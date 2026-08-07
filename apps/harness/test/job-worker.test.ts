@@ -34,6 +34,7 @@ import {
 import {
   GitHubService,
   type GitHubServiceShape,
+  GitHubThrottledError,
 } from "@ready-for-agent/github-service"
 import {
   GitLabService,
@@ -239,6 +240,10 @@ const queueLayer = (
   interruptRunningStepRunsFromPriorWorker: Effect.Effect<number> = Effect.succeed(
     0,
   ),
+  onPostpone: (
+    jobId: string,
+    availableAt: DateTime.Utc,
+  ) => Effect.Effect<unknown> = () => Effect.void,
 ) =>
   Layer.mergeAll(
     defaultGithubLayer,
@@ -248,6 +253,8 @@ const queueLayer = (
         reviveExhaustedKeyed: () => Effect.void,
         postponeKeyed: (jobId, delay) =>
           onPostponeKeyed(jobId, delay).pipe(Effect.asVoid),
+        postpone: (jobId, availableAt) =>
+          onPostpone(jobId, availableAt).pipe(Effect.asVoid),
         rawClaim: (queueName, visibilityTimeout) =>
           Effect.gen(function* () {
             expect(Duration.toMillis(visibilityTimeout ?? Duration.zero)).toBe(
@@ -1049,6 +1056,66 @@ describe("Job worker", () => {
     }),
   )
 
+  it.live("postpones a throttled Refresh Job at its exact retry deadline", () =>
+    Effect.gen(function* () {
+      const job = rawJob(refreshPayload)
+      const retryAt = Date.now() + 120_000
+      const postponed = yield* Deferred.make<{
+        jobId: string
+        availableAt: number
+      }>()
+      let acknowledged = false
+      let failed = false
+
+      yield* runScoped(
+        Effect.gen(function* () {
+          yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+            Effect.forkScoped({ startImmediately: true }),
+          )
+          expect(yield* Deferred.await(postponed)).toEqual({
+            jobId: job.jobId,
+            availableAt: retryAt,
+          })
+          expect(acknowledged).toBe(false)
+          expect(failed).toBe(false)
+        }),
+        Layer.mergeAll(
+          defaultGithubLayer,
+          queueLayer(
+            [job],
+            () =>
+              Effect.sync(() => {
+                acknowledged = true
+              }),
+            () =>
+              Effect.sync(() => {
+                failed = true
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            (jobId, availableAt) =>
+              Deferred.succeed(postponed, {
+                jobId,
+                availableAt: DateTime.toEpochMillis(availableAt),
+              }),
+          ),
+          dbLayer(),
+          Layer.succeed(IssueReconciler, {
+            reconcile: () =>
+              Effect.fail(
+                new GitHubThrottledError({ retryAt, usedFallback: false }),
+              ),
+          }),
+          keymaxxerLayer(),
+        ),
+      )
+    }),
+  )
+
   it.live("executes duplicate Refresh Jobs serially across repositories", () =>
     Effect.gen(function* () {
       const jobs = [
@@ -1582,6 +1649,71 @@ describe("Job worker", () => {
   )
 
   it.live(
+    "postpones a throttled scheduled poll at its retry deadline without cadence sampling",
+    () =>
+      Effect.gen(function* () {
+        const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
+        const retryAt = Date.now() + 120_000
+        const postponed = yield* Deferred.make<{
+          jobId: string
+          availableAt: number
+        }>()
+        let acknowledged = false
+        let failed = false
+
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({
+              idlePollInterval: Duration.zero,
+              samplePollingDelay: Effect.die(
+                "Throttle must not sample cadence",
+              ),
+            }).pipe(Effect.forkScoped({ startImmediately: true }))
+            expect(yield* Deferred.await(postponed)).toEqual({
+              jobId: job.jobId,
+              availableAt: retryAt,
+            })
+            expect(acknowledged).toBe(false)
+            expect(failed).toBe(false)
+          }),
+          Layer.mergeAll(
+            defaultGithubLayer,
+            queueLayer(
+              [job],
+              () =>
+                Effect.sync(() => {
+                  acknowledged = true
+                }),
+              () =>
+                Effect.sync(() => {
+                  failed = true
+                }),
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              (jobId, availableAt) =>
+                Deferred.succeed(postponed, {
+                  jobId,
+                  availableAt: DateTime.toEpochMillis(availableAt),
+                }),
+            ),
+            dbLayer(),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () =>
+                Effect.fail(
+                  new GitHubThrottledError({ retryAt, usedFallback: false }),
+                ),
+            }),
+            keymaxxerLayer(),
+          ),
+        )
+      }),
+  )
+
+  it.live(
     "finalizes a scheduled poll without recurrence when the Repository is missing",
     () =>
       Effect.gen(function* () {
@@ -1828,16 +1960,42 @@ describe("Job worker", () => {
   )
 
   it.live(
-    "persists a scheduled entry across worker restarts without replaying",
+    "durably postpones manual and repeated scheduled throttled polls across worker restarts",
     () =>
       Effect.gen(function* () {
         const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
         const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
         const reconciliations: string[] = []
+        const firstThrottle = yield* Deferred.make<number>()
+        const secondThrottle = yield* Deferred.make<number>()
+        const manualThrottle = yield* Deferred.make<number>()
+        let completedAt = 0
+        let throttleManualRefresh = false
         const reconciler = Layer.succeed(IssueReconciler, {
           reconcile: (repo) =>
-            Effect.sync(() => {
+            Effect.gen(function* () {
               reconciliations.push(repo.id)
+              if (throttleManualRefresh) {
+                throttleManualRefresh = false
+                const retryAt = Date.now() + 1_000
+                yield* Deferred.succeed(manualThrottle, retryAt)
+                return yield* new GitHubThrottledError({
+                  retryAt,
+                  usedFallback: false,
+                })
+              }
+              if (reconciliations.length <= 2) {
+                const retryAt = Date.now() + 150
+                yield* Deferred.succeed(
+                  reconciliations.length === 1 ? firstThrottle : secondThrottle,
+                  retryAt,
+                )
+                return yield* new GitHubThrottledError({
+                  retryAt,
+                  usedFallback: false,
+                })
+              }
+              completedAt = Date.now()
               return {
                 fetched: 0,
                 inserted: 0,
@@ -1911,28 +2069,155 @@ describe("Job worker", () => {
             { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
           )
 
+          const waitForPostponedEntry = (retryAt: number) =>
+            Effect.gen(function* () {
+              for (let attempt = 0; attempt < 100; attempt += 1) {
+                const [entry] = yield* service.listKeyed(ISSUE_POLL_QUEUE)
+                if (
+                  entry !== undefined &&
+                  entry.attempts === 0 &&
+                  DateTime.toEpochMillis(entry.availableAt) === retryAt
+                ) {
+                  return entry
+                }
+                yield* Effect.sleep(Duration.millis(5))
+              }
+              return yield* Effect.die(
+                "Scheduled poll was not durably postponed",
+              )
+            })
+
+          const waitForManualPostpone = () =>
+            Effect.gen(function* () {
+              for (let attempt = 0; attempt < 100; attempt += 1) {
+                const stats = yield* service.getStats(ISSUE_REFRESH_QUEUE)
+                if (
+                  stats.pending === 1 &&
+                  stats.processing === 0 &&
+                  stats.deadLetter === 0
+                ) {
+                  return
+                }
+                yield* Effect.sleep(Duration.millis(5))
+              }
+              return yield* Effect.die(
+                "Manual Refresh Job was not durably postponed",
+              )
+            })
+
+          const firstRetryAt = yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* runJobWorker({
+                idlePollInterval: Duration.zero,
+                samplePollingDelay: Effect.succeed(Duration.seconds(67)),
+              }).pipe(Effect.forkScoped({ startImmediately: true }))
+              const retryAt = yield* Deferred.await(firstThrottle)
+              const entry = yield* waitForPostponedEntry(retryAt)
+              expect(entry.key).toBe(added.id)
+              expect(entry.attempts).toBe(0)
+              return retryAt
+            }),
+          )
+
+          const afterFirstThrottle = yield* waitForPostponedEntry(firstRetryAt)
+          expect(afterFirstThrottle.key).toBe(added.id)
+          expect(afterFirstThrottle.attempts).toBe(0)
+
+          const secondRetryAt = yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* runJobWorker({
+                idlePollInterval: Duration.zero,
+                samplePollingDelay: Effect.succeed(Duration.seconds(67)),
+              }).pipe(Effect.forkScoped({ startImmediately: true }))
+              yield* Effect.sleep(Duration.millis(25))
+              expect(reconciliations).toEqual([added.id])
+              const retryAt = yield* Deferred.await(secondThrottle)
+              const entry = yield* waitForPostponedEntry(retryAt)
+              expect(entry.key).toBe(added.id)
+              expect(entry.attempts).toBe(0)
+              return retryAt
+            }),
+          )
+
+          const afterSecondThrottle =
+            yield* waitForPostponedEntry(secondRetryAt)
+          expect(afterSecondThrottle.key).toBe(added.id)
+          expect(afterSecondThrottle.attempts).toBe(0)
+
           yield* Effect.scoped(
             Effect.gen(function* () {
               yield* runJobWorker({
                 idlePollInterval: Duration.zero,
-                samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+                samplePollingDelay: Effect.succeed(Duration.seconds(67)),
               }).pipe(Effect.forkScoped({ startImmediately: true }))
-              while (reconciliations.length < 1) {
+              yield* Effect.sleep(Duration.millis(25))
+              expect(reconciliations).toEqual([added.id, added.id])
+              while (reconciliations.length < 3) {
                 yield* Effect.sleep("5 millis")
               }
             }),
           )
 
-          expect(reconciliations).toEqual([added.id])
+          expect(reconciliations).toEqual([added.id, added.id, added.id])
+          expect(completedAt).toBeGreaterThan(0)
 
           const keyed = yield* service.listKeyed(ISSUE_POLL_QUEUE)
           expect(keyed).toHaveLength(1)
-          expect(keyed[0]?.key).toBe(added.id)
-          expect(keyed[0]?.attempts).toBe(0)
+          const [scheduledEntry] = keyed
+          if (scheduledEntry === undefined) {
+            return yield* Effect.die("Scheduled poll entry disappeared")
+          }
+          expect(scheduledEntry.key).toBe(added.id)
+          expect(scheduledEntry.attempts).toBe(0)
+          const nextAvailableAt = DateTime.toEpochMillis(
+            scheduledEntry.availableAt,
+          )
+          expect(nextAvailableAt).toBeGreaterThanOrEqual(completedAt + 66_000)
+          expect(nextAvailableAt).toBeLessThanOrEqual(completedAt + 68_000)
 
-          // Not immediately available again (postponed 120s).
-          const claimNow = yield* service.rawClaim(ISSUE_POLL_QUEUE)
-          expect(Option.isNone(claimNow)).toBe(true)
+          yield* service.enqueue(ISSUE_REFRESH_QUEUE, {
+            _tag: "refresh-repository",
+            repositoryId: RepositoryId.make(added.id),
+          })
+          throttleManualRefresh = true
+
+          const manualRetryAt = yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* runJobWorker({
+                idlePollInterval: Duration.zero,
+                samplePollingDelay: Effect.succeed(Duration.seconds(67)),
+              }).pipe(Effect.forkScoped({ startImmediately: true }))
+              const retryAt = yield* Deferred.await(manualThrottle)
+              yield* waitForManualPostpone()
+              return retryAt
+            }),
+          )
+
+          expect(Date.now()).toBeLessThan(manualRetryAt)
+          expect(yield* service.rawClaim(ISSUE_REFRESH_QUEUE)).toEqual(
+            Option.none(),
+          )
+
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* runJobWorker({
+                idlePollInterval: Duration.zero,
+                samplePollingDelay: Effect.succeed(Duration.seconds(67)),
+              }).pipe(Effect.forkScoped({ startImmediately: true }))
+              yield* Effect.sleep(Duration.millis(25))
+              expect(reconciliations).toEqual([
+                added.id,
+                added.id,
+                added.id,
+                added.id,
+              ])
+            }),
+          )
+          expect(yield* service.getStats(ISSUE_REFRESH_QUEUE)).toEqual({
+            pending: 1,
+            processing: 0,
+            deadLetter: 0,
+          })
         }).pipe(
           Effect.provide(
             Layer.mergeAll(

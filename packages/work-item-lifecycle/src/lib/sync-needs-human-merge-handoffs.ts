@@ -2,12 +2,34 @@ import { Effect } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import {
   GitHubService,
+  type GitHubThrottledError,
   type PullRequestCheckStatus,
   type PullRequestLifecycleStatus,
+  isGitHubThrottledError,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { WorkItemLifecycle } from "./work-item-lifecycle.js"
 import { workItemBranchName } from "./worktree-names.js"
+
+const skipNonThrottleLookupFailure = <A>(
+  lookup: Effect.Effect<A, unknown>,
+  input: {
+    readonly message: string
+    readonly repositoryId: string
+    readonly workItemId: string
+  },
+): Effect.Effect<A | null, GitHubThrottledError> =>
+  lookup.pipe(
+    Effect.catch((error) =>
+      isGitHubThrottledError(error)
+        ? Effect.fail(error)
+        : Effect.logWarning(input.message, {
+            workItemId: input.workItemId,
+            repositoryId: input.repositoryId,
+            error: String(error),
+          }).pipe(Effect.as(null)),
+    ),
+  )
 
 /**
  * After Issue reconciliation, advance Work Items whose Work Item PR was merged
@@ -16,7 +38,8 @@ import { workItemBranchName } from "./worktree-names.js"
  * and for open-PR Needs Human handoffs observe mergeability (ADR 0046):
  * Decide/Merge Needs Human + conflicting → Resolve PR Merge Conflict;
  * Resolve Needs Human + no longer conflicting → Watch PR Status Checks.
- * Forge lookup failures are skipped so Refresh still succeeds.
+ * Non-throttle Forge lookup failures are skipped so Refresh still succeeds;
+ * explicit GitHub throttles propagate to durably postpone the Refresh Job.
  */
 export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
   Effect.gen(function* () {
@@ -74,18 +97,12 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
           ? gitlab.getPullRequestLifecycleStatus(repository, headRefName)
           : github.getPullRequestLifecycleStatus(repository, headRefName)
 
-      const status = yield* lifecycleLookup.pipe(
-        Effect.catch((error) =>
-          Effect.logWarning(
-            "Skipping Work Item PR merge outcome: PR lifecycle lookup failed",
-            {
-              workItemId: workItem.id,
-              repositoryId,
-              error: String(error),
-            },
-          ).pipe(Effect.as(null)),
-        ),
-      )
+      const status = yield* skipNonThrottleLookupFailure(lifecycleLookup, {
+        message:
+          "Skipping Work Item PR merge outcome: PR lifecycle lookup failed",
+        workItemId: workItem.id,
+        repositoryId,
+      })
 
       if (status === null) {
         continue
@@ -145,17 +162,14 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
             ? gitlab.getPullRequestCheckStatus(repository, headRefName)
             : github.getPullRequestCheckStatus(repository, headRefName)
 
-        const checkStatus = yield* checkStatusLookup.pipe(
-          Effect.catch((error) =>
-            Effect.logWarning(
+        const checkStatus = yield* skipNonThrottleLookupFailure(
+          checkStatusLookup,
+          {
+            message:
               "Skipping Needs Human mergeability: PR check status lookup failed",
-              {
-                workItemId: workItem.id,
-                repositoryId,
-                error: String(error),
-              },
-            ).pipe(Effect.as(null)),
-          ),
+            workItemId: workItem.id,
+            repositoryId,
+          },
         )
 
         if (checkStatus === null) {

@@ -698,6 +698,47 @@ describe("SqliteQueueService", () => {
         }),
       ))
 
+    it("postpones a claimed unkeyed entry in place at its exact deadline", () =>
+      runTest(
+        Effect.gen(function* () {
+          const queue = yield* QueueService
+          const sql = yield* SqlClient.SqlClient
+          const jobId = yield* queue.enqueue("manual-postpone-queue", {
+            kind: "manual-refresh",
+          })
+          const claimed = yield* queue.rawClaim("manual-postpone-queue")
+          expect(Option.isSome(claimed)).toBe(true)
+          if (Option.isNone(claimed)) return
+          expect(claimed.value.jobId).toBe(jobId)
+          expect(claimed.value.key).toBeNull()
+          expect(claimed.value.attempts).toBe(1)
+
+          const retryAt = DateTime.makeUnsafe(Date.now() + 120_000)
+          yield* queue.postpone(claimed.value.jobId, retryAt)
+
+          expect(
+            Option.isNone(yield* queue.rawClaim("manual-postpone-queue")),
+          ).toBe(true)
+
+          const stats = yield* queue.getStats("manual-postpone-queue")
+          expect(stats).toEqual({ pending: 1, processing: 0, deadLetter: 0 })
+          const rows = yield* sql.unsafe(
+            `SELECT id, key, job_attempts, available_at, locked_until
+             FROM job_queue WHERE id = ?`,
+            [jobId],
+          )
+          expect(rows).toEqual([
+            {
+              id: jobId,
+              key: null,
+              job_attempts: 0,
+              available_at: DateTime.toEpochMillis(retryAt),
+              locked_until: null,
+            },
+          ])
+        }),
+      ))
+
     it("makes a postponed entry claimable after its delay elapses", () =>
       runTest(
         Effect.gen(function* () {

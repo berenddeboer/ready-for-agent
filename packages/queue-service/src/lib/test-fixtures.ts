@@ -14,6 +14,7 @@ export const stubQueueService = (
   listKeyed: () => unexpected("listKeyed"),
   reviveExhaustedKeyed: () => unexpected("reviveExhaustedKeyed"),
   postponeKeyed: () => unexpected("postponeKeyed"),
+  postpone: () => unexpected("postpone"),
   removeKeyed: () => unexpected("removeKeyed"),
   rawClaim: () => unexpected("rawClaim"),
   acknowledge: () => unexpected("acknowledge"),

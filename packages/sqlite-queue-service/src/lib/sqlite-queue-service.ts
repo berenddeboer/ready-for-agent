@@ -506,6 +506,38 @@ export const SqliteQueueServiceLive = Layer.effect(
             message: "Cannot postpone an unclaimed keyed job",
           })
         }),
+      postpone: (jobId: string, availableAt: DateTime.Utc) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const rows = yield* retrySqliteBusy(
+            sql.unsafe(
+              `UPDATE job_queue
+               SET locked_until = NULL,
+                   job_attempts = 0,
+                   available_at = ?,
+                   updated_at = ?
+               WHERE id = ?
+                 AND locked_until IS NOT NULL
+               RETURNING id`,
+              [DateTime.toEpochMillis(availableAt), now, jobId],
+            ),
+          ).pipe(Effect.mapError((error) => toAcknowledgeError(jobId, error)))
+          const updated = yield* decodeIdRows(rows).pipe(
+            Effect.mapError((error) => toAcknowledgeSchemaError(jobId, error)),
+          )
+          if (updated[0]) return
+          const existing = yield* sql
+            .unsafe(`SELECT id FROM job_queue WHERE id = ?`, [jobId])
+            .pipe(Effect.mapError((error) => toAcknowledgeError(jobId, error)))
+          const decoded = yield* decodeIdRows(existing).pipe(
+            Effect.mapError((error) => toAcknowledgeSchemaError(jobId, error)),
+          )
+          if (!decoded[0]) return yield* new JobNotFoundError({ jobId })
+          return yield* new AcknowledgeError({
+            jobId,
+            message: "Cannot postpone an unclaimed job",
+          })
+        }),
       removeKeyed: (queue: string, key: string) =>
         Effect.gen(function* () {
           yield* validateQueueName(queue)

@@ -5,6 +5,8 @@ import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import {
   GitHubService,
   type GitHubServiceShape,
+  GitHubThrottledError,
+  type PullRequestCheckStatus,
   type PullRequestLifecycleStatus,
 } from "@ready-for-agent/github-service"
 import { QueueService } from "@ready-for-agent/queue-service"
@@ -71,11 +73,22 @@ describe("syncNeedsHumanMergeHandoffs", () => {
 
   type Mergeability = "mergeable" | "conflicting" | "unknown"
   type CheckStatusTag = "succeeded" | "closed"
+  type GitHubLookupOverrides = {
+    readonly checkStatus?: () => Effect.Effect<
+      PullRequestCheckStatus,
+      GitHubThrottledError
+    >
+    readonly lifecycleStatus?: () => Effect.Effect<
+      PullRequestLifecycleStatus,
+      GitHubThrottledError
+    >
+  }
 
   const githubWith = (
     getStatus: () => PullRequestLifecycleStatus,
     getMergeability: () => Mergeability = () => "mergeable",
     getCheckStatusTag: () => CheckStatusTag = () => "succeeded",
+    overrides: GitHubLookupOverrides = {},
   ) =>
     Layer.succeed(GitHubService, {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
@@ -85,6 +98,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       createDraftPullRequest: () => Effect.succeed(1),
       countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
+        overrides.checkStatus?.() ??
         Effect.succeed(
           getCheckStatusTag() === "closed"
             ? {
@@ -113,7 +127,8 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           _tag: "ambiguous" as const,
           reason: "Automated review evidence observation is not configured",
         }),
-      getPullRequestLifecycleStatus: () => Effect.succeed(getStatus()),
+      getPullRequestLifecycleStatus: () =>
+        overrides.lifecycleStatus?.() ?? Effect.succeed(getStatus()),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
       rerunWorkflowRun: () => Effect.void,
@@ -140,12 +155,18 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     gitlab: Parameters<typeof stubGitLabServiceLayer>[0] = {},
     getMergeability: () => Mergeability = () => "mergeable",
     getCheckStatusTag: () => CheckStatusTag = () => "succeeded",
+    githubLookupOverrides: GitHubLookupOverrides = {},
   ) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
       // githubWith controls GitHub PR lifecycle for syncNeedsHumanMergeHandoffs.
       Layer.provideMerge(
-        githubWith(getStatus, getMergeability, getCheckStatusTag),
+        githubWith(
+          getStatus,
+          getMergeability,
+          getCheckStatusTag,
+          githubLookupOverrides,
+        ),
       ),
       Layer.provideMerge(stubGitLabServiceLayer(gitlab)),
       Layer.provideMerge(
@@ -304,6 +325,85 @@ describe("syncNeedsHumanMergeHandoffs", () => {
         const still = yield* lifecycle.getWorkItem(created.id)
         expect(still.state).toBe("needs_human")
       }).pipe(Effect.provide(makeLayer({ _tag: "open" }))),
+    )
+  })
+
+  it("propagates GitHub throttling from PR lifecycle observation", async () => {
+    const throttle = new GitHubThrottledError({
+      retryAt: 1_750_000_000_000,
+      usedFallback: false,
+    })
+    let throttled = false
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository } = yield* driveToNeedsHuman()
+        throttled = true
+        const error = yield* syncNeedsHumanMergeHandoffs(repository.id).pipe(
+          Effect.flip,
+        )
+        expect(error).toBe(throttle)
+      }).pipe(
+        Effect.provide(
+          makeLayerWithStatus(
+            () => ({ _tag: "open" }),
+            successfulSteps,
+            {},
+            () => "mergeable",
+            () => "succeeded",
+            {
+              lifecycleStatus: () =>
+                throttled
+                  ? Effect.fail(throttle)
+                  : Effect.succeed({ _tag: "open" }),
+            },
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("propagates GitHub throttling from mergeability observation", async () => {
+    const throttle = new GitHubThrottledError({
+      retryAt: 1_750_000_000_000,
+      usedFallback: false,
+    })
+    let throttled = false
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository } = yield* driveToNeedsHuman()
+        throttled = true
+        const error = yield* syncNeedsHumanMergeHandoffs(repository.id).pipe(
+          Effect.flip,
+        )
+        expect(error).toBe(throttle)
+      }).pipe(
+        Effect.provide(
+          makeLayerWithStatus(
+            () => ({ _tag: "open" }),
+            successfulSteps,
+            {},
+            () => "mergeable",
+            () => "succeeded",
+            {
+              checkStatus: () =>
+                throttled
+                  ? Effect.fail(throttle)
+                  : Effect.succeed({
+                      _tag: "succeeded",
+                      terminalChecks: [],
+                      mergeability: "mergeable",
+                      baseRefName: "main",
+                      headPushedAt: null,
+                      headSha: null,
+                      createdAt: null,
+                      isDraft: null,
+                    }),
+            },
+          ),
+        ),
+      ),
     )
   })
 

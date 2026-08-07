@@ -1,6 +1,7 @@
 import "@tanstack/react-start/server-only"
 import {
   Clock,
+  DateTime,
   Duration,
   Effect,
   Layer,
@@ -19,6 +20,7 @@ import {
 import {
   type GitHubOperationOrigin,
   formatUserFacingError,
+  isGitHubThrottledError,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
@@ -249,6 +251,18 @@ const finalizeManualRefresh = <A, E>(
   Effect.gen(function* () {
     const queue = yield* QueueService
     if (result._tag === "Failure") {
+      if (isGitHubThrottledError(result.failure)) {
+        yield* Effect.logWarning("Refresh Job postponed by GitHub throttling", {
+          jobId,
+          repositoryId,
+          retryAt: result.failure.retryAt,
+        })
+        yield* queue.postpone(
+          jobId,
+          DateTime.makeUnsafe(result.failure.retryAt),
+        )
+        return
+      }
       yield* Effect.logError("Refresh Job failed", {
         jobId,
         repositoryId,
@@ -311,6 +325,17 @@ const finalizeScheduledRefresh = <A, E>(
     }
 
     if (result._tag === "Failure") {
+      if (isGitHubThrottledError(result.failure)) {
+        yield* Effect.logWarning(
+          "Scheduled Issue poll postponed by GitHub throttling",
+          { jobId, repositoryId, retryAt: result.failure.retryAt },
+        )
+        yield* queue.postpone(
+          jobId,
+          DateTime.makeUnsafe(result.failure.retryAt),
+        )
+        return
+      }
       yield* Effect.logError("Scheduled Issue poll failed", {
         jobId,
         repositoryId,
