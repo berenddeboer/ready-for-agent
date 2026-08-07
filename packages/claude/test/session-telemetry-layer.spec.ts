@@ -1,26 +1,130 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { Effect } from "effect"
 import { SessionTelemetryProvider } from "@ready-for-agent/agent-backend"
 import { ClaudeSessionTelemetryLive } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
 describe("ClaudeSessionTelemetryLive", () => {
-  it("reports Session Telemetry unsupported for any session id", async () => {
-    const result = await Effect.runPromise(
+  const getSession = (input: {
+    readonly claudeConfigDir: string
+    readonly sessionId: string
+  }) =>
+    Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* SessionTelemetryProvider
-        return yield* provider.getSession("any-session-id")
-      }).pipe(Effect.provide(ClaudeSessionTelemetryLive())),
+        return yield* provider.getSession(input.sessionId)
+      }).pipe(
+        Effect.provide(
+          ClaudeSessionTelemetryLive({
+            claudeConfigDir: input.claudeConfigDir,
+          }),
+        ),
+      ),
     )
 
-    expect(result).toEqual({
-      id: "any-session-id",
-      availability: "unsupported",
-      backend: { id: "claude", label: "Claude Code" },
-      model: null,
-      tokens: null,
-      cost: null,
-      createdAt: null,
-      updatedAt: null,
-    })
+  const writeTranscript = (input: {
+    readonly claudeConfigDir: string
+    readonly sessionId: string
+    readonly model: string
+    readonly effort: string
+  }) => {
+    const path = join(
+      input.claudeConfigDir,
+      "projects",
+      "-work-repo",
+      `${input.sessionId}.jsonl`,
+    )
+    mkdirSync(join(path, ".."), { recursive: true })
+    writeFileSync(
+      path,
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-08-05T04:27:47.143Z",
+        effort: input.effort,
+        message: {
+          model: input.model,
+          usage: {
+            input_tokens: 10,
+            output_tokens: 4,
+            cache_read_input_tokens: 30,
+            cache_creation_input_tokens: 5,
+          },
+        },
+      }),
+    )
+  }
+
+  it("maps transcript-store sessions with the static Claude Code label", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claude-session-telemetry-"))
+    try {
+      writeTranscript({
+        claudeConfigDir: dir,
+        sessionId: "anthropic-session",
+        model: "claude-sonnet-5",
+        effort: "low",
+      })
+      writeTranscript({
+        claudeConfigDir: dir,
+        sessionId: "bedrock-session",
+        model:
+          "arn:aws:bedrock:us-east-1:123456789012:inference-profile/us.anthropic.claude-sonnet-4-5-v1:0",
+        effort: "medium",
+      })
+
+      await expect(
+        getSession({ claudeConfigDir: dir, sessionId: "anthropic-session" }),
+      ).resolves.toMatchObject({
+        id: "anthropic-session",
+        availability: "available",
+        backend: { id: "claude", label: "Claude Code" },
+        model: {
+          providerId: "anthropic",
+          id: "claude-sonnet-5",
+          thinkingLevel: "low",
+        },
+        tokens: {
+          input: 10,
+          output: 4,
+          reasoning: 0,
+          cacheRead: 30,
+          cacheWrite: 5,
+        },
+      })
+      await expect(
+        getSession({ claudeConfigDir: dir, sessionId: "bedrock-session" }),
+      ).resolves.toMatchObject({
+        id: "bedrock-session",
+        availability: "available",
+        backend: { id: "claude", label: "Claude Code" },
+        model: {
+          providerId: "bedrock",
+          thinkingLevel: "medium",
+        },
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("maps an absent transcript to missing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claude-session-telemetry-"))
+    try {
+      await expect(
+        getSession({ claudeConfigDir: dir, sessionId: "missing-session" }),
+      ).resolves.toEqual({
+        id: "missing-session",
+        availability: "missing",
+        backend: { id: "claude", label: "Claude Code" },
+        model: null,
+        tokens: null,
+        cost: null,
+        createdAt: null,
+        updatedAt: null,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
