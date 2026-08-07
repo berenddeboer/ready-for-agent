@@ -3224,11 +3224,22 @@ export const makeGitHubServiceFromToken = (
   )
 }
 
-export const GitHubServiceLive = Layer.effect(
-  GitHubService,
-  Effect.gen(function* () {
-    const token = yield* Config.redacted("GITHUB_TOKEN")
-    const fs = yield* FileSystem.FileSystem
-    return makeGitHubServiceFromToken(Redacted.value(token), fetch, fs)
-  }),
-)
+/** Builds a live service and optionally observes successful final-quota use. */
+export const makeGitHubServiceLive = (
+  observeThrottle?: GitHubThrottleObserver,
+): Layer.Layer<GitHubService, Config.ConfigError, FileSystem.FileSystem> =>
+  Layer.effect(
+    GitHubService,
+    Effect.gen(function* () {
+      const token = yield* Config.redacted("GITHUB_TOKEN")
+      const fs = yield* FileSystem.FileSystem
+      return makeGitHubServiceFromToken(
+        Redacted.value(token),
+        fetch,
+        fs,
+        observeThrottle,
+      )
+    }),
+  )
+
+export const GitHubServiceLive = makeGitHubServiceLive()

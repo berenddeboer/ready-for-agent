@@ -2,6 +2,10 @@ import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, test } from "vitest"
 import {
+  GITHUB_HELPER_THROTTLED_EXIT_CODE,
+  parseGitHubHelperControl,
+} from "../src/lib/github-helper-protocol.js"
+import {
   countOpenNonDraftPullRequestsLite,
   runOpenNonDraftPullRequestCountCli,
 } from "../src/lib/open-non-draft-pull-request-count.js"
@@ -129,7 +133,9 @@ describe("countOpenNonDraftPullRequestsLite", () => {
     expect(calls).toBe(3)
     expect(sleeps).toEqual([500, 500])
     if (result._tag === "error") {
-      expect(result.message).toContain("Something went wrong")
+      expect(result.message).toBe(
+        "Failed to count open pull requests for acme/widgets",
+      )
     }
   })
 
@@ -152,6 +158,36 @@ describe("countOpenNonDraftPullRequestsLite", () => {
     if (result._tag === "error") {
       expect(result.statusCode).toBe(401)
       expect(result.message).not.toContain("bad-token")
+    }
+  })
+
+  test("returns an explicit throttle without retrying a 429 response", async () => {
+    let calls = 0
+    const sleeps: number[] = []
+    const before = Date.now()
+    const result = await countOpenNonDraftPullRequestsLite({
+      token: "test-token",
+      owner: "acme",
+      name: "widgets",
+      sleepMs: async (ms) => {
+        sleeps.push(ms)
+      },
+      fetchImpl: async () => {
+        calls += 1
+        return new Response("secondary rate limit", {
+          status: 429,
+          statusText: "Too Many Requests",
+          headers: { "Retry-After": "120" },
+        })
+      },
+    })
+
+    expect(calls).toBe(1)
+    expect(sleeps).toEqual([])
+    expect(result._tag).toBe("throttled")
+    if (result._tag === "throttled") {
+      expect(result.retryAt).toBeGreaterThanOrEqual(before + 120_000)
+      expect(result.usedFallback).toBe(false)
     }
   })
 
@@ -227,7 +263,71 @@ describe("runOpenNonDraftPullRequestCountCli", () => {
           }),
       },
     )
-    expect(result).toEqual({ exitCode: 0, stdout: "2", stderr: "" })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("2")
+    expect(parseGitHubHelperControl(result.stderr)).toEqual({
+      version: 1,
+      kind: "success",
+      throttle: null,
+    })
+  })
+
+  test("serializes a throttled count as the versioned non-secret control result", async () => {
+    const result = await runOpenNonDraftPullRequestCountCli(
+      [encode("github"), encode("github.com"), encode("acme/widgets")],
+      {
+        env: { GITHUB_TOKEN: "test-token" },
+        fetchImpl: async () =>
+          new Response("secondary rate limit", {
+            status: 429,
+            statusText: "Too Many Requests",
+            headers: { "Retry-After": "120" },
+          }),
+      },
+    )
+
+    expect(result.exitCode).toBe(GITHUB_HELPER_THROTTLED_EXIT_CODE)
+    expect(result.stdout).toBe("")
+    const control = parseGitHubHelperControl(result.stderr)
+    expect(control?.kind).toBe("github-throttled")
+    expect(result.stderr).not.toContain("test-token")
+  })
+
+  test("preserves final-quota evidence after a successful count", async () => {
+    const resetAt = Math.floor(Date.now() / 1_000) + 3_600
+    const result = await runOpenNonDraftPullRequestCountCli(
+      [encode("github"), encode("github.com"), encode("acme/widgets")],
+      {
+        env: { GITHUB_TOKEN: "test-token" },
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              data: {
+                repository: {
+                  pullRequests: {
+                    nodes: [],
+                    pageInfo: { endCursor: null, hasNextPage: false },
+                  },
+                },
+              },
+            }),
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": String(resetAt),
+              },
+            },
+          ),
+      },
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(parseGitHubHelperControl(result.stderr)).toEqual({
+      version: 1,
+      kind: "success",
+      throttle: { retryAt: resetAt * 1_000, usedFallback: false },
+    })
   })
 
   test("exits 2 when the repository is unavailable", async () => {
@@ -265,7 +365,7 @@ describe("runOpenNonDraftPullRequestCountCli", () => {
       { env: { GITHUB_TOKEN: "test-token" } },
     )
     expect(result.exitCode).toBe(1)
-    expect(result.stderr).toContain("Missing project path argument")
+    expect(result.stderr).toBe("Failed to count open pull requests\n")
   })
 })
 

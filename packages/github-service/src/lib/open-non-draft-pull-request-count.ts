@@ -8,6 +8,17 @@
  * 500ms delay (no retry on HTTP 401), repository-unavailable when GitHub
  * returns a null repository.
  */
+import {
+  GITHUB_HELPER_THROTTLED_EXIT_CODE,
+  type GitHubHelperThrottle,
+  githubHelperSuccess,
+  githubHelperThrottled,
+  serializeGitHubHelperControl,
+} from "./github-helper-protocol.js"
+import {
+  githubThrottleFromResponse,
+  githubThrottleFromSuccessfulResponse,
+} from "./github-throttle.js"
 
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 const PAGE_SIZE = 100
@@ -37,6 +48,8 @@ export type OpenNonDraftPullRequestCountFetch = (
 export type OpenNonDraftPullRequestCountOk = {
   readonly _tag: "ok"
   readonly count: number
+  /** Explicit final-quota evidence observed while completing the count. */
+  readonly throttle?: GitHubHelperThrottle
 }
 
 export type OpenNonDraftPullRequestCountUnavailable = {
@@ -49,9 +62,16 @@ export type OpenNonDraftPullRequestCountFailed = {
   readonly statusCode?: number
 }
 
+export type OpenNonDraftPullRequestCountThrottled = {
+  readonly _tag: "throttled"
+  readonly retryAt: number
+  readonly usedFallback: boolean
+}
+
 export type OpenNonDraftPullRequestCountResult =
   | OpenNonDraftPullRequestCountOk
   | OpenNonDraftPullRequestCountUnavailable
+  | OpenNonDraftPullRequestCountThrottled
   | OpenNonDraftPullRequestCountFailed
 
 export type OpenNonDraftPullRequestCountInput = {
@@ -82,9 +102,16 @@ type GraphQlPage = {
 class CountHttpError extends Error {
   constructor(
     readonly statusCode: number,
+    readonly headers: Headers,
     message: string,
   ) {
     super(message)
+  }
+}
+
+class CountThrottledError extends Error {
+  constructor(readonly throttle: GitHubHelperThrottle) {
+    super("GitHub throttled")
   }
 }
 
@@ -123,6 +150,7 @@ const fetchGraphQlPage = async (
     readonly name: string
     readonly after: string | null
     readonly fetchImpl: OpenNonDraftPullRequestCountFetch
+    readonly observeSuccessfulThrottle: (throttle: GitHubHelperThrottle) => void
   },
   signal: AbortSignal,
 ): Promise<GraphQlPage> => {
@@ -146,10 +174,14 @@ const fetchGraphQlPage = async (
 
   if (!response.ok) {
     const body = await response.text()
-    throw new CountHttpError(
-      response.status,
-      `${response.statusText}: ${body.slice(0, 300)}`,
-    )
+    const message = `${response.statusText}: ${body.slice(0, 300)}`
+    const throttle = githubThrottleFromResponse({
+      statusCode: response.status,
+      headers: response.headers,
+      message,
+    })
+    if (throttle !== undefined) throw new CountThrottledError(throttle)
+    throw new CountHttpError(response.status, response.headers, message)
   }
 
   const page = (await response.json()) as GraphQlPage
@@ -164,8 +196,18 @@ const fetchGraphQlPage = async (
           : "GraphQL error",
       )
       .join("\n")
+    const throttle = githubThrottleFromResponse({
+      statusCode: response.status,
+      headers: response.headers,
+      message,
+    })
+    if (throttle !== undefined) throw new CountThrottledError(throttle)
     throw new Error(message)
   }
+  const throttle = githubThrottleFromSuccessfulResponse({
+    headers: response.headers,
+  })
+  if (throttle !== undefined) input.observeSuccessfulThrottle(throttle)
   return page
 }
 
@@ -185,6 +227,7 @@ const withTimeoutAndRetry = async <A>(
       const value: A = await request(controller.signal)
       return value
     } catch (cause) {
+      if (cause instanceof CountThrottledError) throw cause
       const statusCode =
         cause instanceof CountHttpError ? cause.statusCode : undefined
       const timedOut =
@@ -226,6 +269,15 @@ export const countOpenNonDraftPullRequestsLite = async (
   const label = projectLabel(input.owner, input.name)
   let count = 0
   let cursor: string | null = null
+  let observedThrottle: GitHubHelperThrottle | undefined
+  const observeSuccessfulThrottle = (throttle: GitHubHelperThrottle): void => {
+    if (
+      observedThrottle === undefined ||
+      throttle.retryAt > observedThrottle.retryAt
+    ) {
+      observedThrottle = throttle
+    }
+  }
 
   try {
     for (;;) {
@@ -240,6 +292,7 @@ export const countOpenNonDraftPullRequestsLite = async (
               name: input.name,
               after: afterCursor,
               fetchImpl,
+              observeSuccessfulThrottle,
             },
             signal,
           ),
@@ -273,8 +326,17 @@ export const countOpenNonDraftPullRequestsLite = async (
       }
       cursor = pageInfo.endCursor
     }
-    return { _tag: "ok", count }
+    return observedThrottle === undefined
+      ? { _tag: "ok", count }
+      : { _tag: "ok", count, throttle: observedThrottle }
   } catch (cause) {
+    if (cause instanceof CountThrottledError) {
+      return {
+        _tag: "throttled",
+        retryAt: cause.throttle.retryAt,
+        usedFallback: cause.throttle.usedFallback,
+      }
+    }
     const statusCode =
       typeof cause === "object" &&
       cause !== null &&
@@ -282,10 +344,7 @@ export const countOpenNonDraftPullRequestsLite = async (
       typeof (cause as { statusCode: unknown }).statusCode === "number"
         ? (cause as { statusCode: number }).statusCode
         : undefined
-    const message =
-      cause instanceof Error && cause.message.trim() !== ""
-        ? cause.message
-        : `Failed to count open pull requests for ${label}`
+    const message = `Failed to count open pull requests for ${label}`
     return statusCode === undefined
       ? { _tag: "error", message }
       : { _tag: "error", message, statusCode }
@@ -337,25 +396,36 @@ export const runOpenNonDraftPullRequestCountCli = async (
     })
 
     if (result._tag === "ok") {
-      return { exitCode: 0, stdout: String(result.count), stderr: "" }
+      return {
+        exitCode: 0,
+        stdout: String(result.count),
+        stderr: serializeGitHubHelperControl(
+          result.throttle === undefined
+            ? githubHelperSuccess()
+            : githubHelperSuccess({ throttle: result.throttle }),
+        ),
+      }
     }
     if (result._tag === "unavailable") {
       return { exitCode: 2, stdout: "", stderr: "" }
     }
-    return {
-      exitCode: 1,
-      stdout: "",
-      stderr: `${result.message}\n`,
+    if (result._tag === "throttled") {
+      return {
+        exitCode: GITHUB_HELPER_THROTTLED_EXIT_CODE,
+        stdout: "",
+        stderr: serializeGitHubHelperControl(githubHelperThrottled(result)),
+      }
     }
-  } catch (cause) {
-    const message =
-      cause instanceof Error && cause.message.trim() !== ""
-        ? cause.message
-        : "Command failed"
     return {
       exitCode: 1,
       stdout: "",
-      stderr: `${message}\n`,
+      stderr: "Failed to count open pull requests\n",
+    }
+  } catch {
+    return {
+      exitCode: 1,
+      stdout: "",
+      stderr: "Failed to count open pull requests\n",
     }
   }
 }
