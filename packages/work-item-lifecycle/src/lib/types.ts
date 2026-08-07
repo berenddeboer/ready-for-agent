@@ -335,7 +335,7 @@ export const STEP_RUN_REASON = {
    * before the backend CLI is spawned.
    */
   agentModelNotInCatalog: "agent_model_not_in_catalog",
-  /** Mid-run: Review is running the reviewing (/review) OpenCode pass. */
+  /** Mid-run: Review is running the reviewing OpenCode pass. */
   reviewReviewing: "review_reviewing",
   /** Mid-run: Review is applying findings with the build model. */
   reviewApplyingFindings: "review_applying_findings",

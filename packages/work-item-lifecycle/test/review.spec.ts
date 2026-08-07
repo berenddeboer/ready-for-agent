@@ -18,7 +18,6 @@ import {
   CurrentStepRun,
   MAX_REVIEW_FIX_ROUNDS,
   PreCommitOpenCodeError,
-  REVIEW_AGENT_COMMAND,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
   REVIEW_ASSESSING_RERUN_MESSAGE,
   REVIEW_FIX_LIMIT_REASON,
@@ -400,11 +399,7 @@ describe("parseRerunAssessmentResult", () => {
   })
 })
 
-const isReviewingTurn = (input: {
-  readonly command?: string
-  readonly prompt: string
-}): boolean =>
-  input.command === REVIEW_AGENT_COMMAND ||
+const isReviewingTurn = (input: { readonly prompt: string }): boolean =>
   input.prompt === buildReviewingPrompt()
 
 const isAssessmentTurn = (input: { readonly prompt: string }): boolean =>
@@ -430,7 +425,6 @@ describe("buildReviewingPrompt", () => {
     expect(prompt.startsWith('"')).toBe(false)
     expect(prompt.endsWith('"')).toBe(false)
     expect(prompt.startsWith("/review")).toBe(false)
-    expect(REVIEW_AGENT_COMMAND).toBe("/review")
   })
 })
 
@@ -462,7 +456,7 @@ describe("review", () => {
       expect(error).toBeInstanceOf(ReviewSessionContextMissingError)
     }))
 
-  it("continues the Implement Session with /review contract and review model", () =>
+  it("continues the Implement Session with the review contract and review model", () =>
     withTemp(async (root) => {
       let continued: {
         sessionId: string
@@ -511,7 +505,7 @@ describe("review", () => {
       expect(Duration.toMillis(continued!.timeout!)).toBe(
         Duration.toMillis(Duration.minutes(45)),
       )
-      expect(continued!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continued!.command).toBeUndefined()
       expect(continued!.prompt).toBe(buildReviewingPrompt())
       expect(continued!.prompt.startsWith('"')).toBe(false)
       expect(continued!.prompt.endsWith('"')).toBe(false)
@@ -546,7 +540,7 @@ describe("review", () => {
       expect(result).toEqual({ _tag: "clean" })
     }))
 
-  it("requests a verdict when /review summarizes a nested clean result without its marker", () =>
+  it("requests a verdict when the reviewing pass omits its marker", () =>
     withTemp(async (root) => {
       const continues: Array<{ prompt: string; command?: string }> = []
       const result = await run(
@@ -572,7 +566,7 @@ describe("review", () => {
 
       expect(result).toEqual({ _tag: "clean" })
       expect(continues).toHaveLength(2)
-      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.command).toBeUndefined()
       expect(continues[1]!.command).toBeUndefined()
       expect(continues[1]!.prompt).toContain(
         "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
@@ -585,11 +579,9 @@ describe("review", () => {
       )
     }))
 
-  it("enters a Review Fix Round from normalized /review child findings (not parent REVIEW_FIXED)", () =>
+  it("enters a Review Fix Round from reviewing findings", () =>
     withTemp(async (root) => {
-      // Models the OpenCode adapter contract after #439: command turns return
-      // only the nested reviewer text, never the automatic parent resume.
-      const normalizedChildReview = [
+      const reviewingPassResult = [
         "## Review Findings",
         "- Medium: example finding",
         "",
@@ -606,10 +598,10 @@ describe("review", () => {
                 ? { command: input.command }
                 : {}),
             })
-            if (input.command === REVIEW_AGENT_COMMAND) {
+            if (isReviewingTurn(input)) {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
-                assistantText: normalizedChildReview,
+                assistantText: reviewingPassResult,
               })
             }
             return Effect.succeed({
@@ -627,17 +619,16 @@ describe("review", () => {
         reason: "follow-up",
       })
       expect(continues).toHaveLength(2)
-      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.command).toBeUndefined()
       expect(continues[1]!.command).toBeUndefined()
       expect(continues[1]!.prompt).toContain("Interpret those findings")
       expect(continues[1]!.prompt).toContain("REVIEW_HAS_FINDINGS: medium")
-      // Parent resume marker must not be accepted as the reviewing outcome.
       expect(parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_FIXED")).toBe(
         null,
       )
     }))
 
-  it("classifies severity on the fallback verdict without another /review command", () =>
+  it("classifies severity on the fallback verdict without another reviewing pass", () =>
     withTemp(async (root) => {
       const continues: Array<{
         prompt: string
@@ -689,7 +680,7 @@ describe("review", () => {
         reason: "follow-up ticket",
       })
       expect(continues).toHaveLength(3)
-      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.command).toBeUndefined()
       expect(continues[0]!.model).toBe("opencode/review-model")
       expect(continues[1]!.command).toBeUndefined()
       expect(continues[1]!.model).toBe("opencode/review-model")
@@ -742,7 +733,7 @@ describe("review", () => {
       expect(continues).toHaveLength(2)
       expect(continues[0]!.model).toBe("opencode/review-model")
       expect(continues[0]!.thinkingLevel).toBe("max")
-      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.command).toBeUndefined()
       expect(continues[0]!.prompt).toBe(buildReviewingPrompt())
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[1]!.thinkingLevel).toBe("high")
@@ -934,14 +925,14 @@ describe("review", () => {
       expect(continues).toHaveLength(3)
       expect(continues[0]!.model).toBe("opencode/review-model")
       expect(continues[0]!.thinkingLevel).toBe("max")
-      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.command).toBeUndefined()
       expect(continues[0]!.prompt).toBe(buildReviewingPrompt())
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[1]!.thinkingLevel).toBe("high")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
       expect(continues[2]!.model).toBe("opencode/review-model")
       expect(continues[2]!.thinkingLevel).toBe("max")
-      expect(continues[2]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[2]!.command).toBeUndefined()
       expect(continues[2]!.prompt).toBe(buildReviewingPrompt())
       expect(continues.some((turn) => isAssessmentTurn(turn))).toBe(false)
     }))
@@ -995,7 +986,7 @@ describe("review", () => {
       expect(result).toEqual({ _tag: "clean" })
       expect(continues).toHaveLength(3)
       expect(continues.some((turn) => isAssessmentTurn(turn))).toBe(false)
-      expect(continues[2]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[2]!.command).toBeUndefined()
     }))
 
   it("runs Pre-Commit then re-reviews after high FIXED_AND_DEFERRED without assessment", () =>
@@ -1047,14 +1038,14 @@ describe("review", () => {
 
       expect(result).toEqual({ _tag: "clean" })
       expect(continues).toHaveLength(3)
-      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.command).toBeUndefined()
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED_AND_DEFERRED")
-      expect(continues[2]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[2]!.command).toBeUndefined()
       expect(continues.some((turn) => isAssessmentTurn(turn))).toBe(false)
     }))
 
-  it("accepts low-severity FIXED without a second review-model command", () =>
+  it("accepts low-severity FIXED without a second review-model pass", () =>
     withTempGit(async (root) => {
       await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
       await writeFile(join(root, "change.txt"), "fixed\n")
@@ -1112,7 +1103,7 @@ describe("review", () => {
       })
       expect(continues).toHaveLength(3)
       expect(continues[0]!.model).toBe("opencode/review-model")
-      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.command).toBeUndefined()
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
       expect(continues[2]!.model).toBe("opencode/build-model")
@@ -1223,11 +1214,11 @@ describe("review", () => {
 
       expect(result).toEqual({ _tag: "clean" })
       expect(continues).toHaveLength(4)
-      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.command).toBeUndefined()
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[2]!.model).toBe("opencode/build-model")
       expect(isAssessmentTurn(continues[2]!)).toBe(true)
-      expect(continues[3]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[3]!.command).toBeUndefined()
       expect(continues[3]!.model).toBe("opencode/review-model")
     }))
 

@@ -85,7 +85,7 @@ export type ReviewResult =
     }
   | { readonly _tag: "needs_human"; readonly reason: string }
 
-/** Machine-readable outcome of the reviewing (/review) pass only. */
+/** Machine-readable outcome of the reviewing pass only. */
 export type ReviewingPassResult =
   | { readonly _tag: "clean" }
   | { readonly _tag: "has_findings"; readonly severity: ReviewSeverity }
@@ -110,8 +110,6 @@ export type ApplyReviewResult =
 export type RerunAssessmentResult =
   | { readonly _tag: "accepted"; readonly reason: string }
   | { readonly _tag: "rerun_required"; readonly reason: string }
-
-export const REVIEW_AGENT_COMMAND = "/review"
 
 const SEVERITY_RUBRIC = [
   "Severity measures finding impact, not expected fix effort:",
@@ -152,7 +150,7 @@ export const buildReviewingPrompt = () =>
 
 const buildReviewVerdictPrompt = () =>
   [
-    "The /review command immediately above has completed.",
+    "The reviewing pass immediately above has completed.",
     "Do not review again, edit files, or add explanatory prose.",
     SEVERITY_RUBRIC,
     "Classify the existing report. If it reported any Review Findings, respond exactly:",
@@ -508,7 +506,6 @@ export const review = (context: LifecycleStepContext) =>
       const reviewing = yield* agentBackend
         .continueTurn({
           sessionId,
-          command: REVIEW_AGENT_COMMAND,
           prompt: buildReviewingPrompt(),
           cwd: worktreePath,
           model: context.reviewModel,
