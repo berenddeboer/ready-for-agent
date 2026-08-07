@@ -186,12 +186,12 @@ describe("kanban home board", () => {
     expect(source).toContain("ui.queueHint")
     expect(source).toContain("Feed the queue — label issues with")
     expect(source).toContain("ready-for-agent")
-    expect(source).toContain("Implement now")
-    expect(source).toContain("Implement locally")
     expect(source).toContain("ui.queueHintMenuIllus")
     expect(source).toContain("ui.queueHintImplementBtn")
     expect(source).toContain("ui.queueHintImplementIcon")
     expect(source).toContain("click Implement.")
+    expect(source).not.toContain("Implement now")
+    expect(source).not.toContain("Implement locally")
     expect(source).not.toContain("ui.queueHintMenuKebab")
     // Issue #742: no redundant Queue tag; blue Implement control teaches
     // the repos path; "your repos" links to the Repos view.
@@ -656,7 +656,9 @@ describe("kanban home board", () => {
     expect(ui).toMatch(/laneSwitcher:[\s\S]*?hidden/)
     expect(ui).toContain("queueHint:")
     expect(ui).toContain("queueHintMenuIllus:")
-    expect(ui).toContain("queueHintMenuItem:")
+    expect(ui).toContain("queueHintImplementBtn:")
+    expect(ui).not.toContain("queueHintMenuPanel:")
+    expect(ui).not.toContain("queueHintMenuItem:")
     expect(ui).toContain("queueHintLink:")
     // Issue #742: tag chip and bold action emphasis removed from empty-state.
     expect(ui).not.toContain("queueHintTag:")

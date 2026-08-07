@@ -677,8 +677,8 @@ A permanent fixture at the **foot of the Queue platform**, always rendered
   "your repos" to the Repos view.
 - **Illustration**: compact static mock of the repos-row **Implement** control
   (Build-lane blue plate, play-triangle start icon, mono "Implement" label)
-  with a menu panel listing **Implement now** and **Implement locally**
-  (decorative, `aria-hidden`) so operators recognize the primary cue on Repos.
+  so operators recognize the primary action on Repos. Clicking the control
+  starts implementation immediately; it does not open a choice menu.
   Queue for blocked issues stays kebab-only and is not illustrated here.
 - No primary "Manage repos" CTA — keep the hint focused on label → Implement.
 - No transit glyphs (no ⇄), no "Transfer" wording anywhere.
