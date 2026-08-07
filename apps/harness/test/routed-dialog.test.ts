@@ -2,11 +2,18 @@ import {
   isHarnessSettingsPath,
   isOtherRoutedDialogPath,
   isPipelineBackgroundPath,
+  isReposBackgroundPath,
+  isRepositorySettingsPath,
+  isRepositorySettingsPathFor,
   isSessionTelemetryPath,
+  markRepositorySettingsOpenedFromInApp,
   markSessionTelemetryOpenedFromInApp,
+  parseRepositorySettingsRepositoryId,
   parseSessionTelemetryPath,
   readHarnessSettingsHistoryState,
+  readRepositorySettingsHistoryState,
   readSessionTelemetryHistoryState,
+  wasRepositorySettingsOpenedFromInAppThisDocument,
   wasSessionTelemetryOpenedFromInApp,
 } from "../src/routed-dialog.ts"
 import { describe, expect, test } from "bun:test"
@@ -84,5 +91,65 @@ describe("routed dialog path helpers (issues #840 / #841)", () => {
     // mark function is the public seam used by Pipeline openers.
     markSessionTelemetryOpenedFromInApp()
     expect(wasSessionTelemetryOpenedFromInApp()).toBe(true)
+  })
+})
+
+describe("Repository settings route helpers (issue #842)", () => {
+  test("parses the stable Repository ID from the settings path", () => {
+    expect(
+      parseRepositorySettingsRepositoryId("/repos/repo-01ABC/settings"),
+    ).toBe("repo-01ABC")
+    expect(
+      parseRepositorySettingsRepositoryId("/repos/repo-01ABC/settings/"),
+    ).toBe("repo-01ABC")
+    expect(parseRepositorySettingsRepositoryId("/repos")).toBeUndefined()
+    expect(
+      parseRepositorySettingsRepositoryId("/repos/repo-01ABC"),
+    ).toBeUndefined()
+    expect(parseRepositorySettingsRepositoryId("/settings")).toBeUndefined()
+    expect(parseRepositorySettingsRepositoryId("/repos/a%2Fb/settings")).toBe(
+      "a/b",
+    )
+  })
+
+  test("identifies Repository settings paths and per-id matches", () => {
+    expect(isRepositorySettingsPath("/repos/repo-1/settings")).toBe(true)
+    expect(isRepositorySettingsPath("/repos")).toBe(false)
+    expect(
+      isRepositorySettingsPathFor("/repos/repo-1/settings", "repo-1"),
+    ).toBe(true)
+    expect(
+      isRepositorySettingsPathFor("/repos/repo-1/settings", "repo-2"),
+    ).toBe(false)
+  })
+
+  test("Repos background includes /repos and repository settings overlays", () => {
+    expect(isReposBackgroundPath("/repos")).toBe(true)
+    expect(isReposBackgroundPath("/repos/")).toBe(true)
+    expect(isReposBackgroundPath("/repos/repo-1/settings")).toBe(true)
+    expect(isReposBackgroundPath("/")).toBe(false)
+    expect(isReposBackgroundPath("/settings")).toBe(false)
+  })
+
+  test("reads the Repository settings in-app origin history marker", () => {
+    expect(
+      readRepositorySettingsHistoryState({
+        repositorySettings: { kind: "in-app-origin" },
+      }),
+    ).toEqual({ kind: "in-app-origin" })
+    expect(readRepositorySettingsHistoryState({})).toBeUndefined()
+    expect(readRepositorySettingsHistoryState(null)).toBeUndefined()
+    expect(
+      readRepositorySettingsHistoryState({
+        repositorySettings: { kind: "other" },
+      }),
+    ).toBeUndefined()
+  })
+
+  test("tracks explicit in-app opens for the current document", () => {
+    const id = `repo-test-${Date.now()}`
+    expect(wasRepositorySettingsOpenedFromInAppThisDocument(id)).toBe(false)
+    markRepositorySettingsOpenedFromInApp(id)
+    expect(wasRepositorySettingsOpenedFromInAppThisDocument(id)).toBe(true)
   })
 })
