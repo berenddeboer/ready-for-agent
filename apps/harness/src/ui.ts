@@ -43,12 +43,11 @@ const cardMetalLight =
 const mastScrollworkStroke =
   "[fill:none] [stroke-linecap:round] [stroke-linejoin:round]"
 
-/**
- * Horizontal wrap row for collapsed journey-leg summaries (archive footer +
- * Kanban/repos lifecycle chrome). Shared so both surfaces stay dense and
- * consistent — not a vertical stack of BUILD / REVIEW / PR|MR.
- */
-const legRowClasses = "flex flex-wrap items-center gap-[0.35rem]"
+/** Horizontal lifecycle row: top-align a summary button and a chip list. */
+const lifecycleLegRowClasses = "flex flex-wrap items-start gap-[0.35rem]"
+
+/** Archive footer keeps its established centered journey-leg alignment. */
+const archiveFootClasses = "flex flex-wrap items-center gap-[0.35rem]"
 
 export const ui = {
   /* ---------- Nav shell (§4.1) ---------- */
@@ -323,11 +322,11 @@ export const ui = {
 
   archiveJourney: "grid min-w-0 gap-[0.45rem]",
 
-  /** Collapsed journey legs on one wrap line — see `legRowClasses`. */
-  legRow: legRowClasses,
+  /** Collapsed lifecycle legs on one wrap line — see `lifecycleLegRowClasses`. */
+  legRow: lifecycleLegRowClasses,
 
-  /** Archive footer alias of `legRow` (call-site clarity on completed cards). */
-  archiveFoot: legRowClasses,
+  /** Completed-card journey legs preserve their existing centered alignment. */
+  archiveFoot: archiveFootClasses,
 
   /**
    * Journey-leg chips — board density floor (0.56rem) is the shared base.
@@ -1009,9 +1008,12 @@ export const ui = {
   legSummary: cx(
     "inline-flex max-w-full min-w-0 cursor-pointer items-center gap-[0.35rem]",
     "overflow-hidden border-[1.5px] border-ink bg-[var(--leg-lane,var(--lane-build))] px-[0.38rem] py-[0.16rem]",
-    "font-mono text-[0.56rem] font-bold tracking-[0.06em] uppercase whitespace-nowrap text-[var(--leg-on,#fff)]",
+    "font-mono text-[0.56rem] font-bold leading-[1.2] tracking-[0.06em] uppercase whitespace-nowrap text-[var(--leg-on,#fff)]",
     "hover:brightness-105",
   ),
+
+  /** Matches `legSummary` metrics only for a running focus-lane chip. */
+  lifecycleFocusRunningChip: "leading-[1.2]",
 
   /**
    * Multi-block lifecycle chrome: summary leg row on top, expanded chip

@@ -226,14 +226,39 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).toContain("lifecycleInset:")
     expect(ui).toMatch(/lifecycleInset:[\s\S]*?border-\[1\.5px\]/)
     expect(ui).toMatch(/lifecycleInset:[\s\S]*?border-ink/)
-    // Shared horizontal leg-row recipe (lifecycle chrome + archive foot).
+    // Both surfaces keep horizontal journey legs, while the lifecycle row
+    // specifically top-aligns its mixed button and chip-list controls.
     expect(ui).toContain("legRow:")
     expect(ui).toContain("lifecycleLegBlocks:")
     expect(ui).toMatch(
-      /legRowClasses\s*=\s*"flex flex-wrap items-center gap-\[0\.35rem\]"/,
+      /lifecycleLegRowClasses\s*=\s*"flex flex-wrap items-start gap-\[0\.35rem\]"/,
     )
-    expect(ui).toContain("archiveFoot: legRowClasses")
-    expect(ui).toContain("legRow: legRowClasses")
+    expect(ui).toMatch(
+      /archiveFootClasses\s*=\s*"flex flex-wrap items-center gap-\[0\.35rem\]"/,
+    )
+    expect(ui).toContain("archiveFoot: archiveFootClasses")
+    expect(ui).toContain("legRow: lifecycleLegRowClasses")
+  })
+
+  test("running focus chips align with collapsed earlier-lane summaries", () => {
+    const lifecycle = sliceBetweenMarkers(
+      homeSource(),
+      "export function WorkItemLifecycleStatus(",
+      "function RepositoryIssuesSkeleton(",
+    )
+    const ui = uiSource()
+
+    // The mixed row holds a button for a collapsed lane and an ol/li/span for
+    // the running focus lane. Pin both the row alignment and chip metrics.
+    expect(lifecycle).toContain("className={ui.legRow}")
+    expect(lifecycle).toContain('key="focus-lane"')
+    expect(lifecycle).toContain("isFocusLane: true")
+    expect(ui).toMatch(
+      /lifecycleLegRowClasses\s*=\s*"flex flex-wrap items-start gap-\[0\.35rem\]"/,
+    )
+    expect(ui).toMatch(/lifecycleFocusRunningChip:\s*"leading-\[1\.2\]"/)
+    expect(ui).not.toMatch(/leg:\s*"[^"\n]*leading-\[1\.2\]/)
+    expect(ui).toMatch(/legSummary:[\s\S]*?leading-\[1\.2\]/)
   })
 
   test("parent issue groups use an aligned details card", () => {

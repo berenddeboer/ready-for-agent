@@ -3781,7 +3781,13 @@ export function WorkItemLifecycleStatus({
       return next
     })
   }
-  const renderLifecycleChip = (lifecycleLabel: LifecycleLabelChip) => {
+  const renderLifecycleChip = ({
+    lifecycleLabel,
+    isFocusLane = false,
+  }: {
+    readonly lifecycleLabel: LifecycleLabelChip
+    readonly isFocusLane?: boolean
+  }) => {
     const displayDurationMs = liveDurationMs(
       lifecycleLabel.durationMs,
       isLiveDurationStatus(lifecycleLabel.status),
@@ -3794,8 +3800,11 @@ export function WorkItemLifecycleStatus({
       openPullRequestLabel !== null &&
       lifecycleLabel.phase === "DECIDE_PR_MERGE" &&
       lifecycleLabel.status === "NEEDS_HUMAN"
-    const chipClassName = lifecycleStepChipClassNameForStatus(
-      lifecycleLabel.status,
+    const chipClassName = cx(
+      lifecycleStepChipClassNameForStatus(lifecycleLabel.status),
+      isFocusLane && lifecycleLabel.status === "RUNNING"
+        ? ui.lifecycleFocusRunningChip
+        : null,
     )
     // Only RUNNING chips take current-lane fill; needs-human/fail use Attention.
     const chipLane =
@@ -3846,6 +3855,7 @@ export function WorkItemLifecycleStatus({
       readonly id?: string
       readonly className?: string
       readonly ariaLabel?: string
+      readonly isFocusLane?: boolean
     },
   ) => (
     <ol
@@ -3856,7 +3866,12 @@ export function WorkItemLifecycleStatus({
       }
       aria-label={options?.ariaLabel ?? "Lifecycle steps"}
     >
-      {chips.map(renderLifecycleChip)}
+      {chips.map((lifecycleLabel) =>
+        renderLifecycleChip({
+          lifecycleLabel,
+          isFocusLane: options?.isFocusLane,
+        }),
+      )}
     </ol>
   )
 
@@ -3972,6 +3987,7 @@ export function WorkItemLifecycleStatus({
                         className:
                           "m-0 flex min-w-0 max-w-full list-none flex-wrap gap-1 p-0",
                         ariaLabel: "Current lifecycle steps",
+                        isFocusLane: true,
                       })}
                     </div>
                   )
