@@ -1835,6 +1835,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           getAuthenticatedUserLogin: () => Effect.die("not used"),
           getOpenPullRequestNumber: () => Effect.die("not used"),
           findOpenPullRequestNumber: () => Effect.die("not used"),
+          closeOpenPullRequestsAndDeleteBranch: () => Effect.die("not used"),
           createDraftPullRequest: () => Effect.die("not used"),
           updateOpenDraftPullRequestCopy: () => Effect.die("not used"),
           countOpenNonDraftPullRequests: () =>

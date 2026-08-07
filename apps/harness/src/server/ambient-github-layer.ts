@@ -266,7 +266,7 @@ export const ambientGitHubLayer = (options: {
         closeOpenPullRequestsAndDeleteBranch: Effect.fn(
           "AmbientGitHub.closeOpenPullRequestsAndDeleteBranch",
         )((repository, headRefName) =>
-          authenticated("operator", (service) =>
+          authenticated("operator", repository, (service) =>
             service.closeOpenPullRequestsAndDeleteBranch(
               repository,
               headRefName,
