@@ -498,17 +498,17 @@ const patchWorkItemsCaches = (
 }
 
 export const Route = createFileRoute("/")({
-  component: HomePage,
+  component: PipelinePage,
 })
 
 /**
- * Home is the kanban board when repositories exist; otherwise the same
- * add-repo blank slate as `/repos` (no empty pipeline).
+ * Pipeline page body (home board or empty blank slate). Also used as the
+ * canonical background under the `/settings` overlay route (issue #840).
  *
  * Membership SSE stays mounted on both paths so CLI add/remove refreshes the
  * blank-slate ↔ board gate without navigating away (issue #684 review).
  */
-function HomePage() {
+export function PipelinePage() {
   return (
     <>
       <HomeRepositoryMembershipLive />

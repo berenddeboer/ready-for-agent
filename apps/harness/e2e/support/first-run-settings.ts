@@ -12,37 +12,117 @@ const pageLandmark = (page: Page) =>
     .or(page.getByRole("region", { name: "Lifecycle pipeline" }))
     .or(page.getByRole("region", { name: "Configured repositories" }))
 
-/** True when harness has no default build model (first-run Settings auto-opens). */
-const isFirstRunSettingsRequired = async (): Promise<boolean> => {
+const graphqlJson = async <T>(
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<T> => {
   const response = await fetch(E2E_GRAPHQL_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      query: `query { config { defaultModel } }`,
-    }),
+    body: JSON.stringify({ query, variables }),
   })
   if (!response.ok) {
     throw new Error(
-      `GraphQL HTTP ${response.status} while checking first-run settings: ${await response.text()}`,
+      `GraphQL HTTP ${response.status} while preparing settings: ${await response.text()}`,
     )
   }
   const payload = (await response.json()) as {
-    data?: { config?: { defaultModel: string | null } }
+    data?: T
     errors?: ReadonlyArray<{ message: string }>
   }
   if (payload.errors?.length) {
     throw new Error(
-      `GraphQL errors while checking first-run settings: ${payload.errors
+      `GraphQL errors while preparing settings: ${payload.errors
         .map((e) => e.message)
         .join("; ")}`,
     )
   }
-  const defaultModel = payload.data?.config?.defaultModel
+  if (payload.data === undefined) {
+    throw new Error("GraphQL response missing data while preparing settings")
+  }
+  return payload.data
+}
+
+/** True when harness has no default build model (first-run Settings auto-opens). */
+const isFirstRunSettingsRequired = async (): Promise<boolean> => {
+  const data = await graphqlJson<{
+    config: { defaultModel: string | null }
+  }>(`query { config { defaultModel } }`)
+  const defaultModel = data.config.defaultModel
   return (
     defaultModel === null ||
     defaultModel === undefined ||
     defaultModel.length === 0
   )
+}
+
+/**
+ * Ensure Harness Config has a catalog build model so Save is not blocked by
+ * first-run emptiness. Used by history scenarios that cancel first-run and
+ * then Save (issue #840 review) — independent of suite order.
+ */
+export const ensureConfiguredDefaultBuildModel = async (): Promise<void> => {
+  const data = await graphqlJson<{
+    config: {
+      selectedAgentBackend: string
+      defaultModel: string | null
+      maxConcurrentAgentTurns: number
+      maxConcurrentWorkItems: number
+    }
+    models: ReadonlyArray<{ id: string }>
+  }>(`query {
+    config {
+      selectedAgentBackend
+      defaultModel
+      maxConcurrentAgentTurns
+      maxConcurrentWorkItems
+    }
+    models { id }
+  }`)
+
+  if (
+    data.config.defaultModel !== null &&
+    data.config.defaultModel.length > 0
+  ) {
+    return
+  }
+
+  const modelId = data.models.find((model) => model.id.length > 0)?.id
+  if (modelId === undefined) {
+    throw new Error(
+      "Cannot configure default build model: Agent Model catalog is empty",
+    )
+  }
+
+  const updated = await graphqlJson<{
+    updateConfig: { defaultModel: string | null }
+  }>(
+    `mutation UpdateConfig($input: UpdateConfigInput!) {
+      updateConfig(input: $input) {
+        defaultModel
+      }
+    }`,
+    {
+      input: {
+        selectedAgentBackend: data.config.selectedAgentBackend,
+        defaultModel: modelId,
+        defaultThinkingLevel: null,
+        reviewModel: null,
+        reviewThinkingLevel: null,
+        maxConcurrentAgentTurns: data.config.maxConcurrentAgentTurns,
+        maxConcurrentWorkItems: data.config.maxConcurrentWorkItems,
+      },
+    },
+  )
+
+  if (
+    updated.updateConfig.defaultModel === null ||
+    updated.updateConfig.defaultModel.length === 0
+  ) {
+    throw new Error(
+      `Expected non-empty defaultModel after configure, got ${JSON.stringify(updated.updateConfig.defaultModel)}`,
+    )
+  }
 }
 
 /**

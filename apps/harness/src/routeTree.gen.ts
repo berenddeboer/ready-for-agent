@@ -14,6 +14,7 @@ import { Route as CompletedRouteImport } from './routes/completed'
 import { Route as GraphqlRouteImport } from './routes/graphql'
 import { Route as KanbanRouteImport } from './routes/kanban'
 import { Route as ReposRouteImport } from './routes/repos'
+import { Route as SettingsRouteImport } from './routes/settings'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,6 +41,11 @@ const ReposRoute = ReposRouteImport.update({
   path: '/repos',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
   '/repos': typeof ReposRoute
+  '/settings': typeof SettingsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
   '/repos': typeof ReposRoute
+  '/settings': typeof SettingsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +70,22 @@ export interface FileRoutesById {
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
   '/repos': typeof ReposRoute
+  '/settings': typeof SettingsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/completed' | '/graphql' | '/kanban' | '/repos'
+  fullPaths:
+    '/' | '/completed' | '/graphql' | '/kanban' | '/repos' | '/settings'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/completed' | '/graphql' | '/kanban' | '/repos'
-  id: '__root__' | '/' | '/completed' | '/graphql' | '/kanban' | '/repos'
+  to: '/' | '/completed' | '/graphql' | '/kanban' | '/repos' | '/settings'
+  id:
+    | '__root__'
+    | '/'
+    | '/completed'
+    | '/graphql'
+    | '/kanban'
+    | '/repos'
+    | '/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -77,6 +94,7 @@ export interface RootRouteChildren {
   GraphqlRoute: typeof GraphqlRoute
   KanbanRoute: typeof KanbanRoute
   ReposRoute: typeof ReposRoute
+  SettingsRoute: typeof SettingsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -116,6 +134,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReposRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -125,6 +150,7 @@ const rootRouteChildren: RootRouteChildren = {
   GraphqlRoute: GraphqlRoute,
   KanbanRoute: KanbanRoute,
   ReposRoute: ReposRoute,
+  SettingsRoute: SettingsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

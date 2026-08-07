@@ -107,11 +107,14 @@ describe("Harness settings Agent Backend change", () => {
 
   test("Settings open refreshes indefinitely cached mode and catalog (issue #838)", () => {
     const source = rootSource()
-    const openSettings = source.slice(
-      source.indexOf("const openSettings = () => {"),
-      source.indexOf("dialogRef.current?.showModal()"),
+    const prepare = source.slice(
+      source.indexOf("prepareSettingsSessionRef.current = () => {"),
+      source.indexOf("const leaveSettingsRoute"),
     )
-    expect(openSettings).toContain("void models.refetch()")
-    expect(openSettings).toContain("void backendStatus.refetch()")
+    expect(prepare).toContain("void models.refetch()")
+    expect(prepare).toContain("void backendStatus.refetch()")
+    // Explicit openers still prepare then push `/settings` (issue #840).
+    expect(source).toContain('to: "/settings"')
+    expect(source).toContain("prepareSettingsSession()")
   })
 })

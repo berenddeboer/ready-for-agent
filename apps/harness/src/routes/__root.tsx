@@ -12,12 +12,16 @@ import {
   Scripts,
   createRootRouteWithContext,
   retainSearchParams,
+  useBlocker,
   useNavigate,
+  useRouter,
+  useRouterState,
 } from "@tanstack/react-router"
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools"
 import {
   type FormEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -45,6 +49,11 @@ import { JobsRepositoryFilterProvider } from "../jobs-repository-filter.js"
 import { JobsViewSwitcher } from "../jobs-view-switcher.js"
 import { MastheadScrollwork } from "../masthead-scrollwork.js"
 import { repositoriesQuery } from "../repositories-query.js"
+import {
+  isHarnessSettingsPath,
+  isOtherRoutedDialogPath,
+  readHarnessSettingsHistoryState,
+} from "../routed-dialog.js"
 import appCss from "../styles.css?url"
 import {
   THEME_BOOTSTRAP_SCRIPT,
@@ -303,7 +312,30 @@ function ThemeMoonIcon() {
 function SettingsChrome() {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const queryClient = useQueryClient()
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const navigate = useNavigate()
+  const router = useRouter()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const settingsHistoryState = useRouterState({
+    select: (s) => readHarnessSettingsHistoryState(s.location.state),
+  })
+  // Routed `/settings` open (explicit / direct / forward). First-run stays
+  // local-only and never pushes this path (issue #840).
+  const routedSettingsOpen = isHarnessSettingsPath(pathname)
+  const [localSettingsOpen, setLocalSettingsOpen] = useState(false)
+  const dialogOpen = routedSettingsOpen || localSettingsOpen
+  // Prevent onClose from double-navigating when we close as part of leaveRoute.
+  const dismissingRouteRef = useRef(false)
+  // True only after an explicit in-app open in this SPA document session.
+  // History state alone is not enough: HTML5 restores state across full reload,
+  // but refresh/direct entry must still close with replace → `/` (issue #840).
+  const settingsOpenedFromInAppThisSessionRef = useRef(false)
+  // Coalesce rapid masthead clicks before the first `/settings` navigate commits.
+  const settingsOpenNavigatePendingRef = useRef(false)
+  // Mutation onSuccess is registered before dismissSettings is defined; call
+  // through a ref so Save can still leave the route after a successful update.
+  const dismissSettingsRef = useRef<
+    (options?: { ignoreBlocker?: boolean }) => void
+  >(() => {})
   const [autoOpenAttempted, setAutoOpenAttempted] = useState(false)
   const config = useQuery(configQuery)
   const backendStatus = useQuery(agentBackendStatusQuery)
@@ -349,6 +381,7 @@ function SettingsChrome() {
   const backendChangeBlocked = blockingUnfinishedWorkItemCount > 0
   // Hydrate editable form fields once per dialog-open session. Live WI refresh
   // refetches config (counts) often; re-applying full config.data would wipe drafts.
+  // Forward/explicit re-open resets this so abandoned drafts are not restored.
   const formHydratedForOpenRef = useRef(false)
 
   useEffect(() => {
@@ -409,9 +442,23 @@ function SettingsChrome() {
       // effectiveAgentBackend / blocking counts on Repository cards depend on
       // the harness default; refresh so inheriting repos do not stay stale.
       void queryClient.invalidateQueries({ queryKey: ["repositories"] })
-      dialogRef.current?.close()
-      setDialogOpen(false)
+      dismissSettingsRef.current({ ignoreBlocker: true })
     },
+  })
+
+  // Block Back (and other route leaves) while Save is in flight so navigation
+  // cannot race an in-progress configuration update (issue #840).
+  const updateConfigPendingRef = useRef(false)
+  updateConfigPendingRef.current = updateConfig.isPending
+  // Stable identity so useBlocker does not tear down/re-register every render.
+  const shouldBlockSettingsLeave = useCallback(
+    () => updateConfigPendingRef.current,
+    [],
+  )
+  useBlocker({
+    shouldBlockFn: shouldBlockSettingsLeave,
+    enableBeforeUnload: updateConfig.isPending,
+    disabled: !updateConfig.isPending,
   })
 
   const [recheckingBackendId, setRecheckingBackendId] = useState<string | null>(
@@ -612,8 +659,14 @@ function SettingsChrome() {
     }
   }
 
-  const openSettings = () => {
-    setDialogOpen(true)
+  /**
+   * Reset form session state and refresh indefinitely-cached catalogs on open
+   * (issue #838). Shared by explicit open, routed enter, and first-run.
+   * Stored on a ref so the dialog-open effect can call the latest session
+   * preparer without listing an unstable function in its dependency array.
+   */
+  const prepareSettingsSessionRef = useRef(() => {})
+  prepareSettingsSessionRef.current = () => {
     // Allow one hydrate for this open (effect or inline below).
     formHydratedForOpenRef.current = false
     // Discard any in-flight preview from a previous dialog session.
@@ -646,18 +699,137 @@ function SettingsChrome() {
     setRecheckAllFailures([])
     updateConfig.reset()
     recheckBackend.reset()
-    dialogRef.current?.showModal()
+  }
+  const prepareSettingsSession = () => {
+    prepareSettingsSessionRef.current()
   }
 
+  /**
+   * Leave the `/settings` route: Back to the in-app origin when this SPA
+   * session opened Settings explicitly, else replace with Pipeline so
+   * Forward cannot reopen a direct-link or post-refresh entry.
+   */
+  const leaveSettingsRoute = (options?: { ignoreBlocker?: boolean }) => {
+    const ignoreBlocker = options?.ignoreBlocker === true
+    // Require both history marker and same-document session flag so a full
+    // reload (which restores history state) still uses replace → `/`.
+    const openedFromInApp =
+      settingsOpenedFromInAppThisSessionRef.current &&
+      settingsHistoryState?.kind === "in-app-origin"
+    if (openedFromInApp && router.history.canGoBack()) {
+      router.history.back({ ignoreBlocker })
+      return
+    }
+    void navigate({
+      to: "/",
+      search: (prev) => prev,
+      replace: true,
+      ignoreBlocker,
+    })
+  }
+
+  /**
+   * Close Settings: local first-run only closes the native dialog; routed
+   * opens also leave `/settings` (Save / Cancel / Escape share this path).
+   */
+  const dismissSettings = (options?: { ignoreBlocker?: boolean }) => {
+    if (updateConfig.isPending && options?.ignoreBlocker !== true) {
+      return
+    }
+    if (routedSettingsOpen) {
+      dismissingRouteRef.current = true
+      dialogRef.current?.close()
+      setLocalSettingsOpen(false)
+      leaveSettingsRoute(options)
+      return
+    }
+    dialogRef.current?.close()
+    setLocalSettingsOpen(false)
+  }
+  dismissSettingsRef.current = dismissSettings
+
+  /** Explicit Settings openers (masthead, setup/backend guidance). */
+  const openSettings = () => {
+    prepareSettingsSession()
+    if (routedSettingsOpen || settingsOpenNavigatePendingRef.current) {
+      // Already on `/settings`, or a push is in flight: keep URL, refresh.
+      if (dialogRef.current !== null && !dialogRef.current.open) {
+        dialogRef.current.showModal()
+      }
+      return
+    }
+    settingsOpenedFromInAppThisSessionRef.current = true
+    settingsOpenNavigatePendingRef.current = true
+    // Open immediately so focus trap matches pre-route UX; the route effect
+    // remains the source of truth for direct/forward entry and Back close.
+    if (dialogRef.current !== null && !dialogRef.current.open) {
+      dialogRef.current.showModal()
+    }
+    void navigate({
+      to: "/settings",
+      search: (prev) => prev,
+      state: (prev) => {
+        // HistoryState is an open bag; mark this entry as an explicit in-app open
+        // so Cancel/Save/Escape can history.back() instead of replace-to-home.
+        const next = { ...prev }
+        Object.assign(next, {
+          harnessSettings: { kind: "in-app-origin" as const },
+        })
+        return next
+      },
+    }).finally(() => {
+      settingsOpenNavigatePendingRef.current = false
+    })
+  }
+
+  // Sync native <dialog> with routed + local open flags.
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (dialog === null) {
+      return
+    }
+    if (dialogOpen) {
+      if (!dialog.open) {
+        // Entering via route (direct, Forward, or explicit navigate) needs a
+        // fresh session so abandoned drafts are not restored.
+        prepareSettingsSessionRef.current()
+        dialog.showModal()
+      }
+      return
+    }
+    if (dialog.open) {
+      dismissingRouteRef.current = true
+      dialog.close()
+    }
+  }, [dialogOpen])
+
+  // Automatic first-run: local-only, no URL change, suppressed while another
+  // routed dialog is requested (Repository settings / Session Telemetry).
   useEffect(() => {
     if (autoOpenAttempted || !config.isSuccess || buildConfigured) {
       return
     }
+    if (isOtherRoutedDialogPath(pathname)) {
+      // Suppress this pass only — do not burn autoOpenAttempted so first-run
+      // can still open after the competing overlay is dismissed (ADR 0048).
+      return
+    }
+    if (routedSettingsOpen) {
+      // Direct `/settings` already owns the dialog.
+      setAutoOpenAttempted(true)
+      return
+    }
     setAutoOpenAttempted(true)
-    setDialogOpen(true)
+    setLocalSettingsOpen(true)
     updateConfig.reset()
-    dialogRef.current?.showModal()
-  }, [autoOpenAttempted, buildConfigured, config.isSuccess, updateConfig.reset])
+  }, [
+    autoOpenAttempted,
+    buildConfigured,
+    config.isSuccess,
+    pathname,
+    routedSettingsOpen,
+    updateConfig.reset,
+  ])
 
   const savedAgentBackend = config.data?.selectedAgentBackend ?? "opencode"
   const backendChanging = selectedAgentBackend !== savedAgentBackend
@@ -932,9 +1104,23 @@ function SettingsChrome() {
         className={ui.dialogPanel}
         aria-labelledby="settings-title"
         onCancel={(event) => {
-          if (updateConfig.isPending) event.preventDefault()
+          if (updateConfig.isPending) {
+            event.preventDefault()
+          }
         }}
-        onClose={() => setDialogOpen(false)}
+        onClose={() => {
+          // Escape (or other user dismiss) closes the native dialog first; if
+          // we are still on `/settings`, leave the route so URL and UI match.
+          if (dismissingRouteRef.current) {
+            dismissingRouteRef.current = false
+            setLocalSettingsOpen(false)
+            return
+          }
+          setLocalSettingsOpen(false)
+          if (isHarnessSettingsPath(pathname)) {
+            leaveSettingsRoute()
+          }
+        }}
       >
         <form onSubmit={saveSettings}>
           <div className={ui.dialogHeader}>
@@ -1492,8 +1678,7 @@ function SettingsChrome() {
               type="button"
               className={ui.plateMini}
               onClick={() => {
-                dialogRef.current?.close()
-                setDialogOpen(false)
+                dismissSettings()
               }}
               disabled={updateConfig.isPending}
             >
