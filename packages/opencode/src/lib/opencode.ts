@@ -17,6 +17,7 @@ import { makeOpencodeEnvironment } from "./environment.js"
 import type { OpencodeConfigError } from "./errors.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseCommandTaskResultFromLine } from "./parse-command-task-result.js"
+import { parseErrorClassificationFromLine } from "./parse-error-classification.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
 import { parseVerboseModelsOutputDetailed } from "./parse-verbose-models.js"
 import type { OpencodeLayerOptions } from "./types.js"
@@ -121,6 +122,7 @@ export class Opencode {
             observerLabel: "OpenCode",
             parseLine: (line) => {
               const sessionId = parseSessionIdFromLine(line)
+              const errorClassification = parseErrorClassificationFromLine(line)
               if (commandName !== undefined) {
                 const commandText = parseCommandTaskResultFromLine(
                   line,
@@ -129,12 +131,18 @@ export class Opencode {
                 if (commandText !== undefined) {
                   return {
                     ...(sessionId !== undefined ? { sessionId } : {}),
+                    ...(errorClassification !== undefined
+                      ? { errorClassification }
+                      : {}),
                     finalizeText: commandText,
                   }
                 }
               }
               return {
                 ...(sessionId !== undefined ? { sessionId } : {}),
+                ...(errorClassification !== undefined
+                  ? { errorClassification }
+                  : {}),
                 text: parseAssistantTextFromLine(line),
               }
             },

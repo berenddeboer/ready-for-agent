@@ -195,6 +195,97 @@ describe("Opencode AgentBackend adapter", () => {
     )
   })
 
+  it("classifies a retryable provider error observed before a non-zero exit", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"type":"step_start","sessionID":"ses_retry"}'`,
+        `printf '%s\\n' '{"type":"error","sessionID":"ses_retry","error":{"name":"APIError","data":{"message":"Overloaded","statusCode":503,"isRetryable":true}}}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toEqual(
+          new AgentBackendExitError({
+            exitCode: 1,
+            cwd: process.cwd(),
+            sessionId: "ses_retry",
+            classification: "retryable_provider_error",
+          }),
+        )
+      },
+    )
+  })
+
+  it("classifies a length-limit truncation observed before a non-zero exit", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"type":"step_start","sessionID":"ses_length"}'`,
+        `printf '%s\\n' '{"type":"error","sessionID":"ses_length","error":{"name":"MessageOutputLengthError","data":{}}}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toEqual(
+          new AgentBackendExitError({
+            exitCode: 1,
+            cwd: process.cwd(),
+            sessionId: "ses_length",
+            classification: "length_limit_truncation",
+          }),
+        )
+      },
+    )
+  })
+
+  it("classifies a provider auth error observed before a non-zero exit", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"type":"step_start","sessionID":"ses_auth"}'`,
+        `printf '%s\\n' '{"type":"error","sessionID":"ses_auth","error":{"name":"ProviderAuthError","data":{"providerID":"anthropic","message":"Not authenticated"}}}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toEqual(
+          new AgentBackendExitError({
+            exitCode: 1,
+            cwd: process.cwd(),
+            sessionId: "ses_auth",
+            classification: "terminal_auth_error",
+          }),
+        )
+      },
+    )
+  })
+
+  it("falls back to a generic exit error for an unrecognized error payload", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"type":"step_start","sessionID":"ses_unknown"}'`,
+        `printf '%s\\n' '{"type":"error","sessionID":"ses_unknown","error":{"name":"UnknownError","data":{"message":"Unexpected server error."}}}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toEqual(
+          new AgentBackendExitError({
+            exitCode: 1,
+            cwd: process.cwd(),
+            sessionId: "ses_unknown",
+          }),
+        )
+      },
+    )
+  })
+
   it("retains an observed session in the typed timeout error", async () => {
     await withExecutable(
       [

@@ -45,12 +45,18 @@ const parseSimpleLine = (line: string) => {
     const parsed = JSON.parse(line) as {
       sessionID?: string
       text?: string
+      errorClassification?:
+        | "retryable_provider_error"
+        | "length_limit_truncation"
     }
     return {
       ...(typeof parsed.sessionID === "string"
         ? { sessionId: parsed.sessionID }
         : {}),
       ...(typeof parsed.text === "string" ? { text: parsed.text } : {}),
+      ...(parsed.errorClassification !== undefined
+        ? { errorClassification: parsed.errorClassification }
+        : {}),
     }
   } catch {
     return {}
@@ -251,6 +257,66 @@ describe("runCliTurn", () => {
         expect(observed.earlySessionId).toBe("ses_early")
         expect(observed.stillRunning).toBe(true)
         expect(Exit.isSuccess(observed.result)).toBe(true)
+      },
+    )
+  })
+
+  it("carries an observed error classification on a non-zero exit", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"sessionID":"ses_retry","errorClassification":"retryable_provider_error"}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              parseLine: parseSimpleLine,
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toEqual(
+          new AgentBackendExitError({
+            exitCode: 1,
+            cwd: process.cwd(),
+            sessionId: "ses_retry",
+            classification: "retryable_provider_error",
+          }),
+        )
+      },
+    )
+  })
+
+  it("omits classification on a non-zero exit with no observed error event", async () => {
+    await withExecutable(
+      [`printf '%s\\n' '{"sessionID":"ses_plain"}'`, "exit 1"].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              parseLine: parseSimpleLine,
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toEqual(
+          new AgentBackendExitError({
+            exitCode: 1,
+            cwd: process.cwd(),
+            sessionId: "ses_plain",
+          }),
+        )
       },
     )
   })
