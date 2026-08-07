@@ -114,7 +114,7 @@ const CLAUDE_REGISTRATION: AgentBackendRegistration = {
     label: CLAUDE_CODE_LABEL,
   },
   capabilities: [
-    { _tag: "SessionTelemetry", supported: false },
+    { _tag: "SessionTelemetry", supported: true },
     { _tag: "KeymaxxerMcp", supported: false },
   ],
 }
