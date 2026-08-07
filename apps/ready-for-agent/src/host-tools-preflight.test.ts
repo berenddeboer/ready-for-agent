@@ -17,6 +17,15 @@ describe("host tools preflight", () => {
     expect(result.ok).toBe(true)
   })
 
+  test("requires no Agent Backend executable before the first backend selection", () => {
+    const result = checkHostTools((command) => command === "git", {
+      selectedAgentBackendIds: [],
+      repositoryForges: [],
+    })
+
+    expect(result).toEqual({ ok: true })
+  })
+
   test("requires gh only when a GitHub Repository exists", () => {
     const githubOnly = checkHostTools(
       (command) => ["git", "gh", "opencode"].includes(command),

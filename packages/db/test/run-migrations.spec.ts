@@ -103,6 +103,7 @@ describe("runMigrations", () => {
           { name: "20260729160000_forge_identity_foundation" },
           { name: "20260730140857_unfinished_work_item_index" },
           { name: "20260807100000_postponed_step_runs" },
+          { name: "20260808093000_explicit_agent_backend_selection" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -1026,6 +1027,53 @@ describe("runMigrations", () => {
             status: "queued",
             finished_at: null,
             postponed_until: null,
+          },
+        ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("marks existing Agent Backend selections as explicitly configured", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260808093000_explicit_agent_backend_selection/migration.sql",
+      ),
+      "utf8",
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `CREATE TABLE config (
+             id text PRIMARY KEY,
+             selected_agent_backend text NOT NULL,
+             updated_at integer NOT NULL
+           )`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO config (id, selected_agent_backend, updated_at)
+           VALUES ('default', 'claude', 123)`,
+        )
+
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        expect(
+          yield* sql.unsafe(
+            `SELECT selected_agent_backend, agent_backend_configured_at
+             FROM config WHERE id = 'default'`,
+          ),
+        ).toEqual([
+          {
+            selected_agent_backend: "claude",
+            agent_backend_configured_at: 123,
           },
         ])
       }).pipe(Effect.provide(SqliteTest)),

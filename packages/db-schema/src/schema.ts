@@ -73,6 +73,8 @@ export const config = snakeCase.table("config", {
   id: text().primaryKey().default("default"),
   /** Active Agent Backend for the Harness instance (OpenCode by default). */
   selectedAgentBackend: text().notNull().default("opencode"),
+  /** Set only after an operator saves the Harness Agent Backend selection. */
+  agentBackendConfiguredAt: integer({ mode: "number" }),
   defaultModel: text(),
   defaultThinkingLevel: text(),
   reviewModel: text(),

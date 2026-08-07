@@ -30,6 +30,16 @@ const ensureConfigTable = (db: Database): void => {
   `)
 }
 
+const ensureConfigSelectionTable = (db: Database): void => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS config (
+      id TEXT PRIMARY KEY DEFAULT 'default',
+      selected_agent_backend TEXT NOT NULL DEFAULT 'opencode',
+      agent_backend_configured_at INTEGER
+    )
+  `)
+}
+
 const ensureRepositoryTable = (db: Database): void => {
   db.run(`
     CREATE TABLE IF NOT EXISTS repository (
@@ -50,12 +60,46 @@ describe("peekSelectedAgentBackendIds", () => {
     roots = []
   })
 
-  test("missing DB defaults safely to OpenCode only", () => {
+  test("missing DB has no persisted backend selection", () => {
     expect(
       peekSelectedAgentBackendIds("/no/such/path/ready-for-agent.db"),
-    ).toEqual(["opencode"])
-    expect(peekSelectedAgentBackendIds(":memory:")).toEqual(["opencode"])
-    expect(peekSelectedAgentBackendIds("")).toEqual(["opencode"])
+    ).toEqual([])
+    expect(peekSelectedAgentBackendIds(":memory:")).toEqual([])
+    expect(peekSelectedAgentBackendIds("")).toEqual([])
+  })
+
+  test("seeded default remains unselected until Settings saves a backend", () => {
+    const { path, root } = createTempDb()
+    roots.push(root)
+    const db = openWritable(path)
+    try {
+      ensureConfigSelectionTable(db)
+      db.run(
+        `INSERT INTO config (id, selected_agent_backend) VALUES ('default', 'opencode')`,
+      )
+    } finally {
+      db.close()
+    }
+
+    expect(peekSelectedAgentBackendIds(path)).toEqual([])
+  })
+
+  test("requires a backend explicitly saved in Settings", () => {
+    const { path, root } = createTempDb()
+    roots.push(root)
+    const db = openWritable(path)
+    try {
+      ensureConfigSelectionTable(db)
+      db.run(
+        `INSERT INTO config (
+           id, selected_agent_backend, agent_backend_configured_at
+         ) VALUES ('default', 'claude', 1)`,
+      )
+    } finally {
+      db.close()
+    }
+
+    expect(peekSelectedAgentBackendIds(path)).toEqual(["claude"])
   })
 
   test("default only when no repository overrides", () => {

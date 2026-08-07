@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import {
   defaultAgentBackendId,
   isSelectableAgentBackendId,
@@ -30,29 +31,81 @@ const normalizeBackendId = (
   return isSelectableAgentBackendId(trimmed) ? trimmed : undefined
 }
 
-const readConfigBackendId = (db: Database): string => {
+type PersistedBackendSelection =
+  | { readonly kind: "unselected" }
+  | { readonly kind: "selected"; readonly backendId: string }
+
+const selectedBackend = (
+  backendId: string | null | undefined,
+): PersistedBackendSelection => ({
+  kind: "selected",
+  backendId: normalizeBackendId(backendId) ?? defaultAgentBackendId,
+})
+
+const readPersistedConfigBackendSelection = (
+  db: Database,
+): PersistedBackendSelection => {
   try {
+    const configTable = db
+      .query(
+        `SELECT 1
+         FROM sqlite_master
+         WHERE type = 'table' AND name = 'config'
+         LIMIT 1`,
+      )
+      .get()
+    if (configTable === null) return { kind: "unselected" }
+
     const configRow = db
       .query(
-        `SELECT selected_agent_backend AS selectedAgentBackend
+        `SELECT selected_agent_backend AS selectedAgentBackend,
+                agent_backend_configured_at AS agentBackendConfiguredAt
          FROM config
          WHERE id = 'default'
          LIMIT 1`,
       )
-      .get() as { selectedAgentBackend?: string } | null
-    return (
-      normalizeBackendId(configRow?.selectedAgentBackend) ??
-      defaultAgentBackendId
-    )
+      .get() as {
+      selectedAgentBackend?: string
+      agentBackendConfiguredAt?: number | null
+    } | null
+    if (configRow === null || configRow.agentBackendConfiguredAt === null) {
+      return { kind: "unselected" }
+    }
+    return selectedBackend(configRow.selectedAgentBackend)
   } catch {
-    // Config table may be missing on first-run / pre-migration DBs.
-    return defaultAgentBackendId
+    // Pre-marker Config rows belong to existing installations, where the
+    // default was already enforced as a host-tool requirement.
+    try {
+      const configRow = db
+        .query(
+          `SELECT selected_agent_backend AS selectedAgentBackend
+           FROM config
+           WHERE id = 'default'
+           LIMIT 1`,
+        )
+        .get() as { selectedAgentBackend?: string } | null
+      return configRow === null
+        ? { kind: "unselected" }
+        : selectedBackend(configRow.selectedAgentBackend)
+    } catch {
+      // An unreadable existing DB must retain the conservative host preflight.
+      return selectedBackend(defaultAgentBackendId)
+    }
   }
 }
 
+const readConfigBackendId = (db: Database): string =>
+  (() => {
+    const selection = readPersistedConfigBackendSelection(db)
+    return selection.kind === "selected"
+      ? selection.backendId
+      : defaultAgentBackendId
+  })()
+
 /**
  * Read Harness Config's selected Agent Backend without starting the full app.
- * Missing DB or row defaults to OpenCode so first-run preflight stays correct.
+ * Missing DB or row returns the product default for direct callers that need a
+ * backend value. First-run preflight uses the plural peek below instead.
  * Does not include Repository overrides (use {@link peekSelectedAgentBackendIds}).
  */
 export const peekSelectedAgentBackendId = (databasePath: string): string => {
@@ -77,22 +130,34 @@ export const peekSelectedAgentBackendId = (databasePath: string): string => {
  * Cold-start host-tools preflight set: harness config default unioned with
  * every distinct non-null Repository Agent Backend override.
  *
- * Missing DB / unreadable DB / empty config defaults safely to OpenCode only.
+ * A bootstrap-seeded default is not a persisted selection until Settings saves
+ * it. First-run can therefore reach Settings across restarts.
  * Unknown or blank backend ids are ignored (never required as host tools).
  */
 export const peekSelectedAgentBackendIds = (
   databasePath: string,
 ): ReadonlyArray<string> => {
+  if (databasePath.startsWith("libsql:")) {
+    // The local SQLite peeker cannot inspect a remote URL; retain the existing
+    // conservative preflight rather than treating it as a pristine database.
+    return [defaultAgentBackendId]
+  }
   const filePath = resolveFilePath(databasePath)
   if (filePath === undefined) {
-    return [defaultAgentBackendId]
+    return []
+  }
+  if (!existsSync(filePath)) {
+    return []
   }
 
   try {
     const db = new Database(filePath, { readonly: true, create: false })
     try {
       const ids = new Set<string>()
-      ids.add(readConfigBackendId(db))
+      const configSelection = readPersistedConfigBackendSelection(db)
+      if (configSelection.kind === "selected") {
+        ids.add(configSelection.backendId)
+      }
 
       try {
         const overrideRows = db
