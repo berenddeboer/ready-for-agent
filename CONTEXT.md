@@ -287,6 +287,10 @@ _Avoid_: Queued (alone), Waiting for Worker Slot, blocked Issue (the Issue is bl
 The state of an unfinished, non-paused Work Item that is not Waiting for blockers and has not yet been Admitted because all Worker Slots are occupied. It does not occupy a Worker Slot and has no Step Run and no lifecycle job until admission. Operators may create more Work Items than the Worker Slot bound with no separate cap on how many may wait; those extras remain Waiting for Worker Slot until admitted **FIFO by time entered this state** (creation time if never admitted; re-queue time after Start when no slot was free; the same creation time applies when a former Waiting for blockers Work Item joins this line). No priority by Repository, Issue age, or operator. Operator-visible status is Waiting for worker slot with a message that a worker slot must become available; the current Lifecycle Step is unchanged and is not queued until admission.
 _Avoid_: Queued Step Run, paused, Not Implemented, Waiting for blockers
 
+**Waiting for GitHub**:
+A derived Work Item hold whose latest Step Run is a Postponed Step Run with a durable wake contract and retry deadline. It is not a Lifecycle Step, Work Item state, Queue hold, or Worker Slot wait: the Work Item remains in its current pipeline lane, holds no Worker Slot, and owns no queued or running Step Run. It clears only when later lifecycle progress supersedes that Postponed history; Pause, Waiting for blockers, and Waiting for Worker Slot take presentation precedence.
+_Avoid_: Queue, Waiting for Worker Slot, paused, Work Item state
+
 **Implement Now**:
 An explicit operator request that creates a Work Item for an Actionable Issue and seeks Worker Slot admission immediately. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (`Select a default build model first`). Distinct from Queue, which creates a Work Item only for a blocked open leaf and holds it until Implementable.
 _Avoid_: Auto-implement, enqueue Issue, Queue
@@ -398,11 +402,15 @@ A highest-priority request given to the Work Item's Implement Session by Resolve
 _Avoid_: PR Status Check, conflict status check
 
 **Step Run**:
-A durable record of one scheduled execution attempt for a Work Item's Lifecycle Step, created when that attempt is queued and recording when it starts, finishes, and succeeds, fails, is interrupted, or is cancelled before starting. Retried steps produce additional Step Runs rather than replacing earlier attempts, allowing queue wait and execution duration to be measured separately.
+A durable record of one scheduled execution attempt for a Work Item's Lifecycle Step, created when that attempt is queued and recording when it starts, finishes, and succeeds, fails, is interrupted, is postponed, or is cancelled before starting. Retried steps produce additional Step Runs rather than replacing earlier attempts, allowing queue wait and execution duration to be measured separately.
 _Avoid_: Step duration, job attempt
 
+**Postponed Step Run**:
+A finished Step Run outcome that records `postponed` and one retry deadline (`postponedUntil`) because its next GitHub attempt must wait. It is immutable history, not a failed or successful attempt, and it cannot be retried manually; a later durable wake creates a fresh Step Run through ordinary admission. A Postponed Step Run derives Waiting for GitHub without adding a Work Item lifecycle state or hold flag.
+_Avoid_: Deferred Review Finding, Queued Step Run, Retry, Failed Step Run
+
 **Retry**:
-An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. Retry is not allowed while a Work Item is paused; the operator must Start first.
+An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. Retry is unavailable for a Postponed Step Run and while a Work Item is paused; the operator must Start first.
 _Avoid_: Queue redelivery, resume
 
 **Pause Work Item**:
@@ -418,7 +426,7 @@ A transition that moves a Work Item with no running Step Run to the terminal Aba
 _Avoid_: Delete, cancel
 
 **Reset**:
-An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused, Waiting for Worker Slot, or Waiting for blockers and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause). Waiting for blockers has no worktree yet; Reset is the operator cancel for a queued intent.
+An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused, Waiting for GitHub, Waiting for Worker Slot, or Waiting for blockers and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause). Waiting for blockers has no worktree yet; Reset is the operator cancel for a queued intent.
 _Avoid_: Abandon, Retry, cancel
 
 **Failed Work Item**:

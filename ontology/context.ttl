@@ -1863,6 +1863,44 @@ rfa:WaitingForWorkerSlot
   rfa:avoidanceRationale "CONTEXT.md prefers Waiting for Worker Slot for this concept."@en ;
 ] .
 
+rfa:WaitingForGitHub
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Waiting for GitHub"@en ;
+  skos:definition "A derived Work Item hold whose latest Step Run is a Postponed Step Run with a durable wake contract and retry deadline. It is not a Lifecycle Step, Work Item state, Queue hold, or Worker Slot wait: the Work Item remains in its current pipeline lane, holds no Worker Slot, and owns no queued or running Step Run. It clears only when later lifecycle progress supersedes that Postponed history; Pause, Waiting for blockers, and Waiting for Worker Slot take presentation precedence."@en ;
+  skos:hiddenLabel "Queue"@en, "Waiting for Worker Slot"@en, "paused"@en, "Work Item state"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForGitHub ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Queue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for GitHub for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForGitHub ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Waiting for Worker Slot"@en ;
+  rfa:avoidanceRationale "Waiting for GitHub is an independent hold."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForGitHub ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "paused"@en ;
+  rfa:avoidanceRationale "Pause is an explicit operator instruction with higher presentation precedence."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForGitHub ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Work Item state"@en ;
+  rfa:avoidanceRationale "Waiting for GitHub is derived from Step Run history rather than persisted as a lifecycle state."@en ;
+] .
+
 rfa:ImplementNow
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Implement Now"@en ;
@@ -2328,7 +2366,7 @@ rfa:MergeConflictHandoff
 rfa:StepRun
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Step Run"@en ;
-  skos:definition "A durable record of one scheduled execution attempt for a Work Item's Lifecycle Step, created when that attempt is queued and recording when it starts, finishes, and succeeds, fails, is interrupted, or is cancelled before starting. Retried steps produce additional Step Runs rather than replacing earlier attempts, allowing queue wait and execution duration to be measured separately."@en ;
+  skos:definition "A durable record of one scheduled execution attempt for a Work Item's Lifecycle Step, created when that attempt is queued and recording when it starts, finishes, and succeeds, fails, is interrupted, is postponed, or is cancelled before starting. Retried steps produce additional Step Runs rather than replacing earlier attempts, allowing queue wait and execution duration to be measured separately."@en ;
   skos:hiddenLabel "Step duration"@en, "job attempt"@en .
 
 [
@@ -2347,10 +2385,48 @@ rfa:StepRun
   rfa:avoidanceRationale "CONTEXT.md prefers Step Run for this concept."@en ;
 ] .
 
+rfa:PostponedStepRun
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Postponed Step Run"@en ;
+  skos:definition "A finished Step Run outcome that records `postponed` and one retry deadline (`postponedUntil`) because its next GitHub attempt must wait. It is immutable history, not a failed or successful attempt, and it cannot be retried manually; a later durable wake creates a fresh Step Run through ordinary admission. A Postponed Step Run derives Waiting for GitHub without adding a Work Item lifecycle state or hold flag."@en ;
+  skos:hiddenLabel "Deferred Review Finding"@en, "Queued Step Run"@en, "Retry"@en, "Failed Step Run"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PostponedStepRun ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Deferred Review Finding"@en ;
+  rfa:avoidanceRationale "Review Findings may be deferred, but a Postponed Step Run is an execution outcome."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PostponedStepRun ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Queued Step Run"@en ;
+  rfa:avoidanceRationale "Postponed is a finished outcome and has no active queue job."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PostponedStepRun ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Retry"@en ;
+  rfa:avoidanceRationale "The durable wake, rather than an operator Retry, creates a fresh attempt."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PostponedStepRun ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Failed Step Run"@en ;
+  rfa:avoidanceRationale "Postponed is an independent finished outcome, not a failure."@en ;
+] .
+
 rfa:Retry
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Retry"@en ;
-  skos:definition "An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. Retry is not allowed while a Work Item is paused; the operator must Start first."@en ;
+  skos:definition "An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. Retry is unavailable for a Postponed Step Run and while a Work Item is paused; the operator must Start first."@en ;
   skos:hiddenLabel "Queue redelivery"@en, "resume"@en .
 
 [
@@ -2478,7 +2554,7 @@ rfa:Abandon
 rfa:Reset
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Reset"@en ;
-  skos:definition "An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused, Waiting for Worker Slot, or Waiting for blockers and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause). Waiting for blockers has no worktree yet; Reset is the operator cancel for a queued intent."@en ;
+  skos:definition "An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused, Waiting for GitHub, Waiting for Worker Slot, or Waiting for blockers and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause). Waiting for blockers has no worktree yet; Reset is the operator cancel for a queued intent."@en ;
   skos:hiddenLabel "Abandon"@en, "Retry"@en, "cancel"@en .
 
 [

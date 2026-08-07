@@ -274,7 +274,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "const renderChipList =",
     )
     expect(chipRenderer).toContain(
-      '<li key={lifecycleLabel.phase} className="flex min-w-0 max-w-full">',
+      `key={\`\${lifecycleLabel.phase}-\${lifecycleLabel.label}\`}`,
     )
     expect(ui).toMatch(
       /lifecycleLegRowClasses\s*=\s*"flex flex-wrap items-start gap-\[0\.35rem\]"/,

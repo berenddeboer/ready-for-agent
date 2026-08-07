@@ -252,12 +252,14 @@ type WorkItemStatus =
   | "FAILED"
   | "INTERRUPTED"
   | "CANCELLED"
+  | "POSTPONED"
   | "COMPLETE"
   | "ABANDONED"
   | "NEEDS_HUMAN"
   | "NEEDS_HUMAN_REVIEW"
   | "WAITING_FOR_WORKER_SLOT"
   | "WAITING_FOR_BLOCKERS"
+  | "WAITING_FOR_GITHUB"
 
 export type WorkItem = {
   id: string
@@ -271,6 +273,7 @@ export type WorkItem = {
   status: WorkItemStatus
   statusLabel: string
   statusMessage: string | null
+  postponedUntil: string | null
   paused: boolean
   canRetry: boolean
   isTerminal: boolean
@@ -301,6 +304,7 @@ const workItemFields = {
   status: true,
   statusLabel: true,
   statusMessage: true,
+  postponedUntil: true,
   paused: true,
   canRetry: true,
   isTerminal: true,
@@ -3397,7 +3401,10 @@ export function WorkItemLifecycleStatus({
         ? `${lifecycleLabel.label} · ${formatDuration(displayDurationMs)}`
         : lifecycleLabel.label
     return (
-      <li key={lifecycleLabel.phase} className="flex min-w-0 max-w-full">
+      <li
+        key={`${lifecycleLabel.phase}-${lifecycleLabel.label}`}
+        className="flex min-w-0 max-w-full"
+      >
         {linkToPullRequest ? (
           <a
             className={`${chipClassName} hover:underline`}

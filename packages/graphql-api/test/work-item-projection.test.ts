@@ -2,6 +2,11 @@ import type { WorkItemRecord } from "@ready-for-agent/work-item-lifecycle"
 import {
   cumulativeExecutionDurationMs,
   lifecycleLabels,
+  statusLabel,
+  workItemCanRetry,
+  workItemPostponedUntil,
+  workItemStatus,
+  workItemStatusMessage,
 } from "../src/lib/work-item-projection.js"
 import { describe, expect, test } from "bun:test"
 
@@ -16,6 +21,7 @@ const baseStepRun = {
   finishedAt: new Date("2026-07-14T08:38:36.000Z"),
   reasonCode: null,
   reasonMessage: null,
+  postponedUntil: null,
   queueWaitMs: 1_000,
   executionDurationMs: 2_315_000, // 38m 35s
 }
@@ -49,6 +55,11 @@ const baseWorkItem = {
   stepRuns: [baseStepRun],
 } as WorkItemRecord
 
+const workItemWith = (overrides: Partial<WorkItemRecord>): WorkItemRecord => ({
+  ...baseWorkItem,
+  ...overrides,
+})
+
 describe("cumulativeExecutionDurationMs", () => {
   test("returns null when no attempt has started", () => {
     expect(
@@ -75,6 +86,122 @@ describe("cumulativeExecutionDurationMs", () => {
         { executionDurationMs: 12_000 },
       ]),
     ).toBe(2_315_000 + 45_000 + 12_000)
+  })
+})
+
+describe("Postponed Step Run projection", () => {
+  const postponedUntil = new Date("2026-08-07T12:00:00.000Z")
+  const postponedStepRun = {
+    ...baseStepRun,
+    step: "watch_pr_status_checks",
+    status: "postponed",
+    finishedAt: new Date("2026-08-07T11:00:00.000Z"),
+    postponedUntil,
+  } satisfies WorkItemRecord["stepRuns"][number]
+  const postponed = workItemWith({
+    state: "watch_pr_status_checks",
+    holdsWorkerSlot: false,
+    stepRuns: [postponedStepRun],
+  })
+  const postponedWorkItemWith = (
+    overrides: Partial<WorkItemRecord>,
+  ): WorkItemRecord => ({ ...postponed, ...overrides })
+
+  test("derives Waiting for GitHub from latest postponed history and deadline", () => {
+    expect(workItemStatus(postponed)).toBe("waiting_for_github")
+    expect(statusLabel(workItemStatus(postponed))).toBe("Waiting for GitHub")
+    expect(workItemPostponedUntil(postponed)).toEqual(postponedUntil)
+    expect(workItemStatusMessage(postponed)).toBe(
+      "Waiting for GitHub until 2026-08-07T12:00:00.000Z",
+    )
+    expect(workItemCanRetry(postponed)).toBe(false)
+    expect(lifecycleLabels(postponed)).toEqual([
+      {
+        phase: "GITHUB_STATUS_CHECKS",
+        label: "GitHub status checks: Postponed",
+        status: "POSTPONED",
+        durationMs: 2_315_000,
+      },
+    ])
+  })
+
+  test("keeps lifecycle hold precedence without a duplicate persisted flag", () => {
+    const paused = postponedWorkItemWith({ paused: true })
+    expect(workItemStatus(paused)).toBe("needs_human_review")
+    expect(workItemPostponedUntil(paused)).toBeNull()
+    expect(workItemStatusMessage(paused)).toBeNull()
+    expect(
+      workItemStatus(
+        postponedWorkItemWith({
+          paused: true,
+          waitingSince: new Date("2026-08-07T11:30:00.000Z"),
+        }),
+      ),
+    ).toBe("waiting_for_worker_slot")
+    expect(
+      workItemStatus(
+        postponedWorkItemWith({
+          waitingSince: new Date("2026-08-07T11:30:00.000Z"),
+          waitingForBlockers: true,
+        }),
+      ),
+    ).toBe("waiting_for_blockers")
+    expect(workItemStatus(postponedWorkItemWith({ state: "complete" }))).toBe(
+      "complete",
+    )
+  })
+
+  test("does not derive a GitHub hold from contradictory active resources", () => {
+    const workerSlotHeld = postponedWorkItemWith({ holdsWorkerSlot: true })
+    expect(workItemStatus(workerSlotHeld)).toBe("postponed")
+    expect(workItemPostponedUntil(workerSlotHeld)).toBeNull()
+
+    const activeHistory = postponedWorkItemWith({
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "watch_pr_status_checks",
+          status: "running",
+          finishedAt: null,
+          postponedUntil: null,
+        } satisfies WorkItemRecord["stepRuns"][number],
+        postponedStepRun,
+      ],
+    })
+    expect(workItemStatus(activeHistory)).toBe("postponed")
+    expect(workItemPostponedUntil(activeHistory)).toBeNull()
+  })
+
+  test("retains Postponed history after a durable wake starts a fresh attempt", () => {
+    const resumed = postponedWorkItemWith({
+      stepRuns: [
+        postponedStepRun,
+        {
+          ...baseStepRun,
+          id: "srun-01J00000000000000000000001",
+          step: "watch_pr_status_checks",
+          status: "queued",
+          finishedAt: null,
+          postponedUntil: null,
+          executionDurationMs: null,
+        } satisfies WorkItemRecord["stepRuns"][number],
+      ],
+    })
+
+    expect(lifecycleLabels(resumed)).toEqual([
+      {
+        phase: "GITHUB_STATUS_CHECKS",
+        label: "GitHub status checks: Postponed (1 prior attempt)",
+        status: "POSTPONED",
+        durationMs: null,
+      },
+      {
+        phase: "GITHUB_STATUS_CHECKS",
+        label: "GitHub status checks: Queued",
+        status: "QUEUED",
+        durationMs: 2_315_000,
+      },
+    ])
   })
 })
 

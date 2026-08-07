@@ -51,6 +51,7 @@ export const StepRunStatus = Schema.Literals([
   "failed",
   "interrupted",
   "cancelled",
+  "postponed",
 ])
 export type StepRunStatus = typeof StepRunStatus.Type
 
@@ -62,11 +63,10 @@ export type StepRunStatus = typeof StepRunStatus.Type
 export const MergeMode = Schema.Literals(["ordinary", "always"])
 export type MergeMode = typeof MergeMode.Type
 
-export interface StepRunRecord {
+interface StepRunRecordBase {
   readonly id: StepRunId
   readonly workItemId: WorkItemId
   readonly step: OperationalLifecycleStep
-  readonly status: StepRunStatus
   readonly queueJobId: string | null
   readonly queuedAt: Date
   readonly startedAt: Date | null
@@ -78,6 +78,25 @@ export interface StepRunRecord {
   /** Time from start until finish/now; null when execution never began. */
   readonly executionDurationMs: number | null
 }
+
+/** A finished attempt held for GitHub's durable retry deadline. */
+export type PostponedStepRunRecord = Omit<StepRunRecordBase, "finishedAt"> & {
+  readonly status: "postponed"
+  readonly finishedAt: Date
+  readonly postponedUntil: Date
+}
+
+/** Every non-postponed outcome has no GitHub retry deadline. */
+export type NonPostponedStepRunRecord = StepRunRecordBase & {
+  readonly status: Exclude<StepRunStatus, "postponed">
+  readonly postponedUntil: null
+}
+
+/**
+ * A persisted Step Run makes its outcome/deadline invariant unrepresentable
+ * in lifecycle code; the SQLite migration enforces the same contract.
+ */
+export type StepRunRecord = PostponedStepRunRecord | NonPostponedStepRunRecord
 
 export interface WorkItemRecord {
   readonly id: WorkItemId

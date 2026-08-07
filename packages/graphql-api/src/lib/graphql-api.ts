@@ -71,6 +71,7 @@ import {
   workIssueProjection,
   workItemCanRetry,
   workItemIsTerminal,
+  workItemPostponedUntil,
   workItemStateLabel,
   workItemStatus,
   workItemStatusMessage,
@@ -849,6 +850,8 @@ export const createGraphqlApi = (
               }).pipe(Effect.withSpan("graphql-api.WorkItem.statusMessage")),
             )
           },
+          postponedUntil: (workItem: WorkItemRecord) =>
+            workItemPostponedUntil(workItem)?.toISOString() ?? null,
           paused: (workItem: WorkItemRecord) => workItem.paused,
           canRetry: workItemCanRetry,
           isTerminal: workItemIsTerminal,
