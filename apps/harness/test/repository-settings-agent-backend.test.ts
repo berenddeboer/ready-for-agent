@@ -100,11 +100,21 @@ describe("Repository settings Agent Backend override", () => {
 
   test("Settings open refreshes indefinitely cached mode and catalog (issue #838)", () => {
     const source = indexSource()
+    // prepareSettingsSession runs on every open (explicit + routed enter).
+    const prepareStart = source.indexOf(
+      "prepareSettingsSessionRef.current = () => {",
+    )
+    expect(prepareStart).toBeGreaterThan(-1)
+    const prepare = source.slice(
+      prepareStart,
+      source.indexOf("const leaveSettingsRoute", prepareStart),
+    )
+    expect(prepare).toContain("void models.refetch()")
+    expect(prepare).toContain("void agentBackends.refetch()")
     const openSettings = source.slice(
       source.indexOf("const openSettings = () => {"),
       source.indexOf("const harnessDefaultBackendId"),
     )
-    expect(openSettings).toContain("void models.refetch()")
-    expect(openSettings).toContain("void agentBackends.refetch()")
+    expect(openSettings).toContain("prepareSettingsSessionRef.current()")
   })
 })

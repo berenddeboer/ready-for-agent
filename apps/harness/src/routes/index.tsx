@@ -5,11 +5,18 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  useBlocker,
+  useNavigate,
+  useRouter,
+  useRouterState,
+} from "@tanstack/react-router"
 import {
   type CSSProperties,
   type FormEvent,
   Suspense,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -78,6 +85,13 @@ import {
   followRepositoryWorkItemsLive,
 } from "../refresh-work-items-live.js"
 import { type Repository, repositoriesQuery } from "../repositories-query.js"
+import {
+  isRepositorySettingsPathFor,
+  markRepositorySettingsOpenedFromInApp,
+  parseRepositorySettingsRepositoryId,
+  readRepositorySettingsHistoryState,
+  wasRepositorySettingsOpenedFromInAppThisDocument,
+} from "../routed-dialog.js"
 import { SessionUsageDialog } from "../session-usage-dialog.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { cx, ui } from "../ui.js"
@@ -584,6 +598,7 @@ function EmptyRepositoriesBlankSlate() {
 
 export function RepositoryCards() {
   const queryClient = useQueryClient()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const { data: addRepositoryCommand } = useSuspenseQuery(
     addRepositoryCommandQuery,
@@ -595,6 +610,11 @@ export function RepositoryCards() {
   >({})
   const repositoryIdsRef = useRef(repositories.map(({ id }) => id))
   repositoryIdsRef.current = repositories.map(({ id }) => id)
+  // Stale `/repos/<id>/settings` links: in-dialog not-found over Repos (issue #842).
+  const routedRepositoryId = parseRepositorySettingsRepositoryId(pathname)
+  const repositoryMissing =
+    routedRepositoryId !== undefined &&
+    !repositories.some((repository) => repository.id === routedRepositoryId)
 
   // Repository membership SSE: transport health drives the live-updates
   // warning; authoritative catch-up and dedicated open-PR counts run
@@ -672,6 +692,9 @@ export function RepositoryCards() {
       <>
         {warning}
         <EmptyRepositoriesBlankSlate />
+        {repositoryMissing && routedRepositoryId !== undefined && (
+          <RepositorySettingsNotFoundDialog repositoryId={routedRepositoryId} />
+        )}
       </>
     )
   }
@@ -691,7 +714,94 @@ export function RepositoryCards() {
       <div className="mt-10 sm:mt-12">
         <AddRepositoryGuidance command={addRepositoryCommand} />
       </div>
+      {repositoryMissing && routedRepositoryId !== undefined && (
+        <RepositorySettingsNotFoundDialog repositoryId={routedRepositoryId} />
+      )}
     </>
+  )
+}
+
+/**
+ * Accessible in-dialog “Repository not found” for stale settings links
+ * (issue #842). Renders over the Repos background; Close replaces to `/repos`.
+ */
+function RepositorySettingsNotFoundDialog({
+  repositoryId,
+}: {
+  repositoryId: string
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const navigate = useNavigate()
+  const dismissingRouteRef = useRef(false)
+
+  const leaveToRepos = () => {
+    dismissingRouteRef.current = true
+    dialogRef.current?.close()
+    void navigate({
+      to: "/repos",
+      search: (prev) => prev,
+      replace: true,
+    })
+  }
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (dialog === null) {
+      return
+    }
+    if (!dialog.open) {
+      dialog.showModal()
+    }
+  }, [])
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className={ui.dialogPanel}
+      aria-labelledby="repo-settings-not-found-title"
+      onClose={() => {
+        if (dismissingRouteRef.current) {
+          dismissingRouteRef.current = false
+          return
+        }
+        void navigate({
+          to: "/repos",
+          search: (prev) => prev,
+          replace: true,
+        })
+      }}
+    >
+      <div className={ui.dialogHeader}>
+        <p className={ui.dialogKicker}>Repository settings</p>
+        <h2 id="repo-settings-not-found-title" className={ui.dialogTitle}>
+          Repository not found
+        </h2>
+        <p className={ui.dialogLede}>
+          No configured Repository matches this link. It may have been removed,
+          or the address is out of date.
+        </p>
+      </div>
+      <div className={ui.dialogBodySectioned}>
+        <Banner
+          className={ui.bannerCompact}
+          tone="alarm"
+          tag="Missing"
+          role="alert"
+        >
+          Repository <code>{repositoryId}</code> is not configured on this
+          Harness.
+        </Banner>
+      </div>
+      <div className={ui.dialogFooter}>
+        <button
+          type="button"
+          className={ui.platePrimary}
+          onClick={leaveToRepos}
+        >
+          Close
+        </button>
+      </div>
+    </dialog>
   )
 }
 
@@ -1006,18 +1116,43 @@ function RepositoryCard({
   repository: Repository
 }) {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const router = useRouter()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const repositorySettingsHistoryState = useRouterState({
+    select: (s) => readRepositorySettingsHistoryState(s.location.state),
+  })
+  // Routed `/repos/<id>/settings` open (issue #842). Dialog is route-owned.
+  const settingsOpen = isRepositorySettingsPathFor(pathname, repository.id)
+  // Optimistic open until the route commits (mirrors harness local || routed).
+  const [optimisticSettingsOpen, setOptimisticSettingsOpen] = useState(false)
+  const dialogOpen = settingsOpen || optimisticSettingsOpen
+  const dismissingRouteRef = useRef(false)
+  // Explicit in-app open markers live at module scope so remounting Repos when
+  // pushing `/repos/<id>/settings` still treats Cancel/Save as history.back().
+  // Full reload clears the module set so close uses replace → `/repos`.
+  const settingsOpenNavigatePendingRef = useRef(false)
+  // Invalidate in-flight open navigates when the operator dismisses early.
+  const settingsOpenIntentGenerationRef = useRef(0)
+  // Leave as soon as the settings route commits after an early dismiss or a
+  // successful Save that finished before navigate landed (issue #842 review).
+  const leaveWhenSettingsRouteCommitsRef = useRef(false)
+  const dismissSettingsRef = useRef<
+    (options?: { ignoreBlocker?: boolean }) => void
+  >(() => {})
   const [githubTokenCreated, setGithubTokenCreated] = useState(false)
   const [gitlabTokenCreated, setGitlabTokenCreated] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [awaitingRefresh, setAwaitingRefresh] = useState(false)
   const issuesChangeCountOnRefresh = useRef(issuesChangeCount)
   const settingsDialogRef = useRef<HTMLDialogElement>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const config = useQuery({ ...configQuery, enabled: settingsOpen })
-  const models = useQuery({ ...modelsQuery, enabled: settingsOpen })
+  // Catalog queries enable for routed open and the optimistic open window so
+  // the first paint after menu click is not a cold catalog (issue #842 review).
+  const config = useQuery({ ...configQuery, enabled: dialogOpen })
+  const models = useQuery({ ...modelsQuery, enabled: dialogOpen })
   const agentBackends = useQuery({
     ...agentBackendsQuery,
-    enabled: settingsOpen,
+    enabled: dialogOpen,
   })
   const [forge, setForge] = useState<"github" | "gitlab">(
     repository.forge === "gitlab" ? "gitlab" : "github",
@@ -1133,9 +1268,23 @@ function RepositoryCard({
       void queryClient.invalidateQueries({
         queryKey: repositoriesQuery.queryKey,
       })
-      settingsDialogRef.current?.close()
-      setSettingsOpen(false)
+      // Successful Save leaves the route (issue #842).
+      dismissSettingsRef.current({ ignoreBlocker: true })
     },
+  })
+
+  // Block Back (and other route leaves) while Save is in flight so navigation
+  // cannot race an in-progress Repository settings update (issue #842).
+  const updateSettingsPendingRef = useRef(false)
+  updateSettingsPendingRef.current = updateSettings.isPending
+  const shouldBlockRepositorySettingsLeave = useCallback(
+    () => updateSettingsPendingRef.current,
+    [],
+  )
+  useBlocker({
+    shouldBlockFn: shouldBlockRepositorySettingsLeave,
+    enableBeforeUnload: updateSettings.isPending,
+    disabled: !updateSettings.isPending || !settingsOpen,
   })
 
   const applyRepoModelPrefs = (prefs: DraftModelPrefs) => {
@@ -1218,8 +1367,12 @@ function RepositoryCard({
     }
   }
 
-  const openSettings = () => {
-    setSettingsOpen(true)
+  /**
+   * Reset form session state and refresh indefinitely-cached catalogs on open
+   * (issue #838). Shared by explicit open and routed enter (direct / Forward).
+   */
+  const prepareSettingsSessionRef = useRef(() => {})
+  prepareSettingsSessionRef.current = () => {
     previewGenerationRef.current += 1
     setPaused(repository.paused)
     setForge(repository.forge === "gitlab" ? "gitlab" : "github")
@@ -1262,8 +1415,154 @@ function RepositoryCard({
     void config.refetch()
     void models.refetch()
     void agentBackends.refetch()
-    settingsDialogRef.current?.showModal()
   }
+
+  /**
+   * Leave the `/repos/<id>/settings` route: Back to the in-app origin when
+   * this SPA session opened settings explicitly, else replace with `/repos`
+   * so Forward cannot reopen a direct-link or post-refresh entry.
+   * Stored on a ref so the route-sync effect can call the latest leave without
+   * re-running on every render (unstable function identity).
+   */
+  const leaveSettingsRouteRef = useRef<
+    (options?: { ignoreBlocker?: boolean }) => void
+  >(() => {})
+  leaveSettingsRouteRef.current = (options?: { ignoreBlocker?: boolean }) => {
+    const ignoreBlocker = options?.ignoreBlocker === true
+    const openedFromInApp =
+      wasRepositorySettingsOpenedFromInAppThisDocument(repository.id) &&
+      repositorySettingsHistoryState?.kind === "in-app-origin"
+    if (openedFromInApp && router.history.canGoBack()) {
+      router.history.back({ ignoreBlocker })
+      return
+    }
+    void navigate({
+      to: "/repos",
+      search: (prev) => prev,
+      replace: true,
+      ignoreBlocker,
+    })
+  }
+  const leaveSettingsRoute = (options?: { ignoreBlocker?: boolean }) => {
+    leaveSettingsRouteRef.current(options)
+  }
+
+  const dismissSettings = (options?: { ignoreBlocker?: boolean }) => {
+    if (updateSettings.isPending && options?.ignoreBlocker !== true) {
+      return
+    }
+    // Early leave while open navigate is still in flight (Cancel/Escape, or
+    // successful Save before the route commits). Invalidate the open intent
+    // and leave when `/repos/<id>/settings` lands so the dialog cannot reopen.
+    if (
+      !settingsOpen &&
+      (settingsOpenNavigatePendingRef.current || optimisticSettingsOpen)
+    ) {
+      settingsOpenNavigatePendingRef.current = false
+      settingsOpenIntentGenerationRef.current += 1
+      leaveWhenSettingsRouteCommitsRef.current = true
+      setOptimisticSettingsOpen(false)
+      const dialog = settingsDialogRef.current
+      // Only pair dismissingRouteRef with an actual close so onClose clears it;
+      // otherwise Escape on a later open would skip leaveSettingsRoute.
+      if (dialog?.open) {
+        dismissingRouteRef.current = true
+        dialog.close()
+      }
+      return
+    }
+    if (!settingsOpen) {
+      settingsDialogRef.current?.close()
+      return
+    }
+    leaveWhenSettingsRouteCommitsRef.current = false
+    setOptimisticSettingsOpen(false)
+    // Escape already closed the native dialog before onClose → dismissSettings.
+    // Only set dismissingRouteRef when we actually close so the flag cannot stick
+    // and break Escape on a subsequent open (issue #842 review).
+    const dialog = settingsDialogRef.current
+    if (dialog?.open) {
+      dismissingRouteRef.current = true
+      dialog.close()
+    }
+    leaveSettingsRoute(options)
+  }
+  dismissSettingsRef.current = dismissSettings
+
+  /** Explicit Repository settings openers (card menu). */
+  const openSettings = () => {
+    leaveWhenSettingsRouteCommitsRef.current = false
+    prepareSettingsSessionRef.current()
+    if (settingsOpen || settingsOpenNavigatePendingRef.current) {
+      if (
+        settingsDialogRef.current !== null &&
+        !settingsDialogRef.current.open
+      ) {
+        settingsDialogRef.current.showModal()
+      }
+      return
+    }
+    markRepositorySettingsOpenedFromInApp(repository.id)
+    const openGeneration = ++settingsOpenIntentGenerationRef.current
+    settingsOpenNavigatePendingRef.current = true
+    setOptimisticSettingsOpen(true)
+    // Open immediately so focus trap matches pre-route UX; the route effect
+    // remains the source of truth for direct/forward entry and Back close.
+    if (settingsDialogRef.current !== null && !settingsDialogRef.current.open) {
+      settingsDialogRef.current.showModal()
+    }
+    void navigate({
+      to: "/repos/$repositoryId/settings",
+      params: { repositoryId: repository.id },
+      search: (prev) => prev,
+      state: (prev) => {
+        const next = { ...prev }
+        Object.assign(next, {
+          repositorySettings: { kind: "in-app-origin" as const },
+        })
+        return next
+      },
+    }).finally(() => {
+      if (settingsOpenIntentGenerationRef.current === openGeneration) {
+        settingsOpenNavigatePendingRef.current = false
+      }
+    })
+  }
+
+  // Sync native <dialog> with the routed open flag (issue #842).
+  useEffect(() => {
+    const dialog = settingsDialogRef.current
+    if (dialog === null) {
+      return
+    }
+    if (settingsOpen) {
+      // Early dismiss or Save completed before navigate settled: leave without reopen.
+      if (leaveWhenSettingsRouteCommitsRef.current) {
+        leaveWhenSettingsRouteCommitsRef.current = false
+        setOptimisticSettingsOpen(false)
+        // Only set dismissingRouteRef when closing so it cannot stick true.
+        if (dialog.open) {
+          dismissingRouteRef.current = true
+          dialog.close()
+        }
+        leaveSettingsRouteRef.current({ ignoreBlocker: true })
+        return
+      }
+      setOptimisticSettingsOpen(false)
+      if (!dialog.open) {
+        // Entering via route (direct, Forward, or explicit navigate) needs a
+        // fresh session so abandoned drafts are not restored.
+        prepareSettingsSessionRef.current()
+        dialog.showModal()
+      }
+      return
+    }
+    setOptimisticSettingsOpen(false)
+    if (dialog.open) {
+      dismissingRouteRef.current = true
+      dialog.close()
+    }
+  }, [settingsOpen])
 
   const harnessDefaultBackendId =
     config.data?.selectedAgentBackend ?? "opencode"
@@ -1285,7 +1584,7 @@ function RepositoryCard({
   const harnessDefaultBackendFromConfig =
     config.data?.selectedAgentBackend ?? null
   useEffect(() => {
-    if (!settingsOpen || harnessDefaultBackendFromConfig === null) {
+    if (!dialogOpen || harnessDefaultBackendFromConfig === null) {
       return
     }
     const harnessDefault = harnessDefaultBackendFromConfig
@@ -1372,7 +1671,7 @@ function RepositoryCard({
         }
       }
     })()
-  }, [settingsOpen, harnessDefaultBackendFromConfig, selectedAgentBackend])
+  }, [dialogOpen, harnessDefaultBackendFromConfig, selectedAgentBackend])
 
   const inheritHarnessBuildModel = (): string => {
     if (harnessPrefsForDraft !== null) {
@@ -1505,7 +1804,7 @@ function RepositoryCard({
   // invalidate (issue #838). Treat a refresh as "no catalog yet" so no stale
   // model is offered and Save stays blocked until the current one arrives.
   const modelsLoading =
-    settingsOpen &&
+    dialogOpen &&
     (usesPreviewCatalog
       ? previewPending || config.isFetching
       : models.isFetching || config.isFetching || agentBackends.isFetching)
@@ -1953,7 +2252,15 @@ function RepositoryCard({
         onCancel={(event) => {
           if (updateSettings.isPending) event.preventDefault()
         }}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          // Escape (or other user dismiss) closes the native dialog first; keep
+          // URL + dialog synchronized, including during pending open navigate.
+          if (dismissingRouteRef.current) {
+            dismissingRouteRef.current = false
+            return
+          }
+          dismissSettings()
+        }}
       >
         <form onSubmit={saveSettings}>
           <div className={ui.dialogHeader}>
@@ -2424,10 +2731,7 @@ function RepositoryCard({
             <button
               type="button"
               className={ui.plateMini}
-              onClick={() => {
-                settingsDialogRef.current?.close()
-                setSettingsOpen(false)
-              }}
+              onClick={() => dismissSettings()}
               disabled={updateSettings.isPending}
             >
               Cancel

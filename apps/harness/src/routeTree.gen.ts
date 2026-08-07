@@ -15,6 +15,7 @@ import { Route as GraphqlRouteImport } from './routes/graphql'
 import { Route as KanbanRouteImport } from './routes/kanban'
 import { Route as ReposRouteImport } from './routes/repos'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ReposRepositoryIdSettingsRouteImport } from './routes/repos.$repositoryId.settings'
 import { Route as SessionWorkItemIdTelemetryRouteImport } from './routes/session.$workItemId.telemetry'
 
 const IndexRoute = IndexRouteImport.update({
@@ -47,6 +48,12 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReposRepositoryIdSettingsRoute =
+  ReposRepositoryIdSettingsRouteImport.update({
+    id: '/$repositoryId/settings',
+    path: '/$repositoryId/settings',
+    getParentRoute: () => ReposRoute,
+  } as any)
 const SessionWorkItemIdTelemetryRoute =
   SessionWorkItemIdTelemetryRouteImport.update({
     id: '/session/$workItemId/telemetry',
@@ -59,8 +66,9 @@ export interface FileRoutesByFullPath {
   '/completed': typeof CompletedRoute
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
-  '/repos': typeof ReposRoute
+  '/repos': typeof ReposRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/repos/$repositoryId/settings': typeof ReposRepositoryIdSettingsRoute
   '/session/$workItemId/telemetry': typeof SessionWorkItemIdTelemetryRoute
 }
 export interface FileRoutesByTo {
@@ -68,8 +76,9 @@ export interface FileRoutesByTo {
   '/completed': typeof CompletedRoute
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
-  '/repos': typeof ReposRoute
+  '/repos': typeof ReposRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/repos/$repositoryId/settings': typeof ReposRepositoryIdSettingsRoute
   '/session/$workItemId/telemetry': typeof SessionWorkItemIdTelemetryRoute
 }
 export interface FileRoutesById {
@@ -78,8 +87,9 @@ export interface FileRoutesById {
   '/completed': typeof CompletedRoute
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
-  '/repos': typeof ReposRoute
+  '/repos': typeof ReposRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/repos/$repositoryId/settings': typeof ReposRepositoryIdSettingsRoute
   '/session/$workItemId/telemetry': typeof SessionWorkItemIdTelemetryRoute
 }
 export interface FileRouteTypes {
@@ -91,6 +101,7 @@ export interface FileRouteTypes {
     | '/kanban'
     | '/repos'
     | '/settings'
+    | '/repos/$repositoryId/settings'
     | '/session/$workItemId/telemetry'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -100,6 +111,7 @@ export interface FileRouteTypes {
     | '/kanban'
     | '/repos'
     | '/settings'
+    | '/repos/$repositoryId/settings'
     | '/session/$workItemId/telemetry'
   id:
     | '__root__'
@@ -109,6 +121,7 @@ export interface FileRouteTypes {
     | '/kanban'
     | '/repos'
     | '/settings'
+    | '/repos/$repositoryId/settings'
     | '/session/$workItemId/telemetry'
   fileRoutesById: FileRoutesById
 }
@@ -117,7 +130,7 @@ export interface RootRouteChildren {
   CompletedRoute: typeof CompletedRoute
   GraphqlRoute: typeof GraphqlRoute
   KanbanRoute: typeof KanbanRoute
-  ReposRoute: typeof ReposRoute
+  ReposRoute: typeof ReposRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   SessionWorkItemIdTelemetryRoute: typeof SessionWorkItemIdTelemetryRoute
 }
@@ -166,6 +179,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/repos/$repositoryId/settings': {
+      id: '/repos/$repositoryId/settings'
+      path: '/$repositoryId/settings'
+      fullPath: '/repos/$repositoryId/settings'
+      preLoaderRoute: typeof ReposRepositoryIdSettingsRouteImport
+      parentRoute: typeof ReposRoute
+    }
     '/session/$workItemId/telemetry': {
       id: '/session/$workItemId/telemetry'
       path: '/session/$workItemId/telemetry'
@@ -176,12 +196,22 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ReposRouteChildren {
+  ReposRepositoryIdSettingsRoute: typeof ReposRepositoryIdSettingsRoute
+}
+
+const ReposRouteChildren: ReposRouteChildren = {
+  ReposRepositoryIdSettingsRoute: ReposRepositoryIdSettingsRoute,
+}
+
+const ReposRouteWithChildren = ReposRoute._addFileChildren(ReposRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CompletedRoute: CompletedRoute,
   GraphqlRoute: GraphqlRoute,
   KanbanRoute: KanbanRoute,
-  ReposRoute: ReposRoute,
+  ReposRoute: ReposRouteWithChildren,
   SettingsRoute: SettingsRoute,
   SessionWorkItemIdTelemetryRoute: SessionWorkItemIdTelemetryRoute,
 }
