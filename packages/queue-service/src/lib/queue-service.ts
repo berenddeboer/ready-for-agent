@@ -1,4 +1,4 @@
-import type { Duration } from "effect"
+import type { DateTime, Duration } from "effect"
 import { Context, Effect, Option, Schema } from "effect"
 import type {
   AcknowledgeError,
@@ -192,6 +192,16 @@ export interface QueueServiceShape {
   readonly postponeKeyed: (
     jobId: string,
     delay: Duration.Duration,
+  ) => Effect.Effect<void, AcknowledgeError | JobNotFoundError>
+
+  /**
+   * Postpone a claimed entry in place until an exact deadline: preserve its
+   * identity, release its claim, and reset delivery attempts. Unlike
+   * `postponeKeyed`, this also supports one-shot unkeyed jobs.
+   */
+  readonly postpone: (
+    jobId: string,
+    availableAt: DateTime.Utc,
   ) => Effect.Effect<void, AcknowledgeError | JobNotFoundError>
 
   /**
