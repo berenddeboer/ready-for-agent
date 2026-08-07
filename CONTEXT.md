@@ -64,6 +64,10 @@ _Avoid_: GitHub request, GitHub task
 The process-local Harness module that admits exactly one Harness GitHub Operation at a time for one application runtime. Callers choose only Operator, Lifecycle, Polling, or Background origin; normal admission is in that order with FIFO within an origin, and the globally oldest request is admitted after 60 seconds. The permit remains held through the entire active operation and is never preempted. This is not a host-wide queue or a proactive rate limiter: Agent Turns, other Harness runtimes, operator shells, Git transport, and GitHub Actions remain best-effort exclusions.
 _Avoid_: Global GitHub queue, rate limiter
 
+**GitHub Throttled**:
+A process-local flow-control condition established only by explicit GitHub throttle evidence. It closes GitHub Operation Coordinator admission until `retryAt`, immediately returns that deadline to pending and new Harness GitHub Operations, and clears when the deadline elapses. It reacts to GitHub’s stated limit; it does not reserve quota or perform proactive quota budgeting.
+_Avoid_: Rate limited, quota budget
+
 **Issue**:
 An issue on the Repository's Forge, identified within that Repository by a positive integer issue number (the iid in GitLab) and represented locally with its title, body, web URL, creation time, Forge state, and optional Issue Author. The harness may retain a local representation for later use, but the Forge remains authoritative. GitLab issues and merge requests come from separate per-project number sequences, so a bare GitLab number is ambiguous across the two kinds — unlike GitHub's single shared sequence.
 _Avoid_: Ticket, task (unless referring to a broader concept)

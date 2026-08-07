@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { Effect, ManagedRuntime } from "effect"
+import { GitHubThrottledError } from "@ready-for-agent/github-service"
 import {
   GitHubOperationCoordinator,
   GitHubOperationCoordinatorLive,
@@ -290,6 +291,77 @@ it("keeps an active operation running after its caller cancels", async () => {
   await waitFor(() => started.length === 2)
   release.get("next")?.()
   await Promise.all([active, next])
+})
+
+it("releases waiting work and closes new admission until the throttle deadline", async () => {
+  let time = 0
+  const coordinator = makeGitHubOperationCoordinator({ now: () => time })
+  const started: string[] = []
+  const release = new Map<string, () => void>()
+  const active = enqueue({
+    coordinator,
+    origin: "lifecycle",
+    name: "active",
+    started,
+    release,
+  })
+  await waitFor(() => started.length === 1)
+
+  const waiting = enqueue({
+    coordinator,
+    origin: "operator",
+    name: "waiting",
+    started,
+    release,
+  }).catch((error: unknown) => error)
+  const throttle = coordinator.reportThrottle(
+    new GitHubThrottledError({ retryAt: 60_000, usedFallback: false }),
+  )
+  const waitingError = await waiting
+  expect(waitingError).toBeInstanceOf(GitHubThrottledError)
+  expect(started).toEqual(["active"])
+  expect(coordinator.throttleStatus()).toEqual({ retryAt: throttle.retryAt })
+
+  const blocked = enqueue({
+    coordinator,
+    origin: "operator",
+    name: "blocked",
+    started,
+    release,
+  }).catch((error: unknown) => error)
+  expect(await blocked).toBeInstanceOf(GitHubThrottledError)
+  expect(started).toEqual(["active"])
+
+  release.get("active")?.()
+  await active
+  time = 60_000
+  expect(coordinator.throttleStatus()).toBeNull()
+  const resumed = enqueue({
+    coordinator,
+    origin: "operator",
+    name: "resumed",
+    started,
+    release,
+  })
+  await waitFor(() => started.length === 2)
+  release.get("resumed")?.()
+  await resumed
+})
+
+it("doubles only repeated deadline-less secondary throttles", () => {
+  let time = 0
+  const coordinator = makeGitHubOperationCoordinator({ now: () => time })
+  const first = coordinator.reportThrottle(
+    new GitHubThrottledError({ retryAt: 60_000, usedFallback: true }),
+  )
+  expect(first.retryAt).toBe(60_000)
+
+  time = 60_000
+  expect(coordinator.throttleStatus()).toBeNull()
+  const second = coordinator.reportThrottle(
+    new GitHubThrottledError({ retryAt: 120_000, usedFallback: true }),
+  )
+  expect(second.retryAt).toBe(180_000)
 })
 
 it("isolates and disposes coordinator state per managed runtime", async () => {

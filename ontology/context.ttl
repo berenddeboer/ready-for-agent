@@ -416,6 +416,28 @@ rfa:GitHubOperationCoordinator
   rfa:avoidanceRationale "it serializes operations without proactive quota budgeting or ordinary pacing"@en ;
 ] .
 
+rfa:GitHubThrottled
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "GitHub Throttled"@en ;
+  skos:definition "A process-local flow-control condition established only by explicit GitHub throttle evidence. It closes GitHub Operation Coordinator admission until `retryAt`, immediately returns that deadline to pending and new Harness GitHub Operations, and clears when the deadline elapses. It reacts to GitHub’s stated limit; it does not reserve quota or perform proactive quota budgeting."@en ;
+  skos:hiddenLabel "Rate limited"@en, "quota budget"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:GitHubThrottled ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Rate limited"@en ;
+  rfa:avoidanceRationale "GitHub Throttled names the coordinator condition, not a generic request outcome."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:GitHubThrottled ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "quota budget"@en ;
+  rfa:avoidanceRationale "the coordinator reacts to explicit evidence and does not proactively allocate quota."@en ;
+] .
+
 rfa:Issue
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Issue"@en ;

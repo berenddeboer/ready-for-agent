@@ -52,7 +52,10 @@ import {
   environmentConfigLayer,
   loadApplicationConfig,
 } from "./application-config.js"
-import { GitHubOperationCoordinatorLive } from "./github-operation-coordinator.js"
+import {
+  GitHubOperationCoordinator,
+  GitHubOperationCoordinatorLive,
+} from "./github-operation-coordinator.js"
 import { JobWorkerLive } from "./job-worker.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
 import { keymaxxerGitLabLayer } from "./keymaxxer-gitlab-layer.js"
@@ -258,7 +261,7 @@ export const createApplication = async (
         )
   const appLayer = applicationServices.pipe(
     Layer.provide(configLayer),
-    Layer.provide(githubOperationCoordinatorLayer),
+    Layer.provideMerge(githubOperationCoordinatorLayer),
   )
   const runtime = ManagedRuntime.make(appLayer)
 
@@ -286,7 +289,15 @@ export const createApplication = async (
 
   return {
     context: {
-      graphqlApi: createGraphqlApi(runtime, { agentBackendCwd: toolCwd }),
+      graphqlApi: createGraphqlApi(runtime, {
+        agentBackendCwd: toolCwd,
+        githubThrottleStatus: () =>
+          runtime.runPromise(
+            Effect.map(GitHubOperationCoordinator, (coordinator) =>
+              coordinator.throttleStatus(),
+            ),
+          ),
+      }),
     },
     dispose: runtime.dispose,
   }

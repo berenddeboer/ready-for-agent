@@ -8,6 +8,7 @@ export {
   makeGitHubServiceFromToken,
 } from "./lib/github-service-live.js"
 export * from "./lib/github-service-test.js"
+export * from "./lib/github-throttle.js"
 export * from "./lib/open-non-draft-pull-request-count.js"
 export * from "./lib/types.js"
 export * from "./lib/user-facing-error.js"

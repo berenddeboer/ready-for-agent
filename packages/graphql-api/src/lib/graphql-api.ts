@@ -359,8 +359,8 @@ const toNativeResponse = (response: unknown): Response => {
  */
 export const DEFAULT_KEYMAXXER_METADATA_TIMEOUT = Duration.seconds(60)
 
-export const createGraphqlApi = (
-  runtime: GraphqlRuntime,
+export const createGraphqlApi = <R>(
+  runtime: ManagedRuntime.ManagedRuntime<GraphqlServices | R, unknown>,
   options: {
     readonly agentBackendCwd?: string
     /** @deprecated Use agentBackendCwd */
@@ -377,6 +377,10 @@ export const createGraphqlApi = (
      * does not depend on the host shell.
      */
     readonly environment?: Readonly<Record<string, string | undefined>>
+    /** Runtime-only coordinator state supplied by the Harness application. */
+    readonly githubThrottleStatus?: () => Promise<{
+      readonly retryAt: number
+    } | null>
   } = {},
 ) => {
   const agentBackendCwd =
@@ -436,6 +440,12 @@ export const createGraphqlApi = (
                 return yield* db.listRepositories
               }).pipe(Effect.withSpan("graphql-api.repositories")),
             ),
+          githubThrottleStatus: async () => {
+            const status = await options.githubThrottleStatus?.()
+            return status === null || status === undefined
+              ? null
+              : { retryAt: new Date(status.retryAt).toISOString() }
+          },
           repositoryCredentials: async () =>
             runGraphql(
               Effect.gen(function* () {

@@ -480,6 +480,26 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("exposes and clears the runtime-only GitHub throttle status", async () => {
+    let throttled = true
+    const api = createGraphqlApi(runtime, {
+      githubThrottleStatus: async () =>
+        throttled ? { retryAt: 1_780_000_000_000 } : null,
+    })
+    const request = () =>
+      graphqlRequest({
+        query: "{ githubThrottleStatus { retryAt } }",
+      })
+
+    expect(await (await api.fetch(request())).json()).toEqual({
+      data: { githubThrottleStatus: { retryAt: "2026-05-28T20:26:40.000Z" } },
+    })
+    throttled = false
+    expect(await (await api.fetch(request())).json()).toEqual({
+      data: { githubThrottleStatus: null },
+    })
+  })
+
   test("verifies a GitLab project before adding the repository", async () => {
     const actions: string[] = []
     await runtime.dispose()

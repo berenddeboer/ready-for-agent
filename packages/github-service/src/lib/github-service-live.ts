@@ -33,8 +33,14 @@ import {
 import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
+  type GitHubThrottledError,
+  isGitHubThrottledError,
 } from "./errors.js"
 import { GitHubService, type GitHubServiceShape } from "./github-service.js"
+import {
+  githubThrottleFromResponse,
+  githubThrottleFromSuccessfulResponse,
+} from "./github-throttle.js"
 import type {
   GitHubIssueReference,
   GitHubIssueState,
@@ -67,12 +73,18 @@ const REQUEST_TIMEOUT = "30 seconds"
 const DEFAULT_MAX_EXCERPT_CHARS = 12_000
 
 class GitHubHttpError extends Error {
-  constructor(
-    readonly statusCode: number,
-    message: string,
-  ) {
-    super(message)
+  constructor(input: {
+    readonly statusCode: number
+    readonly headers: Headers
+    readonly message: string
+  }) {
+    super(input.message)
+    this.statusCode = input.statusCode
+    this.headers = input.headers
   }
+
+  readonly statusCode: number
+  readonly headers: Headers
 }
 
 export interface GitHubGraphqlClient {
@@ -91,25 +103,46 @@ type GitHubFetch = (
   init?: RequestInit,
 ) => Promise<Response>
 
+/** Observes explicit, non-secret quota evidence from successful responses. */
+export type GitHubThrottleObserver = (throttle: GitHubThrottledError) => void
+
 const githubRequest = <A>(
   message: string,
   request: (signal: AbortSignal) => Promise<A>,
-): Effect.Effect<A, GitHubRequestError> =>
+): Effect.Effect<A, GitHubRequestError | GitHubThrottledError> =>
   Effect.tryPromise({
     try: request,
-    catch: (cause) =>
-      new GitHubRequestError({
+    catch: (cause) => {
+      if (isGitHubThrottledError(cause)) return cause
+      const throttle = githubThrottleFromResponse({
+        statusCode: cause instanceof GitHubHttpError ? cause.statusCode : 0,
+        headers:
+          cause instanceof GitHubHttpError ? cause.headers : new Headers(),
+        message: cause instanceof Error ? cause.message : "",
+      })
+      if (throttle !== undefined) return throttle
+      return new GitHubRequestError({
         message,
         cause,
         ...(cause instanceof GitHubHttpError
-          ? { statusCode: cause.statusCode }
-          : {}),
-      }),
+          ? {
+              statusCode: cause.statusCode,
+              retryable: cause.statusCode >= 500,
+            }
+          : cause instanceof GenqlError
+            ? { retryable: false }
+            : { retryable: true }),
+      })
+    },
   }).pipe(
     Effect.timeout(REQUEST_TIMEOUT),
     Effect.catchTag("TimeoutError", (cause) =>
       Effect.fail(
-        new GitHubRequestError({ message: `${message} timed out`, cause }),
+        new GitHubRequestError({
+          message: `${message} timed out`,
+          cause,
+          retryable: true,
+        }),
       ),
     ),
   )
@@ -117,13 +150,14 @@ const githubRequest = <A>(
 const githubQuery = <A>(
   message: string,
   request: (signal: AbortSignal) => Promise<A>,
-): Effect.Effect<A, GitHubRequestError> =>
+): Effect.Effect<A, GitHubRequestError | GitHubThrottledError> =>
   githubRequest(message, request).pipe(
     Effect.retry({
       schedule: Schedule.addDelay(Schedule.recurs(2), () =>
         Effect.succeed(Duration.millis(500)),
       ),
-      while: (error) => error.statusCode !== 401,
+      while: (error) =>
+        error._tag === "GitHubRequestError" && error.retryable === true,
     }),
   )
 
@@ -232,7 +266,10 @@ export type LoadPrStatusCheckDiagnostics = (
   checks: readonly PrStatusCheckDiagnosticsRequest[],
   options: PrStatusCheckDiagnosticsOptions,
   signal?: AbortSignal,
-) => Effect.Effect<readonly PrStatusCheckDiagnostic[], GitHubRequestError>
+) => Effect.Effect<
+  readonly PrStatusCheckDiagnostic[],
+  GitHubRequestError | GitHubThrottledError
+>
 
 /** Rerun an entire GitHub Actions workflow run. */
 export type RerunWorkflowRun = (
@@ -247,7 +284,10 @@ export type ObserveAutomatedReviewEvidence = (
   headRefName: string,
   checks: readonly AutomatedReviewEvidenceCheck[],
   signal?: AbortSignal,
-) => Effect.Effect<AutomatedReviewEvidenceObservation, GitHubRequestError>
+) => Effect.Effect<
+  AutomatedReviewEvidenceObservation,
+  GitHubRequestError | GitHubThrottledError
+>
 
 const emptyTerminalChecks: readonly TerminalPrStatusCheck[] = []
 
@@ -859,7 +899,9 @@ const findOpenPullRequestDetailsImpl = (
   headRefName: string,
 ): Effect.Effect<
   OpenPullRequestDetails | null,
-  GitHubApiRepositoryUnavailableError | GitHubRequestError
+  | GitHubApiRepositoryUnavailableError
+  | GitHubRequestError
+  | GitHubThrottledError
 > =>
   Effect.gen(function* () {
     const result = yield* githubQuery(
@@ -920,7 +962,9 @@ const findOpenPullRequestNumberImpl = (
   headRefName: string,
 ): Effect.Effect<
   number | null,
-  GitHubApiRepositoryUnavailableError | GitHubRequestError
+  | GitHubApiRepositoryUnavailableError
+  | GitHubRequestError
+  | GitHubThrottledError
 > =>
   Effect.gen(function* () {
     // Number-only query: do not require GraphQL id (update paths use details).
@@ -2480,10 +2524,11 @@ const readGitHubJson = async <A>(
   message: string,
 ): Promise<A> => {
   if (!response.ok) {
-    throw new GitHubHttpError(
-      response.status,
-      `${message}: ${response.statusText}: ${await response.text()}`,
-    )
+    throw new GitHubHttpError({
+      statusCode: response.status,
+      headers: response.headers,
+      message: `${message}: ${response.statusText}: ${await response.text()}`,
+    })
   }
   return (await response.json()) as A
 }
@@ -2621,10 +2666,11 @@ const makeRerunWorkflowRun =
       },
     )
     if (!response.ok) {
-      throw new GitHubHttpError(
-        response.status,
-        `Failed to rerun workflow run ${workflowRunId} for ${repository.owner}/${repository.name}: ${response.statusText}: ${await response.text()}`,
-      )
+      throw new GitHubHttpError({
+        statusCode: response.status,
+        headers: response.headers,
+        message: `Failed to rerun workflow run ${workflowRunId} for ${repository.owner}/${repository.name}: ${response.statusText}: ${await response.text()}`,
+      })
     }
   }
 
@@ -2849,6 +2895,9 @@ const makeObserveAutomatedReviewEvidence =
             ),
         ).pipe(Effect.result)
         if (Result.isFailure(jobResult)) {
+          if (isGitHubThrottledError(jobResult.failure)) {
+            return yield* jobResult.failure
+          }
           return {
             _tag: "ambiguous" as const,
             reason: `Could not load Actions job steps for recognized reviewer ${check.name}: ${jobResult.failure.message}`,
@@ -2935,6 +2984,12 @@ const makeListTerminalChecksForCommit =
     } catch (cause) {
       // Fine-grained PATs cannot use the Checks API; Actions jobs still work.
       if (cause instanceof GitHubHttpError && cause.statusCode === 403) {
+        const throttle = githubThrottleFromResponse({
+          statusCode: cause.statusCode,
+          headers: cause.headers,
+          message: cause.message,
+        })
+        if (throttle !== undefined) throw throttle
         checkRuns = await listTerminalChecksViaActions(
           token,
           repository,
@@ -2991,10 +3046,11 @@ const fetchActionsJobDiagnostic = async (
     },
   )
   if (!logsResponse.ok) {
-    throw new GitHubHttpError(
-      logsResponse.status,
-      `Failed to download Actions job logs for ${repository.owner}/${repository.name} job ${jobId}: ${logsResponse.statusText}: ${await logsResponse.text()}`,
-    )
+    throw new GitHubHttpError({
+      statusCode: logsResponse.status,
+      headers: logsResponse.headers,
+      message: `Failed to download Actions job logs for ${repository.owner}/${repository.name} job ${jobId}: ${logsResponse.statusText}: ${await logsResponse.text()}`,
+    })
   }
   const logText = await logsResponse.text()
   return { htmlUrl, logText }
@@ -3074,6 +3130,9 @@ const makeLoadPrStatusCheckDiagnostics =
         ).pipe(Effect.result)
 
         if (Result.isFailure(fetched)) {
+          if (isGitHubThrottledError(fetched.failure)) {
+            return yield* fetched.failure
+          }
           diagnostics.push({
             externalId: check.externalId,
             name: check.name,
@@ -3121,10 +3180,11 @@ const makeGitHubGraphqlClient = (
       fetch: async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
         const response = await fetchImpl(input, init)
         if (!response.ok) {
-          throw new GitHubHttpError(
-            response.status,
-            `${response.statusText}: ${await response.text()}`,
-          )
+          throw new GitHubHttpError({
+            statusCode: response.status,
+            headers: response.headers,
+            message: `${response.statusText}: ${await response.text()}`,
+          })
         }
         return response
       },
@@ -3143,14 +3203,26 @@ export const makeGitHubServiceFromToken = (
   token: string,
   fetchImpl: GitHubFetch = fetch,
   fs?: FileSystem.FileSystem,
-): GitHubServiceShape =>
-  makeGitHubService(
-    makeGitHubGraphqlClient(token, fetchImpl),
-    makeListTerminalChecksForCommit(token, fetchImpl),
-    makeLoadPrStatusCheckDiagnostics(token, fetchImpl, fs),
-    makeRerunWorkflowRun(token, fetchImpl),
-    makeObserveAutomatedReviewEvidence(token, fetchImpl),
+  observeThrottle?: GitHubThrottleObserver,
+): GitHubServiceShape => {
+  const observingFetch: GitHubFetch = async (input, init) => {
+    const response = await fetchImpl(input, init)
+    if (response.ok) {
+      const throttle = githubThrottleFromSuccessfulResponse({
+        headers: response.headers,
+      })
+      if (throttle !== undefined) observeThrottle?.(throttle)
+    }
+    return response
+  }
+  return makeGitHubService(
+    makeGitHubGraphqlClient(token, observingFetch),
+    makeListTerminalChecksForCommit(token, observingFetch),
+    makeLoadPrStatusCheckDiagnostics(token, observingFetch, fs),
+    makeRerunWorkflowRun(token, observingFetch),
+    makeObserveAutomatedReviewEvidence(token, observingFetch),
   )
+}
 
 export const GitHubServiceLive = Layer.effect(
   GitHubService,
