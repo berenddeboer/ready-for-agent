@@ -7,6 +7,7 @@ import {
   collectChildStdoutAndStderr,
 } from "./collect-child-stdout.js"
 import {
+  type AgentBackendErrorClassification,
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
   AgentBackendSessionIdMissingError,
@@ -42,6 +43,13 @@ export type CliLineEvent = {
    * process tree so later parent-resume output is not folded into the result.
    */
   readonly finalizeText?: string
+  /**
+   * Set when this line carried a recognizable backend error event (e.g.
+   * OpenCode's `error` and `step_finish` stream events). Sticky across the
+   * fold: once observed, it rides on AgentBackendExitError if the turn goes
+   * on to exit non-zero.
+   */
+  readonly errorClassification?: AgentBackendErrorClassification
 }
 
 export type RunCliCaptureInput = {
@@ -274,6 +282,7 @@ export const runCliTurn = (
               sessionId?: string
               assistantText: string
               finalized: boolean
+              errorClassification?: AgentBackendErrorClassification
             } => ({
               assistantText: "",
               finalized: false,
@@ -286,6 +295,8 @@ export const runCliTurn = (
 
                 const event = input.parseLine(line)
                 const sessionId = event.sessionId ?? acc.sessionId
+                const errorClassification =
+                  event.errorClassification ?? acc.errorClassification
                 if (event.sessionId !== undefined) {
                   yield* Ref.set(seenSessionId, event.sessionId)
                   const alreadyNotified = yield* Ref.getAndSet(
@@ -324,6 +335,9 @@ export const runCliTurn = (
                     sessionId,
                     assistantText: event.finalizeText,
                     finalized: true,
+                    ...(errorClassification !== undefined
+                      ? { errorClassification }
+                      : {}),
                   }
                 }
 
@@ -336,6 +350,9 @@ export const runCliTurn = (
                         ? event.text
                         : `${acc.assistantText}\n${event.text}`,
                   finalized: false,
+                  ...(errorClassification !== undefined
+                    ? { errorClassification }
+                    : {}),
                 }
               }),
           ),
@@ -355,6 +372,7 @@ export const runCliTurn = (
           sessionId: output.sessionId,
           assistantText: output.assistantText,
           finalized: output.finalized,
+          errorClassification: output.errorClassification,
         }
       }),
     ).pipe(
@@ -385,6 +403,9 @@ export const runCliTurn = (
           exitCode,
           cwd: input.cwd,
           ...(sessionId !== undefined ? { sessionId } : {}),
+          ...(result.errorClassification !== undefined
+            ? { classification: result.errorClassification }
+            : {}),
         })
       }
     }
