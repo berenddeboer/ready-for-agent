@@ -152,7 +152,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).toMatch(/stampBlocked:[\s\S]*?bg-lane-queue/)
   })
 
-  test("zero relevant issues omit the kicker but retain refresh chrome", () => {
+  test("zero relevant issues retain heading chrome and explain how to add them", () => {
     const card = sliceBetweenMarkers(
       homeSource(),
       "function RepositoryCard(",
@@ -160,9 +160,8 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     )
     expect(card).toContain("const hasNoRelevantIssues =")
     expect(card).toContain("relevantIssues?.length === 0")
-    expect(card).toContain("{!hasNoRelevantIssues ? (")
     expect(card).toContain(
-      "<h3 className={ui.repoIssuesKicker}>Relevant issues</h3>",
+      '<h3 className={ui.repoIssuesKicker}>\n                {hasNoRelevantIssues ? "No relevant issues" : "Relevant issues"}',
     )
     expect(card).toContain(
       'aria-label={\n                  refreshingIssues ? "Refreshing issues" : "Refresh issues"',
@@ -174,7 +173,12 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "function RepositoryIssues(",
       "function ParentIssueGroup(",
     )
-    expect(issues).toContain("No issues found this harness can work on.")
+    expect(issues).toContain("Label GitHub/GitLab issues with")
+    expect(issues).toContain("ready-for-agent")
+    expect(issues).toContain("for them to\n        show up here.")
+    expect(issues).toContain(
+      "If an issue is a child issue, the parent itself cannot be\n        a child issue too.",
+    )
     expect(issues).toContain("ui.repoIssuesEmpty")
 
     const ui = uiSource()

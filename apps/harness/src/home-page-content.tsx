@@ -2526,9 +2526,9 @@ function RepositoryCard({
             )}
           <div className={ui.repoIssues}>
             <div className={ui.repoIssuesHead}>
-              {!hasNoRelevantIssues ? (
-                <h3 className={ui.repoIssuesKicker}>Relevant issues</h3>
-              ) : null}
+              <h3 className={ui.repoIssuesKicker}>
+                {hasNoRelevantIssues ? "No relevant issues" : "Relevant issues"}
+              </h3>
               <button
                 type="button"
                 className={ui.iconBtn}
@@ -2625,7 +2625,10 @@ function RepositoryIssues({
   if (issues.length === 0) {
     return (
       <p className={ui.repoIssuesEmpty}>
-        No issues found this harness can work on.
+        Label GitHub/GitLab issues with{" "}
+        <code className={ui.guidanceCode}>ready-for-agent</code> for them to
+        show up here. If an issue is a child issue, the parent itself cannot be
+        a child issue too.
       </p>
     )
   }
