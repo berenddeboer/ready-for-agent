@@ -46,6 +46,7 @@ import { Banner, BannerActionButton } from "../banner.js"
 import { CommittedPullRequestsDashboard } from "../committed-pr-dashboard.js"
 import { READY_FOR_AGENT_VERSION_LABEL } from "../generated/version"
 import { GitHubThrottleBanner } from "../github-throttle-banner.js"
+import { getHarnessSettingsAutoOpenAction } from "../harness-settings-auto-open.js"
 import { JobsRepositoryFilterProvider } from "../jobs-repository-filter.js"
 import { JobsViewSwitcher } from "../jobs-view-switcher.js"
 import { MastheadScrollwork } from "../masthead-scrollwork.js"
@@ -888,27 +889,31 @@ function SettingsChrome() {
     }
   }, [dialogOpen])
 
-  // Automatic first-run: local-only, no URL change, suppressed while another
-  // routed dialog is requested (Repository settings / Session Telemetry).
+  // Automatic first-run and Unavailable-backend recovery: local-only, no URL
+  // change, and suppressed while another routed dialog is requested.
   useEffect(() => {
-    if (autoOpenAttempted || !config.isSuccess || buildConfigured) {
-      return
-    }
-    if (isOtherRoutedDialogPath(pathname)) {
-      // Suppress this pass only — do not burn autoOpenAttempted so first-run
-      // can still open after the competing overlay is dismissed (ADR 0048).
-      return
-    }
-    if (routedSettingsOpen) {
-      // Direct `/settings` already owns the dialog.
-      setAutoOpenAttempted(true)
+    const action = getHarnessSettingsAutoOpenAction({
+      autoOpenAttempted,
+      configLoaded: config.isSuccess,
+      buildConfigured,
+      backendStatusLoaded: backendStatus.isSuccess,
+      defaultBackendUnavailable: backendKind === "UNAVAILABLE",
+      otherRoutedDialogOpen: isOtherRoutedDialogPath(pathname),
+      routedSettingsOpen,
+    })
+    if (action === "NONE") {
       return
     }
     setAutoOpenAttempted(true)
+    if (action === "MARK_ATTEMPTED") {
+      return
+    }
     setLocalSettingsOpen(true)
     updateConfig.reset()
   }, [
     autoOpenAttempted,
+    backendKind,
+    backendStatus.isSuccess,
     buildConfigured,
     config.isSuccess,
     pathname,

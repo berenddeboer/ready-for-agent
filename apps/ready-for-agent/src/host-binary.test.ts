@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { selectPlatformPackage } from "../bin/select-platform.js"
+import { Database } from "bun:sqlite"
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -317,7 +318,21 @@ describe("compiled host binary ambient-auth smoke", () => {
       dbPath: firstRunDatabasePath,
       serverPort: firstRunPort,
     })
-    // The bootstrap-created OpenCode default is not an operator selection.
+
+    // Model an existing installation whose OpenCode selection was explicitly
+    // saved, then prove deleting the selected CLI still permits cold start.
+    const firstRunDb = new Database(firstRunDatabasePath)
+    try {
+      const result = firstRunDb.run(
+        `UPDATE config
+         SET agent_backend_configured_at = unixepoch()
+         WHERE id = 'default'`,
+      )
+      expect(result.changes).toBe(1)
+    } finally {
+      firstRunDb.close()
+    }
+    expect(Bun.which("opencode", { PATH: firstRunBin })).toBeNull()
     await startOnce({
       binPath: firstRunBin,
       dbPath: firstRunDatabasePath,

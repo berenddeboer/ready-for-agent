@@ -42,11 +42,11 @@ describe("/settings route (issue #840)", () => {
     expect(source).toContain("search: (prev) => prev")
   })
 
-  test("first-run auto-open stays local-only and yields to other routed dialogs", () => {
+  test("automatic open stays local-only and yields to other routed dialogs", () => {
     const source = rootSource()
     expect(source).toContain("setLocalSettingsOpen(true)")
     expect(source).toContain("isOtherRoutedDialogPath(pathname)")
-    // First-run must not navigate to /settings.
+    // Automatic first-run / recovery must not navigate to /settings.
     const autoOpenStart = source.indexOf("Automatic first-run")
     expect(autoOpenStart).toBeGreaterThan(-1)
     const autoOpen = source.slice(
@@ -56,13 +56,8 @@ describe("/settings route (issue #840)", () => {
     expect(autoOpen).toContain("setLocalSettingsOpen(true)")
     expect(autoOpen).not.toContain('to: "/settings"')
     expect(autoOpen).toContain("isOtherRoutedDialogPath(pathname)")
-    // Competing overlays suppress this pass without burning autoOpenAttempted.
-    const competing = autoOpen.slice(
-      autoOpen.indexOf("isOtherRoutedDialogPath"),
-      autoOpen.indexOf("if (routedSettingsOpen)"),
-    )
-    expect(competing).toContain("return")
-    expect(competing).not.toContain("setAutoOpenAttempted(true)")
+    expect(autoOpen).toContain("getHarnessSettingsAutoOpenAction")
+    expect(autoOpen).toContain('backendKind === "UNAVAILABLE"')
   })
 
   test("dismiss leaves the route for in-app origin or replaces to Pipeline", () => {

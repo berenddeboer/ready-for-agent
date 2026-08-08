@@ -32,9 +32,6 @@
       "path": "../../packages/github-service/tsconfig.lib.json"
     },
     {
-      "path": "../../packages/agent-backend/tsconfig.lib.json"
-    },
-    {
       "path": "../../packages/release-versioning/tsconfig.lib.json"
     }
   ]
