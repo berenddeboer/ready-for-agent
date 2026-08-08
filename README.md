@@ -15,7 +15,7 @@ action.
 
 ## Quick start
 
-1. Install the prerequisites and have them on your PATH:
+1. Install the [prerequisites](#requirements) and have them on your PATH:
    [git](https://git-scm.com/), the [GitHub CLI
    (`gh`)](https://cli.github.com/), and at least one coding agent —
    [OpenCode](https://opencode.ai/),
