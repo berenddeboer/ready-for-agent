@@ -296,18 +296,20 @@ function RootComponent() {
 }
 
 /**
- * Session Telemetry at `/session/<work-item-id>/telemetry` (ADR 0048 / #841 / #843).
- * Explicit opens from Pipeline, Repos, or Completed push history; Close/Escape/
- * Back leave the route; direct entry closes with replace → `/`.
+ * Session Telemetry at `/session/<work-item-id>/telemetry` (ADR 0048 / #841 / #843 / #906).
+ * In-app opens mask the retained runtime surface; direct entry uses the
+ * canonical Pipeline route. Close/Escape/Back leave the public overlay URL.
  */
 function SessionTelemetryOverlay() {
   const navigate = useNavigate()
   const router = useRouter()
-  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const telemetryPathname = useRouterState({
+    select: (s) => s.location.maskedLocation?.pathname ?? s.location.pathname,
+  })
   const telemetryHistoryState = useRouterState({
     select: (s) => readSessionTelemetryHistoryState(s.location.state),
   })
-  const parsed = parseSessionTelemetryPath(pathname)
+  const parsed = parseSessionTelemetryPath(telemetryPathname)
   const workItemId = parsed?.workItemId ?? null
   const open = workItemId !== null
   const sessionIdHint = telemetryHistoryState?.sessionId ?? null
@@ -337,7 +339,7 @@ function SessionTelemetryOverlay() {
       onClose={() => {
         // Native dialog already closed; leave the route only when we are still
         // on the telemetry path (Back already changed location first).
-        if (isSessionTelemetryPath(pathname)) {
+        if (isSessionTelemetryPath(telemetryPathname)) {
           leaveSessionTelemetryRoute()
         }
       }}

@@ -42,6 +42,11 @@ export const TELEMETRY_FIXTURE = {
   completedSessionId: "ses_e2e_fixture_completed",
   completedIssueNumber: 103,
   completedIssueId: "issue-01KZD5SESS10NTE0FXX0000003",
+  /** Complete Work Item pinned to page 2 of the Completed archive. */
+  completedPageTwoWorkItemId: "wi-01KZD5SESS10NTE0FXX0000004",
+  completedPageTwoSessionId: "ses_e2e_fixture_completed_page_two",
+  completedPageTwoIssueNumber: 104,
+  completedPageTwoIssueId: "issue-01KZD5SESS10NTE0FXX0000004",
 } as const
 
 const sqlLiteral = (value: string) => `'${value.replaceAll("'", "''")}'`
@@ -85,6 +90,39 @@ const seedAndRestart = async (sql: string) => {
  */
 export const seedSessionTelemetryFixtures = async (): Promise<void> => {
   const now = Date.now()
+  // Keep both Completed pages deterministic even when other e2e scenarios have
+  // terminal Work Items. Future fixture timestamps sort ahead of all ordinary
+  // rows: page 1 has the existing telemetry fixture + 19 fillers, and page 2
+  // has the dedicated page-two fixture + 19 fillers.
+  const completedOrderBase = now + 10_000_000_000
+  const fillerWorkItems = Array.from({ length: 38 }, (_, index) => {
+    const issueNumber = 200 + index
+    const order =
+      index < 19
+        ? completedOrderBase + 199 - index
+        : index < 33
+          ? completedOrderBase + 69 - (index - 19)
+          : completedOrderBase + 49 - (index - 33)
+    const id = `wi-01KZD5SESS10NTE0F${String(index + 1).padStart(9, "0")}`
+    return `INSERT INTO work_item (
+       id, repository_id, issue_number, issue_title, agent_backend,
+       state, state_ready_at, paused, holds_worker_slot, session_id,
+       created_at, updated_at
+     ) VALUES (
+       ${sqlLiteral(id)},
+       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
+       ${issueNumber},
+       ${sqlLiteral(`E2E Completed pagination filler ${index + 1}`)},
+       'opencode',
+       'complete',
+       ${order},
+       0,
+       0,
+       NULL,
+       ${order},
+       ${order}
+     );`
+  })
   const sql = [
     // Clear prior fixture rows so scenarios can re-seed safely.
     `DELETE FROM work_item WHERE repository_id = ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)};`,
@@ -119,6 +157,22 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        '',
        ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${TELEMETRY_FIXTURE.missingSessionIssueNumber}`)},
        'OPEN',
+       ${now},
+       0,
+       ${now},
+       ${now}
+     );`,
+    `INSERT INTO issue (
+       id, repository_id, issue_number, title, body, url, state,
+       github_created_at, has_children, created_at, updated_at
+     ) VALUES (
+       ${sqlLiteral(TELEMETRY_FIXTURE.completedPageTwoIssueId)},
+       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
+       ${TELEMETRY_FIXTURE.completedPageTwoIssueNumber},
+       'E2E Session Telemetry completed page two',
+       '',
+       ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${TELEMETRY_FIXTURE.completedPageTwoIssueNumber}`)},
+       'CLOSED',
        ${now},
        0,
        ${now},
@@ -203,13 +257,33 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        'E2E Session Telemetry completed',
        'opencode',
        'complete',
-       ${now},
+       ${completedOrderBase + 200},
        0,
        0,
        ${sqlLiteral(TELEMETRY_FIXTURE.completedSessionId)},
-       ${now},
-       ${now}
+       ${completedOrderBase + 200},
+       ${completedOrderBase + 200}
      );`,
+    ...fillerWorkItems.slice(0, 19),
+    `INSERT INTO work_item (
+       id, repository_id, issue_number, issue_title, agent_backend,
+       state, state_ready_at, paused, holds_worker_slot, session_id,
+       created_at, updated_at
+     ) VALUES (
+       ${sqlLiteral(TELEMETRY_FIXTURE.completedPageTwoWorkItemId)},
+       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
+       ${TELEMETRY_FIXTURE.completedPageTwoIssueNumber},
+       'E2E Session Telemetry completed page two',
+       'opencode',
+       'complete',
+       ${completedOrderBase + 50},
+       0,
+       0,
+       ${sqlLiteral(TELEMETRY_FIXTURE.completedPageTwoSessionId)},
+       ${completedOrderBase + 50},
+       ${completedOrderBase + 50}
+     );`,
+    ...fillerWorkItems.slice(19),
   ].join("\n")
 
   await seedAndRestart(sql)

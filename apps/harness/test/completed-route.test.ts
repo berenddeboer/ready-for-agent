@@ -201,16 +201,18 @@ describe("Completed surface routes", () => {
 
   test("exposes accessible previous/next pagination", () => {
     const source = completedSource()
+    expect(source).toContain("Route.useSearch()")
+    expect(source).toContain("useNavigate")
+    expect(source).not.toContain("useState(1)")
     expect(source).toContain('aria-label="Completed work items pagination"')
     expect(source).toContain("← Prev")
     expect(source).toContain("Next →")
     expect(source).toContain("className={ui.plateMini}")
     expect(source).toContain("className={ui.pager}")
     expect(source).toContain("className={ui.pagerNote}")
-    expect(source).toContain(
-      'aria-label="Previous page of completed work items"',
-    )
-    expect(source).toContain('aria-label="Next page of completed work items"')
+    expect(source).toContain('label="Previous page of completed work items"')
+    expect(source).toContain('label="Next page of completed work items"')
+    expect(source).toContain("aria-label={label}")
     expect(source).toContain("disabled={!hasPreviousPage")
     expect(source).toContain("disabled={!hasNextPage")
     expect(source).toContain("Page {currentPage} of {resolvedTotalPages}")
@@ -219,11 +221,23 @@ describe("Completed surface routes", () => {
     expect(source).toContain('aria-live="polite"')
   })
 
+  test("keeps enabled pagination navigable before React attaches handlers", () => {
+    const source = completedSource()
+    expect(source).toContain("function CompletedPageLink(")
+    expect(source).toContain("<Link")
+    expect(source).toContain("page: completedPageSearch(targetPage).page")
+    // Route.useSearch and router location update through different stores.
+    // Comparing them in an effect can race and undo a valid page navigation.
+    expect(source).not.toContain("useRouterState")
+    expect(source).not.toContain("pageSearchIsCanonical")
+  })
+
   test("handles empty, loading, and error states", () => {
     const source = completedSource()
     expect(source).toContain("No completed work items yet")
     expect(source).toContain("No completed work items on this page")
-    expect(source).toContain("setPage(totalPages)")
+    expect(source).toContain("completedPageSearch(totalPages)")
+    expect(source).toContain("replace: true")
     expect(source).toContain("Could not load completed work items")
     expect(source).toContain(
       "completedQuery.isError && completedQuery.data === undefined",

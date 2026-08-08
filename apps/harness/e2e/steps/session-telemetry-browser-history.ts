@@ -21,6 +21,8 @@ const telemetryPathFor = (workItemId: string): RegExp =>
   )
 
 const completedPathPattern = /\/completed\/?(?:\?.*)?$/
+const completedPageTwoPathPattern = /\/completed\/?\?page=2$/
+const telemetryOriginScrollByPage = new WeakMap<Page, number>()
 
 const openSessionButton = async (page: Page, sessionId: string) => {
   const sessionButton = page.getByRole("button", {
@@ -152,6 +154,25 @@ When("I open the Completed page", async ({ page }) => {
   await expect(page).toHaveURL(completedPathPattern)
 })
 
+When("I open Completed page 2 directly", async ({ page }) => {
+  await page.goto("/completed?page=2")
+  await expect(page).toHaveURL(completedPageTwoPathPattern)
+  await expect(
+    page.getByRole("navigation", { name: "Completed work items pagination" }),
+  ).toContainText("Page 2 of", { timeout: 30_000 })
+})
+
+When("I open Completed with invalid page search", async ({ page }) => {
+  await page.goto("/completed?page=invalid")
+})
+
+When("I navigate to the next Completed page", async ({ page }) => {
+  await page
+    .getByRole("link", { name: "Next page of completed work items" })
+    .click()
+  await expect(page).toHaveURL(completedPageTwoPathPattern)
+})
+
 When(
   "I open Session Telemetry for the completed fixture from Completed",
   async ({ page }) => {
@@ -159,6 +180,30 @@ When(
     await openSessionButton(page, TELEMETRY_FIXTURE.completedSessionId)
   },
 )
+
+When(
+  "I open Session Telemetry for the page-2 fixture from Completed",
+  async ({ page }) => {
+    await installSessionQueryRoute(page)
+    const sessionButton = page.getByRole("button", {
+      name: TELEMETRY_FIXTURE.completedPageTwoSessionId,
+      exact: true,
+    })
+    await expect(sessionButton).toBeVisible({ timeout: 30_000 })
+    await sessionButton.scrollIntoViewIfNeeded()
+    telemetryOriginScrollByPage.set(
+      page,
+      await page.evaluate(() => window.scrollY),
+    )
+    await sessionButton.click()
+    await expect(sessionUsageDialog(page)).toBeVisible({ timeout: 15_000 })
+  },
+)
+
+When("I press Escape", async ({ page }) => {
+  await page.keyboard.press("Escape")
+  await expect(sessionUsageDialog(page)).toBeHidden()
+})
 
 When(
   "I open the missing-session Session Telemetry path directly",
@@ -236,6 +281,16 @@ Then(
 )
 
 Then(
+  "the browser location is the Session Telemetry path for the page-2 fixture",
+  async ({ page }) => {
+    await expect(page).toHaveURL(
+      telemetryPathFor(TELEMETRY_FIXTURE.completedPageTwoWorkItemId),
+    )
+    expect(new URL(page.url()).searchParams.has("page")).toBe(false)
+  },
+)
+
+Then(
   "the browser location is the Session Telemetry path for the missing-session fixture with theme dark",
   async ({ page }) => {
     await expect(page).toHaveURL(
@@ -248,6 +303,67 @@ Then(
 
 Then("the browser location is the completed path", async ({ page }) => {
   await expect(page).toHaveURL(completedPathPattern)
+})
+
+Then("the browser location is Completed page 2", async ({ page }) => {
+  await expect(page).toHaveURL(completedPageTwoPathPattern)
+})
+
+Then("the browser location is canonical Completed page 1", async ({ page }) => {
+  await expect(page).toHaveURL(/\/completed\/?$/)
+  await expect(
+    page.getByRole("navigation", { name: "Completed work items pagination" }),
+  ).toContainText("Page 1 of")
+})
+
+Then("Completed page 2 is visible", async ({ page }) => {
+  await expect(
+    page.getByRole("navigation", { name: "Completed work items pagination" }),
+  ).toContainText("Page 2 of")
+  await expect(
+    page.getByRole("button", {
+      name: TELEMETRY_FIXTURE.completedPageTwoSessionId,
+      exact: true,
+    }),
+  ).toBeVisible()
+})
+
+Then("Completed page 2 remains visible under the dialog", async ({ page }) => {
+  await expect(sessionUsageDialog(page)).toBeVisible()
+  await expect(
+    page.getByRole("navigation", { name: "Completed work items pagination" }),
+  ).toContainText("Page 2 of")
+})
+
+Then("the Completed jobs tab is active", async ({ page }) => {
+  await expect(
+    page.getByRole("navigation", { name: "Jobs" }).getByRole("link", {
+      name: "Completed",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-current", "page")
+})
+
+Then("the Pipeline remains visible under the dialog", async ({ page }) => {
+  await expect(
+    page.getByRole("region", { name: "Lifecycle pipeline" }),
+  ).toBeVisible()
+})
+
+Then("Repos remains visible under the dialog", async ({ page }) => {
+  await expect(
+    page.getByRole("region", { name: "Configured repositories" }),
+  ).toBeVisible()
+})
+
+Then("the Completed scroll position is preserved", async ({ page }) => {
+  const origin = telemetryOriginScrollByPage.get(page)
+  if (origin === undefined) {
+    throw new Error("Completed scroll origin was not recorded")
+  }
+  const current = await page.evaluate(() => window.scrollY)
+  expect(origin).toBeGreaterThan(0)
+  expect(current).toBe(origin)
 })
 
 Then("the Session usage dialog is visible", async ({ page }) => {

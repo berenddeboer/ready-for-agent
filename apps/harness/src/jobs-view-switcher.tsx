@@ -62,9 +62,9 @@ export function JobsViewSwitcher() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const onCompleted =
     pathname === "/completed" || pathname.startsWith("/completed/")
-  // `/settings` and Session Telemetry use Pipeline as canonical background
-  // (issues #840 / #841 / #843). Explicit opens from Repos or Completed share
-  // that background while the overlay is open; Close/Back restore the origin.
+  // Direct `/settings` and telemetry loads use Pipeline as their canonical
+  // background. Masked telemetry opens retain the runtime origin pathname, so
+  // the originating Jobs tab remains active (issues #840–#843 / #906).
   const pipelineActive = isPipelineBackgroundPath(pathname)
   const reposActive = pathname === "/repos" || pathname.startsWith("/repos/")
   // Filters only drive the Pipeline board today (full in-memory item set).

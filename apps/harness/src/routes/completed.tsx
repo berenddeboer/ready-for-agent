@@ -1,7 +1,11 @@
 import { useQueries, useQuery, useSuspenseQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
-import { Suspense, useEffect, useState } from "react"
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
+import { type ReactNode, Suspense, useEffect } from "react"
 import { Banner, BannerActionButton } from "../banner.js"
+import {
+  completedPageSearch,
+  parseCompletedSearch,
+} from "../completed-search.js"
 import {
   CompletedCardGrid,
   CompletedSurface,
@@ -20,6 +24,7 @@ import { WorkItemsLiveUpdates } from "../work-items-live-updates.js"
  * Full completed-work archive (server-paginated). Sticky Jobs chrome links here.
  */
 export const Route = createFileRoute("/completed")({
+  validateSearch: (raw: Record<string, unknown>) => parseCompletedSearch(raw),
   component: CompletedPage,
 })
 
@@ -39,8 +44,56 @@ function CompletedPage() {
   )
 }
 
+function CompletedPageLink({
+  targetPage,
+  disabled,
+  busy,
+  label,
+  children,
+}: {
+  readonly targetPage: number
+  readonly disabled: boolean
+  readonly busy: boolean
+  readonly label: string
+  readonly children: ReactNode
+}) {
+  if (disabled) {
+    return (
+      <button
+        type="button"
+        className={ui.plateMini}
+        disabled
+        aria-busy={busy || undefined}
+        aria-label={label}
+      >
+        {children}
+      </button>
+    )
+  }
+
+  // Keep the pager useful while a streamed Suspense boundary is becoming
+  // interactive: the href is a native fallback until Link attaches its SPA
+  // navigation handler.
+  return (
+    <Link
+      from={Route.fullPath}
+      to="/completed"
+      search={(prev) => ({
+        ...prev,
+        page: completedPageSearch(targetPage).page,
+      })}
+      className={ui.plateMini}
+      aria-label={label}
+    >
+      {children}
+    </Link>
+  )
+}
+
 function CompletedBoard() {
-  const [page, setPage] = useState(1)
+  const navigate = useNavigate({ from: Route.fullPath })
+  const { page: searchPage } = Route.useSearch()
+  const page = searchPage ?? 1
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const repositoryIds = repositories.map(({ id }) => id)
   const completedQuery = useQuery(completedWorkItemsHistoryQuery(page))
@@ -78,9 +131,16 @@ function CompletedBoard() {
   useEffect(() => {
     if (totalPages === undefined) return
     if (page > totalPages) {
-      setPage(totalPages)
+      void navigate({
+        to: "/completed",
+        search: (prev) => ({
+          ...prev,
+          page: completedPageSearch(totalPages).page,
+        }),
+        replace: true,
+      })
     }
-  }, [page, totalPages])
+  }, [navigate, page, totalPages])
 
   // Live updates must outlive pending/error UI. Unmounting on skeleton aborts
   // the follower and cancels the completed-work-items query prefix mid-fetch.
@@ -204,30 +264,22 @@ function CompletedBoard() {
               : null}
           </p>
           <div className={ui.pagerBtns}>
-            <button
-              type="button"
-              className={ui.plateMini}
+            <CompletedPageLink
+              targetPage={Math.max(1, page - 1)}
               disabled={!hasPreviousPage || completedQuery.isFetching}
-              aria-busy={completedQuery.isFetching || undefined}
-              aria-label="Previous page of completed work items"
-              onClick={() => {
-                setPage((current) => Math.max(1, current - 1))
-              }}
+              busy={completedQuery.isFetching}
+              label="Previous page of completed work items"
             >
               ← Prev
-            </button>
-            <button
-              type="button"
-              className={ui.plateMini}
+            </CompletedPageLink>
+            <CompletedPageLink
+              targetPage={page + 1}
               disabled={!hasNextPage || completedQuery.isFetching}
-              aria-busy={completedQuery.isFetching || undefined}
-              aria-label="Next page of completed work items"
-              onClick={() => {
-                setPage((current) => current + 1)
-              }}
+              busy={completedQuery.isFetching}
+              label="Next page of completed work items"
             >
               Next →
-            </button>
+            </CompletedPageLink>
           </div>
         </nav>
       </CompletedSurface>

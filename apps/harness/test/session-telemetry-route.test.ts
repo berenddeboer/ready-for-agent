@@ -35,8 +35,8 @@ const jobsSwitcherSource = () =>
 const routedDialogSource = () =>
   readFileSync(join(import.meta.dir, "../src/routed-dialog.ts"), "utf8")
 
-describe("Session Telemetry route (issues #841 / #843)", () => {
-  test("is a dedicated TanStack file route over the Pipeline background", () => {
+describe("Session Telemetry route (issues #841 / #843 / #906)", () => {
+  test("is a dedicated TanStack file route with a canonical Pipeline background", () => {
     const source = telemetryRouteSource()
     expect(source).toContain(
       'createFileRoute("/session/$workItemId/telemetry")',
@@ -75,6 +75,7 @@ describe("Session Telemetry route (issues #841 / #843)", () => {
 
     const nav = navSource()
     expect(nav).toContain('to: "/session/$workItemId/telemetry"')
+    expect(nav).toContain("mask:")
     expect(nav).toContain("markSessionTelemetryOpenedFromInApp")
     expect(nav).toContain("sessionTelemetry")
     expect(nav).toContain('kind: "in-app-origin"')
@@ -84,6 +85,7 @@ describe("Session Telemetry route (issues #841 / #843)", () => {
   test("root owns the route-driven Session Telemetry overlay", () => {
     const source = rootSource()
     expect(source).toContain("SessionTelemetryOverlay")
+    expect(source).toContain("maskedLocation")
     expect(source).toContain("parseSessionTelemetryPath")
     expect(source).toContain("wasSessionTelemetryOpenedFromInApp")
     expect(source).toContain("leaveSessionTelemetryRoute")
@@ -93,9 +95,12 @@ describe("Session Telemetry route (issues #841 / #843)", () => {
     expect(source).toContain("SessionUsageDialog")
   })
 
-  test("Jobs switcher treats Session Telemetry as Pipeline background", () => {
+  test("Jobs switcher derives the active background from the runtime route", () => {
     const switcher = jobsSwitcherSource()
     expect(switcher).toContain("isPipelineBackgroundPath")
+    expect(switcher).not.toContain(
+      "Explicit opens from Repos or Completed share",
+    )
     const helpers = routedDialogSource()
     expect(helpers).toContain("isSessionTelemetryPath")
     expect(helpers).toContain("parseSessionTelemetryPath")
