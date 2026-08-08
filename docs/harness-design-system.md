@@ -675,11 +675,13 @@ A permanent fixture at the **foot of the Queue platform**, always rendered
   with `ready-for-agent`. When they show up in your repos, click
   **Implement**." Prefer neutral "issues" over a forge brand name. Link
   "your repos" to the Repos view.
-- **Illustration**: compact static mock of the repos-row **Implement** control
+- **Dual-entry Implement**: the compact static mock shows the repos-row control
   (Build-lane blue plate, play-triangle start icon, mono "Implement" label)
   so operators recognize the primary action on Repos. Clicking the control
-  starts implementation immediately; it does not open a choice menu.
-  Queue for blocked issues stays kebab-only and is not illustrated here.
+  starts **Implement now** immediately; it does not open a choice menu. The
+  same implementable row also keeps a rightmost kebab with the complete
+  **Implement now** and **Implement locally** actions. Queue for blocked issues
+  stays kebab-only and is not illustrated here.
 - No primary "Manage repos" CTA — keep the hint focused on label → Implement.
 - No transit glyphs (no ⇄), no "Transfer" wording anywhere.
 
