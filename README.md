@@ -145,19 +145,16 @@ Forge):
 3. [curl](https://curl.se/) for GitLab Repositories. `glab` is an optional
    ambient credential source, not a required host tool.
 
-**Agent Backend executable** (only the backend selected in Settings is
-required; default is OpenCode). On a first run, before any backend selection is
-stored, no Agent Backend executable is required so the Harness can open
-Settings:
+**Agent Backend executables** are soft prerequisites. They are inspected after
+the Harness starts and never block the process or UI from starting. A missing or
+broken selected backend is shown as **Agent Backend Unavailable**; open Settings
+to choose another backend, reinstall the CLI, or use Recheck after fixing it:
 
-4. [OpenCode](https://opencode.ai/) (`opencode` on PATH) when OpenCode is the
-   selected Agent Backend
-5. [Codex](https://github.com/openai/codex) (`codex` on PATH) when Codex is the
-   selected Agent Backend
-6. [Grok Build](https://docs.x.ai/) (`grok` on PATH) when Grok Build is the
-   selected Agent Backend
+4. [OpenCode](https://opencode.ai/) (`opencode` on PATH)
+5. [Codex](https://github.com/openai/codex) (`codex` on PATH)
+6. [Grok Build](https://docs.x.ai/) (`grok` on PATH)
 7. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on
-   PATH) when Claude Code is the selected Agent Backend
+   PATH)
 
 Authenticate Grok Build with `grok login` or `XAI_API_KEY` before Recheck /
 Agent Turns. Harness-launched Grok processes disable auto-update for that
