@@ -1,0 +1,150 @@
+name: Cleanup Nx Cache
+
+on:
+  pull_request:
+    types:
+      - closed
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+jobs:
+  cleanup-pr-cache:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete PR caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          delete_cache() {
+            local cache_id="$1"
+            local output
+            if output="$(gh cache delete "$cache_id" --repo "$GH_REPO" 2>&1)"; then
+              return
+            fi
+            if printf '%s' "$output" | grep -Eqi 'HTTP 404|not found'; then
+              echo "  cache ${cache_id} was already deleted"
+              return
+            fi
+            printf '%s\n' "$output" >&2
+            return 1
+          }
+
+          delete_pr_caches() {
+            local pass="$1"
+            echo "Pass ${pass}: deleting caches for PR ${PR_NUMBER}"
+            gh cache list \
+              --repo "$GH_REPO" \
+              --key "nx-pr-${PR_NUMBER}-" \
+              --json id,key \
+              --limit 100 \
+              --jq '.[] | "\(.id)\t\(.key)"' |
+            while IFS=$'\t' read -r cache_id cache_key; do
+              if [ -n "${cache_id:-}" ]; then
+                echo "  delete ${cache_id} (${cache_key})"
+                delete_cache "$cache_id"
+              fi
+            done
+          }
+
+          # Immediate pass for the common case.
+          delete_pr_caches 1
+
+          # In-flight PR jobs can save after close (race). Hold the runner so a
+          # second pass can catch those late saves. Cost: ~20m of ubuntu-latest
+          # per closed PR; the nightly cleanup-stale-caches job is the backstop
+          # if anything is still left after this window.
+          echo "Waiting 20m for in-flight PR jobs to finish saving..."
+          sleep 1200
+
+          # Skip pass 2 if the PR was reopened during the sleep (new CI may
+          # have written live nx-pr- caches we must not delete).
+          if ! state="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json state --jq .state)"; then
+            echo "Could not re-check PR ${PR_NUMBER} state; skipping pass 2" >&2
+            exit 0
+          fi
+          if [ "$state" = "OPEN" ]; then
+            echo "PR ${PR_NUMBER} is OPEN again; skipping pass 2 so live caches stay"
+            exit 0
+          fi
+
+          delete_pr_caches 2
+
+  cleanup-stale-caches:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prune Nx caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # Keep a couple of recent main caches for restore-key fallback.
+          KEEP_MAIN: "2"
+        run: |
+          set -euo pipefail
+
+          delete_cache() {
+            local cache_id="$1"
+            local output
+            if output="$(gh cache delete "$cache_id" --repo "$GH_REPO" 2>&1)"; then
+              return
+            fi
+            if printf '%s' "$output" | grep -Eqi 'HTTP 404|not found'; then
+              echo "  cache ${cache_id} was already deleted"
+              return
+            fi
+            printf '%s\n' "$output" >&2
+            return 1
+          }
+
+          delete_ids() {
+            while IFS= read -r cache_id; do
+              if [ -n "${cache_id:-}" ]; then
+                echo "  delete ${cache_id}"
+                delete_cache "$cache_id"
+              fi
+            done
+          }
+
+          echo "==> Keep latest ${KEEP_MAIN} nx-main- caches"
+          gh cache list \
+            --repo "$GH_REPO" \
+            --key nx-main- \
+            --sort created_at \
+            --order desc \
+            --json id \
+            --limit 100 \
+            --jq ".[${KEEP_MAIN}:][].id" |
+          delete_ids
+
+          echo "==> Delete nx-pr- caches for closed PRs"
+          gh cache list \
+            --repo "$GH_REPO" \
+            --key nx-pr- \
+            --json id,key \
+            --limit 100 \
+            --jq '.[] | "\(.id)\t\(.key)"' |
+          while IFS=$'\t' read -r cache_id cache_key; do
+            pr_number="$(printf '%s' "$cache_key" | sed -n 's/^nx-pr-\([0-9][0-9]*\)-.*/\1/p')"
+            if [ -z "${pr_number:-}" ]; then
+              continue
+            fi
+            if ! state="$(gh pr view "$pr_number" --repo "$GH_REPO" --json state --jq .state)"; then
+              echo "  skip ${cache_key}: could not read PR ${pr_number}" >&2
+              continue
+            fi
+            if [ "$state" != "OPEN" ]; then
+              echo "  delete ${cache_id} (${cache_key}, pr=${pr_number}, state=${state})"
+              delete_cache "$cache_id"
+            fi
+          done

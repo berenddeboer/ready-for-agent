@@ -1,0 +1,69 @@
+name: Nx cache
+description: Restore or save the local Nx cache with GitHub Actions cache.
+
+inputs:
+  mode:
+    description: "Cache mode: main, pr, or restore-main"
+    required: true
+  pr-number:
+    description: Pull request number for PR cache keys.
+    required: false
+    default: ""
+  allow-save:
+    description: Whether PR mode is allowed to save a cache.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    # Cap local .nx/cache growth on the runner before tasks run, so the
+    # GitHub Actions cache we save stays bounded (default Nx cap is huge).
+    - name: Cap Nx local cache size
+      shell: bash
+      run: echo "NX_MAX_CACHE_SIZE=1GB" >> "$GITHUB_ENV"
+
+    - name: Restore and save main Nx cache
+      if: inputs.mode == 'main'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .nx
+        key: nx-main-${{ github.sha }}
+        restore-keys: |
+          nx-main-
+
+    - name: Restore main Nx cache
+      if: inputs.mode == 'restore-main'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .nx
+        key: nx-main-${{ github.sha }}
+        restore-keys: |
+          nx-main-
+
+    - name: Restore and save PR Nx cache
+      if: inputs.mode == 'pr' && inputs.allow-save == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .nx
+        key: nx-pr-${{ inputs.pr-number }}-${{ github.sha }}
+        restore-keys: |
+          nx-pr-${{ inputs.pr-number }}-
+          nx-main-
+
+    - name: Restore PR Nx cache
+      if: inputs.mode == 'pr' && inputs.allow-save != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .nx
+        key: nx-pr-${{ inputs.pr-number }}-${{ github.sha }}
+        restore-keys: |
+          nx-pr-${{ inputs.pr-number }}-
+          nx-main-
+
+    - name: Reject unknown Nx cache mode
+      if: inputs.mode != 'main' && inputs.mode != 'restore-main' && inputs.mode != 'pr'
+      shell: bash
+      run: |
+        echo "Unknown nx-cache mode: '${{ inputs.mode }}' (expected main, restore-main, or pr)" >&2
+        exit 1
