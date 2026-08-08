@@ -1,7 +1,16 @@
 import { useQueries, useQuery, useSuspenseQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
-import { Suspense, useEffect, useState } from "react"
+import {
+  createFileRoute,
+  useNavigate,
+  useRouterState,
+} from "@tanstack/react-router"
+import { Suspense, useEffect } from "react"
 import { Banner, BannerActionButton } from "../banner.js"
+import {
+  completedPageSearch,
+  isCompletedPageSearchCanonical,
+  parseCompletedSearch,
+} from "../completed-search.js"
 import {
   CompletedCardGrid,
   CompletedSurface,
@@ -20,6 +29,7 @@ import { WorkItemsLiveUpdates } from "../work-items-live-updates.js"
  * Full completed-work archive (server-paginated). Sticky Jobs chrome links here.
  */
 export const Route = createFileRoute("/completed")({
+  validateSearch: (raw: Record<string, unknown>) => parseCompletedSearch(raw),
   component: CompletedPage,
 })
 
@@ -40,7 +50,16 @@ function CompletedPage() {
 }
 
 function CompletedBoard() {
-  const [page, setPage] = useState(1)
+  const navigate = useNavigate({ from: Route.fullPath })
+  const { page: searchPage } = Route.useSearch()
+  const page = searchPage ?? 1
+  const rawPage = useRouterState({
+    select: (state) => state.location.search.page,
+  })
+  const pageSearchIsCanonical = isCompletedPageSearchCanonical({
+    rawPage,
+    page,
+  })
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const repositoryIds = repositories.map(({ id }) => id)
   const completedQuery = useQuery(completedWorkItemsHistoryQuery(page))
@@ -74,13 +93,35 @@ function CompletedBoard() {
         ? 1
         : Math.max(1, Math.ceil(totalCount / pageSize))
 
+  // Validation makes the query safe immediately; replace malformed aliases
+  // (`?page=1`, fractional, zero, negative, or text) with the canonical URL.
+  useEffect(() => {
+    if (pageSearchIsCanonical) return
+    void navigate({
+      to: "/completed",
+      search: (prev) => ({
+        ...prev,
+        page: completedPageSearch(page).page,
+      }),
+      replace: true,
+      resetScroll: false,
+    })
+  }, [navigate, page, pageSearchIsCanonical])
+
   // When history shrinks under us (SSE refresh), clamp past the last page.
   useEffect(() => {
     if (totalPages === undefined) return
     if (page > totalPages) {
-      setPage(totalPages)
+      void navigate({
+        to: "/completed",
+        search: (prev) => ({
+          ...prev,
+          page: completedPageSearch(totalPages).page,
+        }),
+        replace: true,
+      })
     }
-  }, [page, totalPages])
+  }, [navigate, page, totalPages])
 
   // Live updates must outlive pending/error UI. Unmounting on skeleton aborts
   // the follower and cancels the completed-work-items query prefix mid-fetch.
@@ -211,7 +252,13 @@ function CompletedBoard() {
               aria-busy={completedQuery.isFetching || undefined}
               aria-label="Previous page of completed work items"
               onClick={() => {
-                setPage((current) => Math.max(1, current - 1))
+                void navigate({
+                  to: "/completed",
+                  search: (prev) => ({
+                    ...prev,
+                    page: completedPageSearch(Math.max(1, page - 1)).page,
+                  }),
+                })
               }}
             >
               ← Prev
@@ -223,7 +270,13 @@ function CompletedBoard() {
               aria-busy={completedQuery.isFetching || undefined}
               aria-label="Next page of completed work items"
               onClick={() => {
-                setPage((current) => current + 1)
+                void navigate({
+                  to: "/completed",
+                  search: (prev) => ({
+                    ...prev,
+                    page: completedPageSearch(page + 1).page,
+                  }),
+                })
               }}
             >
               Next →

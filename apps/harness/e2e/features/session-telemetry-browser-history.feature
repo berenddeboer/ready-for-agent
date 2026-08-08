@@ -15,6 +15,7 @@ Feature: Route Session Telemetry through browser history
     And the Session usage dialog is visible
     And the Session usage dialog shows the missing Session Telemetry state
     And the Pipeline jobs tab is active
+    And the Pipeline remains visible under the dialog
 
   Scenario: Browser Back closes telemetry and Forward reopens the same Work Item
     When I open the home page
@@ -45,6 +46,8 @@ Feature: Route Session Telemetry through browser history
     Then the browser location is the Session Telemetry path for the missing-session fixture
     And the Session usage dialog is visible
     And the Session usage dialog shows the missing Session Telemetry state
+    And the Repos jobs tab is active
+    And Repos remains visible under the dialog
 
   Scenario: Browser Back and Forward from Repos restore origin and reopen
     When I open the Repos page
@@ -95,6 +98,77 @@ Feature: Route Session Telemetry through browser history
     When I close the Session usage dialog
     Then the Session usage dialog is hidden
     And the browser location is the completed path
+
+  Scenario: Completed Next pushes page 2 into the URL
+    When I open the Completed page
+    And I cancel the Harness settings dialog if present
+    And I navigate to the next Completed page
+    Then the browser location is Completed page 2
+    And Completed page 2 is visible
+
+  Scenario: Completed page 2 is directly addressable
+    When I open Completed page 2 directly
+    And I cancel the Harness settings dialog if present
+    Then the browser location is Completed page 2
+    And Completed page 2 is visible
+
+  Scenario: Invalid Completed page search resolves to canonical page 1
+    When I open Completed with invalid page search
+    And I cancel the Harness settings dialog if present
+    Then the browser location is canonical Completed page 1
+
+  Scenario: Page-2 telemetry retains Completed page and scroll on Close
+    When I open Completed page 2 directly
+    And I cancel the Harness settings dialog if present
+    And I open Session Telemetry for the page-2 fixture from Completed
+    Then the browser location is the Session Telemetry path for the page-2 fixture
+    And the Session usage dialog is visible
+    And Completed page 2 remains visible under the dialog
+    And the Completed jobs tab is active
+    And the Completed scroll position is preserved
+    When I close the Session usage dialog
+    Then the browser location is Completed page 2
+    And Completed page 2 is visible
+    And the Completed scroll position is preserved
+
+  Scenario: Back and Forward retain Completed page 2 and reopen telemetry
+    When I open Completed page 2 directly
+    And I cancel the Harness settings dialog if present
+    And I open Session Telemetry for the page-2 fixture from Completed
+    Then the browser location is the Session Telemetry path for the page-2 fixture
+    When I go back in the browser
+    Then the Session usage dialog is hidden
+    And the browser location is Completed page 2
+    And Completed page 2 is visible
+    And the Completed scroll position is preserved
+    When I go forward in the browser
+    Then the Session usage dialog is visible
+    And the browser location is the Session Telemetry path for the page-2 fixture
+    And Completed page 2 remains visible under the dialog
+    And the Completed jobs tab is active
+
+  Scenario: Escape returns to Completed page 2
+    When I open Completed page 2 directly
+    And I cancel the Harness settings dialog if present
+    And I open Session Telemetry for the page-2 fixture from Completed
+    When I press Escape
+    Then the Session usage dialog is hidden
+    And the browser location is Completed page 2
+    And Completed page 2 is visible
+
+  Scenario: Refreshing an in-app masked telemetry URL uses canonical Pipeline
+    When I open Completed page 2 directly
+    And I cancel the Harness settings dialog if present
+    And I open Session Telemetry for the page-2 fixture from Completed
+    Then the browser location is the Session Telemetry path for the page-2 fixture
+    When I refresh the page
+    Then the Session usage dialog is visible
+    And the browser location is the Session Telemetry path for the page-2 fixture
+    And the Pipeline jobs tab is active
+    And the Pipeline remains visible under the dialog
+    When I close the Session usage dialog
+    Then the Session usage dialog is hidden
+    And the browser location is the home path
 
   Scenario: Direct telemetry navigation shows the dialog over Pipeline
     When I open the missing-session Session Telemetry path directly

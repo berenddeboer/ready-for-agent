@@ -190,8 +190,8 @@ export const isOtherRoutedDialogPath = (pathname: string): boolean => {
 }
 
 /**
- * Pipeline is the canonical background for `/settings` and Session Telemetry
- * (direct load / refresh). Jobs switcher treats these as Pipeline-active.
+ * Pipeline is the canonical background for `/settings` and directly loaded
+ * Session Telemetry. Masked in-app telemetry keeps its origin pathname here.
  */
 export const isPipelineBackgroundPath = (pathname: string): boolean =>
   pathname === "/" ||

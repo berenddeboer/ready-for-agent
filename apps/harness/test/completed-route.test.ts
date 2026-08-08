@@ -201,6 +201,9 @@ describe("Completed surface routes", () => {
 
   test("exposes accessible previous/next pagination", () => {
     const source = completedSource()
+    expect(source).toContain("Route.useSearch()")
+    expect(source).toContain("useNavigate")
+    expect(source).not.toContain("useState(1)")
     expect(source).toContain('aria-label="Completed work items pagination"')
     expect(source).toContain("← Prev")
     expect(source).toContain("Next →")
@@ -223,7 +226,8 @@ describe("Completed surface routes", () => {
     const source = completedSource()
     expect(source).toContain("No completed work items yet")
     expect(source).toContain("No completed work items on this page")
-    expect(source).toContain("setPage(totalPages)")
+    expect(source).toContain("completedPageSearch(totalPages)")
+    expect(source).toContain("replace: true")
     expect(source).toContain("Could not load completed work items")
     expect(source).toContain(
       "completedQuery.isError && completedQuery.data === undefined",
