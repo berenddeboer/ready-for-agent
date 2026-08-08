@@ -2319,6 +2319,12 @@ function RepositoryCard({
               </dd>
             </div>
             <div className={ui.repoMetaRow}>
+              <dt>Include all Issue Authors</dt>
+              <dd>
+                {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
+              </dd>
+            </div>
+            <div className={ui.repoMetaRow}>
               <dt>Build model</dt>
               <dd>
                 {repository.defaultModel ??
@@ -2365,22 +2371,16 @@ function RepositoryCard({
               </dd>
             </div>
             <div className={ui.repoMetaRow}>
-              <dt>Auto-merge</dt>
-              <dd>{repository.autoMerge ? "Enabled" : "Disabled"}</dd>
-            </div>
-            <div className={ui.repoMetaRow}>
-              <dt>Include all Issue Authors</dt>
-              <dd>
-                {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
-              </dd>
-            </div>
-            <div className={ui.repoMetaRow}>
               <dt>Wait for ready checks</dt>
               <dd>
                 {repository.waitForReadyForReviewChecks
                   ? "Enabled"
                   : "Disabled"}
               </dd>
+            </div>
+            <div className={ui.repoMetaRow}>
+              <dt>Auto-merge</dt>
+              <dd>{repository.autoMerge ? "Enabled" : "Disabled"}</dd>
             </div>
           </dl>
           {!repository.credential.configured &&

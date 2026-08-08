@@ -60,15 +60,25 @@ describe("Interchange phase 4: repos page + blank slate", () => {
   })
 
   test("meta table is hairline two-column mono dt/dd with harness-default annotations", () => {
-    const body = sliceBetweenMarkers(
+    const meta = sliceBetweenMarkers(
       homeSource(),
       "className={ui.repoMeta}",
-      "function RepositoryIssues(",
+      "</dl>",
     )
-    expect(body).toContain("ui.repoMetaRow")
-    expect(body).toContain("Harness default (")
-    expect(body).toContain("<dt>Path</dt>")
-    expect(body).toContain("<dt>Agent Backend</dt>")
+    expect(meta).toContain("ui.repoMetaRow")
+    expect(meta).toContain("Harness default (")
+    expect(
+      Array.from(meta.matchAll(/<dt>([^<]+)<\/dt>/g), (match) => match[1]),
+    ).toEqual([
+      "Path",
+      "Checkout",
+      "Agent Backend",
+      "Include all Issue Authors",
+      "Build model",
+      "Review model",
+      "Wait for ready checks",
+      "Auto-merge",
+    ])
 
     const ui = uiSource()
     expect(ui).toContain("repoMeta:")
