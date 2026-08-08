@@ -168,7 +168,7 @@ When("I open Completed with invalid page search", async ({ page }) => {
 
 When("I navigate to the next Completed page", async ({ page }) => {
   await page
-    .getByRole("button", { name: "Next page of completed work items" })
+    .getByRole("link", { name: "Next page of completed work items" })
     .click()
   await expect(page).toHaveURL(completedPageTwoPathPattern)
 })

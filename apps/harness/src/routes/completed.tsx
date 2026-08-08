@@ -1,10 +1,11 @@
 import { useQueries, useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import {
+  Link,
   createFileRoute,
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router"
-import { Suspense, useEffect } from "react"
+import { type ReactNode, Suspense, useEffect } from "react"
 import { Banner, BannerActionButton } from "../banner.js"
 import {
   completedPageSearch,
@@ -46,6 +47,52 @@ function CompletedPage() {
     >
       <CompletedBoard />
     </Suspense>
+  )
+}
+
+function CompletedPageLink({
+  targetPage,
+  disabled,
+  busy,
+  label,
+  children,
+}: {
+  readonly targetPage: number
+  readonly disabled: boolean
+  readonly busy: boolean
+  readonly label: string
+  readonly children: ReactNode
+}) {
+  if (disabled) {
+    return (
+      <button
+        type="button"
+        className={ui.plateMini}
+        disabled
+        aria-busy={busy || undefined}
+        aria-label={label}
+      >
+        {children}
+      </button>
+    )
+  }
+
+  // Keep the pager useful while a streamed Suspense boundary is becoming
+  // interactive: the href is a native fallback until Link attaches its SPA
+  // navigation handler.
+  return (
+    <Link
+      from={Route.fullPath}
+      to="/completed"
+      search={(prev) => ({
+        ...prev,
+        page: completedPageSearch(targetPage).page,
+      })}
+      className={ui.plateMini}
+      aria-label={label}
+    >
+      {children}
+    </Link>
   )
 }
 
@@ -245,42 +292,22 @@ function CompletedBoard() {
               : null}
           </p>
           <div className={ui.pagerBtns}>
-            <button
-              type="button"
-              className={ui.plateMini}
+            <CompletedPageLink
+              targetPage={Math.max(1, page - 1)}
               disabled={!hasPreviousPage || completedQuery.isFetching}
-              aria-busy={completedQuery.isFetching || undefined}
-              aria-label="Previous page of completed work items"
-              onClick={() => {
-                void navigate({
-                  to: "/completed",
-                  search: (prev) => ({
-                    ...prev,
-                    page: completedPageSearch(Math.max(1, page - 1)).page,
-                  }),
-                })
-              }}
+              busy={completedQuery.isFetching}
+              label="Previous page of completed work items"
             >
               ← Prev
-            </button>
-            <button
-              type="button"
-              className={ui.plateMini}
+            </CompletedPageLink>
+            <CompletedPageLink
+              targetPage={page + 1}
               disabled={!hasNextPage || completedQuery.isFetching}
-              aria-busy={completedQuery.isFetching || undefined}
-              aria-label="Next page of completed work items"
-              onClick={() => {
-                void navigate({
-                  to: "/completed",
-                  search: (prev) => ({
-                    ...prev,
-                    page: completedPageSearch(page + 1).page,
-                  }),
-                })
-              }}
+              busy={completedQuery.isFetching}
+              label="Next page of completed work items"
             >
               Next →
-            </button>
+            </CompletedPageLink>
           </div>
         </nav>
       </CompletedSurface>

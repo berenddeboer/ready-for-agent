@@ -210,16 +210,22 @@ describe("Completed surface routes", () => {
     expect(source).toContain("className={ui.plateMini}")
     expect(source).toContain("className={ui.pager}")
     expect(source).toContain("className={ui.pagerNote}")
-    expect(source).toContain(
-      'aria-label="Previous page of completed work items"',
-    )
-    expect(source).toContain('aria-label="Next page of completed work items"')
+    expect(source).toContain('label="Previous page of completed work items"')
+    expect(source).toContain('label="Next page of completed work items"')
+    expect(source).toContain("aria-label={label}")
     expect(source).toContain("disabled={!hasPreviousPage")
     expect(source).toContain("disabled={!hasNextPage")
     expect(source).toContain("Page {currentPage} of {resolvedTotalPages}")
     expect(source).toContain("rangeStart")
     expect(source).toContain("rangeEnd")
     expect(source).toContain('aria-live="polite"')
+  })
+
+  test("keeps enabled pagination navigable before React attaches handlers", () => {
+    const source = completedSource()
+    expect(source).toContain("function CompletedPageLink(")
+    expect(source).toContain("<Link")
+    expect(source).toContain("page: completedPageSearch(targetPage).page")
   })
 
   test("handles empty, loading, and error states", () => {
