@@ -10,8 +10,8 @@ covers monorepo development of Ready for Agent.
 1. [Bun](https://bun.sh/) (workspace package manager and runtime)
 2. Host tools from the product README: `git`, the selected Agent Backend on
    PATH (`opencode` by default), plus `gh` for GitHub Repositories and `curl`
-   for GitLab Repositories. Authenticate Grok with `grok login` or
-   `XAI_API_KEY` when developing against Grok Build.
+   for GitLab Repositories. Authenticate the Agent Backend per its own
+   documentation.
 3. Optional: `keymaxxer` on PATH, or `KEYMAXXER_ENTRYPOINT` pointing at an
   existing entrypoint (no hardcoded machine path). Not used by Grok Build
   Agent Turns.
@@ -61,9 +61,26 @@ the file with external write tooling (single-process WAL).
 
 # Architecture
 
-This repo is an [Nx monorepo](https://nx.dev/). Your agent will now
+This repo is an [Nx monorepo](https://nx.dev/). Your agent will know
 how to deal with this.
 
 Architecture notes are in
 [ARCHITECTURE.md](ARCHITECTURE.md) and domain language in
 [CONTEXT.md](CONTEXT.md).
+
+## Repo map
+
+- `apps/harness` — the product: web UI plus backend server
+  (`bunx nx run harness:dev` boots this)
+- `apps/ready-for-agent` — the published npm CLI wrapping the harness
+- `apps/keymaxxer-sidecar` — optional secrets sidecar
+- `packages/` — the libraries; start with:
+  - `work-item-lifecycle` — the lifecycle engine driving Work Items
+  - `lifecycle-model` — states and transitions generated from `ontology/`
+  - `agent-backend` plus `opencode`, `codex`, `grok`, `claude` — Agent
+    Backend adapters
+  - `github-service`, `gitlab-service` — Forge integrations
+  - `graphql-schema`, `graphql-api`, `graphql-client` — the GraphQL
+    contract, server, and generated client
+- `ontology/` — the machine-readable domain model, source of truth for
+  the Work Item lifecycle

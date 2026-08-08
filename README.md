@@ -1,77 +1,166 @@
 # Ready for Agent: Clanker Harness for 150+ PRs a week
 
-Create issues in GitHub and use this harness to implement them, review
-the code, create a PR, and merge the PR. It supports a different way
-of working: you talk to your agent to create GitHub issues, and this
-harness works on them.
-
-It's a loop based around issues labelled with `ready-for-agent`. The
-harness will only show these, you select the ones you want to work on,
-and it autonomously completes the task using your preferred coding
-agent. You can even select a parent issue, and ready-for-agent will
-implement all child issues.
+Ready for Agent turns GitHub (or GitLab) issues into merged pull
+requests. You create issues and label them `ready-for-agent`; the
+harness hands each one to your preferred coding agent, which
+implements it, reviews the code, opens a PR, and merges when
+allowed. You design, you architect, you verify where needed — the
+harness removes the babysitting between issue and merged PR.
 
 <img src="ready-for-agent.png" alt="Ready for Agent" width="90%" />
 
-It very much supports a HITL workflow (Human in the Loop): you design,
-you architect, you verify where needed.
+Watch [the introduction
+video](https://www.youtube.com/watch?v=TK1OeQZswiQ) to see the tool in
+action.
 
-It works very well if you follow [the Matt Pocock
-workflow](https://www.youtube.com/watch?v=M6mYodf0dJM): start a
-grilling session, create a specification (`/to-spec`), then create
-tickets (`/to-tickets`). These tickets will be labeled with
-ready-for-agent, and show up immediately in the harness. Install his
-[Skills for Real Engineers](https://github.com/mattpocock/skills) to
-get started with this kind of workflow.
+## Quick start
+
+1. Install the prerequisites and have them on your PATH:
+   [git](https://git-scm.com/), the [GitHub CLI
+   (`gh`)](https://cli.github.com/), and at least one coding agent —
+   [OpenCode](https://opencode.ai/),
+   [Codex](https://github.com/openai/codex), [Grok
+   Build](https://docs.x.ai/), or [Claude
+   Code](https://docs.anthropic.com/en/docs/claude-code) —
+   authenticated per its own documentation.
+2. Start the harness:
+
+   ```bash
+   npx ready-for-agent@latest
+   ```
+
+   Or install it once with `npm install -g ready-for-agent` and run
+   `ready-for-agent`. The UI opens at
+   [http://127.0.0.1:6056/](http://127.0.0.1:6056/). On first run it
+   takes you to Settings to pick your coding agent and a default build
+   model and effort (thinking).
+
+3. Add a repo you have cloned locally (the UI prompts for this too):
+
+   ```bash
+   ready-for-agent add /path/to/local/repo
+   ```
+
+4. Label a GitHub issue `ready-for-agent`. It shows up in the UI
+   shortly. By default only issues you authored are listed — see
+   [Troubleshooting](#troubleshooting).
+5. Open the issue's kebab menu and pick **Implement now** to run it
+   end to end — implement, review, PR — or **Implement locally** to
+   stop before the PR and inspect the work yourself.
+
+## Requirements
+
+A supported platform: Linux, macOS, or Windows (x64 or arm64).
+
+**Always required on PATH** (start fails fast if missing):
+
+- [git](https://git-scm.com/)
+
+**Forge-specific tools** (required only when at least one repository
+uses that Forge):
+
+- [GitHub CLI (`gh`)](https://cli.github.com/) for GitHub repositories
+- [curl](https://curl.se/) for GitLab repositories. `glab` is an
+  optional ambient credential source, not a required host tool.
+
+**Coding agents** are soft prerequisites: they are inspected after
+the harness starts and never block the process or UI from starting. A
+missing or broken selected backend (default is OpenCode) is shown as
+**Agent Backend Unavailable**; open Settings to choose another
+backend, reinstall the CLI, or use Recheck after fixing it:
+
+- [OpenCode](https://opencode.ai/) (`opencode` on PATH)
+- [Codex](https://github.com/openai/codex) (`codex` on PATH)
+- [Grok Build](https://docs.x.ai/) (`grok` on PATH)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+  (`claude` on PATH)
+
+We assume your coding agent is installed and authenticated — see its
+own documentation. To run Claude Code through Amazon Bedrock instead
+of a first-party login, see
+[docs/claude-code-amazon-bedrock.md](docs/claude-code-amazon-bedrock.md).
+
+You also need:
+
+- A repo cloned locally, either "normally" or as a bare clone
+  (recommended). Install the [git-bare-worktree
+  skill](https://github.com/berenddeboer/git-bare-worktree) and let
+  your agent create this setup for you: `npx skills@latest add
+  berenddeboer/git-bare-worktree --global`
+- Ideally, a CI pipeline with automated build/test and an AI code
+  review.
+
+The harness is designed to run on your local laptop. This avoids
+cloud costs — you already paid for an extensive machine — and your
+machine is already set up for your repo, so you avoid the setup
+issues that come with running compute in the cloud.
+
+## Features
+
+- Four interchangeable coding agents — OpenCode, Codex, Grok Build,
+  and Claude Code — switchable instance-wide.
+- Per-repo agent and model overrides: expensive models for hard
+  repos, cheaper ones for the rest.
+- Auto-merge gated by an AI risk assessment: only low-risk PRs merge
+  unattended, higher risk still requires human review.
+- "Implement locally" to inspect the work before any commit or PR
+  exists.
+- Select a parent issue and it implements all child issues.
+- Runs on your laptop against your existing local clone — no cloud
+  spend, no environment drift.
+- Works with your existing Claude (or other) subscription rather than
+  metered API billing.
+- GitHub and GitLab support.
+- Human in the loop where you want it: you design, you architect, you
+  verify.
+
+## How it works
+
+The harness is a loop around issues labelled `ready-for-agent`: it
+only shows those, you pick the ones to work on, and it autonomously
+completes them using your selected coding agent. For each issue it
+creates a fresh worktree, installs packages, and asks the headless
+agent to implement the issue, review the code, create a PR, and merge
+if allowed.
 
 Steps 1 to 3 are you. Steps 4 and 5 are the harness.
 
 <img src="docs/way-of-working.png" alt="Way of Working" width="40%" />
 
-But as long as an issue has the `ready-for-agent` label, this tool can
-work on it.
+The goal of this clanker harness is to get you to that 150+ PRs a
+week nirvana. It does that by removing the time spent babysitting an
+agent and guiding it through the implementation, review, commit, and
+PR status-check stages.
 
-## How it works
+It works very well if you follow [the Matt Pocock
+workflow](https://www.youtube.com/watch?v=M6mYodf0dJM): start a
+grilling session, create a specification (`/to-spec`), then create
+tickets (`/to-tickets`). These tickets will be labeled with
+`ready-for-agent`, and show up immediately in the harness. Install his
+[Skills for Real Engineers](https://github.com/mattpocock/skills) to
+get started with this kind of workflow.
 
-The harness creates a new worktree, installs packages, and asks a
-selectable headless Agent Backend ([OpenCode](https://opencode.ai/),
-[Codex](https://github.com/openai/codex), [Grok
-Build](https://docs.x.ai/), or [Claude
-Code](https://docs.anthropic.com/en/docs/claude-code)) to implement the
-issue, review the issue, create a PR, and merge if allowed.
+But as long as an issue has the `ready-for-agent` label, this tool
+can work on it.
 
-The goal of this clanker harness is to get you to that 25+ PRs merged
-a day nirvana. It does that by removing the time spent babysitting an
-agent and guiding it through the implementation, review, commit, and PR
-status-check stages.
+### Working on issues
 
-See [the introduction
-video](https://www.youtube.com/watch?v=TK1OeQZswiQ) to see the tool in
-action.
+Currently the harness does not automatically pick issues to work
+on. Click on the kebab menu and implement an issue end to end via
+"Implement now".
 
-# Usage
+You can configure your repo to automatically merge the PR. Default is
+for human review to take place. If auto-merge is enabled, the harness
+will ask the AI about the risk of auto-merge. Only low risk PRs are
+auto-merged, higher risk still require human review.
 
-Requires a supported platform: Linux, macOS, or Windows (x64 or arm64).
+Pick the "Implement locally" option to implement the issue in the new
+worktree, but without creating a PR yet. This allows you to test and
+verify before a commit or PR exists.
 
-Run:
+## Configuration
 
-```bash
-npx ready-for-agent@latest
-```
-
-Or install the package and use the `ready-for-agent` command:
-
-```bash
-npm install -g ready-for-agent
-ready-for-agent
-```
-
-This opens the UI in the browser
-([http://127.0.0.1:6056/](http://127.0.0.1:6056/)). This shows the
-configured state. If you open this for the first time, you will be
-prompted to set a default build model and effort (thinking), and configure repos.
-
-## Stop opening a browser window
+### Stop opening a browser window
 
 Disable opening a browser window with:
 
@@ -81,7 +170,7 @@ ready-for-agent --no-open
 NO_BROWSER=1 ready-for-agent
 ```
 
-## Use a different port
+### Use a different port
 
 Use a different port than 6056:
 
@@ -89,123 +178,86 @@ Use a different port than 6056:
 PORT=7000 ready-for-agent
 ```
 
-## Configuring a repo
-
-If you open ready-for-agent without any repo configured, it will prompt. Add with:
-
-```bash
-ready-for-agent add /path/to/local/repo
-```
-
-If you use a non-default port:
+When adding a repo against a non-default port:
 
 ```bash
 READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
   ready-for-agent add /path/to/local/repo
 ```
 
-## Working on issues
+### Per-repo settings
 
-Currently the harness does not automatically pick issues to work
-on. Click on the kebab menu and implement this end to end via
-"Implement now".
+Each repo can override the harness-wide coding agent and build/review
+models, and enable auto-merge. This allows you to configure more
+expensive models for more complex code, and cheaper models for
+others.
 
-You can configure your repo to automatically merge the PR. Default is
-for human review to take place. If auto-merge is enabled, the harness
-will ask the AI about the risk of auto-merge. Only low risk PRs are
-auto-merged, higher risk still require human review.
-
-Pick the "Implement locally" option to implement the issue in the new
-worktree, but without creating a PR yet. This allows you to test and verify.
-
-## Assumptions
-
-- You use GitHub or GitLab.
-- You have a repo cloned locally, either "normally" or as a bare clone
-  (recommended). Install the [git-bare-worktree
-  skill](https://github.com/berenddeboer/git-bare-worktree) and let
-  your agent create this setup for you: `npx skills@latest add
-  berenddeboer/git-bare-worktree --global`
-- The harness is designed to run on your local laptop. This avoids
-  cloud costs, and you already paid for an extensive
-  machine. Secondly, your machine will be set up for your repo, so we
-  avoid the setup issues you get with running compute in the cloud.
-- Ideally, you have set up a CI pipeline with automated build/test and an AI code review.
-
-# Requirements
-
-**Always required on PATH** (start fails fast if missing):
-
-1. [git](https://git-scm.com/)
-
-**Forge-specific tools** (required only when at least one Repository uses that
-Forge):
-
-2. [GitHub CLI (`gh`)](https://cli.github.com/) for GitHub Repositories
-3. [curl](https://curl.se/) for GitLab Repositories. `glab` is an optional
-   ambient credential source, not a required host tool.
-
-**Agent Backend executables** are soft prerequisites. They are inspected after
-the Harness starts and never block the process or UI from starting. A missing or
-broken selected backend is shown as **Agent Backend Unavailable**; open Settings
-to choose another backend, reinstall the CLI, or use Recheck after fixing it:
-
-4. [OpenCode](https://opencode.ai/) (`opencode` on PATH)
-5. [Codex](https://github.com/openai/codex) (`codex` on PATH)
-6. [Grok Build](https://docs.x.ai/) (`grok` on PATH)
-7. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on
-   PATH)
-
-Authenticate Grok Build with `grok login` or `XAI_API_KEY` before Recheck /
-Agent Turns. Harness-launched Grok processes disable auto-update for that
-session (`--no-auto-update` / `GROK_DISABLE_AUTOUPDATER`). Grok Build Agent
-Turns do not integrate Keymaxxer; Session Telemetry is live-read from on-disk
-Grok session files under `$GROK_HOME/sessions` (default `~/.grok`). Authenticate
-Claude Code with `claude auth login` or `ANTHROPIC_API_KEY` before Recheck /
-Agent Turns. For **Amazon Bedrock**, set `CLAUDE_CODE_USE_BEDROCK=1` plus AWS
-credentials/region on the harness process instead of first-party login; see
-[Claude Code on Amazon Bedrock](docs/claude-code-amazon-bedrock.md) (Ready vs
-Unavailable, **Claude Code Bedrock** Settings label, **Amazon Bedrock** provider
-status, strict profile select from the bundled AWS SDK—not the AWS CLI—and
-optional env pins for first-party aliases). Harness-launched Claude processes
-disable auto-update for that session (`DISABLE_AUTOUPDATER`). Claude Code Agent
-Turns do not integrate Keymaxxer; Session Telemetry is unsupported in v1.
-Opt-in live adapter tests use `GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1` /
-`CODEX_INTEGRATION=1` / `CLAUDE_INTEGRATION=1` / `BEDROCK_INTEGRATION=1`
-(list-only; never invokes a model); normal CI does not need paid model
-credentials.
-
-# KeyMaxxer
+### KeyMaxxer
 
 Ready for Agent supports
 [keymaxxer](https://github.com/glommer/keymaxxer), but does not
 require it. With KeyMaxxer secrets stay encrypted, and are only
 granted to agents when they need them.
 
-Keymaxxer is automatically enabled if keymaxxer is in your path. Disable with:
+Keymaxxer is automatically enabled if keymaxxer is in your path.
+Disable with:
 
-```
+```bash
 KEYMAXXER_ENABLED=false npx ready-for-agent@latest
 ```
 
-# Frequently Asked Questions
+### Application data
 
-1. What coding cli agents are supported?
+Product state defaults to the platform data directory:
 
-Yes. Settings can select [OpenCode](https://opencode.ai/),
-[Codex](https://github.com/openai/codex), [Grok Build](https://docs.x.ai/), or
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) as the
-instance-wide Agent Backend. The change hot-activates on Save when no Work
-Items are unfinished (including Needs Human). Model catalogs and effort
-(thinking) options are backend-local, and build/review prefs are remembered per
-backend. Model selection is catalog-only for every backend: build and review
-models are picked from the Agent Backend's current catalog, never typed in.
+- Linux: `$XDG_DATA_HOME/ready-for-agent/` or `~/.local/share/ready-for-agent/`
+- macOS: `~/Library/Application Support/ready-for-agent/`
+
+The SQLite database is `ready-for-agent.db` in that directory. Set
+`SQLITE_DATABASE_PATH` to use another file. Stop the harness
+completely before opening the database with external write tooling
+(single-writer SQLite).
+
+## Troubleshooting
+
+### Startup fails with "Required host tools are missing from PATH"
+
+Install the listed tools. Only `git` and the Forge tool for your
+repositories (`gh` for GitHub, `curl` for GitLab) block startup. A
+missing coding agent never does — it shows as Unavailable instead
+(see below).
+
+### A labelled issue does not show up
+
+- The issue must carry the `ready-for-agent` label — the harness only
+  shows those.
+- By default only issues **you** authored are listed. Enable "Include
+  all Issue Authors" in the repo settings to include everyone's.
+
+### The coding agent shows as Unavailable
+
+Its executable is missing from PATH, or it is not authenticated. Fix
+that and use Recheck in Settings, or pick another backend there.
+
+## Frequently Asked Questions
+
+1. What coding CLI agents are supported?
+
+[OpenCode](https://opencode.ai/),
+[Codex](https://github.com/openai/codex), [Grok
+Build](https://docs.x.ai/), and [Claude
+Code](https://docs.anthropic.com/en/docs/claude-code). Settings
+selects the instance-wide Agent Backend; the change hot-activates on
+Save when no Work Items are unfinished. Model catalogs and effort
+(thinking) options are backend-local, and build/review preferences
+are remembered per backend. Models are always picked from the
+backend's current catalog, never typed in.
 
 2. Does the harness support a Forge other than GitHub?
 
-Yes. GitLab Repository identity, Issue reconciliation, and local Agent Turns
-through Review are supported. GitLab Pull Request lifecycle operations are
-being delivered in later phases.
+Yes. GitLab repository identity, issue reconciliation, and local
+agent work through review are supported. GitLab pull request
+lifecycle operations are being delivered in later phases.
 
 3. Can I use my Claude subscription?
 
@@ -214,70 +266,65 @@ permissible usage.
 
 4. Can I run Claude Code through Amazon Bedrock?
 
-Yes. Export `CLAUDE_CODE_USE_BEDROCK=1` and your AWS credentials/region on the
-harness process, select **Claude Code Bedrock**, then Recheck. Status shows
-**Claude Code · Amazon Bedrock**. In Bedrock mode Settings offer active
-Anthropic system-defined and application inference profiles discovered from AWS
-via the bundled SDK (no AWS CLI host tool; friendly names in Settings; ID/ARN
-stored and passed to Claude Code). First-party Claude Code offers the static
-alias catalog (`haiku`, `sonnet`, `opus`, `fable`) and never calls AWS. A model
-stored under the other provider mode is kept and shown as unavailable until you
-pick a current one — it is never rewritten or translated.
-Discovery failures leave Claude Ready with a warning but block Save until a
-discovered profile is available after Recheck; listing does not prove
-InvokeModel access. Details:
+Yes. See
 [docs/claude-code-amazon-bedrock.md](docs/claude-code-amazon-bedrock.md).
 
 5. Can I implement something locally, and then check myself?
 
-Yes, pick "Implement locally" from the kebab menu. Everything stays
-local, and no commit is made.
+Yes — pick "Implement locally" from the kebab menu; see [Working on
+issues](#working-on-issues).
 
-6. Can I specify a different model or coding agent per repo?
+6. Can I use a different model or coding agent per repo?
 
-Yes, check the repo settings. This allows you to configure more
-expensive models for more complex code, and cheaper models for others.
+Yes — see [Per-repo settings](#per-repo-settings).
 
-# Architecture
+## Glossary
 
-## The Forge is source of truth
+- **Clanker** — affectionate slang for a robot; here, the coding
+  agent doing the work.
+- **Harness** — this tool: the deterministic loop that steers
+  clankers from issue to merged PR.
+- **Forge** — the code-hosting platform for a repository: GitHub or
+  GitLab.
+- **Agent Backend** — the coding-agent CLI the harness drives:
+  OpenCode, Codex, Grok Build, or Claude Code.
+- **Work Item** — one attempt to complete an issue through the work
+  lifecycle, from implementation to merged PR.
+- **Agent Turn** — one unattended invocation of the coding agent
+  within a Work Item.
+- **Needs Human** — a Work Item state where the harness cannot
+  continue autonomously and hands back to you, recording why.
+- **Recheck** — a Settings action that revalidates a coding agent and
+  refreshes its model catalog.
+- **Metaharness** — a harness that steers agent harnesses; see
+  [metaharness.tools](https://metaharness.tools/).
 
-Issues on the configured Repository Forge (GitHub/GitLab) remain the
-source of truth; the local database is book-keeping. Style and
-guidelines come from the target repository—this harness steers an
-agent swarm on `ready-for-agent` labeled work.
+The full domain language lives in [CONTEXT.md](CONTEXT.md), derived
+from a versioned ontology under [`ontology/`](ontology/README.md).
 
-## GraphQL API
+## Architecture
 
-The backend serves a GraphQL API at `http://127.0.0.1:6056/graphql`.
-
-## Ontology-based domain model
-
-The Work Item lifecycle is driven by a machine-readable ontology under
-`ontology/` (Turtle + SHACL), not by ad-hoc enums scattered through the
-code. States, legal transitions, guards, and glossary terms are declared
-there; TypeScript types, GraphQL enums, database columns, and the runtime
-transition check are generated from or validated against it. Agents propose
-work; the ontology defines what a state means and which moves are legal.
-See [ontology/README.md](ontology/README.md) and
+Issues on the Forge remain the source of truth; the local SQLite
+database is book-keeping. The backend serves a GraphQL API at
+`http://127.0.0.1:6056/graphql`, and the Work Item lifecycle is
+driven by a machine-readable ontology rather than ad-hoc enums.
+Details in [ARCHITECTURE.md](ARCHITECTURE.md),
+[CONTEXT.md](CONTEXT.md), [ontology/README.md](ontology/README.md),
+and
 [docs/why-agentic-systems-need-ontologies.md](docs/why-agentic-systems-need-ontologies.md).
 
-## Application data
-
-Product state defaults to the platform data directory:
-
-- Linux: `$XDG_DATA_HOME/ready-for-agent/` or `~/.local/share/ready-for-agent/`
-- macOS: `~/Library/Application Support/ready-for-agent/`
-
-The SQLite database is `ready-for-agent.db` in that directory. Set
-`SQLITE_DATABASE_PATH` to use another file. Stop the harness completely before
-opening the database with external write tooling (single-writer SQLite).
-
-# Contributing
+## Contributing
 
 Contributions welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-# Related work
+## License
 
-- Inspired by [this blog post](https://lovable.dev/blog/85000-in-tokens-later-scaling-agentic-coding-at-lovable) from Alexander at Lovable
-- ready-for-agent is an example of a [metaharness](https://metaharness.tools/).
+[MIT](LICENSE).
+
+## Related work
+
+- Inspired by [this blog
+  post](https://lovable.dev/blog/85000-in-tokens-later-scaling-agentic-coding-at-lovable)
+  from Alexander at Lovable
+- ready-for-agent is an example of a
+  [metaharness](https://metaharness.tools/).
