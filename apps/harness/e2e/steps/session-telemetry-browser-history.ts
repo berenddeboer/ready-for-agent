@@ -220,14 +220,14 @@ When(
 )
 
 When(
-  "I open the unsupported Session Telemetry path directly",
+  "I open the Codex missing Session Telemetry path directly",
   async ({ page }) => {
     await installSessionQueryRoute(page)
     await page.goto(
-      `/session/${TELEMETRY_FIXTURE.unsupportedWorkItemId}/telemetry`,
+      `/session/${TELEMETRY_FIXTURE.codexMissingWorkItemId}/telemetry`,
     )
     await expect(page).toHaveURL(
-      telemetryPathFor(TELEMETRY_FIXTURE.unsupportedWorkItemId),
+      telemetryPathFor(TELEMETRY_FIXTURE.codexMissingWorkItemId),
     )
     await expect(sessionUsageDialog(page)).toBeVisible({ timeout: 30_000 })
   },
@@ -383,19 +383,6 @@ Then(
     })
     await expect(
       dialog.getByText(/no longer has this Session locally/i),
-    ).toBeVisible({ timeout: 30_000 })
-  },
-)
-
-Then(
-  "the Session usage dialog shows the unsupported Session Telemetry state",
-  async ({ page }) => {
-    const dialog = sessionUsageDialog(page)
-    await expect(dialog.getByText("Loading usage…")).toHaveCount(0, {
-      timeout: 30_000,
-    })
-    await expect(
-      dialog.getByText(/does not provide Session Telemetry/i),
     ).toBeVisible({ timeout: 30_000 })
   },
 )

@@ -28,11 +28,11 @@ export const TELEMETRY_FIXTURE = {
   missingSessionId: "ses_e2e_fixture_missing",
   missingSessionIssueNumber: 101,
   missingSessionIssueId: "issue-01KZD5SESS10NTE0FXX0000001",
-  /** Codex Build Work Item → UNSUPPORTED Session Telemetry. */
-  unsupportedWorkItemId: "wi-01KZD5SESS10NTE0FXX0000002",
-  unsupportedSessionId: "ses_e2e_fixture_unsupported",
-  unsupportedIssueNumber: 102,
-  unsupportedIssueId: "issue-01KZD5SESS10NTE0FXX0000002",
+  /** Codex Build Work Item with a non-local Session id → MISSING telemetry. */
+  codexMissingWorkItemId: "wi-01KZD5SESS10NTE0FXX0000002",
+  codexMissingSessionId: "ses_e2e_fixture_codex_missing",
+  codexMissingIssueNumber: 102,
+  codexMissingIssueId: "issue-01KZD5SESS10NTE0FXX0000002",
   /**
    * Complete Work Item for the Completed archive surface (issue #843).
    * Distinct Session id so openers are unambiguous when both surfaces list
@@ -182,12 +182,12 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        id, repository_id, issue_number, title, body, url, state,
        github_created_at, has_children, created_at, updated_at
      ) VALUES (
-       ${sqlLiteral(TELEMETRY_FIXTURE.unsupportedIssueId)},
+       ${sqlLiteral(TELEMETRY_FIXTURE.codexMissingIssueId)},
        ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
-       ${TELEMETRY_FIXTURE.unsupportedIssueNumber},
-       'E2E Session Telemetry unsupported',
+       ${TELEMETRY_FIXTURE.codexMissingIssueNumber},
+       'E2E Codex Session Telemetry missing',
        '',
-       ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${TELEMETRY_FIXTURE.unsupportedIssueNumber}`)},
+       ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${TELEMETRY_FIXTURE.codexMissingIssueNumber}`)},
        'OPEN',
        ${now},
        0,
@@ -233,16 +233,16 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        state, state_ready_at, paused, holds_worker_slot, session_id,
        created_at, updated_at
      ) VALUES (
-       ${sqlLiteral(TELEMETRY_FIXTURE.unsupportedWorkItemId)},
+       ${sqlLiteral(TELEMETRY_FIXTURE.codexMissingWorkItemId)},
        ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
-       ${TELEMETRY_FIXTURE.unsupportedIssueNumber},
-       'E2E Session Telemetry unsupported',
+       ${TELEMETRY_FIXTURE.codexMissingIssueNumber},
+       'E2E Codex Session Telemetry missing',
        'codex',
        'implement',
        ${now},
        1,
        0,
-       ${sqlLiteral(TELEMETRY_FIXTURE.unsupportedSessionId)},
+       ${sqlLiteral(TELEMETRY_FIXTURE.codexMissingSessionId)},
        ${now},
        ${now}
      );`,

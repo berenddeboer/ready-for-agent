@@ -1,30 +1,47 @@
 import { Effect, Layer } from "effect"
 import {
   AGENT_BACKEND_IDS,
+  type SessionTelemetry,
   SessionTelemetryProvider,
-  unsupportedSessionTelemetry,
 } from "@ready-for-agent/agent-backend"
+import {
+  type CodexSession,
+  CodexSessionStore,
+  CodexSessionStoreLive,
+  type CodexSessionStoreOptions,
+} from "./session-store.js"
 
 const CODEX_BACKEND = {
   id: AGENT_BACKEND_IDS.codex,
   label: "Codex Build",
 } as const
 
-/**
- * Codex Build declares Session Telemetry unsupported (ADR 0041 v1).
- * Provides a provider that always reports `unsupported` so composition roots
- * can wire Codex like other backends without a null telemetry branch.
- *
- * Accepts an unused options bag so the export is a Layer factory matching
- * Grok/OpenCode call sites (`CodexSessionTelemetryLive()`).
- */
+const toSessionTelemetry = (session: CodexSession): SessionTelemetry => ({
+  id: session.id,
+  availability: session.availability,
+  backend: CODEX_BACKEND,
+  model: session.model,
+  tokens: session.tokens,
+  cost: session.cost,
+  createdAt: session.createdAt,
+  updatedAt: session.updatedAt,
+})
+
+/** Expose Codex-owned rollout telemetry through the generic provider. */
 export const CodexSessionTelemetryLive = (
-  _options: Record<string, never> = {},
-): Layer.Layer<SessionTelemetryProvider> =>
-  Layer.succeed(
+  options: CodexSessionStoreOptions = {},
+): Layer.Layer<SessionTelemetryProvider> => {
+  const storeLayer = CodexSessionStoreLive(options)
+  const providerLayer = Layer.effect(
     SessionTelemetryProvider,
-    SessionTelemetryProvider.of({
-      getSession: (sessionId) =>
-        Effect.succeed(unsupportedSessionTelemetry(sessionId, CODEX_BACKEND)),
+    Effect.gen(function* () {
+      const store = yield* CodexSessionStore
+      return SessionTelemetryProvider.of({
+        getSession: (sessionId) =>
+          store.getSession(sessionId).pipe(Effect.map(toSessionTelemetry)),
+      })
     }),
-  )
+  ).pipe(Layer.provide(storeLayer))
+
+  return providerLayer
+}
