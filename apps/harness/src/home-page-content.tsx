@@ -2871,6 +2871,21 @@ function RepositoryIssueRow({
     },
     onSuccess: onImplementSuccess,
   })
+  const implementLocally = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        implementLocally: {
+          __args: {
+            repositoryId: issue.repositoryId,
+            issueNumber: issue.issueNumber,
+          },
+          ...workItemFields,
+        },
+      })
+      return result.implementLocally
+    },
+    onSuccess: onImplementSuccess,
+  })
   const queueIssue = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -2886,7 +2901,27 @@ function RepositoryIssueRow({
     },
     onSuccess: onImplementSuccess,
   })
-  const implementPending = implementNow.isPending || queueIssue.isPending
+  const implementPending =
+    implementNow.isPending || implementLocally.isPending || queueIssue.isPending
+  const startImplementNow = () => {
+    implementLocally.reset()
+    queueIssue.reset()
+    implementNow.mutate()
+  }
+  const startImplementLocally = () => {
+    implementNow.reset()
+    queueIssue.reset()
+    implementLocally.mutate()
+  }
+  const startQueue = () => {
+    implementNow.reset()
+    implementLocally.reset()
+    queueIssue.mutate()
+  }
+  const runMenuAction = ({ action }: { readonly action: () => void }) => {
+    setMenuOpen(false)
+    action()
+  }
 
   useEffect(() => {
     if (!menuOpen) return
@@ -2922,10 +2957,7 @@ function RepositoryIssueRow({
                 className={ui.repoIssueImplementBtn}
                 aria-label={`Implement issue #${issue.issueNumber}`}
                 disabled={implementPending}
-                onClick={() => {
-                  queueIssue.reset()
-                  implementNow.mutate()
-                }}
+                onClick={startImplementNow}
               >
                 <svg
                   aria-hidden="true"
@@ -2950,7 +2982,7 @@ function RepositoryIssueRow({
           {issue.blockedBy.length > 0 && (
             <span className={cx(ui.stamp, ui.stampBlocked)}>Blocked</span>
           )}
-          {canQueue && (
+          {(canImplement || canQueue) && (
             <span className="relative" data-issue-menu={issue.id}>
               <button
                 type="button"
@@ -2968,19 +3000,47 @@ function RepositoryIssueRow({
               </button>
               {menuOpen && (
                 <div role="menu" className={cx(ui.menuPanel, "min-w-44")}>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={ui.menuItem}
-                    disabled={implementPending}
-                    onClick={() => {
-                      setMenuOpen(false)
-                      implementNow.reset()
-                      queueIssue.mutate()
-                    }}
-                  >
-                    {queueIssue.isPending ? "Queueing..." : "Queue"}
-                  </button>
+                  {canImplement && (
+                    <>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={ui.menuItem}
+                        disabled={implementPending}
+                        onClick={() =>
+                          runMenuAction({ action: startImplementNow })
+                        }
+                      >
+                        {implementNow.isPending
+                          ? "Starting..."
+                          : "Implement now"}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={ui.menuItem}
+                        disabled={implementPending}
+                        onClick={() =>
+                          runMenuAction({ action: startImplementLocally })
+                        }
+                      >
+                        {implementLocally.isPending
+                          ? "Starting..."
+                          : "Implement locally"}
+                      </button>
+                    </>
+                  )}
+                  {canQueue && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={ui.menuItem}
+                      disabled={implementPending}
+                      onClick={() => runMenuAction({ action: startQueue })}
+                    >
+                      {queueIssue.isPending ? "Queueing..." : "Queue"}
+                    </button>
+                  )}
                 </div>
               )}
             </span>
@@ -3011,7 +3071,9 @@ function RepositoryIssueRow({
           onOpenSession={onOpenSession}
         />
       )}
-      {(implementNow.isError || queueIssue.isError) && (
+      {(implementNow.isError ||
+        implementLocally.isError ||
+        queueIssue.isError) && (
         <Banner
           className={cx(ui.bannerCompact, ui.repoIssueError)}
           tone="alarm"

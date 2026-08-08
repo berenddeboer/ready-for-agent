@@ -125,13 +125,46 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     const implementAction = sliceBetweenMarkers(
       issues,
       "{canImplement && (",
-      "{canQueue && (",
+      "{(canImplement || canQueue) && (",
     )
-    expect(implementAction).toContain("queueIssue.reset()")
-    expect(implementAction).toContain("implementNow.mutate()")
+    expect(implementAction).toContain("onClick={startImplementNow}")
     expect(implementAction).not.toContain('aria-haspopup="menu"')
     expect(implementAction).not.toContain('role="menu"')
     expect(implementAction).not.toContain("Implement locally")
+    const actionHandlers = sliceBetweenMarkers(
+      issues,
+      "const startImplementNow = () => {",
+      "useEffect(() => {",
+    )
+    expect(actionHandlers).toContain("implementLocally.reset()")
+    expect(actionHandlers).toContain("queueIssue.reset()")
+    expect(actionHandlers).toContain("implementNow.mutate()")
+    expect(actionHandlers).toContain("implementLocally.mutate()")
+    expect(actionHandlers).toContain("queueIssue.mutate()")
+    expect(actionHandlers).toContain("const runMenuAction =")
+    const completeMenuStart = issues.indexOf("{(canImplement || canQueue) && (")
+    expect(completeMenuStart).toBeGreaterThan(-1)
+    const completeMenu = issues.slice(completeMenuStart)
+    expect(completeMenu).toContain("{canImplement && (")
+    expect(completeMenu).toContain("Implement now")
+    expect(completeMenu).toContain("Implement locally")
+    expect(completeMenu).toContain(
+      "runMenuAction({ action: startImplementNow })",
+    )
+    expect(completeMenu).toContain(
+      "runMenuAction({ action: startImplementLocally })",
+    )
+    expect(completeMenu).toContain("{canQueue && (")
+    expect(completeMenu).toContain("runMenuAction({ action: startQueue })")
+    expect(completeMenu).toContain(
+      'queueIssue.isPending ? "Queueing..." : "Queue"',
+    )
+    expect(issues.indexOf("ui.repoIssueImplementBtn")).toBeLessThan(
+      issues.indexOf("ui.repoIssueActions"),
+    )
+    expect(issues.indexOf("ui.repoIssueActions")).toBeLessThan(
+      issues.indexOf("{(canImplement || canQueue) && ("),
+    )
     expect(issues).toContain("ui.repoIssueAuthor")
     expect(issues).toContain("ui.stamp")
     expect(issues).toContain("ui.stampClosed")
