@@ -269,7 +269,7 @@ permissible usage.
 Yes. See
 [docs/claude-code-amazon-bedrock.md](docs/claude-code-amazon-bedrock.md).
 
-5. Can I implement something locally, and then check myself?
+5. Can I implement something locally, and then verify the work myself?
 
 Yes — pick "Implement locally" from the kebab menu; see [Working on
 issues](#working-on-issues).
@@ -277,6 +277,15 @@ issues](#working-on-issues).
 6. Can I use a different model or coding agent per repo?
 
 Yes — see [Per-repo settings](#per-repo-settings).
+
+7. Does ready-for-agent help me to create GitHub issues?
+
+No, this tool deliberately starts with existing issues. Creating these
+issues is a very different scope. It falls into the category of a
+software factory. [Victor Savkin](https://x.com/victorsavkin) has done
+a very nice [write-up of what these tools
+do](https://x.com/victorsavkin/status/2085381771516846093): they start
+with finding work, they are not explorer work or creating work.
 
 ## Glossary
 
