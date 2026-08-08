@@ -230,7 +230,13 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "repoIssuesEmpty:",
       "repoIssuesUnrefreshed:",
     )
+    // Empty guidance is one mono notch above meta chrome (issue #929).
+    expect(emptyStyle).toContain("text-[0.72rem]")
+    expect(emptyStyle).not.toContain("text-[0.68rem]")
     expect(emptyStyle).not.toContain("uppercase")
+    // Inline ready-for-agent chip mid-aligns with surrounding sentence.
+    expect(ui).toMatch(/guidanceCode:[\s\S]*?align-middle/)
+    expect(ui).not.toMatch(/guidanceCode:[\s\S]*?align-baseline/)
     expect(ui).toMatch(/repoIssuesUnrefreshed:[\s\S]*?uppercase/)
   })
 

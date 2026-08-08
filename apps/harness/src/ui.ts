@@ -1138,7 +1138,7 @@ export const ui = {
     "m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[0.9rem] font-normal tracking-[0.01em] text-ink",
 
   guidanceCode:
-    "inline-block max-w-full overflow-x-auto border-[1.5px] border-ink bg-paper px-[0.4rem] py-[0.18rem] align-baseline font-mono text-[0.78rem] font-medium text-ink",
+    "inline-block max-w-full overflow-x-auto border-[1.5px] border-ink bg-paper px-[0.4rem] py-[0.18rem] align-middle font-mono text-[0.78rem] font-medium text-ink",
 
   repoIssues: "mt-[1.1rem]",
 
@@ -1150,7 +1150,7 @@ export const ui = {
   repoIssuesList: "m-0 grid list-none gap-0 p-0",
 
   repoIssuesEmpty:
-    "m-0 font-mono text-[0.68rem] tracking-[0.08em] text-ink-faint",
+    "m-0 font-mono text-[0.72rem] tracking-[0.08em] text-ink-faint",
 
   repoIssuesUnrefreshed:
     "m-0 font-mono text-[0.68rem] tracking-[0.08em] uppercase text-ink-faint",
