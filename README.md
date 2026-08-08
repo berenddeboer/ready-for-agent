@@ -60,8 +60,8 @@ A supported platform: Linux, macOS, or Windows (x64 or arm64).
 uses that Forge):
 
 - [GitHub CLI (`gh`)](https://cli.github.com/) for GitHub repositories
-- [curl](https://curl.se/) for GitLab repositories. `glab` is an
-  optional ambient credential source, not a required host tool.
+- [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) for GitLab repositories.
+  Authenticate `glab` for each repository's Forge Host.
 
 **Coding agents** are soft prerequisites: they are inspected after
 the harness starts and never block the process or UI from starting. A
@@ -223,7 +223,7 @@ completely before opening the database with external write tooling
 ### Startup fails with "Required host tools are missing from PATH"
 
 Install the listed tools. Only `git` and the Forge tool for your
-repositories (`gh` for GitHub, `curl` for GitLab) block startup. A
+repositories (`gh` for GitHub, `glab` for GitLab) block startup. A
 missing coding agent never does — it shows as Unavailable instead
 (see below).
 

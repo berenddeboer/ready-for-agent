@@ -32,39 +32,49 @@ describe("host tools preflight", () => {
     expect(githubOnly.ok).toBe(true)
 
     const missing = checkHostTools(
-      (command) => ["git", "curl"].includes(command),
+      (command) => ["git", "glab", "curl"].includes(command),
       { repositoryForges: ["github"] },
     )
     expect(missing.ok).toBe(false)
     if (missing.ok) return
     expect(missing.missing.map((tool) => tool.name)).toEqual(["gh"])
-    expect(missing.message).not.toContain("Install curl")
+    expect(missing.message).not.toContain("glab")
+    expect(missing.message).not.toContain("curl")
   })
 
-  test("requires curl but not gh when only GitLab Repositories exist", () => {
+  test("requires glab but not gh or curl when only GitLab Repositories exist", () => {
     const gitlabOnly = checkHostTools(
-      (command) => ["git", "curl"].includes(command),
+      (command) => ["git", "glab"].includes(command),
       { repositoryForges: ["gitlab"] },
     )
     expect(gitlabOnly.ok).toBe(true)
 
     const missing = checkHostTools(
-      (command) => ["git", "gh"].includes(command),
+      (command) => ["git", "gh", "curl"].includes(command),
       { repositoryForges: ["gitlab"] },
     )
     expect(missing.ok).toBe(false)
     if (missing.ok) return
-    expect(missing.missing.map((tool) => tool.name)).toEqual(["curl"])
-    expect(missing.message).toContain("https://curl.se/download.html")
+    expect(missing.missing.map((tool) => tool.name)).toEqual(["glab"])
+    expect(missing.message).toContain("https://docs.gitlab.com/cli/")
     expect(missing.message).not.toContain("Install GitHub CLI")
+    expect(missing.message).not.toContain("curl")
   })
 
   test("requires both Forge tools for a mixed Repository fleet", () => {
     expect(
-      checkHostTools((command) => ["git", "gh", "curl"].includes(command), {
+      checkHostTools((command) => ["git", "gh", "glab"].includes(command), {
         repositoryForges: ["gitlab", "github"],
       }),
     ).toEqual({ ok: true })
+
+    const missing = checkHostTools((command) => command === "git", {
+      repositoryForges: ["github", "gitlab"],
+    })
+    expect(missing.ok).toBe(false)
+    if (missing.ok) return
+    expect(missing.missing.map((tool) => tool.name)).toEqual(["gh", "glab"])
+    expect(missing.message).not.toContain("curl")
   })
 
   test("fails with install hints only for required base and Forge tools", () => {

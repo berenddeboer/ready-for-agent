@@ -8,13 +8,18 @@ covers monorepo development of Ready for Agent.
 ## Prerequisites
 
 1. [Bun](https://bun.sh/) (workspace package manager and runtime)
-2. Host tools from the product README: `git`, the selected Agent Backend on
-   PATH (`opencode` by default), plus `gh` for GitHub Repositories and `curl`
-   for GitLab Repositories. Authenticate the Agent Backend per its own
-   documentation.
-3. Optional: `keymaxxer` on PATH, or `KEYMAXXER_ENTRYPOINT` pointing at an
-  existing entrypoint (no hardcoded machine path). Not used by Grok Build
-  Agent Turns.
+2. Product host tools from the product README: `git`, plus `gh` for GitHub
+   Repositories and `glab` for GitLab Repositories. Authenticate each Forge CLI
+   for the Repository's Forge Host.
+3. The selected Agent Backend on PATH (`opencode` by default), authenticated per
+   its own documentation.
+4. Optional: `keymaxxer` on PATH, or `KEYMAXXER_ENTRYPOINT` pointing at an
+   existing entrypoint (no hardcoded machine path). Not used by Grok Build
+   Agent Turns.
+5. Contributor scripts only: `curl`, used by GitLab e2e and fixture scripts
+   such as `scripts/setup-gitlab-e2e-fixture.sh` and
+   `scripts/regenerate-e2e-keymaxxer-vault.sh`. It is not required to run the
+   operator binary.
 
 ## Install
 

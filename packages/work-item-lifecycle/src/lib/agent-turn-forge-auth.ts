@@ -208,8 +208,8 @@ export const agentTurnGitHubCredentialGuidance = (
 
 /**
  * Forge-selected credential and tool guidance for lifecycle Agent Turns.
- * GitLab guidance deliberately offers REST curl and host-scoped glab, and
- * explicitly excludes gh so the Turn cannot silently target GitHub.
+ * GitLab guidance uses host-scoped glab and explicitly excludes the GitHub
+ * CLI so the Turn cannot silently target the wrong Forge.
  */
 export const agentTurnForgeCredentialGuidance = (
   repository: AgentTurnForgeRepository,
@@ -221,12 +221,10 @@ export const agentTurnForgeCredentialGuidance = (
   }
   if (auth._tag === "keymaxxer") {
     return [
-      `For any ${accessScope}, use Keymaxxer secret ${auth.tokenName} via keymaxxer_run to run curl against the GitLab REST API at https://${repository.forgeHost}/api/v4.`,
-      `Inside the injected command, read the token from $${auth.tokenName} and send it in a PRIVATE-TOKEN header; never put secret values in the ambient environment.`,
+      `For any ${accessScope}, use Keymaxxer secret ${auth.tokenName} via keymaxxer_run to drive glab for https://${repository.forgeHost}/${repository.projectPath}.`,
+      `On POSIX shells, pass a child command of the form \`GITLAB_TOKEN="$${auth.tokenName}" GITLAB_HOST="https://${repository.forgeHost}" glab <subcommand> ...\`.`,
+      `On Windows cmd.exe, use \`set "GITLAB_TOKEN=%${auth.tokenName}%" && set "GITLAB_HOST=https://${repository.forgeHost}" && glab <subcommand> ...\`. Never put secret values in the ambient environment.`,
     ].join(" ")
   }
-  return [
-    `For any ${accessScope}, use curl against the GitLab REST API at https://${repository.forgeHost}/api/v4 with the Repository's ambient GITLAB_TOKEN credential in a PRIVATE-TOKEN header,`,
-    `or use glab authenticated for ${repository.forgeHost}.`,
-  ].join(" ")
+  return `For any ${accessScope}, use the glab CLI authenticated for ${repository.forgeHost} and target https://${repository.forgeHost}/${repository.projectPath}.`
 }

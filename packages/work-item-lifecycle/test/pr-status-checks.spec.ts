@@ -1075,7 +1075,7 @@ describe("PR status check steps", () => {
     )
   })
 
-  it("uses GitLab curl/glab credential guidance for investigate and never mentions gh", async () => {
+  it("uses GitLab glab credential guidance for investigate and never mentions curl or gh", async () => {
     const prompts: string[] = []
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -1153,11 +1153,11 @@ describe("PR status check steps", () => {
     expect(prompts).toHaveLength(1)
     expect(prompts[0]).toContain("GitLab pipeline-job traces")
     expect(prompts[0]).toContain("ERROR: lint failed")
-    expect(prompts[0]).toContain("curl")
-    expect(prompts[0]).toContain("https://git.drupalcode.org/api/v4")
-    expect(prompts[0]).toContain("GITLAB_TOKEN")
-    expect(prompts[0]).toContain("PRIVATE-TOKEN")
     expect(prompts[0]).toContain("glab")
+    expect(prompts[0]).toContain(
+      "https://git.drupalcode.org/project/oauth_client",
+    )
+    expect(prompts[0]).not.toContain("curl")
     expect(prompts[0]).not.toMatch(/\bgh\b/i)
     expect(prompts[0]).not.toContain("GitHub")
   })
