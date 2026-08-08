@@ -16,8 +16,8 @@ const FORGE_HOST_TOOLS = {
     installHint: "Install GitHub CLI (gh): https://cli.github.com/",
   },
   gitlab: {
-    name: "curl",
-    installHint: "Install curl: https://curl.se/download.html",
+    name: "glab",
+    installHint: "Install GitLab CLI (glab): https://docs.gitlab.com/cli/",
   },
 } as const
 
@@ -26,7 +26,7 @@ type RepositoryForge = keyof typeof FORGE_HOST_TOOLS
 export type HostToolsPreflightOptions = {
   /**
    * Distinct Forges represented by persisted Repositories. `gh` is required
-   * only for GitHub; `curl` only for GitLab. Omit for backwards-compatible
+   * only for GitHub; `glab` only for GitLab. Omit for backwards-compatible
    * GitHub-only behavior; pass an empty list when no Repository exists.
    */
   readonly repositoryForges?: ReadonlyArray<string>

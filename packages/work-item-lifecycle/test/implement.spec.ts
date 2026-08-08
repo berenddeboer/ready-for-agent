@@ -281,7 +281,7 @@ describe("implement", () => {
       expect(continued).toBe(false)
     }))
 
-  it("starts a GitLab Implement turn with curl/glab credential guidance and no gh guidance", () =>
+  it("starts a GitLab Implement turn with glab credential guidance and no curl or gh guidance", () =>
     withTemp(async (root) => {
       let prompt = ""
       const sessionId = await run(
@@ -314,11 +314,11 @@ describe("implement", () => {
         "GitLab issue project/oauth_client#3601642 on git.drupalcode.org",
       )
       expect(prompt).toContain("Inspect the current GitLab Issue")
-      expect(prompt).toContain("curl")
-      expect(prompt).toContain("https://git.drupalcode.org/api/v4")
-      expect(prompt).toContain("GITLAB_TOKEN")
-      expect(prompt).toContain("PRIVATE-TOKEN")
       expect(prompt).toContain("glab")
+      expect(prompt).toContain(
+        "https://git.drupalcode.org/project/oauth_client",
+      )
+      expect(prompt).not.toContain("curl")
       expect(prompt).not.toMatch(/\bgh\b/i)
       expect(prompt).not.toContain("GitHub")
     }))
@@ -381,8 +381,17 @@ describe("implement", () => {
       expect(prompt).toContain(
         "use Keymaxxer secret GITLAB_TOKEN_PROJECT_OAUTH_CLIENT via keymaxxer_run",
       )
-      expect(prompt).toContain("$GITLAB_TOKEN_PROJECT_OAUTH_CLIENT")
-      expect(prompt).toContain("PRIVATE-TOKEN")
+      expect(prompt).toContain("glab")
+      expect(prompt).toContain(
+        'GITLAB_TOKEN="$GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"',
+      )
+      expect(prompt).toContain('GITLAB_HOST="https://git.drupalcode.org"')
+      expect(prompt).toContain(
+        'set "GITLAB_TOKEN=%GITLAB_TOKEN_PROJECT_OAUTH_CLIENT%"',
+      )
+      expect(prompt).toContain('set "GITLAB_HOST=https://git.drupalcode.org"')
+      expect(prompt).not.toContain("curl")
+      expect(prompt).not.toContain("PRIVATE-TOKEN")
       expect(prompt).not.toContain("ambient GITLAB_TOKEN")
       expect(prompt).not.toMatch(/\bgh\b/i)
     }))

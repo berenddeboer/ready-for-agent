@@ -330,7 +330,7 @@ describe("agentTurnForgeCredentialGuidance", () => {
     )
   })
 
-  it("guides GitLab turns to curl or glab with the Repository credential and never gh", () => {
+  it("guides ambient GitLab turns to host-authenticated glab and never curl or gh", () => {
     const guidance = agentTurnForgeCredentialGuidance(
       {
         forge: "gitlab",
@@ -340,15 +340,16 @@ describe("agentTurnForgeCredentialGuidance", () => {
       { _tag: "ambient" },
       "GitLab Issue or API access",
     )
-    expect(guidance).toContain("curl")
-    expect(guidance).toContain("https://git.drupalcode.org/api/v4")
-    expect(guidance).toContain("GITLAB_TOKEN")
-    expect(guidance).toContain("PRIVATE-TOKEN")
     expect(guidance).toContain("glab")
+    expect(guidance).toContain("git.drupalcode.org")
+    expect(guidance).toContain(
+      "https://git.drupalcode.org/project/oauth_client",
+    )
+    expect(guidance).not.toContain("curl")
     expect(guidance).not.toMatch(/\bgh\b/i)
   })
 
-  it("guides vault-backed GitLab turns to run curl through Keymaxxer", () => {
+  it("guides vault-backed GitLab turns to run glab through Keymaxxer", () => {
     const guidance = agentTurnForgeCredentialGuidance(
       {
         forge: "gitlab",
@@ -362,9 +363,19 @@ describe("agentTurnForgeCredentialGuidance", () => {
       "GitLab Issue or API access",
     )
     expect(guidance).toContain("keymaxxer_run")
-    expect(guidance).toContain("$GITLAB_TOKEN_PROJECT_OAUTH_CLIENT")
-    expect(guidance).toContain("PRIVATE-TOKEN")
-    expect(guidance).toContain("https://git.drupalcode.org/api/v4")
+    expect(guidance).toContain("glab")
+    expect(guidance).toContain(
+      'GITLAB_TOKEN="$GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"',
+    )
+    expect(guidance).toContain('GITLAB_HOST="https://git.drupalcode.org"')
+    expect(guidance).toContain(
+      'set "GITLAB_TOKEN=%GITLAB_TOKEN_PROJECT_OAUTH_CLIENT%"',
+    )
+    expect(guidance).toContain('set "GITLAB_HOST=https://git.drupalcode.org"')
+    expect(guidance).toContain(
+      "https://git.drupalcode.org/project/oauth_client",
+    )
+    expect(guidance).not.toContain("curl")
     expect(guidance).not.toMatch(/\bgh\b/i)
   })
 })
