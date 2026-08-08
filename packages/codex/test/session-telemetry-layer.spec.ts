@@ -124,4 +124,71 @@ describe("CodexSessionTelemetryLive", () => {
       rmSync(codexHome, { recursive: true, force: true })
     }
   })
+
+  it("maps a safe missing Session to MISSING with Codex Build provenance", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-telemetry-"))
+    try {
+      mkdirSync(join(codexHome, "sessions"), { recursive: true })
+      await expect(
+        getTelemetry({ codexHome, sessionId: "no-such-session" }),
+      ).resolves.toEqual({
+        id: "no-such-session",
+        availability: "missing",
+        backend: { id: "codex", label: "Codex Build" },
+        model: null,
+        tokens: null,
+        cost: null,
+        createdAt: null,
+        updatedAt: null,
+      })
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("maps unusable corrupt Session data to UNAVAILABLE with null metrics", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-telemetry-"))
+    try {
+      const sessionId = "corrupt-telemetry-session"
+      const sessionDirectory = join(codexHome, "sessions", "2026", "08", "08")
+      mkdirSync(sessionDirectory, { recursive: true })
+      writeFileSync(
+        join(
+          sessionDirectory,
+          `rollout-2026-08-08T01-02-03-${sessionId}.jsonl`,
+        ),
+        "not-json\n",
+      )
+
+      await expect(getTelemetry({ codexHome, sessionId })).resolves.toEqual({
+        id: sessionId,
+        availability: "unavailable",
+        backend: { id: "codex", label: "Codex Build" },
+        model: null,
+        tokens: null,
+        cost: null,
+        createdAt: null,
+        updatedAt: null,
+      })
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("maps unsafe Session ID path segments to non-AVAILABLE telemetry", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-telemetry-"))
+    try {
+      mkdirSync(join(codexHome, "sessions"), { recursive: true })
+      await expect(
+        getTelemetry({ codexHome, sessionId: "../escape" }),
+      ).resolves.toMatchObject({
+        id: "../escape",
+        availability: "missing",
+        backend: { id: "codex", label: "Codex Build" },
+        tokens: null,
+      })
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
 })

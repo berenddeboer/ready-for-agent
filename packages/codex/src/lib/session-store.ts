@@ -307,10 +307,86 @@ const findIndexedRollout = (input: {
   return null
 }
 
+const sessionsRootLookup = (
+  codexHome: string,
+):
+  | { readonly kind: "found"; readonly path: string }
+  | { readonly kind: "missing" }
+  | { readonly kind: "unavailable" } => {
+  const sessionsRoot = join(codexHome, "sessions")
+  try {
+    if (!statSync(sessionsRoot).isDirectory()) {
+      return { kind: "unavailable" }
+    }
+  } catch (error) {
+    return isMissingPathError(error)
+      ? { kind: "missing" }
+      : { kind: "unavailable" }
+  }
+  return { kind: "found", path: sessionsRoot }
+}
+
+/** Filename pattern used by the sessions-tree scan for a Session ID. */
+const isScannedRolloutFileName = (
+  fileName: string,
+  sessionId: string,
+): boolean =>
+  fileName.startsWith("rollout-") && fileName.endsWith(`-${sessionId}.jsonl`)
+
+const sameResolvedPath = (left: string, right: string): boolean => {
+  if (left === right) {
+    return true
+  }
+  try {
+    return realpathSync(left) === realpathSync(right)
+  } catch {
+    return false
+  }
+}
+
 /**
- * Locate a unique date-partitioned Codex rollout by its filename Session ID.
+ * Scan date-partitioned rollouts under the sessions tree by filename Session ID.
  * Symlinks are not followed, and duplicate suffix matches are unavailable
  * rather than being attributed arbitrarily.
+ */
+const findScannedRollout = (input: {
+  readonly sessionsRoot: string
+  readonly sessionId: string
+  /** Skip an already-tried index path when falling back after a mismatch. */
+  readonly excludePath?: string
+}): CodexRolloutLookup => {
+  const scan = scanRolloutDirectory({
+    directory: input.sessionsRoot,
+    fileSuffix: `-${input.sessionId}.jsonl`,
+  })
+  if (scan.kind === "unavailable") {
+    return scan
+  }
+  const excludePath = input.excludePath
+  const paths =
+    excludePath === undefined
+      ? scan.paths
+      : scan.paths.filter((path) => !sameResolvedPath(path, excludePath))
+  if (paths.length === 0) {
+    return { kind: "missing" }
+  }
+  if (paths.length > 1) {
+    return { kind: "unavailable" }
+  }
+  const path = paths[0]
+  return path === undefined
+    ? { kind: "missing" }
+    : {
+        kind: "found",
+        path,
+        indexCreatedAt: null,
+        indexUpdatedAt: null,
+      }
+}
+
+/**
+ * Locate a unique Codex rollout: prefer a trustworthy threads index hit, then
+ * fall back to scanning date-partitioned rollout filenames by Session ID.
  */
 export const findCodexSessionRollout = (input: {
   readonly codexHome: string
@@ -321,20 +397,14 @@ export const findCodexSessionRollout = (input: {
     return { kind: "missing" }
   }
 
-  const sessionsRoot = join(input.codexHome, "sessions")
-  try {
-    if (!statSync(sessionsRoot).isDirectory()) {
-      return { kind: "unavailable" }
-    }
-  } catch (error) {
-    return isMissingPathError(error)
-      ? { kind: "missing" }
-      : { kind: "unavailable" }
+  const sessionsRoot = sessionsRootLookup(input.codexHome)
+  if (sessionsRoot.kind !== "found") {
+    return sessionsRoot
   }
 
   const indexed = findIndexedRollout({
     codexHome: input.codexHome,
-    sessionsRoot,
+    sessionsRoot: sessionsRoot.path,
     sessionId: id,
   })
   if (indexed !== null) {
@@ -346,28 +416,10 @@ export const findCodexSessionRollout = (input: {
     }
   }
 
-  const scan = scanRolloutDirectory({
-    directory: sessionsRoot,
-    fileSuffix: `-${id}.jsonl`,
+  return findScannedRollout({
+    sessionsRoot: sessionsRoot.path,
+    sessionId: id,
   })
-  if (scan.kind === "unavailable") {
-    return scan
-  }
-  if (scan.paths.length === 0) {
-    return { kind: "missing" }
-  }
-  if (scan.paths.length > 1) {
-    return { kind: "unavailable" }
-  }
-  const path = scan.paths[0]
-  return path === undefined
-    ? { kind: "missing" }
-    : {
-        kind: "found",
-        path,
-        indexCreatedAt: null,
-        indexUpdatedAt: null,
-      }
 }
 
 type CodexRolloutFold = {
@@ -515,6 +567,70 @@ const missing = (id: string): CodexSessionUnavailable => ({
   updatedAt: null,
 })
 
+type ParsedRollout =
+  | { readonly kind: "available"; readonly session: CodexSessionAvailable }
+  | { readonly kind: "unreadable" }
+  /** Readable but no trustworthy `session_meta` identity. */
+  | { readonly kind: "corrupt" }
+  /** Readable session_meta for a different Session ID. */
+  | { readonly kind: "wrong_session" }
+
+const parseRolloutAt = (input: {
+  readonly sessionId: string
+  readonly path: string
+  readonly indexCreatedAt: string | null
+  readonly indexUpdatedAt: string | null
+}): ParsedRollout => {
+  let raw: string
+  try {
+    raw = readFileSync(input.path, "utf8")
+  } catch {
+    return { kind: "unreadable" }
+  }
+  const fold = foldCodexRollout(raw)
+  if (fold.sessionId === null) {
+    return { kind: "corrupt" }
+  }
+  if (fold.sessionId !== input.sessionId) {
+    return { kind: "wrong_session" }
+  }
+  return {
+    kind: "available",
+    session: {
+      id: input.sessionId,
+      availability: "available",
+      model: fold.model,
+      tokens: fold.tokens,
+      cost: null,
+      createdAt: fold.createdAt ?? input.indexCreatedAt,
+      updatedAt: fold.updatedAt ?? input.indexUpdatedAt,
+    },
+  }
+}
+
+const sessionFromLookup = (input: {
+  readonly sessionId: string
+  readonly lookup: CodexRolloutLookup
+}): CodexSession => {
+  if (input.lookup.kind === "missing") {
+    return missing(input.sessionId)
+  }
+  if (input.lookup.kind === "unavailable") {
+    return unavailable(input.sessionId)
+  }
+  const parsed = parseRolloutAt({
+    sessionId: input.sessionId,
+    path: input.lookup.path,
+    indexCreatedAt: input.lookup.indexCreatedAt,
+    indexUpdatedAt: input.lookup.indexUpdatedAt,
+  })
+  if (parsed.kind === "available") {
+    return parsed.session
+  }
+  // Scanned filename matched the Session ID but content is unusable.
+  return unavailable(input.sessionId)
+}
+
 const readCodexSessionFromDisk = (input: {
   readonly codexHome: string
   readonly sessionId: string
@@ -524,37 +640,63 @@ const readCodexSessionFromDisk = (input: {
     return missing(id)
   }
 
-  const lookup = findCodexSessionRollout({
-    codexHome: input.codexHome,
-    sessionId: id,
-  })
-  if (lookup.kind === "missing") {
+  const sessionsRoot = sessionsRootLookup(input.codexHome)
+  if (sessionsRoot.kind === "missing") {
     return missing(id)
   }
-  if (lookup.kind === "unavailable") {
+  if (sessionsRoot.kind === "unavailable") {
     return unavailable(id)
   }
 
-  let raw: string
-  try {
-    raw = readFileSync(lookup.path, "utf8")
-  } catch {
-    return unavailable(id)
-  }
-  const fold = foldCodexRollout(raw)
-  if (fold.sessionId !== id) {
+  const indexed = findIndexedRollout({
+    codexHome: input.codexHome,
+    sessionsRoot: sessionsRoot.path,
+    sessionId: id,
+  })
+  if (indexed !== null) {
+    const parsed = parseRolloutAt({
+      sessionId: id,
+      path: indexed.path,
+      indexCreatedAt: indexed.createdAt,
+      indexUpdatedAt: indexed.updatedAt,
+    })
+    if (parsed.kind === "available") {
+      return parsed.session
+    }
+    // Mismatched, stale, corrupt, or unreadable index paths fall through to a
+    // sessions-tree scan so a trustworthy unique rollout can still win.
+    const scanned = findScannedRollout({
+      sessionsRoot: sessionsRoot.path,
+      sessionId: id,
+      excludePath: indexed.path,
+    })
+    if (scanned.kind === "found") {
+      return sessionFromLookup({ sessionId: id, lookup: scanned })
+    }
+    if (scanned.kind === "unavailable") {
+      return unavailable(id)
+    }
+    // No alternate rollout after excluding the index path.
+    // Unreadable/corrupt index targets stay UNAVAILABLE.
+    // wrong_session: MISSING only when the index pointed at a non-scan path for
+    // a different Session (no matching Session for this id). If the index path
+    // itself is a scan-pattern rollout for this id, match pure-scan behaviour
+    // and report UNAVAILABLE for untrustworthy identity — not MISSING.
+    if (parsed.kind === "wrong_session") {
+      return isScannedRolloutFileName(basename(indexed.path), id)
+        ? unavailable(id)
+        : missing(id)
+    }
     return unavailable(id)
   }
 
-  return {
-    id,
-    availability: "available",
-    model: fold.model,
-    tokens: fold.tokens,
-    cost: null,
-    createdAt: fold.createdAt ?? lookup.indexCreatedAt,
-    updatedAt: fold.updatedAt ?? lookup.indexUpdatedAt,
-  }
+  return sessionFromLookup({
+    sessionId: id,
+    lookup: findScannedRollout({
+      sessionsRoot: sessionsRoot.path,
+      sessionId: id,
+    }),
+  })
 }
 
 export const makeCodexSessionStore = (
