@@ -198,10 +198,10 @@ Feature: Route Session Telemetry through browser history
     Then the Session usage dialog is hidden
     And the browser location is the home path
 
-  Scenario: Unsupported backend telemetry remains distinct
-    When I open the unsupported Session Telemetry path directly
+  Scenario: Codex missing telemetry remains distinct
+    When I open the Codex missing Session Telemetry path directly
     Then the Session usage dialog is visible
-    And the Session usage dialog shows the unsupported Session Telemetry state
+    And the Session usage dialog shows the missing Session Telemetry state
 
   Scenario: Query failure remains distinct from missing Work Item
     When Session Telemetry query is forced to fail
