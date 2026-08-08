@@ -226,6 +226,10 @@ describe("Completed surface routes", () => {
     expect(source).toContain("function CompletedPageLink(")
     expect(source).toContain("<Link")
     expect(source).toContain("page: completedPageSearch(targetPage).page")
+    // Route.useSearch and router location update through different stores.
+    // Comparing them in an effect can race and undo a valid page navigation.
+    expect(source).not.toContain("useRouterState")
+    expect(source).not.toContain("pageSearchIsCanonical")
   })
 
   test("handles empty, loading, and error states", () => {

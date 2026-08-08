@@ -26,9 +26,3 @@ export const parseCompletedSearch = (
 /** Page 1 is canonical as bare `/completed`; later pages carry `?page=`. */
 export const completedPageSearch = (page: number): CompletedSearch =>
   page <= 1 ? {} : { page }
-
-/** Whether the address bar already uses the canonical search for this page. */
-export const isCompletedPageSearchCanonical = (input: {
-  readonly rawPage: unknown
-  readonly page: number
-}): boolean => input.rawPage === (input.page === 1 ? undefined : input.page)

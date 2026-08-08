@@ -1,6 +1,5 @@
 import {
   completedPageSearch,
-  isCompletedPageSearchCanonical,
   parseCompletedSearch,
 } from "../src/completed-search.js"
 import { describe, expect, test } from "bun:test"
@@ -32,20 +31,4 @@ describe("Completed route search", () => {
     expect(completedPageSearch(1)).toEqual({})
     expect(completedPageSearch(2)).toEqual({ page: 2 })
   })
-
-  test.each([
-    [{ rawPage: undefined, page: 1 }, true],
-    [{ rawPage: 1, page: 1 }, false],
-    [{ rawPage: 0, page: 1 }, false],
-    [{ rawPage: -1, page: 1 }, false],
-    [{ rawPage: 1.5, page: 1 }, false],
-    [{ rawPage: "invalid", page: 1 }, false],
-    [{ rawPage: 2, page: 2 }, true],
-    [{ rawPage: "2", page: 2 }, false],
-  ] as const)(
-    "recognizes canonical Completed page search",
-    (input, expected) => {
-      expect(isCompletedPageSearchCanonical(input)).toBe(expected)
-    },
-  )
 })

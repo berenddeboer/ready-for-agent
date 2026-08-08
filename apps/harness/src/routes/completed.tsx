@@ -1,15 +1,9 @@
 import { useQueries, useQuery, useSuspenseQuery } from "@tanstack/react-query"
-import {
-  Link,
-  createFileRoute,
-  useNavigate,
-  useRouterState,
-} from "@tanstack/react-router"
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { type ReactNode, Suspense, useEffect } from "react"
 import { Banner, BannerActionButton } from "../banner.js"
 import {
   completedPageSearch,
-  isCompletedPageSearchCanonical,
   parseCompletedSearch,
 } from "../completed-search.js"
 import {
@@ -100,13 +94,6 @@ function CompletedBoard() {
   const navigate = useNavigate({ from: Route.fullPath })
   const { page: searchPage } = Route.useSearch()
   const page = searchPage ?? 1
-  const rawPage = useRouterState({
-    select: (state) => state.location.search.page,
-  })
-  const pageSearchIsCanonical = isCompletedPageSearchCanonical({
-    rawPage,
-    page,
-  })
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const repositoryIds = repositories.map(({ id }) => id)
   const completedQuery = useQuery(completedWorkItemsHistoryQuery(page))
@@ -139,21 +126,6 @@ function CompletedBoard() {
       : totalCount === 0
         ? 1
         : Math.max(1, Math.ceil(totalCount / pageSize))
-
-  // Validation makes the query safe immediately; replace malformed aliases
-  // (`?page=1`, fractional, zero, negative, or text) with the canonical URL.
-  useEffect(() => {
-    if (pageSearchIsCanonical) return
-    void navigate({
-      to: "/completed",
-      search: (prev) => ({
-        ...prev,
-        page: completedPageSearch(page).page,
-      }),
-      replace: true,
-      resetScroll: false,
-    })
-  }, [navigate, page, pageSearchIsCanonical])
 
   // When history shrinks under us (SSE refresh), clamp past the last page.
   useEffect(() => {
