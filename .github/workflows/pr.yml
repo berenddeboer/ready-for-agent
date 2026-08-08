@@ -4,8 +4,8 @@ on:
   pull_request:
 
 permissions:
-  # upload-artifact attaches to this run; GITHUB_TOKEN does not need actions:write
-  actions: read
+  # actions: write — save PR-scoped Nx caches (same-repo PRs only)
+  actions: write
   contents: read
 
 jobs:
@@ -64,6 +64,15 @@ jobs:
         run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
       - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
+
+      - name: Restore/save Nx cache
+        uses: ./.github/actions/nx-cache
+        with:
+          mode: pr
+          pr-number: ${{ github.event.pull_request.number }}
+          # Forks and Dependabot get a read-only token for cache writes; restore only.
+          allow-save: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+
       - uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
 
       - name: Quality gates
@@ -109,6 +118,14 @@ jobs:
         run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
       - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
+
+      # Restore only: quality-gates is the PR cache producer.
+      - name: Restore Nx cache
+        uses: ./.github/actions/nx-cache
+        with:
+          mode: pr
+          pr-number: ${{ github.event.pull_request.number }}
+          allow-save: "false"
 
       # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
       # Production live e2e below remains vault-backed and separate.

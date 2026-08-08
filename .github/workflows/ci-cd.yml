@@ -73,6 +73,13 @@ jobs:
       # - run: bunx nx start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="build"
 
       - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
+
+      # Primary main-branch cache producer (restore + save under nx-main-${{ github.sha }}).
+      - name: Restore/save Nx cache
+        uses: ./.github/actions/nx-cache
+        with:
+          mode: main
+
       - uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
 
       # Prepend any command with "nx record --" to record its logs to Nx Cloud
@@ -131,6 +138,12 @@ jobs:
         run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
       - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
+
+      # Restore only: quality-gates is the main cache producer.
+      - name: Restore Nx cache
+        uses: ./.github/actions/nx-cache
+        with:
+          mode: restore-main
 
       # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
       # Production live e2e below remains vault-backed and separate.
@@ -207,6 +220,12 @@ jobs:
 
       - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
 
+      # Restore only: quality-gates is the main cache producer.
+      - name: Restore Nx cache
+        uses: ./.github/actions/nx-cache
+        with:
+          mode: restore-main
+
       - name: Packed-install Harness smoke
         id: packed-install
         env:
@@ -249,6 +268,12 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
+
+      # Restore only: quality-gates is the main cache producer.
+      - name: Restore Nx cache
+        uses: ./.github/actions/nx-cache
+        with:
+          mode: restore-main
 
       - name: Compute next version
         id: version
