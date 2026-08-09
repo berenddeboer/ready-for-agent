@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@types/n3": "^1.26.1",
-    "n3": "^2.1.1",
+    "n3": "^2.2.0",
     "rdf-validate-shacl": "^0.6.5"
   }
 }

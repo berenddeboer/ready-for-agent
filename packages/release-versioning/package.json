@@ -16,15 +16,15 @@
     }
   },
   "dependencies": {
-    "@conventional-changelog/git-client": "^3.1.0",
+    "@conventional-changelog/git-client": "^3.1.1",
     "conventional-changelog-conventionalcommits": "^10.2.1",
     "conventional-commits-filter": "^6.0.1",
-    "conventional-commits-parser": "^7.1.0",
+    "conventional-commits-parser": "^7.1.2",
     "semver": "^7.8.5",
     "tslib": "^2.3.0"
   },
   "devDependencies": {
-    "@types/semver": "^7.7.1",
+    "@types/semver": "^7.8.0",
     "vitest": "^4.1.10"
   }
 }
