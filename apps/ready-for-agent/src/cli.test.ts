@@ -139,7 +139,11 @@ describe("operator binary CLI seam", () => {
                 added = repository
                 return {
                   id: "repo-1",
-                  ...repository,
+                  forge: repository.forge,
+                  forgeHost: repository.forgeHost,
+                  projectPath: repository.projectPath,
+                  localPath: repository.localPath,
+                  isBare: repository.isBare,
                 }
               }),
           }),
@@ -162,6 +166,46 @@ describe("operator binary CLI seam", () => {
         forgeHost: "git.drupalcode.org",
         projectPath: "project/oauth_client",
       })
+    }),
+  )
+
+  it.live("add success output does not mention paused", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+
+      try {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              addRepository: (repository) =>
+                Effect.succeed({
+                  id: "repo-1",
+                  forge: repository.forge,
+                  forgeHost: repository.forgeHost,
+                  projectPath: repository.projectPath,
+                  localPath: repository.localPath,
+                  isBare: repository.isBare,
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(["add", "/tmp/repo"], layer)
+
+        const output = logs.join("\n")
+        expect(output).toContain("Added repository owner/repo")
+        expect(output).toContain("id: repo-1")
+        expect(output).toContain("local path: /tmp/repo")
+        expect(output).toContain("bare: false")
+        expect(output).not.toMatch(/paused/i)
+      } finally {
+        console.log = originalLog
+      }
     }),
   )
 
