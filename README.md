@@ -158,6 +158,24 @@ Pick the "Implement locally" option to implement the issue in the new
 worktree, but without creating a PR yet. This allows you to test and
 verify before a commit or PR exists.
 
+### Enrolling every issue from the command line
+
+If you have prepared a batch of tickets and want them all admitted
+without clicking through each one — on a headless box, or from cron —
+`scripts/drain-ready-issues.sh` does that over the same GraphQL API the
+UI uses:
+
+```bash
+scripts/drain-ready-issues.sh --repo owner/name --dry-run  # show the plan
+scripts/drain-ready-issues.sh --repo owner/name            # enroll, then follow
+```
+
+Issues with open blockers are admitted with Queue rather than Implement
+Now, so the harness still decides the order. Add `--auto-merge` to turn
+on auto-merge for the repo; the AI risk assessment still applies, so
+higher-risk PRs continue to stop at Needs Human. Requires `curl` and
+`jq`.
+
 ## Configuration
 
 ### Stop opening a browser window
