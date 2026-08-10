@@ -34,14 +34,18 @@ describe("Harness settings Agent Backend change", () => {
     expect(source).toContain("Active Agent Backends")
     expect(source).toContain("Repositories inheriting the harness default")
     expect(source).toContain("Default Agent Backend")
-    // First-run guidance covers default backend/model setup and per-repo overrides.
-    expect(source).toContain(
-      "Select a default agent backend, and default build model",
-    )
-    expect(source).toContain(
-      "Optionally select a different review model (recommended)",
-    )
-    expect(source).toContain("override this per configured repo")
+    // First-run guidance names the default backend and Settings/per-repo paths.
+    expect(source).toContain("unconfiguredBuildModelGuidance")
+    expect(source).toContain("No build model set for Agent Backend")
+    expect(source).toContain("Optionally select a different")
+    expect(source).toContain("review model (recommended)")
+    expect(source).toContain("override this per configured")
+    // Default Unavailable + Ready alternatives (issue #937).
+    expect(source).toContain("Default Agent Backend")
+    expect(source).toContain("is not available")
+    expect(source).toContain("readyBackendIdsForBanner")
+    expect(source).toContain("readyAlternativesForBanner")
+    expect(source).toContain("previewAgentBackend")
   })
 
   test("Active and preview status request provider and format Ready wording", () => {

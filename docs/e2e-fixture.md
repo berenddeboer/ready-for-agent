@@ -235,6 +235,17 @@ Required status checks (after the former monolithic `main` job was split):
 | **PR** | `quality-gates`, `harness`, `pinact` |
 | **CI/CD** | `quality-gates`, `harness`, `packed-install`, `pinact` |
 
+### Overnight published-install smoke (complementary)
+
+`.github/workflows/overnight-install-smoke.yml` runs daily (and via
+`workflow_dispatch`) on **linux-x64** and **linux-arm64**. It installs
+`ready-for-agent@latest` from the public npm registry into an isolated prefix
+(not monorepo pack), starts the harness with **no** `opencode` on the product
+PATH, and asserts UI shell + GraphQL health plus default Agent Backend
+**Unavailable** reporting. It does **not** replace CI/CD `packed-install` on
+main (pack-from-source distribution gate); overnight catches first-run
+packaging/start regressions on published multi-arch binaries.
+
 If branch protection or a ruleset still names `main`, update it when this lands
 or merges can stall (stale check never completes) or under-gate e2e (if only
 `quality-gates` is re-added).

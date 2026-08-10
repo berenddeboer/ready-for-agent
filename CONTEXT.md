@@ -304,7 +304,7 @@ A derived Work Item hold whose latest Step Run is a Postponed Step Run with a du
 _Avoid_: Queue, Waiting for Worker Slot, paused, Work Item state
 
 **Implement Now**:
-An explicit operator request that creates a Work Item for an Actionable Issue and seeks Worker Slot admission immediately. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (`Select a default build model first`). Distinct from Queue, which creates a Work Item only for a blocked open leaf and holds it until Implementable.
+An explicit operator request that creates a Work Item for an Actionable Issue and seeks Worker Slot admission immediately. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (operator error names the Agent Backend, repository or harness scope, Settings / per-repository path, and available catalog models when known). Distinct from Queue, which creates a Work Item only for a blocked open leaf and holds it until Implementable.
 _Avoid_: Auto-implement, enqueue Issue, Queue
 
 **Queue**:

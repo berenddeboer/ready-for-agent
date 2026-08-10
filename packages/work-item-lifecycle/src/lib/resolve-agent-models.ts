@@ -1,5 +1,11 @@
 import { Effect } from "effect"
 import {
+  ActiveAgentBackend,
+  type AgentBackendId,
+  formatBuildModelNotConfiguredMessage,
+  isSelectableAgentBackendId,
+} from "@ready-for-agent/agent-backend"
+import {
   type DatabaseError,
   DbService,
   type RepositoryRecord,
@@ -86,6 +92,9 @@ export const resolveAgentModelSelection = (
  * Load repository flat model columns and harness backend-scoped prefs for
  * `backendId`, then resolve Agent Models for the next Agent Turn. Fails when
  * no build model is configured for that backend.
+ *
+ * Error copy names the Agent Backend, repository/harness scope, Settings, and
+ * Ready catalog model ids when ActiveAgentBackend is available (issue #937).
  */
 export const resolveAgentModelsForBackend = (
   repositoryId: string,
@@ -93,7 +102,7 @@ export const resolveAgentModelsForBackend = (
 ): Effect.Effect<
   AgentModelSelection,
   BuildModelNotConfiguredError | DatabaseError,
-  DbService
+  DbService | ActiveAgentBackend
 > =>
   Effect.gen(function* () {
     const db = yield* DbService
@@ -106,8 +115,22 @@ export const resolveAgentModelsForBackend = (
     const harnessPrefs = yield* db.getBackendModelPrefs(backendId)
     const selection = resolveAgentModelSelection(repository, harnessPrefs)
     if (selection === null) {
+      let availableModelIds: readonly string[] | undefined
+      if (isSelectableAgentBackendId(backendId)) {
+        const active = yield* ActiveAgentBackend
+        const status = yield* active.getBackendStatus(
+          backendId as AgentBackendId,
+        )
+        if (status !== null && status.kind === "ready") {
+          availableModelIds = status.models.map((model) => model.id)
+        }
+      }
       return yield* new BuildModelNotConfiguredError({
-        message: "Select a default build model first",
+        message: formatBuildModelNotConfiguredMessage({
+          backendId,
+          repositoryProjectPath: repository?.projectPath,
+          availableModelIds,
+        }),
       })
     }
     return selection
@@ -159,7 +182,7 @@ export const resolveAgentModelsForRepository = (
 ): Effect.Effect<
   AgentModelSelection,
   BuildModelNotConfiguredError | DatabaseError,
-  DbService
+  DbService | ActiveAgentBackend
 > =>
   Effect.gen(function* () {
     const db = yield* DbService
