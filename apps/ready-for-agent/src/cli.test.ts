@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { Command } from "effect/unstable/cli"
 import { cli } from "./cli.ts"
-import { HARNESS_START_HINT } from "./graphql-error.ts"
+import {
+  HARNESS_START_HINT,
+  harnessNotRunningMessage,
+} from "./graphql-error.ts"
 import { GraphqlApi, GraphqlRequestFailed } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
 import { StartHarness } from "./services/start-harness.ts"
@@ -76,31 +79,36 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
-  it.live("add reports GraphQL start-hint failures from the service", () =>
-    Effect.gen(function* () {
-      const layer = mockStart.pipe(
-        Layer.provideMerge(mockLocalGit),
-        Layer.provideMerge(
-          Layer.succeed(GraphqlApi, {
-            addRepository: () =>
-              Effect.fail(
-                new GraphqlRequestFailed({
-                  message: `Unable to connect\n\n${HARNESS_START_HINT}`,
-                }),
-              ),
-          }),
-        ),
-      )
+  it.live(
+    "add reports GraphQL harness-not-running failures from the service",
+    () =>
+      Effect.gen(function* () {
+        const harnessDown = harnessNotRunningMessage()
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              addRepository: () =>
+                Effect.fail(
+                  new GraphqlRequestFailed({
+                    message: harnessDown,
+                  }),
+                ),
+            }),
+          ),
+        )
 
-      const result = yield* runOperator(["add", "/tmp/repo"], layer).pipe(
-        Effect.flip,
-      )
+        const result = yield* runOperator(["add", "/tmp/repo"], layer).pipe(
+          Effect.flip,
+        )
 
-      expect(result._tag).toBe("GraphqlRequestFailed")
-      if (result._tag === "GraphqlRequestFailed") {
-        expect(result.message).toContain(HARNESS_START_HINT)
-      }
-    }),
+        expect(result._tag).toBe("GraphqlRequestFailed")
+        if (result._tag === "GraphqlRequestFailed") {
+          expect(result.message).toBe(harnessDown)
+          expect(result.message).toContain(HARNESS_START_HINT)
+          expect(result.message).not.toContain("Unable to connect")
+        }
+      }),
   )
 
   it.live("add lets the operator correct a guessed GitLab identity", () =>
@@ -197,7 +205,7 @@ describe("operator binary CLI seam", () => {
       }),
   )
 
-  it("binary add against unreachable GraphQL prints start hint", () => {
+  it("binary add against unreachable GraphQL prints harness-not-running once, no stack", () => {
     const repoDir = join(tempRoot, "repo")
     mkdirSync(repoDir)
     writeFileSync(join(repoDir, "README.md"), "fixture\n")
@@ -229,6 +237,16 @@ describe("operator binary CLI seam", () => {
 
     const output = `${result.stdout}\n${result.stderr}`
     expect(result.status).not.toBe(0)
+    expect(output).toContain("Harness is not running at http://127.0.0.1:1")
     expect(output).toContain(HARNESS_START_HINT)
+    expect(output.split(HARNESS_START_HINT).length - 1).toBe(1)
+    expect(output).not.toContain("Unable to connect")
+    expect(output).not.toContain("access the url")
+    // No multi-frame Effect / internal stack for this expected case.
+    expect(output).not.toMatch(/\s+at\s+\S+\s+\(/)
+    expect(output).not.toContain("GraphqlRequestFailed:")
+    // Child process must not boot the harness (add is GraphQL-only). Do not
+    // assert parent `started` — that counter is only for in-process mockStart.
+    expect(output.toLowerCase()).not.toContain("starting harness")
   })
 })

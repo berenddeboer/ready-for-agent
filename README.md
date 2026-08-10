@@ -35,7 +35,18 @@ action.
    takes you to Settings to pick your coding agent and a default build
    model and effort (thinking).
 
-3. Add a repo you have cloned locally (the UI prompts for this too):
+3. Add a local Git repo from the UI. After start, the blank slate
+   prompts you to pick the first repository:
+
+   - Use **Browse…** when shown (Windows, macOS, and typical Linux
+     desktops), or paste a host path into the field.
+   - Click **Inspect**, confirm the forge identity, then **Confirm and
+     add**.
+
+   <img src="docs/add-repository-blank-slate.png" alt="Blank slate: add a repository from the UI (Browse, path field, or CLI)" width="90%" />
+
+   Advanced: once the harness is running, you can also add from a
+   shell:
 
    ```bash
    ready-for-agent add /path/to/local/repo
@@ -178,7 +189,8 @@ Use a different port than 6056:
 PORT=7000 ready-for-agent
 ```
 
-When adding a repo against a non-default port:
+When adding a repo via the CLI against a non-default port (Harness must
+already be running):
 
 ```bash
 READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
