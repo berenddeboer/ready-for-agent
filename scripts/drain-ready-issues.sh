@@ -20,6 +20,15 @@
 # is what an unattended run must do — rather than choose a model, and a price,
 # on your behalf, the script stops and tells you the options.
 #
+# A failed build is not terminal. The harness parks the Work Item with canRetry
+# set and waits for someone to press Retry, which on an unattended run is where
+# a drain stops for good — so failures are retried here, up to --max-retries.
+# The reason is read out of the coder's own transcript first, because "Claude
+# Code failed to implement the Work Item issue" names neither the cause nor
+# whether waiting would change it. When that reason turns out to be a spent
+# agent quota, retries hold until the reset the message names: every Work Item
+# draws on the same account, so retrying sooner only burns the budget.
+#
 # Prerequisites:
 #   - The harness is running (`ready-for-agent start`)
 #   - curl and jq on PATH
@@ -32,6 +41,8 @@
 #   scripts/drain-ready-issues.sh --repo owner/name --status
 #   scripts/drain-ready-issues.sh --repo owner/name --backend claude \
 #     --build-model sonnet --thinking-level high
+#   scripts/drain-ready-issues.sh --repo owner/name --max-retries 5
+#   scripts/drain-ready-issues.sh --repo owner/name --no-retry
 #
 # Honours READY_FOR_AGENT_GRAPHQL_URL for non-default ports, same as
 # `ready-for-agent add`.
@@ -45,10 +56,12 @@ THINKING_LEVEL=""
 AUTO_MERGE=""
 DRY_RUN=""
 STATUS_ONLY=""
+NO_RETRY=""
 POLL_SECONDS="${POLL_SECONDS:-60}"
+MAX_RETRIES="${MAX_RETRIES:-3}"
 
 usage() {
-  sed -n '2,36p' "$0" | sed 's|^# \{0,1\}||'
+  sed -n '2,47p' "$0" | sed 's|^# \{0,1\}||'
   exit "${1:-0}"
 }
 
@@ -59,6 +72,8 @@ while [[ $# -gt 0 ]]; do
     --build-model) BUILD_MODEL="${2:-}"; shift 2 ;;
     --thinking-level) THINKING_LEVEL="${2:-}"; shift 2 ;;
     --poll) POLL_SECONDS="${2:-}"; shift 2 ;;
+    --max-retries) MAX_RETRIES="${2:-}"; shift 2 ;;
+    --no-retry) NO_RETRY=1; shift ;;
     --auto-merge) AUTO_MERGE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --status) STATUS_ONLY=1; shift ;;
@@ -180,6 +195,16 @@ current_settings() {
 
   jq -c --arg id "${repository_id}" \
     '[.data.repositories[] | select(.id == $id)][0] | del(.id) | .repositoryId = $id' <<<"${current}"
+}
+
+# Which Agent Backend actually ran, for a mode that never chose one.
+# effectiveAgentBackend rather than selectedAgentBackend: a Repository with no
+# override of its own still built with something.
+repository_backend() {
+  local repository_id="$1"
+  gql '{ repositories { id effectiveAgentBackend } }' \
+    | jq -r --arg id "${repository_id}" \
+      '[.data.repositories[] | select(.id == $id)][0].effectiveAgentBackend // ""'
 }
 
 # Send a complete settings input.
@@ -446,38 +471,155 @@ enroll() {
   done <<<"${pending}"
 }
 
+# The latest Work Item snapshot, kept for retry_failures and stalled to reuse
+# rather than each asking the harness the same question again.
+ITEMS=""
+
 # 0 = still working, 1 = everything terminal, 2 = no Work Items, 3 = query failed.
 report_status() {
-  local repository_id="$1" items
-  items="$(gql "{
+  local repository_id="$1"
+  ITEMS="$(gql "{
     workItems(repositoryId: \"${repository_id}\") {
-      issueNumber stateLabel statusLabel statusMessage
-      pullRequestNumber paused isTerminal
+      id issueNumber stateLabel statusLabel statusMessage
+      pullRequestNumber paused isTerminal canRetry sessionId
     }
   }")" || return 3
 
-  jq -e '.data.workItems | length > 0' >/dev/null <<<"${items}" || return 2
+  jq -e '.data.workItems | length > 0' >/dev/null <<<"${ITEMS}" || return 2
 
   jq -r '.data.workItems | sort_by(.issueNumber)[]
     | "  #\(.issueNumber) \(.stateLabel) / \(.statusLabel)"
       + (if .pullRequestNumber then " PR#\(.pullRequestNumber)" else "" end)
       + (if .paused then " [paused]" else "" end)
-      + (if .statusMessage then " — \(.statusMessage)" else "" end)' <<<"${items}"
+      + (if .statusMessage then " — \(.statusMessage)" else "" end)' <<<"${ITEMS}"
 
   # Needs Human is terminal but unfinished. Auto-merge only clears low-risk PRs,
   # so an unattended run is expected to leave some Work Items parked here.
   local needs_human
   needs_human="$(jq '[.data.workItems[]
-    | select(.stateLabel | ascii_downcase | test("needs human"))] | length' <<<"${items}")"
+    | select(.stateLabel | ascii_downcase | test("needs human"))] | length' <<<"${ITEMS}")"
   if [[ "${needs_human}" != "0" ]]; then
     echo "  ${needs_human} Work Item(s) need a human"
   fi
 
-  jq -e '[.data.workItems[] | select(.isTerminal | not)] | length > 0' >/dev/null <<<"${items}"
+  jq -e '[.data.workItems[] | select(.isTerminal | not)] | length > 0' >/dev/null <<<"${ITEMS}"
+}
+
+# statusMessage says only "Claude Code failed to implement the Work Item issue",
+# which names neither the cause nor whether waiting would change it. The coder
+# wrote the real answer down: the last thing it said before it stopped is the
+# reason it stopped. Silent for any Agent Backend whose transcripts this does
+# not know how to read, which is every backend but Claude Code so far.
+backend_failure_reason() {
+  local session="$1" transcript
+  [[ "${BACKEND}" == "claude" && -n "${session}" && "${session}" != "null" ]] || return 0
+  transcript="$(find "${HOME}/.claude/projects" -name "${session}.jsonl" -print -quit 2>/dev/null)"
+  [[ -n "${transcript}" ]] || return 0
+  jq -r 'select(.type == "assistant") | .message.content // []
+    | if type == "array" then (map(select(.type == "text").text) | join(" ")) else "" end' \
+    "${transcript}" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -1
+}
+
+# "You've hit your session limit · resets 4:20am (UTC)" is not a failure of the
+# Work Item that reported it. Every Work Item on this machine draws on the one
+# account, so retrying any of them before the reset spends the retry budget on a
+# wall that has not moved. Prints the epoch second the message names, or nothing
+# when the failure is something else.
+quota_reset_epoch() {
+  local reason="$1" clock target now
+  [[ "${reason}" == *"session limit"* || "${reason}" == *"usage limit"* ]] || return 0
+
+  clock="$(grep -oiE 'resets [0-9]{1,2}(:[0-9]{2})? ?[ap]m' <<<"${reason}" \
+    | sed 's/^[Rr]esets //')" || return 0
+  [[ -n "${clock}" ]] || return 0
+  target="$(date -u -d "${clock}" +%s 2>/dev/null)" || return 0
+  now="$(date -u +%s)"
+  # A reset time already past today is tomorrow's.
+  ((target <= now)) && target=$((target + 86400))
+  # Further out than a day is a misread, not a wait worth taking.
+  ((target - now > 86400)) && return 0
+  echo $((target + 60))
+}
+
+# A failed build is not terminal: the harness parks it with canRetry and waits to
+# be told to go again. Nobody is watching an unattended drain, so press Retry
+# here — bounded, because a Work Item that fails the same way three times is not
+# waiting on patience.
+declare -A RETRY_COUNT=()
+RETRIED=0
+QUOTA_UNTIL=0
+retry_failures() {
+  local failures issue_number work_item_id session reason reset wall=0 entry response now
+  local -a pending=()
+  RETRIED=0
+
+  failures="$(jq -r '.data.workItems[]
+    | select(.canRetry and (.statusLabel | ascii_downcase | test("fail")))
+    | [.issueNumber, .id, (.sessionId // "")] | @tsv' <<<"${ITEMS}")"
+  [[ -z "${failures}" ]] && return 0
+
+  now="$(date -u +%s)"
+  if ((QUOTA_UNTIL > now)); then
+    echo "  agent quota resets in $(((QUOTA_UNTIL - now + 59) / 60))m — holding retries until it does"
+    return 0
+  fi
+
+  while IFS=$'\t' read -r issue_number work_item_id session; do
+    [[ -z "${issue_number}" ]] && continue
+    reason="$(backend_failure_reason "${session}")"
+    [[ -n "${reason}" ]] && echo "  #${issue_number} failed because: ${reason:0:200}"
+
+    [[ -n "${NO_RETRY}" ]] && continue
+    if ((${RETRY_COUNT[${issue_number}]:-0} >= MAX_RETRIES)); then
+      echo "  #${issue_number} has failed ${MAX_RETRIES} times — leaving it parked"
+      continue
+    fi
+
+    reset="$(quota_reset_epoch "${reason}")"
+    [[ -n "${reset}" ]] && ((reset > wall)) && wall="${reset}"
+    pending+=("${issue_number}:${work_item_id}")
+  done <<<"${failures}"
+
+  [[ ${#pending[@]} -eq 0 ]] && return 0
+
+  # Record the wall and come back to it rather than sleeping here: blocking the
+  # loop would stop following the Work Items still building, and those are the
+  # ones most likely to hit the same wall next.
+  if ((wall > 0)); then
+    QUOTA_UNTIL="${wall}"
+    echo "  the agent's quota is spent and every Work Item shares the one account,"
+    echo "  so retries resume at $(date -u -d "@${wall}" '+%H:%M UTC') rather than burning the budget now"
+    return 0
+  fi
+
+  for entry in "${pending[@]}"; do
+    issue_number="${entry%%:*}"
+    work_item_id="${entry#*:}"
+    RETRY_COUNT[${issue_number}]=$((${RETRY_COUNT[${issue_number}]:-0} + 1))
+    echo "  retrying #${issue_number} (attempt ${RETRY_COUNT[${issue_number}]} of ${MAX_RETRIES})"
+    # One Work Item the harness will not retry must not end the whole drain.
+    if response="$(gql "mutation {
+      retryWorkItem(workItemId: \"${work_item_id}\") { stateLabel statusLabel }
+    }" 2>&1)"; then
+      jq -r '.data.retryWorkItem | "    now \(.stateLabel) / \(.statusLabel)"' <<<"${response}"
+      RETRIED=1
+    else
+      echo "    the harness refused the retry: $(tail -1 <<<"${response}")"
+    fi
+  done
+}
+
+# Nothing left that can move on its own: every unfinished Work Item has either
+# failed or is queued behind one that has. Following past this point is watching.
+stalled() {
+  jq -e '[.data.workItems[]
+    | select(.isTerminal | not)
+    | select((.statusLabel | ascii_downcase | test("fail|waiting for blockers")) | not)]
+    | length == 0' >/dev/null <<<"${ITEMS}"
 }
 
 follow() {
-  local repository_id="$1" result
+  local repository_id="$1" result now wait
   echo "following Work Items every ${POLL_SECONDS}s — Ctrl-C detaches, the harness keeps going"
   while true; do
     echo "--- $(date '+%Y-%m-%d %H:%M:%S') ---"
@@ -486,7 +628,24 @@ follow() {
     result=$?
     set -e
     case "${result}" in
-      0) sleep "${POLL_SECONDS}" ;;
+      0)
+        retry_failures
+        if [[ "${RETRIED}" == "0" ]] && stalled; then
+          now="$(date -u +%s)"
+          if ((QUOTA_UNTIL > now)); then
+            # Nothing can move until the quota resets. Keep following anyway,
+            # lazily: a human unblocking something still has to show up here.
+            wait=$((QUOTA_UNTIL - now))
+            ((wait > 300)) && wait=300
+            sleep "${wait}"
+            continue
+          fi
+          echo "nothing left that can move by itself — every unfinished Work Item has"
+          echo "failed or is queued behind one that has"
+          return 1
+        fi
+        sleep "${POLL_SECONDS}"
+        ;;
       1) echo "every Work Item has reached a terminal state"; return 0 ;;
       2) echo "no Work Items for this repository"; return 0 ;;
       *) return 1 ;;
@@ -499,6 +658,11 @@ main() {
   repository_id="$(resolve_repository_id)" || exit 1
 
   if [[ -n "${STATUS_ONLY}" ]]; then
+    # --status is read-only and pressing Retry is a mutation, so it reports why
+    # a Work Item failed without acting on it. The Agent Backend is still worth
+    # resolving: it decides whose transcript holds that reason.
+    NO_RETRY=1
+    [[ -z "${BACKEND}" ]] && BACKEND="$(repository_backend "${repository_id}")"
     follow "${repository_id}"
     return
   fi
