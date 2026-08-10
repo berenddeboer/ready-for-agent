@@ -1,3 +1,4 @@
+import { tmpdir } from "node:os"
 import {
   repositorySlug,
   workItemBranchName,
@@ -97,6 +98,30 @@ describe("worktree names", () => {
       }),
     ).toBe(
       "/var/tmp/ready-for-agent/acme/widgets/7-wi-01HZZZZZZZZZZZZZZZZZZZZZZZ",
+    )
+  })
+
+  it("defaults non-bare worktrees to os.tmpdir() when tmpDir is omitted", () => {
+    const temporaryDirectory = tmpdir().replace(/[/\\]+$/, "")
+
+    expect(
+      worktreeParentPath({
+        localPath: "/home/berend/src/acme/widgets",
+        isBare: false,
+        projectPath: "acme/widgets",
+      }),
+    ).toBe(`${temporaryDirectory}/ready-for-agent/acme/widgets`)
+
+    expect(
+      workItemWorktreePath({
+        localPath: "/home/berend/src/acme/widgets",
+        isBare: false,
+        projectPath: "acme/widgets",
+        issueNumber: 7,
+        workItemId: "wi-01HZZZZZZZZZZZZZZZZZZZZZZZ",
+      }),
+    ).toBe(
+      `${temporaryDirectory}/ready-for-agent/acme/widgets/7-wi-01HZZZZZZZZZZZZZZZZZZZZZZZ`,
     )
   })
 })
