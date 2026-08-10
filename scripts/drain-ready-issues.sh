@@ -515,9 +515,22 @@ backend_failure_reason() {
   [[ "${BACKEND}" == "claude" && -n "${session}" && "${session}" != "null" ]] || return 0
   transcript="$(find "${HOME}/.claude/projects" -name "${session}.jsonl" -print -quit 2>/dev/null)"
   [[ -n "${transcript}" ]] || return 0
-  jq -r 'select(.type == "assistant") | .message.content // []
-    | if type == "array" then (map(select(.type == "text").text) | join(" ")) else "" end' \
-    "${transcript}" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -1
+
+  # The message's own timestamp comes back with it, as "<epoch>TAB<reason>": a
+  # reset clock like "2:20pm" only means something relative to the moment the
+  # agent hit the wall. Both travel on stdout because every caller reads this
+  # through $( ), and a global assigned in that subshell never reaches them.
+  local row stamp
+  row="$(jq -r 'select(.type == "assistant")
+    | (.message.content // []) as $content
+    | (if ($content | type) == "array"
+       then ($content | map(select(.type == "text").text) | join(" "))
+       else "" end) as $text
+    | select($text | test("[^[:space:]]"))
+    | [(.timestamp // ""), $text] | @tsv' "${transcript}" 2>/dev/null | tail -1)"
+  [[ -n "${row}" ]] || return 0
+  stamp="$(date -u -d "${row%%$'\t'*}" +%s 2>/dev/null || true)"
+  printf '%s\t%s\n' "${stamp}" "${row#*$'\t'}"
 }
 
 # "You've hit your session limit · resets 4:20am (UTC)" is not a failure of the
@@ -526,16 +539,23 @@ backend_failure_reason() {
 # wall that has not moved. Prints the epoch second the message names, or nothing
 # when the failure is something else.
 quota_reset_epoch() {
-  local reason="$1" clock target now
+  local reason="$1" since="${2:-}" clock target now
   [[ "${reason}" == *"session limit"* || "${reason}" == *"usage limit"* ]] || return 0
 
   clock="$(grep -oiE 'resets [0-9]{1,2}(:[0-9]{2})? ?[ap]m' <<<"${reason}" \
     | sed 's/^[Rr]esets //')" || return 0
   [[ -n "${clock}" ]] || return 0
-  target="$(date -u -d "${clock}" +%s 2>/dev/null)" || return 0
   now="$(date -u +%s)"
-  # A reset time already past today is tomorrow's.
-  ((target <= now)) && target=$((target + 86400))
+  [[ -n "${since}" ]] || since="${now}"
+
+  # Read the clock on the day the agent hit the wall rather than today's.
+  # Anchoring it to now is what let a drain outlive its own reset, decide the
+  # wall must be tomorrow's, and idle through a quota it had already got back.
+  target="$(date -u -d "$(date -u -d "@${since}" +%F) ${clock}" +%s 2>/dev/null)" || return 0
+  # Roll forward a day only if the clock genuinely lay behind the failure.
+  ((target < since)) && target=$((target + 86400))
+  # The reset has already come and gone, so there is nothing left to wait for.
+  ((target <= now)) && return 0
   # Further out than a day is a misread, not a wait worth taking.
   ((target - now > 86400)) && return 0
   echo $((target + 60))
@@ -549,7 +569,7 @@ declare -A RETRY_COUNT=()
 RETRIED=0
 QUOTA_UNTIL=0
 retry_failures() {
-  local failures issue_number work_item_id session reason reset wall=0 entry response now
+  local failures issue_number work_item_id session failure failed_at reason reset wall=0 entry response now
   local -a pending=()
   RETRIED=0
 
@@ -566,7 +586,10 @@ retry_failures() {
 
   while IFS=$'\t' read -r issue_number work_item_id session; do
     [[ -z "${issue_number}" ]] && continue
-    reason="$(backend_failure_reason "${session}")"
+    failure="$(backend_failure_reason "${session}")"
+    failed_at="${failure%%$'\t'*}"
+    reason="${failure#*$'\t'}"
+    [[ "${failure}" == *$'\t'* ]] || { failed_at=""; reason=""; }
     [[ -n "${reason}" ]] && echo "  #${issue_number} failed because: ${reason:0:200}"
 
     [[ -n "${NO_RETRY}" ]] && continue
@@ -575,7 +598,7 @@ retry_failures() {
       continue
     fi
 
-    reset="$(quota_reset_epoch "${reason}")"
+    reset="$(quota_reset_epoch "${reason}" "${failed_at}")"
     [[ -n "${reset}" ]] && ((reset > wall)) && wall="${reset}"
     pending+=("${issue_number}:${work_item_id}")
   done <<<"${failures}"
