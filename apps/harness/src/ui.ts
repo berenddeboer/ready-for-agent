@@ -1068,7 +1068,7 @@ export const ui = {
     "hover:border-lane-pr hover:bg-lane-pr hover:text-white",
   ),
 
-  /* ---------- Primary plate (§5.3) ---------- */
+  /* ---------- Primary + ready plates (§5.3) ---------- */
 
   /**
    * Riveted stamped-plate twin of plateMini (not solid-ink fill). Hierarchy is
@@ -1085,6 +1085,26 @@ export const ui = {
     "cursor-pointer transition-[background-color,color] duration-100 ease-in-out",
     "hover:bg-[var(--plate-hover)]",
     "disabled:cursor-not-allowed disabled:opacity-55",
+    "disabled:aria-busy:cursor-wait",
+  ),
+
+  /**
+   * Verified / ready-to-commit plate. Same riveted chrome as platePrimary
+   * (rivets, ink border, top bevel, mono uppercase), but PR-green fill and
+   * light text so a successful inspect reads as safe to commit. Reusable for
+   * future “verified, safe to commit” actions; currently wired only on
+   * Confirm and add after repo inspect.
+   */
+  plateReady: cx(
+    "inline-flex items-center justify-center gap-[0.4rem] border-2 border-ink",
+    "bg-lane-pr text-white",
+    plateMiniRivets,
+    "shadow-[inset_0_1px_0_var(--plate-hi)]",
+    "px-[0.95rem] py-[0.46rem]",
+    "font-mono text-[0.68rem] font-bold tracking-[0.12em] uppercase no-underline",
+    "cursor-pointer transition-[background-color,color,filter] duration-100 ease-in-out",
+    "hover:brightness-110",
+    "disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:brightness-100",
     "disabled:aria-busy:cursor-wait",
   ),
 

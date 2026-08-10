@@ -100,6 +100,25 @@ describe("blank-slate add repository command", () => {
     expect(guidance).not.toContain("bg-oxblood")
   })
 
+  test("Confirm and add uses plateReady; Inspect stays platePrimary; Browse stays plateMini", () => {
+    const guidance = addRepositoryGuidanceSource()
+    // Issue #946: green ready plate only after successful inspect / while adding.
+    expect(guidance).toContain("ui.plateReady")
+    expect(guidance).toContain(
+      "inspection !== null || addLocalRepository.isPending",
+    )
+    expect(guidance).toContain("? ui.plateReady")
+    expect(guidance).toContain(": ui.platePrimary")
+    // Browse remains neutral mini plate (className precedes the label).
+    expect(guidance).toMatch(/className=\{ui\.plateMini\}[\s\S]*?Browse…/)
+    // Labels cycle Inspect → Confirm and add → Adding…; success is form clear.
+    expect(guidance).toContain('"Inspect"')
+    expect(guidance).toContain('"Confirm and add"')
+    expect(guidance).toContain('"Adding…"')
+    expect(guidance).toContain('setPath("")')
+    expect(guidance).toContain("setInspection(null)")
+  })
+
   test("shows add-repository guidance in the empty state via shared blank slate", () => {
     const cards = repositoryCardsSource()
     const emptyStart = cards.indexOf("if (repositories.length === 0)")

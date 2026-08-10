@@ -183,7 +183,7 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
     // Slice each recipe so later recipes with bottom bevels don't false-match.
     const platePrimaryBlock = ui.slice(
       ui.indexOf("platePrimary:"),
-      ui.indexOf("/* ---------- Stamps"),
+      ui.indexOf("plateReady:"),
     )
     const plateMiniBlock = ui.slice(
       ui.indexOf("plateMini:"),
@@ -197,6 +197,20 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
     expect(plateMiniBlock).not.toContain("inset_0_-2px")
     expect(ui).toMatch(/platePrimary:[\s\S]*?disabled:aria-busy:cursor-wait/)
     expect(ui).toMatch(/platePrimary:[\s\S]*?disabled:cursor-not-allowed/)
+    // Ready plate: PR-green fill + light text; same rivets/bevel/disabled chrome.
+    // Slice to the next section so later stamps/lanes do not false-match.
+    const plateReadyBlock = ui.slice(
+      ui.indexOf("plateReady:"),
+      ui.indexOf("/* ---------- Stamps"),
+    )
+    expect(plateReadyBlock).toContain("bg-lane-pr")
+    expect(plateReadyBlock).toContain("text-white")
+    expect(plateReadyBlock).toContain("plateMiniRivets")
+    expect(plateReadyBlock).toContain("inset_0_1px_0_var(--plate-hi)")
+    expect(plateReadyBlock).not.toContain("inset_0_-2px")
+    expect(plateReadyBlock).toContain("hover:brightness-110")
+    expect(plateReadyBlock).toContain("disabled:opacity-55")
+    expect(plateReadyBlock).toContain("disabled:aria-busy:cursor-wait")
     const root = rootSource()
     const home = homeSource()
     expect(root).toContain("aria-busy={updateConfig.isPending || undefined}")

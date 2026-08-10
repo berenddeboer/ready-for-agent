@@ -390,7 +390,11 @@ export function AddRepositoryGuidance({
             <button
               type="submit"
               disabled={busy}
-              className={ui.platePrimary}
+              className={
+                inspection !== null || addLocalRepository.isPending
+                  ? ui.plateReady
+                  : ui.platePrimary
+              }
               aria-busy={busy || undefined}
             >
               {addLocalRepository.isPending
