@@ -61,15 +61,16 @@ for tool in curl jq; do
   }
 done
 
-# POST a query and fail loudly. A GraphQL error arrives as HTTP 200 with an
-# `errors` array, so checking the transport alone is not enough.
+# POST a query, with optional variables JSON, and fail loudly. A GraphQL error
+# arrives as HTTP 200 with an `errors` array, so checking the transport alone is
+# not enough.
 #
 # Returns non-zero rather than calling exit: every caller reads it through a
 # command substitution, and an exit there would only kill the subshell and let
 # the script carry on with an empty result.
 gql() {
   local response
-  response="$(jq -nc --arg q "$1" '{query: $q}' \
+  response="$(jq -nc --arg q "$1" --argjson v "${2:-null}" '{query: $q, variables: $v}' \
     | curl -sS -X POST "${GRAPHQL_URL}" \
         -H 'content-type: application/json' \
         --data-binary @- 2>/dev/null)" || {
@@ -119,31 +120,67 @@ resolve_repository_id() {
   printf '%s' "${id}"
 }
 
-# Unpause, and optionally set the Agent Backend and auto-merge. Settings the
-# caller did not ask for are read back and rewritten unchanged, so this never
-# silently clears a per-repo override.
+# Unpause, and optionally set the Agent Backend and auto-merge. Every other
+# setting is read back and resent unchanged, so this never silently clears a
+# per-repo override.
+#
+# updateRepositorySettings is not a patch, so naming only the settings we mean
+# to change is not enough on either count:
+#
+#   - defaultModel, defaultThinkingLevel, reviewModel and reviewThinkingLevel
+#     are persisted as `input.field ?? null`, so a field left out is cleared
+#     rather than kept
+#   - paused, autoMerge, includeAllIssueAuthors and waitForReadyForReviewChecks
+#     are Boolean!, so a field left out fails the whole call
+#
+# Both hazards grow with the schema, and a hardcoded list here goes stale the
+# next time a setting is added. So take the field list from the schema and read
+# the values off the Repository, which exposes a same-named field for each one.
 configure_repository() {
-  local repository_id="$1" current backend auto_merge
-  current="$(gql "{ repositories { id selectedAgentBackend autoMerge } }")" || return 1
-  backend="$(jq -r --arg id "${repository_id}" \
-    '.data.repositories[] | select(.id == $id) | .selectedAgentBackend // ""' <<<"${current}")"
-  auto_merge="$(jq -r --arg id "${repository_id}" \
-    '.data.repositories[] | select(.id == $id) | .autoMerge' <<<"${current}")"
+  local repository_id="$1" shape settable unreadable current input
+  shape="$(gql '{
+    settings: __type(name: "UpdateRepositorySettingsInput") { inputFields { name } }
+    repository: __type(name: "Repository") { fields { name } }
+  }')" || return 1
 
-  [[ -n "${BACKEND}" ]] && backend="${BACKEND}"
-  [[ -n "${AUTO_MERGE}" ]] && auto_merge="true"
+  # repositoryId is the one input field with no counterpart to read back; it is
+  # Repository.id, which the query below asks for separately.
+  settable="$(jq -r '[.data.repository.fields[].name] as $readable
+    | [.data.settings.inputFields[].name | select(. != "repositoryId")]
+    | map(select(. as $field | $readable | index($field)))
+    | join(" ")' <<<"${shape}")"
 
-  local backend_field=""
-  [[ -n "${backend}" ]] && backend_field="selectedAgentBackend: \"${backend}\""
+  unreadable="$(jq -r '[.data.repository.fields[].name] as $readable
+    | [.data.settings.inputFields[].name | select(. != "repositoryId")]
+    | map(select(. as $field | $readable | index($field) | not))
+    | join(", ")' <<<"${shape}")"
+  if [[ -n "${unreadable}" ]]; then
+    echo "warning: no Repository field to read these settings back from: ${unreadable}" >&2
+    echo "         this run may reset them" >&2
+  fi
 
-  gql "mutation {
-    updateRepositorySettings(input: {
-      repositoryId: \"${repository_id}\"
-      paused: false
-      autoMerge: ${auto_merge}
-      ${backend_field}
-    }) { paused autoMerge selectedAgentBackend }
-  }" | jq -r '.data.updateRepositorySettings
+  current="$(gql "{ repositories { id ${settable} } }")" || return 1
+  if ! jq -e --arg id "${repository_id}" \
+      '[.data.repositories[] | select(.id == $id)] | length == 1' >/dev/null <<<"${current}"; then
+    echo "error: repository ${repository_id} went away while configuring it" >&2
+    return 1
+  fi
+
+  input="$(jq -c --arg id "${repository_id}" --arg backend "${BACKEND}" --arg auto "${AUTO_MERGE}" '
+    [.data.repositories[] | select(.id == $id)][0]
+    | del(.id)
+    | .repositoryId = $id
+    | .paused = false
+    | if $backend == "" then . else .selectedAgentBackend = $backend end
+    | if $auto == "" then . else .autoMerge = true end
+  ' <<<"${current}")"
+
+  # $input is a GraphQL variable, not a shell one — the quoting is deliberate.
+  # shellcheck disable=SC2016
+  gql 'mutation ($input: UpdateRepositorySettingsInput!) {
+    updateRepositorySettings(input: $input) { paused autoMerge selectedAgentBackend }
+  }' "$(jq -nc --argjson input "${input}" '{input: $input}')" \
+    | jq -r '.data.updateRepositorySettings
     | "unpaused, autoMerge=\(.autoMerge), backend=\(.selectedAgentBackend // "harness default")"'
 }
 
