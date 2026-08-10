@@ -1,5 +1,27 @@
-export const HARNESS_START_HINT =
-  "Start the Harness first: ready-for-agent start (or bun run ready-for-agent start)"
+/** Default Harness UI / GraphQL loopback origin (port 6056). */
+export const DEFAULT_HARNESS_BASE_URL = "http://127.0.0.1:6056"
+
+/** Single-line start remedy for unreachable-Harness failures. */
+export const HARNESS_START_HINT = "Start it with: ready-for-agent start"
+
+/**
+ * Derive the operator-facing Harness base URL from a GraphQL endpoint URL
+ * (strip a trailing `/graphql`). Falls back to the product default.
+ */
+export const harnessBaseUrlFromGraphqlUrl = (graphqlUrl: string): string => {
+  const trimmed = graphqlUrl.trim().replace(/\/+$/, "")
+  if (trimmed.length === 0) {
+    return DEFAULT_HARNESS_BASE_URL
+  }
+  const withoutGraphql = trimmed.replace(/\/graphql$/i, "")
+  return withoutGraphql.length > 0 ? withoutGraphql : DEFAULT_HARNESS_BASE_URL
+}
+
+/** User-facing message when the GraphQL target is the local Harness and it is down. */
+export const harnessNotRunningMessage = (
+  harnessBaseUrl: string = DEFAULT_HARNESS_BASE_URL,
+): string =>
+  `Harness is not running at ${harnessBaseUrl}\n${HARNESS_START_HINT}`
 
 const collectErrorText = (cause: unknown): string => {
   const parts: string[] = []
@@ -35,11 +57,21 @@ export const isGraphqlUnreachable = (cause: unknown): boolean => {
   )
 }
 
-export const formatGraphqlRequestFailure = (cause: unknown): string => {
-  const detail =
-    cause instanceof Error ? cause.message : "GraphQL request failed"
+export type FormatGraphqlRequestFailureOptions = {
+  /** Configured GraphQL URL; used to print the Harness origin when unreachable. */
+  readonly graphqlUrl?: string
+}
+
+export const formatGraphqlRequestFailure = (
+  cause: unknown,
+  options?: FormatGraphqlRequestFailureOptions,
+): string => {
   if (isGraphqlUnreachable(cause)) {
-    return `${detail}\n\n${HARNESS_START_HINT}`
+    const baseUrl =
+      options?.graphqlUrl === undefined
+        ? DEFAULT_HARNESS_BASE_URL
+        : harnessBaseUrlFromGraphqlUrl(options.graphqlUrl)
+    return harnessNotRunningMessage(baseUrl)
   }
-  return detail
+  return cause instanceof Error ? cause.message : "GraphQL request failed"
 }

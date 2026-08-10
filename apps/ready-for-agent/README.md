@@ -100,7 +100,10 @@ WAL; concurrent writers are not supported.
 
 ### Add a repository
 
-With the Harness running:
+For interactive first-run setup, prefer the blank-slate UI after `start`
+(Browse… / path field). CLI `add` is for scripting and power-user use.
+
+With the Harness already running:
 
 ```bash
 bun run ready-for-agent add /path/to/local/repo
@@ -109,7 +112,7 @@ bun run ready-for-agent add /path/to/local/repo
 The command inspects the local git repository, calls the harness GraphQL
 endpoint at `http://127.0.0.1:6056/graphql`, and prints the persisted Repository
 fields. The path must be a git repository with a GitHub or GitLab remote, and
-new Repositories are reported as paused.
+new Repositories are reported as paused. `add` does not start the Harness.
 
 Override the endpoint when the harness is available elsewhere:
 
@@ -118,8 +121,9 @@ READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
   bun run ready-for-agent add /path/to/local/repo
 ```
 
-If the GraphQL endpoint is unreachable, the command fails with a clear hint to
-start the Harness first.
+If the GraphQL endpoint is unreachable, the command fails with a short
+harness-not-running message and a single start hint (no network-connectivity
+wording or stack trace).
 
 ### Remove a GitHub token
 

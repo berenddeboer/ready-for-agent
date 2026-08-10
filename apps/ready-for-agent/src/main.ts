@@ -40,7 +40,16 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
 
   const program = Command.run(cli, {
     version: READY_FOR_AGENT_VERSION,
-  }).pipe(Effect.provide(MainLive))
+  }).pipe(
+    Effect.provide(MainLive),
+    // GraphqlRequestFailed is marked [Runtime.errorReported]=false so runMain
+    // skips Cause pretty-print; surface the short message once here.
+    Effect.tapErrorTag("GraphqlRequestFailed", (error) =>
+      Effect.sync(() => {
+        console.error(error.message)
+      }),
+    ),
+  )
 
   BunRuntime.runMain(program)
 }
