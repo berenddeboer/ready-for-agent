@@ -2625,7 +2625,7 @@ function RepositoryIssues({
   if (issues.length === 0) {
     return (
       <p className={ui.repoIssuesEmpty}>
-        Label GitHub/GitLab issues with{" "}
+        Label {repository.forge === "gitlab" ? "GitLab" : "GitHub"} issues with{" "}
         <code className={ui.guidanceCode}>ready-for-agent</code> for them to
         show up here. If an issue is a child issue, the parent itself cannot be
         a child issue too.
