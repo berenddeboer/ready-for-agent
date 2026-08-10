@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os"
+
 const sanitizeSegment = (value: string): string => {
   const cleaned = value
     .toLowerCase()
@@ -70,7 +72,7 @@ export const worktreeParentPath = (input: {
     return `${dirname(localPath)}/${repositoryStem(localPath)}-worktrees`
   }
 
-  const temporaryDirectory = (input.tmpDir ?? "/tmp")
+  const temporaryDirectory = (input.tmpDir ?? tmpdir())
     .trim()
     .replace(/[/\\]+$/, "")
   const path = input.projectPath.split("/").map(sanitizeSegment).join("/")
