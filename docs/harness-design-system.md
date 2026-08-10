@@ -637,6 +637,13 @@ underline).
   stamped-plate twin of mini** — same `--plate` fill, rivets, and top-only
   bevel (not solid-ink fill). Hierarchy is position/label only so Cancel and
   Save cannot drift. Pending state = label swap ("Saving…"), no spinner.
+- **Ready plate** (`ui.plateReady`): same riveted chrome as primary (rivets,
+  ink border, top bevel, mono uppercase), but **PR-green** (`--lane-pr`) fill
+  and light/white text. Use for **verified, safe-to-commit** actions after a
+  successful check (e.g. **Confirm and add** / **Adding…** on the add-
+  repository form once inspect succeeds). Browse and pre-inspect **Inspect**
+  stay on mini/primary. Hover = slight brightness lift; disabled =
+  `opacity-55` (+ wait cursor when `aria-busy`).
 
 ### 5.4 Icon buttons (pause/start, reset, refresh, collapse, copy)
 
