@@ -984,6 +984,7 @@ export const makeWorkItemLifecycleLive = (
       > =>
         resolveAgentModelsForBackend(repositoryId, backendId).pipe(
           Effect.provideService(DbService, db),
+          Effect.provideService(ActiveAgentBackend, activeAgentBackend),
         )
       const notifyWorkItemsChanged = (
         repositoryId: string,

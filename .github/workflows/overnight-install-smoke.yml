@@ -1,0 +1,83 @@
+# Overnight published-install smoke (issue #937).
+#
+# Installs ready-for-agent from the public npm registry (user path), starts the
+# harness without opencode on PATH, and asserts first-run health + default
+# Agent Backend Unavailable on linux-x64 and linux-arm64.
+#
+# Complementary to CI/CD packed-install on main (pack-from-source, x64 only).
+name: Overnight install smoke
+
+on:
+  schedule:
+    # Once daily, overnight UTC.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "npm dist-tag or version (default latest)"
+        required: false
+        default: "latest"
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  published-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: linux-x64
+            runs-on: ubuntu-latest
+          - arch: linux-arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    name: published-install (${{ matrix.arch }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          filter: tree:0
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "26"
+
+      # git + gh for host-tools preflight. Do not install opencode — the smoke
+      # asserts default backend Unavailable when the CLI is absent.
+      - name: Ensure gh is available
+        run: |
+          set -euo pipefail
+          if ! command -v gh >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y gh
+          fi
+          command -v git
+          command -v gh
+          if command -v opencode >/dev/null 2>&1; then
+            echo "warning: opencode present on runner PATH; product PATH still excludes it" >&2
+          fi
+
+      - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
+
+      - name: Overnight published-install smoke
+        id: overnight
+        env:
+          OVERNIGHT_INSTALL_DIAGNOSTICS_DIR: ${{ runner.temp }}/overnight-install-diagnostics
+          OVERNIGHT_INSTALL_VERSION: ${{ github.event.inputs.version || 'latest' }}
+        run: bunx nx run ready-for-agent:overnight-published-install-smoke --args="--version=${OVERNIGHT_INSTALL_VERSION}"
+
+      - name: Upload overnight-install diagnostics
+        if: failure() && steps.overnight.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: overnight-install-diagnostics-${{ matrix.arch }}
+          path: ${{ runner.temp }}/overnight-install-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 14

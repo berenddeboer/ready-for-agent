@@ -426,6 +426,10 @@ describe("Captured Agent Backend (create + route + models)", () => {
 
   it("resolves models from captured backend prefs, not the default flat columns", async () => {
     const dbLayer = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+    const activeLayer = stubActiveAgentBackendLayer({
+      registration: opencodeRegistration,
+      registrations: [grokRegistration],
+    })
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = yield* DbService
@@ -492,7 +496,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
         const selection = yield* resolveAgentModelsForBackend(repo.id, "grok")
         expect(selection.model).toBe("grok-code-fast-1")
         expect(selection.thinkingLevel).toBe("high")
-      }).pipe(Effect.provide(dbLayer)),
+      }).pipe(Effect.provide(Layer.mergeAll(dbLayer, activeLayer))),
     )
   })
 
@@ -631,7 +635,10 @@ describe("Captured Agent Backend (create + route + models)", () => {
         const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 6))
         expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
         if (error instanceof BuildModelNotConfiguredError) {
-          expect(error.message).toBe("Select a default build model first")
+          expect(error.message).toContain("No build model set")
+          expect(error.message).toContain("acme/widgets")
+          expect(error.message).toContain("Grok Build")
+          expect(error.message).toContain("Settings")
         }
       }).pipe(
         Effect.provide(

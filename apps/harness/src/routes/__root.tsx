@@ -452,6 +452,11 @@ function SettingsChrome() {
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewPending, setPreviewPending] = useState(false)
   const previewGenerationRef = useRef(0)
+  // Ready alternatives for the default-Unavailable banner when those backends
+  // are not yet in the Active set (typical first-run; issue #937).
+  const [readyAlternativesForBanner, setReadyAlternativesForBanner] = useState<
+    readonly string[]
+  >([])
   const buildConfigured = isBuildModelConfigured(config.data)
   const statuses: readonly AgentBackendStatusRow[] =
     backendStatus.data?.agentBackendStatuses ?? []
@@ -923,6 +928,59 @@ function SettingsChrome() {
     updateConfig.reset,
   ])
 
+  // When the harness default is Unavailable, probe non-default backends via
+  // existing previewAgentBackend (no Active-set change) so the banner can list
+  // Ready alternatives on first run, not only backends already Active (#937).
+  useEffect(() => {
+    if (backendKind !== "UNAVAILABLE" || !backendStatus.isSuccess) {
+      setReadyAlternativesForBanner([])
+      return
+    }
+    const selectedId = config.data?.selectedAgentBackend ?? defaultBackendId
+    const candidates = (backendStatus.data?.agentBackends ?? [])
+      .map((backend) => backend.id)
+      .filter((id) => id !== selectedId)
+    if (candidates.length === 0) {
+      setReadyAlternativesForBanner([])
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const readyIds = (
+        await Promise.all(
+          candidates.map(async (backendId) => {
+            try {
+              const result = await graphql.query({
+                previewAgentBackend: {
+                  __args: { backendId },
+                  kind: true,
+                  backend: { id: true },
+                },
+              })
+              return result.previewAgentBackend.kind === "READY"
+                ? backendId
+                : null
+            } catch {
+              return null
+            }
+          }),
+        )
+      ).filter((id): id is string => id !== null)
+      if (!cancelled) {
+        setReadyAlternativesForBanner(readyIds)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    backendKind,
+    backendStatus.isSuccess,
+    backendStatus.data?.agentBackends,
+    config.data?.selectedAgentBackend,
+    defaultBackendId,
+  ])
+
   const savedAgentBackend = config.data?.selectedAgentBackend ?? "opencode"
   const backendChanging = selectedAgentBackend !== savedAgentBackend
 
@@ -990,14 +1048,48 @@ function SettingsChrome() {
   const showBackendBanner =
     config.isSuccess &&
     (backendKind === "UNAVAILABLE" || unavailableStatuses.length > 0)
+  // Prefer the "default missing + Ready alternatives" guidance when the
+  // harness default is Unavailable and at least one other backend is Ready
+  // (Active statuses and/or previewAgentBackend probes; issue #937).
+  const readyFromActiveStatuses = statuses
+    .filter(
+      (row) =>
+        row.kind === "READY" &&
+        row.backend.id !==
+          (config.data?.selectedAgentBackend ?? defaultBackendId),
+    )
+    .map((row) => row.backend.id)
+  const readyBackendIdsForBanner = [
+    ...new Set([...readyFromActiveStatuses, ...readyAlternativesForBanner]),
+  ]
+  const defaultUnavailableGuidance =
+    backendKind === "UNAVAILABLE" && readyBackendIdsForBanner.length > 0
+      ? `Default Agent Backend '${config.data?.selectedAgentBackend ?? defaultBackendId}' is not available (${
+          defaultStatus?.reason?.trim() || "unavailable"
+        }). Ready: ${readyBackendIdsForBanner.join(", ")}.`
+      : null
   const bannerUnavailableReason =
-    unavailableStatuses.length === 1
+    defaultUnavailableGuidance ??
+    (unavailableStatuses.length === 1
       ? `${unavailableStatuses[0]?.backend.label ?? "Agent Backend"}: ${
           unavailableStatuses[0]?.reason ?? "unavailable"
         }`
       : unavailableStatuses.length > 1
         ? `${unavailableStatuses.length} Agent Backends are unavailable`
-        : (defaultStatus?.reason ?? "Agent Backend is unavailable")
+        : backendKind === "UNAVAILABLE"
+          ? `Default Agent Backend '${config.data?.selectedAgentBackend ?? defaultBackendId}' is not available (${
+              defaultStatus?.reason?.trim() || "unavailable"
+            }). Open Settings to choose another backend or install the CLI.`
+          : (defaultStatus?.reason ?? "Agent Backend is unavailable"))
+  const unconfiguredBuildModelGuidance = `No build model set for Agent Backend '${
+    statuses.find(
+      (row) =>
+        row.backend.id ===
+        (config.data?.selectedAgentBackend ?? defaultBackendId),
+    )?.backend.label ??
+    config.data?.selectedAgentBackend ??
+    defaultBackendId
+  }' (harness default). Set one in Settings, or per repository.`
   const modelsDisabled =
     backendChanging && (previewPending || previewError !== null)
   // isFetching, not isPending: opening Settings refetches, and React Query
@@ -1193,7 +1285,7 @@ function SettingsChrome() {
               </BannerActionButton>
             }
           >
-            Select a default build model first
+            {unconfiguredBuildModelGuidance}
           </Banner>
         )}
         <Outlet />
@@ -1237,9 +1329,9 @@ function SettingsChrome() {
                 tone="guidance"
                 tag="Setup"
               >
-                Select a default agent backend, and default build model.
-                Optionally select a different review model (recommended). You
-                can override this per configured repo.
+                {unconfiguredBuildModelGuidance} Optionally select a different
+                review model (recommended). You can override this per configured
+                repo.
               </Banner>
             )}
             {!backendChanging &&

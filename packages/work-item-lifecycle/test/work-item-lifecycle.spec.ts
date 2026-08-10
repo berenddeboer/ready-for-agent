@@ -344,7 +344,9 @@ describe("WorkItemLifecycle", () => {
 
           expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
           if (error instanceof BuildModelNotConfiguredError) {
-            expect(error.message).toBe("Select a default build model first")
+            expect(error.message).toContain("No build model set")
+            expect(error.message).toContain("Agent Backend")
+            expect(error.message).toContain("Settings")
           }
         }),
       ))

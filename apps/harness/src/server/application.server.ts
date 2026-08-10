@@ -19,7 +19,9 @@ import {
   type AgentBackendId,
   type ResolveAgentBackendRuntime,
   SessionTelemetryProvider,
+  formatDefaultBackendUnavailableMessage,
   isSelectableAgentBackendId,
+  listBuiltInAgentBackends,
   resolveActiveRegistration,
 } from "@ready-for-agent/agent-backend"
 import { Claude, ClaudeSessionTelemetryLive } from "@ready-for-agent/claude"
@@ -272,6 +274,7 @@ export const createApplication = async (
         yield* keymaxxer.initialize
         // Startup inspection: failure must not terminate the Harness.
         const active = yield* ActiveAgentBackend
+        const db = yield* DbService
         // Startup inspect for every initial Active backend (selected-or-in-use).
         const statuses = yield* active.listStatuses
         for (const status of statuses) {
@@ -279,6 +282,57 @@ export const createApplication = async (
             cwd: toolCwd,
             timeout: "30 seconds",
           })
+        }
+
+        // When the harness default is Unavailable, probe other built-ins via
+        // preview (no Active-set change) so first-run operators see Ready
+        // alternatives early instead of a later model-catalog failure (#937).
+        // Parallel + short timeout: guidance only; must not dominate cold start.
+        const config = yield* db.getConfig
+        const defaultBackendId = isSelectableAgentBackendId(
+          config.selectedAgentBackend,
+        )
+          ? (config.selectedAgentBackend as AgentBackendId)
+          : AGENT_BACKEND_IDS.opencode
+        const defaultStatus = yield* active.getBackendStatus(defaultBackendId)
+        if (defaultStatus !== null && defaultStatus.kind === "unavailable") {
+          const otherBackendIds = listBuiltInAgentBackends()
+            .map((entry) => entry.descriptor.id)
+            .filter((id) => id !== defaultBackendId)
+          const previews = yield* Effect.all(
+            otherBackendIds.map((id) =>
+              active
+                .preview(id, {
+                  cwd: toolCwd,
+                  timeout: "8 seconds",
+                })
+                .pipe(Effect.map((preview) => ({ id, preview }))),
+            ),
+            { concurrency: "unbounded" },
+          )
+          const readyBackendIds = previews
+            .filter(({ preview }) => preview.kind === "ready")
+            .map(({ id }) => id)
+          const guidance = formatDefaultBackendUnavailableMessage({
+            defaultBackendId,
+            reason: defaultStatus.reason,
+            readyBackendIds,
+          })
+          if (guidance !== null) {
+            yield* Effect.sync(() => {
+              console.info(guidance)
+            })
+          } else if (
+            defaultStatus.reason != null &&
+            defaultStatus.reason.trim().length > 0
+          ) {
+            // Still name the default when no Ready alternative is present.
+            yield* Effect.sync(() => {
+              console.info(
+                `Default Agent Backend '${defaultBackendId}' is not available (${defaultStatus.reason}). Open Settings to choose another backend or install the CLI.`,
+              )
+            })
+          }
         }
       }),
     )

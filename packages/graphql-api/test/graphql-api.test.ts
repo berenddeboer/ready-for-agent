@@ -3556,7 +3556,8 @@ describe("GraphQL API", () => {
         implementNow: () =>
           Effect.fail(
             new BuildModelNotConfiguredError({
-              message: "Select a default build model first",
+              message:
+                "No build model set for acme/widgets on Agent Backend 'Claude Code'. Available: haiku, sonnet. Set one in Settings, or per repository.",
             }),
           ),
       },
@@ -3578,7 +3579,8 @@ describe("GraphQL API", () => {
       data: null,
       errors: [
         expect.objectContaining({
-          message: "Select a default build model first",
+          message:
+            "No build model set for acme/widgets on Agent Backend 'Claude Code'. Available: haiku, sonnet. Set one in Settings, or per repository.",
           extensions: expect.objectContaining({
             code: "BUILD_MODEL_NOT_CONFIGURED",
           }),

@@ -39,7 +39,8 @@
         "bin/select-platform.js",
         "scripts/compile-platform-binary.ts",
         "scripts/generate-standalone-embed.ts",
-        "scripts/packed-install-smoke.ts"
+        "scripts/packed-install-smoke.ts",
+        "scripts/overnight-published-install-smoke.ts"
       ],
       "project": ["src/**/*.ts", "bin/**/*.{js,ts}", "scripts/**/*.ts"]
     },
