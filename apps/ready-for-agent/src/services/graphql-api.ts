@@ -52,7 +52,6 @@ export class GraphqlApi extends Context.Service<
                 projectPath: true,
                 localPath: true,
                 isBare: true,
-                paused: true,
               },
             })
             const added = result.addRepository

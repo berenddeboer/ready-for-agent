@@ -111,8 +111,8 @@ bun run ready-for-agent add /path/to/local/repo
 
 The command inspects the local git repository, calls the harness GraphQL
 endpoint at `http://127.0.0.1:6056/graphql`, and prints the persisted Repository
-fields. The path must be a git repository with a GitHub or GitLab remote, and
-new Repositories are reported as paused. `add` does not start the Harness.
+id, local path, and bare flag. The path must be a git repository with a GitHub
+or GitLab remote. `add` does not start the Harness.
 
 Override the endpoint when the harness is available elsewhere:
 

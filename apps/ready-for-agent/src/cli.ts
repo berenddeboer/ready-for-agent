@@ -60,7 +60,6 @@ const addRepositoryWorkflow = Effect.fn("Cli.addRepository")(function* (
   yield* Console.log(`  id: ${added.id}`)
   yield* Console.log(`  local path: ${added.localPath}`)
   yield* Console.log(`  bare: ${added.isBare}`)
-  yield* Console.log(`  paused: ${added.paused}`)
 })
 
 const startCommand = Command.make(
