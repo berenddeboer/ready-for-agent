@@ -11,15 +11,19 @@ import {
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
+  GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
   type GitHubHelperOperation,
   type GitHubOperationOptions,
   type GitHubRepository,
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
   GitHubService,
+  type GitHubServiceError,
   type GitHubServiceShape,
   GitHubThrottledError,
+  GitHubTlsTrustError,
   formatGitHubHelperShellCommand,
+  formatTlsTrustRemediation,
   parseGitHubHelperControl,
   resolveGitHubHelperChildSpawn,
 } from "@ready-for-agent/github-service"
@@ -46,11 +50,6 @@ import {
  * automatic visible-tab refresh still observes GitHub changes after expiry.
  */
 export const OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS = 5_000
-
-type GitHubServiceError =
-  | GitHubRepositoryUnavailableError
-  | GitHubRequestError
-  | GitHubThrottledError
 
 interface CountLookup {
   readonly fiber: Fiber.Fiber<number, GitHubServiceError>
@@ -309,6 +308,25 @@ export const keymaxxerGitHubLayer = (options: {
                   input.repository,
                   input.describe,
                 )
+              }
+              if (result.exitCode === GITHUB_HELPER_TLS_TRUST_EXIT_CODE) {
+                const control = parseGitHubHelperControl(result.stderr)
+                if (control?.kind !== "github-tls-trust") {
+                  return yield* requestError(input.repository, input.describe)
+                }
+                const operationMessage = requestError(
+                  input.repository,
+                  input.describe,
+                ).message
+                return yield* new GitHubTlsTrustError({
+                  message: formatTlsTrustRemediation({
+                    host: control.host,
+                    code: control.code,
+                    operationMessage,
+                  }),
+                  host: control.host,
+                  code: control.code,
+                })
               }
               if (result.exitCode !== 0) {
                 return yield* requestError(input.repository, input.describe)

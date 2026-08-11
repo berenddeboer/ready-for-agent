@@ -2,9 +2,9 @@ import { Cache, Duration, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   type GitHubOperationOptions,
-  type GitHubRepositoryUnavailableError,
   GitHubRequestError,
   GitHubService,
+  type GitHubServiceError,
   type GitHubServiceShape,
   type GitHubThrottledError,
   isGitHubThrottledError,
@@ -14,11 +14,6 @@ import {
   GitHubOperationCoordinator,
   type GitHubOperationOrigin,
 } from "./github-operation-coordinator.js"
-
-type GitHubServiceError =
-  | GitHubRepositoryUnavailableError
-  | GitHubRequestError
-  | GitHubThrottledError
 
 /** Unit key for the process-wide ambient GitHub CLI token cache. */
 const TOKEN_CACHE_KEY = true as const

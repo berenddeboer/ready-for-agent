@@ -11,15 +11,22 @@
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
+  GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
   type GitHubHelperThrottle,
   githubHelperSuccess,
   githubHelperThrottled,
+  githubHelperTlsTrust,
   serializeGitHubHelperControl,
 } from "./github-helper-protocol.js"
 import {
   githubThrottleFromResponse,
   githubThrottleFromSuccessfulResponse,
 } from "./github-throttle.js"
+import {
+  findTlsTrustCode,
+  formatTlsTrustRemediation,
+  githubApiHost,
+} from "./tls-trust.js"
 
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 const PAGE_SIZE = 100
@@ -69,10 +76,17 @@ export type OpenNonDraftPullRequestCountThrottled = {
   readonly usedFallback: boolean
 }
 
+export type OpenNonDraftPullRequestCountTlsTrust = {
+  readonly _tag: "tls-trust"
+  readonly host: string
+  readonly code: string
+}
+
 export type OpenNonDraftPullRequestCountResult =
   | OpenNonDraftPullRequestCountOk
   | OpenNonDraftPullRequestCountUnavailable
   | OpenNonDraftPullRequestCountThrottled
+  | OpenNonDraftPullRequestCountTlsTrust
   | OpenNonDraftPullRequestCountFailed
 
 export type OpenNonDraftPullRequestCountInput = {
@@ -113,6 +127,20 @@ class CountHttpError extends Error {
 class CountThrottledError extends Error {
   constructor(readonly throttle: GitHubHelperThrottle) {
     super("GitHub throttled")
+  }
+}
+
+class CountTlsTrustError extends Error {
+  constructor(
+    readonly host: string,
+    readonly code: string,
+  ) {
+    super(
+      formatTlsTrustRemediation({
+        host,
+        code,
+      }),
+    )
   }
 }
 
@@ -229,6 +257,10 @@ const withTimeoutAndRetry = async <A>(
       return value
     } catch (cause) {
       if (cause instanceof CountThrottledError) throw cause
+      const tlsCode = findTlsTrustCode(cause)
+      if (tlsCode !== undefined) {
+        throw new CountTlsTrustError(githubApiHost(), tlsCode)
+      }
       const statusCode =
         cause instanceof CountHttpError ? cause.statusCode : undefined
       const timedOut =
@@ -338,13 +370,20 @@ export const countOpenNonDraftPullRequestsLite = async (
         usedFallback: cause.throttle.usedFallback,
       }
     }
-    const statusCode =
-      typeof cause === "object" &&
-      cause !== null &&
-      "statusCode" in cause &&
-      typeof (cause as { statusCode: unknown }).statusCode === "number"
-        ? (cause as { statusCode: number }).statusCode
-        : undefined
+    if (cause instanceof CountTlsTrustError) {
+      return {
+        _tag: "tls-trust",
+        host: cause.host,
+        code: cause.code,
+      }
+    }
+    let statusCode: number | undefined
+    if (typeof cause === "object" && cause !== null && "statusCode" in cause) {
+      const raw = Reflect.get(cause, "statusCode")
+      if (typeof raw === "number") {
+        statusCode = raw
+      }
+    }
     const message = `Failed to count open pull requests for ${label}`
     return statusCode === undefined
       ? { _tag: "error", message }
@@ -415,6 +454,15 @@ export const runOpenNonDraftPullRequestCountCli = async (
         exitCode: GITHUB_HELPER_THROTTLED_EXIT_CODE,
         stdout: "",
         stderr: serializeGitHubHelperControl(githubHelperThrottled(result)),
+      }
+    }
+    if (result._tag === "tls-trust") {
+      return {
+        exitCode: GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
+        stdout: "",
+        stderr: serializeGitHubHelperControl(
+          githubHelperTlsTrust({ host: result.host, code: result.code }),
+        ),
       }
     }
     return {

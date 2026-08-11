@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test } from "vitest"
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
+  GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
   parseGitHubHelperControl,
 } from "../src/lib/github-helper-protocol.js"
 import {
@@ -160,6 +161,32 @@ describe("countOpenNonDraftPullRequestsLite", () => {
       expect(result.statusCode).toBe(401)
       expect(result.message).not.toContain("bad-token")
     }
+  })
+
+  test("does not retry TLS trust failures and returns tls-trust", async () => {
+    let calls = 0
+    const openssl = Object.assign(
+      new Error("self-signed certificate in certificate chain"),
+      { code: "SELF_SIGNED_CERT_IN_CHAIN" },
+    )
+    const result = await countOpenNonDraftPullRequestsLite({
+      token: "test-token",
+      owner: "acme",
+      name: "widgets",
+      sleepMs: async () => {
+        throw new Error("TLS trust failures must not sleep/retry")
+      },
+      fetchImpl: async () => {
+        calls += 1
+        throw new TypeError("fetch failed", { cause: openssl })
+      },
+    })
+    expect(calls).toBe(1)
+    expect(result).toEqual({
+      _tag: "tls-trust",
+      host: "api.github.com",
+      code: "SELF_SIGNED_CERT_IN_CHAIN",
+    })
   })
 
   test("returns an explicit throttle without retrying a 429 response", async () => {
@@ -357,6 +384,32 @@ describe("runOpenNonDraftPullRequestCountCli", () => {
     )
 
     expect(result.exitCode).toBe(GITHUB_HELPER_AUTHENTICATION_EXIT_CODE)
+  })
+
+  test("serializes TLS trust failures as versioned non-secret control", async () => {
+    const openssl = Object.assign(
+      new Error("self-signed certificate in certificate chain"),
+      { code: "SELF_SIGNED_CERT_IN_CHAIN" },
+    )
+    const result = await runOpenNonDraftPullRequestCountCli(
+      [encode("github"), encode("github.com"), encode("acme/widgets")],
+      {
+        env: { GITHUB_TOKEN: "test-token" },
+        fetchImpl: async () => {
+          throw new TypeError("fetch failed", { cause: openssl })
+        },
+      },
+    )
+
+    expect(result.exitCode).toBe(GITHUB_HELPER_TLS_TRUST_EXIT_CODE)
+    expect(result.stdout).toBe("")
+    expect(parseGitHubHelperControl(result.stderr)).toEqual({
+      version: 1,
+      kind: "github-tls-trust",
+      host: "api.github.com",
+      code: "SELF_SIGNED_CERT_IN_CHAIN",
+    })
+    expect(result.stderr).not.toContain("test-token")
   })
 
   test("exits 1 without a token and does not call GitHub", async () => {

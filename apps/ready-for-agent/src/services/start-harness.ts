@@ -6,8 +6,12 @@ import {
   resolveUiUrl,
   shouldOpenBrowser,
 } from "../browser-open.ts"
+import { checkForgeTlsTrust } from "../forge-tls-preflight.ts"
 import { checkHostTools } from "../host-tools-preflight.ts"
-import { peekRepositoryForges } from "../peek-repository-forges.ts"
+import {
+  peekForgeApiEndpoints,
+  peekRepositoryForges,
+} from "../peek-repository-forges.ts"
 import { bootStandaloneProduction } from "../standalone-boot.ts"
 import { ApplicationConfig } from "./application-config.ts"
 
@@ -88,6 +92,23 @@ export class StartHarness extends Context.Service<
         )
         if (!result.ok) {
           return yield* new StartHarnessFailed({ detail: result.message })
+        }
+
+        const endpoints = peekForgeApiEndpoints(config.databasePath)
+        if (endpoints.length > 0) {
+          const tls = yield* Effect.tryPromise({
+            try: () => checkForgeTlsTrust({ endpoints }),
+            catch: (cause) =>
+              new StartHarnessFailed({
+                detail:
+                  cause instanceof Error
+                    ? cause.message
+                    : "Forge TLS preflight failed",
+              }),
+          })
+          if (!tls.ok) {
+            return yield* new StartHarnessFailed({ detail: tls.message })
+          }
         }
       })
 

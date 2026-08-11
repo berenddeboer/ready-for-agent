@@ -12,6 +12,7 @@ import {
   type GitHubRequestError,
   GitHubService,
   type GitHubThrottledError,
+  type GitHubTlsTrustError,
   type ReadyLabeledIssue,
 } from "@ready-for-agent/github-service"
 import {
@@ -54,6 +55,7 @@ export class ReconciliationMutationError extends Schema.TaggedErrorClass<Reconci
 export type ReconciliationError =
   | GitHubRepositoryUnavailableError
   | GitHubRequestError
+  | GitHubTlsTrustError
   | GitHubThrottledError
   | GitLabProjectUnavailableError
   | GitLabRequestError
