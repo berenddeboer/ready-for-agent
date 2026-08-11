@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -6,7 +7,9 @@ import { SqlClient } from "effect/unstable/sql"
 import { SqliteTest } from "../src/lib/database-test.js"
 import {
   defaultMigrationsFolder,
+  migrationsAppliedLogMessage,
   runMigrations,
+  runMigrationsFromSources,
 } from "../src/lib/run-migrations.js"
 import { afterEach, describe, expect, it } from "bun:test"
 
@@ -29,7 +32,115 @@ afterEach(async () => {
   )
 })
 
+describe("migrationsAppliedLogMessage", () => {
+  it("returns null when no migrations were applied", () => {
+    expect(migrationsAppliedLogMessage({ applied: [] })).toBeNull()
+  })
+
+  it("describes a single applied migration", () => {
+    expect(
+      migrationsAppliedLogMessage({
+        applied: [{ name: "20260101000000_one", hash: "abc" }],
+      }),
+    ).toBe("Applied 1 database migration")
+  })
+
+  it("describes multiple applied migrations with a count", () => {
+    expect(
+      migrationsAppliedLogMessage({
+        applied: [
+          { name: "20260101000000_one", hash: "abc" },
+          { name: "20260102000000_two", hash: "def" },
+        ],
+      }),
+    ).toBe("Applied 2 database migrations")
+  })
+})
+
 describe("runMigrations", () => {
+  it("returns newly applied migrations and nothing on a second run", async () => {
+    const firstSql = "CREATE TABLE first_table (id integer);"
+    const secondSql = "CREATE TABLE second_table (id integer);"
+    const folder = await migrationFolder("20260101000000_first", firstSql)
+    const secondFolder = join(folder, "20260102000000_second")
+    await mkdir(secondFolder)
+    await writeFile(join(secondFolder, "migration.sql"), secondSql)
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const first = yield* runMigrations(folder)
+        expect(first.applied).toEqual([
+          {
+            name: "20260101000000_first",
+            hash: createHash("sha256").update(firstSql).digest("hex"),
+          },
+          {
+            name: "20260102000000_second",
+            hash: createHash("sha256").update(secondSql).digest("hex"),
+          },
+        ])
+        expect(migrationsAppliedLogMessage(first)).toBe(
+          "Applied 2 database migrations",
+        )
+
+        const second = yield* runMigrations(folder)
+        expect(second.applied).toEqual([])
+        expect(migrationsAppliedLogMessage(second)).toBeNull()
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("returns only migrations that were not already recorded", async () => {
+    const existingSql = "CREATE TABLE already_there (id integer);"
+    const pendingSql = "CREATE TABLE newly_there (id integer);"
+    const existingHash = createHash("sha256").update(existingSql).digest("hex")
+    const pendingHash = createHash("sha256").update(pendingSql).digest("hex")
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`
+          CREATE TABLE __drizzle_migrations (
+            id INTEGER PRIMARY KEY,
+            hash text NOT NULL,
+            created_at numeric,
+            name text,
+            applied_at TEXT
+          )
+        `
+        yield* sql`
+          INSERT INTO __drizzle_migrations (hash, created_at, name, applied_at)
+          VALUES (
+            ${existingHash},
+            ${20260101000000},
+            ${"20260101000000_existing"},
+            ${"2026-01-01T00:00:00.000Z"}
+          )
+        `
+
+        const result = yield* runMigrationsFromSources([
+          { name: "20260101000000_existing", sql: existingSql },
+          { name: "20260102000000_pending", sql: pendingSql },
+        ])
+
+        expect(result.applied).toEqual([
+          { name: "20260102000000_pending", hash: pendingHash },
+        ])
+        expect(migrationsAppliedLogMessage(result)).toBe(
+          "Applied 1 database migration",
+        )
+
+        const tables = yield* sql`
+          SELECT name FROM sqlite_master
+          WHERE type = 'table' AND name IN ('already_there', 'newly_there')
+          ORDER BY name
+        `
+        // existing was skipped (hash already recorded), so only pending ran
+        expect(tables).toEqual([{ name: "newly_there" }])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
   it("rolls back all statements when a migration fails", async () => {
     const folder = await migrationFolder(
       "20260714120000_broken",

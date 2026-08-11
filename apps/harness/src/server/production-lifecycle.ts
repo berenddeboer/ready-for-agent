@@ -16,7 +16,11 @@ import {
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
-import { DatabaseLive, runConfiguredMigrations } from "@ready-for-agent/db"
+import {
+  DatabaseLive,
+  logMigrationsAppliedIfAny,
+  runConfiguredMigrations,
+} from "@ready-for-agent/db"
 import {
   KEYMAXXER_SIDECAR_URL_PREFIX,
   type SidecarChildSpawn,
@@ -223,9 +227,9 @@ const applyProductionMigrations = async (
       Effect.provide(
         DatabaseLive.pipe(Layer.provide(environmentConfigLayer(environment))),
       ),
-      Effect.tap(() =>
+      Effect.tap((result) =>
         Effect.sync(() => {
-          console.info("Database migrations applied")
+          logMigrationsAppliedIfAny(result)
         }),
       ),
     ),
