@@ -189,11 +189,36 @@ Use a different port than 6056:
 PORT=7000 ready-for-agent
 ```
 
-When adding a repo via the CLI against a non-default port (Harness must
+### Listen on all interfaces (or a specific address)
+
+By default the Harness binds loopback only (`127.0.0.1`). To reach the UI or
+GraphQL from another machine, container, or remote desktop, opt in with
+Vite-style `--host` / `HOST` (the Keymaxxer Sidecar stays on `127.0.0.1`):
+
+```bash
+# all interfaces (0.0.0.0)
+ready-for-agent start --host
+# or
+HOST=0.0.0.0 ready-for-agent start
+
+# a single address
+ready-for-agent start --host 192.168.1.10
+```
+
+The flag wins when both `--host` and `HOST` are set. The readiness log shows
+the bind address (e.g. `listening on http://0.0.0.0:6056`). Browser auto-open
+uses `http://127.0.0.1:<port>/` for all-interfaces binds (browsers mishandle
+`0.0.0.0`); for a concrete `--host <addr>` it opens that address.
+
+When adding a repo via the CLI against a non-default port or host (Harness must
 already be running):
 
 ```bash
 READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
+  ready-for-agent add /path/to/local/repo
+
+# non-loopback Harness (use a host/port the CLI machine can reach):
+READY_FOR_AGENT_GRAPHQL_URL=http://<reachable-host>:<port>/graphql \
   ready-for-agent add /path/to/local/repo
 ```
 

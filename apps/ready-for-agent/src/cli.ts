@@ -14,6 +14,13 @@ const noOpenFlag = Flag.boolean("no-open").pipe(
   ),
 )
 
+const hostFlag = Flag.string("host").pipe(
+  Flag.withDescription(
+    "Listen host (default 127.0.0.1). Bare --host binds all interfaces (0.0.0.0); --host <addr> binds that address. Env: HOST (flag wins)",
+  ),
+  Flag.optional,
+)
+
 const forgeHostFlag = Flag.string("forge-host").pipe(
   Flag.withDescription(
     "Correct the forge host inferred from the repository remote",
@@ -30,9 +37,10 @@ const projectPathFlag = Flag.string("project-path").pipe(
 
 const startHarnessWorkflow = Effect.fn("Cli.startHarness")(function* (
   noOpen: boolean,
+  host: string | undefined,
 ) {
   const startHarnessService = yield* StartHarness
-  yield* startHarnessService.start({ noOpen })
+  yield* startHarnessService.start({ noOpen, host })
 })
 
 const addRepositoryWorkflow = Effect.fn("Cli.addRepository")(function* (
@@ -64,8 +72,9 @@ const addRepositoryWorkflow = Effect.fn("Cli.addRepository")(function* (
 
 const startCommand = Command.make(
   "start",
-  { noOpen: noOpenFlag },
-  ({ noOpen }) => startHarnessWorkflow(noOpen),
+  { noOpen: noOpenFlag, host: hostFlag },
+  ({ noOpen, host }) =>
+    startHarnessWorkflow(noOpen, Option.getOrUndefined(host)),
 ).pipe(
   Command.withDescription(
     "Start the full Harness (UI + backend); opens the browser unless --no-open / NO_BROWSER",
@@ -92,8 +101,9 @@ const addCommand = Command.make(
 
 export const cli = Command.make(
   "ready-for-agent",
-  { noOpen: noOpenFlag },
-  ({ noOpen }) => startHarnessWorkflow(noOpen),
+  { noOpen: noOpenFlag, host: hostFlag },
+  ({ noOpen, host }) =>
+    startHarnessWorkflow(noOpen, Option.getOrUndefined(host)),
 ).pipe(
   Command.withDescription(
     "Ready for Agent operator binary (start Harness, add repositories)",

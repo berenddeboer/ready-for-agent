@@ -33,6 +33,13 @@ import {
   shouldOpenBrowser,
 } from "./browser-open.js"
 import {
+  formatListenUrl,
+  isRequestHostAdmitted,
+  parseHostFlagFromArgv,
+  resolveBrowserOpenUrl,
+  resolveListenHost,
+} from "./listen-host.js"
+import {
   type EmbeddedClientAssets,
   type StartHandler,
   serveStaticAssetFromDirectory,
@@ -495,7 +502,13 @@ const defaultServeHttp = async (input: {
     port: input.port,
     idleTimeout: PRODUCTION_HTTP_IDLE_TIMEOUT_SECONDS,
     async fetch(request) {
-      if (new URL(request.url).hostname !== input.hostname) {
+      const requestHostname = new URL(request.url).hostname
+      if (
+        !isRequestHostAdmitted({
+          requestHostname,
+          bindHostname: input.hostname,
+        })
+      ) {
         return new Response("Invalid Host", { status: 421 })
       }
 
@@ -548,7 +561,12 @@ export const startProductionLifecycle = async (
 ): Promise<ProductionLifecycleHandle> => {
   const environment = { ...(options.environment ?? process.env) }
   const argv = options.argv ?? process.argv
-  const hostname = options.hostname ?? "127.0.0.1"
+  const hostname =
+    options.hostname ??
+    resolveListenHost({
+      flag: parseHostFlagFromArgv(argv),
+      env: environment.HOST,
+    })
   const port = options.port ?? (await Effect.runPromise(loadPort(environment)))
   const clientDirectory = options.clientDirectory ?? defaultClientDirectory
   const serverEntryPath = options.serverEntryPath ?? defaultServerEntryPath
@@ -745,7 +763,7 @@ export const startProductionLifecycle = async (
           )
 
           return {
-            listenUrl: `http://${hostname}:${server.port}/`,
+            listenUrl: formatListenUrl(hostname, server.port),
             listenPort: server.port,
           }
         }),
@@ -784,7 +802,8 @@ export const startProductionLifecycle = async (
       },
     })
   ) {
-    openBrowser(listenUrl)
+    // Wildcard → loopback; concrete bind host → that address (never 0.0.0.0).
+    openBrowser(resolveBrowserOpenUrl(listenPort, hostname))
     onEvent("browser-open")
   }
 

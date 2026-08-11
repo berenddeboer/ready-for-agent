@@ -40,12 +40,15 @@ That boots the full Harness (UI + backend) on the monorepo dev path
 
 - UI: `http://127.0.0.1:6056`
 - GraphQL: `http://127.0.0.1:6056/graphql`
-- Sidecar (dev): `127.0.0.1:6057` (preserves Keymaxxer session across reloads)
+- Sidecar (dev): `127.0.0.1:6057` (preserves Keymaxxer session across reloads; always loopback)
 
-Or with non-standard ports:
+Or with non-standard ports / bind host (`HOST` / `ready-for-agent start --host`,
+same semantics as Vite `server.host`; Sidecar is unchanged):
 
 ```
 PORT=4021 KEYMAXXER_SIDECAR_PORT=4031 bunx nx run harness:dev
+HOST=0.0.0.0 bunx nx run harness:dev
+bun run ready-for-agent start --host
 ```
 
 Production-style monorepo start

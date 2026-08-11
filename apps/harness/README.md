@@ -14,21 +14,31 @@ bun run ready-for-agent start
 bunx nx run harness:dev
 ```
 
-The SPA and GraphQL endpoint are available on the same loopback server:
+The SPA and GraphQL endpoint are available on the same application server
+(loopback by default):
 
 - `http://127.0.0.1:6056`
 - `http://127.0.0.1:6056/graphql`
 
 The sidecar listens separately on `127.0.0.1:6057` only to preserve the
-Keymaxxer session across application-server reloads.
+Keymaxxer session across application-server reloads (always loopback; not
+affected by `--host` / `HOST`).
 
-Override either listener independently, and point operator commands at a
-non-default Harness GraphQL endpoint with `READY_FOR_AGENT_GRAPHQL_URL`:
+Override port, bind host, or sidecar port independently, and point operator
+commands at a non-default Harness GraphQL endpoint with
+`READY_FOR_AGENT_GRAPHQL_URL`:
 
 ```bash
 PORT=7000 bun run ready-for-agent start
+# all interfaces (Vite-style --host / HOST); flag wins over env
+bun run ready-for-agent start --host
+HOST=0.0.0.0 bun run ready-for-agent start
+bun run ready-for-agent start --host 192.168.1.10
 KEYMAXXER_SIDECAR_PORT=7001 bun run ready-for-agent start
 READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
+  bun run ready-for-agent add /path/to/local/repo
+# non-loopback Harness:
+READY_FOR_AGENT_GRAPHQL_URL=http://<reachable-host>:<port>/graphql \
   bun run ready-for-agent add /path/to/local/repo
 ```
 

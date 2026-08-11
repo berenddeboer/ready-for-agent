@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 
 export type BrowserOpenEnv = Partial<
-  Record<"NO_BROWSER" | "PORT", string | undefined>
+  Record<"NO_BROWSER" | "PORT" | "HOST", string | undefined>
 >
 
 const DEFAULT_UI_PORT = 6056

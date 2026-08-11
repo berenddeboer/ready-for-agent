@@ -2,6 +2,10 @@ import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { isStandaloneExecutable } from "@ready-for-agent/keymaxxer-service"
 import {
+  resolveBrowserOpenUrl,
+  resolveListenHost,
+} from "../../../harness/src/server/listen-host.ts"
+import {
   openBrowserWhenReady,
   resolveUiUrl,
   shouldOpenBrowser,
@@ -26,6 +30,11 @@ export class StartHarnessFailed extends Schema.TaggedErrorClass<StartHarnessFail
 
 export type StartHarnessOptions = {
   readonly noOpen?: boolean
+  /**
+   * Raw `--host` flag value when present (including bare → `0.0.0.0` after
+   * argv expansion). Omitted means resolve from `HOST` env / default only.
+   */
+  readonly host?: string
 }
 
 const databaseFilePath = (databasePath: string): string | undefined => {
@@ -123,10 +132,17 @@ export class StartHarness extends Context.Service<
         }
       })
 
+      const resolveBindHost = (options: StartHarnessOptions): string =>
+        resolveListenHost({
+          flag: options.host,
+          env: config.browserEnv.HOST,
+        })
+
       const startStandalone = Effect.fn("StartHarness.startStandalone")(
         function* (options: StartHarnessOptions) {
           yield* runPreflight()
           yield* ensureDatabaseParentDir()
+          const hostname = resolveBindHost(options)
 
           // The embedded harness lifecycle owns a Promise-based server host.
           return yield* Effect.tryPromise({
@@ -135,6 +151,7 @@ export class StartHarness extends Context.Service<
                 noOpen: options.noOpen === true,
                 databasePath: config.databasePath,
                 browserEnv: config.browserEnv,
+                hostname,
               }),
             catch: fail,
           })
@@ -153,6 +170,7 @@ export class StartHarness extends Context.Service<
           })
         }
         yield* ensureDatabaseParentDir()
+        const hostname = resolveBindHost(options)
 
         // Scope owns the readiness poll fiber so it cancels with startMonorepo
         // (Harness exit, failure, or interrupt). The browser GUI stays detached.
@@ -164,7 +182,11 @@ export class StartHarness extends Context.Service<
                 env: config.browserEnv,
               })
             ) {
-              const url = resolveUiUrl(config.browserEnv)
+              // Port from env (same as resolveUiUrl); host: loopback for
+              // wildcards, concrete bind host otherwise — never 0.0.0.0.
+              const loopbackUrl = resolveUiUrl(config.browserEnv)
+              const port = Number(new URL(loopbackUrl).port)
+              const url = resolveBrowserOpenUrl(port, hostname)
               // Best-effort Effect (retry/timeout/ignore); scope interrupt stops the poll.
               yield* openBrowserWhenReady(config.platform, url).pipe(
                 Effect.forkScoped({ startImmediately: true }),
@@ -174,7 +196,11 @@ export class StartHarness extends Context.Service<
             const code = yield* spawner.exitCode(
               ChildProcess.make("bun", ["nx", "run", "harness:dev"], {
                 cwd: root,
-                env: { SQLITE_DATABASE_PATH: config.databasePath },
+                env: {
+                  SQLITE_DATABASE_PATH: config.databasePath,
+                  // Vite reads HOST for server.host / preview.host.
+                  HOST: hostname,
+                },
                 extendEnv: true,
                 stdin: "inherit",
                 stdout: "inherit",

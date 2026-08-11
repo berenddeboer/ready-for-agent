@@ -80,6 +80,15 @@ bun run ready-for-agent --no-open
 NO_BROWSER=1 bun run ready-for-agent
 ```
 
+Bind host defaults to loopback. Opt into all interfaces or a specific address
+with Vite-style `--host` / `HOST` (Sidecar stays on `127.0.0.1`):
+
+```bash
+bun run ready-for-agent start --host
+HOST=0.0.0.0 bun run ready-for-agent start
+bun run ready-for-agent start --host 192.168.1.10
+```
+
 ### Application data
 
 By default, product state is stored under the platform data directory:
@@ -114,10 +123,14 @@ endpoint at `http://127.0.0.1:6056/graphql`, and prints the persisted Repository
 id, local path, and bare flag. The path must be a git repository with a GitHub
 or GitLab remote. `add` does not start the Harness.
 
-Override the endpoint when the harness is available elsewhere:
+Override the endpoint when the harness is available elsewhere (non-default port
+or non-loopback bind):
 
 ```bash
 READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
+  bun run ready-for-agent add /path/to/local/repo
+
+READY_FOR_AGENT_GRAPHQL_URL=http://<reachable-host>:<port>/graphql \
   bun run ready-for-agent add /path/to/local/repo
 ```
 

@@ -1,7 +1,7 @@
 # Design
 
 - SPA uses TanStack Start SPA mode; no need for SSR
-- A single loopback application server serves the SPA and `/graphql`; see `docs/adr/0005-tanstack-start-single-application-server.md`
+- A single application server serves the SPA and `/graphql` (loopback by default; optional non-loopback bind via `--host` / `HOST`); see `docs/adr/0005-tanstack-start-single-application-server.md`
 - The GraphQL contract, generated genql client, and Yoga handler are separate packages
 - A shared Keymaxxer Sidecar owns one keyholder and exposes Streamable HTTP MCP to Harness and OpenCode (dev and production); capability URL is stdout-bootstrapped, never on disk
 - Database is Turso database (sqlite)

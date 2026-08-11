@@ -23,6 +23,9 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
   const { BunRuntime, BunServices } = await import("@effect/platform-bun")
   const { Effect, Layer } = await import("effect")
   const { Command } = await import("effect/unstable/cli")
+  const { expandBareHostFlag } = await import(
+    "../../harness/src/server/listen-host.ts"
+  )
   const { cli } = await import("./cli.ts")
   const { ApplicationConfig } = await import("./services/application-config.ts")
   const { GraphqlApi } = await import("./services/graphql-api.ts")
@@ -38,9 +41,12 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
     Layer.provideMerge(BunServices.layer),
   )
 
-  const program = Command.run(cli, {
+  // Expand bare `--host` → `--host 0.0.0.0` before Effect's string flag parser.
+  const args = expandBareHostFlag(process.argv.slice(2))
+
+  const program = Command.runWith(cli, {
     version: READY_FOR_AGENT_VERSION,
-  }).pipe(
+  })(args).pipe(
     Effect.provide(MainLive),
     // GraphqlRequestFailed is marked [Runtime.errorReported]=false so runMain
     // skips Cause pretty-print; surface the short message once here.

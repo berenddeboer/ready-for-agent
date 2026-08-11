@@ -54,7 +54,10 @@ export const bootStandaloneProduction = async (input: {
   readonly browserEnv: {
     readonly NO_BROWSER?: string | undefined
     readonly PORT?: string | undefined
+    readonly HOST?: string | undefined
   }
+  /** Resolved bind host (from `--host` / `HOST` / default). */
+  readonly hostname: string
 }): Promise<void> => {
   const argv = [
     ...process.argv,
@@ -70,6 +73,7 @@ export const bootStandaloneProduction = async (input: {
       SQLITE_DATABASE_PATH: input.databasePath,
     },
     argv,
+    hostname: input.hostname,
     embeddedClientAssets,
     loadStartHandler: async () =>
       createEmbeddedSpaStartHandler({
