@@ -1,19 +1,20 @@
 /**
  * Central non-interactive policy for live e2e's Keymaxxer usage.
  *
- * Live e2e is the one supported Harness test entry point that keeps
- * Keymaxxer enabled on purpose: it validates the production application,
- * Keymaxxer Sidecar, command-line client, and controlled Forge Repositories
- * together. That means it needs a way to run without ever prompting an
- * operator, while still allowing a human to intentionally test against their
- * own ambient vault.
+ * Vault-backed live e2e (`harness:e2e`) keeps Keymaxxer enabled on purpose:
+ * it validates the production application, Keymaxxer Sidecar, command-line
+ * client, and controlled Forge Repositories together. Vault-free live e2e
+ * (`harness:e2e-no-backend`) soft-disables Keymaxxer via
+ * `KEYMAXXER_ENABLED=false` (and clears fixture master-key env) so fork PRs
+ * still get coverage.
  *
  * `resolveKeymaxxerE2ePolicy` is the single seam both the live-Harness
  * supervisor (`start-live-harness.ts`) and the fixture-clone helper
  * (`clone-fixture-repo.ts`) call before touching Keymaxxer, so neither can
  * drift into a silent prompt: a fixture master key selects the checked-in
- * vault, `E2E_ALLOW_KEYMAXXER_PROMPTS=1` is the only way to opt into the
- * operator's ambient vault, and anything else fails closed with an
+ * vault, `KEYMAXXER_ENABLED=false` without a master key is vault-free
+ * soft-disable, `E2E_ALLOW_KEYMAXXER_PROMPTS=1` is the only way to opt into
+ * the operator's ambient vault, and anything else fails closed with an
  * actionable diagnostic.
  */
 
@@ -28,6 +29,8 @@ const fixtureVaultDir = resolve(workspaceRoot, "e2e/fixtures/keymaxxer")
 export type KeymaxxerE2ePolicy =
   | { readonly mode: "fixture"; readonly masterKey: string }
   | { readonly mode: "interactive" }
+  /** Soft-disabled product path (e.g. `@no-backend` e2e / KEYMAXXER_ENABLED=false). */
+  | { readonly mode: "disabled" }
 
 const FIXTURE_REQUIRED_MESSAGE =
   "Live e2e requires E2E_KEYMAXXER_MASTER_KEY (or the legacy KEYMAXXER_MASTER_KEY) " +
@@ -40,15 +43,22 @@ const NO_CREDENTIAL_MESSAGE = [
   "non-interactively against the checked-in fixture vault, or set",
   "E2E_ALLOW_KEYMAXXER_PROMPTS=1 to explicitly opt into interactive prompts",
   "against your ambient ~/.keymaxxer vault.",
+  "Vault-free suites set KEYMAXXER_ENABLED=false (e.g. harness:e2e-no-backend).",
 ].join(" ")
 
 /**
- * Resolves whether live e2e runs against the non-interactive fixture vault
- * or the operator's ambient vault. A fixture master key always wins. Absent
- * one, CI and explicit fixture-vault requests fail closed rather than
- * falling back to an ambient vault; local runs need the explicit
- * `E2E_ALLOW_KEYMAXXER_PROMPTS=1` opt-in to run interactively. Missing
- * credentials without that opt-in are an error, not a silent prompt.
+ * Resolves whether live e2e runs against the non-interactive fixture vault,
+ * the operator's ambient vault, or with Keymaxxer soft-disabled.
+ *
+ * Priority:
+ * 1. A non-empty fixture master key always selects fixture mode — including
+ *    when ambient `KEYMAXXER_ENABLED=false` is set from product soft-disable
+ *    docs — so vault-backed `harness:e2e` is not broken by that flag.
+ * 2. `KEYMAXXER_ENABLED=false` without a master key is vault-free soft-disable
+ *    (`harness:e2e-no-backend` clears master-key env and sets this flag).
+ * 3. CI / `E2E_USE_FIXTURE_VAULT=1` without a master key fail closed.
+ * 4. `E2E_ALLOW_KEYMAXXER_PROMPTS=1` opts into ambient interactive vault.
+ * 5. Otherwise fail closed with an actionable diagnostic (never silent prompt).
  */
 export const resolveKeymaxxerE2ePolicy = (
   environment: NodeJS.ProcessEnv = process.env,
@@ -58,6 +68,10 @@ export const resolveKeymaxxerE2ePolicy = (
     environment.KEYMAXXER_MASTER_KEY?.trim()
   if (masterKey) {
     return { mode: "fixture", masterKey }
+  }
+
+  if (environment.KEYMAXXER_ENABLED?.trim().toLowerCase() === "false") {
+    return { mode: "disabled" }
   }
 
   const fixtureRequested =

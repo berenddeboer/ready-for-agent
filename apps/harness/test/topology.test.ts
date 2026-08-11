@@ -77,7 +77,7 @@ describe("single application server topology", () => {
     expect(smokeScript).not.toContain("E2E_KEYMAXXER_MASTER_KEY")
   })
 
-  test("forces KEYMAXXER_ENABLED=false at the ordinary test-target boundary, but not for live e2e", async () => {
+  test("forces KEYMAXXER_ENABLED=false at the ordinary test-target boundary, but not for vault-backed live e2e", async () => {
     const harness = await readJson<{ targets: Record<string, Target> }>(
       "../project.json",
     )
@@ -87,9 +87,29 @@ describe("single application server topology", () => {
       "false",
     )
     expect(harness.targets.smoke?.options?.env?.KEYMAXXER_ENABLED).toBe("false")
-    // Live e2e is the one supported suite that intentionally keeps Keymaxxer
-    // enabled: it validates the real Sidecar, CLI, and fixture credentials.
+    // Vault-backed live e2e intentionally keeps Keymaxxer enabled: it validates
+    // the real Sidecar, CLI, and fixture credentials.
     expect(harness.targets.e2e?.options?.env?.KEYMAXXER_ENABLED).toBeUndefined()
+    expect(harness.targets.e2e?.options?.command).toContain(
+      "--grep-invert @no-backend",
+    )
+    // Vault-free @no-backend suite: soft-disable Keymaxxer, clear ambient
+    // master keys so fixture mode cannot win, and strip OpenCode.
+    expect(
+      harness.targets["e2e-no-backend"]?.options?.env?.KEYMAXXER_ENABLED,
+    ).toBe("false")
+    expect(
+      harness.targets["e2e-no-backend"]?.options?.env?.E2E_KEYMAXXER_MASTER_KEY,
+    ).toBe("")
+    expect(
+      harness.targets["e2e-no-backend"]?.options?.env?.KEYMAXXER_MASTER_KEY,
+    ).toBe("")
+    expect(
+      harness.targets["e2e-no-backend"]?.options?.env?.E2E_AGENT_BACKEND_MODE,
+    ).toBe("no-opencode")
+    expect(harness.targets["e2e-no-backend"]?.options?.command).toContain(
+      "--grep @no-backend",
+    )
 
     const runnerScript = await readFile(
       new URL("../scripts/run-unit-tests.sh", import.meta.url),

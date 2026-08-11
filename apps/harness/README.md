@@ -80,17 +80,30 @@ without wrapping the Harness in a second coordinator process.
 ## Live end-to-end
 
 The Gherkin operator journeys under `e2e/features/` run the production build
-against a fresh isolated Harness database. They verify adding and refreshing
-the GitHub and GitLab End-to-End Fixture Repositories through the real operator
-binary, as well as the dedicated Kanban pipeline route.
+against a fresh isolated Harness database. There are **two** live suites
+(separate Playwright / `webServer` boots; issue #958):
+
+| Target | Tag filter | Product PATH | Keymaxxer | What it covers |
+| --- | --- | --- | --- | --- |
+| `harness:e2e-no-backend` | `--grep @no-backend` | `E2E_AGENT_BACKEND_MODE=no-opencode` (ambient `opencode` stripped; fail-closed if still resolvable) | `KEYMAXXER_ENABLED=false` (vault-free) | Default Agent Backend Unavailable + first-run UI when OpenCode is absent; pure-absence and mixed-Ready (fake Claude) |
+| `harness:e2e` | `--grep-invert @no-backend` | Default (OpenCode expected in CI) | Fixture vault credential | Add/refresh fixture Repositories, Kanban, Settings history, catalog-only models, etc. |
 
 ```bash
+# Vault-free default-backend / first-run (no OpenCode install required)
+bunx nx run harness:e2e-no-backend
+
+# OpenCode-backed operator journeys (excludes @no-backend)
 bunx nx run harness:e2e
 ```
 
-Live e2e is non-interactive by default and requires a Keymaxxer credential
-before it starts the Harness, Sidecar, or CLI at all — it never falls back to
-silently prompting:
+Overnight published-install smoke (`.github/workflows/overnight-install-smoke.yml`)
+remains the packaging multi-arch gate; it does not replace these suites.
+
+### Vault-backed suite (`harness:e2e`)
+
+Non-interactive by default and requires a Keymaxxer credential before it
+starts the Harness, Sidecar, or CLI at all — it never falls back to silently
+prompting:
 
 - **Fixture vault (default, non-interactive):** set
   `E2E_KEYMAXXER_MASTER_KEY` (or the legacy `KEYMAXXER_MASTER_KEY`) to unlock
@@ -109,3 +122,14 @@ silently prompting:
 The GitLab scenario soft-skips until the fixture vault includes the GitLab
 secret; set `E2E_REQUIRE_GITLAB=1` to fail closed after bootstrap. See
 `docs/e2e-fixture.md` and `docs/adr/0021-live-harness-end-to-end-test.md`.
+
+### Vault-free suite (`harness:e2e-no-backend`)
+
+Does **not** require `E2E_KEYMAXXER_MASTER_KEY` (fork-PR safe). The supervisor
+soft-disables Keymaxxer, always prepends a fake `claude` CLI, and in
+`no-opencode` mode removes every PATH directory that provides ambient
+`opencode` / `grok` / `codex` / `claude` so a local developer install cannot
+silently green pure-absence or mixed-Ready scenarios. It fails closed if those
+binaries still resolve (except the fake `claude`). Claude readiness is toggled
+per scenario via the live-harness control protocol
+(`firstParty` / `unauthenticated`).

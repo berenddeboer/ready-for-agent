@@ -4,6 +4,8 @@
  *
  * CI / fixture mode: temporary HOME with the checked-in encrypted vault.
  * Local mode: developer's vault; does not copy over ~/.keymaxxer.
+ * Vault-free mode (`KEYMAXXER_ENABLED=false`): no Keymaxxer Sidecar or vault
+ * (used by `@no-backend` / `harness:e2e-no-backend`, issue #958).
  *
  * The Harness runs as a supervised child so scenarios can request a restart
  * and seed legacy rows against the stopped database (issue #838); see
@@ -12,6 +14,11 @@
  * Agent Model catalog are fixed for the run: no Anthropic login, no AWS call,
  * and no billable model is ever involved. `CLAUDE_CODE_USE_BEDROCK` is
  * explicitly removed so the Harness runs in first-party configuration mode.
+ *
+ * `E2E_AGENT_BACKEND_MODE=no-opencode` strips ambient Agent Backend CLIs
+ * (`opencode`, `grok`, `codex`, ambient `claude`) from the product PATH and
+ * fails closed if they still resolve, except the controlled fake `claude`
+ * (issue #958).
  */
 
 import { type ChildProcess, spawn } from "node:child_process"
@@ -26,8 +33,13 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { delimiter, dirname, join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import {
+  assertNoAmbientAgentCliOnProductPath,
+  buildProductPath,
+  resolveAgentBackendE2eMode,
+} from "./agent-backend-path.ts"
 import { E2E_HARNESS_PORT } from "./constants.ts"
 import {
   type KeymaxxerE2ePolicy,
@@ -48,10 +60,12 @@ const port = Number(process.env.E2E_HARNESS_PORT ?? E2E_HARNESS_PORT)
 
 // Fail fast, before creating any temp dir, fake CLI, or production-build
 // check: a missing credential must never get far enough to touch the
-// Harness, Sidecar, or Keymaxxer CLI.
+// Harness, Sidecar, or Keymaxxer CLI (unless Keymaxxer is soft-disabled).
 let keymaxxerPolicy: KeymaxxerE2ePolicy
+let agentBackendMode: ReturnType<typeof resolveAgentBackendE2eMode>
 try {
   keymaxxerPolicy = resolveKeymaxxerE2ePolicy()
+  agentBackendMode = resolveAgentBackendE2eMode()
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error))
   process.exit(1)
@@ -100,9 +114,25 @@ exit 1
 )
 chmodSync(join(binDir, "claude"), 0o755)
 
+const productPath = buildProductPath({
+  mode: agentBackendMode,
+  fakeCliBinDir: binDir,
+  ambientPath: process.env.PATH ?? "",
+})
+try {
+  assertNoAmbientAgentCliOnProductPath({
+    mode: agentBackendMode,
+    productPath,
+    fakeCliBinDir: binDir,
+  })
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exit(1)
+}
+
 const env: NodeJS.ProcessEnv = {
   ...process.env,
-  PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+  PATH: productPath,
   SQLITE_DATABASE_PATH: dbPath,
   PORT: String(port),
   NO_BROWSER: "1",
@@ -120,6 +150,16 @@ if (keymaxxerPolicy.mode === "fixture") {
   )
   // Fresh sidecar bound to the fixture vault — do not reuse a developer sidecar.
   delete env.KEYMAXXER_SIDECAR_URL
+  // Ambient product soft-disable must not keep Keymaxxer off when vault e2e
+  // intentionally selected fixture mode (master key wins in the policy).
+  delete env.KEYMAXXER_ENABLED
+} else if (keymaxxerPolicy.mode === "disabled") {
+  // Soft-disable product Keymaxxer (same as overnight / packed smoke). Do not
+  // seed a vault or reuse a developer sidecar.
+  env.KEYMAXXER_ENABLED = "false"
+  delete env.KEYMAXXER_SIDECAR_URL
+  delete env.KEYMAXXER_MASTER_KEY
+  delete env.E2E_KEYMAXXER_MASTER_KEY
 }
 // keymaxxerPolicy.mode === "interactive": leave the environment untouched so
 // Keymaxxer uses the operator's ambient ~/.keymaxxer vault, prompts and all.
