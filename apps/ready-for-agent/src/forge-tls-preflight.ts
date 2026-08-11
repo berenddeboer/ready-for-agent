@@ -5,7 +5,7 @@ import {
 } from "@ready-for-agent/github-service"
 import type { ForgeApiEndpoint } from "./peek-repository-forges.ts"
 
-export type ForgeTlsPreflightFetch = (
+type ForgeTlsPreflightFetch = (
   input: Parameters<typeof fetch>[0],
   init?: RequestInit,
 ) => Promise<Response>
@@ -51,7 +51,7 @@ const parseHostPort = (
  * After a trust failure, reconnect without verification so we can name the
  * private CA (Netskope / Zscaler / etc.) in the operator message.
  */
-export const readPresentedCertificateIssuer = (
+const readPresentedCertificateIssuer = (
   host: string,
   timeoutMs = 5_000,
 ): Promise<string | null> => {
