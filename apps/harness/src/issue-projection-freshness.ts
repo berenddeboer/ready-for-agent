@@ -12,10 +12,10 @@
  */
 
 /** Upper bound of one healthy poll quiet period (base 60s + jitter 30s). */
-export const ISSUE_POLL_CADENCE_UPPER_MS = 90_000
+const ISSUE_POLL_CADENCE_UPPER_MS = 90_000
 
 /** How many cadence upper bounds without a successful refresh before stale. */
-export const ISSUE_PROJECTION_STALE_MULTIPLE = 5
+const ISSUE_PROJECTION_STALE_MULTIPLE = 5
 
 /** Age after which a non-null `issuesReconciledAt` is treated as stale. */
 export const ISSUE_PROJECTION_STALE_AFTER_MS =
