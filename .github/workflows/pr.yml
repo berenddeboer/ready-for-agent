@@ -84,8 +84,9 @@ jobs:
         run: bunx nx run harness:slow-test
 
   # Dev smoke + live Gherkin e2e. Independent of quality-gates (parallel job).
-  # OpenCode CLI is required: live e2e first-run settings inspects the model
-  # catalog via `opencode models --verbose` (empty catalog fails the suite).
+  # Two live suites (issue #958): vault-free @no-backend first (no OpenCode),
+  # then vault-backed OpenCode suite (excludes @no-backend). Overnight owns
+  # published-install packaging; this job owns product behaviour.
   harness:
     runs-on: ubuntu-latest
     steps:
@@ -98,10 +99,60 @@ jobs:
         with:
           bun-version: latest
 
-      # Resolve the release via authenticated GitHub API then pin the installer
-      # --version flag: bare `opencode.ai/install` hits unauthenticated
-      # /releases/latest and fails under Actions rate limits.
+      - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
+
+      # Restore only: quality-gates is the PR cache producer.
+      - name: Restore Nx cache
+        uses: ./.github/actions/nx-cache
+        with:
+          mode: pr
+          pr-number: ${{ github.event.pull_request.number }}
+          allow-save: "false"
+
+      # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
+      - name: Harness dev smoke
+        run: bunx nx run harness:smoke
+
+      # Chromium once for both live suites (no-backend always; full suite when vault).
+      - name: Install Playwright Chromium
+        working-directory: apps/harness
+        run: bunx playwright install --with-deps chromium
+
+      # Product default-backend / first-run without OpenCode (vault-free; fork-safe).
+      - name: Live Harness e2e (no backend agents)
+        id: live-e2e-no-backend
+        run: bunx nx run harness:e2e-no-backend
+
+      - name: Upload Playwright diagnostics (no backend)
+        if: failure() && steps.live-e2e-no-backend.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-no-backend
+          path: |
+            apps/harness/playwright-report/
+            apps/harness/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Vault-backed OpenCode suite (same as ci-cd.yml on main).
+      # Same-repo PRs can read E2E_KEYMAXXER_MASTER_KEY; fork PRs cannot, so
+      # skip rather than fail-closed when the secret is empty.
+      - name: Check live e2e vault key
+        id: e2e-vault
+        env:
+          E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
+        run: |
+          if [ -z "${E2E_KEYMAXXER_MASTER_KEY}" ]; then
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping vault-backed live Harness e2e: E2E_KEYMAXXER_MASTER_KEY is unavailable (expected for fork PRs)."
+          else
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # OpenCode only for the vault-backed suite: first-run model catalog via
+      # `opencode models --verbose` (empty catalog fails that suite).
       - name: Install OpenCode
+        if: steps.e2e-vault.outputs.has_key == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -115,44 +166,10 @@ jobs:
           test -n "$VERSION"
           curl -fsSL https://opencode.ai/install | bash -s -- --version "$VERSION" --no-modify-path
       - name: Add OpenCode to PATH
+        if: steps.e2e-vault.outputs.has_key == 'true'
         run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
-      - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
-
-      # Restore only: quality-gates is the PR cache producer.
-      - name: Restore Nx cache
-        uses: ./.github/actions/nx-cache
-        with:
-          mode: pr
-          pr-number: ${{ github.event.pull_request.number }}
-          allow-save: "false"
-
-      # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
-      # Production live e2e below remains vault-backed and separate.
-      - name: Harness dev smoke
-        run: bunx nx run harness:smoke
-
-      # Live Gherkin e2e (vault-backed, same suite as ci-cd.yml on main).
-      # Same-repo PRs can read E2E_KEYMAXXER_MASTER_KEY; fork PRs cannot, so
-      # skip rather than fail-closed when the secret is empty.
-      - name: Check live e2e vault key
-        id: e2e-vault
-        env:
-          E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
-        run: |
-          if [ -z "${E2E_KEYMAXXER_MASTER_KEY}" ]; then
-            echo "has_key=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping live Harness e2e: E2E_KEYMAXXER_MASTER_KEY is unavailable (expected for fork PRs)."
-          else
-            echo "has_key=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Install Playwright Chromium
-        if: steps.e2e-vault.outputs.has_key == 'true'
-        working-directory: apps/harness
-        run: bunx playwright install --with-deps chromium
-
-      - name: Live Harness e2e
+      - name: Live Harness e2e (with OpenCode)
         if: steps.e2e-vault.outputs.has_key == 'true'
         id: live-e2e
         env:

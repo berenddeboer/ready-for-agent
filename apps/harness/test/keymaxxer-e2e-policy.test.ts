@@ -9,6 +9,25 @@ import {
 import { afterEach, describe, expect, test } from "bun:test"
 
 describe("resolveKeymaxxerE2ePolicy", () => {
+  test("fixture master key wins over ambient KEYMAXXER_ENABLED=false (vault-backed e2e)", () => {
+    const policy = resolveKeymaxxerE2ePolicy({
+      KEYMAXXER_ENABLED: "false",
+      CI: "true",
+      E2E_KEYMAXXER_MASTER_KEY: "vault-key",
+    })
+    expect(policy).toEqual({ mode: "fixture", masterKey: "vault-key" })
+  })
+
+  test("KEYMAXXER_ENABLED=false without a master key is vault-free soft-disable", () => {
+    const policy = resolveKeymaxxerE2ePolicy({
+      KEYMAXXER_ENABLED: "false",
+      CI: "true",
+      E2E_KEYMAXXER_MASTER_KEY: "",
+      KEYMAXXER_MASTER_KEY: "   ",
+    })
+    expect(policy).toEqual({ mode: "disabled" })
+  })
+
   test("selects fixture mode when E2E_KEYMAXXER_MASTER_KEY is set", () => {
     const policy = resolveKeymaxxerE2ePolicy({ E2E_KEYMAXXER_MASTER_KEY: "k" })
     expect(policy).toEqual({ mode: "fixture", masterKey: "k" })

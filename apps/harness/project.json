@@ -83,7 +83,27 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bddgen && playwright test"
+        "command": "bddgen && playwright test --grep-invert @no-backend"
+      },
+      "dependsOn": [
+        "build",
+        {
+          "projects": ["graphql-client"],
+          "target": "generate"
+        }
+      ]
+    },
+    "e2e-no-backend": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bddgen && playwright test --grep @no-backend",
+        "env": {
+          "E2E_AGENT_BACKEND_MODE": "no-opencode",
+          "KEYMAXXER_ENABLED": "false",
+          "E2E_KEYMAXXER_MASTER_KEY": "",
+          "KEYMAXXER_MASTER_KEY": ""
+        }
       },
       "dependsOn": [
         "build",

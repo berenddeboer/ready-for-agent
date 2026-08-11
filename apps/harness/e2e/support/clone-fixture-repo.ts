@@ -88,12 +88,20 @@ const keymaxxerBin = () => {
 /**
  * Fixture-vault environment for a Keymaxxer CLI/Sidecar call, or `null` when
  * policy resolves to interactive mode (ambient `~/.keymaxxer`, opted into via
- * `E2E_ALLOW_KEYMAXXER_PROMPTS=1`). Throws when no credential is available
- * and no interactive opt-in was given — see `keymaxxer-e2e-policy.ts`.
+ * `E2E_ALLOW_KEYMAXXER_PROMPTS=1`). Vault-free `@no-backend` e2e
+ * (`KEYMAXXER_ENABLED=false` → policy mode `disabled`) cannot clone fixtures
+ * and fails closed here. Throws when no credential is available and no
+ * interactive opt-in was given — see `keymaxxer-e2e-policy.ts`.
  */
 const fixtureVaultEnv = (): NodeJS.ProcessEnv | null => {
   const policy = resolveKeymaxxerE2ePolicy()
   if (policy.mode === "interactive") return null
+  if (policy.mode !== "fixture") {
+    throw new Error(
+      "Fixture Repository clone requires Keymaxxer; KEYMAXXER_ENABLED=false " +
+        "(vault-free e2e) cannot clone. Use harness:e2e for vault-backed scenarios.",
+    )
+  }
 
   const home = mkdtempSync(join(tmpdir(), "rfa-e2e-keymaxxer-home-"))
   seedFixtureVaultHome(home)

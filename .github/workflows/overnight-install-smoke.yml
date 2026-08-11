@@ -4,6 +4,10 @@
 # harness without opencode on PATH, and asserts first-run health + default
 # Agent Backend Unavailable on linux-x64 and linux-arm64.
 #
+# Owns packaging / multi-arch published install. Product default-backend
+# behaviour in the monorepo live Gherkin suite is `harness:e2e-no-backend`
+# (@no-backend; issue #958) — do not replace or weaken this workflow with that.
+#
 # Complementary to CI/CD packed-install on main (pack-from-source, x64 only).
 name: Overnight install smoke
 
