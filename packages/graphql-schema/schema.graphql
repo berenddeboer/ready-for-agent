@@ -74,8 +74,8 @@ type Query {
   Historical Completed Work Items across all repositories (Complete and
   Abandoned only). Ordered by stateReadyAt newest-first. No rolling 24-hour
   window (unlike workItems listKind COMPLETED). Page is 1-based; defaults are
-  page 1 and pageSize 20. pageSize is clamped to a maximum of 100; invalid or
-  non-positive pageSize falls back to 20. Server-side pagination — not an
+  page 1 and pageSize 21. pageSize is clamped to a maximum of 100; invalid or
+  non-positive pageSize falls back to 21. Server-side pagination — not an
   unbounded client list.
   """
   completedWorkItems(page: Int, pageSize: Int): CompletedWorkItemsConnection!

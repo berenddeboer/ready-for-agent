@@ -5363,7 +5363,7 @@ describe("GraphQL API", () => {
       secondBody.data.completedWorkItems.items.map((item) => item.id),
     ).toContain(completedTooOldForJobsTab.id)
 
-    // Defaults: page 1, pageSize 20
+    // Defaults: page 1, pageSize 21 (fills 3-column completed grid)
     const defaultResponse = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `query {
@@ -5384,9 +5384,9 @@ describe("GraphQL API", () => {
         }
       }
     }
-    expect(lastListArgs).toEqual({ page: 1, pageSize: 20 })
+    expect(lastListArgs).toEqual({ page: 1, pageSize: 21 })
     expect(defaultBody.data.completedWorkItems.page).toBe(1)
-    expect(defaultBody.data.completedWorkItems.pageSize).toBe(20)
+    expect(defaultBody.data.completedWorkItems.pageSize).toBe(21)
   })
 
   test("normalizes completedWorkItems page and pageSize edge cases", async () => {
@@ -5424,11 +5424,11 @@ describe("GraphQL API", () => {
       // GraphQL Int variables only — fractional values are not part of the contract.
       {
         variables: { page: 2, pageSize: 0 },
-        expected: { page: 2, pageSize: 20 },
+        expected: { page: 2, pageSize: 21 },
       },
       {
         variables: { page: 3, pageSize: -5 },
-        expected: { page: 3, pageSize: 20 },
+        expected: { page: 3, pageSize: 21 },
       },
       {
         variables: { page: 1, pageSize: 500 },
