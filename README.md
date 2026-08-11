@@ -205,10 +205,7 @@ HOST=0.0.0.0 ready-for-agent start
 ready-for-agent start --host 192.168.1.10
 ```
 
-The flag wins when both `--host` and `HOST` are set. The readiness log shows
-the bind address (e.g. `listening on http://0.0.0.0:6056`). Browser auto-open
-uses `http://127.0.0.1:<port>/` for all-interfaces binds (browsers mishandle
-`0.0.0.0`); for a concrete `--host <addr>` it opens that address.
+The flag wins when both `--host` and `HOST` are set.
 
 When adding a repo via the CLI against a non-default port or host (Harness must
 already be running):
