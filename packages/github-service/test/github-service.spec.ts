@@ -8,6 +8,7 @@ import {
   GitHubRequestError,
   GitHubService,
   GitHubThrottledError,
+  GitHubTlsTrustError,
   type ReadyLabeledIssue,
   formatUserFacingError,
   makeGitHubServiceFromToken,
@@ -201,6 +202,58 @@ describe("GitHubService live implementation", () => {
       expect((error as GitHubRequestError).statusCode).toBe(401)
       expect(requests).toBe(1)
     }),
+  )
+
+  it.effect(
+    "classifies TLS certificate trust failures as non-retryable GitHubTlsTrustError",
+    () =>
+      Effect.gen(function* () {
+        let requests = 0
+        const openssl = Object.assign(
+          new Error("self-signed certificate in certificate chain"),
+          { code: "SELF_SIGNED_CERT_IN_CHAIN" },
+        )
+        const service = makeGitHubServiceFromToken("token", async () => {
+          requests += 1
+          throw new TypeError("fetch failed", { cause: openssl })
+        })
+
+        const error = yield* service
+          .listReadyIssues(repository)
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubTlsTrustError)
+        expect(error._tag).toBe("GitHubTlsTrustError")
+        expect(error.code).toBe("SELF_SIGNED_CERT_IN_CHAIN")
+        expect(error.host).toBe("api.github.com")
+        expect(error.message).toContain("NODE_EXTRA_CA_CERTS")
+        expect(error.message).toContain("trusted TLS connection")
+        // Permanent for the process: no bounded query retries.
+        expect(requests).toBe(1)
+      }),
+  )
+
+  it.effect(
+    "does not retry UNABLE_TO_VERIFY_LEAF_SIGNATURE as a transient error",
+    () =>
+      Effect.gen(function* () {
+        let requests = 0
+        const openssl = Object.assign(new Error("unable to verify"), {
+          code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+        })
+        const service = makeGitHubServiceFromToken("token", async () => {
+          requests += 1
+          throw new TypeError("fetch failed", { cause: openssl })
+        })
+
+        const error = yield* service
+          .getOpenPullRequestNumber(repository, "rfa/branch")
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubTlsTrustError)
+        expect(error.code).toBe("UNABLE_TO_VERIFY_LEAF_SIGNATURE")
+        expect(requests).toBe(1)
+      }),
   )
 
   it.effect("aborts an in-flight request when interrupted", () =>

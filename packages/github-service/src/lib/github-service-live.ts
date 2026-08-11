@@ -34,6 +34,7 @@ import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
   type GitHubThrottledError,
+  GitHubTlsTrustError,
   isGitHubThrottledError,
 } from "./errors.js"
 import { GitHubService, type GitHubServiceShape } from "./github-service.js"
@@ -41,6 +42,11 @@ import {
   githubThrottleFromResponse,
   githubThrottleFromSuccessfulResponse,
 } from "./github-throttle.js"
+import {
+  findTlsTrustCode,
+  formatTlsTrustRemediation,
+  githubApiHost,
+} from "./tls-trust.js"
 import type {
   GitHubIssueReference,
   GitHubIssueState,
@@ -106,14 +112,40 @@ type GitHubFetch = (
 /** Observes explicit, non-secret quota evidence from successful responses. */
 export type GitHubThrottleObserver = (throttle: GitHubThrottledError) => void
 
+const tlsTrustErrorFromCause = (
+  message: string,
+  cause: unknown,
+): GitHubTlsTrustError | undefined => {
+  const code = findTlsTrustCode(cause)
+  if (code === undefined) {
+    return undefined
+  }
+  const host = githubApiHost()
+  return new GitHubTlsTrustError({
+    message: formatTlsTrustRemediation({
+      host,
+      code,
+      operationMessage: message,
+    }),
+    host,
+    code,
+    cause,
+  })
+}
+
 const githubRequest = <A>(
   message: string,
   request: (signal: AbortSignal) => Promise<A>,
-): Effect.Effect<A, GitHubRequestError | GitHubThrottledError> =>
+): Effect.Effect<
+  A,
+  GitHubRequestError | GitHubThrottledError | GitHubTlsTrustError
+> =>
   Effect.tryPromise({
     try: request,
     catch: (cause) => {
       if (isGitHubThrottledError(cause)) return cause
+      const tlsTrust = tlsTrustErrorFromCause(message, cause)
+      if (tlsTrust !== undefined) return tlsTrust
       const throttle = githubThrottleFromResponse({
         statusCode: cause instanceof GitHubHttpError ? cause.statusCode : 0,
         headers:
@@ -150,7 +182,10 @@ const githubRequest = <A>(
 const githubQuery = <A>(
   message: string,
   request: (signal: AbortSignal) => Promise<A>,
-): Effect.Effect<A, GitHubRequestError | GitHubThrottledError> =>
+): Effect.Effect<
+  A,
+  GitHubRequestError | GitHubThrottledError | GitHubTlsTrustError
+> =>
   githubRequest(message, request).pipe(
     Effect.retry({
       schedule: Schedule.addDelay(Schedule.recurs(2), () =>
@@ -268,7 +303,7 @@ export type LoadPrStatusCheckDiagnostics = (
   signal?: AbortSignal,
 ) => Effect.Effect<
   readonly PrStatusCheckDiagnostic[],
-  GitHubRequestError | GitHubThrottledError
+  GitHubRequestError | GitHubThrottledError | GitHubTlsTrustError
 >
 
 /** Rerun an entire GitHub Actions workflow run. */
@@ -286,7 +321,7 @@ export type ObserveAutomatedReviewEvidence = (
   signal?: AbortSignal,
 ) => Effect.Effect<
   AutomatedReviewEvidenceObservation,
-  GitHubRequestError | GitHubThrottledError
+  GitHubRequestError | GitHubThrottledError | GitHubTlsTrustError
 >
 
 const emptyTerminalChecks: readonly TerminalPrStatusCheck[] = []
@@ -959,6 +994,7 @@ const findOpenPullRequestDetailsImpl = (
   | GitHubApiRepositoryUnavailableError
   | GitHubRequestError
   | GitHubThrottledError
+  | GitHubTlsTrustError
 > =>
   Effect.gen(function* () {
     const result = yield* githubQuery(
@@ -1022,6 +1058,7 @@ const findOpenPullRequestNumberImpl = (
   | GitHubApiRepositoryUnavailableError
   | GitHubRequestError
   | GitHubThrottledError
+  | GitHubTlsTrustError
 > =>
   Effect.gen(function* () {
     // Number-only query: do not require GraphQL id (update paths use details).
@@ -1433,6 +1470,7 @@ const makeGitHubApiService = (
       string | null,
       | GitHubRequestError
       | GitHubThrottledError
+      | GitHubTlsTrustError
       | GitHubApiRepositoryUnavailableError
     > =>
       Effect.gen(function* () {

@@ -1,7 +1,10 @@
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { peekRepositoryForges } from "./peek-repository-forges.ts"
+import {
+  peekForgeApiEndpoints,
+  peekRepositoryForges,
+} from "./peek-repository-forges.ts"
 import { Database } from "bun:sqlite"
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
 
@@ -16,7 +19,8 @@ const ensureRepositoryTable = (db: Database): void => {
   db.run(`
     CREATE TABLE IF NOT EXISTS repository (
       id TEXT PRIMARY KEY,
-      forge TEXT NOT NULL DEFAULT 'github'
+      forge TEXT NOT NULL DEFAULT 'github',
+      forge_host TEXT NOT NULL DEFAULT 'github.com'
     )
   `)
 }
@@ -78,5 +82,69 @@ describe("peekRepositoryForges", () => {
       db.close()
     }
     expect(peekRepositoryForges(path)).toEqual(["github"])
+  })
+})
+
+describe("peekForgeApiEndpoints", () => {
+  let roots: string[] = []
+
+  afterEach(() => {
+    for (const root of roots) {
+      rmSync(root, { recursive: true, force: true })
+    }
+    roots = []
+  })
+
+  test("returns no endpoints when there are no Repositories", () => {
+    expect(peekForgeApiEndpoints(":memory:")).toEqual([])
+  })
+
+  test("maps GitHub Repositories to api.github.com once", () => {
+    const { path, root } = createTempDb()
+    roots.push(root)
+    const db = new Database(path, { create: true })
+    try {
+      ensureRepositoryTable(db)
+      db.run(
+        `INSERT INTO repository (id, forge, forge_host) VALUES ('r1', 'github', 'github.com')`,
+      )
+      db.run(
+        `INSERT INTO repository (id, forge, forge_host) VALUES ('r2', 'github', 'github.com')`,
+      )
+    } finally {
+      db.close()
+    }
+    expect(peekForgeApiEndpoints(path)).toEqual([
+      { forge: "github", host: "api.github.com", path: "/" },
+    ])
+  })
+
+  test("includes each distinct GitLab forge host", () => {
+    const { path, root } = createTempDb()
+    roots.push(root)
+    const db = new Database(path, { create: true })
+    try {
+      ensureRepositoryTable(db)
+      db.run(
+        `INSERT INTO repository (id, forge, forge_host) VALUES ('g1', 'gitlab', 'gitlab.com')`,
+      )
+      db.run(
+        `INSERT INTO repository (id, forge, forge_host) VALUES ('g2', 'gitlab', 'git.drupalcode.org')`,
+      )
+      db.run(
+        `INSERT INTO repository (id, forge, forge_host) VALUES ('gh', 'github', 'github.com')`,
+      )
+    } finally {
+      db.close()
+    }
+    expect(peekForgeApiEndpoints(path)).toEqual([
+      { forge: "github", host: "api.github.com", path: "/" },
+      {
+        forge: "gitlab",
+        host: "git.drupalcode.org",
+        path: "/api/v4/version",
+      },
+      { forge: "gitlab", host: "gitlab.com", path: "/api/v4/version" },
+    ])
   })
 })

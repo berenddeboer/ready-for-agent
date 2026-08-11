@@ -10,6 +10,11 @@ export const GITHUB_HELPER_PROTOCOL_VERSION = 1 as const
 export const GITHUB_HELPER_THROTTLED_EXIT_CODE = 3 as const
 /** Typed helper exit used by the Keymaxxer parent to invalidate auth caches. */
 export const GITHUB_HELPER_AUTHENTICATION_EXIT_CODE = 4 as const
+/**
+ * Permanent TLS certificate trust failure. Non-secret host + OpenSSL code only;
+ * the parent rebuilds operator-facing remediation (no API/token material).
+ */
+export const GITHUB_HELPER_TLS_TRUST_EXIT_CODE = 5 as const
 
 export interface GitHubHelperThrottle {
   readonly retryAt: number
@@ -30,7 +35,18 @@ export interface GitHubHelperThrottled {
   readonly usedFallback: boolean
 }
 
-export type GitHubHelperControl = GitHubHelperSuccess | GitHubHelperThrottled
+/** Non-secret TLS trust evidence for the Keymaxxer parent. */
+export interface GitHubHelperTlsTrust {
+  readonly version: typeof GITHUB_HELPER_PROTOCOL_VERSION
+  readonly kind: "github-tls-trust"
+  readonly host: string
+  readonly code: string
+}
+
+export type GitHubHelperControl =
+  | GitHubHelperSuccess
+  | GitHubHelperThrottled
+  | GitHubHelperTlsTrust
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null
@@ -41,6 +57,14 @@ const isThrottle = (value: unknown): value is GitHubHelperThrottle =>
   Number.isSafeInteger(value.retryAt) &&
   value.retryAt > 0 &&
   typeof value.usedFallback === "boolean"
+
+const isTlsTrustFields = (
+  value: Record<string, unknown>,
+): value is { readonly host: string; readonly code: string } =>
+  typeof value.host === "string" &&
+  value.host.trim() !== "" &&
+  typeof value.code === "string" &&
+  value.code.trim() !== ""
 
 /**
  * Strictly recognizes only the current helper protocol. Unknown, malformed,
@@ -79,6 +103,14 @@ export const parseGitHubHelperControl = (
       usedFallback: value.usedFallback,
     }
   }
+  if (value.kind === "github-tls-trust" && isTlsTrustFields(value)) {
+    return {
+      version: GITHUB_HELPER_PROTOCOL_VERSION,
+      kind: "github-tls-trust",
+      host: value.host.trim(),
+      code: value.code.trim(),
+    }
+  }
   return undefined
 }
 
@@ -108,4 +140,14 @@ export const githubHelperThrottled = (
   kind: "github-throttled",
   retryAt: throttle.retryAt,
   usedFallback: throttle.usedFallback,
+})
+
+export const githubHelperTlsTrust = (input: {
+  readonly host: string
+  readonly code: string
+}): GitHubHelperTlsTrust => ({
+  version: GITHUB_HELPER_PROTOCOL_VERSION,
+  kind: "github-tls-trust",
+  host: input.host,
+  code: input.code,
 })

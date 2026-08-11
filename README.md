@@ -239,6 +239,34 @@ repositories (`gh` for GitHub, `glab` for GitLab) block startup. A
 missing coding agent never does — it shows as Unavailable instead
 (see below).
 
+### Startup fails with "Cannot establish a trusted TLS connection"
+
+Corporate TLS-inspection proxies (Netskope, Zscaler, Palo Alto,
+mitmproxy, and similar) present a private root CA. `git`, `gh`, and
+`curl` usually trust it via the OS keychain, but Ready for Agent runs
+on Bun, which does **not** read that store — every GitHub/GitLab API
+call then fails with a certificate error such as
+`SELF_SIGNED_CERT_IN_CHAIN`.
+
+On startup the harness probes each configured forge API host. When
+TLS trust fails it stops immediately and prints the remedy. Export
+your corporate root CA and point Bun at it with
+`NODE_EXTRA_CA_CERTS` (honoured by the compiled binary as well):
+
+```bash
+# macOS — Netskope example (adjust -c to your proxy CA common name):
+security find-certificate -a -c certadmin -p \
+  /Library/Keychains/System.keychain > ~/.config/corp-ca.pem
+export NODE_EXTRA_CA_CERTS=~/.config/corp-ca.pem
+
+# Linux — use the PEM your IT provides:
+export NODE_EXTRA_CA_CERTS=/path/to/corp-root-ca.pem
+```
+
+Set the variable in your shell profile (or the service unit that
+starts the harness) so it applies on every launch, then restart
+`ready-for-agent`.
+
 ### A labelled issue does not show up
 
 - The issue must carry the `ready-for-agent` label — the harness only

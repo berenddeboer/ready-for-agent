@@ -6,12 +6,15 @@ import {
   GitHubRequestError,
   type GitHubThrottledError,
   isGitHubThrottledError,
+  isGitHubTlsTrustError,
 } from "../lib/errors.js"
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
+  GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
   githubHelperSuccess,
   githubHelperThrottled,
+  githubHelperTlsTrust,
   serializeGitHubHelperControl,
 } from "../lib/github-helper-protocol.js"
 import type { GitHubService } from "../lib/github-service.js"
@@ -85,6 +88,16 @@ export const runGitHubCli = <A, E>(
         if (isGitHubThrottledError(error)) {
           writeThrottle(error)
           process.exitCode = GITHUB_HELPER_THROTTLED_EXIT_CODE
+          return
+        }
+        if (isGitHubTlsTrustError(error)) {
+          // Non-secret host + OpenSSL code only; parent rebuilds remediation.
+          process.stderr.write(
+            `${serializeGitHubHelperControl(
+              githubHelperTlsTrust({ host: error.host, code: error.code }),
+            )}\n`,
+          )
+          process.exitCode = GITHUB_HELPER_TLS_TRUST_EXIT_CODE
           return
         }
         if (error instanceof CliArgumentError) {
