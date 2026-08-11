@@ -2,7 +2,11 @@
 import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { writeReadyForAgentVersionFiles } from "./write-ready-for-agent-version.ts"
+import {
+  assertClientDistMatchesProductVersion,
+  readLauncherVersion,
+  writeReadyForAgentVersionFiles,
+} from "./write-ready-for-agent-version.ts"
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(appRoot, "../..")
@@ -32,6 +36,14 @@ if (!statSync(clientRoot, { throwIfNoEntry: false })?.isDirectory()) {
   console.error(
     `Missing harness client build at ${clientRoot}. Run harness:build first.`,
   )
+  process.exit(1)
+}
+
+const productVersion = readLauncherVersion()
+try {
+  assertClientDistMatchesProductVersion(clientRoot, productVersion)
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error))
   process.exit(1)
 }
 
@@ -80,7 +92,7 @@ export const embeddedShellHtmlPath: string = ${shellImport} as unknown as string
 
 writeFileSync(assetsOut, assetsContent)
 
-const { version } = writeReadyForAgentVersionFiles()
+const { version } = writeReadyForAgentVersionFiles(productVersion)
 
 console.log(
   `Wrote ${assetsOut} (${files.length} assets) and version modules (v${version})`,

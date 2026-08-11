@@ -1,7 +1,17 @@
-import { readFileSync } from "node:fs"
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
+  assertClientDistMatchesProductVersion,
+  parseMastheadProductVersion,
+  productVersionLabel,
   readLauncherVersion,
   writeReadyForAgentVersionFiles,
 } from "../scripts/write-ready-for-agent-version.ts"
@@ -55,5 +65,45 @@ describe("ready-for-agent version generation", () => {
     expect(readFileSync(harnessVersionPath, "utf8")).toContain(
       `READY_FOR_AGENT_VERSION = ${JSON.stringify(launcherVersion)}`,
     )
+  })
+
+  test("parseMastheadProductVersion reads title attribute, not SSR text splits", () => {
+    const html = `<b title="Ready for Agent v1.2.3">RFA <!-- -->v1.2.3</b>`
+    expect(parseMastheadProductVersion(html)).toBe("1.2.3")
+    expect(productVersionLabel("1.2.3")).toBe("v1.2.3")
+  })
+
+  test("assertClientDistMatchesProductVersion accepts matching shell and JS", () => {
+    const root = mkdtempSync(join(tmpdir(), "rfa-client-dist-"))
+    try {
+      mkdirSync(join(root, "assets"), { recursive: true })
+      writeFileSync(
+        join(root, "_shell.html"),
+        `<b title="Ready for Agent v9.8.7">RFA v9.8.7</b>`,
+      )
+      writeFileSync(join(root, "assets", "index.js"), `var xl=\`v9.8.7\`;`)
+      expect(() =>
+        assertClientDistMatchesProductVersion(root, "9.8.7"),
+      ).not.toThrow()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test("assertClientDistMatchesProductVersion rejects stale placeholder UI", () => {
+    const root = mkdtempSync(join(tmpdir(), "rfa-client-dist-stale-"))
+    try {
+      mkdirSync(join(root, "assets"), { recursive: true })
+      writeFileSync(
+        join(root, "_shell.html"),
+        `<b title="Ready for Agent v0.0.0">RFA v0.0.0</b>`,
+      )
+      writeFileSync(join(root, "assets", "index.js"), `var xl=\`v0.0.0\`;`)
+      expect(() =>
+        assertClientDistMatchesProductVersion(root, "0.19.0"),
+      ).toThrow(/does not embed product version "v0.19.0"/)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

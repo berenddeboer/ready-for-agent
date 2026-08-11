@@ -26,7 +26,7 @@ describe("ready-for-agent target topology", () => {
       ),
     ) as {
       targets: {
-        build?: { dependsOn?: unknown[] }
+        build?: { dependsOn?: unknown[]; inputs?: unknown[] }
       }
     }
 
@@ -35,6 +35,15 @@ describe("ready-for-agent target topology", () => {
     )
     expect(JSON.stringify(project.targets.build?.dependsOn ?? [])).toContain(
       '"projects":["ready-for-agent"]',
+    )
+    // Release bumps apps/ready-for-agent/package.json after CI has cached
+    // harness:build at v0.0.0. Without this input, Nx restores the stale UI
+    // while generate-version rewrites CLI version modules (issue #957).
+    expect(JSON.stringify(project.targets.build?.inputs ?? [])).toContain(
+      "apps/ready-for-agent/package.json",
+    )
+    expect(JSON.stringify(project.targets.build?.inputs ?? [])).toContain(
+      "src/generated/version.ts",
     )
   })
 })

@@ -13,6 +13,12 @@
           "projects": ["ready-for-agent"],
           "target": "generate-version"
         }
+      ],
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/apps/ready-for-agent/package.json",
+        "{projectRoot}/src/generated/version.ts"
       ]
     },
     "dev": {
