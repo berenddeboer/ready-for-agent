@@ -30,6 +30,7 @@ import {
   launcherManifestForNpmPublish,
 } from "@ready-for-agent/release-versioning"
 import { selectPlatformPackage } from "../bin/select-platform.js"
+import { parseMastheadProductVersion } from "./write-ready-for-agent-version.ts"
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(appRoot, "../..")
@@ -507,6 +508,19 @@ try {
       if (!html.toLowerCase().includes("html")) {
         fail("GET / response did not look like HTML")
       }
+
+      // Masthead must bake the packed product version (not a stale v0.0.0 UI
+      // while CLI/listen report the real semver — issue #957).
+      const uiVersion = parseMastheadProductVersion(html)
+      if (uiVersion === undefined) {
+        fail('GET / HTML missing masthead version "Ready for Agent v<semver>"')
+      }
+      if (uiVersion !== packageVersion) {
+        fail(
+          `UI masthead version v${uiVersion} does not match packed version ${packageVersion}`,
+        )
+      }
+      log(`${label}: UI masthead version ok: v${uiVersion}`)
 
       const assetMatch = html.match(/\/assets\/[A-Za-z0-9._-]+\.(?:js|css)/)
       if (assetMatch === null || assetMatch[0] === undefined) {

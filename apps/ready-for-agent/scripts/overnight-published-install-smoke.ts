@@ -23,6 +23,7 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { parseMastheadProductVersion } from "./write-ready-for-agent-version.ts"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
 const appRoot = join(scriptDir, "..")
@@ -359,6 +360,28 @@ try {
     if (!html.toLowerCase().includes("html")) {
       fail("GET / response did not look like HTML")
     }
+
+    // Masthead brand must show the published product version (not build placeholder).
+    // Screenshot regression: published @latest rendered "RFA V0.0.0" in the header.
+    // SSR may insert <!-- --> between text nodes ("RFA <!-- -->v…"); prefer the
+    // title attribute which stays a single string: title="Ready for Agent v…".
+    const uiVersion = parseMastheadProductVersion(html)
+    if (uiVersion === undefined) {
+      fail('GET / HTML missing masthead version "Ready for Agent v<semver>"')
+    }
+    if (uiVersion === "0.0.0") {
+      fail(
+        'UI masthead shows placeholder version "v0.0.0" (expected published product version)',
+      )
+    }
+    const cliVersion =
+      versionText.match(/\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/)?.[0] ?? ""
+    if (cliVersion !== "" && uiVersion !== cliVersion) {
+      fail(
+        `UI masthead version v${uiVersion} does not match CLI --version ${JSON.stringify(versionText)}`,
+      )
+    }
+    log(`UI masthead version ok: v${uiVersion}`)
 
     const health = await fetch(`${base}/graphql`, {
       method: "POST",
