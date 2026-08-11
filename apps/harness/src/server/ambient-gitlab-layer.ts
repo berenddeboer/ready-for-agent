@@ -1,5 +1,6 @@
 import { Cache, Duration, Effect, Exit, Fiber, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
+import { extractErrorCode } from "@ready-for-agent/github-service"
 import {
   type GitLabProjectUnavailableError,
   GitLabRequestError,
@@ -12,11 +13,14 @@ import {
 
 type GitLabServiceError = GitLabProjectUnavailableError | GitLabRequestError
 
-const authenticationError = (forgeHost: string, cause: unknown) =>
-  new GitLabRequestError({
+const authenticationError = (forgeHost: string, cause: unknown) => {
+  const code = extractErrorCode(cause)
+  return new GitLabRequestError({
     message: `Failed to resolve GitLab CLI authentication for ${forgeHost}`,
     cause,
+    ...(code !== undefined ? { code } : {}),
   })
+}
 
 export const ambientGitLabLayer = (options: {
   readonly workspaceRoot: string

@@ -8296,11 +8296,20 @@ describe("WorkItemLifecycle", () => {
     })
 
     it("records typed handler failure as Failed Step Run and leaves the pending step", () => {
+      const leaf = Object.assign(
+        new Error("self-signed certificate in certificate chain"),
+        {
+          code: "SELF_SIGNED_CERT_IN_CHAIN",
+        },
+      )
       const failingSteps: LifecycleStepsShape = {
         ...successfulSteps,
         createWorktree: () =>
           Effect.fail(
-            new LifecycleStepFailedError({ message: "worktree path busy" }),
+            new LifecycleStepFailedError({
+              message: "worktree path busy",
+              cause: leaf,
+            }),
           ),
       }
 
@@ -8309,6 +8318,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const queue = yield* QueueService
+          const sql = yield* SqlClient.SqlClient
           const { repository, issue } = yield* seedActionableIssue
 
           const created = yield* lifecycle.implementNow(
@@ -8332,6 +8342,31 @@ describe("WorkItemLifecycle", () => {
               run.startedAt!.getTime(),
             )
           }
+
+          const detailRows = (yield* sql.unsafe(
+            `SELECT reason_detail FROM step_run WHERE work_item_id = ?`,
+            [created.id],
+          )) as readonly { readonly reason_detail: string | null }[]
+          expect(detailRows).toHaveLength(1)
+          const detail = JSON.parse(detailRows[0]!.reason_detail!) as {
+            readonly code?: string
+            readonly causeChain: readonly {
+              readonly name?: string
+              readonly code?: string
+              readonly message?: string
+            }[]
+          }
+          expect(detail.code).toBe("SELF_SIGNED_CERT_IN_CHAIN")
+          expect(
+            detail.causeChain.some(
+              (link) => link.code === "SELF_SIGNED_CERT_IN_CHAIN",
+            ),
+          ).toBe(true)
+          expect(
+            detail.causeChain.some((link) =>
+              link.message?.includes("worktree path busy"),
+            ),
+          ).toBe(true)
 
           const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isNone(remaining)).toBe(true)

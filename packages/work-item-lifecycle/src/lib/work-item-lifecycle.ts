@@ -29,9 +29,12 @@ import {
   GitHubService,
   type GitHubThrottledError,
   type PullRequestLifecycleStatus,
+  buildReasonDetail,
   formatUserFacingError,
   isGitHubThrottledError,
+  logErrorAnnotations,
   sanitizeUserFacingText,
+  serializeReasonDetail,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
@@ -3226,6 +3229,15 @@ export const makeWorkItemLifecycleLive = (
             terminalFailure,
           } = input
 
+          const failureSource = Cause.squash(input.cause)
+          const failureAnnotations = logErrorAnnotations(
+            failureSource,
+            reasonMessage,
+          )
+          const reasonDetail = serializeReasonDetail(
+            buildReasonDetail(failureSource),
+          )
+
           yield* Effect.logError("Lifecycle Step handler failed", {
             workItemId: workItem.id,
             stepRunId: stepRun.id,
@@ -3233,6 +3245,10 @@ export const makeWorkItemLifecycleLive = (
             reasonCode,
             reasonMessage,
             terminal: terminalFailure !== undefined,
+            causeChain: failureAnnotations.causeChain,
+            ...(failureAnnotations.code !== undefined
+              ? { code: failureAnnotations.code }
+              : {}),
           })
 
           yield* sql
@@ -3244,9 +3260,17 @@ export const makeWorkItemLifecycleLive = (
                      finished_at = ?,
                      reason_code = ?,
                      reason_message = ?,
+                     reason_detail = ?,
                      updated_at = ?
                  WHERE id = ? AND status = 'running'`,
-                  [now, reasonCode, reasonMessage, now, stepRun.id],
+                  [
+                    now,
+                    reasonCode,
+                    reasonMessage,
+                    reasonDetail,
+                    now,
+                    stepRun.id,
+                  ],
                 )
 
                 if (terminalFailure !== undefined) {

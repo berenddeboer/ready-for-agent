@@ -30,6 +30,7 @@ import {
   isRecognizedAutomatedReviewerLogin,
   isRecognizedAutomatedReviewerName,
 } from "./automated-review-evidence.js"
+import { extractErrorCode } from "./error-cause-chain.js"
 import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
@@ -153,9 +154,11 @@ const githubRequest = <A>(
         message: cause instanceof Error ? cause.message : "",
       })
       if (throttle !== undefined) return throttle
+      const code = extractErrorCode(cause)
       return new GitHubRequestError({
         message,
         cause,
+        ...(code !== undefined ? { code } : {}),
         ...(cause instanceof GitHubHttpError
           ? {
               statusCode: cause.statusCode,
@@ -173,6 +176,7 @@ const githubRequest = <A>(
         new GitHubRequestError({
           message: `${message} timed out`,
           cause,
+          code: "TIMEOUT",
           retryable: true,
         }),
       ),
@@ -365,7 +369,14 @@ const decodeGitHubResponse = <S extends { readonly Type: unknown }>(
 ): Effect.Effect<S["Type"], GitHubRequestError> =>
   Effect.try({
     try: () => decodeSync(schema, value),
-    catch: (cause) => new GitHubRequestError({ message, cause }),
+    catch: (cause) => {
+      const code = extractErrorCode(cause)
+      return new GitHubRequestError({
+        message,
+        cause,
+        ...(code !== undefined ? { code } : {}),
+      })
+    },
   })
 
 const GitHubIssueStateSchema = Schema.Literals(["OPEN", "CLOSED"])

@@ -19,8 +19,8 @@ import {
 } from "@ready-for-agent/db-service"
 import {
   type GitHubOperationOrigin,
-  formatUserFacingError,
   isGitHubThrottledError,
+  logErrorAnnotations,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
@@ -83,9 +83,6 @@ const currentWorkerGeneration = (): number => {
   }
   return globalState[workerGenerationKey] ?? 0
 }
-
-const formatLogError = (error: unknown): string =>
-  formatUserFacingError(error, "Unknown error")
 
 const RefreshRepositoryJob = Schema.TaggedStruct("refresh-repository", {
   repositoryId: RepositoryId,
@@ -215,7 +212,7 @@ const runQueuePollLoop = <E, R>(
       const state = yield* claimAndRun.pipe(
         Effect.catch((error) =>
           Effect.logError(`${logLabel} poll failed`, {
-            error: formatLogError(error),
+            ...logErrorAnnotations(error),
           }).pipe(Effect.as("idle" as const)),
         ),
       )
@@ -267,7 +264,7 @@ const finalizeManualRefresh = <A, E>(
       yield* Effect.logError("Refresh Job failed", {
         jobId,
         repositoryId,
-        error: formatLogError(result.failure),
+        ...logErrorAnnotations(result.failure),
       })
       yield* queue.fail(jobId, { retryable: false })
     } else {
@@ -285,7 +282,7 @@ const finalizePollingAutoHeal = <A, E>(
     if (result._tag === "Failure") {
       yield* Effect.logError("Polling Auto-heal Job failed", {
         jobId,
-        error: formatLogError(result.failure),
+        ...logErrorAnnotations(result.failure),
       })
       const delay = yield* sampleBackoff
       yield* queue.postponeKeyed(jobId, delay)
@@ -340,7 +337,7 @@ const finalizeScheduledRefresh = <A, E>(
       yield* Effect.logError("Scheduled Issue poll failed", {
         jobId,
         repositoryId,
-        error: formatLogError(result.failure),
+        ...logErrorAnnotations(result.failure),
       })
     }
 
@@ -489,7 +486,7 @@ const runLifecycleClaimLoop = (
         yield* lifecycle.recoverOrphanedStepRuns.pipe(
           Effect.catch((error) =>
             Effect.logError("Lifecycle orphan recovery failed", {
-              error: formatLogError(error),
+              ...logErrorAnnotations(error),
             }),
           ),
         )
@@ -523,7 +520,7 @@ const runLifecycleClaimLoop = (
         ),
         Effect.catch((error) =>
           Effect.logError("Lifecycle job queue poll failed", {
-            error: formatLogError(error),
+            ...logErrorAnnotations(error),
           }).pipe(Effect.as(Option.none())),
         ),
       )
@@ -556,7 +553,7 @@ const runLifecycleClaimLoop = (
               Effect.logError("Lifecycle Job lease extension failed", {
                 jobId: job.jobId,
                 ...jobContext,
-                error: formatLogError(error),
+                ...logErrorAnnotations(error),
               }).pipe(Effect.as(false)),
           }),
         )
@@ -583,7 +580,7 @@ const runLifecycleClaimLoop = (
                 jobId: job.jobId,
                 workItemId: payload.workItemId,
                 postponedUntil: payload.postponedUntil,
-                error: formatLogError(error),
+                ...logErrorAnnotations(error),
               }),
             ),
             Effect.ignore,
@@ -597,7 +594,7 @@ const runLifecycleClaimLoop = (
           Effect.logError("Work Item Lifecycle Job failed", {
             jobId: job.jobId,
             stepRunId: payload.stepRunId,
-            error: formatLogError(error),
+            ...logErrorAnnotations(error),
           }),
         ),
         Effect.ignore,
@@ -669,7 +666,7 @@ export const startJobWorker = Effect.fn("JobWorker.startJobWorker")(function* (
     Effect.catch((error) =>
       Effect.logError(
         "Failed to interrupt prior-process running Step Runs on startup",
-        { error: formatLogError(error) },
+        logErrorAnnotations(error),
       ),
     ),
   )

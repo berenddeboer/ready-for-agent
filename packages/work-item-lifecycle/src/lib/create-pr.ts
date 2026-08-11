@@ -7,6 +7,7 @@ import {
   type GitHubRepository,
   GitHubService,
   isGitHubThrottledError,
+  logErrorAnnotations,
 } from "@ready-for-agent/github-service"
 import {
   type GitLabRepository,
@@ -233,6 +234,8 @@ const findExistingOpenPr = (
 /**
  * Soft lookup: transport/API failures become null so callers can fall through
  * to create-number acceptance or agent repair without aborting the step.
+ * Failures are still logged with the cause chain so "lookup broke" is not
+ * silent and indistinguishable from a genuine empty result.
  */
 const softFindExistingOpenPr = (
   context: LifecycleStepContext,
@@ -241,7 +244,18 @@ const softFindExistingOpenPr = (
 ) =>
   findExistingOpenPr(context, repository, branch).pipe(
     Effect.catch((error) =>
-      isGitHubThrottledError(error) ? Effect.fail(error) : Effect.succeed(null),
+      isGitHubThrottledError(error)
+        ? Effect.fail(error)
+        : Effect.logWarning(
+            "Soft open-PR lookup failed; treating as not found",
+            {
+              step: "create_pr",
+              repositoryId: context.repositoryId,
+              projectPath: repository.projectPath,
+              branch,
+              ...logErrorAnnotations(error),
+            },
+          ).pipe(Effect.as(null)),
     ),
   )
 
