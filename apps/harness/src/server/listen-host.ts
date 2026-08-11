@@ -93,7 +93,7 @@ export const isRequestHostAdmitted = (input: {
  * Host authority for an HTTP URL. IPv6 literals need brackets
  * (`http://[::]:6056/`); IPv4 and names do not.
  */
-export const hostAuthorityForUrl = (hostname: string): string => {
+const hostAuthorityForUrl = (hostname: string): string => {
   const host = hostname.trim()
   if (host.startsWith("[") && host.endsWith("]")) {
     return host
