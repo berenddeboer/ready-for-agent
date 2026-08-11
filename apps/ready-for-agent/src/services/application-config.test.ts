@@ -23,11 +23,16 @@ describe("ApplicationConfig", () => {
           SQLITE_DATABASE_PATH: "/custom/product.db",
           NO_BROWSER: "true",
           PORT: "4300",
+          HOST: "0.0.0.0",
         })
 
         expect(config.graphqlUrl).toBe("https://example.test/graphql")
         expect(config.databasePath).toBe("/custom/product.db")
-        expect(config.browserEnv).toEqual({ NO_BROWSER: "true", PORT: "4300" })
+        expect(config.browserEnv).toEqual({
+          NO_BROWSER: "true",
+          PORT: "4300",
+          HOST: "0.0.0.0",
+        })
       }),
   )
 

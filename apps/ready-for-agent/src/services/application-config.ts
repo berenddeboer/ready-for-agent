@@ -28,6 +28,7 @@ export class ApplicationConfig extends Context.Service<
       const sqliteDatabasePath = yield* optionalString("SQLITE_DATABASE_PATH")
       const noBrowser = yield* optionalString("NO_BROWSER")
       const port = yield* optionalString("PORT")
+      const host = yield* optionalString("HOST")
       const homeValue = Option.getOrUndefined(homeOption)
       const platform = process.platform
 
@@ -46,6 +47,7 @@ export class ApplicationConfig extends Context.Service<
         browserEnv: {
           NO_BROWSER: Option.getOrUndefined(noBrowser),
           PORT: Option.getOrUndefined(port),
+          HOST: Option.getOrUndefined(host),
         },
         platform,
       }

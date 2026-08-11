@@ -212,6 +212,105 @@ describe("production lifecycle process behavior", () => {
     await noBrowser.dispose()
   })
 
+  test("binds HOST env / --host and opens browser on loopback only", async () => {
+    const served: Array<{ hostname: string; port: number }> = []
+
+    const fromEnv = await startProductionLifecycle({
+      ...baseOptions(),
+      environment: {
+        SQLITE_DATABASE_PATH: "/tmp/unused.db",
+        KEYMAXXER_ENABLED: "false",
+        HOST: "0.0.0.0",
+      },
+      serveHttp: async (input) => {
+        served.push({ hostname: input.hostname, port: input.port })
+        return {
+          port: 4242,
+          stop: async () => {
+            disposed.push("server")
+          },
+        }
+      },
+    })
+    expect(served[0]?.hostname).toBe("0.0.0.0")
+    expect(logs.some((line) => line.includes("http://0.0.0.0:4242"))).toBe(true)
+    // Browser must never open http://0.0.0.0:...
+    expect(browserOpens).toEqual(["http://127.0.0.1:4242/"])
+    expect(fromEnv.url).toBe("http://0.0.0.0:4242/")
+    await fromEnv.dispose()
+
+    served.length = 0
+    logs.length = 0
+    browserOpens.length = 0
+    disposed.length = 0
+
+    const fromFlag = await startProductionLifecycle({
+      ...baseOptions(),
+      environment: {
+        SQLITE_DATABASE_PATH: "/tmp/unused.db",
+        KEYMAXXER_ENABLED: "false",
+        HOST: "127.0.0.1",
+      },
+      argv: ["bun", "server.ts", "--host", "192.168.1.10"],
+      serveHttp: async (input) => {
+        served.push({ hostname: input.hostname, port: input.port })
+        return {
+          port: 4300,
+          stop: async () => {
+            disposed.push("server")
+          },
+        }
+      },
+    })
+    // Flag wins over HOST env; concrete bind opens that address (not loopback).
+    expect(served[0]?.hostname).toBe("192.168.1.10")
+    expect(logs.some((line) => line.includes("http://192.168.1.10:4300"))).toBe(
+      true,
+    )
+    expect(browserOpens).toEqual(["http://192.168.1.10:4300/"])
+    await fromFlag.dispose()
+
+    served.length = 0
+    browserOpens.length = 0
+    disposed.length = 0
+
+    const bareHost = await startProductionLifecycle({
+      ...baseOptions(),
+      argv: ["bun", "server.ts", "--host"],
+      serveHttp: async (input) => {
+        served.push({ hostname: input.hostname, port: input.port })
+        return {
+          port: 4242,
+          stop: async () => {
+            disposed.push("server")
+          },
+        }
+      },
+    })
+    expect(served[0]?.hostname).toBe("0.0.0.0")
+    expect(browserOpens).toEqual(["http://127.0.0.1:4242/"])
+    await bareHost.dispose()
+  })
+
+  test("default bind remains loopback when host is unset", async () => {
+    let hostname: string | undefined
+    const handle = await startProductionLifecycle({
+      ...baseOptions(),
+      serveHttp: async (input) => {
+        hostname = input.hostname
+        return {
+          port: 4242,
+          stop: async () => {
+            disposed.push("server")
+          },
+        }
+      },
+    })
+    expect(hostname).toBe("127.0.0.1")
+    expect(handle.url).toBe("http://127.0.0.1:4242/")
+    await handle.dispose()
+  })
+
   test("gates application startup on owned Sidecar readiness", async () => {
     const child = new FakeChild()
     let applicationStarted = false

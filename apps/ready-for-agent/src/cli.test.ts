@@ -7,6 +7,7 @@ import { BunServices } from "@effect/platform-bun"
 import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { Command } from "effect/unstable/cli"
+import { expandBareHostFlag } from "../../harness/src/server/listen-host.ts"
 import { cli } from "./cli.ts"
 import {
   HARNESS_START_HINT,
@@ -14,7 +15,10 @@ import {
 } from "./graphql-error.ts"
 import { GraphqlApi, GraphqlRequestFailed } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
-import { StartHarness } from "./services/start-harness.ts"
+import {
+  StartHarness,
+  type StartHarnessOptions,
+} from "./services/start-harness.ts"
 
 /** Package root (`apps/ready-for-agent`), independent of Bun's `import.meta.dir`. */
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
@@ -23,17 +27,20 @@ const runOperator = (
   args: ReadonlyArray<string>,
   layer: Layer.Layer<GraphqlApi | LocalGit | StartHarness, never, never>,
 ) =>
-  Command.runWith(cli, { version: "0.0.0" })(args).pipe(
+  // Mirror main.ts: expand bare `--host` before Effect's string flag parser.
+  Command.runWith(cli, { version: "0.0.0" })(expandBareHostFlag(args)).pipe(
     Effect.provide(layer),
     Effect.provide(BunServices.layer),
   )
 
 describe("operator binary CLI seam", () => {
   let started = 0
+  let lastStartOptions: StartHarnessOptions | undefined
   let tempRoot = ""
 
   beforeEach(() => {
     started = 0
+    lastStartOptions = undefined
     tempRoot = mkdtempSync(join(tmpdir(), "ready-for-agent-cli-"))
   })
 
@@ -42,9 +49,10 @@ describe("operator binary CLI seam", () => {
   })
 
   const mockStart = Layer.succeed(StartHarness, {
-    start: () =>
+    start: (options) =>
       Effect.sync(() => {
         started += 1
+        lastStartOptions = options ?? {}
       }),
   })
 
@@ -209,7 +217,7 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
-  it("binary help lists start, add, and --no-open", () => {
+  it("binary help lists start, add, --no-open, and --host", () => {
     const result = spawnSync(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", "--help"],
@@ -225,6 +233,7 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("add")
     expect(output).not.toContain("remove-github-token")
     expect(output).toContain("no-open")
+    expect(output).toContain("host")
   })
 
   it.live(
@@ -247,6 +256,37 @@ describe("operator binary CLI seam", () => {
         yield* runOperator(["start", "--no-open"], layer)
         expect(started).toBe(2)
       }),
+  )
+
+  it.live("default and start accept --host (bare and with address)", () =>
+    Effect.gen(function* () {
+      const layer = mockStart.pipe(
+        Layer.provideMerge(mockLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            addRepository: () => Effect.die("graphql should not run for start"),
+          }),
+        ),
+      )
+
+      yield* runOperator(["--host"], layer)
+      expect(started).toBe(1)
+      expect(lastStartOptions).toEqual({ noOpen: false, host: "0.0.0.0" })
+
+      yield* runOperator(["start", "--host", "192.168.1.10"], layer)
+      expect(started).toBe(2)
+      expect(lastStartOptions).toEqual({
+        noOpen: false,
+        host: "192.168.1.10",
+      })
+
+      yield* runOperator(["start", "--host", "0.0.0.0", "--no-open"], layer)
+      expect(started).toBe(3)
+      expect(lastStartOptions).toEqual({
+        noOpen: true,
+        host: "0.0.0.0",
+      })
+    }),
   )
 
   it("binary add against unreachable GraphQL prints harness-not-running once, no stack", () => {
