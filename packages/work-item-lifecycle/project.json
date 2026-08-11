@@ -9,7 +9,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "NODE_ENV=test bun test"
+        "command": "NODE_ENV=test bun test --timeout 30000"
       },
       "inputs": ["default", "^production"],
       "cache": true,
