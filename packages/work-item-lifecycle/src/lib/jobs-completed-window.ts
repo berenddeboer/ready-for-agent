@@ -14,6 +14,6 @@ export const JOBS_COMPLETED_WINDOW_HOURS =
  * Default page size for the historical Completed Work Items page (no 24 h window).
  * Distinct from Jobs Completed, which uses JOBS_COMPLETED_WINDOW_MS with no page cap.
  */
-export const COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE = 20
+export const COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE = 21
 /** Upper bound for historical Completed page size (GraphQL + lifecycle SQL path). */
 export const COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE = 100
