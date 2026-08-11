@@ -33,11 +33,46 @@ export type MigrationSource = {
   readonly sql: string
 }
 
+/** A migration that was newly applied in this run (not already in __drizzle_migrations). */
+export type AppliedMigration = {
+  readonly name: string
+  readonly hash: string
+}
+
+/** Outcome of a migration run: which migrations were applied this time. */
+export type MigrationRunResult = {
+  readonly applied: ReadonlyArray<AppliedMigration>
+}
+
 type MigrationRecord = {
   readonly hash: string
   readonly name: string
   readonly folderMillis: number
   readonly statements: ReadonlyArray<string>
+}
+
+/**
+ * User-facing success line when migrations actually ran.
+ * Returns null when nothing was applied (startup should stay quiet).
+ */
+export const migrationsAppliedLogMessage = (
+  result: MigrationRunResult,
+): string | null => {
+  const count = result.applied.length
+  if (count === 0) {
+    return null
+  }
+  return count === 1
+    ? "Applied 1 database migration"
+    : `Applied ${count} database migrations`
+}
+
+/** Log only when at least one migration was applied. */
+export const logMigrationsAppliedIfAny = (result: MigrationRunResult): void => {
+  const message = migrationsAppliedLogMessage(result)
+  if (message !== null) {
+    console.info(message)
+  }
 }
 
 export class MigrationReadError extends Schema.TaggedErrorClass<MigrationReadError>()(
@@ -99,6 +134,7 @@ const applyMigrationRecords = Effect.fn("applyMigrationRecords")(function* (
     ),
   )
   const appliedHashes = new Set(appliedRows.map((row) => row.hash))
+  const newlyApplied: Array<AppliedMigration> = []
 
   for (const migration of migrations) {
     if (appliedHashes.has(migration.hash)) {
@@ -124,41 +160,46 @@ const applyMigrationRecords = Effect.fn("applyMigrationRecords")(function* (
         `
       }),
     )
+    newlyApplied.push({ name: migration.name, hash: migration.hash })
   }
+
+  return { applied: newlyApplied } satisfies MigrationRunResult
 })
 
 /**
  * Apply Drizzle migration SQL sources via the current SqlClient.
  * Skips migrations already recorded in __drizzle_migrations.
+ * Returns which migrations were newly applied in this run.
  */
 export const runMigrationsFromSources = Effect.fn("runMigrationsFromSources")(
   function* (sources: ReadonlyArray<MigrationSource>) {
-    yield* applyMigrationRecords(toMigrationRecords(sources))
+    return yield* applyMigrationRecords(toMigrationRecords(sources))
   },
 )
 
 /**
  * Apply Drizzle migration SQL files via the current SqlClient.
  * Skips migrations already recorded in __drizzle_migrations.
+ * Returns which migrations were newly applied in this run.
  */
 export const runMigrations = Effect.fn("runMigrations")(function* (
   migrationsFolder: string,
 ) {
   const sources = yield* readMigrationSourcesFromFolder(migrationsFolder)
-  yield* runMigrationsFromSources(sources)
+  return yield* runMigrationsFromSources(sources)
 })
 
 /**
  * Run migrations using embedded SQL when present, otherwise MIGRATIONS_FOLDER
  * (defaults to db-schema/drizzle on disk).
+ * Returns which migrations were newly applied in this run.
  */
 export const runConfiguredMigrations = Effect.fn("runConfiguredMigrations")(
   function* () {
     if (embeddedMigrationSources.length > 0) {
-      yield* runMigrationsFromSources(embeddedMigrationSources)
-      return
+      return yield* runMigrationsFromSources(embeddedMigrationSources)
     }
     const migrationsFolder = yield* MigrationsFolderConfig
-    yield* runMigrations(migrationsFolder)
+    return yield* runMigrations(migrationsFolder)
   },
 )
