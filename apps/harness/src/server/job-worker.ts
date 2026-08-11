@@ -30,6 +30,7 @@ import {
   POLLING_AUTO_HEAL_BACKOFF,
   POLLING_AUTO_HEAL_KEY,
   enqueuePollingAutoHealJob,
+  issuePollFailureBackoff,
   repairPollingSchedules,
   sampleIssuePollingDelay,
 } from "@ready-for-agent/graphql-api"
@@ -59,6 +60,14 @@ const ORPHAN_RECOVERY_INTERVAL = Duration.seconds(30)
 const REFRESH_REPOSITORY_TAG = "refresh-repository"
 /** Modest concurrency for credential probes (Keymaxxer / GitLab). */
 const CREDENTIAL_CHECK_CONCURRENCY = 4
+
+/**
+ * Process-local consecutive failure counts for scheduled Issue polls.
+ * `postponeKeyed` resets queue `job_attempts`, so recurrence failure is
+ * unobservable through the queue; this Map is the only consecutive-failure
+ * memory. Cleared on success and on process restart (healthy first retry).
+ */
+const consecutiveScheduledPollFailures = new Map<string, number>()
 
 /**
  * Process-global generation so HMR/runtime restarts retire zombie workers that
@@ -334,13 +343,22 @@ const finalizeScheduledRefresh = <A, E>(
         )
         return
       }
+      const consecutiveFailures =
+        (consecutiveScheduledPollFailures.get(repositoryId) ?? 0) + 1
+      consecutiveScheduledPollFailures.set(repositoryId, consecutiveFailures)
+      const delay = issuePollFailureBackoff(consecutiveFailures)
       yield* Effect.logError("Scheduled Issue poll failed", {
         jobId,
         repositoryId,
+        consecutiveFailures,
+        nextDelayMs: Duration.toMillis(delay),
         ...logErrorAnnotations(result.failure),
       })
+      yield* queue.postponeKeyed(jobId, delay)
+      return
     }
 
+    consecutiveScheduledPollFailures.delete(repositoryId)
     const delay = yield* sampleDelay
     yield* queue.postponeKeyed(jobId, delay)
   })

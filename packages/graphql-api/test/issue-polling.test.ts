@@ -15,9 +15,11 @@ import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
   ISSUE_POLLING_BASE_SECONDS,
   ISSUE_POLLING_JITTER_SECONDS,
+  ISSUE_POLL_FAILURE_MAX_SECONDS,
   ISSUE_POLL_QUEUE,
   ISSUE_REFRESH_QUEUE,
   activateRepositoryPolling,
+  issuePollFailureBackoffSeconds,
   repairPollingSchedules,
   suspendRepositoryPolling,
 } from "../src/lib/issue-polling.js"
@@ -32,6 +34,27 @@ const repoOrphan = "repo-01J00000000000000000000003"
 const repoAdded = "repo-01J00000000000000000000004"
 
 describe("issue-polling", () => {
+  test("issuePollFailureBackoffSeconds grows exponentially to a ceiling", () => {
+    expect(issuePollFailureBackoffSeconds(0)).toBe(ISSUE_POLLING_BASE_SECONDS)
+    expect(issuePollFailureBackoffSeconds(1)).toBe(ISSUE_POLLING_BASE_SECONDS)
+    expect(issuePollFailureBackoffSeconds(2)).toBe(
+      ISSUE_POLLING_BASE_SECONDS * 2,
+    )
+    expect(issuePollFailureBackoffSeconds(3)).toBe(
+      ISSUE_POLLING_BASE_SECONDS * 4,
+    )
+    expect(issuePollFailureBackoffSeconds(4)).toBe(
+      ISSUE_POLLING_BASE_SECONDS * 8,
+    )
+    // 60 * 2^5 = 1920 > 900 → capped.
+    expect(issuePollFailureBackoffSeconds(6)).toBe(
+      ISSUE_POLL_FAILURE_MAX_SECONDS,
+    )
+    expect(issuePollFailureBackoffSeconds(20)).toBe(
+      ISSUE_POLL_FAILURE_MAX_SECONDS,
+    )
+  })
+
   test("activateRepositoryPolling ensures keyed schedule and first refresh", async () => {
     const ensured: Array<{
       queue: string

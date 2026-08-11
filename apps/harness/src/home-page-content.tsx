@@ -51,6 +51,10 @@ import {
   issueActionEligibility,
 } from "./issue-action-eligibility.js"
 import {
+  formatLastRefreshedAgo,
+  isIssueProjectionStale,
+} from "./issue-projection-freshness.js"
+import {
   formatDuration,
   formatStartedAgo,
   isLiveDurationStatus,
@@ -1550,6 +1554,13 @@ function RepositoryCard({
   })
   const hasNoRelevantIssues =
     repository.issuesReconciledAt !== null && relevantIssues?.length === 0
+  // Wall-clock tick so a previously-fresh projection can cross the stale
+  // threshold while this card stays mounted (failed polls never invalidate).
+  const nowMs = useNowMs(repository.issuesReconciledAt !== null, 30_000)
+  const issuesProjectionStale = isIssueProjectionStale(
+    repository.issuesReconciledAt,
+    nowMs,
+  )
 
   const addGitHubToken = useMutation({
     mutationFn: async () => {
@@ -2577,13 +2588,29 @@ function RepositoryCard({
             {repository.issuesReconciledAt === null ? (
               <p className={ui.repoIssuesUnrefreshed}>Not refreshed yet.</p>
             ) : (
-              <Suspense fallback={<RepositoryIssuesSkeleton />}>
-                <RepositoryIssues
-                  repository={repository}
-                  workItems={workItems}
-                  workItemsLoading={workItemsLoading}
-                />
-              </Suspense>
+              <>
+                {issuesProjectionStale && (
+                  <Banner
+                    className={cx(ui.bannerCompact, "mb-2")}
+                    tone="guidance"
+                    tag="Stale"
+                    role="status"
+                  >
+                    {formatLastRefreshedAgo(
+                      repository.issuesReconciledAt,
+                      nowMs,
+                    )}
+                    . Issues may be out of date.
+                  </Banner>
+                )}
+                <Suspense fallback={<RepositoryIssuesSkeleton />}>
+                  <RepositoryIssues
+                    repository={repository}
+                    workItems={workItems}
+                    workItemsLoading={workItemsLoading}
+                  />
+                </Suspense>
+              </>
             )}
           </div>
           {removeRepository.isError && (

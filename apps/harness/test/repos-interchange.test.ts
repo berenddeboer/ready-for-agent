@@ -210,6 +210,11 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       'aria-label={\n                  refreshingIssues ? "Refreshing issues" : "Refresh issues"',
     )
     expect(card).toContain("ui.repoIssuesUnrefreshed")
+    // Stale projection caption (#951): guidance banner when issuesReconciledAt is old.
+    expect(card).toContain("isIssueProjectionStale")
+    expect(card).toContain("formatLastRefreshedAgo")
+    expect(card).toContain('tag="Stale"')
+    expect(card).toContain("Issues may be out of date.")
 
     const issues = sliceBetweenMarkers(
       homeSource(),

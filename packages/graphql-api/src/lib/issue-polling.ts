@@ -19,8 +19,36 @@ export const ISSUE_POLLING_BASE_SECONDS = 60
 /** Inclusive upper bound for additive jitter seconds (0–30). */
 export const ISSUE_POLLING_JITTER_SECONDS = 30
 
+/**
+ * Ceiling for consecutive scheduled-poll failure backoff (15 minutes).
+ * Permanent failures (expired token, TLS, renamed repo) must not keep the
+ * full healthy cadence forever — see issue #951.
+ */
+export const ISSUE_POLL_FAILURE_MAX_SECONDS = 15 * 60
+
 /** Default backoff when a Polling Auto-heal Job fails (no tight loop). */
 export const POLLING_AUTO_HEAL_BACKOFF = Duration.seconds(5)
+
+/**
+ * Quiet period after the Nth consecutive scheduled poll failure (1-based).
+ * Grows exponentially from the healthy base and caps at
+ * {@link ISSUE_POLL_FAILURE_MAX_SECONDS}. Count 0 or negative falls back to
+ * the healthy base (callers should prefer sampling jitter on success).
+ */
+export const issuePollFailureBackoffSeconds = (
+  consecutiveFailures: number,
+): number => {
+  if (consecutiveFailures <= 0) return ISSUE_POLLING_BASE_SECONDS
+  const exponent = Math.min(consecutiveFailures - 1, 31)
+  const seconds = ISSUE_POLLING_BASE_SECONDS * 2 ** exponent
+  return Math.min(seconds, ISSUE_POLL_FAILURE_MAX_SECONDS)
+}
+
+/** Duration form of {@link issuePollFailureBackoffSeconds}. */
+export const issuePollFailureBackoff = (
+  consecutiveFailures: number,
+): Duration.Duration =>
+  Duration.seconds(issuePollFailureBackoffSeconds(consecutiveFailures))
 
 const RefreshRepositoryJobPayload = (repositoryId: string) => ({
   _tag: "refresh-repository" as const,
