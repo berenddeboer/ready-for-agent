@@ -1672,8 +1672,24 @@ describe("Job worker", () => {
 
   it.live("postpones a failed scheduled poll without publishing success", () =>
     Effect.gen(function* () {
-      const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
-      const postponed = yield* Deferred.make<string>()
+      // Unique Repository id so process-local consecutive-failure counts start
+      // at 0; keep default projectPath so keymaxxerLayer credentials match.
+      const failingRepo = makeRepositoryRecord({
+        id: RepositoryId.make("repo-01J0000000000000000000000A"),
+        paused: true,
+      })
+      const job = rawJob(
+        {
+          _tag: "refresh-repository" as const,
+          repositoryId: failingRepo.id,
+        },
+        ISSUE_POLL_QUEUE,
+        failingRepo.id,
+      )
+      const postponed = yield* Deferred.make<{
+        jobId: string
+        delayMs: number
+      }>()
       const notifications: string[] = []
       let failed = false
 
@@ -1681,9 +1697,14 @@ describe("Job worker", () => {
         Effect.gen(function* () {
           yield* runJobWorker({
             idlePollInterval: Duration.zero,
+            // Success path samples cadence; failure must ignore this and back off.
             samplePollingDelay: Effect.succeed(Duration.seconds(120)),
           }).pipe(Effect.forkScoped({ startImmediately: true }))
-          expect(yield* Deferred.await(postponed)).toBe(job.jobId)
+          expect(yield* Deferred.await(postponed)).toEqual({
+            jobId: job.jobId,
+            // First consecutive failure: healthy base (60s), not the sample delay.
+            delayMs: 60_000,
+          })
           expect(notifications).toEqual([])
           expect(failed).toBe(false)
         }),
@@ -1700,9 +1721,13 @@ describe("Job worker", () => {
             undefined,
             undefined,
             undefined,
-            (jobId) => Deferred.succeed(postponed, jobId),
+            (jobId, delay) =>
+              Deferred.succeed(postponed, {
+                jobId,
+                delayMs: Duration.toMillis(delay),
+              }),
           ),
-          dbLayer([repository], (repositoryId) =>
+          dbLayer([failingRepo], (repositoryId) =>
             Effect.sync(() => {
               notifications.push(repositoryId)
             }),
@@ -1715,6 +1740,85 @@ describe("Job worker", () => {
         ),
       )
     }),
+  )
+
+  it.live(
+    "backs off successive scheduled poll failures and resets after success",
+    () =>
+      Effect.gen(function* () {
+        // Unique id; default projectPath stays credentialed via keymaxxerLayer.
+        const backoffRepo = makeRepositoryRecord({
+          id: RepositoryId.make("repo-01J0000000000000000000000B"),
+          paused: true,
+        })
+        const failPayload = {
+          _tag: "refresh-repository" as const,
+          repositoryId: backoffRepo.id,
+        }
+        const firstJob = rawJob(failPayload, ISSUE_POLL_QUEUE, backoffRepo.id)
+        const secondJob = rawJob(failPayload, ISSUE_POLL_QUEUE, backoffRepo.id)
+        const successJob = rawJob(failPayload, ISSUE_POLL_QUEUE, backoffRepo.id)
+        const delays: number[] = []
+        const done = yield* Deferred.make<void>()
+        let reconcileCalls = 0
+
+        // Sequential claims across high-priority probe + poll queue.
+        const pendingJobs = [firstJob, secondJob, successJob]
+
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({
+              idlePollInterval: Duration.zero,
+              samplePollingDelay: Effect.succeed(Duration.seconds(137)),
+            }).pipe(Effect.forkScoped({ startImmediately: true }))
+            yield* Deferred.await(done)
+            expect(delays).toEqual([60_000, 120_000, 137_000])
+          }),
+          Layer.mergeAll(
+            defaultGithubLayer,
+            queueLayer(
+              [],
+              undefined,
+              undefined,
+              (queueName) =>
+                Effect.sync(() => {
+                  if (queueName !== ISSUE_POLL_QUEUE) return Option.none()
+                  const next = pendingJobs.shift()
+                  return next === undefined ? Option.none() : Option.some(next)
+                }),
+              undefined,
+              undefined,
+              undefined,
+              (_jobId, delay) =>
+                Effect.gen(function* () {
+                  delays.push(Duration.toMillis(delay))
+                  if (delays.length === 3) {
+                    yield* Deferred.succeed(done, undefined)
+                  }
+                }),
+            ),
+            dbLayer([backoffRepo]),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () => {
+                reconcileCalls += 1
+                if (reconcileCalls <= 2) {
+                  return Effect.fail(
+                    new DatabaseError({ message: "scheduled fail" }),
+                  )
+                }
+                return Effect.succeed({
+                  fetched: 0,
+                  inserted: 0,
+                  updated: 0,
+                  deleted: 0,
+                  unchanged: 0,
+                })
+              },
+            }),
+            keymaxxerLayer(),
+          ),
+        )
+      }),
   )
 
   it.live(
