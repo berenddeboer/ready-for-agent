@@ -9,13 +9,14 @@ import {
   Result,
   Schema,
 } from "effect"
-import type {
-  MergePullRequestResult,
-  PrStatusCheckDiagnostic,
-  PullRequestCheckStatus,
-  PullRequestLifecycleStatus,
-  PullRequestMergeability,
-  TerminalPrStatusCheck,
+import {
+  type MergePullRequestResult,
+  type PrStatusCheckDiagnostic,
+  type PullRequestCheckStatus,
+  type PullRequestLifecycleStatus,
+  type PullRequestMergeability,
+  type TerminalPrStatusCheck,
+  extractErrorCode,
 } from "@ready-for-agent/github-service"
 import { GitLabProjectUnavailableError, GitLabRequestError } from "./errors.js"
 import {
@@ -451,14 +452,17 @@ const apiBase = (repository: GitLabRepository): string =>
 const projectApiPath = (repository: GitLabRepository): string =>
   `/projects/${encodeURIComponent(repository.projectPath)}`
 
-const requestError = (message: string, cause: unknown): GitLabRequestError =>
-  new GitLabRequestError({
+const requestError = (message: string, cause: unknown): GitLabRequestError => {
+  const code = extractErrorCode(cause)
+  return new GitLabRequestError({
     message,
     cause,
+    ...(code !== undefined ? { code } : {}),
     ...(cause instanceof GitLabHttpError
       ? { statusCode: cause.statusCode }
       : {}),
   })
+}
 
 const decode = <S extends { readonly Type: unknown }>(
   schema: S & Parameters<typeof Schema.decodeUnknownSync>[0],

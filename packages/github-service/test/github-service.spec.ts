@@ -9,10 +9,15 @@ import {
   GitHubService,
   GitHubThrottledError,
   type ReadyLabeledIssue,
+  buildReasonDetail,
+  extractCauseChain,
+  extractErrorCode,
   formatUserFacingError,
+  logErrorAnnotations,
   makeGitHubServiceFromToken,
   makeGitHubServiceTest,
   sanitizeUserFacingText,
+  serializeReasonDetail,
   stripAnsi,
 } from "../src/index.js"
 import { GenqlError } from "../src/internal/generated/runtime/error.js"
@@ -3880,6 +3885,71 @@ describe("user-facing error formatting", () => {
     expect(formatUserFacingError(error, "fallback")).toBe(
       "Failed to get pull request check status for acme/widgets",
     )
+  })
+})
+
+describe("error cause chain", () => {
+  it("walks nested causes and surfaces the leaf code", () => {
+    const leaf = Object.assign(
+      new Error("self-signed certificate in certificate chain"),
+      {
+        code: "SELF_SIGNED_CERT_IN_CHAIN",
+      },
+    )
+    const transport = new TypeError("fetch failed", { cause: leaf })
+    const wrapped = new GitHubRequestError({
+      message: "Failed to list Ready-labeled Issues for acme/widgets",
+      cause: transport,
+      code: "SELF_SIGNED_CERT_IN_CHAIN",
+    })
+
+    expect(extractErrorCode(wrapped)).toBe("SELF_SIGNED_CERT_IN_CHAIN")
+    expect(extractCauseChain(wrapped)).toEqual([
+      {
+        name: "GitHubRequestError",
+        code: "SELF_SIGNED_CERT_IN_CHAIN",
+        message: "Failed to list Ready-labeled Issues for acme/widgets",
+      },
+      {
+        name: "TypeError",
+        message: "fetch failed",
+      },
+      {
+        name: "Error",
+        code: "SELF_SIGNED_CERT_IN_CHAIN",
+        message: "self-signed certificate in certificate chain",
+      },
+    ])
+
+    const annotations = logErrorAnnotations(wrapped)
+    expect(annotations.error).toBe(
+      "Failed to list Ready-labeled Issues for acme/widgets",
+    )
+    expect(annotations.code).toBe("SELF_SIGNED_CERT_IN_CHAIN")
+    expect(annotations.causeChain).toHaveLength(3)
+
+    const detail = buildReasonDetail(wrapped)
+    expect(detail).not.toBeNull()
+    expect(detail?.code).toBe("SELF_SIGNED_CERT_IN_CHAIN")
+    expect(JSON.parse(serializeReasonDetail(detail)!)).toEqual(detail)
+  })
+
+  it("returns an empty chain for uninformative values", () => {
+    expect(extractCauseChain(null)).toEqual([])
+    expect(extractCauseChain(undefined)).toEqual([])
+    expect(extractErrorCode({})).toBeUndefined()
+    expect(buildReasonDetail(null)).toBeNull()
+  })
+
+  it("maps Effect TimeoutError to code TIMEOUT", () => {
+    const timeout = Object.assign(new Error(), {
+      name: "TimeoutError",
+      _tag: "TimeoutError",
+    })
+    expect(extractErrorCode(timeout)).toBe("TIMEOUT")
+    expect(extractCauseChain(timeout)).toEqual([
+      { name: "TimeoutError", code: "TIMEOUT" },
+    ])
   })
 })
 

@@ -7,6 +7,7 @@ import {
   GitHubService,
   type GitHubServiceShape,
   type GitHubThrottledError,
+  extractErrorCode,
   isGitHubThrottledError,
   makeGitHubServiceFromToken,
 } from "@ready-for-agent/github-service"
@@ -40,11 +41,14 @@ const authenticatedUserCacheKey = (repository: {
     repository.projectPath.toLowerCase(),
   ].join("\0")
 
-const authenticationError = (cause: unknown) =>
-  new GitHubRequestError({
+const authenticationError = (cause: unknown) => {
+  const code = extractErrorCode(cause)
+  return new GitHubRequestError({
     message: "Failed to resolve GitHub CLI authentication",
     cause,
+    ...(code !== undefined ? { code } : {}),
   })
+}
 
 export const ambientGitHubLayer = (options: {
   readonly workspaceRoot: string

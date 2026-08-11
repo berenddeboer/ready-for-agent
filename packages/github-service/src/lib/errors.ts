@@ -15,6 +15,11 @@ export class GitHubRequestError extends Schema.TaggedErrorClass<GitHubRequestErr
     message: Schema.String,
     cause: Schema.optional(Schema.Defect()),
     statusCode: Schema.optional(Schema.Finite),
+    /**
+     * Machine-readable discriminator lifted from the nested cause chain
+     * (e.g. `SELF_SIGNED_CERT_IN_CHAIN`, `ENOTFOUND`) when available.
+     */
+    code: Schema.optional(Schema.String),
     /** Whether the transport failure may receive the bounded query retry. */
     retryable: Schema.optional(Schema.Boolean),
   },

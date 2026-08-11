@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
-import { Duration, Effect, Layer } from "effect"
+import { Duration, Effect, Layer, Logger } from "effect"
 import {
   type ActiveAgentBackend,
   AgentBackend,
@@ -687,38 +687,78 @@ describe("createPr", () => {
     withTemp(async (root) => {
       let continueCalls = 0
       let findCalls = 0
-      const result = await run(createPr(baseContext(root)), {
-        keymaxxer: stubKeymaxxer({
-          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
-          runWithSecrets: () =>
-            Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
-        }),
-        github: stubGitHub({
-          findOpenPullRequestNumber: () => {
-            findCalls += 1
-            if (findCalls === 1) {
-              return Effect.succeed(null)
-            }
-            return Effect.fail(
-              new GitHubRequestError({ message: "lookup timeout" }),
-            )
-          },
-          createDraftPullRequest: () => Effect.succeed(444),
-        }),
-        opencode: stubOpencode({
-          continueTurn: () => {
-            continueCalls += 1
-            return Effect.succeed({
-              sessionId: "ses",
-              assistantText: "",
-            })
-          },
-        }),
+      const logs: unknown[] = []
+      const logger = Logger.make(({ message }) => {
+        logs.push(message)
       })
+      const leaf = Object.assign(new Error("self-signed certificate"), {
+        code: "SELF_SIGNED_CERT_IN_CHAIN",
+      })
+      const result = await Effect.runPromise(
+        createPr(baseContext(root)).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              stubDb,
+              stubGitHub({
+                findOpenPullRequestNumber: () => {
+                  findCalls += 1
+                  if (findCalls === 1) {
+                    return Effect.succeed(null)
+                  }
+                  return Effect.fail(
+                    new GitHubRequestError({
+                      message: "lookup timeout",
+                      cause: leaf,
+                      code: "SELF_SIGNED_CERT_IN_CHAIN",
+                    }),
+                  )
+                },
+                createDraftPullRequest: () => Effect.succeed(444),
+              }),
+              stubGitLab(),
+              stubKeymaxxer({
+                findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+                runWithSecrets: () =>
+                  Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+              }),
+              stubOpencode({
+                continueTurn: () => {
+                  continueCalls += 1
+                  return Effect.succeed({
+                    sessionId: "ses",
+                    assistantText: "",
+                  })
+                },
+              }),
+              stubActiveAgentBackendLayer(),
+              Logger.layer([logger]),
+            ),
+          ),
+          Effect.provide(PlatformLayer),
+        ),
+      )
 
       expect(result.pullRequestNumber).toBe(444)
       expect(result.completion).toBe("native")
       expect(continueCalls).toBe(0)
+      expect(logs).toContainEqual([
+        "Soft open-PR lookup failed; treating as not found",
+        expect.objectContaining({
+          step: "create_pr",
+          code: "SELF_SIGNED_CERT_IN_CHAIN",
+          causeChain: expect.arrayContaining([
+            expect.objectContaining({
+              name: "GitHubRequestError",
+              code: "SELF_SIGNED_CERT_IN_CHAIN",
+              message: "lookup timeout",
+            }),
+            expect.objectContaining({
+              code: "SELF_SIGNED_CERT_IN_CHAIN",
+              message: "self-signed certificate",
+            }),
+          ]),
+        }),
+      ])
     }))
 
   it("treats indeterminate create as success when lookup finds the PR", () =>

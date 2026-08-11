@@ -104,7 +104,23 @@ describe("runMigrations", () => {
           { name: "20260730140857_unfinished_work_item_index" },
           { name: "20260807100000_postponed_step_runs" },
           { name: "20260808093000_explicit_agent_backend_selection" },
+          { name: "20260811120000_step_run_reason_detail" },
         ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("adds Step Run reason_detail for failure diagnostics", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* runMigrations(defaultMigrationsFolder)
+        const columns = (yield* sql.unsafe(
+          `PRAGMA table_info(step_run)`,
+        )) as readonly { readonly name: string }[]
+        const names = new Set(columns.map((column) => column.name))
+        expect(names.has("reason_detail")).toBe(true)
+        expect(names.has("reason_message")).toBe(true)
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

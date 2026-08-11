@@ -363,6 +363,11 @@ export const stepRun = snakeCase.table(
     finishedAt: integer({ mode: "number" }),
     reasonCode: text(),
     reasonMessage: text(),
+    /**
+     * Optional JSON diagnostic payload for failed Step Runs (cause chain +
+     * machine-readable code). Operator-facing summary stays in reasonMessage.
+     */
+    reasonDetail: text(),
     /** Present exactly when this finished Step Run was postponed for GitHub. */
     postponedUntil: integer({ mode: "number" }),
     /**
