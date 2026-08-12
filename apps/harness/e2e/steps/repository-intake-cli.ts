@@ -20,6 +20,9 @@ const workspaceRoot = resolve(
   "../../../..",
 )
 
+/** Operator CLI package root — run main.ts here, not via nx, for clean JSON. */
+const readyForAgentPackageRoot = resolve(workspaceRoot, "apps/ready-for-agent")
+
 const fixtureSelector = `github.com/${FIXTURE_GITHUB_REPOSITORY}`
 
 /** Bound wait for Create Worktree / failed agent steps before suite cleanup. */
@@ -93,17 +96,24 @@ const parseExactlyOneJsonDocument = (text: string): unknown => {
 }
 
 const runFiniteCli = (args: readonly string[]): CliJsonResult => {
-  const result = spawnSync("bun", ["run", "ready-for-agent", ...args], {
-    cwd: workspaceRoot,
-    env: {
-      ...process.env,
-      READY_FOR_AGENT_GRAPHQL_URL: E2E_GRAPHQL_URL,
-      NO_COLOR: "1",
-      FORCE_COLOR: "0",
+  // Invoke the operator CLI entrypoint directly (same seam as cli-process
+  // tests). `bun run ready-for-agent` goes through nx and prints banners
+  // that break the one-JSON-document contract on stdout.
+  const result = spawnSync(
+    "bun",
+    ["--conditions", "@ready-for-agent/source", "src/main.ts", ...args],
+    {
+      cwd: readyForAgentPackageRoot,
+      env: {
+        ...process.env,
+        READY_FOR_AGENT_GRAPHQL_URL: E2E_GRAPHQL_URL,
+        NO_COLOR: "1",
+        FORCE_COLOR: "0",
+      },
+      encoding: "utf8",
+      timeout: 120_000,
     },
-    encoding: "utf8",
-    timeout: 120_000,
-  })
+  )
   const stdout = result.stdout ?? ""
   const stderr = result.stderr ?? ""
   if (result.error) {
