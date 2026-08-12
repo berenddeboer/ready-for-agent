@@ -173,6 +173,17 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(issues).toContain("Blocked")
     expect(issues).toContain("ui.repoIssueBlockedBy")
     expect(issues).toContain("Blocked by")
+    // Companions (lifecycle / error / blocked-by) live in the title column so
+    // long GitLab iids can widen the number track without a fixed rem gutter.
+    // Title column is a flow <div> (not <span>) so Banner / lifecycle / <p> are valid.
+    const titleColumn = sliceBetweenMarkers(
+      issues,
+      '<div className="min-w-0">',
+      "className={ui.repoIssueActions}",
+    )
+    expect(titleColumn).toContain("WorkItemLifecycleStatus")
+    expect(titleColumn).toContain("ui.repoIssueError")
+    expect(titleColumn).toContain("ui.repoIssueBlockedBy")
     // Old amber row-wash language is dropped.
     expect(issues).not.toContain("bg-amber-wash")
     expect(issues).not.toContain("border-sepia")
@@ -193,6 +204,48 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).not.toContain("repoIssueImplementMenu:")
     expect(ui).toMatch(/stampClosed:[\s\S]*?border-dashed/)
     expect(ui).toMatch(/stampBlocked:[\s\S]*?bg-lane-queue/)
+    // Issue #969: auto number track + baseline (not fixed 2.4rem / items-start).
+    // whitespace-nowrap + tabular-nums keep short (#793) and long (#3595864)
+    // GitLab iids fully readable without overlapping the title.
+    const repoIssueRow = sliceBetweenMarkers(
+      ui,
+      "repoIssueRow:",
+      "repoIssueNum:",
+    )
+    expect(repoIssueRow).toContain("grid-cols-[auto_minmax(0,1fr)_auto]")
+    expect(repoIssueRow).toContain("items-baseline")
+    expect(repoIssueRow).not.toContain("2.4rem")
+    expect(repoIssueRow).not.toContain("items-start")
+    const repoIssueNum = sliceBetweenMarkers(
+      ui,
+      "repoIssueNum:",
+      "repoIssueTitleRow:",
+    )
+    expect(repoIssueNum).toContain("whitespace-nowrap")
+    expect(repoIssueNum).toContain("tabular-nums")
+    expect(repoIssueNum).toContain("shrink-0")
+    // Companions no longer use the obsolete 2.4rem+gap (=2.95rem) gutter.
+    const blockedBy = sliceBetweenMarkers(
+      ui,
+      "repoIssueBlockedBy:",
+      "repoIssueBlockedByLink:",
+    )
+    expect(blockedBy).not.toContain("2.95rem")
+    expect(blockedBy).not.toContain("pl-[")
+    const repoIssueError = sliceBetweenMarkers(
+      ui,
+      "repoIssueError:",
+      "parentIssueError:",
+    )
+    expect(repoIssueError).not.toContain("2.95rem")
+    expect(repoIssueError).not.toContain("ml-[")
+    const lifecycleInset = sliceBetweenMarkers(
+      ui,
+      "lifecycleInset:",
+      "blankSlate:",
+    )
+    expect(lifecycleInset).not.toContain("2.95rem")
+    expect(lifecycleInset).not.toContain("ml-[")
   })
 
   test("zero relevant issues retain heading chrome and explain how to add them", () => {
@@ -382,6 +435,17 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).toMatch(/parentIssueChildren:[\s\S]*?px-\[0\.65rem\]/)
     expect(ui).not.toContain("before:absolute before:top-[0.35rem]")
     expect(ui).toContain("parentIssueError:")
+    // Issue #969: parent summary matches leaf number/title alignment rules.
+    const parentSummary = sliceBetweenMarkers(
+      ui,
+      "parentIssueSummary:",
+      "parentIssueClosedCount:",
+    )
+    expect(parentSummary).toContain("grid-cols-[auto_minmax(0,1fr)_auto]")
+    expect(parentSummary).toContain("items-baseline")
+    expect(parentSummary).not.toContain("2.4rem")
+    expect(parentSummary).not.toContain("items-start")
+    expect(parent).toContain("ui.repoIssueNum")
   })
 
   test("repos surface locks alarm Banner weighting for leaf/refresh/remove failures", () => {

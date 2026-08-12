@@ -1178,11 +1178,18 @@ export const ui = {
   repoIssue:
     "min-w-0 border-t border-line-ghost py-[0.55rem] first:border-t-0 first:pt-[0.15rem]",
 
+  /**
+   * Number track is `auto` so short GitHub `#793` and long GitLab iids
+   * (`#3595864`, up to 8 digits) size to content — never overflow into the
+   * title. `items-baseline` keeps mono `#n` and display title on one line.
+   * Companions (blocked-by / error / lifecycle) live in the title column so
+   * they stay aligned without a fixed rem gutter that drifts with width.
+   */
   repoIssueRow:
-    "grid grid-cols-[2.4rem_minmax(0,1fr)_auto] items-start gap-x-[0.55rem] gap-y-[0.45rem]",
+    "grid grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-[0.55rem] gap-y-[0.45rem]",
 
   repoIssueNum:
-    "font-mono text-[0.72rem] font-semibold leading-[1.45] text-ink-2",
+    "shrink-0 whitespace-nowrap tabular-nums font-mono text-[0.72rem] font-semibold leading-[1.45] text-ink-2",
 
   /**
    * Title + inline blue Implement control (play icon + label) on one wrapping
@@ -1227,21 +1234,24 @@ export const ui = {
 
   repoIssueActions: "flex shrink-0 items-center gap-[0.35rem]",
 
+  /** Nested under title column — no fixed left gutter (see repoIssueRow). */
   repoIssueBlockedBy:
-    "mt-[0.4rem] mb-0 pl-[2.95rem] font-mono text-[0.62rem] tracking-[0.04em] text-ink-2",
+    "mt-[0.4rem] mb-0 font-mono text-[0.62rem] tracking-[0.04em] text-ink-2",
 
   repoIssueBlockedByLink:
     "font-semibold text-ink underline underline-offset-2 hover:decoration-2 hover:decoration-signal",
 
-  repoIssueError: "mt-[0.4rem] mb-0 ml-[2.95rem]",
+  /** Nested under title column — no fixed left gutter (see repoIssueRow). */
+  repoIssueError: "mt-[0.4rem] mb-0",
 
   parentIssueError: "mx-[0.65rem] mt-[0.45rem] mb-[0.55rem]",
 
   parentIssue:
     "group mx-[calc(-0.65rem-1.5px)] my-[0.35rem] min-w-0 border-[1.5px] border-ink bg-panel",
 
+  /** Same number/title grid rules as `repoIssueRow` (auto track + baseline). */
   parentIssueSummary:
-    "grid cursor-pointer list-none grid-cols-[2.4rem_minmax(0,1fr)_auto] items-start gap-x-[0.55rem] gap-y-[0.45rem] px-[0.65rem] py-[0.55rem] [&::-webkit-details-marker]:hidden",
+    "grid cursor-pointer list-none grid-cols-[auto_minmax(0,1fr)_auto] items-baseline gap-x-[0.55rem] gap-y-[0.45rem] px-[0.65rem] py-[0.55rem] [&::-webkit-details-marker]:hidden",
 
   parentIssueClosedCount:
     "font-mono text-[0.62rem] font-bold tracking-[0.1em] uppercase text-ink-faint",
@@ -1262,8 +1272,12 @@ export const ui = {
     "px-[0.65rem] pt-[0.15rem] pb-[0.55rem]",
   ),
 
+  /**
+   * Lifecycle chrome under the title column on relevant-issue rows — no
+   * fixed left gutter (companions share the title track; see repoIssueRow).
+   */
   lifecycleInset:
-    "mt-2 mb-0 ml-[2.95rem] min-w-0 max-w-full border-[1.5px] border-ink bg-panel px-[0.65rem] py-[0.55rem]",
+    "mt-2 mb-0 min-w-0 max-w-full border-[1.5px] border-ink bg-panel px-[0.65rem] py-[0.55rem]",
 
   blankSlate:
     "grid justify-items-center border-2 border-dashed border-ink bg-panel px-6 pt-[2.4rem] pb-[2.2rem] text-center sm:px-10 sm:pt-[2.8rem] sm:pb-10",

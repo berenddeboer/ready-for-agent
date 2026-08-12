@@ -461,10 +461,16 @@ prototype, so this spec governs:
   copy keeps `<code>` chips (mono, 1.5px ink border, paper fill).
 - **Relevant issues section**: mono kicker + refresh icon button; issue rows
   use ticket anatomy (mono `#nn`, display title link, author sub-line).
-  Stamps: **Closed** = dashed neutral stamp; **Blocked** = solid Queue-yellow
-  tag (a blocked issue is queue-held — lane-consistent). Blocked rows keep
-  the "Blocked by #n" mono link line; the old amber row-wash is dropped —
-  the yellow tag carries the state, no wash fills in the new language.
+  Number track is **auto** (`whitespace-nowrap tabular-nums`) so short GitHub
+  numbers and long GitLab iids (7–8 digits) never overflow into the title;
+  row grids use **`items-baseline`** so `#n` and the display title share one
+  optical line (parent summary rows match). Blocked-by / error / lifecycle
+  companions sit in the **title column** (not a fixed rem left gutter) so they
+  stay under the title when the number track grows. Stamps: **Closed** =
+  dashed neutral stamp; **Blocked** = solid Queue-yellow tag (a blocked issue
+  is queue-held — lane-consistent). Blocked rows keep the "Blocked by #n"
+  mono link line; the old amber row-wash is dropped — the yellow tag carries
+  the state, no wash fills in the new language.
 - **Latest work item** renders the standard lifecycle chrome (§4.4) inside a
   bordered inset panel (`--panel`, 1.5px): runtime lines (agent backend,
   session + copy, worktree + copy), STARTED / status, and earlier-lane
