@@ -21,10 +21,7 @@ import {
   useState,
 } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
-import {
-  COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE as completedWorkItemsDefaultPageSize,
-  JOBS_COMPLETED_WINDOW_HOURS as jobsCompletedWindowHours,
-} from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
+import { COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE as completedWorkItemsDefaultPageSize } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
 import { formatAgentBackendStatusLabel } from "./agent-backend-status-label.js"
 import { AgentBackendWarnings } from "./agent-backend-warnings.js"
 import { AgentModelSelect } from "./agent-model-select.js"
@@ -68,8 +65,10 @@ import {
 import {
   type LifecycleLabelChip,
   type LifecyclePipelineLaneId,
+  type PipelineLaneId,
   lifecycleFocusLaneFor,
   lifecycleLaneForPhase,
+  pipelineLaneIdFromServerLaneId,
   planLifecycleChipPresentation,
 } from "./pipeline-lanes.js"
 import {
@@ -90,6 +89,7 @@ import {
 import {
   completedWorkItemsHistoryQueryKeyPrefix,
   followRepositoryWorkItemsLive,
+  kanbanStatusQueryKeyPrefix,
 } from "./refresh-work-items-live.js"
 import { type Repository, repositoriesQuery } from "./repositories-query.js"
 import {
@@ -335,15 +335,7 @@ type WorkItemsQueryOptions = {
   readonly limit?: number
 }
 
-/**
- * Rolling window hours for Jobs Completed (same source as server filter).
- * Filtering uses Work Item stateReadyAt within JOBS_COMPLETED_WINDOW_MS on the API.
- * Kept in the query key so a window-hours change busts the client cache.
- */
-const JOBS_COMPLETED_WINDOW_HOURS = jobsCompletedWindowHours
-/** Failed history window (fixed item cap; independent of Completed). */
-export const JOBS_FAILED_LIMIT = 15
-/** Historical Completed page size (server-paginated; not the Jobs 24 h tab). */
+/** Historical Completed page size (server-paginated archive on /completed). */
 export const COMPLETED_WORK_ITEMS_PAGE_SIZE = completedWorkItemsDefaultPageSize
 
 export const workItemsQuery = (
@@ -375,24 +367,62 @@ export const workItemsQuery = (
   }
 }
 
-export const jobsWorkingWorkItemsQuery = (repositoryId: string) =>
-  workItemsQuery(repositoryId, { listKind: "WORKING" })
-
-export const jobsFailedWorkItemsQuery = (repositoryId: string) =>
-  workItemsQuery(repositoryId, {
-    listKind: "FAILED",
-    limit: JOBS_FAILED_LIMIT,
-  })
-
-export const jobsCompletedWorkItemsQuery = (repositoryId: string) => {
-  const base = workItemsQuery(repositoryId, {
-    listKind: "COMPLETED",
-  })
-  return {
-    ...base,
-    queryKey: [...base.queryKey, JOBS_COMPLETED_WINDOW_HOURS] as const,
-  }
+/** Server `kanbanStatus` projection used by the visual board. */
+export type KanbanStatusProjection = {
+  readonly repositoryId: string | null
+  readonly lanes: readonly {
+    readonly id: PipelineLaneId
+    readonly label: string
+    readonly count: number
+    readonly workItems: readonly WorkItem[]
+  }[]
 }
+
+/**
+ * Server-owned six-lane Kanban projection. When `repositoryId` is null, covers
+ * every configured Repository (filter applied server-side after the shared
+ * source windows). Lane membership and ordering are authoritative; the board
+ * does not reclassify.
+ */
+export const kanbanStatusQuery = (repositoryId: string | null) => ({
+  queryKey: [...kanbanStatusQueryKeyPrefix, repositoryId] as const,
+  // No cross-key placeholder: a repository filter switch must not paint the
+  // previous source set under the new selection while the projection loads.
+  queryFn: async (): Promise<KanbanStatusProjection> => {
+    const result = await graphql.query({
+      kanbanStatus: {
+        __args: repositoryId === null ? {} : { repositoryId },
+        repository: { id: true },
+        lanes: {
+          id: true,
+          label: true,
+          count: true,
+          workItems: {
+            workItem: workItemFields,
+          },
+        },
+      },
+    })
+    const status = result.kanbanStatus
+    const lanes: KanbanStatusProjection["lanes"][number][] = []
+    for (const lane of status.lanes) {
+      const pipelineLaneId = pipelineLaneIdFromServerLaneId(lane.id)
+      if (pipelineLaneId === null) {
+        throw new Error(`Unknown Kanban lane id from server: ${lane.id}`)
+      }
+      lanes.push({
+        id: pipelineLaneId,
+        label: lane.label,
+        count: lane.count,
+        workItems: lane.workItems.map((row) => row.workItem),
+      })
+    }
+    return {
+      repositoryId: status.repository?.id ?? null,
+      lanes,
+    }
+  },
+})
 
 export type CompletedWorkItemsPage = {
   readonly items: readonly WorkItem[]
@@ -405,7 +435,7 @@ export type CompletedWorkItemsPage = {
 
 /**
  * Historical Completed Work Items across all repositories (server-paginated).
- * Distinct from jobsCompletedWorkItemsQuery (per-repo, 24 h window).
+ * Distinct from the Kanban Merged lane (rolling 24 h via `kanbanStatus`).
  */
 export const completedWorkItemsHistoryQuery = (page: number) => ({
   queryKey: [
@@ -446,6 +476,49 @@ const patchWorkItemsCaches = (
     queryKey: ["work-items", repositoryId],
   })) {
     queryClient.setQueryData<readonly WorkItem[]>(queryKey, update)
+  }
+
+  // Board tickets come from the server Kanban projection. Keep nested Work
+  // Item rows in sync for pause/start/retry so controls stay responsive without
+  // waiting for the next SSE refresh. Reset (delete) may leave an empty lane
+  // slot until the projection refetches membership.
+  for (const [
+    queryKey,
+    data,
+  ] of queryClient.getQueriesData<KanbanStatusProjection>({
+    queryKey: kanbanStatusQueryKeyPrefix,
+  })) {
+    if (data === undefined) continue
+    let changed = false
+    const lanes = data.lanes.map((lane) => {
+      // Only lanes that already hold this repository's items can change from
+      // pause/start/retry/reset patches scoped by repositoryId.
+      if (!lane.workItems.some((item) => item.repositoryId === repositoryId)) {
+        return lane
+      }
+      const nextItems = update(lane.workItems)
+      if (nextItems === undefined) {
+        return lane
+      }
+      const same =
+        nextItems.length === lane.workItems.length &&
+        nextItems.every((item, index) => item === lane.workItems[index])
+      if (same) {
+        return lane
+      }
+      changed = true
+      return {
+        ...lane,
+        workItems: nextItems,
+        count: nextItems.length,
+      }
+    })
+    if (changed) {
+      queryClient.setQueryData<KanbanStatusProjection>(queryKey, {
+        ...data,
+        lanes,
+      })
+    }
   }
 }
 
@@ -3302,16 +3375,16 @@ export function WorkItemLifecycleStatus({
     isNeedsHuman: status === "NEEDS_HUMAN",
     isFailed: status === "FAILED",
   })
-  const dataUpdatedAt = queryClient
-    .getQueriesData({ queryKey: ["work-items", workItem.repositoryId] })
-    .reduce(
-      (latest, [queryKey]) =>
-        Math.max(
-          latest,
-          queryClient.getQueryState(queryKey)?.dataUpdatedAt ?? 0,
-        ),
-      0,
-    )
+  const dataUpdatedAt = [
+    ...queryClient.getQueriesData({
+      queryKey: ["work-items", workItem.repositoryId],
+    }),
+    ...queryClient.getQueriesData({ queryKey: kanbanStatusQueryKeyPrefix }),
+  ].reduce(
+    (latest, [queryKey]) =>
+      Math.max(latest, queryClient.getQueryState(queryKey)?.dataUpdatedAt ?? 0),
+    0,
+  )
   const nowMs = useNowMs(true)
   const [expandedEarlierLanes, setExpandedEarlierLanes] = useState(
     () => new Set<LifecyclePipelineLaneId>(),

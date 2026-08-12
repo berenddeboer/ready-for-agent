@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query"
 import { streamIssuesChanged } from "./issues-live.js"
+import { kanbanStatusQueryKeyPrefix } from "./refresh-work-items-live.js"
 
 export type RepositoryIssuesLiveQueries = {
   repositories: {
@@ -80,12 +81,35 @@ export const followRepositoryIssuesLive = async ({
     )
   }
 
+  /** Active server Kanban projections stay aligned when Issues drive Work Items. */
+  const refreshKanbanStatus = async () => {
+    if (signal.aborted) return
+    await queryClient.cancelQueries({ queryKey: kanbanStatusQueryKeyPrefix })
+    const cached = queryClient
+      .getQueryCache()
+      .findAll({ queryKey: kanbanStatusQueryKeyPrefix })
+    const active = cached.filter((query) => query.isActive())
+    await Promise.all(
+      active.map(async (query) => {
+        if (signal.aborted) return
+        const queryFn = query.options.queryFn
+        if (typeof queryFn !== "function") return
+        await queryClient.fetchQuery({
+          queryKey: query.queryKey,
+          queryFn: queryFn as (context: unknown) => Promise<unknown>,
+          staleTime: 0,
+        })
+      }),
+    )
+  }
+
   const refresh = async (repositoryId: string) => {
     onRepositoryChanged?.(repositoryId)
     await Promise.all([
       fetchFresh(queries.repositories),
       fetchFresh(queries.issues(repositoryId)),
       refreshWorkItems(repositoryId),
+      refreshKanbanStatus(),
     ])
   }
 
@@ -97,6 +121,7 @@ export const followRepositoryIssuesLive = async ({
         fetchFresh(queries.issues(repositoryId)),
       ),
       ...repositoryIds.map((repositoryId) => refreshWorkItems(repositoryId)),
+      refreshKanbanStatus(),
     ])
   }
 

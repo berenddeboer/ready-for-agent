@@ -11,6 +11,12 @@ export const completedWorkItemsHistoryQueryKeyPrefix = [
   "completed-work-items",
 ] as const
 
+/**
+ * Server-owned six-lane Kanban projection (`kanbanStatus`). Optional repository
+ * filter is the second key segment (`null` = all sources).
+ */
+export const kanbanStatusQueryKeyPrefix = ["kanban-status"] as const
+
 const configQueryKey = ["config"] as const
 /**
  * Per-repo unfinished gate (`blockingUnfinishedWorkItemCount`) lives here.
@@ -207,7 +213,7 @@ export const followRepositoryWorkItemsLive = async ({
 
   /**
    * Refetch every work-items cache for the repository (default list plus any
-   * Jobs Working/Failed/Completed listKind variants already in the query cache).
+   * listKind variants already in the query cache, e.g. repository cards).
    */
   const refreshWorkItems = async (repositoryId: string) => {
     if (signal.aborted) return
@@ -268,6 +274,17 @@ export const followRepositoryWorkItemsLive = async ({
     })
   }
 
+  /**
+   * Refresh active server Kanban projections (all-sources and filtered).
+   * Inactive filter variants stay cached until remounted.
+   */
+  const refreshKanbanStatus = async () => {
+    if (signal.aborted) return
+    await refreshCachedQueries(kanbanStatusQueryKeyPrefix, {
+      activeOnly: true,
+    })
+  }
+
   const refresh = async (repositoryId: string) => {
     // Do not await counts here: the SSE subscriber awaits each onChange, so
     // awaiting aggregates would serialize one full count refresh per event and
@@ -278,6 +295,7 @@ export const followRepositoryWorkItemsLive = async ({
     void refreshCompletedWorkItemsHistory()
     await Promise.all([
       refreshWorkItems(repositoryId),
+      refreshKanbanStatus(),
       // Harness Settings includes the global unfinished Work Item count.
       refreshCachedQueries(configQueryKey),
       // Repository settings backend gate uses per-repo blocking counts.
@@ -293,6 +311,7 @@ export const followRepositoryWorkItemsLive = async ({
     scheduleOpenPullRequestCounts()
     await Promise.all([
       ...repositoryIds.map((repositoryId) => refreshWorkItems(repositoryId)),
+      refreshKanbanStatus(),
       // Connect/visibility still await active history so the open archive is current.
       refreshCompletedWorkItemsHistory(),
       refreshCommittedPullRequestsCounts(),
@@ -344,6 +363,9 @@ export const followRepositoryWorkItemsLive = async ({
     void queryClient.cancelQueries({ queryKey: ["work-items"] })
     void queryClient.cancelQueries({
       queryKey: completedWorkItemsHistoryQueryKeyPrefix,
+    })
+    void queryClient.cancelQueries({
+      queryKey: kanbanStatusQueryKeyPrefix,
     })
     // Do not cancel openPullRequestCountsQueryKey: that projection is owned by
     // followOpenPullRequestCountLive; this follower only schedules invalidation.

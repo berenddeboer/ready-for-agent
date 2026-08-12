@@ -157,7 +157,9 @@ describe("kanban home board", () => {
     )
     const metalHeader = metalLaneHeaderSource()
     expect(source).toContain('aria-label="Lifecycle pipeline"')
-    expect(source).toContain("pipelineLaneFor(workItem)")
+    // Membership comes from server projection, not client classification.
+    expect(source).toContain("kanbanStatusQuery")
+    expect(source).not.toContain("pipelineLaneFor")
     expect(source).toContain("Lane clear")
     // Mobile switcher + metal header use {lane.label}; route furnaces live in
     // PipelineRoute (also {lane.label} in accessible names).
@@ -411,12 +413,13 @@ describe("kanban home board", () => {
     expect(source.match(/collapseEarlierLanes/g)).toHaveLength(1)
   })
 
-  test("Merged-lane compact summary is gated by pipelineLaneFor lane id", () => {
+  test("Merged-lane compact summary is gated by server lane id complete", () => {
     // Completed history uses archive cards on /completed/*; pipeline Merged
-    // still uses PipelineCompleteSummary when laneId === "complete".
+    // still uses PipelineCompleteSummary when laneId === "complete" (MERGED).
     const source = boardSource()
     const board = source.slice(source.indexOf("function KanbanJobsBoard("))
-    expect(board).toContain("pipelineLaneFor(workItem)")
+    expect(board).toContain("kanbanStatusQuery")
+    expect(board).not.toContain("pipelineLaneFor")
     expect(board).toContain("<PipelineTicket")
     const ticket = source.slice(
       source.indexOf("function PipelineTicket("),
@@ -424,8 +427,8 @@ describe("kanban home board", () => {
     )
     expect(ticket).toContain('const isCompleteLane = laneId === "complete"')
     expect(ticket).toContain("<PipelineCompleteSummary")
-    // No local completed-tab ticket list on the home board.
-    expect(board).not.toContain("laneId={pipelineLaneFor(workItem)}")
+    // Lane comes from the server projection map, not client reclassification.
+    expect(board).toContain("laneId={lane.id}")
   })
 
   test("shows agent backend and session id on separate runtime lines", () => {
@@ -495,13 +498,31 @@ describe("kanban home board", () => {
     )
   })
 
-  test("reuses existing queries and live invalidation without polling", () => {
-    // Working/Failed list queries still feed the Pipeline board merge; they are
-    // not tab panels. Completed tab still uses jobsCompletedWorkItemsQuery.
+  test("consumes server kanbanStatus projection with live invalidation and no polling", () => {
+    // Board membership is one server projection; issue/repo queries enrich only.
     const source = boardSource()
-    expect(source).toContain("jobsWorkingWorkItemsQuery")
-    expect(source).toContain("jobsFailedWorkItemsQuery")
-    expect(source).toContain("jobsCompletedWorkItemsQuery")
+    const home = readFileSync(
+      join(import.meta.dir, "../src/home-page-content.tsx"),
+      "utf8",
+    )
+    expect(source).toContain("kanbanStatusQuery")
+    expect(source).toContain("selectedRepositoryId")
+    expect(home).toContain("kanbanStatus:")
+    expect(home).toContain("kanbanStatusQueryKeyPrefix")
+    // Filter switches must not paint the previous source set under a new key.
+    const kanbanQuery = home.slice(
+      home.indexOf("export const kanbanStatusQuery"),
+      home.indexOf("export type CompletedWorkItemsPage"),
+    )
+    expect(kanbanQuery).not.toMatch(/placeholderData\s*:/)
+    // Client no longer assembles Working/Failed/Completed source windows.
+    expect(source).not.toContain("jobsWorkingWorkItemsQuery")
+    expect(source).not.toContain("jobsFailedWorkItemsQuery")
+    expect(source).not.toContain("jobsCompletedWorkItemsQuery")
+    expect(source).not.toContain("JOBS_FAILED_LIMIT")
+    expect(source).not.toContain("pipelineLaneFor")
+    expect(source).not.toContain("sortNewestFirst")
+    expect(source).not.toContain("sortCompletedNewestFirst")
     expect(source).toContain("issuesQuery")
     expect(source).toContain("repositoriesQuery")
     expect(source).toContain("<KanbanLiveUpdates")
@@ -510,25 +531,29 @@ describe("kanban home board", () => {
     expect(source).not.toMatch(
       /selectedTab === "working"|selectedTab === "failed"/,
     )
+    // Query construction lives in home-page-content; board does not open a client.
     expect(source).not.toContain("queryFn:")
     expect(source).not.toContain("createClient(")
     expect(source).not.toContain("setInterval")
     expect(source).not.toContain("refetchInterval")
   })
 
-  test("Pipeline preserves Completed stateReadyAt order instead of re-sorting by createdAt", () => {
+  test("defers lane membership and ordering to the server projection", () => {
+    // Server GraphQL suite owns window/precedence/order proofs; board only maps.
     const source = boardSource()
     const board = source.slice(source.indexOf("function KanbanJobsBoard("))
-    expect(board).toContain("sortCompletedNewestFirst")
-    expect(board).toContain("const pipelineItems = Array.from(")
-    expect(board).not.toMatch(/const pipelineItems\s*=\s*sortNewestFirst\s*\(/)
+    expect(board).toContain("kanbanStatusQuery(selectedRepositoryId)")
+    expect(board).toContain("map.set(lane.id, lane.workItems)")
+    expect(board).not.toContain("pipelineLaneFor")
+    expect(board).not.toContain(".sort(")
+    expect(board).not.toContain("slice(0, JOBS_FAILED_LIMIT)")
   })
 
   test("starts live invalidation after the initial board queries settle", () => {
     const source = boardSource()
     const loadingBranch = source.slice(
-      source.indexOf("if (loading && pipelineItems.length === 0)"),
-      source.indexOf("if (failed)"),
+      source.indexOf("if (kanbanLoading && kanbanStatus === undefined)"),
+      source.indexOf("if (kanbanFailed && kanbanStatus === undefined)"),
     )
     expect(loadingBranch).toContain("<JobsCardSkeleton />")
     expect(loadingBranch).not.toContain("<KanbanLiveUpdates")

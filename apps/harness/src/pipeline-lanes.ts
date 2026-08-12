@@ -37,8 +37,9 @@ const LIFECYCLE_LANE_LABEL: Record<LifecyclePipelineLaneId, string> = {
 }
 
 /**
- * Work Item states that place a ticket in Build. Shared with chip phase
- * grouping so board placement and Kanban chip collapse stay aligned.
+ * Work Item states that group chips under Build. Shared with chip phase
+ * grouping so Kanban earlier-lane collapse stays aligned with the server
+ * board model in docs/kanban.md.
  */
 const BUILD_LIFECYCLE_STATES = [
   "CREATE_WORKTREE",
@@ -77,54 +78,30 @@ const PR_PHASES = new Set<string>([
   "GITHUB_STATUS_CHECKS",
 ])
 
-type PipelineWorkItem = {
-  readonly state: string
-  readonly status: string
-}
-
 /**
- * Kanban placement is driven by lifecycle progress, not scheduler status.
- * Attention and Merged override every lane. Queue is only for work that
- * cannot begin yet (blockers or worker slot). Queued step execution stays in
- * its lifecycle lane (Build / Review / PR).
+ * Map GraphQL `KanbanLaneId` (QUEUE…MERGED) onto board `PipelineLaneId`
+ * (queue…complete). Board placement comes from the server projection; this
+ * only translates enum casing/names for UI chrome.
  */
-export function pipelineLaneFor(workItem: PipelineWorkItem): PipelineLaneId {
-  if (
-    workItem.status === "FAILED" ||
-    workItem.status === "INTERRUPTED" ||
-    workItem.status === "NEEDS_HUMAN" ||
-    workItem.status === "NEEDS_HUMAN_REVIEW" ||
-    workItem.state === "FAILED" ||
-    workItem.state === "NEEDS_HUMAN"
-  ) {
-    return "attention"
+export function pipelineLaneIdFromServerLaneId(
+  id: string,
+): PipelineLaneId | null {
+  switch (id) {
+    case "QUEUE":
+      return "queue"
+    case "BUILD":
+      return "build"
+    case "REVIEW":
+      return "review"
+    case "PR":
+      return "pr"
+    case "ATTENTION":
+      return "attention"
+    case "MERGED":
+      return "complete"
+    default:
+      return null
   }
-
-  if (
-    workItem.status === "COMPLETE" ||
-    workItem.status === "SUCCEEDED" ||
-    workItem.status === "ABANDONED" ||
-    workItem.state === "COMPLETE" ||
-    workItem.state === "ABANDONED"
-  ) {
-    return "complete"
-  }
-
-  if (
-    workItem.status === "WAITING_FOR_BLOCKERS" ||
-    workItem.status === "WAITING_FOR_WORKER_SLOT"
-  ) {
-    return "queue"
-  }
-
-  const lifecycleLane = lifecycleLaneForState(workItem.state)
-  if (lifecycleLane !== null) {
-    return lifecycleLane
-  }
-
-  // Unrecognized non-terminal state: keep off Queue so cards do not oscillate.
-  // When the lifecycle gains a step, extend Build, Review, or PR above.
-  return "pr"
 }
 
 /** Map a Work Item operational state to its lifecycle lane (ignores status). */

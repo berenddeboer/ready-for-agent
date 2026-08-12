@@ -1,19 +1,16 @@
-import { useQueries, useSuspenseQuery } from "@tanstack/react-query"
+import { useQueries, useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type CSSProperties, Suspense, useMemo, useState } from "react"
 import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
 import {
-  JOBS_FAILED_LIMIT,
   JobsCardSkeleton,
   type Repository,
   type WorkItem,
   WorkItemLifecycleStatus,
   WorkItemPauseButton,
   issuesQuery,
-  jobsCompletedWorkItemsQuery,
-  jobsFailedWorkItemsQuery,
-  jobsWorkingWorkItemsQuery,
+  kanbanStatusQuery,
   repositoriesQuery,
 } from "./home-page-content.js"
 import { useJobsRepositoryFilter } from "./jobs-repository-filter.js"
@@ -25,11 +22,7 @@ import {
   useNowMs,
 } from "./live-duration.js"
 import { MetalLaneHeader } from "./metal-lane-header.js"
-import {
-  PIPELINE_LANES,
-  type PipelineLaneId,
-  pipelineLaneFor,
-} from "./pipeline-lanes.js"
+import { PIPELINE_LANES, type PipelineLaneId } from "./pipeline-lanes.js"
 import { PipelineRoute, usePipelineRouteFlights } from "./pipeline-route.js"
 import {
   ROUTE_TRANSITION_MS,
@@ -45,18 +38,6 @@ import {
   statusBadgeClassNameForStatus,
 } from "./work-item-progress-chrome.js"
 import { workItemPullRequestUrl } from "./work-item-pull-request-url.js"
-
-const sortNewestFirst = (items: readonly WorkItem[]): readonly WorkItem[] =>
-  items
-    .slice()
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-
-const sortCompletedNewestFirst = (
-  items: readonly WorkItem[],
-): readonly WorkItem[] =>
-  items
-    .slice()
-    .sort((left, right) => right.stateReadyAt.localeCompare(left.stateReadyAt))
 
 const repositoryIssueKey = (
   repositoryId: string,
@@ -322,21 +303,14 @@ function KanbanJobsBoard() {
     })
   }
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
-  const workingQueries = useQueries({
-    queries: repositories.map((repository) =>
-      jobsWorkingWorkItemsQuery(repository.id),
-    ),
-  })
-  const failedQueries = useQueries({
-    queries: repositories.map((repository) =>
-      jobsFailedWorkItemsQuery(repository.id),
-    ),
-  })
-  const completedQueries = useQueries({
-    queries: repositories.map((repository) =>
-      jobsCompletedWorkItemsQuery(repository.id),
-    ),
-  })
+  // Server-owned lane membership, source windows, and ordering. Optional
+  // repository filter is applied after the shared global source set.
+  const {
+    data: kanbanStatus,
+    isLoading: kanbanLoading,
+    isError: kanbanFailed,
+  } = useQuery(kanbanStatusQuery(selectedRepositoryId))
+  // Issue titles/URLs enrich tickets; membership never comes from this list.
   const issueQueries = useQueries({
     queries: repositories.map((repository) => issuesQuery(repository.id)),
   })
@@ -358,64 +332,37 @@ function KanbanJobsBoard() {
     }
   }
 
-  const workingItems = sortNewestFirst(
-    workingQueries.flatMap((query) => query.data ?? []),
-  )
-  const failedItems = sortNewestFirst(
-    failedQueries.flatMap((query) => query.data ?? []),
-  ).slice(0, JOBS_FAILED_LIMIT)
-  const completedItems = sortCompletedNewestFirst(
-    completedQueries.flatMap((query) => query.data ?? []),
-  )
-  // Preserve per-list recency: Working/Failed by createdAt, Completed by
-  // stateReadyAt. Do not re-sort the merge by createdAt or Merged-lane order
-  // drifts from completed history.
-  const pipelineItems = Array.from(
-    new Map(
-      [...workingItems, ...failedItems, ...completedItems].map((item) => [
-        item.id,
-        item,
-      ]),
-    ).values(),
-  )
-  const activeQueries = [
-    ...workingQueries,
-    ...failedQueries,
-    ...completedQueries,
-  ]
-  const loading = activeQueries.some((query) => query.isLoading)
-  const failed = activeQueries.some((query) => query.isError)
-  const visiblePipelineItems =
-    selectedRepositoryId === null
-      ? pipelineItems
-      : pipelineItems.filter(
-          (item) => item.repositoryId === selectedRepositoryId,
-        )
-  const laneItems = new Map(
-    PIPELINE_LANES.map((lane) => [
-      lane.id,
-      visiblePipelineItems.filter(
-        (workItem) => pipelineLaneFor(workItem) === lane.id,
-      ),
-    ]),
-  )
+  const laneItems = useMemo(() => {
+    const map = new Map<PipelineLaneId, readonly WorkItem[]>(
+      PIPELINE_LANES.map((lane) => [lane.id, [] as const]),
+    )
+    if (kanbanStatus === undefined) {
+      return map
+    }
+    for (const lane of kanbanStatus.lanes) {
+      map.set(lane.id, lane.workItems)
+    }
+    return map
+  }, [kanbanStatus])
 
   // Route flights: grey source until absorb, then dest card fades in with smoke.
   const routeFlights = usePipelineRouteFlights(laneItems)
 
   const workItemById = useMemo(() => {
     const map = new Map<string, WorkItem>()
-    for (const item of visiblePipelineItems) {
-      map.set(item.id, item)
+    for (const items of laneItems.values()) {
+      for (const item of items) {
+        map.set(item.id, item)
+      }
     }
     return map
-  }, [visiblePipelineItems])
+  }, [laneItems])
 
-  if (loading && pipelineItems.length === 0) {
+  if (kanbanLoading && kanbanStatus === undefined) {
     return <JobsCardSkeleton />
   }
 
-  if (failed) {
+  if (kanbanFailed && kanbanStatus === undefined) {
     return (
       <>
         <KanbanLiveUpdates repositoryIds={repositoryIds} />

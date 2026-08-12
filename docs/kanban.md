@@ -88,8 +88,9 @@ Completed uses wider archive-style cards (journey legs, forge PR/MR badge,
 full session id) in a responsive grid and keeps repository filters in the
 sticky chrome.
 
-There are no separate Working or Failed list tabs. Pipeline still assembles
-tickets from the existing working, failed, and completed Work Item queries.
+There are no separate Working or Failed list tabs. Pipeline membership comes
+from the server `kanbanStatus` projection (shared with CLI status), not from
+client-side Working / Failed / Completed list assembly.
 
 The existing arrow-key tab behavior, selected-tab ARIA semantics,
 retry/reset/start/pause actions, Session usage dialog, issue links, and
@@ -98,13 +99,14 @@ pull-request links remain available.
 Repository filters sit above the board:
 
 - `All sources` shows every repository.
-- A repository filter limits every lane and the Completed tab to that
-  repository.
-- Filter selection is local UI state and does not alter repository settings or
-  the underlying queries.
+- A repository filter limits every Pipeline lane to that repository via the
+  shared projection (`kanbanStatus(repositoryId)` after the global source set).
+- Filter selection is local UI state and does not alter repository settings; it
+  selects which projection query the board loads. The Completed archive uses
+  its own history query and filters on `/completed`.
 
-Tickets remain sorted newest first within each lane. This gives recency without
-destroying the flow grouping supplied by the board.
+Tickets remain sorted newest first within each lane by the server projection.
+This gives recency without destroying the flow grouping supplied by the board.
 
 ## Ticket lifecycle chips (lane-scoped collapse)
 
@@ -188,19 +190,20 @@ workflow.
 The board should reuse existing Harness data boundaries behind that projection:
 
 - Repository list from the existing repository query.
-- Existing working, failed, and completed Work Item queries.
-- Existing issue queries to enrich ticket titles and URLs.
+- Server `kanbanStatus` GraphQL projection for lane membership and ordering.
+- Existing issue queries to enrich ticket titles and URLs only (not membership).
 - Existing Work Item controls, lifecycle-status presentation, Session usage
   dialog, copy control, and repository/action mutations.
 
-The projection should deduplicate Work Items assembled from the three list
-queries by Work Item ID before assigning lanes. The board should not create an
-additional polling loop.
+The server projection deduplicates Work Items from the shared source set by
+Work Item ID before assigning lanes. The board must not reassemble Working /
+Failed / Completed lists or reclassify lanes client-side, and must not create
+an additional polling loop.
 
 Keep lifecycle-chip presentation helpers close to the board module. Keep the
-lane classifier in the server projection and cover it with focused tests; it
-is a presentation policy that needs deliberate updates if the lifecycle gains
-new states.
+lane classifier in the server projection and cover it with GraphQL integration
+tests; the browser suite verifies consumption of that projection without
+duplicating classification cases.
 
 ## Route Seam
 

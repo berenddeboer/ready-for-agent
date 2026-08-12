@@ -192,14 +192,17 @@ describe("Jobs Reset button wiring", () => {
   })
 
   test("kanban completed tickets still render compact lifecycle outside Merged lane", () => {
-    const source = homeSource()
+    const home = homeSource()
     const board = readFileSync(
       join(import.meta.dir, "../src/kanban-board.tsx"),
       "utf8",
     )
-    expect(source).toContain('listKind: "COMPLETED"')
-    expect(source).toContain("JOBS_COMPLETED_WINDOW_HOURS")
-    expect(source).not.toContain("JOBS_COMPLETED_LIMIT")
+    // Board membership is server kanbanStatus (includes Merged window); archive
+    // remains the separate completedWorkItemsHistoryQuery path.
+    expect(home).toContain("kanbanStatusQuery")
+    expect(home).toContain("completedWorkItemsHistoryQuery")
+    expect(home).not.toContain("jobsCompletedWorkItemsQuery")
+    expect(home).not.toContain("JOBS_COMPLETED_LIMIT")
     // Non-Merged pipeline tickets keep compact lifecycle + Reset wiring.
     const ticket = board.slice(
       board.indexOf("function PipelineTicket("),
