@@ -216,6 +216,7 @@ describe("runMigrations", () => {
           { name: "20260807100000_postponed_step_runs" },
           { name: "20260808093000_explicit_agent_backend_selection" },
           { name: "20260811120000_step_run_reason_detail" },
+          { name: "20260812120000_automated_review_rerun_signature" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

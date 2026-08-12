@@ -1,0 +1,68 @@
+name: Playwright Chromium
+description: Restore or install Playwright Chromium, keyed on Playwright version.
+
+inputs:
+  working-directory:
+    description: Directory that depends on @playwright/test
+    required: false
+    default: apps/harness
+  allow-save:
+    description: Whether this job may save the browser cache.
+    required: false
+    default: "false"
+
+outputs:
+  version:
+    description: Resolved Playwright version used in the cache key.
+    value: ${{ steps.version.outputs.version }}
+  cache-hit:
+    description: Whether the Playwright Chromium cache was restored.
+    value: ${{ steps.cache.outputs.cache-hit || steps.restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    # Resolve the installed package version (not the package.json range) so a
+    # Playwright bump misses the cache and downloads a matching Chromium.
+    - name: Resolve Playwright version
+      id: version
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        VERSION="$(bun -e 'console.log(require("@playwright/test/package.json").version)')"
+        test -n "$VERSION"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "Resolved Playwright ${VERSION}"
+
+    - name: Use Playwright's default browser cache path
+      shell: bash
+      run: echo "PLAYWRIGHT_BROWSERS_PATH=${HOME}/.cache/ms-playwright" >> "$GITHUB_ENV"
+
+    - name: Restore and save Playwright Chromium
+      if: inputs.allow-save == 'true'
+      id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-chromium-${{ runner.os }}-${{ steps.version.outputs.version }}
+
+    - name: Restore Playwright Chromium
+      if: inputs.allow-save != 'true'
+      id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-chromium-${{ runner.os }}-${{ steps.version.outputs.version }}
+
+    - name: Install Playwright Chromium
+      if: steps.cache.outputs.cache-hit != 'true' && steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bunx playwright install --with-deps chromium
+
+    - name: Install Playwright OS dependencies
+      if: steps.cache.outputs.cache-hit == 'true' || steps.restore.outputs.cache-hit == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bunx playwright install-deps chromium

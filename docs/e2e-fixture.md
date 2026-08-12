@@ -217,16 +217,18 @@ Live Gherkin e2e runs in a dedicated **`harness`** job (dev smoke + live e2e)
 in parallel with **`quality-gates`** (`lint` / `knip` / `test` / `typecheck`
 plus harness slow-test) on trusted pushes to `main`
 (`.github/workflows/ci-cd.yml`) and on pull requests
-(`.github/workflows/pr.yml`). Playwright Chromium is installed only when the
-vault secret is available (always on `main`; same-repo PRs only). Both
-workflows unlock the fixture vault with repository secret
-`E2E_KEYMAXXER_MASTER_KEY`.
+(`.github/workflows/pr.yml`). Playwright Chromium is installed once for both
+live suites (vault-free `e2e-no-backend` always; vault-backed `e2e` when the
+secret is available). The PR `harness` job caches that Chromium install keyed
+on Playwright version so a cache hit skips the browser download and only
+installs OS dependencies. Both workflows unlock the fixture vault with
+repository secret `E2E_KEYMAXXER_MASTER_KEY`.
 
 | Event | Secret available | Policy |
 | --- | --- | --- |
 | `push` to `main` | required | Fail closed if missing |
 | Same-repo PR | yes | Run live e2e |
-| Fork PR | no (secrets not exposed) | Skip live e2e only (log + continue); `harness` still runs smoke; quality-gates and pinact still run |
+| Fork PR | no (secrets not exposed) | Skip vault-backed live e2e only (log + continue); `harness` still runs smoke and vault-free `e2e-no-backend`; quality-gates and pinact still run |
 
 Required status checks (after the former monolithic `main` job was split):
 
