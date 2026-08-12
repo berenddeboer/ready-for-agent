@@ -5,8 +5,10 @@ import {
   type FiniteCommandName,
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
+  buildIntakeSuccessDocument,
   buildStatusSuccessDocument,
   encodeCompactJson,
+  intakeHasFailedResults,
   localGitErrorCode,
   toCanonicalRepositoryIdentity,
 } from "./cli-json.ts"
@@ -199,6 +201,65 @@ const candidatesWorkflow = Effect.fn("Cli.candidates")(function* (
   )
 })
 
+const intakeWorkflow = Effect.fn("Cli.intake")(function* (
+  repositoryArgument: string,
+) {
+  const graphqlApi = yield* GraphqlApi
+  const repositories = yield* graphqlApi.listRepositories.pipe(
+    Effect.mapError((error) => toFiniteCommandFailed("intake", error)),
+  )
+
+  const resolved = resolveRepositoryIdentity(repositoryArgument, repositories)
+  switch (resolved._tag) {
+    case "invalid":
+      return yield* new FiniteCommandFailed({
+        command: "intake",
+        code: "REPOSITORY_NOT_FOUND",
+        message: `Invalid repository identity "${resolved.argument}". Use <forge-host>/<project-path>.`,
+      })
+    case "not_found":
+      return yield* new FiniteCommandFailed({
+        command: "intake",
+        code: "REPOSITORY_NOT_FOUND",
+        message: `No configured Repository matches ${resolved.forgeHost}/${resolved.projectPath}`,
+      })
+    case "ambiguous":
+      return yield* new FiniteCommandFailed({
+        command: "intake",
+        code: "REPOSITORY_AMBIGUOUS",
+        message: `Multiple configured Repositories match ${resolved.forgeHost}/${resolved.projectPath} (${resolved.matchCount})`,
+      })
+    case "matched":
+      break
+  }
+
+  const result = yield* graphqlApi
+    .startRepositoryIntake(resolved.repository.id)
+    .pipe(Effect.mapError((error) => toFiniteCommandFailed("intake", error)))
+
+  // Complete result document on stdout even when some candidates failed.
+  yield* Console.log(
+    encodeCompactJson(
+      buildIntakeSuccessDocument({
+        repository: {
+          id: result.repository.id,
+          forge: result.repository.forge,
+          forgeHost: result.repository.forgeHost,
+          projectPath: result.repository.projectPath,
+        },
+        issuesReconciledAt: result.repository.issuesReconciledAt,
+        results: result.results,
+      }),
+    ),
+  )
+
+  // Partial Intake exits 1 while keeping the result document on stdout.
+  // Complete and empty Intake exit 0.
+  yield* Effect.sync(() => {
+    process.exitCode = intakeHasFailedResults(result.results) ? 1 : 0
+  })
+})
+
 const statusWorkflow = Effect.fn("Cli.status")(function* (
   repositoryArgument: string | undefined,
 ) {
@@ -295,6 +356,16 @@ const candidatesCommand = Command.make(
   ),
 )
 
+const intakeCommand = Command.make(
+  "intake",
+  { repository: repositoryIdentityArg },
+  ({ repository }) => intakeWorkflow(repository),
+).pipe(
+  Command.withDescription(
+    "Start every current Intake Candidate for one Repository as versioned JSON",
+  ),
+)
+
 const statusCommand = Command.make(
   "status",
   { repository: optionalRepositoryIdentityArg },
@@ -312,12 +383,13 @@ export const cli = Command.make(
     startHarnessWorkflow(noOpen, Option.getOrUndefined(host)),
 ).pipe(
   Command.withDescription(
-    "Ready for Agent operator binary (start Harness, add repositories, list candidates, Kanban status)",
+    "Ready for Agent operator binary (start Harness, add repositories, intake, Kanban status)",
   ),
   Command.withSubcommands([
     startCommand,
     addCommand,
     candidatesCommand,
+    intakeCommand,
     statusCommand,
   ]),
 )
