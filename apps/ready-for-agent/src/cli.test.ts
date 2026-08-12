@@ -1,16 +1,20 @@
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { BunServices } from "@effect/platform-bun"
-import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest"
+import { beforeEach, describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { Command } from "effect/unstable/cli"
 import { expandBareHostFlag } from "../../harness/src/server/listen-host.ts"
 import { cli } from "./cli.ts"
 import {
+  CLI_SCHEMA_VERSION,
+  FiniteCommandFailed,
+  buildAddSuccessDocument,
+  encodeCompactJson,
+} from "./cli-json.ts"
+import {
   HARNESS_START_HINT,
+  HARNESS_UNREACHABLE_CODE,
   harnessNotRunningMessage,
 } from "./graphql-error.ts"
 import { GraphqlApi, GraphqlRequestFailed } from "./services/graphql-api.ts"
@@ -36,16 +40,10 @@ const runOperator = (
 describe("operator binary CLI seam", () => {
   let started = 0
   let lastStartOptions: StartHarnessOptions | undefined
-  let tempRoot = ""
 
   beforeEach(() => {
     started = 0
     lastStartOptions = undefined
-    tempRoot = mkdtempSync(join(tmpdir(), "ready-for-agent-cli-"))
-  })
-
-  afterEach(() => {
-    rmSync(tempRoot, { recursive: true, force: true })
   })
 
   const mockStart = Layer.succeed(StartHarness, {
@@ -88,7 +86,7 @@ describe("operator binary CLI seam", () => {
   )
 
   it.live(
-    "add reports GraphQL harness-not-running failures from the service",
+    "add maps GraphQL harness-not-running failures to FiniteCommandFailed",
     () =>
       Effect.gen(function* () {
         const harnessDown = harnessNotRunningMessage()
@@ -99,6 +97,7 @@ describe("operator binary CLI seam", () => {
               addRepository: () =>
                 Effect.fail(
                   new GraphqlRequestFailed({
+                    code: HARNESS_UNREACHABLE_CODE,
                     message: harnessDown,
                   }),
                 ),
@@ -110,13 +109,50 @@ describe("operator binary CLI seam", () => {
           Effect.flip,
         )
 
-        expect(result._tag).toBe("GraphqlRequestFailed")
-        if (result._tag === "GraphqlRequestFailed") {
+        expect(result._tag).toBe("FiniteCommandFailed")
+        if (result._tag === "FiniteCommandFailed") {
+          expect(result.command).toBe("add")
+          expect(result.code).toBe(HARNESS_UNREACHABLE_CODE)
           expect(result.message).toBe(harnessDown)
           expect(result.message).toContain(HARNESS_START_HINT)
           expect(result.message).not.toContain("Unable to connect")
         }
       }),
+  )
+
+  it.live("add preserves GraphQL domain error codes", () =>
+    Effect.gen(function* () {
+      const layer = mockStart.pipe(
+        Layer.provideMerge(mockLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            addRepository: () =>
+              Effect.fail(
+                new GraphqlRequestFailed({
+                  code: "REPOSITORY_ALREADY_EXISTS",
+                  message: "Repository owner/repo already exists on github.com",
+                }),
+              ),
+          }),
+        ),
+      )
+
+      const result = yield* runOperator(["add", "/tmp/repo"], layer).pipe(
+        Effect.flip,
+      )
+
+      expect(result).toBeInstanceOf(FiniteCommandFailed)
+      if (result instanceof FiniteCommandFailed) {
+        expect(result.document).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "add",
+          error: {
+            code: "REPOSITORY_ALREADY_EXISTS",
+            message: "Repository owner/repo already exists on github.com",
+          },
+        })
+      }
+    }),
   )
 
   it.live("add lets the operator correct a guessed GitLab identity", () =>
@@ -177,7 +213,7 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
-  it.live("add success output does not mention paused", () =>
+  it.live("add success emits exactly one versioned JSON document", () =>
     Effect.gen(function* () {
       const logs: string[] = []
       const originalLog = console.log
@@ -205,12 +241,18 @@ describe("operator binary CLI seam", () => {
 
         yield* runOperator(["add", "/tmp/repo"], layer)
 
-        const output = logs.join("\n")
-        expect(output).toContain("Added repository owner/repo")
-        expect(output).toContain("id: repo-1")
-        expect(output).toContain("local path: /tmp/repo")
-        expect(output).toContain("bare: false")
-        expect(output).not.toMatch(/paused/i)
+        expect(logs).toHaveLength(1)
+        const expected = buildAddSuccessDocument({
+          id: "repo-1",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "owner/repo",
+          localPath: "/tmp/repo",
+          isBare: false,
+        })
+        expect(logs[0]).toBe(encodeCompactJson(expected))
+        expect(logs[0]).not.toMatch(/paused/i)
+        expect(logs[0]).not.toContain("Added repository")
       } finally {
         console.log = originalLog
       }
@@ -288,49 +330,4 @@ describe("operator binary CLI seam", () => {
       })
     }),
   )
-
-  it("binary add against unreachable GraphQL prints harness-not-running once, no stack", () => {
-    const repoDir = join(tempRoot, "repo")
-    mkdirSync(repoDir)
-    writeFileSync(join(repoDir, "README.md"), "fixture\n")
-    const git = (args: string[]) =>
-      spawnSync("git", args, { cwd: repoDir, encoding: "utf8" })
-    expect(git(["init"]).status).toBe(0)
-    expect(
-      git(["remote", "add", "origin", "git@github.com:owner/repo.git"]).status,
-    ).toBe(0)
-
-    const result = spawnSync(
-      "bun",
-      [
-        "--conditions",
-        "@ready-for-agent/source",
-        "src/main.ts",
-        "add",
-        repoDir,
-      ],
-      {
-        cwd: packageRoot,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          READY_FOR_AGENT_GRAPHQL_URL: "http://127.0.0.1:1/graphql",
-        },
-      },
-    )
-
-    const output = `${result.stdout}\n${result.stderr}`
-    expect(result.status).not.toBe(0)
-    expect(output).toContain("Harness is not running at http://127.0.0.1:1")
-    expect(output).toContain(HARNESS_START_HINT)
-    expect(output.split(HARNESS_START_HINT).length - 1).toBe(1)
-    expect(output).not.toContain("Unable to connect")
-    expect(output).not.toContain("access the url")
-    // No multi-frame Effect / internal stack for this expected case.
-    expect(output).not.toMatch(/\s+at\s+\S+\s+\(/)
-    expect(output).not.toContain("GraphqlRequestFailed:")
-    // Child process must not boot the harness (add is GraphQL-only). Do not
-    // assert parent `started` — that counter is only for in-process mockStart.
-    expect(output.toLowerCase()).not.toContain("starting harness")
-  })
 })

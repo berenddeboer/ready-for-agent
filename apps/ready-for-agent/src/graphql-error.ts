@@ -4,6 +4,28 @@ export const DEFAULT_HARNESS_BASE_URL = "http://127.0.0.1:6056"
 /** Single-line start remedy for unreachable-Harness failures. */
 export const HARNESS_START_HINT = "Start it with: ready-for-agent start"
 
+/** CLI-owned code when the GraphQL transport cannot reach the Harness. */
+export const HARNESS_UNREACHABLE_CODE = "HARNESS_UNREACHABLE"
+
+/**
+ * Fallback when a GraphQL response has no usable `extensions.code`.
+ * Domain failures from the Harness always supply a stable code.
+ */
+export const GRAPHQL_ERROR_CODE = "GRAPHQL_ERROR"
+
+/** Minimal GenqlError shape (generated client is @ts-nocheck; duck-type safely). */
+type GenqlErrorLike = Error & {
+  readonly errors: ReadonlyArray<{
+    readonly message?: string
+    readonly extensions?: Record<string, unknown>
+  }>
+}
+
+const isGenqlErrorLike = (cause: unknown): cause is GenqlErrorLike =>
+  cause instanceof Error &&
+  "errors" in cause &&
+  Array.isArray((cause as { errors: unknown }).errors)
+
 /**
  * Derive the operator-facing Harness base URL from a GraphQL endpoint URL
  * (strip a trailing `/graphql`). Falls back to the product default.
@@ -62,16 +84,54 @@ export type FormatGraphqlRequestFailureOptions = {
   readonly graphqlUrl?: string
 }
 
-export const formatGraphqlRequestFailure = (
+/** Structured GraphQL/transport failure for the CLI JSON error seam. */
+export type GraphqlFailureInfo = {
+  readonly code: string
+  readonly message: string
+}
+
+const graphqlErrorCode = (cause: GenqlErrorLike): string => {
+  const first = cause.errors[0]
+  const code = first?.extensions?.code
+  return typeof code === "string" && code.length > 0 ? code : GRAPHQL_ERROR_CODE
+}
+
+/**
+ * Map a GraphQL client failure to a stable code + operator-facing message.
+ * Unreachable transport uses the CLI-owned `HARNESS_UNREACHABLE` code.
+ * Domain failures retain Harness `extensions.code` from GenqlError.
+ */
+export const describeGraphqlFailure = (
   cause: unknown,
   options?: FormatGraphqlRequestFailureOptions,
-): string => {
+): GraphqlFailureInfo => {
   if (isGraphqlUnreachable(cause)) {
     const baseUrl =
       options?.graphqlUrl === undefined
         ? DEFAULT_HARNESS_BASE_URL
         : harnessBaseUrlFromGraphqlUrl(options.graphqlUrl)
-    return harnessNotRunningMessage(baseUrl)
+    return {
+      code: HARNESS_UNREACHABLE_CODE,
+      message: harnessNotRunningMessage(baseUrl),
+    }
   }
-  return cause instanceof Error ? cause.message : "GraphQL request failed"
+
+  if (isGenqlErrorLike(cause)) {
+    return {
+      code: graphqlErrorCode(cause),
+      message:
+        cause.message.length > 0 ? cause.message : "GraphQL request failed",
+    }
+  }
+
+  return {
+    code: GRAPHQL_ERROR_CODE,
+    message: cause instanceof Error ? cause.message : "GraphQL request failed",
+  }
 }
+
+/** @deprecated Prefer `describeGraphqlFailure` when a stable code is needed. */
+export const formatGraphqlRequestFailure = (
+  cause: unknown,
+  options?: FormatGraphqlRequestFailureOptions,
+): string => describeGraphqlFailure(cause, options).message
