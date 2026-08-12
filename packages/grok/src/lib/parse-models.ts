@@ -1,4 +1,7 @@
-import { GROK_DEFAULT_THINKING_LEVELS } from "./types.js"
+import {
+  GROK_4_6_THINKING_LEVELS,
+  GROK_DEFAULT_THINKING_LEVELS,
+} from "./types.js"
 
 export type ParsedGrokModels = {
   readonly models: ReadonlyArray<{
@@ -10,7 +13,14 @@ export type ParsedGrokModels = {
 }
 
 const MODEL_LINE =
-  /^\s*\*\s+([A-Za-z0-9][A-Za-z0-9._-]*)(?:\s+\((?:default|.*?)\))?\s*$/
+  /^\s*[*-]\s+([A-Za-z0-9][A-Za-z0-9._-]*)(?:\s+\((?:default|.*?)\))?\s*$/
+
+const THINKING_LEVELS_BY_MODEL: Readonly<Record<string, readonly string[]>> = {
+  "grok-4.6": GROK_4_6_THINKING_LEVELS,
+}
+
+const thinkingLevelsForGrokModel = (id: string): readonly string[] =>
+  THINKING_LEVELS_BY_MODEL[id] ?? GROK_DEFAULT_THINKING_LEVELS
 
 const UNAUTHENTICATED_MARKERS = [
   /you are not authenticated/i,
@@ -21,8 +31,9 @@ const UNAUTHENTICATED_MARKERS = [
 ]
 
 /**
- * Parse `grok models` plain-text catalog. Unauthenticated banners are treated
- * as inspection failure even when the CLI exits successfully.
+ * Parse `grok models` plain-text catalog. Star and dash bullets are both
+ * current catalog entries. Unauthenticated banners are treated as inspection
+ * failure even when the CLI exits successfully.
  */
 export const parseGrokModelsOutput = (stdout: string): ParsedGrokModels => {
   const authenticated = !UNAUTHENTICATED_MARKERS.some((marker) =>
@@ -43,7 +54,7 @@ export const parseGrokModelsOutput = (stdout: string): ParsedGrokModels => {
     seen.add(id)
     models.push({
       id,
-      thinkingLevels: [...GROK_DEFAULT_THINKING_LEVELS],
+      thinkingLevels: [...thinkingLevelsForGrokModel(id)],
     })
   }
 
