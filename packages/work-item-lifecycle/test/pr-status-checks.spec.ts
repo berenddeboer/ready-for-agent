@@ -2687,7 +2687,7 @@ describe("PR status check steps", () => {
         formatAutomatedReviewWorkflowIdentity("Claude Code Review"),
       ),
     ).toBe(
-      'Automated review workflow "Claude Code Review" produced the same incomplete review output after one recovery rerun; inspect or run that GitHub review workflow or check manually, then Retry checks.',
+      'Automated review workflow "Claude Code Review" is still incomplete after autonomous recovery was already used on this workflow run; inspect or run that GitHub review workflow or check manually, then Retry checks.',
     )
     expect(
       automatedReviewRerunLimitReason(
@@ -2815,6 +2815,97 @@ describe("PR status check steps", () => {
     )
 
     expect(rerunIds).toEqual([workflowRunId])
+  })
+
+  it("treats legacy null-signature agent reruns as spent incomplete recovery", async () => {
+    const headSha = "sha-legacy-incomplete"
+    const workflowRunId = 31549139161
+    const incompleteEvidence = {
+      _tag: "incomplete" as const,
+      signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+      workflowRunId,
+      workflowName: "Claude Code Review",
+      detail: "Visibly incomplete automated review comment from claude[bot]",
+    }
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const sql = yield* SqlClient.SqlClient
+        const now = Date.now()
+        // One legacy agent RERUN_REVIEW permit (signature NULL) already spends
+        // the incomplete one-retry budget (limit is 1, not 3).
+        yield* sql.unsafe(
+          `INSERT INTO automated_review_rerun (
+             id, work_item_id, head_sha, workflow_run_id, workflow_name,
+             signature, status, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, 'Claude Code Review', NULL, 'completed', ?, ?)`,
+          [
+            "arr-legacy-0",
+            context.workItemId,
+            headSha,
+            String(workflowRunId),
+            now,
+            now,
+          ],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check (
+             id, work_item_id, external_id, name, outcome,
+             handled_at, observed_at, created_at, updated_at
+           ) VALUES (?, ?, ?, 'Claude Code Review/claude-review', 'green', NULL, ?, ?, ?)`,
+          [
+            "psc-legacy-incomplete",
+            context.workItemId,
+            "actions-job:legacy-inc",
+            now,
+            now,
+            now,
+          ],
+        )
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded" as const,
+                ...mergeable,
+                headSha,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:legacy-inc",
+                    name: "Claude Code Review/claude-review",
+                    outcome: "green" as const,
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed(incompleteEvidence),
+                rerunWorkflowRun: () => {
+                  throw new Error(
+                    "must not rerun when legacy agent permits already spent recovery",
+                  )
+                },
+              },
+            ),
+            keymaxxer,
+            opencodeWith(["should not run for spent incomplete recovery"]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({
+      _tag: "needs_human",
+      reason: automatedReviewIncompleteRerunLimitReason(
+        formatAutomatedReviewWorkflowIdentity("Claude Code Review"),
+      ),
+      handledCheckIds: ["psc-legacy-incomplete"],
+    })
   })
 
   it("enters Needs Human when incomplete classification has no workflow run id", async () => {
