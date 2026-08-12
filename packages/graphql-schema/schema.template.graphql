@@ -13,11 +13,6 @@ type Query {
   directoryPickerAvailable: Boolean!
   repositories: [Repository!]!
   repositoryCredentials: [RepositoryCredential!]!
-  """
-  Process-local explicit GitHub flow-control condition. Null when no known
-  deadline remains; this is runtime state and is not persisted.
-  """
-  githubThrottleStatus: GitHubThrottleStatus
   config: Config!
   """
   Built-in Agent Backends available for Harness Config selection.
@@ -108,13 +103,6 @@ type Query {
   lanes in fixed order, including empty lanes.
   """
   kanbanStatus(repositoryId: ID): KanbanStatus!
-}
-
-type GitHubThrottleStatus {
-  """
-  ISO-8601 deadline after which Harness may make another GitHub request.
-  """
-  retryAt: String!
 }
 
 """
