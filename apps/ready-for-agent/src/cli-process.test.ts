@@ -16,6 +16,7 @@ import {
   CLI_SCHEMA_VERSION,
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
+  buildStatusSuccessDocument,
 } from "./cli-json.ts"
 import {
   HARNESS_START_HINT,
@@ -461,5 +462,177 @@ describe("operator binary finite-command process contract", () => {
     } finally {
       await closeServer(server)
     }
+  })
+
+  test("status without repository emits six empty lanes on stdout", async () => {
+    const emptyStatusLanes = [
+      { id: "QUEUE" as const, label: "Queue", count: 0, workItems: [] },
+      { id: "BUILD" as const, label: "Build", count: 0, workItems: [] },
+      { id: "REVIEW" as const, label: "Review", count: 0, workItems: [] },
+      { id: "PR" as const, label: "PR", count: 0, workItems: [] },
+      { id: "ATTENTION" as const, label: "Attention", count: 0, workItems: [] },
+      { id: "MERGED" as const, label: "Merged", count: 0, workItems: [] },
+    ]
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("kanbanStatus")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                kanbanStatus: {
+                  repository: null,
+                  lanes: emptyStatusLanes,
+                },
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({ data: null, errors: [{ message: "unexpected" }] }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["status"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(0)
+      expect(result.stderr.trim()).toBe("")
+      expect(parseExactlyOneJsonDocument(result.stdout)).toEqual(
+        buildStatusSuccessDocument({
+          repository: null,
+          lanes: emptyStatusLanes,
+        }),
+      )
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("status with repository selector resolves then queries kanbanStatus", async () => {
+    const emptyStatusLanes = [
+      { id: "QUEUE" as const, label: "Queue", count: 0, workItems: [] },
+      { id: "BUILD" as const, label: "Build", count: 0, workItems: [] },
+      { id: "REVIEW" as const, label: "Review", count: 0, workItems: [] },
+      { id: "PR" as const, label: "PR", count: 0, workItems: [] },
+      { id: "ATTENTION" as const, label: "Attention", count: 0, workItems: [] },
+      { id: "MERGED" as const, label: "Merged", count: 0, workItems: [] },
+    ]
+    const seenBodies: string[] = []
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        seenBodies.push(body)
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        if (body.includes("kanbanStatus")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                kanbanStatus: {
+                  repository: {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                  lanes: emptyStatusLanes,
+                },
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({ data: null, errors: [{ message: "unexpected" }] }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["status", "github.com/owner/repo"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(0)
+      expect(result.stderr.trim()).toBe("")
+      expect(seenBodies.some((body) => body.includes("repositories"))).toBe(
+        true,
+      )
+      expect(seenBodies.some((body) => body.includes("kanbanStatus"))).toBe(
+        true,
+      )
+      expect(parseExactlyOneJsonDocument(result.stdout)).toEqual(
+        buildStatusSuccessDocument({
+          repository: {
+            id: "repo-process-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          lanes: emptyStatusLanes,
+        }),
+      )
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("status against unreachable GraphQL emits JSON error on stderr only", async () => {
+    const result = await runCli(["status"], "http://127.0.0.1:1/graphql")
+
+    expect(result.status).toBe(1)
+    expect(result.stdout.trim()).toBe("")
+    expect(parseExactlyOneJsonDocument(result.stderr)).toEqual({
+      schemaVersion: CLI_SCHEMA_VERSION,
+      command: "status",
+      error: {
+        code: HARNESS_UNREACHABLE_CODE,
+        message: harnessNotRunningMessage("http://127.0.0.1:1"),
+      },
+    })
   })
 })

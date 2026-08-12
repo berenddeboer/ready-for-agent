@@ -7689,4 +7689,480 @@ describe("GraphQL API", () => {
       ],
     })
   })
+
+  test("kanbanStatus returns six empty lanes for all repositories", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([repository]),
+        listIssues: () => Effect.succeed([]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          kanbanStatus {
+            repository { id }
+            lanes { id label count workItems { workItem { id } } }
+          }
+        }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        kanbanStatus: {
+          repository: null,
+          lanes: [
+            { id: "QUEUE", label: "Queue", count: 0, workItems: [] },
+            { id: "BUILD", label: "Build", count: 0, workItems: [] },
+            { id: "REVIEW", label: "Review", count: 0, workItems: [] },
+            { id: "PR", label: "PR", count: 0, workItems: [] },
+            { id: "ATTENTION", label: "Attention", count: 0, workItems: [] },
+            { id: "MERGED", label: "Merged", count: 0, workItems: [] },
+          ],
+        },
+      },
+    })
+  })
+
+  test("kanbanStatus with zero configured Repositories is a successful empty board", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([]),
+        listIssues: () => Effect.succeed([]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          kanbanStatus {
+            repository { id }
+            lanes { id count workItems { workItem { id } } }
+          }
+        }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        kanbanStatus: {
+          repository: null,
+          lanes: [
+            { id: "QUEUE", count: 0, workItems: [] },
+            { id: "BUILD", count: 0, workItems: [] },
+            { id: "REVIEW", count: 0, workItems: [] },
+            { id: "PR", count: 0, workItems: [] },
+            { id: "ATTENTION", count: 0, workItems: [] },
+            { id: "MERGED", count: 0, workItems: [] },
+          ],
+        },
+      },
+    })
+  })
+
+  test("kanbanStatus keeps only the globally newest 15 terminal failures", async () => {
+    const now = Date.parse("2026-08-12T12:00:00.000Z")
+    const failures = Array.from({ length: 18 }, (_, index) => {
+      const issueNumber = 100 + index
+      return {
+        workItem: {
+          ...workItem,
+          id: `wi-failed-${index}`,
+          repositoryId: repository.id,
+          issueNumber,
+          state: "failed" as const,
+          createdAt: new Date(now - index * 1_000),
+          stateReadyAt: new Date(now - index * 1_000),
+          stepRuns: [],
+        } as WorkItemRecord,
+        issue: {
+          ...issue,
+          id: `issue-failed-${index}`,
+          issueNumber,
+          title: `Failure ${index}`,
+          url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+        },
+      }
+    })
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([repository]),
+        listIssues: () => Effect.succeed(failures.map((entry) => entry.issue)),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed(failures.map((entry) => entry.workItem)),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          kanbanStatus {
+            lanes {
+              id
+              count
+              workItems { workItem { id } }
+            }
+          }
+        }`,
+      }),
+    )
+    const json = (await response.json()) as {
+      data: {
+        kanbanStatus: {
+          lanes: readonly {
+            id: string
+            count: number
+            workItems: readonly { workItem: { id: string } }[]
+          }[]
+        }
+      }
+    }
+    const attention = json.data.kanbanStatus.lanes.find(
+      (lane) => lane.id === "ATTENTION",
+    )
+    expect(attention?.count).toBe(15)
+    expect(attention?.workItems.map((row) => row.workItem.id)).toEqual(
+      Array.from({ length: 15 }, (_, index) => `wi-failed-${index}`),
+    )
+  })
+
+  test("kanbanStatus classifies lanes, windows, ordering, and repository filter", async () => {
+    const now = Date.parse("2026-08-12T12:00:00.000Z")
+    const otherRepo = makeRepositoryRecord({
+      id: "repo-01J00000000000000000000001",
+      projectPath: "acme/other",
+      localPath: "/repos/acme/other.git",
+    })
+
+    const queueItem = {
+      ...workItem,
+      id: "wi-queue",
+      repositoryId: repository.id,
+      issueNumber: 10,
+      state: "create_worktree" as const,
+      waitingForBlockers: true,
+      holdsWorkerSlot: false,
+      createdAt: new Date(now - 5_000),
+      stateReadyAt: new Date(now - 5_000),
+      stepRuns: [],
+    } as WorkItemRecord
+    const buildItem = {
+      ...workItem,
+      id: "wi-build",
+      repositoryId: repository.id,
+      issueNumber: 11,
+      state: "implement" as const,
+      createdAt: new Date(now - 4_000),
+      stateReadyAt: new Date(now - 4_000),
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          id: "srun-build",
+          workItemId: "wi-build",
+          step: "implement" as const,
+          status: "running" as const,
+        },
+      ],
+    } as WorkItemRecord
+    const attentionWorking = {
+      ...workItem,
+      id: "wi-attention-working",
+      repositoryId: repository.id,
+      issueNumber: 12,
+      state: "review" as const,
+      createdAt: new Date(now - 3_000),
+      stateReadyAt: new Date(now - 3_000),
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          id: "srun-attention",
+          workItemId: "wi-attention-working",
+          step: "review" as const,
+          status: "failed" as const,
+          finishedAt: new Date(now - 2_900),
+        },
+      ],
+    } as WorkItemRecord
+    const terminalFailed = {
+      ...workItem,
+      id: "wi-failed",
+      repositoryId: otherRepo.id,
+      issueNumber: 20,
+      state: "failed" as const,
+      createdAt: new Date(now - 1_000),
+      stateReadyAt: new Date(now - 1_000),
+      stepRuns: [],
+    } as WorkItemRecord
+    const merged = {
+      ...workItem,
+      id: "wi-merged",
+      repositoryId: repository.id,
+      issueNumber: 13,
+      state: "complete" as const,
+      createdAt: new Date(now - 20_000),
+      stateReadyAt: new Date(now - 2_000),
+      stepRuns: [],
+    } as WorkItemRecord
+    const oldMerged = {
+      ...workItem,
+      id: "wi-old-merged",
+      repositoryId: repository.id,
+      issueNumber: 14,
+      state: "complete" as const,
+      createdAt: new Date(now - 100_000),
+      // Far outside the rolling 24h window regardless of wall-clock skew in tests.
+      stateReadyAt: new Date(now - 7 * 24 * 60 * 60 * 1000),
+      stepRuns: [],
+    } as WorkItemRecord
+    const queuedStatusCheck = {
+      ...workItem,
+      id: "wi-pr-queued",
+      repositoryId: repository.id,
+      issueNumber: 15,
+      state: "watch_pr_status_checks" as const,
+      createdAt: new Date(now - 500),
+      stateReadyAt: new Date(now - 500),
+      pullRequestNumber: 99,
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          id: "srun-watch",
+          workItemId: "wi-pr-queued",
+          step: "watch_pr_status_checks" as const,
+          status: "queued" as const,
+          startedAt: null,
+          executionDurationMs: null,
+        },
+      ],
+    } as WorkItemRecord
+
+    const byRepo = new Map<string, WorkItemRecord[]>([
+      [
+        repository.id,
+        [
+          queueItem,
+          buildItem,
+          attentionWorking,
+          merged,
+          oldMerged,
+          queuedStatusCheck,
+        ],
+      ],
+      [otherRepo.id, [terminalFailed]],
+    ])
+
+    const otherIssue = {
+      ...issue,
+      id: "issue-other",
+      repositoryId: otherRepo.id,
+      issueNumber: terminalFailed.issueNumber,
+      title: "Other repo failure",
+      url: "https://github.com/acme/other/issues/20",
+    }
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([repository, otherRepo]),
+        listIssues: (repositoryId) =>
+          Effect.succeed(
+            repositoryId === otherRepo.id
+              ? [otherIssue]
+              : [
+                  issue,
+                  {
+                    ...issue,
+                    id: "issue-10",
+                    issueNumber: 10,
+                  },
+                  {
+                    ...issue,
+                    id: "issue-11",
+                    issueNumber: 11,
+                  },
+                  {
+                    ...issue,
+                    id: "issue-12",
+                    issueNumber: 12,
+                  },
+                  {
+                    ...issue,
+                    id: "issue-13",
+                    issueNumber: 13,
+                  },
+                  {
+                    ...issue,
+                    id: "issue-14",
+                    issueNumber: 14,
+                  },
+                  {
+                    ...issue,
+                    id: "issue-15",
+                    issueNumber: 15,
+                  },
+                ],
+          ),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: (repositoryId) =>
+          Effect.succeed(byRepo.get(repositoryId) ?? []),
+      },
+    )
+
+    const allResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          kanbanStatus {
+            repository { id }
+            lanes {
+              id
+              count
+              workItems {
+                repository { id projectPath }
+                workItem {
+                  id
+                  issueNumber
+                  state
+                  status
+                  pullRequestNumber
+                }
+              }
+            }
+          }
+        }`,
+      }),
+    )
+    const allJson = (await allResponse.json()) as {
+      data: {
+        kanbanStatus: {
+          repository: null
+          lanes: readonly {
+            id: string
+            count: number
+            workItems: readonly {
+              repository: { id: string; projectPath: string }
+              workItem: {
+                id: string
+                issueNumber: number
+                state: string
+                status: string
+                pullRequestNumber: number | null
+              }
+            }[]
+          }[]
+        }
+      }
+    }
+    const lanesById = Object.fromEntries(
+      allJson.data.kanbanStatus.lanes.map((lane) => [lane.id, lane]),
+    )
+    expect(allJson.data.kanbanStatus.repository).toBeNull()
+    expect(lanesById.QUEUE?.workItems.map((row) => row.workItem.id)).toEqual([
+      "wi-queue",
+    ])
+    expect(lanesById.BUILD?.workItems.map((row) => row.workItem.id)).toEqual([
+      "wi-build",
+    ])
+    expect(lanesById.PR?.workItems.map((row) => row.workItem.id)).toEqual([
+      "wi-pr-queued",
+    ])
+    expect(lanesById.PR?.workItems[0]?.workItem.pullRequestNumber).toBe(99)
+    // Attention newest-first by createdAt: terminal failed (other repo) first.
+    expect(
+      lanesById.ATTENTION?.workItems.map((row) => row.workItem.id),
+    ).toEqual(["wi-failed", "wi-attention-working"])
+    expect(lanesById.MERGED?.workItems.map((row) => row.workItem.id)).toEqual([
+      "wi-merged",
+    ])
+    expect(lanesById.REVIEW?.workItems).toEqual([])
+
+    const filteredResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Kanban($repositoryId: ID) {
+          kanbanStatus(repositoryId: $repositoryId) {
+            repository { id projectPath }
+            lanes {
+              id
+              workItems {
+                repository { id }
+                workItem { id }
+              }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+    const filteredJson = (await filteredResponse.json()) as {
+      data: {
+        kanbanStatus: {
+          repository: { id: string; projectPath: string }
+          lanes: readonly {
+            id: string
+            workItems: readonly { workItem: { id: string } }[]
+          }[]
+        }
+      }
+    }
+    expect(filteredJson.data.kanbanStatus.repository).toEqual({
+      id: repository.id,
+      projectPath: repository.projectPath,
+    })
+    const filteredById = Object.fromEntries(
+      filteredJson.data.kanbanStatus.lanes.map((lane) => [lane.id, lane]),
+    )
+    // Global failed cap still includes other-repo failures in the source set,
+    // but the repository filter drops them after that set is built.
+    expect(
+      filteredById.ATTENTION?.workItems.map((row) => row.workItem.id),
+    ).toEqual(["wi-attention-working"])
+    expect(
+      filteredJson.data.kanbanStatus.lanes
+        .flatMap((lane) => lane.workItems)
+        .every((row) => row.workItem.id !== "wi-failed"),
+    ).toBe(true)
+  })
+
+  test("kanbanStatus returns REPOSITORY_NOT_FOUND for unknown repositoryId", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          kanbanStatus(repositoryId: "missing-repo") {
+            repository { id }
+            lanes { id }
+          }
+        }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          extensions: { code: "REPOSITORY_NOT_FOUND" },
+        }),
+      ],
+    })
+  })
 })

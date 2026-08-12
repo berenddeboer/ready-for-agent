@@ -4,6 +4,7 @@ import {
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
   buildCommandErrorDocument,
+  buildStatusSuccessDocument,
   encodeCompactJson,
   localGitErrorCode,
 } from "./cli-json.ts"
@@ -34,6 +35,53 @@ describe("finite CLI JSON contract", () => {
     expect(encodeCompactJson(doc)).toBe(
       '{"schemaVersion":1,"command":"add","repository":{"id":"repo-1","forge":"github","forgeHost":"github.com","projectPath":"owner/repo"},"localPath":"/tmp/repo","isBare":false}',
     )
+  })
+
+  test("status success document includes six lanes and null repository", () => {
+    const doc = buildStatusSuccessDocument({
+      repository: null,
+      lanes: [
+        {
+          id: "QUEUE",
+          label: "Queue",
+          count: 1,
+          workItems: [
+            {
+              repository: {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "owner/repo",
+              },
+              id: "wi-1",
+              issueNumber: 102,
+              issueTitle: "Blocked follow-up",
+              state: "CREATE_WORKTREE",
+              status: "WAITING_FOR_BLOCKERS",
+              statusMessage: "Waiting for blocking Issues",
+              paused: false,
+              pullRequestNumber: null,
+              createdAt: "2026-08-12T10:00:00.000Z",
+              updatedAt: "2026-08-12T10:00:00.000Z",
+              stateReadyAt: "2026-08-12T10:00:00.000Z",
+              postponedUntil: null,
+            },
+          ],
+        },
+        { id: "BUILD", label: "Build", count: 0, workItems: [] },
+        { id: "REVIEW", label: "Review", count: 0, workItems: [] },
+        { id: "PR", label: "PR", count: 0, workItems: [] },
+        { id: "ATTENTION", label: "Attention", count: 0, workItems: [] },
+        { id: "MERGED", label: "Merged", count: 0, workItems: [] },
+      ],
+    })
+    expect(doc.schemaVersion).toBe(1)
+    expect(doc.command).toBe("status")
+    expect(doc.repository).toBeNull()
+    expect(doc.lanes).toHaveLength(6)
+    expect(doc.lanes[0]?.workItems[0]?.pullRequestNumber).toBeNull()
+    expect(encodeCompactJson(doc)).toContain('"command":"status"')
+    expect(encodeCompactJson(doc)).toContain('"pullRequestNumber":null')
   })
 
   test("candidates success document includes issuesReconciledAt and actions", () => {

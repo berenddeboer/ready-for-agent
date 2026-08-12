@@ -59,6 +59,10 @@ import {
   suspendRepositoryPolling,
 } from "./issue-polling.js"
 import {
+  buildKanbanSourceSet,
+  projectKanbanLanes,
+} from "./kanban-projection.js"
+import {
   RepositoryCredentialError,
   activatePollingIfCredentialed,
   githubTokenSecretName,
@@ -183,6 +187,10 @@ const normalizeCompletedWorkItemsPage = (
 
 type SessionArgs = {
   workItemId: string
+}
+
+type KanbanStatusArgs = {
+  repositoryId?: string | null
 }
 
 const toGraphqlSessionAvailability = (
@@ -883,6 +891,102 @@ export const createGraphqlApi = <R>(
                 })
                 return toGraphqlSession(session)
               }).pipe(Effect.withSpan("graphql-api.session")),
+              context,
+            ),
+          kanbanStatus: async (
+            _parent: unknown,
+            args: KanbanStatusArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                const lifecycle = yield* WorkItemLifecycle
+                const repositories = yield* db.listRepositories
+                const filterRepositoryId = args.repositoryId ?? null
+                const filteredRepository =
+                  filterRepositoryId === null
+                    ? null
+                    : (repositories.find(
+                        (repository) => repository.id === filterRepositoryId,
+                      ) ?? null)
+                if (
+                  filterRepositoryId !== null &&
+                  filteredRepository === null
+                ) {
+                  return yield* new RepositoryNotFoundError({
+                    repositoryId: filterRepositoryId,
+                  })
+                }
+
+                // Shared global source set first; optional Repository filter
+                // applies after failed/completed windows are built.
+                const perRepository = yield* Effect.forEach(
+                  repositories,
+                  (repository) =>
+                    Effect.gen(function* () {
+                      const [workItems, issues] = yield* Effect.all([
+                        lifecycle.listWorkItemsForRepository(repository.id),
+                        db.listIssues(repository.id),
+                      ])
+                      const relevantIssueNumbers = new Set(
+                        issues.map((issue) => issue.issueNumber),
+                      )
+                      return workItems.filter(
+                        (workItem) =>
+                          isJobsCompletedWorkItemState(workItem.state) ||
+                          isJobsWorkingWorkItem(workItem) ||
+                          relevantIssueNumbers.has(workItem.issueNumber),
+                      )
+                    }),
+                  { concurrency: "unbounded" },
+                )
+                const nowMs = Date.now()
+                const source = buildKanbanSourceSet(perRepository.flat(), nowMs)
+                const visible =
+                  filterRepositoryId === null
+                    ? source
+                    : source.filter(
+                        (workItem) =>
+                          workItem.repositoryId === filterRepositoryId,
+                      )
+                const repositoryById = new Map<
+                  string,
+                  (typeof repositories)[number]
+                >(repositories.map((repository) => [repository.id, repository]))
+                const classifiable = visible.flatMap((workItem) => {
+                  const repository = repositoryById.get(workItem.repositoryId)
+                  if (repository === undefined) {
+                    return []
+                  }
+                  return [
+                    {
+                      id: workItem.id,
+                      repositoryId: workItem.repositoryId,
+                      state: workItem.state,
+                      status: workItemStatus(workItem),
+                      failureCode: workItem.failureCode,
+                      createdAt: workItem.createdAt,
+                      stateReadyAt: workItem.stateReadyAt,
+                      repository,
+                      workItem,
+                    },
+                  ]
+                })
+                const lanes = projectKanbanLanes(classifiable).map((lane) => ({
+                  id: lane.id,
+                  label: lane.label,
+                  count: lane.count,
+                  workItems: lane.workItems.map((entry) => ({
+                    repository: entry.repository,
+                    workItem: entry.workItem,
+                  })),
+                }))
+                return {
+                  repository: filteredRepository,
+                  lanes,
+                }
+              }).pipe(Effect.withSpan("graphql-api.kanbanStatus")),
               context,
             ),
         },
