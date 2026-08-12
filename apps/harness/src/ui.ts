@@ -602,7 +602,7 @@ export const ui = {
 
   industrialShell: "mx-auto",
 
-  mergedPrStats: "border-2 border-ink bg-paper text-ink",
+  mergedPrStats: "relative border-2 border-ink bg-paper text-ink",
 
   mergedPrStatsGrid: "grid grid-cols-5 max-[900px]:grid-cols-2",
 
@@ -622,6 +622,15 @@ export const ui = {
   mergedPrStatsSkeletonInCell: "my-[0.15rem] mx-0",
 
   mergedPrStatsBody: "px-[0.7rem] pt-[0.55rem] pb-[0.7rem]",
+
+  mergedPrStatsSpandrelTL:
+    "pointer-events-none absolute top-[-2px] left-[-2px] overflow-visible",
+  mergedPrStatsSpandrelTR:
+    "pointer-events-none absolute top-[-2px] right-[-2px] overflow-visible",
+  mergedPrStatsSpandrelBL:
+    "pointer-events-none absolute bottom-[-2px] left-[-2px] overflow-visible",
+  mergedPrStatsSpandrelBR:
+    "pointer-events-none absolute bottom-[-2px] right-[-2px] overflow-visible",
 
   pipelineControls:
     "mt-0 flex flex-wrap items-center justify-between gap-x-6 gap-y-[0.8rem] border-0 bg-transparent p-0 max-[900px]:grid max-[900px]:min-w-0",
