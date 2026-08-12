@@ -40,7 +40,7 @@ export type CandidatesSuccessDocument = {
   }[]
 }
 
-export type IntakeCreatedResult = {
+type IntakeCreatedResult = {
   readonly issueNumber: number
   readonly title: string
   readonly url: string
@@ -53,7 +53,7 @@ export type IntakeCreatedResult = {
   }
 }
 
-export type IntakeFailedResult = {
+type IntakeFailedResult = {
   readonly issueNumber: number
   readonly title: string
   readonly url: string
