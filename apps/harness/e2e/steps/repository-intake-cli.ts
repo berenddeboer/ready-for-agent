@@ -12,9 +12,8 @@ import {
   FIXTURE_GITHUB_REPOSITORY,
   GITHUB_SENTINEL_ISSUE_NUMBER,
   GITHUB_SENTINEL_ISSUE_TITLE,
-  SCENARIO_TIMEOUT_MS,
 } from "../support/constants.ts"
-import { Then, When, test } from "./fixtures.ts"
+import { Then, When } from "./fixtures.ts"
 
 const workspaceRoot = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -134,7 +133,10 @@ const runFiniteCli = (args: readonly string[]): CliJsonResult => {
   }
 }
 
-test.setTimeout(SCENARIO_TIMEOUT_MS)
+// Scenario timeout comes from playwright.config (SCENARIO_TIMEOUT_MS) and from
+// the shared Given "the Harness has no configured Repositories", which calls
+// test.setTimeout inside a running test. Do not call test.setTimeout at module
+// load — bddgen imports step files outside a test and Playwright throws.
 
 // Reuse add/refresh Given/When/Then from add-and-refresh-repository steps.
 // Configure model via settings-browser-history "configured default build model".
