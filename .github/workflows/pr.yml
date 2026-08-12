@@ -114,9 +114,12 @@ jobs:
         run: bunx nx run harness:smoke
 
       # Chromium once for both live suites (no-backend always; full suite when vault).
-      - name: Install Playwright Chromium
-        working-directory: apps/harness
-        run: bunx playwright install --with-deps chromium
+      # Cache is keyed on the resolved Playwright version so a bump installs fresh.
+      - name: Restore/install Playwright Chromium
+        uses: ./.github/actions/playwright-chromium
+        with:
+          # Forks and Dependabot get a read-only token for cache writes; restore only.
+          allow-save: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
 
       # Product default-backend / first-run without OpenCode (vault-free; fork-safe).
       - name: Live Harness e2e (no backend agents)
