@@ -96,7 +96,8 @@ const lifecyclePhaseLabel = (phase: LifecyclePhase): string => {
     case "resolve_pr_merge_conflict":
       return "Resolve PR merge conflict"
     case "github_status_checks":
-      return "GitHub status checks"
+      // Forge-neutral: same Watch phase for GitHub checks and GitLab pipeline jobs.
+      return "Status checks"
     case "mark_pr_ready_for_review":
       return "Mark PR ready for review"
     case "decide_pr_merge":

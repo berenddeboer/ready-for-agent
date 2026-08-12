@@ -790,7 +790,7 @@ describe("GitLab PR status checks and ready-for-review", () => {
     })
   })
 
-  test("keeps watching when head_pipeline SHA is behind the MR tip", async () => {
+  test("keeps watching when a branch head_pipeline SHA is behind the MR tip", async () => {
     let jobsListed = 0
     const service = makeGitLabServiceFromToken("test-token", (async (
       input,
@@ -815,8 +815,14 @@ describe("GitLab PR status checks and ready-for-review", () => {
           target_branch: "main",
           detailed_merge_status: "mergeable",
           merge_status: "can_be_merged",
-          // Successful pipeline is still for the previous tip after a push.
-          head_pipeline: { id: 1, status: "success", sha: "old-tip" },
+          // Branch pipeline left behind after a push (not a merge-results run).
+          head_pipeline: {
+            id: 1,
+            status: "success",
+            sha: "old-tip",
+            ref: "rfa/branch",
+            source: "push",
+          },
         })
       }
       if (method === "GET" && url.pathname.includes("/repository/commits/")) {
@@ -842,7 +848,157 @@ describe("GitLab PR status checks and ready-for-review", () => {
     )
     expect(status._tag).toBe("pending")
     expect(status).toMatchObject({ headSha: "new-tip" })
-    // Do not roll up jobs for a pipeline that is not the MR tip.
+    // Do not roll up jobs for a branch pipeline that is not the MR tip.
+    expect(jobsListed).toBe(0)
+  })
+
+  test("settles merged-results head_pipeline even when pipeline SHA differs from MR tip", async () => {
+    // Bible MR !17 shape: merged-results pipeline on refs/merge-requests/N/merge
+    // with allow_failure fails that must not block green.
+    const tipSha = "7f8cdf7765c1b3b0cdb39899545c265d5986de2f"
+    const mergeCommitSha = "63a74a1fbd7979f3ee75470a4c1591964570655b"
+    let jobsListed = 0
+    const service = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname.endsWith("/merge_requests") &&
+        url.search.includes("state=opened")
+      ) {
+        return json([{ iid: 17, draft: false }])
+      }
+      if (method === "GET" && url.pathname.endsWith("/merge_requests/17")) {
+        return json({
+          iid: 17,
+          state: "opened",
+          draft: false,
+          title: "Bible fix",
+          sha: tipSha,
+          target_branch: "1.0.x",
+          detailed_merge_status: "mergeable",
+          merge_status: "can_be_merged",
+          head_pipeline: {
+            id: 919685,
+            status: "success",
+            sha: mergeCommitSha,
+            ref: "refs/merge-requests/17/merge",
+            source: "merge_request_event",
+          },
+        })
+      }
+      if (method === "GET" && url.pathname.includes("/repository/commits/")) {
+        return json({
+          id: tipSha,
+          committed_date: "2026-07-20T10:04:00.000Z",
+        })
+      }
+      if (method === "GET" && url.pathname.includes("/pipelines/919685/jobs")) {
+        jobsListed += 1
+        return json([
+          {
+            id: 1,
+            name: "test",
+            status: "success",
+            allow_failure: false,
+            web_url: "https://git.drupalcode.org/project/bible/-/jobs/1",
+          },
+          {
+            id: 2,
+            name: "cspell",
+            status: "failed",
+            allow_failure: true,
+            web_url: "https://git.drupalcode.org/project/bible/-/jobs/2",
+          },
+          {
+            id: 3,
+            name: "eslint",
+            status: "failed",
+            allow_failure: true,
+            web_url: "https://git.drupalcode.org/project/bible/-/jobs/3",
+          },
+        ])
+      }
+      if (method === "GET" && url.pathname.includes("/bridges")) {
+        return json([])
+      }
+      throw new Error(`Unexpected: ${method} ${url.pathname}${url.search}`)
+    }) as typeof fetch)
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status._tag).toBe("succeeded")
+    expect(status).toMatchObject({ headSha: tipSha })
+    expect(jobsListed).toBe(1)
+    if (status._tag !== "succeeded") return
+    expect(status.terminalChecks).toEqual([
+      { externalId: "gitlab-job:1", name: "test", outcome: "green" },
+    ])
+  })
+
+  test("keeps watching when a tip-aligned MR head_pipeline SHA is behind the tip", async () => {
+    // source=merge_request_event alone (or …/head) does not exempt SHA equality:
+    // only merged-results refs skip tip matching after a concurrent push.
+    let jobsListed = 0
+    const service = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname.endsWith("/merge_requests") &&
+        url.search.includes("state=opened")
+      ) {
+        return json([{ iid: 12, draft: false }])
+      }
+      if (method === "GET" && url.pathname.endsWith("/merge_requests/12")) {
+        return json({
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "fix",
+          sha: "new-tip",
+          target_branch: "main",
+          detailed_merge_status: "mergeable",
+          merge_status: "can_be_merged",
+          head_pipeline: {
+            id: 42,
+            status: "success",
+            sha: "old-tip",
+            ref: "refs/merge-requests/12/head",
+            source: "merge_request_event",
+          },
+        })
+      }
+      if (method === "GET" && url.pathname.includes("/repository/commits/")) {
+        return json({
+          id: "new-tip",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        })
+      }
+      if (method === "GET" && url.pathname.includes("/pipelines/42/jobs")) {
+        jobsListed += 1
+        return json([
+          { id: 9, name: "lint", status: "success", allow_failure: false },
+        ])
+      }
+      if (method === "GET" && url.pathname.includes("/bridges")) {
+        return json([])
+      }
+      throw new Error(`Unexpected: ${method} ${url.pathname}${url.search}`)
+    }) as typeof fetch)
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status._tag).toBe("pending")
+    expect(status).toMatchObject({ headSha: "new-tip" })
     expect(jobsListed).toBe(0)
   })
 
@@ -1854,6 +2010,75 @@ describe("GitLab PR status checks and ready-for-review", () => {
     expect(jobsUrl).toContain("/pipelines/1/jobs")
   })
 
+  test("mergePullRequest merges when merged-results pipeline SHA differs from tip", async () => {
+    const tipSha = "7f8cdf7765c1b3b0cdb39899545c265d5986de2f"
+    const mergeCommitSha = "63a74a1fbd7979f3ee75470a4c1591964570655b"
+    let putCount = 0
+    const service = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname.endsWith("/merge_requests") &&
+        url.search.includes("state=opened")
+      ) {
+        return json([{ iid: 17, draft: false }])
+      }
+      if (method === "GET" && url.pathname.endsWith("/merge_requests/17")) {
+        return json({
+          iid: 17,
+          state: "opened",
+          draft: false,
+          title: "Bible fix",
+          sha: tipSha,
+          target_branch: "1.0.x",
+          detailed_merge_status: "mergeable",
+          merge_status: "can_be_merged",
+          has_conflicts: false,
+          head_pipeline: {
+            id: 919685,
+            status: "success",
+            sha: mergeCommitSha,
+            ref: "refs/merge-requests/17/merge",
+            source: "merge_request_event",
+          },
+        })
+      }
+      if (method === "GET" && url.pathname.includes("/pipelines/919685/jobs")) {
+        return json([
+          { id: 1, name: "test", status: "success", allow_failure: false },
+          { id: 2, name: "cspell", status: "failed", allow_failure: true },
+        ])
+      }
+      if (method === "GET" && url.pathname.includes("/bridges")) {
+        return json([])
+      }
+      if (
+        method === "PUT" &&
+        url.pathname.endsWith("/merge_requests/17/merge")
+      ) {
+        putCount += 1
+        return json({
+          iid: 17,
+          state: "merged",
+          draft: false,
+          title: "Bible fix",
+          sha: tipSha,
+        })
+      }
+      throw new Error(`Unexpected: ${method} ${url.pathname}${url.search}`)
+    }) as typeof fetch)
+
+    const result = await Effect.runPromise(
+      service.mergePullRequest(repository, "rfa/branch"),
+    )
+    expect(result).toEqual({ _tag: "merged" })
+    expect(putCount).toBe(1)
+  })
+
   test("mergePullRequest is idempotent when already merged", async () => {
     let putCount = 0
     const service = makeGitLabServiceFromToken("test-token", (async (
@@ -1994,14 +2219,20 @@ describe("GitLab PR status checks and ready-for-review", () => {
       "checks_not_green",
     ],
     [
-      "a stale successful pipeline for a prior tip",
+      "a stale successful branch pipeline for a prior tip",
       {
         draft: false,
         title: "Ready",
         detailed_merge_status: "mergeable",
         merge_status: "can_be_merged",
         has_conflicts: false,
-        head_pipeline: { id: 1, status: "success", sha: "old-tip" },
+        head_pipeline: {
+          id: 1,
+          status: "success",
+          sha: "old-tip",
+          ref: "rfa/branch",
+          source: "push",
+        },
         jobs: [
           { id: 1, name: "test", status: "success", allow_failure: false },
         ],

@@ -152,6 +152,15 @@ const HeadPipelineSchema = Schema.Struct({
   id: PositiveInt,
   status: Schema.optional(Schema.NullOr(Schema.String)),
   sha: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * GitLab pipeline ref. Merged-results pipelines use
+   * `refs/merge-requests/<iid>/merge` (SHA is never the source tip). Detached
+   * MR head pipelines use `…/head` (SHA is the source tip). Branch pipelines
+   * use the branch name. Only the merged-results form skips tip-SHA equality.
+   */
+  ref: Schema.optional(Schema.NullOr(Schema.String)),
+  /** GitLab pipeline source (`push`, `merge_request_event`, …); decoded for fidelity. */
+  source: Schema.optional(Schema.NullOr(Schema.String)),
   created_at: Schema.optional(Schema.NullOr(Schema.String)),
 })
 const MergeRequestCheckSchema = Schema.Struct({
@@ -423,18 +432,47 @@ const isDraftMergeRequest = (mergeRequest: {
   mergeRequest.draft === true || hasDraftTitlePrefix(mergeRequest.title ?? "")
 
 /**
- * True when the MR tip and the attached head_pipeline SHA are both known and
- * disagree. Watch must not settle green, and Merge must not treat the pipeline
- * as green, until GitLab attaches a pipeline for the current tip.
+ * Merged-results pipelines run on `refs/merge-requests/<iid>/merge`; their
+ * pipeline SHA is the temporary merge commit, never the source-branch tip.
+ * Tip-aligned MR pipelines (`…/head`, branch ref, or source-only
+ * `merge_request_event`) still use SHA equality for stale-after-push detection.
+ */
+const MERGED_RESULTS_PIPELINE_REF = /^refs\/merge-requests\/\d+\/merge$/
+
+/**
+ * True when head_pipeline is a merged-results pipeline. Only this shape is
+ * exempt from tip-SHA equality while GitLab still attaches it as head_pipeline.
+ */
+const isMergedResultsHeadPipeline = (headPipeline: {
+  readonly ref?: string | null
+}): boolean => {
+  const ref =
+    typeof headPipeline.ref === "string" ? headPipeline.ref.trim() : ""
+  return ref !== "" && MERGED_RESULTS_PIPELINE_REF.test(ref)
+}
+
+/**
+ * True when the attached head_pipeline is for a prior tip and must not settle
+ * green (Watch) or pass merge pre-checks.
+ *
+ * Branch and tip-aligned MR pipelines: treat a known SHA mismatch with the MR
+ * tip as stale (left behind after a push until GitLab replaces head_pipeline).
+ *
+ * Merged-results pipelines (`refs/merge-requests/<iid>/merge`): the pipeline
+ * SHA is the temporary merge commit, not the source tip — never stale solely
+ * because of that mismatch while GitLab still exposes them as head_pipeline.
  */
 const isStaleHeadPipelineForTip = (mergeRequest: {
   readonly sha?: string | null
   readonly head_pipeline?: {
     readonly sha?: string | null
+    readonly ref?: string | null
+    readonly source?: string | null
   } | null
 }): boolean => {
   const headPipeline = mergeRequest.head_pipeline
   if (headPipeline === null || headPipeline === undefined) return false
+  if (isMergedResultsHeadPipeline(headPipeline)) return false
   const mrHead =
     typeof mergeRequest.sha === "string" && mergeRequest.sha.trim() !== ""
       ? mergeRequest.sha.trim()
@@ -1138,8 +1176,11 @@ export const makeGitLabService = (options: {
           ...snapshot,
         } satisfies PullRequestCheckStatus
       }
-      // Pipeline still reports a prior tip after a concurrent push: keep
-      // watching (pending) so Merge does not thrash revalidation on a stale green.
+      // Branch or tip-aligned MR pipeline still reports a prior tip after a
+      // concurrent push: keep watching (pending) so Merge does not thrash
+      // revalidation on a stale green. Merged-results pipelines
+      // (`refs/merge-requests/N/merge`) are never stale solely because their
+      // SHA differs from the source tip.
       if (isStaleHeadPipelineForTip(mergeRequest)) {
         return {
           _tag: "pending",
@@ -1498,9 +1539,10 @@ export const makeGitLabService = (options: {
          * Job-level pipeline rollup for merge pre-checks. Matches Watch so
          * allow_failure failures and manual/canceled/skipped jobs do not block
          * merge, while hard-fail and still-running pipelines revalidate.
-         * A head_pipeline whose SHA is not the MR tip is treated as not green so
-         * a concurrent push cannot merge an untested head under a stale success
-         * (same tip-freshness rule as Watch pending).
+         * A tip-aligned head_pipeline whose SHA is not the MR tip is treated as
+         * not green so a concurrent push cannot merge an untested head under a
+         * stale success (same tip-freshness rule as Watch pending). Merged-
+         * results pipelines are excluded from that SHA rule.
          */
         const pipelineBlockingReason = (
           mergeRequest: MergeRequestCheck,

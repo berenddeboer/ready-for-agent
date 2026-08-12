@@ -118,7 +118,7 @@ describe("Postponed Step Run projection", () => {
     expect(lifecycleLabels(postponed)).toEqual([
       {
         phase: "GITHUB_STATUS_CHECKS",
-        label: "GitHub status checks: Postponed",
+        label: "Status checks: Postponed",
         status: "POSTPONED",
         durationMs: 2_315_000,
       },
@@ -191,13 +191,13 @@ describe("Postponed Step Run projection", () => {
     expect(lifecycleLabels(resumed)).toEqual([
       {
         phase: "GITHUB_STATUS_CHECKS",
-        label: "GitHub status checks: Postponed (1 prior attempt)",
+        label: "Status checks: Postponed (1 prior attempt)",
         status: "POSTPONED",
         durationMs: null,
       },
       {
         phase: "GITHUB_STATUS_CHECKS",
-        label: "GitHub status checks: Queued",
+        label: "Status checks: Queued",
         status: "QUEUED",
         durationMs: 2_315_000,
       },
