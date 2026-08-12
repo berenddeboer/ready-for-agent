@@ -24,6 +24,7 @@ import {
   gitlabSentinelIssueNumber,
 } from "../support/constants.ts"
 import { dismissFirstRunSettingsIfPresent } from "../support/first-run-settings.ts"
+import { seedPausedRepositoryFixture } from "../support/paused-repository-fixture.ts"
 import { Given, Then, When, test } from "./fixtures.ts"
 
 const workspaceRoot = resolve(
@@ -169,6 +170,11 @@ Given("the Harness has no configured Repositories", async () => {
   // GraphQL-only setup: do not tour home/Repos blank slates here. The Kanban
   // scenario whose assertion *is* that empty UI still checks it.
   await ensureNoConfiguredRepositories()
+})
+
+Given("the Harness has a seeded Paused Repository", async () => {
+  test.setTimeout(SCENARIO_TIMEOUT_MS)
+  await seedPausedRepositoryFixture()
 })
 
 Given("the End-to-End Fixture Repository is checked out", async ({ world }) => {

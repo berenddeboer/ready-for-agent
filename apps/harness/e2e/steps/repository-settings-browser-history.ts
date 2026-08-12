@@ -2,8 +2,8 @@
  * Playwright-BDD steps for routed Repository settings history (issue #842).
  */
 import { type Page, expect } from "@playwright/test"
-import { E2E_GRAPHQL_URL } from "../support/constants.ts"
 import { dismissFirstRunSettingsIfPresent } from "../support/first-run-settings.ts"
+import { PAUSED_REPOSITORY_FIXTURE } from "../support/paused-repository-fixture.ts"
 import { Then, When } from "./fixtures.ts"
 
 /** Repository settings dialog is titled with the Project Path. */
@@ -25,34 +25,9 @@ const awaitCatalogSettled = async (
 }
 
 const repositorySettingsPathPattern = /\/repos\/[^/]+\/settings\/?(?:\?.*)?$/
-
-const fetchFirstRepositoryId = async (): Promise<string> => {
-  const response = await fetch(E2E_GRAPHQL_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      query: "query { repositories { id projectPath } }",
-    }),
-  })
-  if (!response.ok) {
-    throw new Error(`GraphQL HTTP ${response.status}: ${await response.text()}`)
-  }
-  const payload = (await response.json()) as {
-    data?: { repositories: ReadonlyArray<{ id: string; projectPath: string }> }
-    errors?: ReadonlyArray<{ message: string }>
-  }
-  if (payload.errors?.length) {
-    throw new Error(
-      `GraphQL errors: ${payload.errors.map((e) => e.message).join("; ")}`,
-    )
-  }
-  const repositories = payload.data?.repositories ?? []
-  const first = repositories[0]
-  if (first === undefined) {
-    throw new Error("Expected at least one configured Repository")
-  }
-  return first.id
-}
+const seededRepositorySettingsPath = new RegExp(
+  `/repos/${PAUSED_REPOSITORY_FIXTURE.repositoryId}/settings/?(?:\\?.*)?$`,
+)
 
 type UpdateRepositorySettingsIntercept = {
   failNext: boolean
@@ -135,8 +110,9 @@ When("I open Repository settings from the card menu", async ({ page }) => {
     page.getByRole("region", { name: "Configured repositories" }),
   ).toBeVisible({ timeout: 30_000 })
   await page
-    .getByRole("button", { name: /^Actions for / })
-    .first()
+    .getByRole("button", {
+      name: `Actions for ${PAUSED_REPOSITORY_FIXTURE.projectPath}`,
+    })
     .click()
   await page.getByRole("menuitem", { name: "Settings" }).click()
   const dialog = repositoryDialog(page)
@@ -146,8 +122,9 @@ When("I open Repository settings from the card menu", async ({ page }) => {
 
 When("I open the repository settings path directly", async ({ page }) => {
   await installUpdateRepositorySettingsRoute(page)
-  const repositoryId = await fetchFirstRepositoryId()
-  await page.goto(`/repos/${encodeURIComponent(repositoryId)}/settings`)
+  await page.goto(
+    `/repos/${encodeURIComponent(PAUSED_REPOSITORY_FIXTURE.repositoryId)}/settings`,
+  )
   await expect(page).toHaveURL(repositorySettingsPathPattern)
   const dialog = repositoryDialog(page)
   await expect(dialog).toBeVisible({ timeout: 30_000 })
@@ -176,14 +153,8 @@ When("I press Escape in the Repository settings dialog", async ({ page }) => {
 When("I change the Repository paused draft", async ({ page }) => {
   const dialog = repositoryDialog(page)
   const checkbox = dialog.getByRole("checkbox", { name: /Paused/i })
-  await expect(checkbox).toBeVisible()
-  const wasChecked = await checkbox.isChecked()
-  await checkbox.setChecked(!wasChecked)
-  // Stash the draft expectation on the page for the Then step.
-  await page.evaluate((draftChecked) => {
-    ;(window as unknown as { __rfaPausedDraft?: boolean }).__rfaPausedDraft =
-      draftChecked
-  }, !wasChecked)
+  await expect(checkbox).toBeChecked()
+  await checkbox.setChecked(false)
 })
 
 When(
@@ -274,17 +245,23 @@ When("I close the Repository not found dialog", async ({ page }) => {
 Then(
   "the browser location is the repository settings path",
   async ({ page }) => {
-    await expect(page).toHaveURL(repositorySettingsPathPattern)
+    await expect(page).toHaveURL(seededRepositorySettingsPath)
     const pathname = new URL(page.url()).pathname
     // Path must use the stable Repository ID (repo-…), not a nested project path.
-    expect(pathname).toMatch(/^\/repos\/repo-[^/]+\/settings\/?$/)
+    expect(pathname).toBe(
+      `/repos/${PAUSED_REPOSITORY_FIXTURE.repositoryId}/settings`,
+    )
   },
 )
 
 Then(
   "the browser location is the repository settings path with theme dark",
   async ({ page }) => {
-    await expect(page).toHaveURL(/\/repos\/[^/]+\/settings\/?\?theme=dark$/)
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/repos/${PAUSED_REPOSITORY_FIXTURE.repositoryId}/settings/?\\?theme=dark$`,
+      ),
+    )
   },
 )
 
@@ -324,20 +301,8 @@ Then(
     const dialog = repositoryDialog(page)
     await awaitCatalogSettled(dialog)
     const checkbox = dialog.getByRole("checkbox", { name: /Paused/i })
-    await expect(checkbox).toBeVisible()
-    const draftChecked = await page.evaluate(
-      () =>
-        (window as unknown as { __rfaPausedDraft?: boolean }).__rfaPausedDraft,
-    )
-    // Fresh fixture repos are not paused; draft flipped that, so saved is opposite.
-    if (draftChecked === true) {
-      await expect(checkbox).not.toBeChecked()
-    } else if (draftChecked === false) {
-      await expect(checkbox).toBeChecked()
-    } else {
-      // Default fixture: not paused after discarded draft.
-      await expect(checkbox).not.toBeChecked()
-    }
+    // Seeded Paused Repository: discarded draft is unchecked; saved stays Paused.
+    await expect(checkbox).toBeChecked()
   },
 )
 

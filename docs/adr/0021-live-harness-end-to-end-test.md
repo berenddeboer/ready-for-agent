@@ -1,6 +1,9 @@
 # Validate Harness end to end against controlled Forge Repositories
 
-Harness end-to-end validation runs the production-built application, worker, Keymaxxer Sidecar, command-line client, and browser against controlled End-to-End Fixture Repositories, without GraphQL or Forge mocks. Executable Gherkin via `playwright-bdd` adds each Repository from a fresh local checkout through the real CLI and waits for credential activation's automatic first Refresh Job to make the permanent Ready-labeled sentinel Issue visible in the UI.
+Harness end-to-end validation runs the production-built application, worker, Keymaxxer Sidecar, command-line client, and browser against a real Harness process, without GraphQL or Forge mocks. Executable Gherkin via `playwright-bdd` covers two Repository setup paths:
+
+- **Fixture add-and-refresh.** Add-and-refresh of the End-to-End Fixture Repository, Repository Intake CLI, and the catalog-only scenario that asserts a stale Repository Agent Model override add each Repository from a fresh local checkout through the real CLI and wait for credential activation's automatic first Refresh Job to make the permanent Ready-labeled sentinel Issue visible in the UI.
+- **UI-history persistence seed.** Repository settings history and Kanban live e2e that only need a Repository to exist seed a Paused Repository (same idempotent helper as Session Telemetry fixtures) instead of cloning the End-to-End Fixture Repository. The seeded Repository is Paused so the Harness does not autonomously select work, and Issue-store freshness is marked already reconciled so Repos and Pipeline render without a live Forge round-trip or a Refresh Job.
 
 ## GitHub fixture
 
@@ -12,12 +15,12 @@ Throwaway project on `git.drupalcode.org` under operator control (default Projec
 
 ## Shared run model
 
-Each run starts with an empty, isolated Harness database. Live e2e is split into **two** Nx targets / Playwright invocations (separate `webServer` boots) so product PATH and Keymaxxer policy can differ without installing OpenCode mid-suite (issue #958):
+Each run starts with an empty, isolated Harness database. UI-history scenarios that only need a Repository to exist (Repository settings history, Kanban with a Repository) may seed persistence instead of cloning the fixture; they do not enqueue a Refresh Job. Live e2e is split into **two** Nx targets / Playwright invocations (separate `webServer` boots) so product PATH and Keymaxxer policy can differ without installing OpenCode mid-suite (issue #958):
 
 | Target | Tag filter | Env | Coverage |
 | --- | --- | --- | --- |
 | `harness:e2e-no-backend` | `@no-backend` only | `E2E_AGENT_BACKEND_MODE=no-opencode`, `KEYMAXXER_ENABLED=false` | Default Agent Backend Unavailable + first-run UI when OpenCode is absent (pure-absence and mixed-Ready via fake Claude). Vault-free so fork PRs still run it. |
-| `harness:e2e` | everything except `@no-backend` | Fixture vault (below); ambient OpenCode allowed / expected in CI | Fixture Repository add/refresh, Kanban, Settings history, catalog-only Agent Models, etc. |
+| `harness:e2e` | everything except `@no-backend` | Fixture vault (below); ambient OpenCode allowed / expected in CI | Fixture Repository add/refresh, Kanban, Settings history (UI-history scenarios may seed persistence), catalog-only Agent Models, etc. |
 
 The live-Harness supervisor (`apps/harness/e2e/support/start-live-harness.ts`) always prepends a deterministic fake `claude` binary. In `no-opencode` mode it strips PATH directories that provide ambient `opencode`, `grok`, `codex`, and `claude`, then fails closed if those binaries still resolve (except the fake `claude`). Claude readiness is scenario-controlled (`firstParty` / `unauthenticated`) via the file protocol in `live-harness-control.ts`.
 

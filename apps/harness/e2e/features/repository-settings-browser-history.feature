@@ -2,26 +2,23 @@ Feature: Route Repository settings by Repository ID
   Explicit Repository settings opens use `/repos/<repository-id>/settings` so
   Back closes the dialog, Forward reopens it with saved values, and Save /
   Cancel / Escape stay synchronized with the browser location. Direct and
-  stale links render over Repos. A configured default build model keeps
-  first-run Harness Settings from competing with these scenarios.
+  stale links render over Repos. These scenarios seed a Paused Repository
+  instead of cloning the End-to-End Fixture Repository. A configured
+  default build model keeps first-run Harness Settings from competing.
 
   Background:
-    Given the Harness has no configured Repositories
+    Given the Harness has a seeded Paused Repository
     And the Harness has a configured default build model
 
   Scenario: Explicit open pushes /repos/<id>/settings and preserves theme search
-    Given the End-to-End Fixture Repository is checked out
-    When I add the Repository with the CLI
-    And I open the Repos page with theme dark
+    When I open the Repos page with theme dark
     And I open Repository settings from the card menu
     Then the browser location is the repository settings path with theme dark
     And the Repository settings dialog is visible
     And the Repos jobs tab is active
 
   Scenario: Browser Back closes Repository settings and Forward reopens with saved values
-    Given the End-to-End Fixture Repository is checked out
-    When I add the Repository with the CLI
-    And I open the Repos page
+    When I open the Repos page
     And I open Repository settings from the card menu
     Then the browser location is the repository settings path
     When I change the Repository paused draft
@@ -34,9 +31,7 @@ Feature: Route Repository settings by Repository ID
     And the Repository paused field shows the saved value not the draft
 
   Scenario: Cancel returns to the originating Repos location
-    Given the End-to-End Fixture Repository is checked out
-    When I add the Repository with the CLI
-    And I open the Repos page
+    When I open the Repos page
     And I open Repository settings from the card menu
     Then the browser location is the repository settings path
     When I cancel the Repository settings dialog
@@ -44,9 +39,7 @@ Feature: Route Repository settings by Repository ID
     And the browser location is the repos path
 
   Scenario: Escape returns to the originating Repos location
-    Given the End-to-End Fixture Repository is checked out
-    When I add the Repository with the CLI
-    And I open the Repos page
+    When I open the Repos page
     And I open Repository settings from the card menu
     Then the browser location is the repository settings path
     When I press Escape in the Repository settings dialog
@@ -54,9 +47,7 @@ Feature: Route Repository settings by Repository ID
     And the browser location is the repos path
 
   Scenario: Successful Save returns to the originating location
-    Given the End-to-End Fixture Repository is checked out
-    When I add the Repository with the CLI
-    And I open the Repos page
+    When I open the Repos page
     And I open Repository settings from the card menu
     Then the browser location is the repository settings path
     When I save Repository settings without changing values
@@ -64,9 +55,7 @@ Feature: Route Repository settings by Repository ID
     And the browser location is the repos path
 
   Scenario: Failed Save keeps the dialog and settings path open
-    Given the End-to-End Fixture Repository is checked out
-    When I add the Repository with the CLI
-    And I open the Repos page
+    When I open the Repos page
     And I open Repository settings from the card menu
     Then the browser location is the repository settings path
     When Repository settings Save is forced to fail
@@ -76,9 +65,7 @@ Feature: Route Repository settings by Repository ID
     And a repository settings save error is shown
 
   Scenario: Browser Back is blocked while Save is pending
-    Given the End-to-End Fixture Repository is checked out
-    When I add the Repository with the CLI
-    And I open the Repos page
+    When I open the Repos page
     And I open Repository settings from the card menu
     Then the browser location is the repository settings path
     When Repository settings Save is delayed
@@ -91,9 +78,7 @@ Feature: Route Repository settings by Repository ID
     And the browser location is the repos path
 
   Scenario: Direct repository settings navigation shows the dialog over Repos
-    Given the End-to-End Fixture Repository is checked out
-    When I add the Repository with the CLI
-    And I open the repository settings path directly
+    When I open the repository settings path directly
     Then the Repository settings dialog is visible
     And the browser location is the repository settings path
     And the Repos jobs tab is active
@@ -102,9 +87,7 @@ Feature: Route Repository settings by Repository ID
     And the browser location is the repos path
 
   Scenario: Refreshing repository settings keeps the dialog open and closes to Repos
-    Given the End-to-End Fixture Repository is checked out
-    When I add the Repository with the CLI
-    And I open the repository settings path directly
+    When I open the repository settings path directly
     Then the Repository settings dialog is visible
     When I refresh the page
     Then the Repository settings dialog is visible
@@ -114,9 +97,7 @@ Feature: Route Repository settings by Repository ID
     And the browser location is the repos path
 
   Scenario: Refresh after in-app open still closes to Repos with replace
-    Given the End-to-End Fixture Repository is checked out
-    When I add the Repository with the CLI
-    And I open the Repos page
+    When I open the Repos page
     And I open Repository settings from the card menu
     Then the browser location is the repository settings path
     When I refresh the page
