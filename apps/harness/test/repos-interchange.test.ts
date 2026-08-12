@@ -422,6 +422,8 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(parent).toContain("ui.parentIssueError")
     expect(parent).toContain("implementAll.isError")
     expect(parent).toContain('tone="alarm"')
+    expect(parent).toContain("startWorkBannerMessage")
+    expect(parent).toContain("implementAll.error")
     expect(parent).toContain("Could not start Implement all with auto-merge")
     expect(parent).toContain("errorMessage={null}")
 
@@ -460,6 +462,10 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(leaf).toContain("ui.repoIssueError")
     expect(leaf).toContain('tone="alarm"')
     expect(leaf).toContain('tag="Error"')
+    expect(leaf).toContain("startWorkBannerMessage")
+    expect(leaf).toContain("queueIssue.error")
+    expect(leaf).toContain("implementNow.error")
+    expect(leaf).toContain("implementLocally.error")
     expect(leaf).toContain("Could not queue issue")
     expect(leaf).toContain("Could not start implementation")
 
