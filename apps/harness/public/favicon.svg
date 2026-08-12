@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Ready for Agent">
+  <title>Ready for Agent</title>
+  <style>
+    .crank { fill: #ffd21c; stroke: #ffd21c; }
+    @media (prefers-color-scheme: light) {
+      .crank { fill: #151515; stroke: #151515; }
+    }
+  </style>
+  <circle class="crank" cx="50" cy="50" r="23" fill="none" stroke-width="9"/>
+  <line class="crank" x1="50" y1="50" x2="73" y2="27" stroke-width="8" stroke-linecap="round"/>
+  <circle class="crank" cx="73" cy="27" r="9"/>
+  <circle class="crank" cx="50" cy="50" r="4"/>
+</svg>

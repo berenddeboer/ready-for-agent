@@ -19,6 +19,8 @@ const contentTypeForPathname = (pathname: string): string | undefined => {
   if (pathname.endsWith(".svg")) return "image/svg+xml"
   if (pathname.endsWith(".json")) return "application/json"
   if (pathname.endsWith(".png")) return "image/png"
+  if (pathname.endsWith(".ico")) return "image/x-icon"
+  if (pathname.endsWith(".webmanifest")) return "application/manifest+json"
   if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) {
     return "image/jpeg"
   }
