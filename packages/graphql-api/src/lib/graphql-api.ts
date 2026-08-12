@@ -1,6 +1,8 @@
 import {
+  Cause,
   Duration,
   Effect,
+  Exit,
   type ManagedRuntime,
   Result,
   Semaphore,
@@ -319,6 +321,11 @@ export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
   unknown
 >
 
+/** Yoga provides the HTTP Request on context; its signal drives Effect interruption. */
+export type GraphqlRequestContext = {
+  readonly request: Request
+}
+
 const isSameOriginRequest = (request: Request): boolean => {
   const origin = request.headers.get("origin")
   return origin === null || origin === new URL(request.url).origin
@@ -392,15 +399,35 @@ export const createGraphqlApi = <R>(
     options.environment ?? (process.env as Record<string, string | undefined>)
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
 
+  /**
+   * Run a resolver Effect with the HTTP request's AbortSignal so client
+   * disconnect or fetch abort interrupts the fiber (and its finalizers).
+   * Typed failures stay domain GraphQL errors; interruption is an
+   * operation-level `REQUEST_CANCELLED` failure, not result data.
+   */
   const runGraphql = <A>(
     effect: Effect.Effect<A, unknown, GraphqlServices>,
+    context: GraphqlRequestContext,
   ): Promise<A> =>
-    runtime.runPromise(Effect.result(effect)).then((result) => {
-      if (Result.isFailure(result)) {
-        throw toGraphQLError(result.failure)
-      }
-      return result.success
-    })
+    runtime
+      .runPromiseExit(Effect.result(effect), {
+        signal: context.request.signal,
+      })
+      .then((exit) => {
+        if (Exit.isFailure(exit)) {
+          if (Cause.hasInterruptsOnly(exit.cause)) {
+            throw new GraphQLError("Request cancelled", {
+              extensions: { code: "REQUEST_CANCELLED" },
+            })
+          }
+          throw toGraphQLError(Cause.squash(exit.cause))
+        }
+        const result = exit.value
+        if (Result.isFailure(result)) {
+          throw toGraphQLError(result.failure)
+        }
+        return result.success
+      })
 
   const listModels = Effect.fn("graphql-api.models")(function* () {
     const active = yield* ActiveAgentBackend
@@ -426,19 +453,29 @@ export const createGraphqlApi = <R>(
           health: () => true,
           addRepositoryCommand: () =>
             resolveAddRepositoryCommand(commandExists),
-          directoryPickerAvailable: async () =>
+          directoryPickerAvailable: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const picker = yield* DirectoryPicker
                 return yield* picker.available
               }).pipe(Effect.withSpan("graphql-api.directoryPickerAvailable")),
+              context,
             ),
-          repositories: async () =>
+          repositories: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
                 return yield* db.listRepositories
               }).pipe(Effect.withSpan("graphql-api.repositories")),
+              context,
             ),
           githubThrottleStatus: async () => {
             const status = await options.githubThrottleStatus?.()
@@ -446,7 +483,11 @@ export const createGraphqlApi = <R>(
               ? null
               : { retryAt: new Date(status.retryAt).toISOString() }
           },
-          repositoryCredentials: async () =>
+          repositoryCredentials: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
@@ -536,8 +577,13 @@ export const createGraphqlApi = <R>(
                   { concurrency: "unbounded" },
                 )
               }).pipe(Effect.withSpan("graphql-api.repositoryCredentials")),
+              context,
             ),
-          config: async () =>
+          config: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
@@ -556,6 +602,7 @@ export const createGraphqlApi = <R>(
                   blockingUnfinishedWorkItemCount,
                 }
               }).pipe(Effect.withSpan("graphql-api.config")),
+              context,
             ),
           agentBackends: () =>
             listSelectableAgentBackendInfos(environment).map((entry) => ({
@@ -563,7 +610,11 @@ export const createGraphqlApi = <R>(
               label: entry.label,
               configurationMode: entry.configurationMode,
             })),
-          agentBackendStatuses: async () =>
+          agentBackendStatuses: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const active = yield* ActiveAgentBackend
@@ -572,8 +623,13 @@ export const createGraphqlApi = <R>(
                   toGraphqlAgentBackendStatus(status),
                 )
               }).pipe(Effect.withSpan("graphql-api.agentBackendStatuses")),
+              context,
             ),
-          agentBackendStatus: async () =>
+          agentBackendStatus: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const active = yield* ActiveAgentBackend
@@ -589,10 +645,12 @@ export const createGraphqlApi = <R>(
                 }
                 return toGraphqlAgentBackendStatus(yield* active.getStatus)
               }).pipe(Effect.withSpan("graphql-api.agentBackendStatus")),
+              context,
             ),
           previewAgentBackend: async (
             _parent: unknown,
             args: { backendId: string },
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
@@ -617,27 +675,43 @@ export const createGraphqlApi = <R>(
                 })
                 return toGraphqlAgentBackendPreview(preview)
               }).pipe(Effect.withSpan("graphql-api.previewAgentBackend")),
+              context,
             ),
           harnessModelPrefs: async (
             _parent: unknown,
             args: { backendId: string },
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
                 return yield* db.getBackendModelPrefs(args.backendId)
               }).pipe(Effect.withSpan("graphql-api.harnessModelPrefs")),
+              context,
             ),
-          models: async () => runGraphql(listModels()),
-          issues: async (_parent: unknown, args: IssuesArgs) =>
+          models: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) => runGraphql(listModels(), context),
+          issues: async (
+            _parent: unknown,
+            args: IssuesArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
                 const issues = yield* db.listIssues(args.repositoryId)
                 return workIssueProjection(issues)
               }).pipe(Effect.withSpan("graphql-api.issues")),
+              context,
             ),
-          workItems: async (_parent: unknown, args: WorkItemsArgs) =>
+          workItems: async (
+            _parent: unknown,
+            args: WorkItemsArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
@@ -677,10 +751,12 @@ export const createGraphqlApi = <R>(
                   nowMs,
                 )
               }).pipe(Effect.withSpan("graphql-api.workItems")),
+              context,
             ),
           completedWorkItems: async (
             _parent: unknown,
             args: CompletedWorkItemsArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
@@ -705,10 +781,12 @@ export const createGraphqlApi = <R>(
                   hasPreviousPage,
                 }
               }).pipe(Effect.withSpan("graphql-api.completedWorkItems")),
+              context,
             ),
           committedPullRequestsCount: async (
             _parent: unknown,
             args: CommittedPullRequestsCountArgs,
+            context: GraphqlRequestContext,
           ) => {
             const fromMs = parseIsoInstantMs(args.from, "from")
             const toMs = parseIsoInstantMs(args.to, "to")
@@ -727,9 +805,14 @@ export const createGraphqlApi = <R>(
               }).pipe(
                 Effect.withSpan("graphql-api.committedPullRequestsCount"),
               ),
+              context,
             )
           },
-          session: async (_parent: unknown, args: SessionArgs) =>
+          session: async (
+            _parent: unknown,
+            args: SessionArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
@@ -750,6 +833,7 @@ export const createGraphqlApi = <R>(
                 })
                 return toGraphqlSession(session)
               }).pipe(Effect.withSpan("graphql-api.session")),
+              context,
             ),
         },
         Issue: {
@@ -760,9 +844,13 @@ export const createGraphqlApi = <R>(
           issuesReconciledAt: (repository: {
             issuesReconciledAt: Date | null
           }) => repository.issuesReconciledAt?.toISOString() ?? null,
-          effectiveAgentBackend: async (repository: {
-            selectedAgentBackend: string | null
-          }) =>
+          effectiveAgentBackend: async (
+            repository: {
+              selectedAgentBackend: string | null
+            },
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
@@ -774,8 +862,13 @@ export const createGraphqlApi = <R>(
               }).pipe(
                 Effect.withSpan("graphql-api.Repository.effectiveAgentBackend"),
               ),
+              context,
             ),
-          blockingUnfinishedWorkItemCount: async (repository: { id: string }) =>
+          blockingUnfinishedWorkItemCount: async (
+            repository: { id: string },
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
@@ -787,12 +880,17 @@ export const createGraphqlApi = <R>(
                   "graphql-api.Repository.blockingUnfinishedWorkItemCount",
                 ),
               ),
+              context,
             ),
-          pullRequestCount: async (repository: {
-            forge: string
-            forgeHost: string
-            projectPath: string
-          }) =>
+          pullRequestCount: async (
+            repository: {
+              forge: string
+              forgeHost: string
+              projectPath: string
+            },
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const forgeRepository = {
@@ -823,6 +921,7 @@ export const createGraphqlApi = <R>(
               }).pipe(
                 Effect.withSpan("graphql-api.Repository.pullRequestCount"),
               ),
+              context,
             ),
         },
         WorkItem: {
@@ -837,7 +936,11 @@ export const createGraphqlApi = <R>(
             workItemStatus(workItem).toUpperCase(),
           statusLabel: (workItem: WorkItemRecord) =>
             statusLabel(workItemStatus(workItem)),
-          statusMessage: async (workItem: WorkItemRecord) => {
+          statusMessage: async (
+            workItem: WorkItemRecord,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) => {
             if (workItemIsTerminal(workItem) || !workItem.waitingForBlockers) {
               return workItemStatusMessage(workItem)
             }
@@ -854,6 +957,7 @@ export const createGraphqlApi = <R>(
                     [],
                 })
               }).pipe(Effect.withSpan("graphql-api.WorkItem.statusMessage")),
+              context,
             )
           },
           postponedUntil: (workItem: WorkItemRecord) =>
@@ -871,7 +975,11 @@ export const createGraphqlApi = <R>(
         },
         Subscription: {
           repositoriesChanged: {
-            subscribe: async () =>
+            subscribe: async (
+              _parent: unknown,
+              _args: unknown,
+              context: GraphqlRequestContext,
+            ) =>
               runGraphql(
                 Effect.gen(function* () {
                   const db = yield* DbService
@@ -879,11 +987,16 @@ export const createGraphqlApi = <R>(
                     db.repositoryChanges,
                   )
                 }).pipe(Effect.withSpan("graphql-api.repositoriesChanged")),
+                context,
               ),
             resolve: () => true,
           },
           issuesChanged: {
-            subscribe: async (_parent: unknown, args: RefreshRepositoryArgs) =>
+            subscribe: async (
+              _parent: unknown,
+              args: RefreshRepositoryArgs,
+              context: GraphqlRequestContext,
+            ) =>
               runGraphql(
                 Effect.gen(function* () {
                   const db = yield* DbService
@@ -895,21 +1008,31 @@ export const createGraphqlApi = <R>(
                     ),
                   )
                 }).pipe(Effect.withSpan("graphql-api.issuesChanged")),
+                context,
               ),
             resolve: () => true,
           },
           repositoryIssuesChanged: {
-            subscribe: async () =>
+            subscribe: async (
+              _parent: unknown,
+              _args: unknown,
+              context: GraphqlRequestContext,
+            ) =>
               runGraphql(
                 Effect.gen(function* () {
                   const db = yield* DbService
                   return yield* Stream.toAsyncIterableEffect(db.issueChanges)
                 }).pipe(Effect.withSpan("graphql-api.repositoryIssuesChanged")),
+                context,
               ),
             resolve: (repositoryId: string) => repositoryId,
           },
           repositoryWorkItemsChanged: {
-            subscribe: async () =>
+            subscribe: async (
+              _parent: unknown,
+              _args: unknown,
+              context: GraphqlRequestContext,
+            ) =>
               runGraphql(
                 Effect.gen(function* () {
                   const db = yield* DbService
@@ -917,12 +1040,17 @@ export const createGraphqlApi = <R>(
                 }).pipe(
                   Effect.withSpan("graphql-api.repositoryWorkItemsChanged"),
                 ),
+                context,
               ),
             resolve: (repositoryId: string) => repositoryId,
           },
         },
         Mutation: {
-          updateConfig: async (_parent: unknown, args: UpdateConfigArgs) =>
+          updateConfig: async (
+            _parent: unknown,
+            args: UpdateConfigArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
@@ -1006,10 +1134,12 @@ export const createGraphqlApi = <R>(
                   blockingUnfinishedWorkItemCount,
                 }
               }).pipe(Effect.withSpan("graphql-api.updateConfig")),
+              context,
             ),
           recheckAgentBackend: async (
             _parent: unknown,
             args: { backendId?: string | null },
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
@@ -1047,10 +1177,12 @@ export const createGraphqlApi = <R>(
                 )
                 return toGraphqlAgentBackendStatus(status)
               }).pipe(Effect.withSpan("graphql-api.recheckAgentBackend")),
+              context,
             ),
           updateRepositorySettings: async (
             _parent: unknown,
             args: UpdateRepositorySettingsArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
@@ -1168,28 +1300,37 @@ export const createGraphqlApi = <R>(
                 }
                 return updated
               }).pipe(Effect.withSpan("graphql-api.updateRepositorySettings")),
+              context,
             ),
           pauseRepository: async (
             _parent: unknown,
             args: RefreshRepositoryArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
                 return yield* db.pauseRepository(args.repositoryId)
               }).pipe(Effect.withSpan("graphql-api.pauseRepository")),
+              context,
             ),
           unpauseRepository: async (
             _parent: unknown,
             args: RefreshRepositoryArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
                 return yield* db.unpauseRepository(args.repositoryId)
               }).pipe(Effect.withSpan("graphql-api.unpauseRepository")),
+              context,
             ),
-          addRepository: async (_parent: unknown, args: AddRepositoryArgs) =>
+          addRepository: async (
+            _parent: unknown,
+            args: AddRepositoryArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const resolved = yield* verifyRepositoryIdentity(args.input)
@@ -1215,10 +1356,12 @@ export const createGraphqlApi = <R>(
                 )
                 return added
               }).pipe(Effect.withSpan("graphql-api.addRepository")),
+              context,
             ),
           addLocalRepository: async (
             _parent: unknown,
             args: AddLocalRepositoryArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
@@ -1256,10 +1399,12 @@ export const createGraphqlApi = <R>(
                 )
                 return added
               }).pipe(Effect.withSpan("graphql-api.addLocalRepository")),
+              context,
             ),
           inspectLocalRepository: async (
             _parent: unknown,
             args: AddLocalRepositoryArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
@@ -1274,17 +1419,24 @@ export const createGraphqlApi = <R>(
                 const localGit = yield* LocalGit
                 return yield* localGit.inspect(path)
               }).pipe(Effect.withSpan("graphql-api.inspectLocalRepository")),
+              context,
             ),
-          pickLocalDirectory: async () =>
+          pickLocalDirectory: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const picker = yield* DirectoryPicker
                 return yield* picker.pick
               }).pipe(Effect.withSpan("graphql-api.pickLocalDirectory")),
+              context,
             ),
           addRepositoryGitHubToken: async (
             _parent: unknown,
             args: RepositoryCredentialArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               tokenProvisioning
@@ -1378,10 +1530,12 @@ export const createGraphqlApi = <R>(
                   }),
                 )
                 .pipe(Effect.withSpan("graphql-api.addRepositoryGitHubToken")),
+              context,
             ),
           addRepositoryGitLabToken: async (
             _parent: unknown,
             args: RepositoryCredentialArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               tokenProvisioning
@@ -1475,10 +1629,12 @@ export const createGraphqlApi = <R>(
                   }),
                 )
                 .pipe(Effect.withSpan("graphql-api.addRepositoryGitLabToken")),
+              context,
             ),
           removeRepository: async (
             _parent: unknown,
             args: RemoveRepositoryArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
@@ -1497,17 +1653,24 @@ export const createGraphqlApi = <R>(
                 )
                 return args.repositoryId
               }).pipe(Effect.withSpan("graphql-api.removeRepository")),
+              context,
             ),
-          resetWorkItem: async (_parent: unknown, args: ResetWorkItemArgs) =>
+          resetWorkItem: async (
+            _parent: unknown,
+            args: ResetWorkItemArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.reset(args.workItemId)
               }).pipe(Effect.withSpan("graphql-api.resetWorkItem")),
+              context,
             ),
           refreshRepository: async (
             _parent: unknown,
             args: RefreshRepositoryArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
@@ -1535,8 +1698,13 @@ export const createGraphqlApi = <R>(
                   repositoryId: repository.id,
                 }
               }).pipe(Effect.withSpan("graphql-api.refreshRepository")),
+              context,
             ),
-          implementNow: async (_parent: unknown, args: ImplementNowArgs) =>
+          implementNow: async (
+            _parent: unknown,
+            args: ImplementNowArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
@@ -1545,8 +1713,13 @@ export const createGraphqlApi = <R>(
                   args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementNow")),
+              context,
             ),
-          implementLocally: async (_parent: unknown, args: ImplementNowArgs) =>
+          implementLocally: async (
+            _parent: unknown,
+            args: ImplementNowArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
@@ -1555,10 +1728,12 @@ export const createGraphqlApi = <R>(
                   args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementLocally")),
+              context,
             ),
           implementAllWithAutoMerge: async (
             _parent: unknown,
             args: ImplementNowArgs,
+            context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
@@ -1568,8 +1743,13 @@ export const createGraphqlApi = <R>(
                   args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementAllWithAutoMerge")),
+              context,
             ),
-          queue: async (_parent: unknown, args: ImplementNowArgs) =>
+          queue: async (
+            _parent: unknown,
+            args: ImplementNowArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
@@ -1578,27 +1758,43 @@ export const createGraphqlApi = <R>(
                   args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.queue")),
+              context,
             ),
-          retryWorkItem: async (_parent: unknown, args: WorkItemArgs) =>
+          retryWorkItem: async (
+            _parent: unknown,
+            args: WorkItemArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.retry(args.workItemId)
               }).pipe(Effect.withSpan("graphql-api.retryWorkItem")),
+              context,
             ),
-          pauseWorkItem: async (_parent: unknown, args: WorkItemArgs) =>
+          pauseWorkItem: async (
+            _parent: unknown,
+            args: WorkItemArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.pause(args.workItemId)
               }).pipe(Effect.withSpan("graphql-api.pauseWorkItem")),
+              context,
             ),
-          startWorkItem: async (_parent: unknown, args: WorkItemArgs) =>
+          startWorkItem: async (
+            _parent: unknown,
+            args: WorkItemArgs,
+            context: GraphqlRequestContext,
+          ) =>
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.start(args.workItemId)
               }).pipe(Effect.withSpan("graphql-api.startWorkItem")),
+              context,
             ),
         },
       },
