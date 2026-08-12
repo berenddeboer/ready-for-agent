@@ -1,19 +1,15 @@
 /**
  * Deterministic Work Item / Session Telemetry fixtures for live e2e (issue #841).
  *
- * Seeds via the existing live-Harness control plane (stopped DB + restart).
- * Does not mock router internals — only Harness persistence and optional GraphQL
- * response shaping for outcomes that need a real OpenCode session store.
+ * Seeds once per live Harness process via {@link ensureLiveHarnessPersistence}:
+ * the first call writes rows against the stopped database and restarts; later
+ * calls no-op when the fixtures are already present. Does not mock router
+ * internals — only Harness persistence and optional GraphQL response shaping
+ * for outcomes that need a real OpenCode session store.
  */
 
-import { expect } from "@playwright/test"
 import { E2E_GRAPHQL_URL } from "./constants.ts"
-import {
-  CONTROL_FILES,
-  readGeneration,
-  readLiveHarnessState,
-  writeControlFile,
-} from "./live-harness-control.ts"
+import { ensureLiveHarnessPersistence } from "./live-harness-seed.ts"
 
 /**
  * Branded entity IDs must match DB schema patterns
@@ -49,32 +45,60 @@ export const TELEMETRY_FIXTURE = {
   completedPageTwoIssueId: "issue-01KZD5SESS10NTE0FXX0000004",
 } as const
 
+/** Named Session Telemetry Work Items the operator-visible scenarios open. */
+export const SESSION_TELEMETRY_FIXTURE_WORK_ITEM_IDS = [
+  TELEMETRY_FIXTURE.missingSessionWorkItemId,
+  TELEMETRY_FIXTURE.codexMissingWorkItemId,
+  TELEMETRY_FIXTURE.completedWorkItemId,
+  TELEMETRY_FIXTURE.completedPageTwoWorkItemId,
+] as const
+
+/** Completed archive fillers that pin the page-2 fixture. */
+const SESSION_TELEMETRY_FILLER_COUNT = 38
+
+/** Named Work Items plus Completed pagination fillers. */
+export const SESSION_TELEMETRY_FIXTURE_WORK_ITEM_COUNT =
+  SESSION_TELEMETRY_FIXTURE_WORK_ITEM_IDS.length +
+  SESSION_TELEMETRY_FILLER_COUNT
+
+export const sessionTelemetryFixturesArePresent = (
+  workItems: ReadonlyArray<{ readonly id: string }>,
+): boolean => {
+  const ids = new Set(workItems.map((item) => item.id))
+  return (
+    SESSION_TELEMETRY_FIXTURE_WORK_ITEM_IDS.every((id) => ids.has(id)) &&
+    workItems.length >= SESSION_TELEMETRY_FIXTURE_WORK_ITEM_COUNT
+  )
+}
+
 const sqlLiteral = (value: string) => `'${value.replaceAll("'", "''")}'`
 
-const graphqlReachable = async (): Promise<boolean> => {
+const sessionTelemetryFixturesPresent = async (): Promise<boolean> => {
   try {
     const response = await fetch(E2E_GRAPHQL_URL, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query: "query { config { defaultModel } }" }),
+      body: JSON.stringify({
+        query: `query SessionTelemetryFixtures($repositoryId: ID!) {
+          workItems(repositoryId: $repositoryId) { id }
+        }`,
+        variables: { repositoryId: TELEMETRY_FIXTURE.repositoryId },
+      }),
     })
-    return response.ok
+    if (!response.ok) {
+      return false
+    }
+    const payload = (await response.json()) as {
+      data?: { workItems?: ReadonlyArray<{ id: string }> }
+      errors?: ReadonlyArray<{ message: string }>
+    }
+    if (payload.errors?.length || payload.data?.workItems === undefined) {
+      return false
+    }
+    return sessionTelemetryFixturesArePresent(payload.data.workItems)
   } catch {
     return false
   }
-}
-
-const seedAndRestart = async (sql: string) => {
-  const state = readLiveHarnessState()
-  const before = readGeneration(state)
-  writeControlFile(state, CONTROL_FILES.seedSql, sql)
-  writeControlFile(state, CONTROL_FILES.restart, "1")
-  await expect
-    .poll(() => readGeneration(state), { timeout: 60_000, intervals: [250] })
-    .toBeGreaterThan(before)
-  await expect
-    .poll(graphqlReachable, { timeout: 120_000, intervals: [500] })
-    .toBe(true)
 }
 
 /**
@@ -95,16 +119,18 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
   // rows: page 1 has the existing telemetry fixture + 19 fillers, and page 2
   // has the dedicated page-two fixture + 19 fillers.
   const completedOrderBase = now + 10_000_000_000
-  const fillerWorkItems = Array.from({ length: 38 }, (_, index) => {
-    const issueNumber = 200 + index
-    const order =
-      index < 19
-        ? completedOrderBase + 199 - index
-        : index < 33
-          ? completedOrderBase + 69 - (index - 19)
-          : completedOrderBase + 49 - (index - 33)
-    const id = `wi-01KZD5SESS10NTE0F${String(index + 1).padStart(9, "0")}`
-    return `INSERT INTO work_item (
+  const fillerWorkItems = Array.from(
+    { length: SESSION_TELEMETRY_FILLER_COUNT },
+    (_, index) => {
+      const issueNumber = 200 + index
+      const order =
+        index < 19
+          ? completedOrderBase + 199 - index
+          : index < 33
+            ? completedOrderBase + 69 - (index - 19)
+            : completedOrderBase + 49 - (index - 33)
+      const id = `wi-01KZD5SESS10NTE0F${String(index + 1).padStart(9, "0")}`
+      return `INSERT INTO work_item (
        id, repository_id, issue_number, issue_title, agent_backend,
        state, state_ready_at, paused, holds_worker_slot, session_id,
        created_at, updated_at
@@ -122,7 +148,8 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        ${order},
        ${order}
      );`
-  })
+    },
+  )
   const sql = [
     // Clear prior fixture rows so scenarios can re-seed safely.
     `DELETE FROM work_item WHERE repository_id = ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)};`,
@@ -286,5 +313,8 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
     ...fillerWorkItems.slice(19),
   ].join("\n")
 
-  await seedAndRestart(sql)
+  await ensureLiveHarnessPersistence({
+    alreadyPresent: sessionTelemetryFixturesPresent,
+    sql,
+  })
 }

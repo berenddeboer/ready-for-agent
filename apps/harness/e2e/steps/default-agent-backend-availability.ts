@@ -13,10 +13,10 @@ import { settingsDialog } from "../support/first-run-settings.ts"
 import {
   CONTROL_FILES,
   type FakeClaudeMode,
-  readGeneration,
   readLiveHarnessState,
   writeControlFile,
 } from "../support/live-harness-control.ts"
+import { seedLiveHarnessAndRestart } from "../support/live-harness-seed.ts"
 import { Given, Then, When } from "./fixtures.ts"
 
 type GraphqlEnvelope<T> = {
@@ -48,28 +48,11 @@ const graphqlJson = async <T>(
   return payload.data
 }
 
-const graphqlReachable = async (): Promise<boolean> => {
-  try {
-    const data = await graphqlJson<{ health: boolean }>(`query { health }`)
-    return data.health === true
-  } catch {
-    return false
-  }
-}
-
 const setClaudeModeAndRestart = async (mode: FakeClaudeMode) => {
   const state = readLiveHarnessState()
-  const before = readGeneration(state)
   writeControlFile(state, CONTROL_FILES.claudeMode, mode)
   // Empty seed: only fake-CLI readiness changed.
-  writeControlFile(state, CONTROL_FILES.seedSql, "")
-  writeControlFile(state, CONTROL_FILES.restart, "1")
-  await expect
-    .poll(() => readGeneration(state), { timeout: 60_000, intervals: [250] })
-    .toBeGreaterThan(before)
-  await expect
-    .poll(graphqlReachable, { timeout: 120_000, intervals: [500] })
-    .toBe(true)
+  await seedLiveHarnessAndRestart("")
 }
 
 Given("Claude Code reports unauthenticated", async () => {
