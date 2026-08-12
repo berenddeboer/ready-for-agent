@@ -13,6 +13,9 @@ export const HARNESS_UNREACHABLE_CODE = "HARNESS_UNREACHABLE"
  */
 export const GRAPHQL_ERROR_CODE = "GRAPHQL_ERROR"
 
+/** CLI-owned code when the configured GraphQL URL returned HTML, not GraphQL. */
+export const GRAPHQL_URL_NOT_ENDPOINT_CODE = "GRAPHQL_URL_NOT_ENDPOINT"
+
 /** Minimal GenqlError shape (generated client is @ts-nocheck; duck-type safely). */
 type GenqlErrorLike = Error & {
   readonly errors: ReadonlyArray<{
@@ -44,6 +47,44 @@ export const harnessNotRunningMessage = (
   harnessBaseUrl: string = DEFAULT_HARNESS_BASE_URL,
 ): string =>
   `Harness is not running at ${harnessBaseUrl}\n${HARNESS_START_HINT}`
+
+const urlPathEndsWithGraphql = (configuredUrl: string): boolean => {
+  try {
+    const pathname = new URL(configuredUrl).pathname.replace(/\/+$/, "")
+    return pathname.toLowerCase().endsWith("/graphql")
+  } catch {
+    return configuredUrl
+      .trim()
+      .replace(/\/+$/, "")
+      .toLowerCase()
+      .endsWith("/graphql")
+  }
+}
+
+/** Operator-facing message when the configured GraphQL URL returned HTML. */
+const graphqlUrlNotEndpointMessage = (configuredUrl: string): string => {
+  const htmlNotice = `${configuredUrl} returned HTML (the Harness UI), not GraphQL.`
+  if (urlPathEndsWithGraphql(configuredUrl)) {
+    return htmlNotice
+  }
+  const suggestedUrl = `${configuredUrl.trim().replace(/\/+$/, "")}/graphql`
+  return `${htmlNotice} Set READY_FOR_AGENT_GRAPHQL_URL=${suggestedUrl}`
+}
+
+/**
+ * Thrown at the fetch boundary when the configured GraphQL URL returns a
+ * non-JSON (typically HTML) response instead of a GraphQL payload.
+ */
+export class GraphqlUrlNotEndpointError extends Error {
+  readonly code = GRAPHQL_URL_NOT_ENDPOINT_CODE
+  readonly configuredUrl: string
+
+  constructor(configuredUrl: string) {
+    super(graphqlUrlNotEndpointMessage(configuredUrl))
+    this.name = "GraphqlUrlNotEndpointError"
+    this.configuredUrl = configuredUrl
+  }
+}
 
 const collectErrorText = (cause: unknown): string => {
   const parts: string[] = []
@@ -99,12 +140,20 @@ const graphqlErrorCode = (cause: GenqlErrorLike): string => {
 /**
  * Map a GraphQL client failure to a stable code + operator-facing message.
  * Unreachable transport uses the CLI-owned `HARNESS_UNREACHABLE` code.
+ * HTML (or other non-JSON) at the configured URL uses `GRAPHQL_URL_NOT_ENDPOINT`.
  * Domain failures retain Harness `extensions.code` from GenqlError.
  */
 export const describeGraphqlFailure = (
   cause: unknown,
   options?: FormatGraphqlRequestFailureOptions,
 ): GraphqlFailureInfo => {
+  if (cause instanceof GraphqlUrlNotEndpointError) {
+    return {
+      code: GRAPHQL_URL_NOT_ENDPOINT_CODE,
+      message: cause.message,
+    }
+  }
+
   if (isGraphqlUnreachable(cause)) {
     const baseUrl =
       options?.graphqlUrl === undefined

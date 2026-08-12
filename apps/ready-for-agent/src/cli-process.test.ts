@@ -20,6 +20,7 @@ import {
   buildStatusSuccessDocument,
 } from "./cli-json.ts"
 import {
+  GRAPHQL_URL_NOT_ENDPOINT_CODE,
   HARNESS_START_HINT,
   HARNESS_UNREACHABLE_CODE,
   harnessNotRunningMessage,
@@ -933,5 +934,39 @@ describe("operator binary finite-command process contract", () => {
         message: harnessNotRunningMessage("http://127.0.0.1:1"),
       },
     })
+  })
+
+  test("status against HTML at the configured URL emits GRAPHQL_URL_NOT_ENDPOINT once", async () => {
+    let requestCount = 0
+    const seenUrls: string[] = []
+    const server = createServer((req, res) => {
+      requestCount += 1
+      seenUrls.push(req.url ?? "")
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+      res.end("<!doctype html><html><body>Harness</body></html>")
+    })
+
+    try {
+      const port = await listen(server)
+      const graphqlUrl = `http://127.0.0.1:${port}`
+      const result = await runCli(["status"], graphqlUrl)
+
+      expect(result.status).toBe(1)
+      expect(result.stdout.trim()).toBe("")
+      expect(requestCount).toBe(1)
+      expect(seenUrls).toEqual(["/"])
+      expect(parseExactlyOneJsonDocument(result.stderr)).toEqual({
+        schemaVersion: CLI_SCHEMA_VERSION,
+        command: "status",
+        error: {
+          code: GRAPHQL_URL_NOT_ENDPOINT_CODE,
+          message: `${graphqlUrl} returned HTML (the Harness UI), not GraphQL. Set READY_FOR_AGENT_GRAPHQL_URL=${graphqlUrl}/graphql`,
+        },
+      })
+      expect(result.stderr).not.toContain("Failed to parse JSON")
+      expect(result.stderr).not.toContain("GRAPHQL_ERROR")
+    } finally {
+      await closeServer(server)
+    }
   })
 })
