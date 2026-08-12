@@ -14,15 +14,14 @@
  */
 
 import { type Locator, type Page, expect } from "@playwright/test"
-import { E2E_GRAPHQL_URL } from "../support/constants.ts"
 import { dismissFirstRunSettingsIfPresent } from "../support/first-run-settings.ts"
 import {
   CONTROL_FILES,
   type FakeClaudeMode,
-  readGeneration,
   readLiveHarnessState,
   writeControlFile,
 } from "../support/live-harness-control.ts"
+import { seedLiveHarnessAndRestart } from "../support/live-harness-seed.ts"
 import { Given, Then, When } from "./fixtures.ts"
 
 /** Bedrock inference profile an operator had stored before switching modes. */
@@ -69,37 +68,6 @@ const awaitCatalogSettled = async (dialog: Locator) => {
   })
 }
 
-const graphqlReachable = async (): Promise<boolean> => {
-  try {
-    const response = await fetch(E2E_GRAPHQL_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query: "query { config { defaultModel } }" }),
-    })
-    return response.ok
-  } catch {
-    return false
-  }
-}
-
-/**
- * Seed SQL against the *stopped* database, then restart and wait for the new
- * process to serve GraphQL again. The supervisor owns both the database file
- * and the child process, so steps only drop a request in its control directory.
- */
-const seedAndRestart = async (sql: string) => {
-  const state = readLiveHarnessState()
-  const before = readGeneration(state)
-  writeControlFile(state, CONTROL_FILES.seedSql, sql)
-  writeControlFile(state, CONTROL_FILES.restart, "1")
-  await expect
-    .poll(() => readGeneration(state), { timeout: 60_000, intervals: [250] })
-    .toBeGreaterThan(before)
-  await expect
-    .poll(graphqlReachable, { timeout: 120_000, intervals: [500] })
-    .toBe(true)
-}
-
 const setClaudeMode = (mode: FakeClaudeMode) => {
   const state = readLiveHarnessState()
   writeControlFile(state, CONTROL_FILES.claudeMode, mode)
@@ -122,7 +90,7 @@ const seedClaudeHarnessDefault = async (buildModel: string) => {
       reviewThinkingLevel: null,
     },
   })
-  await seedAndRestart(
+  await seedLiveHarnessAndRestart(
     [
       "UPDATE config SET",
       "  selected_agent_backend = 'claude',",
@@ -165,7 +133,7 @@ When(
     })
     // Inherit the harness Agent Backend (NULL override) so the Repository's
     // Effective backend is Claude Code and its catalog is the global one.
-    await seedAndRestart(
+    await seedLiveHarnessAndRestart(
       [
         "UPDATE repository SET",
         "  selected_agent_backend = NULL,",
@@ -224,7 +192,7 @@ When(
   async () => {
     setClaudeMode("unauthenticated")
     // Restart with no seed: only the Agent Backend's readiness changed.
-    await seedAndRestart("")
+    await seedLiveHarnessAndRestart("")
   },
 )
 
