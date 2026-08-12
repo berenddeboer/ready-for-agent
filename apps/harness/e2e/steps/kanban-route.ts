@@ -192,6 +192,9 @@ Then("the add-repository blank slate is visible", async ({ page }) => {
   await expect(
     page.getByRole("region", { name: "Add a repository" }),
   ).toBeVisible()
+  await expect(
+    page.getByRole("region", { name: "Configured repositories" }),
+  ).toHaveCount(0)
 })
 
 Then("the Harness settings dialog is visible", async ({ page }) => {

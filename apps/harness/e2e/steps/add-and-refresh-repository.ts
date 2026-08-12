@@ -3,6 +3,10 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { expect } from "@playwright/test"
 import {
+  ensureNoConfiguredRepositories,
+  graphqlRequest,
+} from "../support/clear-repositories.ts"
+import {
   type FixtureForge,
   cloneFixtureRepository,
   gitlabFixtureSpec,
@@ -40,129 +44,6 @@ const sentinelFor = (forge: FixtureForge) =>
         number: GITHUB_SENTINEL_ISSUE_NUMBER,
         title: GITHUB_SENTINEL_ISSUE_TITLE,
       }
-
-class GraphQlRequestError extends Error {
-  readonly codes: ReadonlyArray<string>
-
-  constructor(messages: ReadonlyArray<string>, codes: ReadonlyArray<string>) {
-    super(`GraphQL errors: ${messages.join("; ")}`)
-    this.name = "GraphQlRequestError"
-    this.codes = codes
-  }
-}
-
-const graphqlRequest = async <T>(
-  query: string,
-  variables?: Record<string, unknown>,
-): Promise<T> => {
-  const response = await fetch(E2E_GRAPHQL_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ query, variables }),
-  })
-  if (!response.ok) {
-    throw new Error(`GraphQL HTTP ${response.status}: ${await response.text()}`)
-  }
-  const payload = (await response.json()) as {
-    data?: T
-    errors?: ReadonlyArray<{
-      message: string
-      extensions?: { code?: string }
-    }>
-  }
-  if (payload.errors?.length) {
-    throw new GraphQlRequestError(
-      payload.errors.map((e) => e.message),
-      payload.errors.map((e) => e.extensions?.code ?? ""),
-    )
-  }
-  if (!payload.data) {
-    throw new Error("GraphQL response missing data")
-  }
-  return payload.data
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-
-const isRunningStepRemoveError = (error: unknown): boolean => {
-  if (error instanceof GraphQlRequestError) {
-    if (error.codes.includes("REPOSITORY_HAS_RUNNING_STEP")) {
-      return true
-    }
-  }
-  const message = error instanceof Error ? error.message : String(error)
-  return (
-    /REPOSITORY_HAS_RUNNING_STEP/i.test(message) ||
-    /has a running Step Run/i.test(message) ||
-    /RepositoryHasRunningStep/i.test(message)
-  )
-}
-
-/**
- * Clear leftover Repositories so multi-scenario e2e shares one Harness process.
- * Retries briefly when remove is blocked by a still-running Step Run.
- */
-const ensureNoConfiguredRepositories = async () => {
-  const deadline = Date.now() + 30_000
-  let attempt = 0
-  while (true) {
-    attempt += 1
-    const listed = await graphqlRequest<{
-      repositories: ReadonlyArray<{ id: string }>
-    }>(`query { repositories { id } }`)
-    if (listed.repositories.length === 0) {
-      return
-    }
-
-    let blockedByRunningStep = false
-    const failures: string[] = []
-    for (const repository of listed.repositories) {
-      try {
-        await graphqlRequest(
-          `mutation RemoveRepository($repositoryId: ID!) {
-            removeRepository(repositoryId: $repositoryId)
-          }`,
-          { repositoryId: repository.id },
-        )
-      } catch (error) {
-        if (isRunningStepRemoveError(error)) {
-          blockedByRunningStep = true
-          failures.push(error instanceof Error ? error.message : String(error))
-          continue
-        }
-        throw error
-      }
-    }
-
-    // When no remove was classified as running-step blocked, re-list and return
-    // only if empty; otherwise retry until the deadline (blocked path re-lists
-    // at the top of the next loop iteration).
-    if (!blockedByRunningStep) {
-      const remaining = await graphqlRequest<{
-        repositories: ReadonlyArray<{ id: string }>
-      }>(`query { repositories { id } }`)
-      if (remaining.repositories.length === 0) {
-        return
-      }
-    }
-
-    if (Date.now() >= deadline) {
-      throw new Error(
-        [
-          "Could not clear configured Repositories",
-          blockedByRunningStep
-            ? "because a Step Run is still running"
-            : "after remove mutations",
-          `(after ${attempt} attempts over ~30s).`,
-          "Multi-scenario e2e shares one Harness process; wait for refresh/work",
-          "to finish, or restart the e2e webServer.",
-          ...failures,
-        ].join(" "),
-      )
-    }
-    await sleep(500)
-  }
-}
 
 /**
  * Ensure no default build model so first-run Settings auto-opens on the next
@@ -283,46 +164,11 @@ Given("the Harness is empty with first-run settings required", async () => {
   await ensureFirstRunSettingsRequired()
 })
 
-Given("the Harness has no configured Repositories", async ({ page }) => {
+Given("the Harness has no configured Repositories", async () => {
   test.setTimeout(SCENARIO_TIMEOUT_MS)
+  // GraphQL-only setup: do not tour home/Repos blank slates here. The Kanban
+  // scenario whose assertion *is* that empty UI still checks it.
   await ensureNoConfiguredRepositories()
-  // Zero repos: home shows the add-repo blank slate (not an empty kanban board).
-  // First-run Settings may auto-open; dismiss so blank-slate assertions resolve.
-  await page.goto("/")
-  await dismissFirstRunSettingsIfPresent(page)
-  await expect(
-    page.getByRole("heading", { name: "No repositories configured" }),
-  ).toBeVisible()
-  await expect(
-    page.getByRole("region", { name: "Add a repository" }),
-  ).toBeVisible()
-  await expect(
-    page.getByRole("region", { name: "Lifecycle pipeline" }),
-  ).toHaveCount(0)
-  await expect(
-    page.getByRole("region", { name: "Committed pull requests" }),
-  ).toHaveCount(0)
-  // Jobs switcher stays available on the blank slate (Pipeline | Repos | Completed).
-  await expect(
-    page
-      .getByRole("navigation", { name: "Jobs" })
-      .getByRole("link", { name: "Repos" }),
-  ).toBeVisible()
-  await expect(
-    page.getByRole("region", { name: "Configured repositories" }),
-  ).toHaveCount(0)
-
-  await page.goto("/repos")
-  await dismissFirstRunSettingsIfPresent(page)
-  await expect(
-    page.getByRole("heading", { name: "No repositories configured" }),
-  ).toBeVisible()
-  await expect(
-    page.getByRole("region", { name: "Configured repositories" }),
-  ).toHaveCount(0)
-  await expect(
-    page.getByRole("region", { name: "Add a repository" }),
-  ).toBeVisible()
 })
 
 Given("the End-to-End Fixture Repository is checked out", async ({ world }) => {
