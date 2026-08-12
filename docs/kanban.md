@@ -180,7 +180,12 @@ pipeline` region.
 
 ## Data And Implementation Boundaries
 
-The board should reuse existing Harness data boundaries:
+The board and operator CLI share one Harness-owned Kanban projection (ADR
+0051). The projection owns the source windows, lane assignment, and ordering;
+the board remains a visual client of that projection rather than a second
+workflow.
+
+The board should reuse existing Harness data boundaries behind that projection:
 
 - Repository list from the existing repository query.
 - Existing working, failed, and completed Work Item queries.
@@ -188,13 +193,14 @@ The board should reuse existing Harness data boundaries:
 - Existing Work Item controls, lifecycle-status presentation, Session usage
   dialog, copy control, and repository/action mutations.
 
-The board should deduplicate Work Items assembled from the three list queries
-by Work Item ID before assigning lanes. It should not create an additional
-polling loop or a new server-side API solely for board placement.
+The projection should deduplicate Work Items assembled from the three list
+queries by Work Item ID before assigning lanes. The board should not create an
+additional polling loop.
 
-Keep the lane classifier close to the board module and cover it with focused
-tests. It is a presentation policy that will need deliberate updates if the
-lifecycle gains new states.
+Keep lifecycle-chip presentation helpers close to the board module. Keep the
+lane classifier in the server projection and cover it with focused tests; it
+is a presentation policy that needs deliberate updates if the lifecycle gains
+new states.
 
 ## Route Seam
 
@@ -208,7 +214,7 @@ Home (`/`) is a thin composition layer:
 
 Shared pieces:
 
-- `pipelineLaneFor(workItem)` and lane definitions.
+- Server-owned Kanban lane projection and shared lane definitions.
 - Board controls and responsive lane selector in `kanban-board.tsx`.
 - Ticket component that composes existing Work Item actions and status UI.
 
@@ -225,7 +231,8 @@ Shared pieces:
 - Zero repositories → blank slate on `/`; one or more → board on `/`.
 - Desktop shows all six lanes; mobile shows a selected lane without horizontal
   page overflow.
-- No new polling or GraphQL contract is introduced.
+- The board consumes the Harness-owned Kanban GraphQL contract without adding
+  another polling loop.
 - Lane classifier, tab keyboard behavior, filtering, and mobile lane selection
   are covered by tests.
 - Kanban tickets collapse earlier-lane lifecycle chips into per-lane summary
