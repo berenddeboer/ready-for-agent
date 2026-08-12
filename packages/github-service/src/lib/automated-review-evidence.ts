@@ -5,6 +5,9 @@
  * reviewer job or step, or a comment/review from a recognized automated
  * reviewer. Workflow or job names alone (including names containing "review")
  * and skipped or zero-step reviewers are not positive evidence.
+ *
+ * Visibly incomplete Automated Review Output is classified from the latest
+ * correlated recognized-reviewer comment body (ADR 0027 amendment / #971).
  */
 
 /** Telemetry token for green-only fast-path handoffs with no review evidence. */
@@ -12,8 +15,17 @@ export const GREEN_NO_REVIEW_EVIDENCE_REASON =
   "green-no-review-evidence" as const
 
 /**
+ * Stable incomplete-signature id for finished-banner + unchecked substantive
+ * progress task (and/or missing synthesis). Scoped with work item, head SHA,
+ * and workflow run for the one-retry early circuit breaker.
+ */
+export const INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE =
+  "finished_banner_unchecked_substantive_task" as const
+
+/**
  * Structured observation of whether a green Status Check Handoff has positive
- * or ambiguous automated-review evidence that still needs Investigate.
+ * or ambiguous automated-review evidence that still needs Investigate, or
+ * harness-classifiable incomplete Automated Review Output.
  */
 export type AutomatedReviewEvidenceObservation =
   | {
@@ -26,6 +38,15 @@ export type AutomatedReviewEvidenceObservation =
         | "executed_reviewer_job"
         | "review_comment"
         | "pull_request_review"
+      readonly detail: string
+    }
+  | {
+      readonly _tag: "incomplete"
+      readonly signature: typeof INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE
+      /** Workflow run id from the comment job link and/or Actions job, when known. */
+      readonly workflowRunId: number | null
+      /** Operator-facing workflow/check identity (not an implement Agent Model). */
+      readonly workflowName: string | null
       readonly detail: string
     }
   | {
@@ -172,4 +193,101 @@ export const jobHasExecutedReviewerSteps = (
 export type AutomatedReviewEvidenceCheck = {
   readonly externalId: string
   readonly name: string
+}
+
+/** Claude / recognized-reviewer finished banner (terminal attempt claimed done). */
+const FINISHED_BANNER_PATTERN =
+  /(?:\*\*)?Claude finished\b|\bfinished\s+@[\w-]+(?:\[bot\])?'s\s+task\b/i
+
+/**
+ * Unchecked substantive progress tasks that mean the review never synthesized
+ * or posted findings (strong incompleteness evidence when paired with a
+ * finished banner).
+ */
+const UNCHECKED_SUBSTANTIVE_TASK_PATTERN =
+  /-\s*\[\s*\]\s*(?:Aggregate findings(?:\s+and\s+post\s+review)?|Synthesize findings|Post review|Run two-axis review)\b/i
+
+/** Any unchecked Markdown task (secondary signal with finished banner). */
+const UNCHECKED_MARKDOWN_TASK_PATTERN = /-\s*\[\s*\]\s+\S/
+
+/**
+ * Heuristic markers of a completed review synthesis section. Absence with a
+ * finished banner and unchecked progress is strong incompleteness evidence.
+ */
+const FINAL_SYNTHESIS_PATTERN =
+  /(?:##\s*(?:Findings|Summary|Review|Verdict)|Standards?\s+review|Spec\s+review|overall\s+assessment|READY_FOR_AGENT_RESULT)/i
+
+/**
+ * Classification of a recognized automated-reviewer comment body.
+ * Discriminated so incomplete always carries a stable signature.
+ */
+export type IncompleteAutomatedReviewClassification =
+  | { readonly _tag: "complete" }
+  | {
+      readonly _tag: "incomplete"
+      readonly signature: typeof INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE
+    }
+
+/**
+ * Classify whether a recognized automated-reviewer comment body is a present
+ * but visibly incomplete Automated Review Output.
+ *
+ * Strong pattern: finished banner + unchecked Aggregate-style substantive task
+ * and/or finished banner + unchecked progress without final synthesis.
+ * Arbitrary Markdown checkboxes in unrelated comments are not considered.
+ */
+export const classifyIncompleteAutomatedReviewOutput = (
+  body: string,
+): IncompleteAutomatedReviewClassification => {
+  if (body.trim() === "") {
+    return { _tag: "complete" }
+  }
+  const hasFinishedBanner = FINISHED_BANNER_PATTERN.test(body)
+  if (!hasFinishedBanner) {
+    return { _tag: "complete" }
+  }
+  if (UNCHECKED_SUBSTANTIVE_TASK_PATTERN.test(body)) {
+    return {
+      _tag: "incomplete",
+      signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+    }
+  }
+  if (
+    UNCHECKED_MARKDOWN_TASK_PATTERN.test(body) &&
+    !FINAL_SYNTHESIS_PATTERN.test(body)
+  ) {
+    return {
+      _tag: "incomplete",
+      signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+    }
+  }
+  return { _tag: "complete" }
+}
+
+/**
+ * Extract a GitHub Actions workflow run id from a review comment body
+ * (e.g. `.../actions/runs/31549139160`).
+ */
+export const extractWorkflowRunIdFromReviewComment = (
+  body: string,
+): number | null => {
+  const match = body.match(/actions\/runs\/(\d+)/i)
+  if (match?.[1] === undefined) {
+    return null
+  }
+  const id = Number(match[1])
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+/**
+ * Operator-facing workflow identity from a check name such as
+ * `Claude Code Review/claude-review` → `Claude Code Review`.
+ */
+export const workflowNameFromCheckName = (name: string): string => {
+  const trimmed = name.trim()
+  if (trimmed === "") {
+    return trimmed
+  }
+  const slash = trimmed.indexOf("/")
+  return slash > 0 ? trimmed.slice(0, slash).trim() : trimmed
 }

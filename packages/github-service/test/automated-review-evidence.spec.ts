@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest"
 import {
   GREEN_NO_REVIEW_EVIDENCE_REASON,
+  INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+  classifyIncompleteAutomatedReviewOutput,
+  extractWorkflowRunIdFromReviewComment,
   inspectReviewerJobSteps,
   isRecognizedAutomatedReviewerLogin,
   isRecognizedAutomatedReviewerName,
   jobHasExecutedReviewerSteps,
+  workflowNameFromCheckName,
 } from "../src/lib/automated-review-evidence.js"
 
 describe("automated review evidence recognition", () => {
@@ -76,6 +80,66 @@ describe("automated review evidence recognition", () => {
     expect(
       jobHasExecutedReviewerSteps({ conclusion: "success", steps: [] }),
     ).toBe(false)
+  })
+
+  it("classifies finished-banner + unchecked Aggregate task as incomplete", () => {
+    const body = `**Claude finished @berenddeboer's task in 2m 35s** —— [View job](https://github.com/processfocus/monorepo/actions/runs/31549139160)
+
+---
+### Claude is reviewing this PR
+
+- [x] Gather context
+- [x] Launch sub-agents
+- [ ] Aggregate findings and post review
+
+Both sub-agents are running now.`
+    expect(classifyIncompleteAutomatedReviewOutput(body)).toEqual({
+      _tag: "incomplete",
+      signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+    })
+    expect(extractWorkflowRunIdFromReviewComment(body)).toBe(31549139160)
+  })
+
+  it("does not treat a completed review body as incomplete", () => {
+    const body = `**Claude finished @user's task**
+
+## Findings
+Standards review: clean.
+Spec review: matches issue.
+
+- [x] Aggregate findings and post review
+`
+    expect(classifyIncompleteAutomatedReviewOutput(body)).toEqual({
+      _tag: "complete",
+    })
+  })
+
+  it("does not treat arbitrary unchecked boxes without a finished banner as incomplete", () => {
+    expect(
+      classifyIncompleteAutomatedReviewOutput(
+        "- [ ] Aggregate findings and post review\n- [ ] something else",
+      ),
+    ).toEqual({ _tag: "complete" })
+  })
+
+  it("classifies finished banner + unchecked progress without synthesis as incomplete", () => {
+    const body = `**Claude finished @user's task**
+
+### Claude is reviewing this PR
+- [x] Gather context
+- [ ] Pin fixed point and confirm diff
+`
+    expect(classifyIncompleteAutomatedReviewOutput(body)).toEqual({
+      _tag: "incomplete",
+      signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+    })
+  })
+
+  it("derives workflow identity from check names", () => {
+    expect(workflowNameFromCheckName("Claude Code Review/claude-review")).toBe(
+      "Claude Code Review",
+    )
+    expect(workflowNameFromCheckName("CodeRabbit")).toBe("CodeRabbit")
   })
 
   it("treats non-empty steps with missing conclusions as steps unavailable", () => {

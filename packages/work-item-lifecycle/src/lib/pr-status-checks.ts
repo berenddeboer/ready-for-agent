@@ -6,10 +6,13 @@ import { DbService } from "@ready-for-agent/db-service"
 import {
   GREEN_NO_REVIEW_EVIDENCE_REASON,
   GitHubService,
+  INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
   type PrStatusCheckDiagnostic,
   type PullRequestCheckStatus,
   type TerminalPrStatusCheck,
   isGitHubThrottledError,
+  isRecognizedAutomatedReviewerName,
+  workflowNameFromCheckName,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
@@ -114,10 +117,44 @@ export type PrStatusCheckInvestigationResult =
 /** Autonomous whole-review workflow reruns allowed after the initial attempt. */
 export const AUTOMATED_REVIEW_RERUN_LIMIT = 3
 
+/**
+ * Autonomous whole-workflow reruns allowed for harness-classified incomplete
+ * Automated Review Output (finished banner + unchecked substantive task) on the
+ * same (work item, head SHA, workflow run). One recovery attempt only.
+ */
+export const AUTOMATED_REVIEW_INCOMPLETE_RERUN_LIMIT = 1
+
+/**
+ * Format an operator-facing automated-review workflow/check identity so Needs
+ * Human copy cannot be read as blaming the Work Item implement Agent Model.
+ */
+export const formatAutomatedReviewWorkflowIdentity = (
+  workflowName: string | null,
+  workflowRunId?: number,
+): string => {
+  const name = workflowName?.trim()
+  if (name !== undefined && name !== "") {
+    // Already a workflow-run fallback phrase — do not wrap in quotes.
+    if (/^workflow run \d+$/i.test(name)) {
+      return name
+    }
+    return `workflow "${name}"`
+  }
+  if (workflowRunId !== undefined) {
+    return `workflow run ${workflowRunId}`
+  }
+  return "workflow"
+}
+
 export const automatedReviewRerunLimitReason = (
-  workflowLabel: string,
+  workflowIdentity: string,
 ): string =>
-  `Automated review rerun limit reached (${AUTOMATED_REVIEW_RERUN_LIMIT}) for ${workflowLabel}; inspect or run the review manually, then Retry checks.`
+  `Automated review ${workflowIdentity} hit the autonomous rerun limit (${AUTOMATED_REVIEW_RERUN_LIMIT}); inspect or run that GitHub review workflow or check manually, then Retry checks.`
+
+export const automatedReviewIncompleteRerunLimitReason = (
+  workflowIdentity: string,
+): string =>
+  `Automated review ${workflowIdentity} produced the same incomplete review output after one recovery rerun; inspect or run that GitHub review workflow or check manually, then Retry checks.`
 
 interface ObservedPrStatusCheckRow {
   readonly id: string
@@ -409,20 +446,39 @@ const hasInvestigationResultLine = (output: string): boolean =>
     .split("\n")
     .some((line) => /^READY_FOR_AGENT_RESULT:/i.test(line.trim()))
 
+/**
+ * Count durable review-rerun permits for a budget lane.
+ * - `signature` set: incomplete-signature lane (one-retry circuit breaker).
+ * - `signature` null: general agent-reported RERUN_REVIEW lane only
+ *   (`signature IS NULL`), so incomplete recovery does not consume the
+ *   three-rerun Investigate budget (ADR 0027).
+ */
 const countAutomatedReviewReruns = (
   workItemId: string,
   headSha: string,
   workflowRunId: number,
+  signature: string | null,
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = (yield* sql.unsafe(
-      `SELECT COUNT(*) AS count FROM automated_review_rerun
-       WHERE work_item_id = ?
-         AND head_sha = ?
-         AND workflow_run_id = ?`,
-      [workItemId, headSha, String(workflowRunId)],
-    )) as readonly { readonly count: number }[]
+    const rows =
+      signature === null
+        ? ((yield* sql.unsafe(
+            `SELECT COUNT(*) AS count FROM automated_review_rerun
+             WHERE work_item_id = ?
+               AND head_sha = ?
+               AND workflow_run_id = ?
+               AND signature IS NULL`,
+            [workItemId, headSha, String(workflowRunId)],
+          )) as readonly { readonly count: number }[])
+        : ((yield* sql.unsafe(
+            `SELECT COUNT(*) AS count FROM automated_review_rerun
+             WHERE work_item_id = ?
+               AND head_sha = ?
+               AND workflow_run_id = ?
+               AND signature = ?`,
+            [workItemId, headSha, String(workflowRunId), signature],
+          )) as readonly { readonly count: number }[])
     return Number(rows[0]?.count ?? 0)
   })
 
@@ -431,14 +487,22 @@ const reserveAutomatedReviewRerun = (
   headSha: string,
   workflowRunId: number,
   workflowName: string | null,
+  options?: {
+    readonly limit?: number
+    /** Null = general agent budget; set = incomplete-signature budget. */
+    readonly signature?: string | null
+  },
 ) =>
   Effect.gen(function* () {
+    const limit = options?.limit ?? AUTOMATED_REVIEW_RERUN_LIMIT
+    const signature = options?.signature ?? null
     const used = yield* countAutomatedReviewReruns(
       workItemId,
       headSha,
       workflowRunId,
+      signature,
     )
-    if (used >= AUTOMATED_REVIEW_RERUN_LIMIT) {
+    if (used >= limit) {
       return { _tag: "exhausted" as const }
     }
     const sql = yield* SqlClient.SqlClient
@@ -447,9 +511,18 @@ const reserveAutomatedReviewRerun = (
     yield* sql.unsafe(
       `INSERT INTO automated_review_rerun (
          id, work_item_id, head_sha, workflow_run_id, workflow_name,
-         status, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)`,
-      [id, workItemId, headSha, String(workflowRunId), workflowName, now, now],
+         signature, status, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?, ?)`,
+      [
+        id,
+        workItemId,
+        headSha,
+        String(workflowRunId),
+        workflowName,
+        signature,
+        now,
+        now,
+      ],
     )
     return { _tag: "reserved" as const, id }
   })
@@ -729,6 +802,135 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
             reasonNote: GREEN_NO_REVIEW_EVIDENCE_REASON,
           } satisfies PrStatusCheckInvestigationResult
         }
+        // Harness-classified incomplete Automated Review Output: at most one
+        // whole-workflow recovery rerun for this (work item, head, run), then
+        // Needs Human — without an Investigate Agent Turn rediscovery loop.
+        if (evidence._tag === "incomplete") {
+          const handledCheckIds = unhandled.map((check) => check.id)
+          const workflowName =
+            evidence.workflowName ??
+            (() => {
+              const recognized = unhandled.find((check) =>
+                isRecognizedAutomatedReviewerName(check.name),
+              )
+              return recognized !== undefined
+                ? workflowNameFromCheckName(recognized.name)
+                : null
+            })()
+          const workflowIdentity = formatAutomatedReviewWorkflowIdentity(
+            workflowName,
+            evidence.workflowRunId ?? undefined,
+          )
+          if (
+            evidence.workflowRunId === null ||
+            !Number.isSafeInteger(evidence.workflowRunId) ||
+            evidence.workflowRunId <= 0
+          ) {
+            // Harness already classified incompleteness; do not spend an
+            // Investigate Agent Turn rediscovering it without a run id.
+            yield* Effect.logInfo(
+              "Status Check Handoff: incomplete automated review without workflow run id",
+              {
+                workItemId: context.workItemId,
+                signature: evidence.signature,
+                detail: evidence.detail,
+              },
+            )
+            return {
+              _tag: "needs_human",
+              reason: `Automated review ${workflowIdentity} is visibly incomplete but the harness could not resolve a workflow run id to authorize recovery; inspect or run that GitHub review workflow or check manually, then Retry checks.`,
+              handledCheckIds,
+            } satisfies PrStatusCheckInvestigationResult
+          }
+          const status = yield* github
+            .getPullRequestCheckStatus(repository, branch)
+            .pipe(
+              Effect.mapError((cause) =>
+                isGitHubThrottledError(cause)
+                  ? cause
+                  : new PrStatusChecksContextError({
+                      message:
+                        "message" in cause &&
+                        typeof cause.message === "string" &&
+                        cause.message.trim() !== ""
+                          ? `Failed to resolve PR head for incomplete review recovery: ${cause.message}`
+                          : "Failed to resolve PR head for incomplete review recovery",
+                    }),
+              ),
+            )
+          const headSha = status.headSha
+          if (headSha === null || headSha.trim() === "") {
+            return yield* new PrStatusChecksUnresolvedError({
+              message:
+                "Manual fixing may be required. Could not resolve the pull request head SHA to authorize an incomplete automated review recovery rerun. Please fix or rerun the checks on GitHub, then click Retry checks.",
+            })
+          }
+          const permit = yield* reserveAutomatedReviewRerun(
+            context.workItemId,
+            headSha,
+            evidence.workflowRunId,
+            workflowName,
+            {
+              limit: AUTOMATED_REVIEW_INCOMPLETE_RERUN_LIMIT,
+              signature: evidence.signature,
+            },
+          )
+          if (permit._tag === "exhausted") {
+            yield* Effect.logInfo(
+              "Status Check Handoff: incomplete automated review recovery exhausted",
+              {
+                workItemId: context.workItemId,
+                headSha,
+                workflowRunId: evidence.workflowRunId,
+                signature: evidence.signature,
+              },
+            )
+            return {
+              _tag: "needs_human",
+              reason:
+                automatedReviewIncompleteRerunLimitReason(workflowIdentity),
+              handledCheckIds,
+            } satisfies PrStatusCheckInvestigationResult
+          }
+          const rerunResult = yield* Effect.result(
+            github.rerunWorkflowRun(repository, evidence.workflowRunId),
+          )
+          if (rerunResult._tag === "Failure") {
+            if (isGitHubThrottledError(rerunResult.failure)) {
+              yield* releaseThrottledAutomatedReviewRerun(permit.id)
+              return yield* rerunResult.failure
+            }
+            const detail =
+              "_tag" in rerunResult.failure &&
+              "message" in rerunResult.failure &&
+              typeof rerunResult.failure.message === "string" &&
+              rerunResult.failure.message.trim() !== ""
+                ? rerunResult.failure.message
+                : "GitHub workflow rerun failed"
+            return yield* new PrStatusChecksUnresolvedError({
+              message: `Manual fixing may be required. ${detail}. Please fix or rerun the checks on GitHub, then click Retry checks.`,
+            })
+          }
+          yield* completeAuthorizedReviewRerun(
+            permit.id,
+            context.workItemId,
+            headSha,
+          )
+          yield* Effect.logInfo(
+            "Status Check Handoff: authorized incomplete automated review recovery rerun",
+            {
+              workItemId: context.workItemId,
+              headSha,
+              workflowRunId: evidence.workflowRunId,
+              signature: evidence.signature,
+            },
+          )
+          return {
+            _tag: "checks_triggered",
+            handledCheckIds,
+            checkStartAnchorRecorded: true,
+          } satisfies PrStatusCheckInvestigationResult
+        }
         // Positive or ambiguous evidence falls through to the Agent Turn path.
       }
     }
@@ -899,9 +1101,10 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
           message: `${agentBackendLabel(context.agentBackend)} reported the GitHub-only RERUN_REVIEW outcome for a GitLab Repository`,
         })
       }
-      const workflowLabel =
-        investigation.workflowName ??
-        `workflow run ${investigation.workflowRunId}`
+      const workflowIdentity = formatAutomatedReviewWorkflowIdentity(
+        investigation.workflowName,
+        investigation.workflowRunId,
+      )
       const github = yield* GitHubService
       const status = yield* github
         .getPullRequestCheckStatus(repository, branch)
@@ -926,16 +1129,32 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
             "Manual fixing may be required. Could not resolve the pull request head SHA to authorize an automated review rerun. Please fix or rerun the checks on GitHub, then click Retry checks.",
         })
       }
+      // Incomplete-signature recovery already used this scope: do not allow
+      // further agent RERUN_REVIEW to burn past the one-retry incomplete cap.
+      const incompleteUsed = yield* countAutomatedReviewReruns(
+        context.workItemId,
+        headSha,
+        investigation.workflowRunId,
+        INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+      )
+      if (incompleteUsed >= AUTOMATED_REVIEW_INCOMPLETE_RERUN_LIMIT) {
+        return {
+          _tag: "needs_human",
+          reason: automatedReviewIncompleteRerunLimitReason(workflowIdentity),
+          handledCheckIds,
+        } satisfies PrStatusCheckInvestigationResult
+      }
       const permit = yield* reserveAutomatedReviewRerun(
         context.workItemId,
         headSha,
         investigation.workflowRunId,
         investigation.workflowName,
+        { signature: null },
       )
       if (permit._tag === "exhausted") {
         return {
           _tag: "needs_human",
-          reason: automatedReviewRerunLimitReason(workflowLabel),
+          reason: automatedReviewRerunLimitReason(workflowIdentity),
           handledCheckIds,
         } satisfies PrStatusCheckInvestigationResult
       }
