@@ -5,8 +5,8 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query"
 import { type FormEvent, Suspense, useEffect, useState } from "react"
-import { createClient } from "@ready-for-agent/graphql-client"
 import { Banner, BannerActionButton } from "./banner.js"
+import { createHarnessGraphqlClient } from "./harness-graphql.js"
 import { KanbanBoard } from "./kanban-board.js"
 import { openPullRequestCountsQueryKey } from "./refresh-open-pull-request-count-live.js"
 import {
@@ -16,9 +16,9 @@ import {
 import { repositoriesQuery } from "./repositories-query.js"
 import { cx, ui } from "./ui.js"
 
-const graphql = createClient({ url: "/graphql", batch: true })
+const graphql = createHarnessGraphqlClient({ batch: true })
 // Long-lived host folder dialog must not pin co-batched GraphQL operations.
-const graphqlUnbatched = createClient({ url: "/graphql", batch: false })
+const graphqlUnbatched = createHarnessGraphqlClient({ batch: false })
 
 export const addRepositoryCommandQuery = {
   queryKey: ["addRepositoryCommand"],

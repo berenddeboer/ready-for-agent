@@ -6,9 +6,9 @@
  * without importing the home route.
  */
 
-import { createClient } from "@ready-for-agent/graphql-client"
+import { createHarnessGraphqlClient } from "./harness-graphql.js"
 
-const graphql = createClient({ url: "/graphql", batch: true })
+const graphql = createHarnessGraphqlClient({ batch: true })
 
 type RepositoryCredential = {
   repositoryId: string
