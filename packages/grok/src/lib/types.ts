@@ -7,3 +7,11 @@ export interface GrokLayerOptions {
 
 /** Installed CLI effort values advertised on every catalog model when global. */
 export const GROK_DEFAULT_THINKING_LEVELS = ["high", "medium", "low"] as const
+
+/** CLI-advertised effort values for grok-4.6 only. Other Grok models omit xhigh. */
+export const GROK_4_6_THINKING_LEVELS = [
+  "xhigh",
+  "high",
+  "medium",
+  "low",
+] as const

@@ -285,10 +285,11 @@ describe("Grok AgentBackend adapter", () => {
         "cat <<'EOF'",
         "You are logged in with grok.com.",
         "",
-        "Default model: grok-4.5",
+        "Default model: grok-4.6",
         "",
         "Available models:",
-        "  * grok-4.5 (default)",
+        "  * grok-4.6 (default)",
+        "  - grok-4.5",
         "EOF",
       ].join("\n"),
       async (binary) => {
@@ -303,6 +304,10 @@ describe("Grok AgentBackend adapter", () => {
         )
         expect(result.backend).toEqual({ id: "grok", label: "Grok Build" })
         expect(result.models).toEqual([
+          {
+            id: "grok-4.6",
+            thinkingLevels: ["xhigh", "high", "medium", "low"],
+          },
           {
             id: "grok-4.5",
             thinkingLevels: ["high", "medium", "low"],
