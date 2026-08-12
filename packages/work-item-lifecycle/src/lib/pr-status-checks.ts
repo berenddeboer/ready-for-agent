@@ -154,7 +154,7 @@ export const automatedReviewRerunLimitReason = (
 export const automatedReviewIncompleteRerunLimitReason = (
   workflowIdentity: string,
 ): string =>
-  `Automated review ${workflowIdentity} produced the same incomplete review output after one recovery rerun; inspect or run that GitHub review workflow or check manually, then Retry checks.`
+  `Automated review ${workflowIdentity} is still incomplete after autonomous recovery was already used on this workflow run; inspect or run that GitHub review workflow or check manually, then Retry checks.`
 
 interface ObservedPrStatusCheckRow {
   readonly id: string
@@ -448,37 +448,46 @@ const hasInvestigationResultLine = (output: string): boolean =>
 
 /**
  * Count durable review-rerun permits for a budget lane.
- * - `signature` set: incomplete-signature lane (one-retry circuit breaker).
- * - `signature` null: general agent-reported RERUN_REVIEW lane only
- *   (`signature IS NULL`), so incomplete recovery does not consume the
- *   three-rerun Investigate budget (ADR 0027).
+ * - concrete signature id: that incomplete-signature lane only
+ * - `null`: general agent-reported RERUN_REVIEW lane only (`signature IS NULL`)
+ * - `"any"`: every permit on the scope (legacy null-signature agent reruns plus
+ *   incomplete-tagged ones), so the one-retry incomplete circuit breaker treats
+ *   prior recovery attempts as already spent
  */
 const countAutomatedReviewReruns = (
   workItemId: string,
   headSha: string,
   workflowRunId: number,
-  signature: string | null,
+  signature: string | null | "any",
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const rows =
-      signature === null
+      signature === "any"
         ? ((yield* sql.unsafe(
             `SELECT COUNT(*) AS count FROM automated_review_rerun
              WHERE work_item_id = ?
                AND head_sha = ?
-               AND workflow_run_id = ?
-               AND signature IS NULL`,
+               AND workflow_run_id = ?`,
             [workItemId, headSha, String(workflowRunId)],
           )) as readonly { readonly count: number }[])
-        : ((yield* sql.unsafe(
-            `SELECT COUNT(*) AS count FROM automated_review_rerun
+        : signature === null
+          ? ((yield* sql.unsafe(
+              `SELECT COUNT(*) AS count FROM automated_review_rerun
+             WHERE work_item_id = ?
+               AND head_sha = ?
+               AND workflow_run_id = ?
+               AND signature IS NULL`,
+              [workItemId, headSha, String(workflowRunId)],
+            )) as readonly { readonly count: number }[])
+          : ((yield* sql.unsafe(
+              `SELECT COUNT(*) AS count FROM automated_review_rerun
              WHERE work_item_id = ?
                AND head_sha = ?
                AND workflow_run_id = ?
                AND signature = ?`,
-            [workItemId, headSha, String(workflowRunId), signature],
-          )) as readonly { readonly count: number }[])
+              [workItemId, headSha, String(workflowRunId), signature],
+            )) as readonly { readonly count: number }[])
     return Number(rows[0]?.count ?? 0)
   })
 
@@ -489,18 +498,25 @@ const reserveAutomatedReviewRerun = (
   workflowName: string | null,
   options?: {
     readonly limit?: number
-    /** Null = general agent budget; set = incomplete-signature budget. */
+    /**
+     * Null = general agent budget. Set = incomplete-signature budget; prior
+     * permits on this scope with any signature (including legacy null) count
+     * toward the one-retry incomplete limit.
+     */
     readonly signature?: string | null
   },
 ) =>
   Effect.gen(function* () {
     const limit = options?.limit ?? AUTOMATED_REVIEW_RERUN_LIMIT
     const signature = options?.signature ?? null
+    // Incomplete recovery: any prior whole-workflow rerun on this scope already
+    // spent the single recovery attempt (including agent RERUN_REVIEW rows from
+    // before harness body-parse tagged permits with the incomplete signature).
     const used = yield* countAutomatedReviewReruns(
       workItemId,
       headSha,
       workflowRunId,
-      signature,
+      signature === null ? null : "any",
     )
     if (used >= limit) {
       return { _tag: "exhausted" as const }
@@ -774,14 +790,24 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
             Effect.catch((cause) =>
               isGitHubThrottledError(cause)
                 ? Effect.fail(cause)
-                : Effect.succeed({
-                    _tag: "ambiguous" as const,
-                    reason:
+                : Effect.gen(function* () {
+                    const reason =
                       "message" in cause &&
                       typeof cause.message === "string" &&
                       cause.message.trim() !== ""
                         ? cause.message
-                        : "Failed to observe automated review evidence",
+                        : "Failed to observe automated review evidence"
+                    yield* Effect.logWarning(
+                      "Status Check Handoff: automated-review observation failed; treating as ambiguous",
+                      {
+                        workItemId: context.workItemId,
+                        reason,
+                      },
+                    )
+                    return {
+                      _tag: "ambiguous" as const,
+                      reason,
+                    }
                   }),
             ),
           )
@@ -1129,15 +1155,15 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
             "Manual fixing may be required. Could not resolve the pull request head SHA to authorize an automated review rerun. Please fix or rerun the checks on GitHub, then click Retry checks.",
         })
       }
-      // Incomplete-signature recovery already used this scope: do not allow
-      // further agent RERUN_REVIEW to burn past the one-retry incomplete cap.
-      const incompleteUsed = yield* countAutomatedReviewReruns(
+      // Incomplete-tagged recovery already used this scope: do not allow
+      // further agent RERUN_REVIEW past the one-retry incomplete cap.
+      const incompleteTaggedUsed = yield* countAutomatedReviewReruns(
         context.workItemId,
         headSha,
         investigation.workflowRunId,
         INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
       )
-      if (incompleteUsed >= AUTOMATED_REVIEW_INCOMPLETE_RERUN_LIMIT) {
+      if (incompleteTaggedUsed >= AUTOMATED_REVIEW_INCOMPLETE_RERUN_LIMIT) {
         return {
           _tag: "needs_human",
           reason: automatedReviewIncompleteRerunLimitReason(workflowIdentity),
