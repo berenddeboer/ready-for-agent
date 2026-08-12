@@ -4,8 +4,10 @@ import {
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
   buildCommandErrorDocument,
+  buildIntakeSuccessDocument,
   buildStatusSuccessDocument,
   encodeCompactJson,
+  intakeHasFailedResults,
   localGitErrorCode,
 } from "./cli-json.ts"
 import { describe, expect, test } from "bun:test"
@@ -122,6 +124,56 @@ describe("finite CLI JSON contract", () => {
       ],
     })
     expect(encodeCompactJson(doc)).toContain('"issuesReconciledAt":null')
+  })
+
+  test("intake success document discriminates CREATED and FAILED outcomes", () => {
+    const doc = buildIntakeSuccessDocument({
+      repository: {
+        id: "repo-1",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "owner/repo",
+      },
+      issuesReconciledAt: "2026-08-12T10:00:00.000Z",
+      results: [
+        {
+          issueNumber: 101,
+          title: "Implement feature",
+          url: "https://github.com/owner/repo/issues/101",
+          action: "IMPLEMENT_NOW",
+          outcome: "CREATED",
+          workItem: {
+            id: "wi-1",
+            state: "CREATE_WORKTREE",
+            status: "QUEUED",
+          },
+        },
+        {
+          issueNumber: 102,
+          title: "Blocked follow-up",
+          url: "https://github.com/owner/repo/issues/102",
+          action: "QUEUE",
+          outcome: "FAILED",
+          error: {
+            code: "UNFINISHED_WORK_ITEM_EXISTS",
+            message: "Issue #102 already has an unfinished Work Item",
+          },
+        },
+      ],
+    })
+    expect(doc.command).toBe("intake")
+    expect(doc.results).toHaveLength(2)
+    expect(doc.results[0]).toMatchObject({
+      outcome: "CREATED",
+      workItem: { id: "wi-1" },
+    })
+    expect(doc.results[1]).toMatchObject({
+      outcome: "FAILED",
+      error: { code: "UNFINISHED_WORK_ITEM_EXISTS" },
+    })
+    expect(intakeHasFailedResults(doc.results)).toBe(true)
+    expect(encodeCompactJson(doc)).toContain('"outcome":"CREATED"')
+    expect(encodeCompactJson(doc)).toContain('"outcome":"FAILED"')
   })
 
   test("command-level error document is versioned and nested under error", () => {

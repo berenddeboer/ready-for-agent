@@ -6,6 +6,35 @@ export type LiveE2eWorld = {
   cleanupFixtureCheckout?: () => void
   fixtureForge?: FixtureForge
   fixtureDisplayRepository?: string
+  /** Repository Intake CLI scenario state (issue #978). */
+  intakeCandidatesResult?: {
+    readonly status: number | null
+    readonly stdout: string
+    readonly stderr: string
+    readonly document: unknown
+  }
+  intakeCandidatesRerunResult?: {
+    readonly status: number | null
+    readonly stdout: string
+    readonly stderr: string
+    readonly document: unknown
+  }
+  intakeIntakeResult?: {
+    readonly status: number | null
+    readonly stdout: string
+    readonly stderr: string
+    readonly document: unknown
+  }
+  intakeStatusResult?: {
+    readonly status: number | null
+    readonly stdout: string
+    readonly stderr: string
+    readonly document: unknown
+  }
+  intakeCreatedWorkItemId?: string
+  /** All Work Item ids created by Intake in this scenario (for teardown). */
+  intakeCreatedWorkItemIds?: readonly string[]
+  intakeRepositoryId?: string
 }
 
 export const test = base.extend<{ world: LiveE2eWorld }>({

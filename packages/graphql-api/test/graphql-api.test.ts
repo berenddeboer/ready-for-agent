@@ -46,6 +46,7 @@ import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
   IssueNotFoundError,
   STEP_RUN_REASON,
+  UnfinishedWorkItemExistsError,
   WAITING_FOR_AGENT_TURN_MESSAGE,
   WorkItemLifecycle,
   type WorkItemLifecycleShape,
@@ -6406,6 +6407,600 @@ describe("GraphQL API", () => {
     expect(body.errors).toHaveLength(1)
     expect(body.errors[0]?.extensions.code).toBe("BUILD_MODEL_NOT_CONFIGURED")
     expect(body.errors[0]?.message).toContain("stale/model-not-in-catalog")
+  })
+
+  test("startRepositoryIntake empty candidates succeeds without preflight", async () => {
+    let requireAgentTurnsCalls = 0
+    let implementCalls = 0
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+        implementNow: () =>
+          Effect.sync(() => {
+            implementCalls += 1
+            return workItem
+          }),
+        queue: () =>
+          Effect.sync(() => {
+            implementCalls += 1
+            return workItem
+          }),
+      },
+      {
+        requireAgentTurnsAllowed: () =>
+          Effect.sync(() => {
+            requireAgentTurnsCalls += 1
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation StartIntake($repositoryId: ID!) {
+          startRepositoryIntake(repositoryId: $repositoryId) {
+            repository { id }
+            results {
+              __typename
+              ... on RepositoryIntakeCreated { issueNumber }
+              ... on RepositoryIntakeFailed { issueNumber }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        startRepositoryIntake: {
+          repository: { id: repository.id },
+          results: [],
+        },
+      },
+    })
+    expect(requireAgentTurnsCalls).toBe(0)
+    expect(implementCalls).toBe(0)
+  })
+
+  test("startRepositoryIntake processes candidates sequentially and routes Queue", async () => {
+    const actionable = {
+      ...issue,
+      id: "issue-actionable",
+      issueNumber: 12,
+      title: "Actionable leaf",
+      url: "https://github.com/acme/widgets/issues/12",
+      blockedBy: [],
+    }
+    const blocked = {
+      ...issue,
+      id: "issue-blocked",
+      issueNumber: 5,
+      title: "Blocked leaf",
+      url: "https://github.com/acme/widgets/issues/5",
+      blockedBy: [
+        {
+          issueNumber: 1,
+          issueUrl: "https://github.com/acme/widgets/issues/1",
+        },
+      ],
+    }
+    const callOrder: string[] = []
+    const createdNow = {
+      ...workItem,
+      id: "wi-implement-12",
+      issueNumber: 12,
+      issueTitle: actionable.title,
+      waitingForBlockers: false,
+      holdsWorkerSlot: true,
+    } as WorkItemRecord
+    const createdQueue = {
+      ...workItem,
+      id: "wi-queue-5",
+      issueNumber: 5,
+      issueTitle: blocked.title,
+      waitingForBlockers: true,
+      holdsWorkerSlot: false,
+      waitingSince: null,
+      stepRuns: [],
+    } as WorkItemRecord
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([actionable, blocked]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+        implementNow: (repositoryId, issueNumber) =>
+          Effect.sync(() => {
+            callOrder.push(`implementNow:${repositoryId}:${issueNumber}`)
+            return createdNow
+          }),
+        queue: (repositoryId, issueNumber) =>
+          Effect.sync(() => {
+            callOrder.push(`queue:${repositoryId}:${issueNumber}`)
+            return createdQueue
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation StartIntake($repositoryId: ID!) {
+          startRepositoryIntake(repositoryId: $repositoryId) {
+            repository { id projectPath }
+            results {
+              __typename
+              ... on RepositoryIntakeCreated {
+                issueNumber
+                title
+                url
+                action
+                workItem { id state status }
+              }
+              ... on RepositoryIntakeFailed {
+                issueNumber
+                error { code message }
+              }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    // IMPLEMENT_NOW candidates first (issue 12), then QUEUE (issue 5).
+    expect(callOrder).toEqual([
+      `implementNow:${repository.id}:12`,
+      `queue:${repository.id}:5`,
+    ])
+    expect(await response.json()).toEqual({
+      data: {
+        startRepositoryIntake: {
+          repository: {
+            id: repository.id,
+            projectPath: repository.projectPath,
+          },
+          results: [
+            {
+              __typename: "RepositoryIntakeCreated",
+              issueNumber: 12,
+              title: "Actionable leaf",
+              url: "https://github.com/acme/widgets/issues/12",
+              action: "IMPLEMENT_NOW",
+              workItem: {
+                id: createdNow.id,
+                state: "CREATE_WORKTREE",
+                status: "RUNNING",
+              },
+            },
+            {
+              __typename: "RepositoryIntakeCreated",
+              issueNumber: 5,
+              title: "Blocked leaf",
+              url: "https://github.com/acme/widgets/issues/5",
+              action: "QUEUE",
+              workItem: {
+                id: createdQueue.id,
+                state: "CREATE_WORKTREE",
+                status: "WAITING_FOR_BLOCKERS",
+              },
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("startRepositoryIntake continues after candidate-local failure", async () => {
+    const first = {
+      ...issue,
+      id: "issue-first",
+      issueNumber: 10,
+      title: "First actionable",
+      url: "https://github.com/acme/widgets/issues/10",
+      blockedBy: [],
+    }
+    const second = {
+      ...issue,
+      id: "issue-second",
+      issueNumber: 11,
+      title: "Second actionable",
+      url: "https://github.com/acme/widgets/issues/11",
+      blockedBy: [],
+    }
+    const createdSecond = {
+      ...workItem,
+      id: "wi-second",
+      issueNumber: 11,
+      issueTitle: second.title,
+    } as WorkItemRecord
+    const callOrder: number[] = []
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([first, second]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+        implementNow: (_repositoryId, issueNumber) =>
+          Effect.gen(function* () {
+            callOrder.push(issueNumber)
+            if (issueNumber === 10) {
+              return yield* new UnfinishedWorkItemExistsError({
+                repositoryId: repository.id,
+                issueNumber,
+                workItemId: "wi-existing",
+              })
+            }
+            return createdSecond
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation StartIntake($repositoryId: ID!) {
+          startRepositoryIntake(repositoryId: $repositoryId) {
+            results {
+              __typename
+              ... on RepositoryIntakeCreated {
+                issueNumber
+                workItem { id }
+              }
+              ... on RepositoryIntakeFailed {
+                issueNumber
+                error { code message }
+              }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(callOrder).toEqual([10, 11])
+    expect(await response.json()).toEqual({
+      data: {
+        startRepositoryIntake: {
+          results: [
+            {
+              __typename: "RepositoryIntakeFailed",
+              issueNumber: 10,
+              error: {
+                code: "UNFINISHED_WORK_ITEM_EXISTS",
+                message: `Issue #10 already has an unfinished Work Item`,
+              },
+            },
+            {
+              __typename: "RepositoryIntakeCreated",
+              issueNumber: 11,
+              workItem: { id: createdSecond.id },
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("startRepositoryIntake stops on operation-level failure after earlier success", async () => {
+    const first = {
+      ...issue,
+      id: "issue-first",
+      issueNumber: 20,
+      title: "First",
+      url: "https://github.com/acme/widgets/issues/20",
+      blockedBy: [],
+    }
+    const second = {
+      ...issue,
+      id: "issue-second",
+      issueNumber: 21,
+      title: "Second",
+      url: "https://github.com/acme/widgets/issues/21",
+      blockedBy: [],
+    }
+    const createdFirst = {
+      ...workItem,
+      id: "wi-first",
+      issueNumber: 20,
+      issueTitle: first.title,
+    } as WorkItemRecord
+    const callOrder: number[] = []
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([first, second]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+        implementNow: (_repositoryId, issueNumber) =>
+          Effect.gen(function* () {
+            callOrder.push(issueNumber)
+            if (issueNumber === 20) {
+              return createdFirst
+            }
+            return yield* new EnqueueError({
+              queue: "work-item-steps",
+              message: "queue infrastructure failed",
+            })
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation StartIntake($repositoryId: ID!) {
+          startRepositoryIntake(repositoryId: $repositoryId) {
+            results {
+              __typename
+              ... on RepositoryIntakeCreated { issueNumber workItem { id } }
+              ... on RepositoryIntakeFailed { issueNumber }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    // Second candidate never completed as result data — operation failed.
+    expect(callOrder).toEqual([20, 21])
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "queue infrastructure failed",
+          extensions: expect.objectContaining({
+            code: "ENQUEUE_ERROR",
+          }),
+        }),
+      ],
+    })
+  })
+
+  test("startRepositoryIntake runs one preflight before creating Work Items", async () => {
+    const actionable = {
+      ...issue,
+      issueNumber: 30,
+      blockedBy: [],
+    }
+    let requireAgentTurnsCalls = 0
+    let implementCalls = 0
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([actionable]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+        implementNow: () =>
+          Effect.sync(() => {
+            implementCalls += 1
+            return workItem
+          }),
+      },
+      {
+        requireAgentTurnsAllowed: () =>
+          Effect.sync(() => {
+            requireAgentTurnsCalls += 1
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation StartIntake($repositoryId: ID!) {
+          startRepositoryIntake(repositoryId: $repositoryId) {
+            results {
+              __typename
+              ... on RepositoryIntakeCreated { issueNumber }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(requireAgentTurnsCalls).toBe(1)
+    expect(implementCalls).toBe(1)
+    expect(await response.json()).toEqual({
+      data: {
+        startRepositoryIntake: {
+          results: [
+            {
+              __typename: "RepositoryIntakeCreated",
+              issueNumber: 30,
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("startRepositoryIntake works when Repository is Paused", async () => {
+    const actionable = {
+      ...issue,
+      issueNumber: 31,
+      blockedBy: [],
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([
+          {
+            ...repository,
+            paused: true,
+          },
+        ]),
+        listIssues: () => Effect.succeed([actionable]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+        implementNow: () => Effect.succeed(workItem),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation StartIntake($repositoryId: ID!) {
+          startRepositoryIntake(repositoryId: $repositoryId) {
+            repository { id paused }
+            results {
+              __typename
+              ... on RepositoryIntakeCreated { issueNumber }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        startRepositoryIntake: {
+          repository: { id: repository.id, paused: true },
+          results: [
+            {
+              __typename: "RepositoryIntakeCreated",
+              issueNumber: 31,
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("startRepositoryIntake aborts mid-sequence and preserves earlier Work Items", async () => {
+    const first = {
+      ...issue,
+      id: "issue-abort-1",
+      issueNumber: 40,
+      title: "First",
+      url: "https://github.com/acme/widgets/issues/40",
+      blockedBy: [],
+    }
+    const second = {
+      ...issue,
+      id: "issue-abort-2",
+      issueNumber: 41,
+      title: "Second",
+      url: "https://github.com/acme/widgets/issues/41",
+      blockedBy: [],
+    }
+    const createdFirst = {
+      ...workItem,
+      id: "wi-abort-first",
+      issueNumber: 40,
+    } as WorkItemRecord
+    let secondStarted = false
+    let secondCompleted = false
+    let implementCalls = 0
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([first, second]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+        implementNow: (_repositoryId, issueNumber) =>
+          Effect.gen(function* () {
+            implementCalls += 1
+            if (issueNumber === 40) {
+              return createdFirst
+            }
+            secondStarted = true
+            yield* Effect.sleep("30 seconds")
+            secondCompleted = true
+            return workItem
+          }),
+      },
+    )
+
+    const controller = new AbortController()
+    const fetchPromise = createGraphqlApi(runtime).fetch(
+      graphqlRequest(
+        {
+          query: `mutation StartIntake($repositoryId: ID!) {
+            startRepositoryIntake(repositoryId: $repositoryId) {
+              results {
+                __typename
+                ... on RepositoryIntakeCreated { issueNumber workItem { id } }
+              }
+            }
+          }`,
+          variables: { repositoryId: repository.id },
+        },
+        undefined,
+        controller.signal,
+      ),
+    )
+
+    await waitUntil(() => secondStarted)
+    // First Work Item already created before the second candidate blocks.
+    expect(implementCalls).toBe(2)
+    controller.abort()
+
+    await expect(fetchPromise).rejects.toMatchObject({
+      name: "AbortError",
+    })
+    await Bun.sleep(50)
+    expect(secondCompleted).toBe(false)
+  })
+
+  test("startRepositoryIntake rejects unknown repository", async () => {
+    let listIssuesCalls = 0
+    await runtime.dispose()
+    runtime = makeRuntime({
+      listIssues: () =>
+        Effect.sync(() => {
+          listIssuesCalls += 1
+          return []
+        }),
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation StartIntake($repositoryId: ID!) {
+          startRepositoryIntake(repositoryId: $repositoryId) {
+            results { __typename }
+          }
+        }`,
+        variables: { repositoryId: "repo-01DOESNOTEXIST00000000000" },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          extensions: expect.objectContaining({
+            code: "REPOSITORY_NOT_FOUND",
+          }),
+        }),
+      ],
+    })
+    expect(listIssuesCalls).toBe(0)
   })
 
   test("projects Waiting for blockers status and blocker copy", async () => {

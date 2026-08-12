@@ -71,6 +71,7 @@ import {
   repositoryCredential,
   withKeymaxxerMetadataTimeout,
 } from "./repository-credentials.js"
+import { startRepositoryIntake } from "./repository-intake.js"
 import { preflightRepositoryIntake } from "./repository-intake-preflight.js"
 import { toGraphQLError } from "./to-graphql-error.js"
 import { validateAgentModelsAgainstCatalog } from "./validate-agent-models.js"
@@ -1912,6 +1913,17 @@ export const createGraphqlApi = <R>(
                   args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.queue")),
+              context,
+            ),
+          startRepositoryIntake: async (
+            _parent: unknown,
+            args: IssuesArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              startRepositoryIntake(args.repositoryId).pipe(
+                Effect.withSpan("graphql-api.startRepositoryIntake"),
+              ),
               context,
             ),
           retryWorkItem: async (

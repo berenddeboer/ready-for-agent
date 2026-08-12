@@ -3,6 +3,7 @@ import { createClient } from "@ready-for-agent/graphql-client"
 import {
   type CanonicalRepositoryIdentity,
   type IntakeCandidateAction,
+  type IntakeIssueResult,
   type StatusLane,
   type StatusLaneId,
   type StatusWorkItemRow,
@@ -49,6 +50,17 @@ export type IntakeCandidatesResult = {
     readonly url: string
     readonly action: IntakeCandidateAction
   }[]
+}
+
+export type RepositoryIntakeResult = {
+  readonly repository: {
+    readonly id: string
+    readonly forge: string
+    readonly forgeHost: string
+    readonly projectPath: string
+    readonly issuesReconciledAt: string | null
+  }
+  readonly results: readonly IntakeIssueResult[]
 }
 
 export type KanbanStatusResult = {
@@ -161,6 +173,9 @@ export class GraphqlApi extends Context.Service<
     readonly intakeCandidates: (
       repositoryId: string,
     ) => Effect.Effect<IntakeCandidatesResult, GraphqlRequestFailed>
+    readonly startRepositoryIntake: (
+      repositoryId: string,
+    ) => Effect.Effect<RepositoryIntakeResult, GraphqlRequestFailed>
     readonly kanbanStatus: (
       repositoryId: string | null,
     ) => Effect.Effect<KanbanStatusResult, GraphqlRequestFailed>
@@ -286,6 +301,120 @@ export class GraphqlApi extends Context.Service<
         },
       )
 
+      const startRepositoryIntake = Effect.fn(
+        "GraphqlApi.startRepositoryIntake",
+      )(function* (repositoryId: string) {
+        return yield* Effect.tryPromise({
+          try: async () => {
+            const result = await client.mutation({
+              startRepositoryIntake: {
+                __args: { repositoryId },
+                repository: {
+                  id: true,
+                  forge: true,
+                  forgeHost: true,
+                  projectPath: true,
+                  issuesReconciledAt: true,
+                },
+                results: {
+                  on_RepositoryIntakeCreated: {
+                    __typename: true,
+                    issueNumber: true,
+                    title: true,
+                    url: true,
+                    action: true,
+                    workItem: {
+                      id: true,
+                      state: true,
+                      status: true,
+                    },
+                  },
+                  on_RepositoryIntakeFailed: {
+                    __typename: true,
+                    issueNumber: true,
+                    title: true,
+                    url: true,
+                    action: true,
+                    error: {
+                      code: true,
+                      message: true,
+                    },
+                  },
+                },
+              },
+            })
+            const payload = result.startRepositoryIntake
+            if (!payload) {
+              throw new Error("startRepositoryIntake returned null")
+            }
+            const results: IntakeIssueResult[] = []
+            for (const entry of payload.results ?? []) {
+              // Genql union selection uses on_* fragments; __typename discriminates.
+              if (
+                entry !== null &&
+                typeof entry === "object" &&
+                "__typename" in entry &&
+                entry.__typename === "RepositoryIntakeCreated" &&
+                "workItem" in entry &&
+                entry.workItem !== null &&
+                entry.workItem !== undefined
+              ) {
+                results.push({
+                  issueNumber: entry.issueNumber,
+                  title: entry.title,
+                  url: entry.url,
+                  action: entry.action,
+                  outcome: "CREATED",
+                  workItem: {
+                    id: entry.workItem.id,
+                    state: entry.workItem.state,
+                    status: entry.workItem.status,
+                  },
+                })
+                continue
+              }
+              if (
+                entry !== null &&
+                typeof entry === "object" &&
+                "__typename" in entry &&
+                entry.__typename === "RepositoryIntakeFailed" &&
+                "error" in entry &&
+                entry.error !== null &&
+                entry.error !== undefined
+              ) {
+                results.push({
+                  issueNumber: entry.issueNumber,
+                  title: entry.title,
+                  url: entry.url,
+                  action: entry.action,
+                  outcome: "FAILED",
+                  error: {
+                    code: entry.error.code,
+                    message: entry.error.message,
+                  },
+                })
+                continue
+              }
+              throw new Error(
+                "startRepositoryIntake returned an unexpected result shape",
+              )
+            }
+            return {
+              repository: {
+                id: payload.repository.id,
+                forge: payload.repository.forge,
+                forgeHost: payload.repository.forgeHost,
+                projectPath: payload.repository.projectPath,
+                issuesReconciledAt:
+                  payload.repository.issuesReconciledAt ?? null,
+              },
+              results,
+            }
+          },
+          catch: mapFailure,
+        })
+      })
+
       const kanbanStatus = Effect.fn("GraphqlApi.kanbanStatus")(function* (
         repositoryId: string | null,
       ) {
@@ -349,6 +478,7 @@ export class GraphqlApi extends Context.Service<
         addRepository,
         listRepositories,
         intakeCandidates,
+        startRepositoryIntake,
         kanbanStatus,
       }
     }),

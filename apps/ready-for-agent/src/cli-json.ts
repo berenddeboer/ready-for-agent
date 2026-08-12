@@ -7,7 +7,7 @@ export const CLI_SCHEMA_VERSION = 1 as const
  * Finite operator commands that emit one versioned JSON document.
  * Long-running `start` is intentionally excluded.
  */
-export type FiniteCommandName = "add" | "candidates" | "status"
+export type FiniteCommandName = "add" | "candidates" | "intake" | "status"
 
 /** Canonical Repository identity shared across finite CLI JSON documents. */
 export type CanonicalRepositoryIdentity = {
@@ -38,6 +38,42 @@ export type CandidatesSuccessDocument = {
     readonly url: string
     readonly action: IntakeCandidateAction
   }[]
+}
+
+type IntakeCreatedResult = {
+  readonly issueNumber: number
+  readonly title: string
+  readonly url: string
+  readonly action: IntakeCandidateAction
+  readonly outcome: "CREATED"
+  readonly workItem: {
+    readonly id: string
+    readonly state: string
+    readonly status: string
+  }
+}
+
+type IntakeFailedResult = {
+  readonly issueNumber: number
+  readonly title: string
+  readonly url: string
+  readonly action: IntakeCandidateAction
+  readonly outcome: "FAILED"
+  readonly error: {
+    readonly code: string
+    readonly message: string
+  }
+}
+
+/** Discriminated per-Issue Intake outcome for CLI JSON (CREATED | FAILED). */
+export type IntakeIssueResult = IntakeCreatedResult | IntakeFailedResult
+
+export type IntakeSuccessDocument = {
+  readonly schemaVersion: typeof CLI_SCHEMA_VERSION
+  readonly command: "intake"
+  readonly repository: CanonicalRepositoryIdentity
+  readonly issuesReconciledAt: string | null
+  readonly results: readonly IntakeIssueResult[]
 }
 
 export type StatusLaneId =
@@ -130,6 +166,23 @@ export const buildCandidatesSuccessDocument = (input: {
   candidates: input.candidates,
 })
 
+export const buildIntakeSuccessDocument = (input: {
+  readonly repository: CanonicalRepositoryIdentity
+  readonly issuesReconciledAt: string | null
+  readonly results: readonly IntakeIssueResult[]
+}): IntakeSuccessDocument => ({
+  schemaVersion: CLI_SCHEMA_VERSION,
+  command: "intake",
+  repository: input.repository,
+  issuesReconciledAt: input.issuesReconciledAt,
+  results: input.results,
+})
+
+/** True when any candidate-local failure is present (CLI exits nonzero). */
+export const intakeHasFailedResults = (
+  results: readonly IntakeIssueResult[],
+): boolean => results.some((result) => result.outcome === "FAILED")
+
 export const toCanonicalRepositoryIdentity = (repository: {
   readonly id: string
   readonly forge: string
@@ -165,7 +218,12 @@ export const buildCommandErrorDocument = (options: {
   },
 })
 
-const FiniteCommandNameSchema = Schema.Literals(["add", "candidates", "status"])
+const FiniteCommandNameSchema = Schema.Literals([
+  "add",
+  "candidates",
+  "intake",
+  "status",
+])
 
 /**
  * Expected finite-command failure. Marked as already reported so

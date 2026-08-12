@@ -495,6 +495,55 @@ type RepositoryIntakeCandidates {
   candidates: [IntakeCandidate!]!
 }
 
+"""
+Stable candidate-local failure for one Intake Issue. Operation-level failures
+(repository disappearance, infrastructure, cancellation, unexpected defects)
+are GraphQL errors and stop processing instead of appearing here.
+"""
+type RepositoryIntakeIssueError {
+  code: String!
+  message: String!
+}
+
+"""
+Successful Intake of one Issue through ordinary Implement Now or Queue.
+"""
+type RepositoryIntakeCreated {
+  issueNumber: Int!
+  title: String!
+  url: String!
+  action: RepositoryIntakeAction!
+  workItem: WorkItem!
+}
+
+"""
+Candidate-local Intake failure for one Issue. Processing continues with later
+candidates; earlier Work Items are not rolled back.
+"""
+type RepositoryIntakeFailed {
+  issueNumber: Int!
+  title: String!
+  url: String!
+  action: RepositoryIntakeAction!
+  error: RepositoryIntakeIssueError!
+}
+
+"""
+Per-Issue Intake outcome. Created and failed fields cannot coexist.
+"""
+union RepositoryIntakeIssueResult =
+  | RepositoryIntakeCreated
+  | RepositoryIntakeFailed
+
+"""
+Best-effort sequential Repository Intake result. Reclassifies current candidates
+at mutation time; does not accept candidate input or a plan token.
+"""
+type RepositoryIntakeResult {
+  repository: Repository!
+  results: [RepositoryIntakeIssueResult!]!
+}
+
 enum WorkItemState {
   WORK_ITEM_STATE_VALUES
 }
@@ -702,6 +751,17 @@ type Mutation {
   in Waiting for blockers (no Worker Slot, no Step Run).
   """
   queue(repositoryId: ID!, issueNumber: Int!): WorkItem!
+  """
+  Synchronous best-effort Repository Intake: reclassify current Intake
+  Candidates for one Repository, run one shared Repository preflight when the
+  set is nonempty, then process each candidate sequentially through ordinary
+  Implement Now or Queue. Candidate-local races become per-Issue failed
+  results; infrastructure, cancellation, and unexpected defects stop as
+  GraphQL errors while preserving earlier Work Items. No Intake entity or
+  persistence is created. Empty classification is a successful no-op and
+  bypasses preflight.
+  """
+  startRepositoryIntake(repositoryId: ID!): RepositoryIntakeResult!
   retryWorkItem(workItemId: ID!): WorkItem!
   pauseWorkItem(workItemId: ID!): WorkItem!
   startWorkItem(workItemId: ID!): WorkItem!

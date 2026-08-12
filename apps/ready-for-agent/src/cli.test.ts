@@ -11,6 +11,7 @@ import {
   FiniteCommandFailed,
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
+  buildIntakeSuccessDocument,
   buildStatusSuccessDocument,
   encodeCompactJson,
 } from "./cli-json.ts"
@@ -33,6 +34,8 @@ const unusedGraphql = {
   addRepository: () => Effect.die("addRepository should not run"),
   listRepositories: Effect.die("listRepositories should not run"),
   intakeCandidates: () => Effect.die("intakeCandidates should not run"),
+  startRepositoryIntake: () =>
+    Effect.die("startRepositoryIntake should not run"),
   kanbanStatus: () => Effect.die("kanbanStatus should not run"),
 } as const
 
@@ -507,6 +510,317 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
+  it.live("intake emits versioned JSON and keeps exit 0 when all created", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      const previousExitCode = process.exitCode
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      process.exitCode = undefined
+
+      try {
+        let requestedId: string | undefined
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "Owner/Repo",
+                },
+              ]),
+              startRepositoryIntake: (repositoryId) =>
+                Effect.sync(() => {
+                  requestedId = repositoryId
+                  return {
+                    repository: {
+                      id: "repo-1",
+                      forge: "github",
+                      forgeHost: "github.com",
+                      projectPath: "Owner/Repo",
+                      issuesReconciledAt: "2026-08-12T10:00:00.000Z",
+                    },
+                    results: [
+                      {
+                        issueNumber: 7,
+                        title: "Ready work",
+                        url: "https://github.com/Owner/Repo/issues/7",
+                        action: "IMPLEMENT_NOW" as const,
+                        outcome: "CREATED" as const,
+                        workItem: {
+                          id: "wi-7",
+                          state: "CREATE_WORKTREE",
+                          status: "QUEUED",
+                        },
+                      },
+                    ],
+                  }
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(["intake", "GitHub.com/owner/repo"], layer)
+
+        expect(requestedId).toBe("repo-1")
+        expect(logs).toHaveLength(1)
+        expect(logs[0]).toBe(
+          encodeCompactJson(
+            buildIntakeSuccessDocument({
+              repository: {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "Owner/Repo",
+              },
+              issuesReconciledAt: "2026-08-12T10:00:00.000Z",
+              results: [
+                {
+                  issueNumber: 7,
+                  title: "Ready work",
+                  url: "https://github.com/Owner/Repo/issues/7",
+                  action: "IMPLEMENT_NOW",
+                  outcome: "CREATED",
+                  workItem: {
+                    id: "wi-7",
+                    state: "CREATE_WORKTREE",
+                    status: "QUEUED",
+                  },
+                },
+              ],
+            }),
+          ),
+        )
+        expect(process.exitCode).toBe(0)
+      } finally {
+        console.log = originalLog
+        process.exitCode = previousExitCode
+      }
+    }),
+  )
+
+  it.live("intake partial failure writes stdout and sets exitCode 1", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      const previousExitCode = process.exitCode
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      process.exitCode = undefined
+
+      try {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                },
+              ]),
+              startRepositoryIntake: () =>
+                Effect.succeed({
+                  repository: {
+                    id: "repo-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                    issuesReconciledAt: null,
+                  },
+                  results: [
+                    {
+                      issueNumber: 7,
+                      title: "Ready",
+                      url: "https://github.com/owner/repo/issues/7",
+                      action: "IMPLEMENT_NOW" as const,
+                      outcome: "CREATED" as const,
+                      workItem: {
+                        id: "wi-7",
+                        state: "CREATE_WORKTREE",
+                        status: "QUEUED",
+                      },
+                    },
+                    {
+                      issueNumber: 9,
+                      title: "Race",
+                      url: "https://github.com/owner/repo/issues/9",
+                      action: "QUEUE" as const,
+                      outcome: "FAILED" as const,
+                      error: {
+                        code: "UNFINISHED_WORK_ITEM_EXISTS",
+                        message: "Issue #9 already has an unfinished Work Item",
+                      },
+                    },
+                  ],
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(["intake", "github.com/owner/repo"], layer)
+
+        expect(logs).toHaveLength(1)
+        expect(JSON.parse(logs[0] ?? "")).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "intake",
+          repository: {
+            id: "repo-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          issuesReconciledAt: null,
+          results: [
+            {
+              issueNumber: 7,
+              title: "Ready",
+              url: "https://github.com/owner/repo/issues/7",
+              action: "IMPLEMENT_NOW",
+              outcome: "CREATED",
+              workItem: {
+                id: "wi-7",
+                state: "CREATE_WORKTREE",
+                status: "QUEUED",
+              },
+            },
+            {
+              issueNumber: 9,
+              title: "Race",
+              url: "https://github.com/owner/repo/issues/9",
+              action: "QUEUE",
+              outcome: "FAILED",
+              error: {
+                code: "UNFINISHED_WORK_ITEM_EXISTS",
+                message: "Issue #9 already has an unfinished Work Item",
+              },
+            },
+          ],
+        })
+        expect(process.exitCode).toBe(1)
+      } finally {
+        console.log = originalLog
+        process.exitCode = previousExitCode
+      }
+    }),
+  )
+
+  it.live("intake empty results succeed without partial exit", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      const previousExitCode = process.exitCode
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      process.exitCode = undefined
+
+      try {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                },
+              ]),
+              startRepositoryIntake: () =>
+                Effect.succeed({
+                  repository: {
+                    id: "repo-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                    issuesReconciledAt: null,
+                  },
+                  results: [],
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(["intake", "github.com/owner/repo"], layer)
+
+        expect(JSON.parse(logs[0] ?? "")).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "intake",
+          repository: {
+            id: "repo-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          issuesReconciledAt: null,
+          results: [],
+        })
+        expect(process.exitCode).toBe(0)
+      } finally {
+        console.log = originalLog
+        process.exitCode = previousExitCode
+      }
+    }),
+  )
+
+  it.live("intake preserves GraphQL operation-level error codes", () =>
+    Effect.gen(function* () {
+      const layer = mockStart.pipe(
+        Layer.provideMerge(mockLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            ...unusedGraphql,
+            listRepositories: Effect.succeed([
+              {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "owner/repo",
+              },
+            ]),
+            startRepositoryIntake: () =>
+              Effect.fail(
+                new GraphqlRequestFailed({
+                  code: "AGENT_BACKEND_UNAVAILABLE",
+                  message: "Agent Backend is unavailable",
+                }),
+              ),
+          }),
+        ),
+      )
+
+      const result = yield* runOperator(
+        ["intake", "github.com/owner/repo"],
+        layer,
+      ).pipe(Effect.flip)
+
+      expect(result).toBeInstanceOf(FiniteCommandFailed)
+      if (result instanceof FiniteCommandFailed) {
+        expect(result.document).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "intake",
+          error: {
+            code: "AGENT_BACKEND_UNAVAILABLE",
+            message: "Agent Backend is unavailable",
+          },
+        })
+      }
+    }),
+  )
+
   it.live("status without repository returns all-sources Kanban JSON", () =>
     Effect.gen(function* () {
       const logs: string[] = []
@@ -635,7 +949,7 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
-  it("binary help lists start, add, candidates, status, --no-open, and --host", () => {
+  it("binary help lists start, add, candidates, intake, status, --no-open, and --host", () => {
     const result = spawnSync(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", "--help"],
@@ -650,6 +964,7 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("start")
     expect(output).toContain("add")
     expect(output).toContain("candidates")
+    expect(output).toContain("intake")
     expect(output).toContain("status")
     expect(output).not.toContain("remove-github-token")
     expect(output).toContain("no-open")

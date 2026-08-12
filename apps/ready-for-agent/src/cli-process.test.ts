@@ -16,6 +16,7 @@ import {
   CLI_SCHEMA_VERSION,
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
+  buildIntakeSuccessDocument,
   buildStatusSuccessDocument,
 } from "./cli-json.ts"
 import {
@@ -459,6 +460,304 @@ describe("operator binary finite-command process contract", () => {
       })
       expect(result.stderr).not.toMatch(/\s+at\s+\S+\s+\(/)
       expect(result.stderr).not.toContain("FiniteCommandFailed:")
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("intake complete success emits JSON on stdout and exits 0", async () => {
+    const seenBodies: string[] = []
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        seenBodies.push(body)
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({
+            data: {
+              startRepositoryIntake: {
+                repository: {
+                  id: "repo-process-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                  issuesReconciledAt: "2026-08-12T10:00:00.000Z",
+                },
+                results: [
+                  {
+                    __typename: "RepositoryIntakeCreated",
+                    issueNumber: 7,
+                    title: "Ready",
+                    url: "https://github.com/owner/repo/issues/7",
+                    action: "IMPLEMENT_NOW",
+                    workItem: {
+                      id: "wi-7",
+                      state: "CREATE_WORKTREE",
+                      status: "QUEUED",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["intake", "GitHub.com/Owner/Repo"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(0)
+      expect(result.stderr.trim()).toBe("")
+      expect(
+        seenBodies.some((body) => body.includes("startRepositoryIntake")),
+      ).toBe(true)
+      expect(parseExactlyOneJsonDocument(result.stdout)).toEqual(
+        buildIntakeSuccessDocument({
+          repository: {
+            id: "repo-process-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          issuesReconciledAt: "2026-08-12T10:00:00.000Z",
+          results: [
+            {
+              issueNumber: 7,
+              title: "Ready",
+              url: "https://github.com/owner/repo/issues/7",
+              action: "IMPLEMENT_NOW",
+              outcome: "CREATED",
+              workItem: {
+                id: "wi-7",
+                state: "CREATE_WORKTREE",
+                status: "QUEUED",
+              },
+            },
+          ],
+        }),
+      )
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("intake partial failure emits result JSON on stdout and exits 1", async () => {
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({
+            data: {
+              startRepositoryIntake: {
+                repository: {
+                  id: "repo-process-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                  issuesReconciledAt: null,
+                },
+                results: [
+                  {
+                    __typename: "RepositoryIntakeCreated",
+                    issueNumber: 7,
+                    title: "Ready",
+                    url: "https://github.com/owner/repo/issues/7",
+                    action: "IMPLEMENT_NOW",
+                    workItem: {
+                      id: "wi-7",
+                      state: "CREATE_WORKTREE",
+                      status: "QUEUED",
+                    },
+                  },
+                  {
+                    __typename: "RepositoryIntakeFailed",
+                    issueNumber: 9,
+                    title: "Race",
+                    url: "https://github.com/owner/repo/issues/9",
+                    action: "QUEUE",
+                    error: {
+                      code: "UNFINISHED_WORK_ITEM_EXISTS",
+                      message: "Issue #9 already has an unfinished Work Item",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["intake", "github.com/owner/repo"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr.trim()).toBe("")
+      expect(parseExactlyOneJsonDocument(result.stdout)).toEqual(
+        buildIntakeSuccessDocument({
+          repository: {
+            id: "repo-process-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          issuesReconciledAt: null,
+          results: [
+            {
+              issueNumber: 7,
+              title: "Ready",
+              url: "https://github.com/owner/repo/issues/7",
+              action: "IMPLEMENT_NOW",
+              outcome: "CREATED",
+              workItem: {
+                id: "wi-7",
+                state: "CREATE_WORKTREE",
+                status: "QUEUED",
+              },
+            },
+            {
+              issueNumber: 9,
+              title: "Race",
+              url: "https://github.com/owner/repo/issues/9",
+              action: "QUEUE",
+              outcome: "FAILED",
+              error: {
+                code: "UNFINISHED_WORK_ITEM_EXISTS",
+                message: "Issue #9 already has an unfinished Work Item",
+              },
+            },
+          ],
+        }),
+      )
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("intake GraphQL operation failure preserves extensions.code on stderr", async () => {
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({
+            data: null,
+            errors: [
+              {
+                message: "Agent Backend is unavailable",
+                extensions: { code: "AGENT_BACKEND_UNAVAILABLE" },
+              },
+            ],
+          }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["intake", "github.com/owner/repo"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stdout.trim()).toBe("")
+      expect(parseExactlyOneJsonDocument(result.stderr)).toEqual({
+        schemaVersion: CLI_SCHEMA_VERSION,
+        command: "intake",
+        error: {
+          code: "AGENT_BACKEND_UNAVAILABLE",
+          message: "Agent Backend is unavailable",
+        },
+      })
     } finally {
       await closeServer(server)
     }
