@@ -44,15 +44,17 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
   // Expand bare `--host` → `--host 0.0.0.0` before Effect's string flag parser.
   const args = expandBareHostFlag(process.argv.slice(2))
 
+  const { encodeCompactJson } = await import("./cli-json.ts")
+
   const program = Command.runWith(cli, {
     version: READY_FOR_AGENT_VERSION,
   })(args).pipe(
     Effect.provide(MainLive),
-    // GraphqlRequestFailed is marked [Runtime.errorReported]=false so runMain
-    // skips Cause pretty-print; surface the short message once here.
-    Effect.tapErrorTag("GraphqlRequestFailed", (error) =>
+    // FiniteCommandFailed is marked [Runtime.errorReported]=false so runMain
+    // skips Cause pretty-print; emit one versioned JSON error on stderr.
+    Effect.tapErrorTag("FiniteCommandFailed", (error) =>
       Effect.sync(() => {
-        console.error(error.message)
+        console.error(encodeCompactJson(error.document))
       }),
     ),
   )

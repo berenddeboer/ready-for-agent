@@ -1,17 +1,21 @@
 import { Context, Effect, Layer, Runtime, Schema } from "effect"
 import { createClient } from "@ready-for-agent/graphql-client"
 import type { LocalRepository, RepositorySummary } from "../domain.ts"
-import { formatGraphqlRequestFailure } from "../graphql-error.ts"
+import { describeGraphqlFailure } from "../graphql-error.ts"
 import { ApplicationConfig } from "./application-config.ts"
 
 /**
  * Expected GraphQL operator failures. Marked as already reported so
  * `BunRuntime.runMain` does not pretty-print a multi-frame stack after the
- * CLI prints the user-facing `message` once (harness-down and similar).
+ * CLI writes the versioned JSON error once (harness-down and similar).
+ * `code` is the Harness `extensions.code` or a CLI-owned transport code.
  */
 export class GraphqlRequestFailed extends Schema.TaggedErrorClass<GraphqlRequestFailed>()(
   "GraphqlRequestFailed",
-  { message: Schema.String },
+  {
+    code: Schema.String,
+    message: Schema.String,
+  },
 ) {
   override readonly [Runtime.errorReported] = false
 }
@@ -60,12 +64,15 @@ export class GraphqlApi extends Context.Service<
             }
             return added
           },
-          catch: (cause) =>
-            new GraphqlRequestFailed({
-              message: formatGraphqlRequestFailure(cause, {
-                graphqlUrl: config.graphqlUrl,
-              }),
-            }),
+          catch: (cause) => {
+            const failure = describeGraphqlFailure(cause, {
+              graphqlUrl: config.graphqlUrl,
+            })
+            return new GraphqlRequestFailed({
+              code: failure.code,
+              message: failure.message,
+            })
+          },
         })
       })
 

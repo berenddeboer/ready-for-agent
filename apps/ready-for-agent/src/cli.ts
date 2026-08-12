@@ -1,5 +1,11 @@
 import { Console, Effect, Option } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
+import {
+  FiniteCommandFailed,
+  buildAddSuccessDocument,
+  encodeCompactJson,
+  localGitErrorCode,
+} from "./cli-json.ts"
 import { GraphqlApi } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
 import { StartHarness } from "./services/start-harness.ts"
@@ -43,6 +49,51 @@ const startHarnessWorkflow = Effect.fn("Cli.startHarness")(function* (
   yield* startHarnessService.start({ noOpen, host })
 })
 
+const toAddCommandFailed = (error: unknown): FiniteCommandFailed => {
+  if (error instanceof FiniteCommandFailed) {
+    return error
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "_tag" in error &&
+    typeof (error as { _tag: unknown })._tag === "string"
+  ) {
+    const tagged = error as {
+      readonly _tag: string
+      readonly code?: string
+      readonly message?: string
+    }
+    if (
+      tagged._tag === "GraphqlRequestFailed" &&
+      typeof tagged.code === "string" &&
+      typeof tagged.message === "string"
+    ) {
+      return new FiniteCommandFailed({
+        command: "add",
+        code: tagged.code,
+        message: tagged.message,
+      })
+    }
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof tagged.message === "string"
+          ? tagged.message
+          : String(error)
+    return new FiniteCommandFailed({
+      command: "add",
+      code: localGitErrorCode(tagged._tag),
+      message,
+    })
+  }
+  return new FiniteCommandFailed({
+    command: "add",
+    code: "INTERNAL_ERROR",
+    message: error instanceof Error ? error.message : String(error),
+  })
+}
+
 const addRepositoryWorkflow = Effect.fn("Cli.addRepository")(function* (
   path: string,
   corrections: {
@@ -52,7 +103,9 @@ const addRepositoryWorkflow = Effect.fn("Cli.addRepository")(function* (
 ) {
   const localGit = yield* LocalGit
   const graphqlApi = yield* GraphqlApi
-  const inspected = yield* localGit.inspect(path)
+  const inspected = yield* localGit
+    .inspect(path)
+    .pipe(Effect.mapError(toAddCommandFailed))
   const repository = {
     ...inspected,
     ...(corrections.forgeHost === undefined
@@ -62,12 +115,12 @@ const addRepositoryWorkflow = Effect.fn("Cli.addRepository")(function* (
       ? {}
       : { projectPath: corrections.projectPath }),
   }
-  const added = yield* graphqlApi.addRepository(repository)
+  const added = yield* graphqlApi
+    .addRepository(repository)
+    .pipe(Effect.mapError(toAddCommandFailed))
 
-  yield* Console.log(`Added repository ${added.projectPath}`)
-  yield* Console.log(`  id: ${added.id}`)
-  yield* Console.log(`  local path: ${added.localPath}`)
-  yield* Console.log(`  bare: ${added.isBare}`)
+  // Exactly one compact JSON success document on stdout; no progress chatter.
+  yield* Console.log(encodeCompactJson(buildAddSuccessDocument(added)))
 })
 
 const startCommand = Command.make(
