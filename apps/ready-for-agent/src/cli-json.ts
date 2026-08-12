@@ -7,10 +7,10 @@ export const CLI_SCHEMA_VERSION = 1 as const
  * Finite operator commands that emit one versioned JSON document.
  * Long-running `start` is intentionally excluded.
  */
-export type FiniteCommandName = "add"
+export type FiniteCommandName = "add" | "candidates"
 
 /** Canonical Repository identity shared across finite CLI JSON documents. */
-type CanonicalRepositoryIdentity = {
+export type CanonicalRepositoryIdentity = {
   readonly id: string
   readonly forge: string
   readonly forgeHost: string
@@ -23,6 +23,21 @@ export type AddSuccessDocument = {
   readonly repository: CanonicalRepositoryIdentity
   readonly localPath: string
   readonly isBare: boolean
+}
+
+export type IntakeCandidateAction = "IMPLEMENT_NOW" | "QUEUE"
+
+export type CandidatesSuccessDocument = {
+  readonly schemaVersion: typeof CLI_SCHEMA_VERSION
+  readonly command: "candidates"
+  readonly repository: CanonicalRepositoryIdentity
+  readonly issuesReconciledAt: string | null
+  readonly candidates: readonly {
+    readonly issueNumber: number
+    readonly title: string
+    readonly url: string
+    readonly action: IntakeCandidateAction
+  }[]
 }
 
 type CommandErrorBody = {
@@ -60,6 +75,23 @@ export const buildAddSuccessDocument = (added: {
   isBare: added.isBare,
 })
 
+export const buildCandidatesSuccessDocument = (input: {
+  readonly repository: CanonicalRepositoryIdentity
+  readonly issuesReconciledAt: string | null
+  readonly candidates: readonly {
+    readonly issueNumber: number
+    readonly title: string
+    readonly url: string
+    readonly action: IntakeCandidateAction
+  }[]
+}): CandidatesSuccessDocument => ({
+  schemaVersion: CLI_SCHEMA_VERSION,
+  command: "candidates",
+  repository: input.repository,
+  issuesReconciledAt: input.issuesReconciledAt,
+  candidates: input.candidates,
+})
+
 export const buildCommandErrorDocument = (options: {
   readonly command: FiniteCommandName
   readonly code: string
@@ -73,7 +105,7 @@ export const buildCommandErrorDocument = (options: {
   },
 })
 
-const FiniteCommandNameSchema = Schema.Literals(["add"])
+const FiniteCommandNameSchema = Schema.Literals(["add", "candidates"])
 
 /**
  * Expected finite-command failure. Marked as already reported so

@@ -35,6 +35,7 @@ import {
 } from "@ready-for-agent/gitlab-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import { classifyIntakeCandidates } from "@ready-for-agent/lifecycle-model"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import type { QueueService } from "@ready-for-agent/queue-service"
 import {
@@ -46,6 +47,7 @@ import {
   filterWorkItemsByListKind,
   isJobsCompletedWorkItemState,
   isJobsWorkingWorkItem,
+  isRetryableFailedWorkItem,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
   commandExistsOnPath,
@@ -65,6 +67,7 @@ import {
   repositoryCredential,
   withKeymaxxerMetadataTimeout,
 } from "./repository-credentials.js"
+import { preflightRepositoryIntake } from "./repository-intake-preflight.js"
 import { toGraphQLError } from "./to-graphql-error.js"
 import { validateAgentModelsAgainstCatalog } from "./validate-agent-models.js"
 import {
@@ -705,6 +708,53 @@ export const createGraphqlApi = <R>(
                 const issues = yield* db.listIssues(args.repositoryId)
                 return workIssueProjection(issues)
               }).pipe(Effect.withSpan("graphql-api.issues")),
+              context,
+            ),
+          intakeCandidates: async (
+            _parent: unknown,
+            args: IssuesArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                const lifecycle = yield* WorkItemLifecycle
+                const repositories = yield* db.listRepositories
+                const repository = repositories.find(
+                  ({ id }) => id === args.repositoryId,
+                )
+                if (repository === undefined) {
+                  return yield* new RepositoryNotFoundError({
+                    repositoryId: args.repositoryId,
+                  })
+                }
+
+                // Current Issue projection only — never request or wait for Refresh.
+                const [issues, workItems] = yield* Effect.all([
+                  db.listIssues(repository.id),
+                  lifecycle.listWorkItemsForRepository(repository.id),
+                ])
+                const candidates = classifyIntakeCandidates(
+                  issues,
+                  workItems.map((workItem) => ({
+                    issueNumber: workItem.issueNumber,
+                    id: workItem.id,
+                    state: workItem.state,
+                    canRetry: isRetryableFailedWorkItem(workItem),
+                  })),
+                )
+
+                // Empty classification is a successful no-op and skips preflight.
+                if (candidates.length > 0) {
+                  // Preflight re-reads Repository under Config coordination.
+                  yield* preflightRepositoryIntake(repository.id)
+                }
+
+                return {
+                  repository,
+                  candidates,
+                }
+              }).pipe(Effect.withSpan("graphql-api.intakeCandidates")),
               context,
             ),
           workItems: async (

@@ -10,6 +10,7 @@ import {
   CLI_SCHEMA_VERSION,
   FiniteCommandFailed,
   buildAddSuccessDocument,
+  buildCandidatesSuccessDocument,
   encodeCompactJson,
 } from "./cli-json.ts"
 import {
@@ -26,6 +27,12 @@ import {
 
 /** Package root (`apps/ready-for-agent`), independent of Bun's `import.meta.dir`. */
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
+
+const unusedGraphql = {
+  addRepository: () => Effect.die("addRepository should not run"),
+  listRepositories: Effect.die("listRepositories should not run"),
+  intakeCandidates: () => Effect.die("intakeCandidates should not run"),
+} as const
 
 const runOperator = (
   args: ReadonlyArray<string>,
@@ -72,6 +79,7 @@ describe("operator binary CLI seam", () => {
         Layer.provideMerge(mockLocalGit),
         Layer.provideMerge(
           Layer.succeed(GraphqlApi, {
+            ...unusedGraphql,
             addRepository: () => Effect.die("graphql should not run for start"),
           }),
         ),
@@ -94,6 +102,7 @@ describe("operator binary CLI seam", () => {
           Layer.provideMerge(mockLocalGit),
           Layer.provideMerge(
             Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
               addRepository: () =>
                 Effect.fail(
                   new GraphqlRequestFailed({
@@ -126,6 +135,7 @@ describe("operator binary CLI seam", () => {
         Layer.provideMerge(mockLocalGit),
         Layer.provideMerge(
           Layer.succeed(GraphqlApi, {
+            ...unusedGraphql,
             addRepository: () =>
               Effect.fail(
                 new GraphqlRequestFailed({
@@ -178,6 +188,7 @@ describe("operator binary CLI seam", () => {
         Layer.provideMerge(gitlabLocalGit),
         Layer.provideMerge(
           Layer.succeed(GraphqlApi, {
+            ...unusedGraphql,
             addRepository: (repository) =>
               Effect.sync(() => {
                 added = repository
@@ -226,6 +237,7 @@ describe("operator binary CLI seam", () => {
           Layer.provideMerge(mockLocalGit),
           Layer.provideMerge(
             Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
               addRepository: (repository) =>
                 Effect.succeed({
                   id: "repo-1",
@@ -259,7 +271,232 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
-  it("binary help lists start, add, --no-open, and --host", () => {
+  it.live("candidates emits versioned JSON with ordered actions", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+
+      try {
+        let requestedId: string | undefined
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "Owner/Repo",
+                },
+              ]),
+              intakeCandidates: (repositoryId) =>
+                Effect.sync(() => {
+                  requestedId = repositoryId
+                  return {
+                    repository: {
+                      id: "repo-1",
+                      forge: "github",
+                      forgeHost: "github.com",
+                      projectPath: "Owner/Repo",
+                      issuesReconciledAt: "2026-08-12T10:00:00.000Z",
+                    },
+                    candidates: [
+                      {
+                        issueNumber: 7,
+                        title: "Ready work",
+                        url: "https://github.com/Owner/Repo/issues/7",
+                        action: "IMPLEMENT_NOW" as const,
+                      },
+                      {
+                        issueNumber: 9,
+                        title: "Blocked work",
+                        url: "https://github.com/Owner/Repo/issues/9",
+                        action: "QUEUE" as const,
+                      },
+                    ],
+                  }
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(["candidates", "GitHub.com/owner/repo"], layer)
+
+        expect(requestedId).toBe("repo-1")
+        expect(logs).toHaveLength(1)
+        expect(logs[0]).toBe(
+          encodeCompactJson(
+            buildCandidatesSuccessDocument({
+              repository: {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "Owner/Repo",
+              },
+              issuesReconciledAt: "2026-08-12T10:00:00.000Z",
+              candidates: [
+                {
+                  issueNumber: 7,
+                  title: "Ready work",
+                  url: "https://github.com/Owner/Repo/issues/7",
+                  action: "IMPLEMENT_NOW",
+                },
+                {
+                  issueNumber: 9,
+                  title: "Blocked work",
+                  url: "https://github.com/Owner/Repo/issues/9",
+                  action: "QUEUE",
+                },
+              ],
+            }),
+          ),
+        )
+      } finally {
+        console.log = originalLog
+      }
+    }),
+  )
+
+  it.live("candidates empty list succeeds with null issuesReconciledAt", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+
+      try {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                },
+              ]),
+              intakeCandidates: () =>
+                Effect.succeed({
+                  repository: {
+                    id: "repo-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                    issuesReconciledAt: null,
+                  },
+                  candidates: [],
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(["candidates", "github.com/owner/repo"], layer)
+
+        expect(logs).toHaveLength(1)
+        expect(JSON.parse(logs[0] ?? "")).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "candidates",
+          repository: {
+            id: "repo-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          issuesReconciledAt: null,
+          candidates: [],
+        })
+      } finally {
+        console.log = originalLog
+      }
+    }),
+  )
+
+  it.live("candidates fails when no configured Repository matches", () =>
+    Effect.gen(function* () {
+      const layer = mockStart.pipe(
+        Layer.provideMerge(mockLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            ...unusedGraphql,
+            listRepositories: Effect.succeed([]),
+          }),
+        ),
+      )
+
+      const result = yield* runOperator(
+        ["candidates", "github.com/missing/repo"],
+        layer,
+      ).pipe(Effect.flip)
+
+      expect(result).toBeInstanceOf(FiniteCommandFailed)
+      if (result instanceof FiniteCommandFailed) {
+        expect(result.document).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "candidates",
+          error: {
+            code: "REPOSITORY_NOT_FOUND",
+            message: "No configured Repository matches github.com/missing/repo",
+          },
+        })
+      }
+    }),
+  )
+
+  it.live("candidates preserves GraphQL preflight error codes", () =>
+    Effect.gen(function* () {
+      const layer = mockStart.pipe(
+        Layer.provideMerge(mockLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            ...unusedGraphql,
+            listRepositories: Effect.succeed([
+              {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "owner/repo",
+              },
+            ]),
+            intakeCandidates: () =>
+              Effect.fail(
+                new GraphqlRequestFailed({
+                  code: "AGENT_BACKEND_UNAVAILABLE",
+                  message: "Agent Backend is unavailable",
+                }),
+              ),
+          }),
+        ),
+      )
+
+      const result = yield* runOperator(
+        ["candidates", "github.com/owner/repo"],
+        layer,
+      ).pipe(Effect.flip)
+
+      expect(result).toBeInstanceOf(FiniteCommandFailed)
+      if (result instanceof FiniteCommandFailed) {
+        expect(result.document).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "candidates",
+          error: {
+            code: "AGENT_BACKEND_UNAVAILABLE",
+            message: "Agent Backend is unavailable",
+          },
+        })
+      }
+    }),
+  )
+
+  it("binary help lists start, add, candidates, --no-open, and --host", () => {
     const result = spawnSync(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", "--help"],
@@ -273,6 +510,7 @@ describe("operator binary CLI seam", () => {
     expect(result.status).toBe(0)
     expect(output).toContain("start")
     expect(output).toContain("add")
+    expect(output).toContain("candidates")
     expect(output).not.toContain("remove-github-token")
     expect(output).toContain("no-open")
     expect(output).toContain("host")
@@ -286,6 +524,7 @@ describe("operator binary CLI seam", () => {
           Layer.provideMerge(mockLocalGit),
           Layer.provideMerge(
             Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
               addRepository: () =>
                 Effect.die("graphql should not run for start"),
             }),
@@ -306,6 +545,7 @@ describe("operator binary CLI seam", () => {
         Layer.provideMerge(mockLocalGit),
         Layer.provideMerge(
           Layer.succeed(GraphqlApi, {
+            ...unusedGraphql,
             addRepository: () => Effect.die("graphql should not run for start"),
           }),
         ),

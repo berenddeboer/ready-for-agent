@@ -2,6 +2,7 @@ import {
   CLI_SCHEMA_VERSION,
   FiniteCommandFailed,
   buildAddSuccessDocument,
+  buildCandidatesSuccessDocument,
   buildCommandErrorDocument,
   encodeCompactJson,
   localGitErrorCode,
@@ -33,6 +34,46 @@ describe("finite CLI JSON contract", () => {
     expect(encodeCompactJson(doc)).toBe(
       '{"schemaVersion":1,"command":"add","repository":{"id":"repo-1","forge":"github","forgeHost":"github.com","projectPath":"owner/repo"},"localPath":"/tmp/repo","isBare":false}',
     )
+  })
+
+  test("candidates success document includes issuesReconciledAt and actions", () => {
+    const doc = buildCandidatesSuccessDocument({
+      repository: {
+        id: "repo-1",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "owner/repo",
+      },
+      issuesReconciledAt: null,
+      candidates: [
+        {
+          issueNumber: 3,
+          title: "Ready",
+          url: "https://github.com/owner/repo/issues/3",
+          action: "IMPLEMENT_NOW",
+        },
+      ],
+    })
+    expect(doc).toEqual({
+      schemaVersion: CLI_SCHEMA_VERSION,
+      command: "candidates",
+      repository: {
+        id: "repo-1",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "owner/repo",
+      },
+      issuesReconciledAt: null,
+      candidates: [
+        {
+          issueNumber: 3,
+          title: "Ready",
+          url: "https://github.com/owner/repo/issues/3",
+          action: "IMPLEMENT_NOW",
+        },
+      ],
+    })
+    expect(encodeCompactJson(doc)).toContain('"issuesReconciledAt":null')
   })
 
   test("command-level error document is versioned and nested under error", () => {
