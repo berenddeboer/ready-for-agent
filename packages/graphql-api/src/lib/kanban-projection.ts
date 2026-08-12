@@ -18,7 +18,7 @@ import {
 /** Globally newest terminal failures included in the Kanban source set. */
 export const KANBAN_FAILED_LIMIT = 15
 
-export const KANBAN_LANE_IDS = [
+const KANBAN_LANE_IDS = [
   "QUEUE",
   "BUILD",
   "REVIEW",
