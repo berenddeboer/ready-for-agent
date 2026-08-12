@@ -22,6 +22,7 @@ import {
   type GitHubServiceShape,
   GitHubThrottledError,
   GitHubTlsTrustError,
+  INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
   formatGitHubHelperShellCommand,
   formatTlsTrustRemediation,
   parseGitHubHelperControl,
@@ -83,6 +84,17 @@ const SerializedAutomatedReviewEvidenceObservation = Schema.Union([
       "review_comment",
       "pull_request_review",
     ]),
+    detail: Schema.String,
+  }),
+  // Must stay aligned with AutomatedReviewEvidenceObservation in github-service
+  // (#980 incomplete body-parse). Missing this variant makes live incomplete
+  // helper stdout fail decode and fall back to ambiguous Investigate turns.
+  Schema.TaggedStruct("incomplete", {
+    signature: Schema.Literals([INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE]),
+    workflowRunId: Schema.NullOr(
+      Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+    ),
+    workflowName: Schema.NullOr(Schema.String),
     detail: Schema.String,
   }),
   Schema.TaggedStruct("ambiguous", {

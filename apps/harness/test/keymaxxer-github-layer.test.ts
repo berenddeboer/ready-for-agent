@@ -18,6 +18,7 @@ import {
   GitHubService,
   type GitHubServiceShape,
   GitHubThrottledError,
+  INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
   githubHelperSuccess,
   githubHelperThrottled,
   serializeGitHubHelperControl,
@@ -2090,6 +2091,90 @@ describe("Keymaxxer-backed GitHub layer", () => {
           expect(second.retryAt).toBe(retryAt)
         }
         expect(helperRuns).toBe(1)
+      }),
+  )
+
+  it.effect(
+    "decodes incomplete automated-review evidence from helper stdout",
+    () =>
+      Effect.gen(function* () {
+        const incomplete = {
+          _tag: "incomplete" as const,
+          signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+          workflowRunId: 31549139160,
+          workflowName: "Claude Code Review",
+          detail:
+            "Visibly incomplete automated review comment from claude[bot]",
+        }
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.succeed({
+              exitCode: 0,
+              stdout: JSON.stringify(incomplete),
+              stderr: successfulHelperControl,
+            }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+        const observation = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          return yield* github.observeAutomatedReviewEvidence(
+            acmeWidgets,
+            "feature/branch",
+            [
+              {
+                externalId: "actions-job:1",
+                name: "Claude Code Review/claude-review",
+              },
+            ],
+          )
+        }).pipe(Effect.provide(layer))
+        expect(observation).toEqual(incomplete)
+      }),
+  )
+
+  it.effect(
+    "decodes incomplete automated-review evidence with null workflow run id",
+    () =>
+      Effect.gen(function* () {
+        const incomplete = {
+          _tag: "incomplete" as const,
+          signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+          workflowRunId: null,
+          workflowName: null,
+          detail: "incomplete without run id",
+        }
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.succeed({
+              exitCode: 0,
+              stdout: JSON.stringify(incomplete),
+              stderr: successfulHelperControl,
+            }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+        const observation = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          return yield* github.observeAutomatedReviewEvidence(
+            acmeWidgets,
+            "feature/branch",
+            [],
+          )
+        }).pipe(Effect.provide(layer))
+        expect(observation).toEqual(incomplete)
       }),
   )
 })
