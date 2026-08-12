@@ -30,12 +30,12 @@ describe("single application server topology", () => {
     expect(harness.targets.dev?.options?.command).toContain(
       "run-with-keymaxxer-sidecar",
     )
-    expect(harness.targets.dev?.options?.command).toContain(
-      "node_modules/vite/bin/vite.js",
+    // Leaf must be run-dev (not bash -c): nx forwardAllArgs append onto the
+    // sidecar wrapper argv, which must reach run-dev as process.argv.
+    expect(harness.targets.dev?.options?.command).toMatch(
+      /run-with-keymaxxer-sidecar\.ts bun --conditions @ready-for-agent\/source src\/server\/run-dev\.ts\s*$/,
     )
-    expect(harness.targets.dev?.options?.command).toContain(
-      "bun --conditions @ready-for-agent/source ./node_modules/vite/bin/vite.js",
-    )
+    expect(harness.targets.dev?.options?.command).not.toContain("bash -c")
     expect(harness.targets.dev?.options?.command).toContain(
       "export SQLITE_DATABASE_PATH",
     )

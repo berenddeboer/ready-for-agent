@@ -4,12 +4,18 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 import { backendRuntimeRestart } from "./src/server/backend-runtime-restart.js"
-import { resolveListenHost } from "./src/server/listen-host.js"
+import {
+  parseHostFlagFromArgv,
+  resolveListenHost,
+} from "./src/server/listen-host.js"
 
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url))
 
-/** Same HOST / default semantics as production lifecycle (Vite-style). */
-const listenHost = resolveListenHost({ env: process.env.HOST })
+/** Same `--host` / HOST / default semantics as production lifecycle (Vite-style). */
+const listenHost = resolveListenHost({
+  flag: parseHostFlagFromArgv(process.argv),
+  env: process.env.HOST,
+})
 const listenPort = Number(process.env.PORT ?? 6056)
 
 export default defineConfig({

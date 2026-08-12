@@ -11,6 +11,10 @@ import {
   resolveBrowserOpenUrl,
   resolveListenHost,
 } from "../src/server/listen-host.ts"
+import {
+  applyDevListenHostEnv,
+  resolveDevListenHost,
+} from "../src/server/run-dev.ts"
 import { describe, expect, test } from "bun:test"
 
 describe("normalizeHostToken", () => {
@@ -225,5 +229,45 @@ describe("expandBareHostFlag / parseHostFlagFromArgv", () => {
     expect(
       parseHostFlagFromArgv(["bun", "server.ts", "--no-open", "--host"]),
     ).toBe(ALL_INTERFACES_HOST)
+  })
+})
+
+describe("resolveDevListenHost", () => {
+  test("nx-appended bare --host binds all interfaces (not loopback)", () => {
+    // Regression: bash -c swallowed nx forwardAllArgs; run-dev must not.
+    expect(
+      resolveDevListenHost(
+        ["bun", "src/server/run-dev.ts", "--host"],
+        undefined,
+      ),
+    ).toBe(ALL_INTERFACES_HOST)
+    expect(
+      resolveDevListenHost(
+        ["bun", "src/server/run-dev.ts", "--host", "192.168.1.10"],
+        "127.0.0.1",
+      ),
+    ).toBe("192.168.1.10")
+  })
+
+  test("HOST env still works when flag is omitted", () => {
+    expect(resolveDevListenHost(["bun", "src/server/run-dev.ts"], "true")).toBe(
+      ALL_INTERFACES_HOST,
+    )
+  })
+})
+
+describe("applyDevListenHostEnv", () => {
+  test("writes HOST only when flag or env opts into bind", () => {
+    const bare: NodeJS.ProcessEnv = {}
+    applyDevListenHostEnv(bare, ["bun", "run-dev.ts"])
+    expect(bare.HOST).toBeUndefined()
+
+    const fromFlag: NodeJS.ProcessEnv = {}
+    applyDevListenHostEnv(fromFlag, ["bun", "run-dev.ts", "--host"])
+    expect(fromFlag.HOST).toBe(ALL_INTERFACES_HOST)
+
+    const fromEnv: NodeJS.ProcessEnv = { HOST: "true" }
+    applyDevListenHostEnv(fromEnv, ["bun", "run-dev.ts"])
+    expect(fromEnv.HOST).toBe(ALL_INTERFACES_HOST)
   })
 })

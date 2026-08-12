@@ -25,7 +25,7 @@
       "continuous": true,
       "executor": "nx:run-commands",
       "options": {
-        "command": "ROOT=\"$(cd ../.. && pwd)\" && mkdir -p \"$ROOT/tmp\" && export SQLITE_DATABASE_PATH=\"${SQLITE_DATABASE_PATH:-$ROOT/tmp/ready-for-agent.db}\" && bun --conditions @ready-for-agent/source ../../scripts/run-with-keymaxxer-sidecar.ts bash -c 'bun --conditions @ready-for-agent/source src/server/preflight.ts && bun --conditions @ready-for-agent/source ./node_modules/vite/bin/vite.js'",
+        "command": "ROOT=\"$(cd ../.. && pwd)\" && mkdir -p \"$ROOT/tmp\" && export SQLITE_DATABASE_PATH=\"${SQLITE_DATABASE_PATH:-$ROOT/tmp/ready-for-agent.db}\" && bun --conditions @ready-for-agent/source ../../scripts/run-with-keymaxxer-sidecar.ts bun --conditions @ready-for-agent/source src/server/run-dev.ts",
         "cwd": "apps/harness"
       },
       "dependsOn": [

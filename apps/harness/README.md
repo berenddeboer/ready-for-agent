@@ -34,6 +34,9 @@ PORT=7000 bun run ready-for-agent start
 bun run ready-for-agent start --host
 HOST=0.0.0.0 bun run ready-for-agent start
 bun run ready-for-agent start --host 192.168.1.10
+# monorepo nx targets accept the same flag / env
+PORT=7000 bunx nx run harness:dev --host
+HOST=0.0.0.0 bunx nx run harness:dev
 KEYMAXXER_SIDECAR_PORT=7001 bun run ready-for-agent start
 READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
   bun run ready-for-agent add /path/to/local/repo
