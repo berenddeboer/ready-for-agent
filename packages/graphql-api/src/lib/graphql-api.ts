@@ -396,10 +396,6 @@ export const createGraphqlApi = <R>(
      * does not depend on the host shell.
      */
     readonly environment?: Readonly<Record<string, string | undefined>>
-    /** Runtime-only coordinator state supplied by the Harness application. */
-    readonly githubThrottleStatus?: () => Promise<{
-      readonly retryAt: number
-    } | null>
   } = {},
 ) => {
   const agentBackendCwd =
@@ -489,12 +485,6 @@ export const createGraphqlApi = <R>(
               }).pipe(Effect.withSpan("graphql-api.repositories")),
               context,
             ),
-          githubThrottleStatus: async () => {
-            const status = await options.githubThrottleStatus?.()
-            return status === null || status === undefined
-              ? null
-              : { retryAt: new Date(status.retryAt).toISOString() }
-          },
           repositoryCredentials: async (
             _parent: unknown,
             _args: unknown,
