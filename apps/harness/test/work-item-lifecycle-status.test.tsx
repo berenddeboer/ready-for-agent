@@ -14,7 +14,7 @@ const waitingForGitHubWorkItem = {
   pullRequestNumber: 42,
   agentBackend: { id: "opencode", label: "OpenCode" },
   state: "WATCH_PR_STATUS_CHECKS",
-  stateLabel: "GitHub status checks",
+  stateLabel: "Status checks",
   status: "WAITING_FOR_GITHUB",
   statusLabel: "Waiting for GitHub",
   statusMessage: "Waiting for GitHub until 2026-08-07T12:00:00.000Z",
@@ -31,7 +31,7 @@ const waitingForGitHubWorkItem = {
   lifecycleLabels: [
     {
       phase: "GITHUB_STATUS_CHECKS",
-      label: "GitHub status checks: Postponed",
+      label: "Status checks: Postponed",
       status: "POSTPONED",
       durationMs: 0,
     },
@@ -49,7 +49,7 @@ describe("WorkItemLifecycleStatus", () => {
 
     expect(html).toContain("Waiting for GitHub")
     expect(html).toContain("Waiting for GitHub until 2026-08-07T12:00:00.000Z")
-    expect(html).toContain("GitHub status checks: Postponed")
+    expect(html).toContain("Status checks: Postponed")
     expect(html).not.toContain(">Retry<")
   })
 })

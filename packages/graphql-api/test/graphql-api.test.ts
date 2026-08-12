@@ -4055,7 +4055,7 @@ describe("GraphQL API", () => {
       data: {
         workItems: [
           {
-            stateLabel: "GitHub status checks",
+            stateLabel: "Status checks",
             status: "QUEUED",
             statusLabel: "Queued",
             statusMessage: null,
@@ -4079,7 +4079,7 @@ describe("GraphQL API", () => {
               },
               {
                 phase: "GITHUB_STATUS_CHECKS",
-                label: "GitHub status checks: Queued",
+                label: "Status checks: Queued",
                 status: "QUEUED",
               },
             ],
@@ -4094,7 +4094,7 @@ describe("GraphQL API", () => {
             lifecycleLabels: [
               {
                 phase: "GITHUB_STATUS_CHECKS",
-                label: "GitHub status checks: Needs human",
+                label: "Status checks: Needs human",
                 status: "NEEDS_HUMAN",
               },
             ],
@@ -4293,7 +4293,7 @@ describe("GraphQL API", () => {
         workItems: [
           {
             state: "WATCH_PR_STATUS_CHECKS",
-            stateLabel: "GitHub status checks",
+            stateLabel: "Status checks",
             status: "NEEDS_HUMAN_REVIEW",
             statusLabel: "Needs human review",
             statusMessage: reason,
@@ -4308,7 +4308,7 @@ describe("GraphQL API", () => {
               },
               {
                 phase: "GITHUB_STATUS_CHECKS",
-                label: "GitHub status checks: Succeeded",
+                label: "Status checks: Succeeded",
                 status: "SUCCEEDED",
               },
             ],
@@ -4372,7 +4372,7 @@ describe("GraphQL API", () => {
         workItems: [
           {
             state: "INVESTIGATE_PR_STATUS_CHECKS",
-            stateLabel: "GitHub status checks",
+            stateLabel: "Status checks",
             status: "NEEDS_HUMAN_REVIEW",
             statusLabel: "Needs human review",
             statusMessage: reason,
@@ -4387,7 +4387,7 @@ describe("GraphQL API", () => {
               },
               {
                 phase: "GITHUB_STATUS_CHECKS",
-                label: "GitHub status checks: Succeeded",
+                label: "Status checks: Succeeded",
                 status: "SUCCEEDED",
               },
             ],
