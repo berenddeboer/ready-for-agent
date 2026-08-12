@@ -20,7 +20,6 @@ import {
   useRef,
   useState,
 } from "react"
-import { createClient } from "@ready-for-agent/graphql-client"
 import { COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE as completedWorkItemsDefaultPageSize } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
 import { formatAgentBackendStatusLabel } from "./agent-backend-status-label.js"
 import { AgentBackendWarnings } from "./agent-backend-warnings.js"
@@ -43,6 +42,7 @@ import { repositoryCardCollapseId, useCardCollapsed } from "./card-collapse.js"
 import { CardCollapseToggle } from "./card-collapse-toggle.js"
 import { Copy } from "./copy.js"
 import { forgeChangeRequestShort } from "./forge-change-request.js"
+import { createHarnessGraphqlClient } from "./harness-graphql.js"
 import {
   type GraphqlWorkItemState,
   issueActionEligibility,
@@ -120,7 +120,7 @@ import { WorkItemResetButton } from "./work-item-reset-button.js"
 export type { Repository } from "./repositories-query.js"
 export { repositoriesQuery } from "./repositories-query.js"
 
-const graphql = createClient({ url: "/graphql", batch: true })
+const graphql = createHarnessGraphqlClient({ batch: true })
 // Long-lived host folder dialog must not pin co-batched GraphQL operations.
 
 const configQuery = {

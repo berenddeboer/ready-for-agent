@@ -3,8 +3,8 @@
  */
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
-import { createClient } from "@ready-for-agent/graphql-client"
 import { Banner } from "./banner.js"
+import { createHarnessGraphqlClient } from "./harness-graphql.js"
 import {
   localCommittedPullRequestDayBounds,
   msUntilNextLocalMidnight,
@@ -12,7 +12,7 @@ import {
 import { committedPullRequestsCountQueryKeyPrefix } from "./refresh-work-items-live.js"
 import { ui } from "./ui.js"
 
-const graphql = createClient({ url: "/graphql", batch: true })
+const graphql = createHarnessGraphqlClient({ batch: true })
 
 const committedPullRequestsCountQuery = (from: string, to: string) => ({
   queryKey: [...committedPullRequestsCountQueryKeyPrefix, from, to] as const,

@@ -7,11 +7,11 @@
  */
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useId, useRef } from "react"
-import { createClient } from "@ready-for-agent/graphql-client"
 import { Banner } from "./banner.js"
+import { createHarnessGraphqlClient } from "./harness-graphql.js"
 import { cx, ui } from "./ui.js"
 
-const graphql = createClient({ url: "/graphql" })
+const graphql = createHarnessGraphqlClient()
 
 const sessionQuery = (workItemId: string) => ({
   queryKey: ["session", workItemId] as const,

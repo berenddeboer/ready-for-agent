@@ -26,7 +26,6 @@ import {
   useRef,
   useState,
 } from "react"
-import { createClient } from "@ready-for-agent/graphql-client"
 import { formatAgentBackendStatusTrail } from "../agent-backend-status-label.js"
 import { AgentBackendWarnings } from "../agent-backend-warnings.js"
 import { AgentModelSelect } from "../agent-model-select.js"
@@ -47,6 +46,7 @@ import { CommittedPullRequestsDashboard } from "../committed-pr-dashboard.js"
 import { READY_FOR_AGENT_VERSION_LABEL } from "../generated/version"
 import { GitHubThrottleBanner } from "../github-throttle-banner.js"
 import { useGithubThrottleRetryAt } from "../github-throttle-errors.js"
+import { createHarnessGraphqlClient } from "../harness-graphql.js"
 import { getHarnessSettingsAutoOpenAction } from "../harness-settings-auto-open.js"
 import { JobsRepositoryFilterProvider } from "../jobs-repository-filter.js"
 import { JobsViewSwitcher } from "../jobs-view-switcher.js"
@@ -79,7 +79,7 @@ export interface RouterContext {
   queryClient: QueryClient
 }
 
-const graphql = createClient({ url: "/graphql" })
+const graphql = createHarnessGraphqlClient()
 
 const configQuery = {
   queryKey: ["config"],
