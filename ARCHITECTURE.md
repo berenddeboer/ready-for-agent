@@ -28,3 +28,15 @@
   grow a parallel component stylesheet — no new `.foo { … }` rules for UI
   chrome. Theme values live as CSS variables / `@theme` colors so utilities
   like `bg-paper` and `text-ink` stay theme-aware.
+
+## Application data
+
+Product state defaults to the platform data directory:
+
+- Linux: `$XDG_DATA_HOME/ready-for-agent/` or `~/.local/share/ready-for-agent/`
+- macOS: `~/Library/Application Support/ready-for-agent/`
+
+The SQLite database is `ready-for-agent.db` in that directory. Set
+`SQLITE_DATABASE_PATH` to use another file. Stop the harness
+completely before opening the database with external write tooling
+(single-writer SQLite).
