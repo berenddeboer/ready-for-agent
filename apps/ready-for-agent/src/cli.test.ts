@@ -11,6 +11,7 @@ import {
   FiniteCommandFailed,
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
+  buildStatusSuccessDocument,
   encodeCompactJson,
 } from "./cli-json.ts"
 import {
@@ -32,7 +33,17 @@ const unusedGraphql = {
   addRepository: () => Effect.die("addRepository should not run"),
   listRepositories: Effect.die("listRepositories should not run"),
   intakeCandidates: () => Effect.die("intakeCandidates should not run"),
+  kanbanStatus: () => Effect.die("kanbanStatus should not run"),
 } as const
+
+const emptyStatusLanes = [
+  { id: "QUEUE" as const, label: "Queue", count: 0, workItems: [] },
+  { id: "BUILD" as const, label: "Build", count: 0, workItems: [] },
+  { id: "REVIEW" as const, label: "Review", count: 0, workItems: [] },
+  { id: "PR" as const, label: "PR", count: 0, workItems: [] },
+  { id: "ATTENTION" as const, label: "Attention", count: 0, workItems: [] },
+  { id: "MERGED" as const, label: "Merged", count: 0, workItems: [] },
+]
 
 const runOperator = (
   args: ReadonlyArray<string>,
@@ -496,7 +507,135 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
-  it("binary help lists start, add, candidates, --no-open, and --host", () => {
+  it.live("status without repository returns all-sources Kanban JSON", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      try {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              kanbanStatus: (repositoryId) => {
+                expect(repositoryId).toBeNull()
+                return Effect.succeed({
+                  repository: null,
+                  lanes: emptyStatusLanes,
+                })
+              },
+            }),
+          ),
+        )
+
+        yield* runOperator(["status"], layer)
+
+        expect(logs).toHaveLength(1)
+        expect(logs[0]).toBe(
+          encodeCompactJson(
+            buildStatusSuccessDocument({
+              repository: null,
+              lanes: emptyStatusLanes,
+            }),
+          ),
+        )
+      } finally {
+        console.log = originalLog
+      }
+    }),
+  )
+
+  it.live("status with repository selector scopes GraphQL by resolved id", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      try {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "Owner/Repo",
+                },
+              ]),
+              kanbanStatus: (repositoryId) => {
+                expect(repositoryId).toBe("repo-1")
+                return Effect.succeed({
+                  repository: {
+                    id: "repo-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "Owner/Repo",
+                  },
+                  lanes: emptyStatusLanes,
+                })
+              },
+            }),
+          ),
+        )
+
+        yield* runOperator(["status", "GitHub.COM/owner/repo"], layer)
+
+        expect(logs).toHaveLength(1)
+        expect(JSON.parse(logs[0]!)).toMatchObject({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "status",
+          repository: {
+            id: "repo-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "Owner/Repo",
+          },
+        })
+      } finally {
+        console.log = originalLog
+      }
+    }),
+  )
+
+  it.live("status fails with REPOSITORY_NOT_FOUND for unknown selector", () =>
+    Effect.gen(function* () {
+      const layer = mockStart.pipe(
+        Layer.provideMerge(mockLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            ...unusedGraphql,
+            listRepositories: Effect.succeed([]),
+          }),
+        ),
+      )
+
+      const result = yield* runOperator(
+        ["status", "github.com/missing/repo"],
+        layer,
+      ).pipe(Effect.flip)
+
+      expect(result).toBeInstanceOf(FiniteCommandFailed)
+      if (result instanceof FiniteCommandFailed) {
+        expect(result.document).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "status",
+          error: {
+            code: "REPOSITORY_NOT_FOUND",
+            message: "No configured Repository matches github.com/missing/repo",
+          },
+        })
+      }
+    }),
+  )
+
+  it("binary help lists start, add, candidates, status, --no-open, and --host", () => {
     const result = spawnSync(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", "--help"],
@@ -511,6 +650,7 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("start")
     expect(output).toContain("add")
     expect(output).toContain("candidates")
+    expect(output).toContain("status")
     expect(output).not.toContain("remove-github-token")
     expect(output).toContain("no-open")
     expect(output).toContain("host")

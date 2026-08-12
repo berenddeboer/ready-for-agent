@@ -7,7 +7,7 @@ export const CLI_SCHEMA_VERSION = 1 as const
  * Finite operator commands that emit one versioned JSON document.
  * Long-running `start` is intentionally excluded.
  */
-export type FiniteCommandName = "add" | "candidates"
+export type FiniteCommandName = "add" | "candidates" | "status"
 
 /** Canonical Repository identity shared across finite CLI JSON documents. */
 export type CanonicalRepositoryIdentity = {
@@ -38,6 +38,44 @@ export type CandidatesSuccessDocument = {
     readonly url: string
     readonly action: IntakeCandidateAction
   }[]
+}
+
+export type StatusLaneId =
+  | "QUEUE"
+  | "BUILD"
+  | "REVIEW"
+  | "PR"
+  | "ATTENTION"
+  | "MERGED"
+
+export type StatusWorkItemRow = {
+  readonly repository: CanonicalRepositoryIdentity
+  readonly id: string
+  readonly issueNumber: number
+  readonly issueTitle: string | null
+  readonly state: string
+  readonly status: string
+  readonly statusMessage: string | null
+  readonly paused: boolean
+  readonly pullRequestNumber: number | null
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly stateReadyAt: string
+  readonly postponedUntil: string | null
+}
+
+export type StatusLane = {
+  readonly id: StatusLaneId
+  readonly label: string
+  readonly count: number
+  readonly workItems: readonly StatusWorkItemRow[]
+}
+
+export type StatusSuccessDocument = {
+  readonly schemaVersion: typeof CLI_SCHEMA_VERSION
+  readonly command: "status"
+  readonly repository: CanonicalRepositoryIdentity | null
+  readonly lanes: readonly StatusLane[]
 }
 
 type CommandErrorBody = {
@@ -92,6 +130,28 @@ export const buildCandidatesSuccessDocument = (input: {
   candidates: input.candidates,
 })
 
+export const toCanonicalRepositoryIdentity = (repository: {
+  readonly id: string
+  readonly forge: string
+  readonly forgeHost: string
+  readonly projectPath: string
+}): CanonicalRepositoryIdentity => ({
+  id: repository.id,
+  forge: repository.forge,
+  forgeHost: repository.forgeHost,
+  projectPath: repository.projectPath,
+})
+
+export const buildStatusSuccessDocument = (options: {
+  readonly repository: CanonicalRepositoryIdentity | null
+  readonly lanes: readonly StatusLane[]
+}): StatusSuccessDocument => ({
+  schemaVersion: CLI_SCHEMA_VERSION,
+  command: "status",
+  repository: options.repository,
+  lanes: options.lanes,
+})
+
 export const buildCommandErrorDocument = (options: {
   readonly command: FiniteCommandName
   readonly code: string
@@ -105,7 +165,7 @@ export const buildCommandErrorDocument = (options: {
   },
 })
 
-const FiniteCommandNameSchema = Schema.Literals(["add", "candidates"])
+const FiniteCommandNameSchema = Schema.Literals(["add", "candidates", "status"])
 
 /**
  * Expected finite-command failure. Marked as already reported so

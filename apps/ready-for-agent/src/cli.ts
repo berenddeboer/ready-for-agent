@@ -5,8 +5,10 @@ import {
   type FiniteCommandName,
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
+  buildStatusSuccessDocument,
   encodeCompactJson,
   localGitErrorCode,
+  toCanonicalRepositoryIdentity,
 } from "./cli-json.ts"
 import { resolveRepositoryIdentity } from "./repository-identity.ts"
 import { GraphqlApi } from "./services/graphql-api.ts"
@@ -21,6 +23,13 @@ const repositoryIdentityArg = Argument.string("repository").pipe(
   Argument.withDescription(
     "Repository identity as <forge-host>/<project-path> (case-insensitive)",
   ),
+)
+
+const optionalRepositoryIdentityArg = Argument.string("repository").pipe(
+  Argument.withDescription(
+    "Optional repository identity as <forge-host>/<project-path> (case-insensitive)",
+  ),
+  Argument.optional,
 )
 
 const noOpenFlag = Flag.boolean("no-open").pipe(
@@ -190,6 +199,63 @@ const candidatesWorkflow = Effect.fn("Cli.candidates")(function* (
   )
 })
 
+const statusWorkflow = Effect.fn("Cli.status")(function* (
+  repositoryArgument: string | undefined,
+) {
+  const graphqlApi = yield* GraphqlApi
+
+  let repositoryId: string | null = null
+  let scopedRepository: ReturnType<
+    typeof toCanonicalRepositoryIdentity
+  > | null = null
+
+  if (repositoryArgument !== undefined) {
+    const repositories = yield* graphqlApi.listRepositories.pipe(
+      Effect.mapError((error) => toFiniteCommandFailed("status", error)),
+    )
+    const resolved = resolveRepositoryIdentity(repositoryArgument, repositories)
+    switch (resolved._tag) {
+      case "invalid":
+        return yield* new FiniteCommandFailed({
+          command: "status",
+          code: "REPOSITORY_NOT_FOUND",
+          message: `Invalid repository identity "${resolved.argument}". Use <forge-host>/<project-path>.`,
+        })
+      case "not_found":
+        return yield* new FiniteCommandFailed({
+          command: "status",
+          code: "REPOSITORY_NOT_FOUND",
+          message: `No configured Repository matches ${resolved.forgeHost}/${resolved.projectPath}`,
+        })
+      case "ambiguous":
+        return yield* new FiniteCommandFailed({
+          command: "status",
+          code: "REPOSITORY_AMBIGUOUS",
+          message: `Multiple configured Repositories match ${resolved.forgeHost}/${resolved.projectPath} (${resolved.matchCount})`,
+        })
+      case "matched":
+        repositoryId = resolved.repository.id
+        scopedRepository = toCanonicalRepositoryIdentity(resolved.repository)
+        break
+    }
+  }
+
+  const status = yield* graphqlApi
+    .kanbanStatus(repositoryId)
+    .pipe(Effect.mapError((error) => toFiniteCommandFailed("status", error)))
+
+  yield* Console.log(
+    encodeCompactJson(
+      buildStatusSuccessDocument({
+        // Prefer the identity resolved from the operator selector when scoped;
+        // otherwise use the GraphQL projection's repository (null for all).
+        repository: scopedRepository ?? status.repository,
+        lanes: status.lanes,
+      }),
+    ),
+  )
+})
+
 const startCommand = Command.make(
   "start",
   { noOpen: noOpenFlag, host: hostFlag },
@@ -229,6 +295,16 @@ const candidatesCommand = Command.make(
   ),
 )
 
+const statusCommand = Command.make(
+  "status",
+  { repository: optionalRepositoryIdentityArg },
+  ({ repository }) => statusWorkflow(Option.getOrUndefined(repository)),
+).pipe(
+  Command.withDescription(
+    "Print the current six-lane Kanban status as versioned JSON (optional <forge-host>/<project-path>)",
+  ),
+)
+
 export const cli = Command.make(
   "ready-for-agent",
   { noOpen: noOpenFlag, host: hostFlag },
@@ -236,7 +312,12 @@ export const cli = Command.make(
     startHarnessWorkflow(noOpen, Option.getOrUndefined(host)),
 ).pipe(
   Command.withDescription(
-    "Ready for Agent operator binary (start Harness, add repositories, list candidates)",
+    "Ready for Agent operator binary (start Harness, add repositories, list candidates, Kanban status)",
   ),
-  Command.withSubcommands([startCommand, addCommand, candidatesCommand]),
+  Command.withSubcommands([
+    startCommand,
+    addCommand,
+    candidatesCommand,
+    statusCommand,
+  ]),
 )

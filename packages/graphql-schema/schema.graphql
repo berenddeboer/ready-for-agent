@@ -103,6 +103,14 @@ type Query {
   build/review Agent Models, including catalog membership when known).
   """
   intakeCandidates(repositoryId: ID!): RepositoryIntakeCandidates!
+  """
+  Current six-lane Kanban projection. When repositoryId is omitted, includes
+  Work Items from every configured Repository. When set, filters after the
+  shared global source set is built (working + newest 15 terminal failures +
+  Complete/Abandoned in the rolling previous 24 hours). Always returns all six
+  lanes in fixed order, including empty lanes.
+  """
+  kanbanStatus(repositoryId: ID): KanbanStatus!
 }
 
 type GitHubThrottleStatus {
@@ -253,6 +261,47 @@ type Session {
   cost: Float
   createdAt: String
   updatedAt: String
+}
+
+"""
+Kanban pipeline lane identity. Fixed order: Queue, Build, Review, PR,
+Attention, Merged.
+"""
+enum KanbanLaneId {
+  QUEUE
+  BUILD
+  REVIEW
+  PR
+  ATTENTION
+  MERGED
+}
+
+"""
+One Work Item row in a Kanban lane, with its owning Repository identity.
+"""
+type KanbanWorkItem {
+  repository: Repository!
+  workItem: WorkItem!
+}
+
+"""
+One Kanban lane with membership and count. Empty lanes still appear with
+count 0 and an empty workItems list.
+"""
+type KanbanLane {
+  id: KanbanLaneId!
+  label: String!
+  count: Int!
+  workItems: [KanbanWorkItem!]!
+}
+
+"""
+Non-visual Kanban status projection. repository is null when the query covers
+all configured Repositories; otherwise it is the filtered Repository.
+"""
+type KanbanStatus {
+  repository: Repository
+  lanes: [KanbanLane!]!
 }
 
 """
