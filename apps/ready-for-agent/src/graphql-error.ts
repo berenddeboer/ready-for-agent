@@ -62,7 +62,7 @@ const urlPathEndsWithGraphql = (configuredUrl: string): boolean => {
 }
 
 /** Operator-facing message when the configured GraphQL URL returned HTML. */
-export const graphqlUrlNotEndpointMessage = (configuredUrl: string): string => {
+const graphqlUrlNotEndpointMessage = (configuredUrl: string): string => {
   const htmlNotice = `${configuredUrl} returned HTML (the Harness UI), not GraphQL.`
   if (urlPathEndsWithGraphql(configuredUrl)) {
     return htmlNotice
