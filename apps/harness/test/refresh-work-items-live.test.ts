@@ -4,6 +4,7 @@ import {
   committedPullRequestsCountQueryKeyPrefix,
   completedWorkItemsHistoryQueryKeyPrefix,
   followRepositoryWorkItemsLive,
+  kanbanStatusQueryKeyPrefix,
 } from "../src/refresh-work-items-live.js"
 import { describe, expect, test } from "bun:test"
 
@@ -162,6 +163,97 @@ describe("Repository Work Item live-query coordination", () => {
     )
     expect(onChange).toBeDefined()
 
+    controller.abort()
+    await live
+  })
+
+  test("an invalidation refetches active kanbanStatus projections", async () => {
+    const repositoryId = "repo-01JSELECTED000000000000000"
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    type KanbanPayload = {
+      readonly lanes: readonly { readonly id: string; readonly count: number }[]
+    }
+
+    let workItemsFetches = 0
+    let kanbanFetches = 0
+    let kanbanPayload: KanbanPayload = {
+      lanes: [{ id: "QUEUE", count: 0 }],
+    }
+
+    const workItemsQuery = {
+      queryKey: ["work-items", repositoryId] as const,
+      queryFn: async () => {
+        workItemsFetches += 1
+        return []
+      },
+    }
+    const kanbanStatusQuery = {
+      queryKey: [...kanbanStatusQueryKeyPrefix, null] as const,
+      queryFn: async (): Promise<KanbanPayload> => {
+        kanbanFetches += 1
+        return kanbanPayload
+      },
+    }
+
+    // Active observer so activeOnly refresh includes the projection.
+    const unsubscribeKanban = observeQuery(queryClient, kanbanStatusQuery)
+    await queryClient.fetchQuery({ ...workItemsQuery, staleTime: 0 })
+    await queryClient.fetchQuery({ ...kanbanStatusQuery, staleTime: 0 })
+    const kanbanFetchesAfterMount = kanbanFetches
+
+    let releaseInvalidation: (() => void) | undefined
+    const invalidation = new Promise<void>((resolve) => {
+      releaseInvalidation = resolve
+    })
+    let connected: (() => void) | undefined
+    const connectedPromise = new Promise<void>((resolve) => {
+      connected = resolve
+    })
+
+    const controller = new AbortController()
+    const live = followRepositoryWorkItemsLive({
+      getRepositoryIds: () => [repositoryId],
+      queryClient,
+      queries: {
+        workItems: () => workItemsQuery,
+      },
+      signal: controller.signal,
+      retryDelayMs: 10,
+      stream: async ({ onConnected, onChange, signal }) => {
+        await onConnected()
+        connected?.()
+        await invalidation
+        if (signal.aborted) return
+        await onChange(repositoryId)
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) {
+            resolve()
+            return
+          }
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        })
+      },
+    })
+
+    await connectedPromise
+    kanbanPayload = { lanes: [{ id: "BUILD", count: 1 }] }
+    const kanbanBeforeChange = kanbanFetches
+    releaseInvalidation?.()
+    await Bun.sleep(20)
+
+    expect(kanbanFetches).toBeGreaterThan(kanbanBeforeChange)
+    expect(kanbanFetches).toBeGreaterThan(kanbanFetchesAfterMount)
+    expect(
+      queryClient.getQueryData<KanbanPayload>(kanbanStatusQuery.queryKey),
+    ).toEqual({
+      lanes: [{ id: "BUILD", count: 1 }],
+    })
+    expect(workItemsFetches).toBeGreaterThan(1)
+
+    unsubscribeKanban()
     controller.abort()
     await live
   })

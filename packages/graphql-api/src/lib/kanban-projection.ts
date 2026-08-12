@@ -1,11 +1,11 @@
 /**
  * Server-owned Kanban projection: lane membership, source windows, and
- * per-lane ordering. Shared by GraphQL `kanbanStatus` and (later) the visual
- * board so lane meaning cannot drift between clients.
+ * per-lane ordering. Shared by GraphQL `kanbanStatus`, the visual board, and
+ * CLI status so lane meaning cannot drift between clients.
  *
- * Lane rules match `docs/kanban.md` / harness `pipelineLaneFor`. Status and
- * state comparisons are case-insensitive so domain (lowercase) and GraphQL
- * (uppercase) shapes both classify correctly.
+ * Lane rules match `docs/kanban.md`. Status and state comparisons are
+ * case-insensitive so domain (lowercase) and GraphQL (uppercase) shapes both
+ * classify correctly.
  */
 import {
   JOBS_COMPLETED_WINDOW_MS,
