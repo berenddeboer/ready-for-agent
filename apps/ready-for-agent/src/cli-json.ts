@@ -165,11 +165,7 @@ export const buildCommandErrorDocument = (options: {
   },
 })
 
-const FiniteCommandNameSchema = Schema.Literals([
-  "add",
-  "candidates",
-  "status",
-])
+const FiniteCommandNameSchema = Schema.Literals(["add", "candidates", "status"])
 
 /**
  * Expected finite-command failure. Marked as already reported so

@@ -213,10 +213,7 @@ const statusWorkflow = Effect.fn("Cli.status")(function* (
     const repositories = yield* graphqlApi.listRepositories.pipe(
       Effect.mapError((error) => toFiniteCommandFailed("status", error)),
     )
-    const resolved = resolveRepositoryIdentity(
-      repositoryArgument,
-      repositories,
-    )
+    const resolved = resolveRepositoryIdentity(repositoryArgument, repositories)
     switch (resolved._tag) {
       case "invalid":
         return yield* new FiniteCommandFailed({

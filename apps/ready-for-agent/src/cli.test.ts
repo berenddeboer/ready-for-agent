@@ -628,8 +628,7 @@ describe("operator binary CLI seam", () => {
           command: "status",
           error: {
             code: "REPOSITORY_NOT_FOUND",
-            message:
-              "No configured Repository matches github.com/missing/repo",
+            message: "No configured Repository matches github.com/missing/repo",
           },
         })
       }
