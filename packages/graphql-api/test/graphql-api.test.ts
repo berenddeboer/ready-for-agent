@@ -44,6 +44,7 @@ import {
 } from "@ready-for-agent/queue-service"
 import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
+  IssueNotFoundError,
   STEP_RUN_REASON,
   WAITING_FOR_AGENT_TURN_MESSAGE,
   WorkItemLifecycle,
@@ -426,7 +427,7 @@ const makeRuntime = (
   )
 }
 
-const graphqlRequest = (body: unknown, origin?: string) =>
+const graphqlRequest = (body: unknown, origin?: string, signal?: AbortSignal) =>
   new Request("http://127.0.0.1:6056/graphql", {
     method: "POST",
     headers: {
@@ -434,7 +435,21 @@ const graphqlRequest = (body: unknown, origin?: string) =>
       ...(origin === undefined ? {} : { origin }),
     },
     body: JSON.stringify(body),
+    ...(signal === undefined ? {} : { signal }),
   })
+
+const waitUntil = async (
+  predicate: () => boolean,
+  timeoutMs = 2_000,
+): Promise<void> => {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`)
+    }
+    await Bun.sleep(5)
+  }
+}
 
 const addRepositoryRequest = (origin?: string) =>
   graphqlRequest(
@@ -7190,6 +7205,181 @@ describe("GraphQL API", () => {
           cost: null,
         },
       },
+    })
+  })
+
+  test("HTTP abort interrupts the running resolver Effect and runs cleanup", async () => {
+    // Issue #974: GraphQL request cancellation must interrupt Effect execution
+    // rather than leaving the fiber detached after the client disconnects.
+    let started = false
+    let completed = false
+    let cleanedUp = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementNow: () =>
+          Effect.gen(function* () {
+            started = true
+            yield* Effect.sleep("30 seconds")
+            completed = true
+            return workItem
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                cleanedUp = true
+              }),
+            ),
+          ),
+      },
+    )
+
+    const controller = new AbortController()
+    const fetchPromise = createGraphqlApi(runtime).fetch(
+      graphqlRequest(
+        {
+          query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
+            implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+              id
+            }
+          }`,
+          variables: {
+            repositoryId: repository.id,
+            issueNumber: issue.issueNumber,
+          },
+        },
+        undefined,
+        controller.signal,
+      ),
+    )
+
+    await waitUntil(() => started)
+    controller.abort()
+
+    await expect(fetchPromise).rejects.toMatchObject({
+      name: "AbortError",
+    })
+    await waitUntil(() => cleanedUp)
+    expect(completed).toBe(false)
+    // Detached continuation must not finish after the abort settles.
+    await Bun.sleep(50)
+    expect(completed).toBe(false)
+    expect(cleanedUp).toBe(true)
+  })
+
+  test("HTTP abort is not domain result data and later requests keep normal behavior", async () => {
+    let implementCalls = 0
+    let firstStarted = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementNow: () =>
+          Effect.gen(function* () {
+            implementCalls += 1
+            if (implementCalls === 1) {
+              firstStarted = true
+              yield* Effect.sleep("30 seconds")
+            }
+            return workItem
+          }),
+      },
+    )
+
+    const api = createGraphqlApi(runtime)
+    const controller = new AbortController()
+    const aborted = api.fetch(
+      graphqlRequest(
+        {
+          query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
+            implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+              id state
+            }
+          }`,
+          variables: {
+            repositoryId: repository.id,
+            issueNumber: issue.issueNumber,
+          },
+        },
+        undefined,
+        controller.signal,
+      ),
+    )
+    await waitUntil(() => firstStarted)
+    controller.abort()
+    await expect(aborted).rejects.toMatchObject({ name: "AbortError" })
+
+    // Cancelled operation did not return a successful Implement Now payload.
+    // A subsequent request without abort retains existing success behavior.
+    const response = await api.fetch(
+      graphqlRequest({
+        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
+          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            id state
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        implementNow: {
+          id: workItem.id,
+          state: "CREATE_WORKTREE",
+        },
+      },
+    })
+    expect(implementCalls).toBe(2)
+  })
+
+  test("domain GraphQL errors still surface when the request is not aborted", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementNow: () =>
+          Effect.fail(
+            new IssueNotFoundError({
+              repositoryId: repository.id,
+              issueNumber: issue.issueNumber,
+            }),
+          ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
+          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            id
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: `Issue #${issue.issueNumber} was not found in repository ${repository.id}`,
+          extensions: { code: "ISSUE_NOT_FOUND" },
+        }),
+      ],
     })
   })
 })
