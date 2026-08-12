@@ -52,12 +52,23 @@ action.
    ready-for-agent add /path/to/local/repo
    ```
 
-4. Label a GitHub issue `ready-for-agent`. It shows up in the UI
+4. Label a GitHub issue with `ready-for-agent`. It shows up in the UI
    shortly. By default only issues you authored are listed — see
    [Troubleshooting](#troubleshooting).
-5. Open the issue's kebab menu and pick **Implement now** to run it
-   end to end — implement, review, PR — or **Implement locally** to
-   stop before the PR and inspect the work yourself.
+
+5. Go to the `/repos` page to see your issues:
+
+<img src="docs/repos-page.png" alt="Ready for Agent repos" width="90%" />
+
+6. Click the **implement** button to run it end to end — implement,
+   review, PR
+
+<img src="docs/repos-implement-button.png" alt="Ready for Agent implement issue button" width="90%" />
+
+   Alternatively you can open the issue's kebab menu and pick **Implement
+   locally** to stop before the PR and inspect the work yourself.
+
+<img src="docs/repos-implement-locally.png" alt="Ready for Agent implement locally menu" width="90%" />
 
 ## Requirements
 
@@ -240,18 +251,6 @@ Disable with:
 KEYMAXXER_ENABLED=false npx ready-for-agent@latest
 ```
 
-### Application data
-
-Product state defaults to the platform data directory:
-
-- Linux: `$XDG_DATA_HOME/ready-for-agent/` or `~/.local/share/ready-for-agent/`
-- macOS: `~/Library/Application Support/ready-for-agent/`
-
-The SQLite database is `ready-for-agent.db` in that directory. Set
-`SQLITE_DATABASE_PATH` to use another file. Stop the harness
-completely before opening the database with external write tooling
-(single-writer SQLite).
-
 ## Troubleshooting
 
 ### Startup fails with "Required host tools are missing from PATH"
@@ -260,6 +259,18 @@ Install the listed tools. Only `git` and the Forge tool for your
 repositories (`gh` for GitHub, `glab` for GitLab) block startup. A
 missing coding agent never does — it shows as Unavailable instead
 (see below).
+
+### A labelled issue does not show up
+
+- The issue must carry the `ready-for-agent` label — the harness only
+  shows those.
+- By default only issues **you** authored are listed. Enable "Include
+  all Issue Authors" in the repo settings to include everyone's.
+
+### The coding agent shows as Unavailable
+
+Its executable is missing from PATH, or it is not authenticated. Fix
+that and use Recheck in Settings, or pick another backend there.
 
 ### Startup fails with "Cannot establish a trusted TLS connection"
 
@@ -289,17 +300,16 @@ Set the variable in your shell profile (or the service unit that
 starts the harness) so it applies on every launch, then restart
 `ready-for-agent`.
 
-### A labelled issue does not show up
+### What if an item fails with an error message?
 
-- The issue must carry the `ready-for-agent` label — the harness only
-  shows those.
-- By default only issues **you** authored are listed. Enable "Include
-  all Issue Authors" in the repo settings to include everyone's.
+Agents have strict budgets, so the most common one is that it run out
+of tries. Simply click retry.
 
-### The coding agent shows as Unavailable
+You can always inspect the session locally if the error message is unclear, for example:
 
-Its executable is missing from PATH, or it is not authenticated. Fix
-that and use Recheck in Settings, or pick another backend there.
+```
+opencode -s ses_015198f50ffe6aMS7EDvD1U6ob
+```
 
 ## Frequently Asked Questions
 
@@ -399,3 +409,9 @@ Contributions welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
   from Alexander at Lovable
 - ready-for-agent is an example of a
   [metaharness](https://metaharness.tools/).
+- Victor Savkin describes [the workflow very
+  well](https://x.com/victorsavkin/status/2085381771516846093),
+  although we disagree on whether the tooling is always personal, or
+  can be generalised a bit. Obviously my take is that with regards to
+  GitHub/GitLab systems, and a single programmer a tool like
+  ready-for-agent can give a significant productivity boost.
