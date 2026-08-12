@@ -2973,7 +2973,12 @@ function RepositoryIssueRow({
     <li className={ui.repoIssue}>
       <div className={ui.repoIssueRow}>
         <span className={ui.repoIssueNum}>#{issue.issueNumber}</span>
-        <span className="min-w-0">
+        {/*
+          Flow container (div, not span): title column holds block companions
+          (lifecycle, Banner, blocked-by <p>) under the title when the number
+          track grows for long GitLab iids.
+        */}
+        <div className="min-w-0">
           <span className={ui.repoIssueTitleRow}>
             <a className={ui.repoIssueTitleInline} href={issue.url}>
               {issue.title}
@@ -3001,7 +3006,56 @@ function RepositoryIssueRow({
           {issue.issueAuthor !== null && issue.issueAuthor !== "" && (
             <span className={ui.repoIssueAuthor}>{issue.issueAuthor}</span>
           )}
-        </span>
+          {latestWorkItem !== undefined && (
+            <WorkItemLifecycleStatus
+              workItem={latestWorkItem}
+              collapseEarlierLanes
+              forge={repository.forge}
+              issueUrl={
+                issue.url !== ""
+                  ? issue.url
+                  : workItemIssueUrl(
+                      repository.forge,
+                      repository.forgeHost,
+                      repository.projectPath,
+                      latestWorkItem.issueNumber,
+                    )
+              }
+              pullRequestUrl={workItemPullRequestUrl(
+                repository.forge,
+                repository.forgeHost,
+                repository.projectPath,
+                latestWorkItem.pullRequestNumber,
+              )}
+              onOpenSession={onOpenSession}
+            />
+          )}
+          {(implementNow.isError ||
+            implementLocally.isError ||
+            queueIssue.isError) && (
+            <Banner
+              className={cx(ui.bannerCompact, ui.repoIssueError)}
+              tone="alarm"
+              tag="Error"
+              role="alert"
+            >
+              {queueIssue.isError
+                ? "Could not queue issue. Refresh the issues and try again."
+                : "Could not start implementation. Refresh the issues and try again."}
+            </Banner>
+          )}
+          {issue.blockedBy.length > 0 && (
+            <p className={ui.repoIssueBlockedBy}>
+              Blocked by{" "}
+              {issue.blockedBy.map((blocker, index) => (
+                <span key={blocker.issueUrl}>
+                  {index > 0 && ", "}
+                  <a href={blocker.issueUrl}>#{blocker.issueNumber}</a>
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
         <span className={ui.repoIssueActions}>
           {issue.state === "CLOSED" && (
             <span className={cx(ui.stamp, ui.stampClosed)}>Closed</span>
@@ -3074,55 +3128,6 @@ function RepositoryIssueRow({
           )}
         </span>
       </div>
-      {latestWorkItem !== undefined && (
-        <WorkItemLifecycleStatus
-          workItem={latestWorkItem}
-          collapseEarlierLanes
-          forge={repository.forge}
-          issueUrl={
-            issue.url !== ""
-              ? issue.url
-              : workItemIssueUrl(
-                  repository.forge,
-                  repository.forgeHost,
-                  repository.projectPath,
-                  latestWorkItem.issueNumber,
-                )
-          }
-          pullRequestUrl={workItemPullRequestUrl(
-            repository.forge,
-            repository.forgeHost,
-            repository.projectPath,
-            latestWorkItem.pullRequestNumber,
-          )}
-          onOpenSession={onOpenSession}
-        />
-      )}
-      {(implementNow.isError ||
-        implementLocally.isError ||
-        queueIssue.isError) && (
-        <Banner
-          className={cx(ui.bannerCompact, ui.repoIssueError)}
-          tone="alarm"
-          tag="Error"
-          role="alert"
-        >
-          {queueIssue.isError
-            ? "Could not queue issue. Refresh the issues and try again."
-            : "Could not start implementation. Refresh the issues and try again."}
-        </Banner>
-      )}
-      {issue.blockedBy.length > 0 && (
-        <p className={ui.repoIssueBlockedBy}>
-          Blocked by{" "}
-          {issue.blockedBy.map((blocker, index) => (
-            <span key={blocker.issueUrl}>
-              {index > 0 && ", "}
-              <a href={blocker.issueUrl}>#{blocker.issueNumber}</a>
-            </span>
-          ))}
-        </p>
-      )}
     </li>
   )
 }
