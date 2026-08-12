@@ -14,6 +14,7 @@ import {
   GitHubService,
   type GitHubServiceShape,
   GitHubThrottledError,
+  INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
   type PullRequestCheckStatus,
 } from "@ready-for-agent/github-service"
 import {
@@ -25,9 +26,12 @@ import {
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
 import {
+  AUTOMATED_REVIEW_INCOMPLETE_RERUN_LIMIT,
   AUTOMATED_REVIEW_RERUN_LIMIT,
   type LifecycleStepContext,
+  automatedReviewIncompleteRerunLimitReason,
   automatedReviewRerunLimitReason,
+  formatAutomatedReviewWorkflowIdentity,
   investigatePrStatusChecks,
   makeWorkItemId,
   parseInvestigationResult,
@@ -2664,6 +2668,439 @@ describe("PR status check steps", () => {
     )
   })
 
+  it("formats Needs Human reasons so workflow identity is not an implement model", () => {
+    expect(
+      formatAutomatedReviewWorkflowIdentity("Claude Code Review", 42),
+    ).toBe('workflow "Claude Code Review"')
+    expect(formatAutomatedReviewWorkflowIdentity(null, 99)).toBe(
+      "workflow run 99",
+    )
+    expect(
+      automatedReviewRerunLimitReason(
+        formatAutomatedReviewWorkflowIdentity("Claude Code Review"),
+      ),
+    ).toBe(
+      'Automated review workflow "Claude Code Review" hit the autonomous rerun limit (3); inspect or run that GitHub review workflow or check manually, then Retry checks.',
+    )
+    expect(
+      automatedReviewIncompleteRerunLimitReason(
+        formatAutomatedReviewWorkflowIdentity("Claude Code Review"),
+      ),
+    ).toBe(
+      'Automated review workflow "Claude Code Review" produced the same incomplete review output after one recovery rerun; inspect or run that GitHub review workflow or check manually, then Retry checks.',
+    )
+    expect(
+      automatedReviewRerunLimitReason(
+        formatAutomatedReviewWorkflowIdentity("Claude Code Review"),
+      ),
+    ).not.toMatch(/for Claude Code Review/)
+  })
+
+  it("authorizes one incomplete-signature recovery rerun then Needs Human without a second GitHub call", async () => {
+    const rerunIds: number[] = []
+    const headSha = "sha-incomplete-head"
+    const workflowRunId = 31549139160
+    const greenStatus = {
+      _tag: "succeeded" as const,
+      ...mergeable,
+      headSha,
+      terminalChecks: [
+        {
+          externalId: "actions-job:review",
+          name: "Claude Code Review/claude-review",
+          outcome: "green" as const,
+        },
+      ],
+    }
+    const incompleteEvidence = {
+      _tag: "incomplete" as const,
+      signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+      workflowRunId,
+      workflowName: "Claude Code Review",
+      detail: "Visibly incomplete automated review comment from claude[bot]",
+    }
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const sql = yield* SqlClient.SqlClient
+        const now = Date.now()
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check (
+             id, work_item_id, external_id, name, outcome,
+             handled_at, observed_at, created_at, updated_at
+           ) VALUES (?, ?, ?, 'Claude Code Review/claude-review', 'green', NULL, ?, ?, ?)`,
+          [
+            "psc-incomplete-1",
+            context.workItemId,
+            "actions-job:review-1",
+            now,
+            now,
+            now,
+          ],
+        )
+        const first = yield* investigatePrStatusChecks(context)
+        expect(first).toEqual({
+          _tag: "checks_triggered",
+          handledCheckIds: ["psc-incomplete-1"],
+          checkStartAnchorRecorded: true,
+        })
+        expect(AUTOMATED_REVIEW_INCOMPLETE_RERUN_LIMIT).toBe(1)
+        const handledAt = Date.now()
+        yield* sql.unsafe(
+          `UPDATE pr_status_check
+           SET handled_at = ?, updated_at = ?
+           WHERE id = ?`,
+          [handledAt, handledAt, "psc-incomplete-1"],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check (
+             id, work_item_id, external_id, name, outcome,
+             handled_at, observed_at, created_at, updated_at
+           ) VALUES (?, ?, ?, 'Claude Code Review/claude-review', 'green', NULL, ?, ?, ?)`,
+          [
+            "psc-incomplete-2",
+            context.workItemId,
+            "actions-job:review-2",
+            Date.now(),
+            Date.now(),
+            Date.now(),
+          ],
+        )
+        const second = yield* investigatePrStatusChecks(context)
+        expect(second).toEqual({
+          _tag: "needs_human",
+          reason: automatedReviewIncompleteRerunLimitReason(
+            formatAutomatedReviewWorkflowIdentity("Claude Code Review"),
+          ),
+          handledCheckIds: ["psc-incomplete-2"],
+        })
+        const permits = (yield* sql.unsafe(
+          `SELECT COUNT(*) AS count FROM automated_review_rerun
+           WHERE work_item_id = ? AND head_sha = ? AND workflow_run_id = ?
+             AND signature = ?`,
+          [
+            context.workItemId,
+            headSha,
+            String(workflowRunId),
+            INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+          ],
+        )) as readonly { readonly count: number }[]
+        expect(Number(permits[0]?.count)).toBe(1)
+        const generalPermits = (yield* sql.unsafe(
+          `SELECT COUNT(*) AS count FROM automated_review_rerun
+           WHERE work_item_id = ? AND head_sha = ? AND workflow_run_id = ?
+             AND signature IS NULL`,
+          [context.workItemId, headSha, String(workflowRunId)],
+        )) as readonly { readonly count: number }[]
+        expect(Number(generalPermits[0]?.count)).toBe(0)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(greenStatus, {
+              observeAutomatedReviewEvidence: () =>
+                Effect.succeed(incompleteEvidence),
+              rerunWorkflowRun: (_repo, runId) => {
+                rerunIds.push(runId)
+                return Effect.void
+              },
+            }),
+            keymaxxer,
+            opencodeWith(["should not run for harness-classified incomplete"]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(rerunIds).toEqual([workflowRunId])
+  })
+
+  it("enters Needs Human when incomplete classification has no workflow run id", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                headSha: "sha-no-run-id",
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:review",
+                    name: "Claude Code Review/claude-review",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "incomplete" as const,
+                    signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+                    workflowRunId: null,
+                    workflowName: "Claude Code Review",
+                    detail: "incomplete without run id",
+                  }),
+                rerunWorkflowRun: () => {
+                  throw new Error("must not rerun without workflow run id")
+                },
+              },
+            ),
+            keymaxxer,
+            opencodeWith(["should not run"]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+    expect(result._tag).toBe("needs_human")
+    if (result._tag === "needs_human") {
+      expect(result.reason).toContain("could not resolve a workflow run id")
+      expect(result.reason).toContain('workflow "Claude Code Review"')
+    }
+  })
+
+  it("gives a new head SHA a fresh incomplete single retry", async () => {
+    const rerunIds: number[] = []
+    const workflowRunId = 4001
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const sql = yield* SqlClient.SqlClient
+        const now = Date.now()
+        yield* sql.unsafe(
+          `INSERT INTO automated_review_rerun (
+             id, work_item_id, head_sha, workflow_run_id, workflow_name,
+             signature, status, created_at, updated_at
+           ) VALUES ('arr-old-incomplete', ?, 'old-incomplete-head', ?, 'Claude Code Review', ?, 'completed', ?, ?)`,
+          [
+            context.workItemId,
+            String(workflowRunId),
+            INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+            now,
+            now,
+          ],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check (
+             id, work_item_id, external_id, name, outcome,
+             handled_at, observed_at, created_at, updated_at
+           ) VALUES ('psc-new-incomplete-head', ?, 'actions-job:new-inc', 'Claude Code Review/claude-review', 'green', NULL, ?, ?, ?)`,
+          [context.workItemId, now, now, now],
+        )
+        const result = yield* investigatePrStatusChecks(context)
+        expect(result).toEqual({
+          _tag: "checks_triggered",
+          handledCheckIds: ["psc-new-incomplete-head"],
+          checkStartAnchorRecorded: true,
+        })
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                headSha: "new-incomplete-head",
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:new-inc",
+                    name: "Claude Code Review/claude-review",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "incomplete" as const,
+                    signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+                    workflowRunId,
+                    workflowName: "Claude Code Review",
+                    detail: "incomplete on new head",
+                  }),
+                rerunWorkflowRun: (_repo, runId) => {
+                  rerunIds.push(runId)
+                  return Effect.void
+                },
+              },
+            ),
+            keymaxxer,
+            opencodeWith(["should not run"]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+    expect(rerunIds).toEqual([workflowRunId])
+  })
+
+  it("gives a new workflow run id a fresh incomplete single retry", async () => {
+    const rerunIds: number[] = []
+    const headSha = "same-incomplete-head"
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const sql = yield* SqlClient.SqlClient
+        const now = Date.now()
+        yield* sql.unsafe(
+          `INSERT INTO automated_review_rerun (
+             id, work_item_id, head_sha, workflow_run_id, workflow_name,
+             signature, status, created_at, updated_at
+           ) VALUES ('arr-old-run', ?, ?, '111', 'Claude Code Review', ?, 'completed', ?, ?)`,
+          [
+            context.workItemId,
+            headSha,
+            INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+            now,
+            now,
+          ],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check (
+             id, work_item_id, external_id, name, outcome,
+             handled_at, observed_at, created_at, updated_at
+           ) VALUES ('psc-new-run', ?, 'actions-job:new-run', 'Claude Code Review/claude-review', 'green', NULL, ?, ?, ?)`,
+          [context.workItemId, now, now, now],
+        )
+        const result = yield* investigatePrStatusChecks(context)
+        expect(result).toEqual({
+          _tag: "checks_triggered",
+          handledCheckIds: ["psc-new-run"],
+          checkStartAnchorRecorded: true,
+        })
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                headSha,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:new-run",
+                    name: "Claude Code Review/claude-review",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "incomplete" as const,
+                    signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+                    workflowRunId: 222,
+                    workflowName: "Claude Code Review",
+                    detail: "incomplete on new run",
+                  }),
+                rerunWorkflowRun: (_repo, runId) => {
+                  rerunIds.push(runId)
+                  return Effect.void
+                },
+              },
+            ),
+            keymaxxer,
+            opencodeWith(["should not run"]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+    expect(rerunIds).toEqual([222])
+  })
+
+  it("blocks agent RERUN_REVIEW after incomplete-signature budget is spent", async () => {
+    let rerunCalls = 0
+    const headSha = "sha-post-incomplete"
+    const workflowRunId = 555
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const sql = yield* SqlClient.SqlClient
+        const now = Date.now()
+        yield* sql.unsafe(
+          `INSERT INTO automated_review_rerun (
+             id, work_item_id, head_sha, workflow_run_id, workflow_name,
+             signature, status, created_at, updated_at
+           ) VALUES ('arr-incomplete-spent', ?, ?, ?, 'Claude Code Review', ?, 'completed', ?, ?)`,
+          [
+            context.workItemId,
+            headSha,
+            String(workflowRunId),
+            INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+            now,
+            now,
+          ],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check (
+             id, work_item_id, external_id, name, outcome,
+             handled_at, observed_at, created_at, updated_at
+           ) VALUES ('psc-agent-after-incomplete', ?, 'actions-job:after', 'Claude Code Review/claude-review', 'green', NULL, ?, ?, ?)`,
+          [context.workItemId, now, now, now],
+        )
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                headSha,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:after",
+                    name: "Claude Code Review/claude-review",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                // Force agent path (positive evidence, not harness incomplete).
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "positive" as const,
+                    kind: "review_comment" as const,
+                    detail: "Issue comment from claude[bot]",
+                  }),
+                rerunWorkflowRun: () => {
+                  rerunCalls += 1
+                  return Effect.void
+                },
+              },
+            ),
+            keymaxxer,
+            opencodeWith([
+              `still incomplete\nREADY_FOR_AGENT_RESULT: RERUN_REVIEW: ${workflowRunId} Claude Code Review`,
+            ]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+    expect(rerunCalls).toBe(0)
+    expect(result).toEqual({
+      _tag: "needs_human",
+      reason: automatedReviewIncompleteRerunLimitReason(
+        formatAutomatedReviewWorkflowIdentity("Claude Code Review"),
+      ),
+      handledCheckIds: ["psc-agent-after-incomplete"],
+    })
+  })
+
   it("authorizes exactly three whole-review reruns then Needs Human before a fourth", async () => {
     const rerunIds: number[] = []
     const headSha = "sha-review-head"
@@ -2755,7 +3192,9 @@ describe("PR status check steps", () => {
         const exhausted = yield* investigatePrStatusChecks(context)
         expect(exhausted).toEqual({
           _tag: "needs_human",
-          reason: automatedReviewRerunLimitReason("Claude Code Review"),
+          reason: automatedReviewRerunLimitReason(
+            formatAutomatedReviewWorkflowIdentity("Claude Code Review"),
+          ),
           handledCheckIds: ["psc-review-4"],
         })
         const permits = (yield* sql.unsafe(

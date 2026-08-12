@@ -26,9 +26,12 @@ import {
   type AutomatedReviewEvidenceCheck,
   type AutomatedReviewEvidenceObservation,
   GREEN_NO_REVIEW_EVIDENCE_REASON,
+  classifyIncompleteAutomatedReviewOutput,
+  extractWorkflowRunIdFromReviewComment,
   inspectReviewerJobSteps,
   isRecognizedAutomatedReviewerLogin,
   isRecognizedAutomatedReviewerName,
+  workflowNameFromCheckName,
 } from "./automated-review-evidence.js"
 import { extractErrorCode } from "./error-cause-chain.js"
 import {
@@ -3027,6 +3030,54 @@ const listAuthorLoginsFromRestCollection = async (
   return logins
 }
 
+type RestCommentWithBody = {
+  readonly login: string
+  readonly body: string
+}
+
+/**
+ * List issue/PR comments in page order (oldest first). Used so the latest
+ * recognized automated-reviewer comment body can be classified for incomplete
+ * Automated Review Output.
+ */
+const listCommentsWithBodiesFromRestCollection = async (
+  token: string,
+  urlBase: string,
+  fetchImpl: GitHubFetch,
+  errorMessage: string,
+  signal?: AbortSignal,
+): Promise<readonly RestCommentWithBody[]> => {
+  const comments: RestCommentWithBody[] = []
+  for (let page = 1; ; page += 1) {
+    const url = new URL(urlBase)
+    url.searchParams.set("per_page", String(PAGE_SIZE))
+    url.searchParams.set("page", String(page))
+    const response = await fetchImpl(url, {
+      headers: githubRestHeaders(token),
+      signal,
+    })
+    const items = await readGitHubJson<
+      readonly {
+        readonly user?: unknown
+        readonly author?: unknown
+        readonly body?: unknown
+      }[]
+    >(response, errorMessage)
+    for (const item of items) {
+      const login = loginFromAuthor(item.user) ?? loginFromAuthor(item.author)
+      if (login === null) {
+        continue
+      }
+      const body = typeof item.body === "string" ? item.body : ""
+      comments.push({ login, body })
+    }
+    if (items.length < PAGE_SIZE) {
+      break
+    }
+  }
+  return comments
+}
+
 const fetchActionsJobExecution = async (
   token: string,
   repository: { owner: string; name: string },
@@ -3035,6 +3086,7 @@ const fetchActionsJobExecution = async (
   signal?: AbortSignal,
 ): Promise<{
   readonly conclusion: unknown
+  readonly runId: number | null
   readonly steps: readonly {
     readonly status?: unknown
     readonly conclusion?: unknown
@@ -3049,6 +3101,7 @@ const fetchActionsJobExecution = async (
   )
   const job = await readGitHubJson<{
     readonly conclusion?: unknown
+    readonly run_id?: unknown
     readonly steps?:
       | readonly {
           readonly status?: unknown
@@ -3059,8 +3112,16 @@ const fetchActionsJobExecution = async (
     response,
     `Failed to load Actions job ${jobId} for ${repository.owner}/${repository.name}`,
   )
+  const runIdRaw = job.run_id
+  const runId =
+    typeof runIdRaw === "number" &&
+    Number.isSafeInteger(runIdRaw) &&
+    runIdRaw > 0
+      ? runIdRaw
+      : null
   return {
     conclusion: job.conclusion,
+    runId,
     steps: job.steps ?? [],
   }
 }
@@ -3119,10 +3180,19 @@ const makeObserveAutomatedReviewEvidence =
         }
       }
 
+      const recognizedCheck = checks.find((check) =>
+        isRecognizedAutomatedReviewerName(check.name),
+      )
+      const workflowNameFromChecks =
+        recognizedCheck !== undefined
+          ? workflowNameFromCheckName(recognizedCheck.name)
+          : null
+
+      // Latest recognized issue comment body wins for incompleteness (ADR 0027/#971).
       const issueComments = yield* githubRequest(
         `Failed to list issue comments for automated review evidence on ${repository.owner}/${repository.name}#${pullNumber}`,
         (signal) =>
-          listAuthorLoginsFromRestCollection(
+          listCommentsWithBodiesFromRestCollection(
             token,
             `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/issues/${pullNumber}/comments`,
             fetchImpl,
@@ -3130,13 +3200,55 @@ const makeObserveAutomatedReviewEvidence =
             signal,
           ),
       )
-      for (const login of issueComments) {
-        if (isRecognizedAutomatedReviewerLogin(login)) {
-          return {
-            _tag: "positive" as const,
-            kind: "review_comment" as const,
-            detail: `Issue comment from ${login}`,
+      let latestRecognizedIssueComment: RestCommentWithBody | null = null
+      for (const comment of issueComments) {
+        if (isRecognizedAutomatedReviewerLogin(comment.login)) {
+          latestRecognizedIssueComment = comment
+        }
+      }
+      if (latestRecognizedIssueComment !== null) {
+        const classification = classifyIncompleteAutomatedReviewOutput(
+          latestRecognizedIssueComment.body,
+        )
+        if (classification._tag === "incomplete") {
+          let workflowRunId = extractWorkflowRunIdFromReviewComment(
+            latestRecognizedIssueComment.body,
+          )
+          if (workflowRunId === null && recognizedCheck !== undefined) {
+            const { source, actionsJobId } = parseDiagnosticSource(
+              recognizedCheck.externalId,
+            )
+            if (source === "actions-job" && actionsJobId !== null) {
+              const jobResult = yield* githubRequest(
+                `Failed to load Actions job for incomplete review evidence on ${repository.owner}/${repository.name}`,
+                (signal) =>
+                  fetchActionsJobExecution(
+                    token,
+                    repository,
+                    actionsJobId,
+                    fetchImpl,
+                    signal,
+                  ),
+              ).pipe(Effect.result)
+              if (Result.isSuccess(jobResult)) {
+                workflowRunId = jobResult.success.runId
+              } else if (isGitHubThrottledError(jobResult.failure)) {
+                return yield* jobResult.failure
+              }
+            }
           }
+          return {
+            _tag: "incomplete" as const,
+            signature: classification.signature,
+            workflowRunId,
+            workflowName: workflowNameFromChecks,
+            detail: `Visibly incomplete automated review comment from ${latestRecognizedIssueComment.login}`,
+          }
+        }
+        return {
+          _tag: "positive" as const,
+          kind: "review_comment" as const,
+          detail: `Issue comment from ${latestRecognizedIssueComment.login}`,
         }
       }
 

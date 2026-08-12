@@ -4603,7 +4603,7 @@ describe("WorkItemLifecycle", () => {
     it("enters Needs Human when automated review rerun budget is exhausted and releases the Worker Slot", () => {
       const checkId = "psc-rerun-exhausted"
       const reason =
-        "Automated review rerun limit reached (3) for Claude Code Review; inspect or run the review manually, then Retry checks."
+        'Automated review workflow "Claude Code Review" hit the autonomous rerun limit (3); inspect or run that GitHub review workflow or check manually, then Retry checks.'
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>

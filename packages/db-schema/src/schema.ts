@@ -451,6 +451,13 @@ export const automatedReviewRerun = snakeCase.table(
     workflowRunId: text().notNull(),
     workflowName: text(),
     /**
+     * Optional incomplete-signature id (ADR 0027 / #971). Null means a general
+     * agent-reported RERUN_REVIEW permit. Incomplete and general budgets are
+     * counted separately so the one-retry incomplete circuit breaker does not
+     * consume the three-rerun agent budget.
+     */
+    signature: text(),
+    /**
      * `reserved` counts against the budget before/without a confirmed GitHub
      * response; `completed` means the harness observed a successful rerun call.
      */

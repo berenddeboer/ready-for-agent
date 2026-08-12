@@ -9,6 +9,7 @@ import {
   GitHubService,
   GitHubThrottledError,
   GitHubTlsTrustError,
+  INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
   type ReadyLabeledIssue,
   buildReasonDetail,
   extractCauseChain,
@@ -1997,7 +1998,12 @@ describe("GitHubService live implementation", () => {
       }
       if (url.includes("/issues/9/comments")) {
         return new Response(
-          JSON.stringify([{ user: { login: "claude[bot]" } }]),
+          JSON.stringify([
+            {
+              user: { login: "claude[bot]" },
+              body: "**Claude finished**\n\n## Findings\nAll good.\n- [x] Aggregate findings and post review",
+            },
+          ]),
           { status: 200, headers: { "content-type": "application/json" } },
         )
       }
@@ -2014,6 +2020,57 @@ describe("GitHubService live implementation", () => {
       _tag: "positive",
       kind: "review_comment",
       detail: "Issue comment from claude[bot]",
+    })
+  })
+
+  it("observes incomplete Automated Review Output from the latest recognized comment body", async () => {
+    const incompleteBody = `**Claude finished @berenddeboer's task in 2m 35s** —— [View job](https://github.com/acme/widgets/actions/runs/31549139160)
+
+### Claude is reviewing this PR
+- [x] Gather context
+- [ ] Aggregate findings and post review
+`
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = String(input)
+      if (url.includes("/pulls?") && url.includes("state=open")) {
+        return new Response(JSON.stringify([{ number: 11 }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.includes("/issues/11/comments")) {
+        return new Response(
+          JSON.stringify([
+            {
+              user: { login: "claude[bot]" },
+              body: "**Claude finished**\n\n## Findings\nold complete attempt\n- [x] Aggregate findings and post review",
+            },
+            {
+              user: { login: "claude[bot]" },
+              body: incompleteBody,
+            },
+          ]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeAutomatedReviewEvidence(repository, "feature/incomplete", [
+        {
+          externalId: "actions-job:400",
+          name: "Claude Code Review/claude-review",
+        },
+      ]),
+    )
+
+    expect(observation).toEqual({
+      _tag: "incomplete",
+      signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+      workflowRunId: 31549139160,
+      workflowName: "Claude Code Review",
+      detail: "Visibly incomplete automated review comment from claude[bot]",
     })
   })
 
