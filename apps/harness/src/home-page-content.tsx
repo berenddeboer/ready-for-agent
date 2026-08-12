@@ -101,6 +101,7 @@ import {
 } from "./routed-dialog.js"
 import { openSessionTelemetry } from "./session-telemetry-nav.js"
 import { sessionWorktreeParts } from "./session-worktree-line.js"
+import { startWorkBannerMessage } from "./start-work-banner-message.js"
 import { cx, ui } from "./ui.js"
 import { workItemIssueUrl } from "./work-item-issue-url.js"
 import { canShowWorkItemResetAction } from "./work-item-job-actions.js"
@@ -2904,8 +2905,11 @@ function ParentIssueGroup({
             tag="Error"
             role="alert"
           >
-            Could not start Implement all with auto-merge. Refresh the issues
-            and try again.
+            {startWorkBannerMessage({
+              error: implementAll.error,
+              fallback:
+                "Could not start Implement all with auto-merge. Refresh the issues and try again.",
+            })}
           </Banner>
         )}
         <ul className={ui.parentIssueChildren}>
@@ -3112,9 +3116,16 @@ function RepositoryIssueRow({
               tag="Error"
               role="alert"
             >
-              {queueIssue.isError
-                ? "Could not queue issue. Refresh the issues and try again."
-                : "Could not start implementation. Refresh the issues and try again."}
+              {startWorkBannerMessage({
+                error: queueIssue.isError
+                  ? queueIssue.error
+                  : implementNow.isError
+                    ? implementNow.error
+                    : implementLocally.error,
+                fallback: queueIssue.isError
+                  ? "Could not queue issue. Refresh the issues and try again."
+                  : "Could not start implementation. Refresh the issues and try again.",
+              })}
             </Banner>
           )}
           {issue.blockedBy.length > 0 && (
