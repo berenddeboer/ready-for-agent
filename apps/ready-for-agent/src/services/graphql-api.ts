@@ -10,8 +10,36 @@ import {
   toCanonicalRepositoryIdentity,
 } from "../cli-json.ts"
 import type { LocalRepository, RepositorySummary } from "../domain.ts"
-import { describeGraphqlFailure } from "../graphql-error.ts"
+import {
+  GraphqlUrlNotEndpointError,
+  describeGraphqlFailure,
+} from "../graphql-error.ts"
 import { ApplicationConfig } from "./application-config.ts"
+
+const jsonMediaType = (contentType: string | null): string | undefined => {
+  if (contentType === null) {
+    return undefined
+  }
+  return contentType.split(";")[0]?.trim().toLowerCase()
+}
+
+const isJsonContentType = (contentType: string | null): boolean => {
+  const mediaType = jsonMediaType(contentType)
+  return (
+    mediaType === "application/json" || mediaType?.endsWith("+json") === true
+  )
+}
+
+/** Reject HTML (and other non-JSON) before genql parses the response body. */
+const createGraphqlEndpointFetch =
+  (configuredUrl: string) =>
+  async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const response = await fetch(input, init)
+    if (!isJsonContentType(response.headers.get("content-type"))) {
+      throw new GraphqlUrlNotEndpointError(configuredUrl)
+    }
+    return response
+  }
 
 /**
  * Expected GraphQL operator failures. Marked as already reported so
@@ -185,7 +213,10 @@ export class GraphqlApi extends Context.Service<
     GraphqlApi,
     Effect.gen(function* () {
       const config = yield* ApplicationConfig
-      const client = createClient({ url: config.graphqlUrl })
+      const client = createClient({
+        url: config.graphqlUrl,
+        fetch: createGraphqlEndpointFetch(config.graphqlUrl),
+      })
 
       const mapFailure = (cause: unknown): GraphqlRequestFailed => {
         const failure = describeGraphqlFailure(cause, {
