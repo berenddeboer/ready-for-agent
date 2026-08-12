@@ -10,7 +10,7 @@ export const CLI_SCHEMA_VERSION = 1 as const
 export type FiniteCommandName = "add"
 
 /** Canonical Repository identity shared across finite CLI JSON documents. */
-export type CanonicalRepositoryIdentity = {
+type CanonicalRepositoryIdentity = {
   readonly id: string
   readonly forge: string
   readonly forgeHost: string
@@ -25,7 +25,7 @@ export type AddSuccessDocument = {
   readonly isBare: boolean
 }
 
-export type CommandErrorBody = {
+type CommandErrorBody = {
   readonly code: string
   readonly message: string
 }
