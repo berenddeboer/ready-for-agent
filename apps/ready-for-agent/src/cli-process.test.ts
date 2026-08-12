@@ -12,7 +12,11 @@ import { type Server, createServer } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { CLI_SCHEMA_VERSION, buildAddSuccessDocument } from "./cli-json.ts"
+import {
+  CLI_SCHEMA_VERSION,
+  buildAddSuccessDocument,
+  buildCandidatesSuccessDocument,
+} from "./cli-json.ts"
 import {
   HARNESS_START_HINT,
   HARNESS_UNREACHABLE_CODE,
@@ -75,17 +79,14 @@ type ProcessResult = {
   readonly stderr: string
 }
 
-const runAdd = (repoDir: string, graphqlUrl: string): Promise<ProcessResult> =>
+const runCli = (
+  args: readonly string[],
+  graphqlUrl: string,
+): Promise<ProcessResult> =>
   new Promise((resolve, reject) => {
     const child = spawn(
       "bun",
-      [
-        "--conditions",
-        "@ready-for-agent/source",
-        "src/main.ts",
-        "add",
-        repoDir,
-      ],
+      ["--conditions", "@ready-for-agent/source", "src/main.ts", ...args],
       {
         cwd: packageRoot,
         env: {
@@ -109,7 +110,11 @@ const runAdd = (repoDir: string, graphqlUrl: string): Promise<ProcessResult> =>
     })
     const timer = setTimeout(() => {
       child.kill("SIGKILL")
-      reject(new Error(`add timed out\nstdout:\n${stdout}\nstderr:\n${stderr}`))
+      reject(
+        new Error(
+          `${args.join(" ")} timed out\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+        ),
+      )
     }, 20_000)
     child.on("error", (error) => {
       clearTimeout(timer)
@@ -120,6 +125,9 @@ const runAdd = (repoDir: string, graphqlUrl: string): Promise<ProcessResult> =>
       resolve({ status, stdout, stderr })
     })
   })
+
+const runAdd = (repoDir: string, graphqlUrl: string): Promise<ProcessResult> =>
+  runCli(["add", repoDir], graphqlUrl)
 
 describe("operator binary finite-command process contract", () => {
   let tempRoot = ""
@@ -265,6 +273,187 @@ describe("operator binary finite-command process contract", () => {
         error: {
           code: "REPOSITORY_ALREADY_EXISTS",
           message: "Repository owner/repo already exists on github.com",
+        },
+      })
+      expect(result.stderr).not.toMatch(/\s+at\s+\S+\s+\(/)
+      expect(result.stderr).not.toContain("FiniteCommandFailed:")
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("candidates success emits one JSON document on stdout and exits 0", async () => {
+    const seenBodies: string[] = []
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        seenBodies.push(body)
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({
+            data: {
+              intakeCandidates: {
+                repository: {
+                  id: "repo-process-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                  issuesReconciledAt: "2026-08-12T10:00:00.000Z",
+                },
+                candidates: [
+                  {
+                    issueNumber: 7,
+                    title: "Ready",
+                    url: "https://github.com/owner/repo/issues/7",
+                    action: "IMPLEMENT_NOW",
+                  },
+                  {
+                    issueNumber: 9,
+                    title: "Blocked",
+                    url: "https://github.com/owner/repo/issues/9",
+                    action: "QUEUE",
+                  },
+                ],
+              },
+            },
+          }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["candidates", "GitHub.com/Owner/Repo"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(0)
+      expect(result.stderr.trim()).toBe("")
+      expect(seenBodies.some((body) => body.includes("repositories"))).toBe(
+        true,
+      )
+      expect(seenBodies.some((body) => body.includes("intakeCandidates"))).toBe(
+        true,
+      )
+      const successDoc = parseExactlyOneJsonDocument(result.stdout)
+      expect(successDoc).toEqual(
+        buildCandidatesSuccessDocument({
+          repository: {
+            id: "repo-process-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          issuesReconciledAt: "2026-08-12T10:00:00.000Z",
+          candidates: [
+            {
+              issueNumber: 7,
+              title: "Ready",
+              url: "https://github.com/owner/repo/issues/7",
+              action: "IMPLEMENT_NOW",
+            },
+            {
+              issueNumber: 9,
+              title: "Blocked",
+              url: "https://github.com/owner/repo/issues/9",
+              action: "QUEUE",
+            },
+          ],
+        }),
+      )
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("candidates GraphQL preflight failure preserves extensions.code on stderr", async () => {
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({
+            data: null,
+            errors: [
+              {
+                message: "Agent Backend is unavailable",
+                extensions: { code: "AGENT_BACKEND_UNAVAILABLE" },
+              },
+            ],
+          }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["candidates", "github.com/owner/repo"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stdout.trim()).toBe("")
+      const errorDoc = parseExactlyOneJsonDocument(result.stderr)
+      expect(errorDoc).toEqual({
+        schemaVersion: CLI_SCHEMA_VERSION,
+        command: "candidates",
+        error: {
+          code: "AGENT_BACKEND_UNAVAILABLE",
+          message: "Agent Backend is unavailable",
         },
       })
       expect(result.stderr).not.toMatch(/\s+at\s+\S+\s+\(/)

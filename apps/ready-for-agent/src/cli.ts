@@ -2,16 +2,25 @@ import { Console, Effect, Option } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import {
   FiniteCommandFailed,
+  type FiniteCommandName,
   buildAddSuccessDocument,
+  buildCandidatesSuccessDocument,
   encodeCompactJson,
   localGitErrorCode,
 } from "./cli-json.ts"
+import { resolveRepositoryIdentity } from "./repository-identity.ts"
 import { GraphqlApi } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
 import { StartHarness } from "./services/start-harness.ts"
 
 const pathArg = Argument.string("path").pipe(
   Argument.withDescription("Path to a local git repository"),
+)
+
+const repositoryIdentityArg = Argument.string("repository").pipe(
+  Argument.withDescription(
+    "Repository identity as <forge-host>/<project-path> (case-insensitive)",
+  ),
 )
 
 const noOpenFlag = Flag.boolean("no-open").pipe(
@@ -49,7 +58,10 @@ const startHarnessWorkflow = Effect.fn("Cli.startHarness")(function* (
   yield* startHarnessService.start({ noOpen, host })
 })
 
-const toAddCommandFailed = (error: unknown): FiniteCommandFailed => {
+const toFiniteCommandFailed = (
+  command: FiniteCommandName,
+  error: unknown,
+): FiniteCommandFailed => {
   if (error instanceof FiniteCommandFailed) {
     return error
   }
@@ -70,7 +82,7 @@ const toAddCommandFailed = (error: unknown): FiniteCommandFailed => {
       typeof tagged.message === "string"
     ) {
       return new FiniteCommandFailed({
-        command: "add",
+        command,
         code: tagged.code,
         message: tagged.message,
       })
@@ -82,13 +94,14 @@ const toAddCommandFailed = (error: unknown): FiniteCommandFailed => {
           ? tagged.message
           : String(error)
     return new FiniteCommandFailed({
-      command: "add",
-      code: localGitErrorCode(tagged._tag),
+      command,
+      code:
+        command === "add" ? localGitErrorCode(tagged._tag) : "INTERNAL_ERROR",
       message,
     })
   }
   return new FiniteCommandFailed({
-    command: "add",
+    command,
     code: "INTERNAL_ERROR",
     message: error instanceof Error ? error.message : String(error),
   })
@@ -105,7 +118,7 @@ const addRepositoryWorkflow = Effect.fn("Cli.addRepository")(function* (
   const graphqlApi = yield* GraphqlApi
   const inspected = yield* localGit
     .inspect(path)
-    .pipe(Effect.mapError(toAddCommandFailed))
+    .pipe(Effect.mapError((error) => toFiniteCommandFailed("add", error)))
   const repository = {
     ...inspected,
     ...(corrections.forgeHost === undefined
@@ -117,10 +130,64 @@ const addRepositoryWorkflow = Effect.fn("Cli.addRepository")(function* (
   }
   const added = yield* graphqlApi
     .addRepository(repository)
-    .pipe(Effect.mapError(toAddCommandFailed))
+    .pipe(Effect.mapError((error) => toFiniteCommandFailed("add", error)))
 
   // Exactly one compact JSON success document on stdout; no progress chatter.
   yield* Console.log(encodeCompactJson(buildAddSuccessDocument(added)))
+})
+
+const candidatesWorkflow = Effect.fn("Cli.candidates")(function* (
+  repositoryArgument: string,
+) {
+  const graphqlApi = yield* GraphqlApi
+  const repositories = yield* graphqlApi.listRepositories.pipe(
+    Effect.mapError((error) => toFiniteCommandFailed("candidates", error)),
+  )
+
+  const resolved = resolveRepositoryIdentity(repositoryArgument, repositories)
+  switch (resolved._tag) {
+    case "invalid":
+      return yield* new FiniteCommandFailed({
+        command: "candidates",
+        code: "REPOSITORY_NOT_FOUND",
+        message: `Invalid repository identity "${resolved.argument}". Use <forge-host>/<project-path>.`,
+      })
+    case "not_found":
+      return yield* new FiniteCommandFailed({
+        command: "candidates",
+        code: "REPOSITORY_NOT_FOUND",
+        message: `No configured Repository matches ${resolved.forgeHost}/${resolved.projectPath}`,
+      })
+    case "ambiguous":
+      return yield* new FiniteCommandFailed({
+        command: "candidates",
+        code: "REPOSITORY_AMBIGUOUS",
+        message: `Multiple configured Repositories match ${resolved.forgeHost}/${resolved.projectPath} (${resolved.matchCount})`,
+      })
+    case "matched":
+      break
+  }
+
+  const result = yield* graphqlApi
+    .intakeCandidates(resolved.repository.id)
+    .pipe(
+      Effect.mapError((error) => toFiniteCommandFailed("candidates", error)),
+    )
+
+  yield* Console.log(
+    encodeCompactJson(
+      buildCandidatesSuccessDocument({
+        repository: {
+          id: result.repository.id,
+          forge: result.repository.forge,
+          forgeHost: result.repository.forgeHost,
+          projectPath: result.repository.projectPath,
+        },
+        issuesReconciledAt: result.repository.issuesReconciledAt,
+        candidates: result.candidates,
+      }),
+    ),
+  )
 })
 
 const startCommand = Command.make(
@@ -152,6 +219,16 @@ const addCommand = Command.make(
   ),
 )
 
+const candidatesCommand = Command.make(
+  "candidates",
+  { repository: repositoryIdentityArg },
+  ({ repository }) => candidatesWorkflow(repository),
+).pipe(
+  Command.withDescription(
+    "List current Intake Candidates for one Repository as versioned JSON",
+  ),
+)
+
 export const cli = Command.make(
   "ready-for-agent",
   { noOpen: noOpenFlag, host: hostFlag },
@@ -159,7 +236,7 @@ export const cli = Command.make(
     startHarnessWorkflow(noOpen, Option.getOrUndefined(host)),
 ).pipe(
   Command.withDescription(
-    "Ready for Agent operator binary (start Harness, add repositories)",
+    "Ready for Agent operator binary (start Harness, add repositories, list candidates)",
   ),
-  Command.withSubcommands([startCommand, addCommand]),
+  Command.withSubcommands([startCommand, addCommand, candidatesCommand]),
 )

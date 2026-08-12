@@ -92,6 +92,14 @@ type Query {
   unless AVAILABLE.
   """
   session(workItemId: ID!): Session
+  """
+  Current Intake Candidates for one Repository from the Issue projection.
+  Does not request or wait for Refresh. Empty classification succeeds without
+  Agent Backend or Agent Model preflight; nonempty classification runs one
+  shared Repository preflight (effective Agent Backend readiness and resolved
+  build/review Agent Models, including catalog membership when known).
+  """
+  intakeCandidates(repositoryId: ID!): RepositoryIntakeCandidates!
 }
 
 type GitHubThrottleStatus {
@@ -408,6 +416,34 @@ type IssueReference {
 type RefreshJob {
   id: ID!
   repositoryId: ID!
+}
+
+"""
+Intended operator request for an Intake Candidate.
+"""
+enum RepositoryIntakeAction {
+  IMPLEMENT_NOW
+  QUEUE
+}
+
+"""
+A Relevant open Leaf Issue with no unfinished Work Item that currently
+qualifies for Implement Now or Queue.
+"""
+type IntakeCandidate {
+  issueNumber: Int!
+  title: String!
+  url: String!
+  action: RepositoryIntakeAction!
+}
+
+"""
+Ordered Intake Candidates for one Repository. Candidate order is Implement Now
+by ascending Issue number, then Queue by ascending Issue number.
+"""
+type RepositoryIntakeCandidates {
+  repository: Repository!
+  candidates: [IntakeCandidate!]!
 }
 
 enum WorkItemState {

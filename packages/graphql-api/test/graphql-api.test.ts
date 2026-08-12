@@ -6101,6 +6101,313 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("lists Intake Candidates ordered with IMPLEMENT_NOW then QUEUE", async () => {
+    const actionable = {
+      ...issue,
+      id: "issue-actionable",
+      issueNumber: 12,
+      title: "Actionable leaf",
+      url: "https://github.com/acme/widgets/issues/12",
+      blockedBy: [],
+    }
+    const blocked = {
+      ...issue,
+      id: "issue-blocked",
+      issueNumber: 5,
+      title: "Blocked leaf",
+      url: "https://github.com/acme/widgets/issues/5",
+      blockedBy: [
+        {
+          issueNumber: 1,
+          issueUrl: "https://github.com/acme/widgets/issues/1",
+        },
+      ],
+    }
+    const parent = {
+      ...issue,
+      id: "issue-parent",
+      issueNumber: 3,
+      title: "Parent",
+      url: "https://github.com/acme/widgets/issues/3",
+      hasChildren: true,
+      blockedBy: [],
+    }
+    const unfinishedIssue = {
+      ...issue,
+      id: "issue-unfinished",
+      issueNumber: 20,
+      title: "Has unfinished Work Item",
+      url: "https://github.com/acme/widgets/issues/20",
+      blockedBy: [],
+    }
+    const reconciledAt = new Date("2026-08-12T10:00:00.000Z")
+    let requireAgentTurnsCalls = 0
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([
+          {
+            ...repository,
+            issuesReconciledAt: reconciledAt,
+          },
+        ]),
+        listIssues: () =>
+          Effect.succeed([actionable, blocked, parent, unfinishedIssue]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed([
+            {
+              ...workItem,
+              issueNumber: unfinishedIssue.issueNumber,
+            },
+          ]),
+      },
+      {
+        requireAgentTurnsAllowed: () =>
+          Effect.sync(() => {
+            requireAgentTurnsCalls += 1
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query IntakeCandidates($repositoryId: ID!) {
+          intakeCandidates(repositoryId: $repositoryId) {
+            repository {
+              id
+              projectPath
+              issuesReconciledAt
+            }
+            candidates {
+              issueNumber
+              title
+              url
+              action
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        intakeCandidates: {
+          repository: {
+            id: repository.id,
+            projectPath: repository.projectPath,
+            issuesReconciledAt: "2026-08-12T10:00:00.000Z",
+          },
+          candidates: [
+            {
+              issueNumber: 12,
+              title: "Actionable leaf",
+              url: "https://github.com/acme/widgets/issues/12",
+              action: "IMPLEMENT_NOW",
+            },
+            {
+              issueNumber: 5,
+              title: "Blocked leaf",
+              url: "https://github.com/acme/widgets/issues/5",
+              action: "QUEUE",
+            },
+          ],
+        },
+      },
+    })
+    expect(requireAgentTurnsCalls).toBe(1)
+  })
+
+  test("empty Intake Candidates skip Agent Backend preflight", async () => {
+    let requireAgentTurnsCalls = 0
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+      },
+      {
+        requireAgentTurnsAllowed: () =>
+          Effect.sync(() => {
+            requireAgentTurnsCalls += 1
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query IntakeCandidates($repositoryId: ID!) {
+          intakeCandidates(repositoryId: $repositoryId) {
+            repository { id issuesReconciledAt }
+            candidates { issueNumber action }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        intakeCandidates: {
+          repository: {
+            id: repository.id,
+            issuesReconciledAt: null,
+          },
+          candidates: [],
+        },
+      },
+    })
+    expect(requireAgentTurnsCalls).toBe(0)
+  })
+
+  test("nonempty Intake Candidates surface shared preflight failures", async () => {
+    const { AgentBackendUnavailableError } = await import(
+      "@ready-for-agent/agent-backend"
+    )
+    const actionable = {
+      ...issue,
+      issueNumber: 99,
+      blockedBy: [],
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([actionable]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+      },
+      {
+        requireAgentTurnsAllowed: () =>
+          Effect.fail(
+            new AgentBackendUnavailableError({
+              message: "Agent Backend is unavailable",
+              reason: "CLI missing",
+            }),
+          ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query IntakeCandidates($repositoryId: ID!) {
+          intakeCandidates(repositoryId: $repositoryId) {
+            candidates { issueNumber }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "Agent Backend is unavailable",
+          extensions: expect.objectContaining({
+            code: "AGENT_BACKEND_UNAVAILABLE",
+            reason: "CLI missing",
+          }),
+        }),
+      ],
+    })
+  })
+
+  test("Intake Candidates reject unknown repository without Refresh", async () => {
+    let listIssuesCalls = 0
+    await runtime.dispose()
+    runtime = makeRuntime({
+      listIssues: () =>
+        Effect.sync(() => {
+          listIssuesCalls += 1
+          return []
+        }),
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query IntakeCandidates($repositoryId: ID!) {
+          intakeCandidates(repositoryId: $repositoryId) {
+            candidates { issueNumber }
+          }
+        }`,
+        variables: { repositoryId: "repo-01DOESNOTEXIST00000000000" },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          extensions: expect.objectContaining({
+            code: "REPOSITORY_NOT_FOUND",
+          }),
+        }),
+      ],
+    })
+    expect(listIssuesCalls).toBe(0)
+  })
+
+  test("nonempty Intake Candidates reject resolved models missing from catalog", async () => {
+    const actionable = {
+      ...issue,
+      issueNumber: 88,
+      blockedBy: [],
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([
+          {
+            ...repository,
+            defaultModel: "stale/model-not-in-catalog",
+          },
+        ]),
+        getBackendModelPrefs: () =>
+          Effect.succeed({
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          }),
+        listIssues: () => Effect.succeed([actionable]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query IntakeCandidates($repositoryId: ID!) {
+          intakeCandidates(repositoryId: $repositoryId) {
+            candidates { issueNumber }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    const body = (await response.json()) as {
+      errors: Array<{ message: string; extensions: { code: string } }>
+    }
+    expect(body.errors).toHaveLength(1)
+    expect(body.errors[0]?.extensions.code).toBe("BUILD_MODEL_NOT_CONFIGURED")
+    expect(body.errors[0]?.message).toContain("stale/model-not-in-catalog")
+  })
+
   test("projects Waiting for blockers status and blocker copy", async () => {
     const held = {
       ...workItem,
