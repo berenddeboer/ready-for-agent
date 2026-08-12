@@ -2035,6 +2035,66 @@ rfa:Queue
   rfa:avoidanceRationale "CONTEXT.md prefers Queue for this concept."@en ;
 ] .
 
+rfa:RepositoryIntake
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Repository Intake"@en ;
+  skos:definition "An explicit operator request that considers every Relevant, open Leaf Issue in one Repository's current Issue projection, sends Implement Now for each Actionable Issue, and sends Queue for each blocked Issue eligible for Queue. Each Issue request is independent: a candidate-local failure does not roll back successful requests for other Issues or prevent later candidates from being attempted. Parent Issues and Issues with unfinished Work Items are left unchanged. Repository Intake neither refreshes Issues nor creates a durable aggregate or changes Harness or Repository settings."@en ;
+  skos:hiddenLabel "Queue all"@en, "batch run"@en, "Parent Issue intake"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RepositoryIntake ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Queue all"@en ;
+  rfa:avoidanceRationale "Repository Intake sends Implement Now for Actionable Issues and Queue only for eligible blocked Issues."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RepositoryIntake ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "batch run"@en ;
+  rfa:avoidanceRationale "Repository Intake creates no durable batch or Run aggregate."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RepositoryIntake ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Parent Issue intake"@en ;
+  rfa:avoidanceRationale "Repository Intake considers only Leaf Issues."@en ;
+] .
+
+rfa:IntakeCandidate
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Intake Candidate"@en ;
+  skos:definition "A Relevant, open Leaf Issue in one Repository's current Issue projection that would receive Implement Now or Queue if Repository Intake considered it now. The classification includes the intended request, so a caller does not need to interpret Issue hierarchy, blockers, or unfinished Work Items."@en ;
+  skos:hiddenLabel "Relevant Issue"@en, "Intake Plan"@en, "Intake member"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IntakeCandidate ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Relevant Issue"@en ;
+  rfa:avoidanceRationale "broader"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IntakeCandidate ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Intake Plan"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Intake Candidate for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IntakeCandidate ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Intake member"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Intake Candidate for this concept."@en ;
+] .
+
 rfa:ImplementLocally
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Implement Locally"@en ;

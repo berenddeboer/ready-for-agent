@@ -311,6 +311,14 @@ _Avoid_: Auto-implement, enqueue Issue, Queue
 An explicit operator request that creates a Work Item for a Relevant, open Leaf Issue that has listed blockers and no unfinished Work Item — the Issue would be Actionable except for blockers. The new Work Item is Waiting for blockers rather than Admitted. When the hold lifts, lifecycle and admission behave as if the operator had chosen Implement Now at that moment (full remote path, not Implement Locally), including when the Repository is Paused; backend or model problems after the hold lifts are handled like a post-create Implement Now failure, not by staying Waiting for blockers. Same hard blocks as Implement Now for the Repository's effective Agent Backend Unavailable and unresolved build Agent Model at request time. Not offered on Actionable Issues or outside the Issue store.
 _Avoid_: Implement Now, enqueue Issue, schedule, defer
 
+**Repository Intake**:
+An explicit operator request that considers every Relevant, open Leaf Issue in one Repository's current Issue projection, sends Implement Now for each Actionable Issue, and sends Queue for each blocked Issue eligible for Queue. Each Issue request is independent: a candidate-local failure does not roll back successful requests for other Issues or prevent later candidates from being attempted. Parent Issues and Issues with unfinished Work Items are left unchanged. Repository Intake neither refreshes Issues nor creates a durable aggregate or changes Harness or Repository settings.
+_Avoid_: Queue all, batch run, Parent Issue intake
+
+**Intake Candidate**:
+A Relevant, open Leaf Issue in one Repository's current Issue projection that would receive Implement Now or Queue if Repository Intake considered it now. The classification includes the intended request, so a caller does not need to interpret Issue hierarchy, blockers, or unfinished Work Items.
+_Avoid_: Relevant Issue (broader), Intake Plan, Intake member
+
 **Implement Locally**:
 An explicit operator request that creates a Work Item for an Actionable Issue like Implement Now, but records that the Work Item should pause before remote completion. Subject to the same Worker Slot admission rules as Implement Now. Local steps run only after admission; changed work continues from Assess Changes through Pre-Commit and Review before pausing at Commit, while a No-Change Outcome pauses at Close Issue immediately after Assess Changes. No Step Run is enqueued for the paused step, so the operator can inspect the worktree. Start resumes the selected branch and continues the lifecycle. Queue has no Locally variant.
 _Avoid_: Local-only mode, dry run, Implement Now without PR, Queue
