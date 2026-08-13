@@ -1,4 +1,7 @@
-import { resolveDefaultBuildModelFromCatalog } from "../e2e/support/first-run-settings.ts"
+import {
+  preferredFirstRunBackendIds,
+  resolveDefaultBuildModelFromCatalog,
+} from "../e2e/support/first-run-settings.ts"
 import { describe, expect, test } from "bun:test"
 
 describe("resolveDefaultBuildModelFromCatalog", () => {
@@ -42,5 +45,26 @@ describe("resolveDefaultBuildModelFromCatalog", () => {
         models: [{ id: "" }],
       }),
     ).toEqual({ kind: "empty-catalog" })
+  })
+})
+
+describe("preferredFirstRunBackendIds", () => {
+  test("tries OpenCode first when it is listed, then the remaining backends", () => {
+    expect(preferredFirstRunBackendIds(["claude", "opencode", "grok"])).toEqual(
+      ["opencode", "claude", "grok"],
+    )
+  })
+
+  test("keeps listed order when OpenCode is absent", () => {
+    expect(preferredFirstRunBackendIds(["claude", "grok"])).toEqual([
+      "claude",
+      "grok",
+    ])
+  })
+
+  test("drops empty option values", () => {
+    expect(preferredFirstRunBackendIds(["", "opencode", ""])).toEqual([
+      "opencode",
+    ])
   })
 })

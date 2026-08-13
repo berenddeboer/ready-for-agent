@@ -38,6 +38,20 @@ export const resolveDefaultBuildModelFromCatalog = (input: {
   return { kind: "configure", modelId }
 }
 
+/**
+ * First-run Save still prefers OpenCode when listed, then tries the other
+ * backends so an unauthenticated / inspect-failed OpenCode does not stall
+ * on an empty catalog (CI ui-history).
+ */
+export const preferredFirstRunBackendIds = (
+  backendIds: readonly string[],
+): readonly string[] => {
+  const available = backendIds.filter((id) => id.length > 0)
+  const preferred = available.filter((id) => id === "opencode")
+  const rest = available.filter((id) => id !== "opencode")
+  return [...preferred, ...rest]
+}
+
 const restoreFakeClaudeFirstParty = async (): Promise<void> => {
   const state = readLiveHarnessState()
   writeControlFile(state, CONTROL_FILES.claudeMode, "firstParty")
@@ -231,10 +245,29 @@ export const dismissFirstRunSettingsIfPresent = async (page: Page) => {
   await expect(dialog).toBeHidden()
 }
 
+const listedSelectValues = async (
+  select: ReturnType<Page["locator"]>,
+): Promise<readonly string[]> => {
+  const options = select.locator("option")
+  const count = await options.count()
+  const values: string[] = []
+  for (let i = 0; i < count; i += 1) {
+    const value = await options.nth(i).getAttribute("value")
+    if (value != null && value.length > 0) {
+      values.push(value)
+    }
+  }
+  return values
+}
+
+const countRealSelectValues = async (
+  select: ReturnType<Page["locator"]>,
+): Promise<number> => (await listedSelectValues(select)).length
+
 /**
  * Complete first-run settings: prefer OpenCode when listed (shared e2e
- * default), otherwise keep the current backend; pick a build model from the
- * live catalog; Save.
+ * default), then fall back to another listed backend whose catalog has a
+ * build model; pick that model; Save.
  */
 export const completeAndSaveFirstRunSettings = async (page: Page) => {
   const dialog = settingsDialog(page)
@@ -251,59 +284,34 @@ export const completeAndSaveFirstRunSettings = async (page: Page) => {
     })
     .toBeGreaterThan(0)
 
-  // Prefer opencode (usual harness default) when present so a prior first-run
-  // reset that switched backends does not leave the suite on an alternate.
-  const opencodeOption = backendSelect.locator('option[value="opencode"]')
-  if ((await opencodeOption.count()) > 0) {
-    await backendSelect.selectOption("opencode")
-  } else {
-    const current = await backendSelect.inputValue()
-    if (current.length === 0) {
-      const firstValue = await backendSelect
-        .locator("option")
-        .first()
-        .getAttribute("value")
-      if (firstValue != null && firstValue.length > 0) {
-        await backendSelect.selectOption(firstValue)
-      }
-    }
-  }
-
-  // Backend change may re-load the model catalog via preview.
-  await expect(dialog.getByText("Loading settings...")).toHaveCount(0, {
-    timeout: 30_000,
-  })
-  await expect(dialog.getByText("Loading catalog…")).toHaveCount(0, {
-    timeout: 30_000,
-  })
-
   const modelSelect = dialog.locator('select[name="defaultModel"]')
   await expect(modelSelect).toBeVisible()
-  // Wait until catalog options exist beyond the empty placeholder.
-  await expect
-    .poll(
-      async () => {
-        const options = modelSelect.locator("option")
-        const count = await options.count()
-        if (count === 0) return 0
-        let real = 0
-        for (let i = 0; i < count; i += 1) {
-          const value = await options.nth(i).getAttribute("value")
-          if (value != null && value.length > 0) real += 1
-        }
-        return real
-      },
-      { timeout: 60_000 },
-    )
-    .toBeGreaterThan(0)
 
-  const modelOptions = modelSelect.locator("option")
-  const modelCount = await modelOptions.count()
+  const backendIds = preferredFirstRunBackendIds(
+    await listedSelectValues(backendSelect),
+  )
   let selectedModel: string | null = null
-  for (let i = 0; i < modelCount; i += 1) {
-    const value = await modelOptions.nth(i).getAttribute("value")
-    if (value != null && value.length > 0) {
-      selectedModel = value
+  for (const backendId of backendIds) {
+    await backendSelect.selectOption(backendId)
+    // Backend change may re-load the model catalog via preview.
+    await expect(dialog.getByText("Loading settings...")).toHaveCount(0, {
+      timeout: 30_000,
+    })
+    await expect(dialog.getByText("Loading catalog…")).toHaveCount(0, {
+      timeout: 30_000,
+    })
+    try {
+      await expect
+        .poll(() => countRealSelectValues(modelSelect), {
+          timeout: 15_000,
+        })
+        .toBeGreaterThan(0)
+    } catch {
+      continue
+    }
+    const catalog = await listedSelectValues(modelSelect)
+    selectedModel = catalog[0] ?? null
+    if (selectedModel !== null) {
       break
     }
   }
