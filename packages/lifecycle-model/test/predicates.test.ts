@@ -186,6 +186,112 @@ describe("shared lifecycle predicates", () => {
     ).toEqual({ _tag: "issue_author_not_in_scope" })
   })
 
+  it("treats a merged Issue-closing PR as historical after the Issue is reopened", () => {
+    const mergedClosingPullRequest = {
+      number: 9,
+      repository: "owner/repository",
+      state: "MERGED",
+      isDraft: false,
+    } as const
+    const openClosingPullRequest = {
+      number: 10,
+      repository: "owner/repository",
+      state: "OPEN",
+      isDraft: false,
+    } as const
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          closingPullRequests: [mergedClosingPullRequest],
+        }),
+        relevantContext(),
+      ),
+    ).toEqual({ _tag: "match" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          closingPullRequests: [openClosingPullRequest],
+        }),
+        relevantContext(),
+      ),
+    ).toEqual({ _tag: "issue_closing_pull_request_unowned" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          closingPullRequests: [
+            openClosingPullRequest,
+            mergedClosingPullRequest,
+          ],
+        }),
+        relevantContext({ workItemPullRequestNumbers: new Set([9]) }),
+      ),
+    ).toEqual({ _tag: "issue_closing_pull_request_unowned" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          state: "CLOSED",
+          parent: { state: "OPEN", isReadyLabeled: true },
+          closingPullRequests: [mergedClosingPullRequest],
+        }),
+        relevantContext(),
+      ),
+    ).toEqual({ _tag: "issue_closing_pull_request_unowned" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          state: "CLOSED",
+          closingPullRequests: [mergedClosingPullRequest],
+        }),
+        relevantContext(),
+      ),
+    ).toEqual({ _tag: "issue_not_open", state: "CLOSED" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          hierarchySupported: false,
+          closingPullRequests: [mergedClosingPullRequest],
+        }),
+        relevantContext({
+          forge: "gitlab",
+          authorScope: { includeAll: true },
+        }),
+      ),
+    ).toEqual({ _tag: "match" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          hierarchySupported: false,
+          closingPullRequests: [openClosingPullRequest],
+        }),
+        relevantContext({
+          forge: "gitlab",
+          authorScope: { includeAll: true },
+        }),
+      ),
+    ).toEqual({ _tag: "issue_closing_pull_request_unowned" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          hierarchySupported: false,
+          state: "CLOSED",
+          closingPullRequests: [mergedClosingPullRequest],
+        }),
+        relevantContext({
+          forge: "gitlab",
+          authorScope: { includeAll: true },
+        }),
+      ),
+    ).toEqual({ _tag: "issue_not_open", state: "CLOSED" })
+  })
+
   it("matches Relevant closed children, owned PRs, and GitLab roots", () => {
     expect(
       evaluateRelevantIssue(

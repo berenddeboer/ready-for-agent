@@ -103,7 +103,7 @@ rfa:satisfiesClosingPullRequestCondition
   rdfs:range xsd:boolean ;
   rdfs:label "satisfies closing Pull Request condition"@en ;
   skos:definition
-    "True when the Issue has no active Issue-closing Pull Request, or at least one active Issue-closing Pull Request is an owned Work Item PR."@en .
+    "True when the Issue has no active Issue-closing Pull Request, or at least one active Issue-closing Pull Request is an owned Work Item PR. An Issue-closing Pull Request is active when it is open, or when it is merged and the Issue is still closed. A merged Issue-closing Pull Request is historical after the Issue is reopened and is not active."@en .
 
 rfa:isIssueAuthorIncluded
   a owl:DatatypeProperty ;
