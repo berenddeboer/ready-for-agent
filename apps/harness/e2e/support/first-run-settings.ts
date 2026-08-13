@@ -293,14 +293,14 @@ export const completeAndSaveFirstRunSettings = async (page: Page) => {
   let selectedModel: string | null = null
   for (const backendId of backendIds) {
     await backendSelect.selectOption(backendId)
-    // Backend change may re-load the model catalog via preview.
-    await expect(dialog.getByText("Loading settings...")).toHaveCount(0, {
-      timeout: 30_000,
-    })
-    await expect(dialog.getByText("Loading catalog…")).toHaveCount(0, {
-      timeout: 30_000,
-    })
     try {
+      // Settings fetch can briefly overlay; do not wait on "Loading catalog…"
+      // text — that string is the empty option label on both Build and Review
+      // selects while preview is in flight, and a failed OpenCode inspect
+      // leaves both visible forever.
+      await expect(dialog.getByText("Loading settings...")).toHaveCount(0, {
+        timeout: 15_000,
+      })
       await expect
         .poll(() => countRealSelectValues(modelSelect), {
           timeout: 15_000,
