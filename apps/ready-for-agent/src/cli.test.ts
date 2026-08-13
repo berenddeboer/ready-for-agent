@@ -5,8 +5,9 @@ import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { BunServices } from "@effect/platform-bun"
 import { beforeEach, describe, expect, it } from "@effect/vitest"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import { Command } from "effect/unstable/cli"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { expandBareHostFlag } from "../../harness/src/server/listen-host.ts"
 import { cli } from "./cli.ts"
 import {
@@ -1477,6 +1478,7 @@ describe("operator binary jump command", () => {
             }),
           )
           expect(captured).toEqual({
+            sessionId,
             workingDirectory: worktree,
             agentExecutable: want.executable,
             agentArguments: want.arguments,
@@ -1531,5 +1533,288 @@ describe("operator binary jump command", () => {
         console.log = originalLog
       }
     }),
+  )
+
+  const windowListFormat =
+    "#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{@rfa-session-id}"
+  const paneListFormat = "#{pane_id} #{@rfa-agent}"
+  const jumpInput = {
+    sessionId,
+    workingDirectory: "/tmp/rfa-jump-worktree",
+    agentExecutable: "/usr/bin/opencode",
+    agentArguments: ["/tmp/rfa-jump-worktree", "--session", sessionId],
+  } as const
+
+  const recordingTmux = (script: {
+    readonly currentSession?: string
+    readonly windows?: string
+    readonly panes?: string
+    readonly failOn?: string
+  }) => {
+    const invocations: string[][] = []
+    const encoder = new TextEncoder()
+    const service = ChildProcessSpawner.make((command) =>
+      Effect.sync(() => {
+        if (!ChildProcess.isStandardCommand(command)) {
+          throw new Error("expected standard command")
+        }
+        invocations.push([...command.args])
+        let stdout = ""
+        let exit = 0
+        if (
+          script.failOn !== undefined &&
+          command.args.includes(script.failOn)
+        ) {
+          exit = 1
+        } else if (command.args[0] === "display-message") {
+          stdout = `${script.currentSession ?? "$0"}\n`
+        } else if (command.args[0] === "list-windows") {
+          stdout =
+            script.windows === undefined || script.windows.length === 0
+              ? ""
+              : `${script.windows}\n`
+        } else if (command.args[0] === "list-panes") {
+          stdout = `${script.panes ?? "%1 1\n%2"}\n`
+        } else if (command.args.includes("new-window")) {
+          stdout = "@1 %1\n"
+        } else if (
+          command.args[0] === "split-window" &&
+          command.args.includes("-P")
+        ) {
+          stdout = "%3\n"
+        }
+        const bytes = encoder.encode(stdout)
+        return ChildProcessSpawner.makeHandle({
+          pid: ChildProcessSpawner.ProcessId(1),
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exit)),
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          stdin: {
+            onStart: () => Effect.void,
+            onInput: () => Effect.void,
+            onEnd: () => Effect.void,
+          } as never,
+          stdout: Stream.succeed(bytes),
+          stderr: Stream.empty,
+          all: Stream.succeed(bytes),
+          getInputFd: () =>
+            ({
+              onStart: () => Effect.void,
+              onInput: () => Effect.void,
+              onEnd: () => Effect.void,
+            }) as never,
+          getOutputFd: () => Stream.empty,
+          unref: Effect.succeed(Effect.void),
+        })
+      }),
+    )
+
+    return {
+      invocations,
+      layer: Tmux.layer.pipe(
+        Layer.provide(
+          Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, service),
+        ),
+      ),
+    }
+  }
+
+  const runCreateJumpWindow = (
+    layer: Layer.Layer<Tmux, never, never>,
+    input: JumpWindowInput = jumpInput,
+  ) =>
+    Effect.gen(function* () {
+      const tmux = yield* Tmux
+      return yield* tmux.createJumpWindow(input)
+    }).pipe(Effect.provide(layer))
+
+  it.live(
+    "jump selects an existing tagged window in the current tmux session",
+    () =>
+      Effect.gen(function* () {
+        const tmux = recordingTmux({
+          windows: `$0\tdefault\t@5\t3\t${sessionId}`,
+          panes: "%1 1\n%2",
+        })
+        yield* runCreateJumpWindow(tmux.layer)
+        expect(tmux.invocations).toEqual([
+          ["display-message", "-p", "#{session_id}"],
+          ["list-windows", "-a", "-F", windowListFormat],
+          ["list-panes", "-t", "@5", "-F", paneListFormat],
+          ["select-pane", "-t", "%1"],
+          ["select-window", "-t", "@5"],
+        ])
+      }),
+  )
+
+  it.live(
+    "jump recreates the agent pane when the tagged window only has a shell",
+    () =>
+      Effect.gen(function* () {
+        const tmux = recordingTmux({
+          windows: `$0\tdefault\t@5\t3\t${sessionId}`,
+          panes: "%2",
+        })
+        yield* runCreateJumpWindow(tmux.layer)
+        expect(tmux.invocations).toEqual([
+          ["display-message", "-p", "#{session_id}"],
+          ["list-windows", "-a", "-F", windowListFormat],
+          ["list-panes", "-t", "@5", "-F", paneListFormat],
+          [
+            "split-window",
+            "-h",
+            "-b",
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "-t",
+            "@5",
+            "-c",
+            jumpInput.workingDirectory,
+            "--",
+            jumpInput.agentExecutable,
+            ...jumpInput.agentArguments,
+          ],
+          ["set-option", "-p", "-t", "%3", "@rfa-agent", "1"],
+          ["select-layout", "-t", "@5", "even-horizontal"],
+          ["select-pane", "-t", "%3"],
+          ["select-window", "-t", "@5"],
+        ])
+      }),
+  )
+
+  it.live(
+    "jump fails and reports the other tmux session when the tagged window is foreign",
+    () =>
+      Effect.gen(function* () {
+        const tmux = recordingTmux({
+          windows: `$1\tother\t@8\t2\t${sessionId}`,
+        })
+        const result = yield* runCreateJumpWindow(tmux.layer).pipe(Effect.flip)
+        expect(result).toBeInstanceOf(JumpFailed)
+        if (result instanceof JumpFailed) {
+          expect(result.message).toBe(
+            "Session already open in tmux session 'other' window 2",
+          )
+        }
+        expect(
+          tmux.invocations.some((args) => args.includes("new-window")),
+        ).toBe(false)
+        expect(
+          tmux.invocations.some((args) => args.includes("kill-window")),
+        ).toBe(false)
+      }),
+  )
+
+  it.live(
+    "jump stores the full Session ID and names the window rfa:<first-8>",
+    () =>
+      Effect.gen(function* () {
+        const tmux = recordingTmux({})
+        yield* runCreateJumpWindow(tmux.layer)
+        expect(tmux.invocations).toEqual([
+          ["display-message", "-p", "#{session_id}"],
+          ["list-windows", "-a", "-F", windowListFormat],
+          [
+            "new-window",
+            "-d",
+            "-P",
+            "-F",
+            "#{window_id} #{pane_id}",
+            "-n",
+            "rfa:85312e9f",
+            "-c",
+            jumpInput.workingDirectory,
+            "--",
+            jumpInput.agentExecutable,
+            ...jumpInput.agentArguments,
+          ],
+          ["set-option", "-w", "-t", "@1", "@rfa-session-id", sessionId],
+          ["set-option", "-p", "-t", "%1", "@rfa-agent", "1"],
+          ["split-window", "-h", "-t", "@1", "-c", jumpInput.workingDirectory],
+          ["select-layout", "-t", "@1", "even-horizontal"],
+          ["select-pane", "-t", "%1"],
+          ["select-window", "-t", "@1"],
+        ])
+      }),
+  )
+
+  it.live(
+    "jump kills only the window it created when later tmux setup fails",
+    () =>
+      Effect.gen(function* () {
+        const tmux = recordingTmux({ failOn: "split-window" })
+        const result = yield* runCreateJumpWindow(tmux.layer).pipe(Effect.flip)
+        expect(result).toBeInstanceOf(JumpFailed)
+        if (result instanceof JumpFailed) {
+          expect(result.message).toContain(
+            "tmux could not create and arrange the window",
+          )
+        }
+        expect(tmux.invocations.at(-1)).toEqual(["kill-window", "-t", "@1"])
+        expect(
+          tmux.invocations.filter((args) => args.includes("kill-window")),
+        ).toHaveLength(1)
+      }),
+  )
+
+  it.live(
+    "jump reuses a sole remaining pane when it is still the tagged agent",
+    () =>
+      Effect.gen(function* () {
+        const tmux = recordingTmux({
+          windows: `$0\tdefault\t@5\t3\t${sessionId}`,
+          panes: "%1 1",
+        })
+        yield* runCreateJumpWindow(tmux.layer)
+        expect(tmux.invocations).toEqual([
+          ["display-message", "-p", "#{session_id}"],
+          ["list-windows", "-a", "-F", windowListFormat],
+          ["list-panes", "-t", "@5", "-F", paneListFormat],
+          ["select-pane", "-t", "%1"],
+          ["select-window", "-t", "@5"],
+        ])
+        expect(
+          tmux.invocations.some((args) => args.includes("split-window")),
+        ).toBe(false)
+      }),
+  )
+
+  it.live(
+    "jump does not kill a newly created window when only the client switch fails",
+    () =>
+      Effect.gen(function* () {
+        const tmux = recordingTmux({ failOn: "select-window" })
+        const result = yield* runCreateJumpWindow(tmux.layer).pipe(Effect.flip)
+        expect(result).toBeInstanceOf(JumpFailed)
+        expect(
+          tmux.invocations.some((args) => args.includes("kill-window")),
+        ).toBe(false)
+        expect(tmux.invocations).toContainEqual([
+          "set-option",
+          "-p",
+          "-t",
+          "%1",
+          "@rfa-agent",
+          "1",
+        ])
+      }),
+  )
+
+  it.live(
+    "jump does not kill a pre-existing tagged window when recreation fails",
+    () =>
+      Effect.gen(function* () {
+        const tmux = recordingTmux({
+          windows: `$0\tdefault\t@5\t3\t${sessionId}`,
+          panes: "%2",
+          failOn: "split-window",
+        })
+        const result = yield* runCreateJumpWindow(tmux.layer).pipe(Effect.flip)
+        expect(result).toBeInstanceOf(JumpFailed)
+        expect(
+          tmux.invocations.some((args) => args.includes("kill-window")),
+        ).toBe(false)
+      }),
   )
 })
