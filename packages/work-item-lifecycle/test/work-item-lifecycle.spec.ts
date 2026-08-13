@@ -8375,6 +8375,9 @@ describe("WorkItemLifecycle", () => {
           expect(final.state).toBe("create_worktree")
           expect(final.stepRuns).toHaveLength(1)
           expect(final.stepRuns[0]!.status).toBe("failed")
+          expect(final.stepRuns[0]!.reasonDetail).toBe(
+            detailRows[0]!.reason_detail,
+          )
         }),
       )
     })

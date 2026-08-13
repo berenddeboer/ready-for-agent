@@ -81,6 +81,7 @@ import {
   workIssueProjection,
   workItemCanRetry,
   workItemIsTerminal,
+  workItemLatestStepRunDetail,
   workItemPostponedUntil,
   workItemStateLabel,
   workItemStatus,
@@ -1130,6 +1131,8 @@ export const createGraphqlApi = <R>(
               context,
             )
           },
+          latestStepRunDetail: (workItem: WorkItemRecord) =>
+            workItemLatestStepRunDetail(workItem),
           postponedUntil: (workItem: WorkItemRecord) =>
             workItemPostponedUntil(workItem)?.toISOString() ?? null,
           paused: (workItem: WorkItemRecord) => workItem.paused,

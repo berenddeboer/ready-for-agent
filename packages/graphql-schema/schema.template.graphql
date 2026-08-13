@@ -630,6 +630,17 @@ enum MergeMode {
   ALWAYS
 }
 
+type CauseChainLink {
+  name: String
+  code: String
+  message: String
+}
+
+type StepRunReasonDetail {
+  causeChain: [CauseChainLink!]!
+  code: String
+}
+
 type WorkItem {
   id: ID!
   repositoryId: ID!
@@ -649,6 +660,12 @@ type WorkItem {
   status: WorkItemStatus!
   statusLabel: String!
   statusMessage: String
+  """
+  Parsed diagnostic payload from the latest Step Run's reason_detail.
+  Null when that Step Run has no persisted cause chain. Messages are
+  already sanitized at write time and re-sanitized on read.
+  """
+  latestStepRunDetail: StepRunReasonDetail
   """
   Retry deadline on the latest Postponed Step Run. Null unless the Work Item
   is Waiting for GitHub.

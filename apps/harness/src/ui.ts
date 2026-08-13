@@ -1011,6 +1011,14 @@ export const ui = {
 
   statusMessageMark: "text-lane-attention",
 
+  statusMessageDetail: "mt-[0.25rem] mb-0 font-mono text-[0.6rem] text-ink-2",
+
+  statusMessageDetailSummary: "cursor-pointer text-ink-2",
+
+  statusMessageDetailList: "mt-[0.3rem] mb-0 list-decimal pl-[1.1rem]",
+
+  statusMessageDetailCode: "mt-[0.25rem] mb-0",
+
   /* ---------- Journey-leg chips (board §5.2) — see also `leg*` above ---------- */
 
   legSummary: cx(

@@ -18,6 +18,7 @@ import {
   logErrorAnnotations,
   makeGitHubServiceFromToken,
   makeGitHubServiceTest,
+  parseReasonDetail,
   sanitizeUserFacingText,
   serializeReasonDetail,
   stripAnsi,
@@ -4060,6 +4061,63 @@ describe("error cause chain", () => {
     expect(extractCauseChain(timeout)).toEqual([
       { name: "TimeoutError", code: "TIMEOUT" },
     ])
+  })
+
+  it("parses a persisted reason_detail blob into the typed cause chain", () => {
+    const detail = {
+      causeChain: [
+        {
+          name: "GitHubRequestError",
+          code: "SELF_SIGNED_CERT_IN_CHAIN",
+          message: "Failed to list Ready-labeled Issues for acme/widgets",
+        },
+        {
+          name: "Error",
+          code: "SELF_SIGNED_CERT_IN_CHAIN",
+          message: "self-signed certificate in certificate chain",
+        },
+      ],
+      code: "SELF_SIGNED_CERT_IN_CHAIN",
+    }
+
+    expect(parseReasonDetail(JSON.stringify(detail))).toEqual(detail)
+  })
+
+  it("returns null for missing, empty, or unparseable reason_detail", () => {
+    expect(parseReasonDetail(null)).toBeNull()
+    expect(parseReasonDetail(undefined)).toBeNull()
+    expect(parseReasonDetail("")).toBeNull()
+    expect(parseReasonDetail("   ")).toBeNull()
+    expect(parseReasonDetail("not-json")).toBeNull()
+    expect(parseReasonDetail("[]")).toBeNull()
+    expect(parseReasonDetail(JSON.stringify({}))).toBeNull()
+  })
+
+  it("re-sanitizes stored link messages on parse", () => {
+    const esc = String.fromCharCode(0x1b)
+    const parsed = parseReasonDetail(
+      JSON.stringify({
+        causeChain: [
+          {
+            name: "Error",
+            code: "ENOENT",
+            message: `${esc}[31mENOENT: Executable not found in $PATH: "claude"${esc}[0m`,
+          },
+        ],
+        code: "ENOENT",
+      }),
+    )
+
+    expect(parsed).toEqual({
+      causeChain: [
+        {
+          name: "Error",
+          code: "ENOENT",
+          message: 'ENOENT: Executable not found in $PATH: "claude"',
+        },
+      ],
+      code: "ENOENT",
+    })
   })
 })
 

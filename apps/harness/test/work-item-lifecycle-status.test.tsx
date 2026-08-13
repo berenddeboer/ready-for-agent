@@ -18,6 +18,7 @@ const waitingForGitHubWorkItem = {
   status: "WAITING_FOR_GITHUB",
   statusLabel: "Waiting for GitHub",
   statusMessage: "Waiting for GitHub until 2026-08-07T12:00:00.000Z",
+  latestStepRunDetail: null,
   postponedUntil: "2026-08-07T12:00:00.000Z",
   paused: false,
   canRetry: false,
@@ -51,5 +52,51 @@ describe("WorkItemLifecycleStatus", () => {
     expect(html).toContain("Waiting for GitHub until 2026-08-07T12:00:00.000Z")
     expect(html).toContain("Status checks: Postponed")
     expect(html).not.toContain(">Retry<")
+    expect(html).not.toContain("Cause chain")
+  })
+
+  test("hides the cause chain behind a collapsed disclosure on a failed card", () => {
+    const failedWorkItem = {
+      ...waitingForGitHubWorkItem,
+      state: "IMPLEMENT",
+      stateLabel: "Build",
+      status: "FAILED",
+      statusLabel: "Failed",
+      statusMessage: 'Executable not found in $PATH: "claude"',
+      postponedUntil: null,
+      canRetry: true,
+      latestStepRunDetail: {
+        code: "ENOENT",
+        causeChain: [
+          {
+            name: "Error",
+            code: "ENOENT",
+            message: 'ENOENT: Executable not found in $PATH: "claude"',
+          },
+        ],
+      },
+      lifecycleLabels: [
+        {
+          phase: "IMPLEMENT",
+          label: "Build: Failed",
+          status: "FAILED",
+          durationMs: 1200,
+        },
+      ],
+    } satisfies WorkItem
+
+    const queryClient = new QueryClient()
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <WorkItemLifecycleStatus workItem={failedWorkItem} compact />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain("Executable not found in $PATH: &quot;claude&quot;")
+    expect(html).toContain("Cause chain")
+    expect(html).toContain("<details")
+    expect(html).not.toMatch(/<details[^>]*\sopen/)
+    expect(html).toContain("Error ENOENT")
+    expect(html).toContain("Code: ENOENT")
   })
 })

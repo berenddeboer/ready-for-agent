@@ -280,6 +280,14 @@ export type WorkItem = {
   status: WorkItemStatus
   statusLabel: string
   statusMessage: string | null
+  latestStepRunDetail: {
+    causeChain: readonly {
+      name: string | null
+      code: string | null
+      message: string | null
+    }[]
+    code: string | null
+  } | null
   postponedUntil: string | null
   paused: boolean
   canRetry: boolean
@@ -311,6 +319,14 @@ const workItemFields = {
   status: true,
   statusLabel: true,
   statusMessage: true,
+  latestStepRunDetail: {
+    causeChain: {
+      name: true,
+      code: true,
+      message: true,
+    },
+    code: true,
+  },
   postponedUntil: true,
   paused: true,
   canRetry: true,
@@ -3326,6 +3342,48 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
   )
 }
 
+function formatCauseChainLink(link: {
+  readonly name: string | null
+  readonly code: string | null
+  readonly message: string | null
+}): string {
+  const head = [link.name, link.code].filter(
+    (part) => part != null && part !== "",
+  )
+  const headText = head.join(" ")
+  if (link.message != null && link.message !== "") {
+    return headText === "" ? link.message : `${headText} — ${link.message}`
+  }
+  return headText
+}
+
+function CauseChainDisclosure({
+  detail,
+}: {
+  readonly detail: NonNullable<WorkItem["latestStepRunDetail"]>
+}) {
+  const hasCode = detail.code != null && detail.code !== ""
+  if (detail.causeChain.length === 0 && !hasCode) {
+    return null
+  }
+  return (
+    <details className={ui.statusMessageDetail}>
+      <summary className={ui.statusMessageDetailSummary}>Cause chain</summary>
+      {detail.causeChain.length > 0 ? (
+        <ol className={ui.statusMessageDetailList}>
+          {detail.causeChain.map((link) => {
+            const label = formatCauseChainLink(link)
+            return <li key={label}>{label}</li>
+          })}
+        </ol>
+      ) : null}
+      {hasCode ? (
+        <p className={ui.statusMessageDetailCode}>Code: {detail.code}</p>
+      ) : null}
+    </details>
+  )
+}
+
 export function WorkItemLifecycleStatus({
   workItem,
   compact = false,
@@ -3729,6 +3787,9 @@ export function WorkItemLifecycleStatus({
           ) : null}
           {workItem.statusMessage}
         </p>
+      )}
+      {workItem.latestStepRunDetail !== null && (
+        <CauseChainDisclosure detail={workItem.latestStepRunDetail} />
       )}
       {(canReset || canRetry) && (
         <div className="mt-2 flex flex-wrap gap-2">

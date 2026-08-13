@@ -1,5 +1,9 @@
 import type { IssueRecord } from "@ready-for-agent/db-service"
 import {
+  type StepRunReasonDetail,
+  parseReasonDetail,
+} from "@ready-for-agent/github-service"
+import {
   LIFECYCLE_STEP_RETRYABLE,
   type OperationalLifecycleStep,
   type TerminalWorkItemState,
@@ -254,6 +258,15 @@ export const workItemStatusMessage = (
   }
   return latest.reasonMessage
 }
+
+/**
+ * Parsed `reason_detail` from the latest Step Run. Null when that run has no
+ * persisted cause chain. Messages are re-sanitized on parse.
+ */
+export const workItemLatestStepRunDetail = (
+  workItem: WorkItemRecord,
+): StepRunReasonDetail | null =>
+  parseReasonDetail(latestStepRun(workItem)?.reasonDetail)
 
 /**
  * Cumulative wall-clock execution time for a phase across every attempt in
