@@ -1,3 +1,4 @@
+@ui-history
 Feature: Route Repository settings by Repository ID
   Explicit Repository settings opens use `/repos/<repository-id>/settings` so
   Back closes the dialog, Forward reopens it with saved values, and Save /

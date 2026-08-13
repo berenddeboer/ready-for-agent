@@ -1,3 +1,4 @@
+@ui-history
 Feature: View the work pipeline
   Operators use the home Kanban board to monitor delivery without
   repository management competing with the pipeline. Scenarios that only

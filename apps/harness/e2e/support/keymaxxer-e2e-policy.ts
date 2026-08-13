@@ -1,10 +1,11 @@
 /**
  * Central non-interactive policy for live e2e's Keymaxxer usage.
  *
- * Vault-backed live e2e (`harness:e2e`) keeps Keymaxxer enabled on purpose:
- * it validates the production application, Keymaxxer Sidecar, command-line
- * client, and controlled Forge Repositories together. Vault-free live e2e
- * (`harness:e2e-no-backend`) soft-disables Keymaxxer via
+ * Vault-backed live e2e (`harness:e2e` / `harness:e2e-live-forge`) keeps
+ * Keymaxxer enabled on purpose: it validates the production application,
+ * Keymaxxer Sidecar, command-line client, and controlled Forge Repositories
+ * together. Vault-free live e2e (`harness:e2e-no-backend` and
+ * `harness:e2e-ui-history`) soft-disables Keymaxxer via
  * `KEYMAXXER_ENABLED=false` (and clears fixture master-key env) so fork PRs
  * still get coverage.
  *
@@ -43,7 +44,7 @@ const NO_CREDENTIAL_MESSAGE = [
   "non-interactively against the checked-in fixture vault, or set",
   "E2E_ALLOW_KEYMAXXER_PROMPTS=1 to explicitly opt into interactive prompts",
   "against your ambient ~/.keymaxxer vault.",
-  "Vault-free suites set KEYMAXXER_ENABLED=false (e.g. harness:e2e-no-backend).",
+  "Vault-free suites set KEYMAXXER_ENABLED=false (e.g. harness:e2e-no-backend, harness:e2e-ui-history).",
 ].join(" ")
 
 /**

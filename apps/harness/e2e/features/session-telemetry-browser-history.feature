@@ -1,3 +1,4 @@
+@ui-history
 Feature: Route Session Telemetry through browser history
   Opening Session Telemetry from Pipeline, Repos, or Completed uses the same
   `/session/<work-item-id>/telemetry` path so Back closes the dialog, Forward

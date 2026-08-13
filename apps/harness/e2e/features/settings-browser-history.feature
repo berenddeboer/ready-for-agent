@@ -1,3 +1,4 @@
+@ui-history
 Feature: Route Harness Settings through browser history
   Explicit Harness Settings opens use `/settings` so Back closes the dialog,
   Forward reopens it, and Save / Cancel / Escape stay synchronized with the

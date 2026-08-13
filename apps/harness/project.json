@@ -113,6 +113,39 @@
         }
       ]
     },
+    "e2e-live-forge": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bddgen && playwright test --grep @live-forge"
+      },
+      "dependsOn": [
+        "build",
+        {
+          "projects": ["graphql-client"],
+          "target": "generate"
+        }
+      ]
+    },
+    "e2e-ui-history": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bddgen && playwright test --grep @ui-history",
+        "env": {
+          "KEYMAXXER_ENABLED": "false",
+          "E2E_KEYMAXXER_MASTER_KEY": "",
+          "KEYMAXXER_MASTER_KEY": ""
+        }
+      },
+      "dependsOn": [
+        "build",
+        {
+          "projects": ["graphql-client"],
+          "target": "generate"
+        }
+      ]
+    },
     "smoke": {
       "executor": "nx:run-commands",
       "options": {

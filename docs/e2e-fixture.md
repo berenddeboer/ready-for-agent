@@ -213,28 +213,38 @@ These leave the developer's real Keymaxxer vault untouched.
 
 ## CI gating
 
-Live Gherkin e2e runs in a dedicated **`harness`** job (dev smoke + live e2e)
-in parallel with **`quality-gates`** (`lint` / `knip` / `test` / `typecheck`
-plus harness slow-test) on trusted pushes to `main`
-(`.github/workflows/ci-cd.yml`) and on pull requests
-(`.github/workflows/pr.yml`). Playwright Chromium is installed once for both
-live suites (vault-free `e2e-no-backend` always; vault-backed `e2e` when the
-secret is available). The PR `harness` job caches that Chromium install keyed
-on Playwright version so a cache hit skips the browser download and only
-installs OS dependencies. Both workflows unlock the fixture vault with
-repository secret `E2E_KEYMAXXER_MASTER_KEY`.
+Live Gherkin e2e on **`main`** still runs in a dedicated **`harness`** job
+(dev smoke + live e2e) in parallel with **`quality-gates`** (`lint` / `knip` /
+`test` / `typecheck` plus harness slow-test) in `.github/workflows/ci-cd.yml`.
+Pull requests (`.github/workflows/pr.yml`) split product e2e into two
+parallel jobs (issue #999):
+
+- **`harness-e2e-live-forge`** — add/refresh, Intake, catalog-only fixture
+  path (`harness:e2e-live-forge`). Needs the fixture vault.
+- **`harness-e2e-ui-history`** — Settings / Repository settings / Session
+  Telemetry history and Kanban that seed persistence (`harness:e2e-ui-history`),
+  plus vault-free `@no-backend` (`harness:e2e-no-backend`) and harness smoke.
+  Does not need the fixture vault or a clone. May install OpenCode for
+  Settings catalog coverage.
+
+A **`harness`** rollup job still reports after both e2e jobs so the existing
+required-check name stays valid. Playwright Chromium is installed in each PR
+e2e job and cached keyed on Playwright version so a cache hit skips the
+browser download and only installs OS dependencies. Vault-backed suites unlock
+the fixture vault with repository secret `E2E_KEYMAXXER_MASTER_KEY`.
 
 | Event | Secret available | Policy |
 | --- | --- | --- |
 | `push` to `main` | required | Fail closed if missing |
-| Same-repo PR | yes | Run live e2e |
-| Fork PR | no (secrets not exposed) | Skip vault-backed live e2e only (log + continue); `harness` still runs smoke and vault-free `e2e-no-backend`; quality-gates and pinact still run |
+| Same-repo PR | required on live-Forge | Fail closed if missing on `harness-e2e-live-forge`; UI-history and `@no-backend` still run |
+| Fork PR | no (secrets not exposed) | Skip live-Forge e2e only (log + continue); UI-history still runs smoke, vault-free `e2e-no-backend`, and `e2e-ui-history`; quality-gates and pinact still run |
 
-Required status checks (after the former monolithic `main` job was split):
+Required status checks (after the former monolithic `main` job was split, then
+the PR `harness` e2e job):
 
 | Workflow | Require |
 | --- | --- |
-| **PR** | `quality-gates`, `harness`, `pinact` |
+| **PR** | `quality-gates`, `harness-e2e-live-forge`, `harness-e2e-ui-history`, `harness`, `pinact` |
 | **CI/CD** | `quality-gates`, `harness`, `packed-install`, `pinact` |
 
 ### Overnight published-install smoke (complementary)
@@ -252,5 +262,6 @@ If branch protection or a ruleset still names `main`, update it when this lands
 or merges can stall (stale check never completes) or under-gate e2e (if only
 `quality-gates` is re-added).
 
-See ADR 0021. GitHub and GitLab scenarios share that single
-`bunx nx run harness:e2e` step.
+See ADR 0021. GitHub and GitLab live-Forge scenarios share the
+`bunx nx run harness:e2e-live-forge` step on PRs (and the union
+`bunx nx run harness:e2e` step on `main`).

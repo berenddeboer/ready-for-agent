@@ -1,3 +1,4 @@
+@live-forge
 Feature: Agent Model selection is catalog-only
   Operators choose Agent Models from the Agent Backend's current catalog. A
   value left over from another provider mode stays visible but unusable, so
