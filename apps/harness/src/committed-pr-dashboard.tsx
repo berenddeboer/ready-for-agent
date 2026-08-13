@@ -14,6 +14,104 @@ import { ui } from "./ui.js"
 
 const graphql = createHarnessGraphqlClient({ batch: true })
 
+const spandrelSvg = (
+  <svg
+    width="40"
+    height="40"
+    viewBox="0 0 40 40"
+    fill="none"
+    aria-hidden="true"
+    style={{ overflow: "visible" }}
+  >
+    <circle cx="4" cy="4" r="4.5" fill="currentColor" />
+    <circle cx="4" cy="4" r="2" fill="var(--paper)" />
+    <line
+      x1="4"
+      y1="4"
+      x2="14"
+      y2="4"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+    />
+    <line
+      x1="4"
+      y1="4"
+      x2="22"
+      y2="4"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      opacity="0.5"
+    />
+    <line
+      x1="4"
+      y1="4"
+      x2="4"
+      y2="14"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+    />
+    <line
+      x1="4"
+      y1="4"
+      x2="4"
+      y2="22"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      opacity="0.5"
+    />
+    <line
+      x1="4"
+      y1="4"
+      x2="11"
+      y2="11"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      opacity="0.7"
+    />
+    <line
+      x1="4"
+      y1="4"
+      x2="16"
+      y2="16"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      opacity="0.35"
+    />
+  </svg>
+)
+
+function SpandrelCorners() {
+  return (
+    <>
+      <span className={ui.mergedPrStatsSpandrelTL}>{spandrelSvg}</span>
+      <span
+        className={ui.mergedPrStatsSpandrelTR}
+        style={{ transform: "scaleX(-1)" }}
+      >
+        {spandrelSvg}
+      </span>
+      <span
+        className={ui.mergedPrStatsSpandrelBL}
+        style={{ transform: "scaleY(-1)" }}
+      >
+        {spandrelSvg}
+      </span>
+      <span
+        className={ui.mergedPrStatsSpandrelBR}
+        style={{ transform: "scale(-1, -1)" }}
+      >
+        {spandrelSvg}
+      </span>
+    </>
+  )
+}
+
 const committedPullRequestsCountQuery = (from: string, to: string) => ({
   queryKey: [...committedPullRequestsCountQueryKeyPrefix, from, to] as const,
   queryFn: async (): Promise<number> => {
@@ -97,6 +195,7 @@ export function CommittedPullRequestsDashboard() {
         aria-label="Loading committed pull requests"
         aria-busy="true"
       >
+        <SpandrelCorners />
         <div className={ui.mergedPrStatsGrid}>
           <div className={ui.mergedPrStatsCell}>
             <span className={ui.mergedPrStatsSkeleton} />
@@ -121,6 +220,7 @@ export function CommittedPullRequestsDashboard() {
   if (failed) {
     return (
       <article className={ui.mergedPrStats} aria-label="Merged PR throughput">
+        <SpandrelCorners />
         <div className={ui.mergedPrStatsBody}>
           <Banner
             tone="alarm"
@@ -143,6 +243,7 @@ export function CommittedPullRequestsDashboard() {
 
   return (
     <article className={ui.mergedPrStats} aria-label="Merged PR throughput">
+      <SpandrelCorners />
       <div className={ui.mergedPrStatsGrid}>
         <div className={ui.mergedPrStatsCell}>
           <span className={ui.mergedPrStatsLabel}>Today</span>
