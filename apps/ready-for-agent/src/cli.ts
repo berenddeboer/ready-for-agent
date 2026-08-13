@@ -12,7 +12,12 @@ import {
   localGitErrorCode,
   toCanonicalRepositoryIdentity,
 } from "./cli-json.ts"
-import { resolveRepositoryIdentity } from "./repository-identity.ts"
+import {
+  type RepositoryIdentityFields,
+  type RepositoryIdentityMatch,
+  formatRepositoryFullIdentity,
+  resolveRepositoryIdentity,
+} from "./repository-identity.ts"
 import { GraphqlApi } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
 import { StartHarness } from "./services/start-harness.ts"
@@ -21,15 +26,18 @@ const pathArg = Argument.string("path").pipe(
   Argument.withDescription("Path to a local git repository"),
 )
 
+const repositorySelectorGuidance =
+  "Use <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment"
+
 const repositoryIdentityArg = Argument.string("repository").pipe(
   Argument.withDescription(
-    "Repository identity as <forge-host>/<project-path> (case-insensitive)",
+    "Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)",
   ),
 )
 
 const optionalRepositoryIdentityArg = Argument.string("repository").pipe(
   Argument.withDescription(
-    "Optional repository identity as <forge-host>/<project-path> (case-insensitive)",
+    "Optional repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)",
   ),
   Argument.optional,
 )
@@ -68,6 +76,41 @@ const startHarnessWorkflow = Effect.fn("Cli.startHarness")(function* (
   const startHarnessService = yield* StartHarness
   yield* startHarnessService.start({ noOpen, host })
 })
+
+const repositoryIdentityCommandFailed = (
+  command: FiniteCommandName,
+  resolved: Exclude<
+    RepositoryIdentityMatch<RepositoryIdentityFields>,
+    { readonly _tag: "matched" }
+  >,
+): FiniteCommandFailed => {
+  switch (resolved._tag) {
+    case "invalid":
+      return new FiniteCommandFailed({
+        command,
+        code: "REPOSITORY_NOT_FOUND",
+        message: `Invalid repository identity "${resolved.argument}". ${repositorySelectorGuidance}.`,
+      })
+    case "not_found":
+      return new FiniteCommandFailed({
+        command,
+        code: "REPOSITORY_NOT_FOUND",
+        message: `No configured Repository matches ${resolved.selector}`,
+      })
+    case "ambiguous":
+      return new FiniteCommandFailed({
+        command,
+        code: "REPOSITORY_AMBIGUOUS",
+        message: `Multiple configured Repositories match ${resolved.selector}: ${resolved.matches
+          .map((repository) => formatRepositoryFullIdentity(repository))
+          .join(", ")}`,
+      })
+    default: {
+      const _exhaustive: never = resolved
+      return _exhaustive
+    }
+  }
+}
 
 const toFiniteCommandFailed = (
   command: FiniteCommandName,
@@ -156,27 +199,8 @@ const candidatesWorkflow = Effect.fn("Cli.candidates")(function* (
   )
 
   const resolved = resolveRepositoryIdentity(repositoryArgument, repositories)
-  switch (resolved._tag) {
-    case "invalid":
-      return yield* new FiniteCommandFailed({
-        command: "candidates",
-        code: "REPOSITORY_NOT_FOUND",
-        message: `Invalid repository identity "${resolved.argument}". Use <forge-host>/<project-path>.`,
-      })
-    case "not_found":
-      return yield* new FiniteCommandFailed({
-        command: "candidates",
-        code: "REPOSITORY_NOT_FOUND",
-        message: `No configured Repository matches ${resolved.forgeHost}/${resolved.projectPath}`,
-      })
-    case "ambiguous":
-      return yield* new FiniteCommandFailed({
-        command: "candidates",
-        code: "REPOSITORY_AMBIGUOUS",
-        message: `Multiple configured Repositories match ${resolved.forgeHost}/${resolved.projectPath} (${resolved.matchCount})`,
-      })
-    case "matched":
-      break
+  if (resolved._tag !== "matched") {
+    return yield* repositoryIdentityCommandFailed("candidates", resolved)
   }
 
   const result = yield* graphqlApi
@@ -210,27 +234,8 @@ const intakeWorkflow = Effect.fn("Cli.intake")(function* (
   )
 
   const resolved = resolveRepositoryIdentity(repositoryArgument, repositories)
-  switch (resolved._tag) {
-    case "invalid":
-      return yield* new FiniteCommandFailed({
-        command: "intake",
-        code: "REPOSITORY_NOT_FOUND",
-        message: `Invalid repository identity "${resolved.argument}". Use <forge-host>/<project-path>.`,
-      })
-    case "not_found":
-      return yield* new FiniteCommandFailed({
-        command: "intake",
-        code: "REPOSITORY_NOT_FOUND",
-        message: `No configured Repository matches ${resolved.forgeHost}/${resolved.projectPath}`,
-      })
-    case "ambiguous":
-      return yield* new FiniteCommandFailed({
-        command: "intake",
-        code: "REPOSITORY_AMBIGUOUS",
-        message: `Multiple configured Repositories match ${resolved.forgeHost}/${resolved.projectPath} (${resolved.matchCount})`,
-      })
-    case "matched":
-      break
+  if (resolved._tag !== "matched") {
+    return yield* repositoryIdentityCommandFailed("intake", resolved)
   }
 
   const result = yield* graphqlApi
@@ -275,30 +280,11 @@ const statusWorkflow = Effect.fn("Cli.status")(function* (
       Effect.mapError((error) => toFiniteCommandFailed("status", error)),
     )
     const resolved = resolveRepositoryIdentity(repositoryArgument, repositories)
-    switch (resolved._tag) {
-      case "invalid":
-        return yield* new FiniteCommandFailed({
-          command: "status",
-          code: "REPOSITORY_NOT_FOUND",
-          message: `Invalid repository identity "${resolved.argument}". Use <forge-host>/<project-path>.`,
-        })
-      case "not_found":
-        return yield* new FiniteCommandFailed({
-          command: "status",
-          code: "REPOSITORY_NOT_FOUND",
-          message: `No configured Repository matches ${resolved.forgeHost}/${resolved.projectPath}`,
-        })
-      case "ambiguous":
-        return yield* new FiniteCommandFailed({
-          command: "status",
-          code: "REPOSITORY_AMBIGUOUS",
-          message: `Multiple configured Repositories match ${resolved.forgeHost}/${resolved.projectPath} (${resolved.matchCount})`,
-        })
-      case "matched":
-        repositoryId = resolved.repository.id
-        scopedRepository = toCanonicalRepositoryIdentity(resolved.repository)
-        break
+    if (resolved._tag !== "matched") {
+      return yield* repositoryIdentityCommandFailed("status", resolved)
     }
+    repositoryId = resolved.repository.id
+    scopedRepository = toCanonicalRepositoryIdentity(resolved.repository)
   }
 
   const status = yield* graphqlApi
@@ -372,7 +358,7 @@ const statusCommand = Command.make(
   ({ repository }) => statusWorkflow(Option.getOrUndefined(repository)),
 ).pipe(
   Command.withDescription(
-    "Print the current six-lane Kanban status as versioned JSON (optional <forge-host>/<project-path>)",
+    "Print the current six-lane Kanban status as versioned JSON (optional repository selector)",
   ),
 )
 

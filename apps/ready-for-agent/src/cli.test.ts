@@ -465,6 +465,119 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
+  it.live("candidates accepts a unique project-path shorthand", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+
+      try {
+        let requestedId: string | undefined
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "berenddeboer/ready-for-agent",
+                },
+              ]),
+              intakeCandidates: (repositoryId) =>
+                Effect.sync(() => {
+                  requestedId = repositoryId
+                  return {
+                    repository: {
+                      id: "repo-1",
+                      forge: "github",
+                      forgeHost: "github.com",
+                      projectPath: "berenddeboer/ready-for-agent",
+                      issuesReconciledAt: null,
+                    },
+                    candidates: [],
+                  }
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(
+          ["candidates", "berenddeboer/ready-for-agent"],
+          layer,
+        )
+
+        expect(requestedId).toBe("repo-1")
+        expect(logs).toHaveLength(1)
+        expect(JSON.parse(logs[0] ?? "")).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "candidates",
+          repository: {
+            id: "repo-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "berenddeboer/ready-for-agent",
+          },
+          issuesReconciledAt: null,
+          candidates: [],
+        })
+      } finally {
+        console.log = originalLog
+      }
+    }),
+  )
+
+  it.live(
+    "candidates fails with REPOSITORY_AMBIGUOUS listing matching identities",
+    () =>
+      Effect.gen(function* () {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-github",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "acme/ready-for-agent",
+                },
+                {
+                  id: "repo-gitlab",
+                  forge: "gitlab",
+                  forgeHost: "gitlab.com",
+                  projectPath: "group/ready-for-agent",
+                },
+              ]),
+            }),
+          ),
+        )
+
+        const result = yield* runOperator(
+          ["candidates", "ready-for-agent"],
+          layer,
+        ).pipe(Effect.flip)
+
+        expect(result).toBeInstanceOf(FiniteCommandFailed)
+        if (result instanceof FiniteCommandFailed) {
+          expect(result.document).toEqual({
+            schemaVersion: CLI_SCHEMA_VERSION,
+            command: "candidates",
+            error: {
+              code: "REPOSITORY_AMBIGUOUS",
+              message:
+                "Multiple configured Repositories match ready-for-agent: github.com://acme/ready-for-agent, gitlab.com://group/ready-for-agent",
+            },
+          })
+        }
+      }),
+  )
+
   it.live("candidates preserves GraphQL preflight error codes", () =>
     Effect.gen(function* () {
       const layer = mockStart.pipe(
