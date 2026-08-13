@@ -1,12 +1,14 @@
 import { Context, Effect, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { JumpFailed } from "../jump-error.ts"
+import { jumpPaneEnvironmentFlags } from "../jump-pane-environment.ts"
 
 export type JumpWindowInput = {
   readonly sessionId: string
   readonly workingDirectory: string
   readonly agentExecutable: string
   readonly agentArguments: readonly string[]
+  readonly backendId: string
 }
 
 const tmuxMissingMessage = "jump must be run from inside a tmux session"
@@ -186,6 +188,7 @@ export class Tmux extends Context.Service<
           windowId,
           "-c",
           input.workingDirectory,
+          ...jumpPaneEnvironmentFlags({ backendId: input.backendId }),
           "--",
           input.agentExecutable,
           ...input.agentArguments,
@@ -213,6 +216,7 @@ export class Tmux extends Context.Service<
           jumpWindowName(input.sessionId),
           "-c",
           input.workingDirectory,
+          ...jumpPaneEnvironmentFlags({ backendId: input.backendId }),
           "--",
           input.agentExecutable,
           ...input.agentArguments,
