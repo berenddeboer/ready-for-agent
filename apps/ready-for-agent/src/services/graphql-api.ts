@@ -96,6 +96,15 @@ export type KanbanStatusResult = {
   readonly lanes: readonly StatusLane[]
 }
 
+export type SessionWorkItemLookup = {
+  readonly agentBackend: {
+    readonly id: string
+    readonly label: string
+  }
+  readonly sessionId: string
+  readonly worktreePath: string | null
+}
+
 const isStatusLaneId = (value: string): value is StatusLaneId => {
   switch (value) {
     case "QUEUE":
@@ -207,6 +216,9 @@ export class GraphqlApi extends Context.Service<
     readonly kanbanStatus: (
       repositoryId: string | null,
     ) => Effect.Effect<KanbanStatusResult, GraphqlRequestFailed>
+    readonly workItemBySessionId: (
+      sessionId: string,
+    ) => Effect.Effect<SessionWorkItemLookup, GraphqlRequestFailed>
   }
 >()("ready-for-agent/GraphqlApi") {
   static readonly layer = Layer.effect(
@@ -505,12 +517,46 @@ export class GraphqlApi extends Context.Service<
         })
       })
 
+      const workItemBySessionId = Effect.fn("GraphqlApi.workItemBySessionId")(
+        function* (sessionId: string) {
+          return yield* Effect.tryPromise({
+            try: async () => {
+              const result = await client.query({
+                workItemBySessionId: {
+                  __args: { sessionId },
+                  agentBackend: {
+                    id: true,
+                    label: true,
+                  },
+                  sessionId: true,
+                  worktreePath: true,
+                },
+              })
+              const payload = result.workItemBySessionId
+              if (!payload) {
+                throw new Error("workItemBySessionId returned null")
+              }
+              return {
+                agentBackend: {
+                  id: payload.agentBackend.id,
+                  label: payload.agentBackend.label,
+                },
+                sessionId: payload.sessionId,
+                worktreePath: payload.worktreePath ?? null,
+              }
+            },
+            catch: mapFailure,
+          })
+        },
+      )
+
       return {
         addRepository,
         listRepositories,
         intakeCandidates,
         startRepositoryIntake,
         kanbanStatus,
+        workItemBySessionId,
       }
     }),
   )

@@ -7,10 +7,17 @@
  */
 
 import { spawn, spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { type Server, createServer } from "node:http"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
   CLI_SCHEMA_VERSION,
@@ -85,20 +92,26 @@ type ProcessResult = {
 const runCli = (
   args: readonly string[],
   graphqlUrl: string,
+  extraEnv: NodeJS.ProcessEnv = {},
 ): Promise<ProcessResult> =>
   new Promise((resolve, reject) => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      READY_FOR_AGENT_GRAPHQL_URL: graphqlUrl,
+      // Keep CLI error JSON free of ANSI so process contracts stay exact.
+      NO_COLOR: "1",
+      FORCE_COLOR: "0",
+      ...extraEnv,
+    }
+    if (!("TMUX" in extraEnv)) {
+      delete env.TMUX
+    }
     const child = spawn(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", ...args],
       {
         cwd: packageRoot,
-        env: {
-          ...process.env,
-          READY_FOR_AGENT_GRAPHQL_URL: graphqlUrl,
-          // Keep CLI error JSON free of ANSI so process contracts stay exact.
-          NO_COLOR: "1",
-          FORCE_COLOR: "0",
-        },
+        env,
       },
     )
     let stdout = ""
@@ -967,6 +980,395 @@ describe("operator binary finite-command process contract", () => {
       expect(result.stderr).not.toContain("GRAPHQL_ERROR")
     } finally {
       await closeServer(server)
+    }
+  })
+})
+
+const jumpSessionId = "85312e9f-9c57-42ef-9757-b2512cee57cd"
+
+const writeExecutable = (path: string, body: string): void => {
+  writeFileSync(path, body, { encoding: "utf8" })
+  chmodSync(path, 0o755)
+}
+
+const parseTmuxArgvLog = (logPath: string): readonly (readonly string[])[] => {
+  const text = readFileSync(logPath, "utf8").trim()
+  if (text.length === 0) {
+    return []
+  }
+  return text.split("\n").map((line) => JSON.parse(line) as string[])
+}
+
+const startJumpGraphqlServer = (options: {
+  readonly backendId?: string
+  readonly worktreePath?: string | null
+  readonly error?: { readonly code: string; readonly message: string }
+}): Promise<{
+  readonly url: string
+  readonly seenBodies: string[]
+  readonly close: () => Promise<void>
+}> =>
+  new Promise((resolve, reject) => {
+    const seenBodies: string[] = []
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        seenBodies.push(Buffer.concat(chunks).toString("utf8"))
+        res.writeHead(200, { "content-type": "application/json" })
+        if (options.error !== undefined) {
+          res.end(
+            JSON.stringify({
+              data: null,
+              errors: [
+                {
+                  message: options.error.message,
+                  extensions: { code: options.error.code },
+                },
+              ],
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({
+            data: {
+              workItemBySessionId: {
+                agentBackend: {
+                  id: options.backendId ?? "opencode",
+                  label: options.backendId ?? "OpenCode",
+                },
+                sessionId: jumpSessionId,
+                worktreePath: options.worktreePath ?? null,
+              },
+            },
+          }),
+        )
+      })
+    })
+    listen(server)
+      .then((port) => {
+        resolve({
+          url: `http://127.0.0.1:${port}/graphql`,
+          seenBodies,
+          close: () => closeServer(server),
+        })
+      })
+      .catch(reject)
+  })
+
+describe("operator binary jump process contract", () => {
+  let tempRoot = ""
+  let binDir = ""
+  let tmuxLog = ""
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), "ready-for-agent-jump-process-"))
+    binDir = join(tempRoot, "bin")
+    mkdirSync(binDir)
+    tmuxLog = join(tempRoot, "tmux-argv.log")
+    writeFileSync(tmuxLog, "")
+    writeExecutable(
+      join(binDir, "tmux"),
+      `#!/usr/bin/env bun
+import { appendFileSync } from "node:fs"
+appendFileSync(process.env.TMUX_ARGV_LOG ?? "", JSON.stringify(process.argv.slice(2)) + "\\n")
+if (process.env.TMUX_FAIL === "1") {
+  process.exit(1)
+}
+if (process.argv.includes("new-window")) {
+  process.stdout.write("@1 %1\\n")
+}
+`,
+    )
+    for (const name of ["opencode", "grok", "codex", "claude"] as const) {
+      writeExecutable(join(binDir, name), "#!/usr/bin/env bash\nexit 0\n")
+    }
+  })
+
+  afterEach(() => {
+    rmSync(tempRoot, { recursive: true, force: true })
+  })
+
+  const jumpEnv = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+    PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    TMUX: "/tmp/tmux-1000/default,123,0",
+    TMUX_ARGV_LOG: tmuxLog,
+    ...overrides,
+  })
+
+  test("jump outside tmux writes a text error and does not invoke tmux", async () => {
+    const result = await runCli(
+      ["jump", jumpSessionId],
+      "http://127.0.0.1:1/graphql",
+    )
+
+    expect(result.status).toBe(1)
+    expect(result.stdout.trim()).toBe("")
+    expect(result.stderr.trim()).toBe(
+      "jump must be run from inside a tmux session",
+    )
+    expect(result.stderr).not.toContain("schemaVersion")
+    expect(result.stderr).not.toMatch(/\s+at\s+\S+\s+\(/)
+    expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+  })
+
+  test("jump against unreachable GraphQL writes text, not JSON", async () => {
+    const result = await runCli(
+      ["jump", jumpSessionId],
+      "http://127.0.0.1:1/graphql",
+      jumpEnv(),
+    )
+
+    expect(result.status).toBe(1)
+    expect(result.stdout.trim()).toBe("")
+    expect(result.stderr).toContain(
+      harnessNotRunningMessage("http://127.0.0.1:1"),
+    )
+    expect(result.stderr).not.toContain("schemaVersion")
+    expect(result.stderr).not.toContain("HARNESS_UNREACHABLE")
+    expect(result.stderr).not.toMatch(/\s+at\s+\S+\s+\(/)
+    expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+  })
+
+  test("jump writes the Session-not-found GraphQL message", async () => {
+    const graphql = await startJumpGraphqlServer({
+      error: {
+        code: "SESSION_NOT_FOUND",
+        message: `No Work Item owns Session ID: ${jumpSessionId}`,
+      },
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv(),
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stdout.trim()).toBe("")
+      expect(result.stderr.trim()).toBe(
+        `No Work Item owns Session ID: ${jumpSessionId}`,
+      )
+      expect(
+        graphql.seenBodies.some((body) => body.includes("workItemBySessionId")),
+      ).toBe(true)
+      expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump writes the ambiguous-Session GraphQL message", async () => {
+    const graphql = await startJumpGraphqlServer({
+      error: {
+        code: "SESSION_AMBIGUOUS",
+        message: `Multiple Work Items own Session ID: ${jumpSessionId}`,
+      },
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv(),
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr.trim()).toBe(
+        `Multiple Work Items own Session ID: ${jumpSessionId}`,
+      )
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump fails when the captured Agent Backend is unsupported", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "mystery",
+      worktreePath: null,
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv(),
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr.trim()).toBe("Unsupported Agent Backend: mystery")
+      expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump fails when the backend executable is not on PATH", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: null,
+    })
+    try {
+      const emptyBin = join(tempRoot, "empty-bin")
+      mkdirSync(emptyBin)
+      const bunDir = dirname(Bun.which("bun") ?? "/usr/bin/bun")
+      const result = await runCli(["jump", jumpSessionId], graphql.url, {
+        PATH: `${emptyBin}:${bunDir}`,
+        TMUX: "/tmp/tmux-1000/default,123,0",
+        TMUX_ARGV_LOG: tmuxLog,
+      })
+
+      expect(result.status).toBe(1)
+      expect(result.stderr.trim()).toBe(
+        "Agent Backend executable 'opencode' is not on PATH",
+      )
+      expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump fails when tmux cannot create the window", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: null,
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv({ TMUX_FAIL: "1" }),
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stdout.trim()).toBe("")
+      expect(result.stderr).toContain(
+        "tmux could not create and arrange the window",
+      )
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump creates an even split with the resolved OpenCode executable", async () => {
+    const worktree = join(tempRoot, "worktree")
+    mkdirSync(worktree)
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: worktree,
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv(),
+      )
+
+      expect(result.status).toBe(0)
+      expect(result.stdout.trim()).toBe("")
+      expect(result.stderr.trim()).toBe("")
+      const invocations = parseTmuxArgvLog(tmuxLog)
+      const opencode = join(binDir, "opencode")
+      expect(invocations).toEqual([
+        [
+          "new-window",
+          "-d",
+          "-P",
+          "-F",
+          "#{window_id} #{pane_id}",
+          "-c",
+          worktree,
+          "--",
+          opencode,
+          worktree,
+          "--session",
+          jumpSessionId,
+        ],
+        ["split-window", "-h", "-t", "@1", "-c", worktree],
+        ["select-layout", "-t", "@1", "even-horizontal"],
+        ["select-pane", "-t", "%1"],
+        ["select-window", "-t", "@1"],
+      ])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump uses the CLI cwd when the worktree is gone", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "claude",
+      worktreePath: join(tempRoot, "cleaned-up-worktree"),
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv(),
+      )
+
+      expect(result.status).toBe(0)
+      const invocations = parseTmuxArgvLog(tmuxLog)
+      const claude = join(binDir, "claude")
+      const cliCwd = resolve(packageRoot)
+      expect(invocations[0]).toEqual([
+        "new-window",
+        "-d",
+        "-P",
+        "-F",
+        "#{window_id} #{pane_id}",
+        "-c",
+        cliCwd,
+        "--",
+        claude,
+        "--resume",
+        jumpSessionId,
+      ])
+      expect(invocations[1]).toEqual([
+        "split-window",
+        "-h",
+        "-t",
+        "@1",
+        "-c",
+        cliCwd,
+      ])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump launches Grok and Codex interactive resume commands", async () => {
+    const worktree = join(tempRoot, "backend-wt")
+    mkdirSync(worktree)
+    for (const [backendId, expectedTail] of [
+      ["grok", ["--cwd", worktree, "--resume", jumpSessionId]],
+      ["codex", ["resume", "-C", worktree, jumpSessionId]],
+    ] as const) {
+      writeFileSync(tmuxLog, "")
+      const graphql = await startJumpGraphqlServer({
+        backendId,
+        worktreePath: worktree,
+      })
+      try {
+        const result = await runCli(
+          ["jump", jumpSessionId],
+          graphql.url,
+          jumpEnv(),
+        )
+        expect(result.status).toBe(0)
+        const invocations = parseTmuxArgvLog(tmuxLog)
+        expect(invocations[0]?.slice(8)).toEqual([
+          join(binDir, backendId),
+          ...expectedTail,
+        ])
+      } finally {
+        await graphql.close()
+      }
     }
   })
 })

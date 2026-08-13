@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { BunServices } from "@effect/platform-bun"
 import { beforeEach, describe, expect, it } from "@effect/vitest"
@@ -20,12 +23,19 @@ import {
   HARNESS_UNREACHABLE_CODE,
   harnessNotRunningMessage,
 } from "./graphql-error.ts"
-import { GraphqlApi, GraphqlRequestFailed } from "./services/graphql-api.ts"
+import { JumpFailed } from "./jump-error.ts"
+import { ExecutablePath } from "./services/executable-path.ts"
+import {
+  GraphqlApi,
+  GraphqlRequestFailed,
+  type SessionWorkItemLookup,
+} from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
 import {
   StartHarness,
   type StartHarnessOptions,
 } from "./services/start-harness.ts"
+import { type JumpWindowInput, Tmux } from "./services/tmux.ts"
 
 /** Package root (`apps/ready-for-agent`), independent of Bun's `import.meta.dir`. */
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
@@ -37,7 +47,18 @@ const unusedGraphql = {
   startRepositoryIntake: () =>
     Effect.die("startRepositoryIntake should not run"),
   kanbanStatus: () => Effect.die("kanbanStatus should not run"),
+  workItemBySessionId: () => Effect.die("workItemBySessionId should not run"),
 } as const
+
+const unusedJumpServices = Layer.mergeAll(
+  Layer.succeed(Tmux, {
+    requireAttachedSession: Effect.die("tmux should not run"),
+    createJumpWindow: () => Effect.die("tmux should not run"),
+  }),
+  Layer.succeed(ExecutablePath, {
+    resolve: () => Effect.die("executable path should not run"),
+  }),
+)
 
 const emptyStatusLanes = [
   { id: "QUEUE" as const, label: "Queue", count: 0, workItems: [] },
@@ -55,6 +76,7 @@ const runOperator = (
   // Mirror main.ts: expand bare `--host` before Effect's string flag parser.
   Command.runWith(cli, { version: "0.0.0" })(expandBareHostFlag(args)).pipe(
     Effect.provide(layer),
+    Effect.provide(unusedJumpServices),
     Effect.provide(BunServices.layer),
   )
 
@@ -1062,7 +1084,7 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
-  it("binary help lists start, add, candidates, intake, status, --no-open, and --host", () => {
+  it("binary help lists start, add, candidates, intake, status, jump, --no-open, and --host", () => {
     const result = spawnSync(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", "--help"],
@@ -1079,6 +1101,7 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("candidates")
     expect(output).toContain("intake")
     expect(output).toContain("status")
+    expect(output).toContain("jump")
     expect(output).not.toContain("remove-github-token")
     expect(output).toContain("no-open")
     expect(output).toContain("host")
@@ -1136,6 +1159,377 @@ describe("operator binary CLI seam", () => {
         noOpen: true,
         host: "0.0.0.0",
       })
+    }),
+  )
+})
+
+describe("operator binary jump command", () => {
+  const sessionId = "85312e9f-9c57-42ef-9757-b2512cee57cd"
+  const mockStart = Layer.succeed(StartHarness, {
+    start: () => Effect.die("start should not run for jump"),
+  })
+  const mockLocalGit = Layer.succeed(LocalGit, {
+    inspect: () => Effect.die("local git should not run for jump"),
+  })
+
+  const jumpGraphql = (
+    workItemBySessionId: (
+      sessionId: string,
+    ) => Effect.Effect<SessionWorkItemLookup, GraphqlRequestFailed>,
+  ) =>
+    Layer.succeed(GraphqlApi, {
+      ...unusedGraphql,
+      workItemBySessionId,
+    })
+
+  const foundWorkItem = (options: {
+    readonly backendId: string
+    readonly worktreePath: string | null
+    readonly sessionId?: string
+  }) => ({
+    agentBackend: { id: options.backendId, label: options.backendId },
+    sessionId: options.sessionId ?? sessionId,
+    worktreePath: options.worktreePath,
+  })
+
+  const successfulJumpLayer = (options: {
+    readonly workItemBySessionId?: (
+      id: string,
+    ) => Effect.Effect<SessionWorkItemLookup, GraphqlRequestFailed>
+    readonly requireAttachedSession?: Effect.Effect<void, JumpFailed>
+    readonly createJumpWindow?: (
+      input: JumpWindowInput,
+    ) => Effect.Effect<void, JumpFailed>
+    readonly resolve?: (command: string) => Effect.Effect<string, JumpFailed>
+  }) =>
+    mockStart.pipe(
+      Layer.provideMerge(mockLocalGit),
+      Layer.provideMerge(
+        jumpGraphql(
+          options.workItemBySessionId ??
+            (() =>
+              Effect.succeed(
+                foundWorkItem({
+                  backendId: "opencode",
+                  worktreePath: null,
+                }),
+              )),
+        ),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(Tmux, {
+          requireAttachedSession: options.requireAttachedSession ?? Effect.void,
+          createJumpWindow: options.createJumpWindow ?? (() => Effect.void),
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(ExecutablePath, {
+          resolve:
+            options.resolve ??
+            ((command) => Effect.succeed(`/usr/bin/${command}`)),
+        }),
+      ),
+    )
+
+  it.live("jump looks up the Session ID through GraphQL", () =>
+    Effect.gen(function* () {
+      let requested: string | undefined
+      yield* runOperator(
+        ["jump", sessionId],
+        successfulJumpLayer({
+          workItemBySessionId: (id) => {
+            requested = id
+            return Effect.succeed(
+              foundWorkItem({ backendId: "opencode", worktreePath: null }),
+            )
+          },
+        }),
+      )
+      expect(requested).toBe(sessionId)
+    }),
+  )
+
+  it.live("jump fails when invoked outside tmux", () =>
+    Effect.gen(function* () {
+      let lookedUp = false
+      const result = yield* runOperator(
+        ["jump", sessionId],
+        successfulJumpLayer({
+          requireAttachedSession: Effect.fail(
+            new JumpFailed({
+              message: "jump must be run from inside a tmux session",
+            }),
+          ),
+          workItemBySessionId: () => {
+            lookedUp = true
+            return Effect.die("GraphQL should not run outside tmux")
+          },
+        }),
+      ).pipe(Effect.flip)
+
+      expect(lookedUp).toBe(false)
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toBe(
+          "jump must be run from inside a tmux session",
+        )
+      }
+    }),
+  )
+
+  it.live("jump fails when the Harness is unreachable", () =>
+    Effect.gen(function* () {
+      const harnessDown = harnessNotRunningMessage()
+      let created = false
+      const result = yield* runOperator(
+        ["jump", sessionId],
+        successfulJumpLayer({
+          workItemBySessionId: () =>
+            Effect.fail(
+              new GraphqlRequestFailed({
+                code: HARNESS_UNREACHABLE_CODE,
+                message: harnessDown,
+              }),
+            ),
+          createJumpWindow: () => {
+            created = true
+            return Effect.void
+          },
+        }),
+      ).pipe(Effect.flip)
+
+      expect(created).toBe(false)
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toBe(harnessDown)
+        expect(result.message).toContain(HARNESS_START_HINT)
+      }
+    }),
+  )
+
+  it.live("jump fails when no Work Item owns the Session ID", () =>
+    Effect.gen(function* () {
+      const result = yield* runOperator(
+        ["jump", sessionId],
+        successfulJumpLayer({
+          workItemBySessionId: () =>
+            Effect.fail(
+              new GraphqlRequestFailed({
+                code: "SESSION_NOT_FOUND",
+                message: `No Work Item owns Session ID: ${sessionId}`,
+              }),
+            ),
+        }),
+      ).pipe(Effect.flip)
+
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toBe(
+          `No Work Item owns Session ID: ${sessionId}`,
+        )
+      }
+    }),
+  )
+
+  it.live("jump fails when multiple Work Items own the Session ID", () =>
+    Effect.gen(function* () {
+      const result = yield* runOperator(
+        ["jump", sessionId],
+        successfulJumpLayer({
+          workItemBySessionId: () =>
+            Effect.fail(
+              new GraphqlRequestFailed({
+                code: "SESSION_AMBIGUOUS",
+                message: `Multiple Work Items own Session ID: ${sessionId}`,
+              }),
+            ),
+        }),
+      ).pipe(Effect.flip)
+
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toBe(
+          `Multiple Work Items own Session ID: ${sessionId}`,
+        )
+      }
+    }),
+  )
+
+  it.live("jump fails when the captured Agent Backend is unsupported", () =>
+    Effect.gen(function* () {
+      let resolved: string | undefined
+      const result = yield* runOperator(
+        ["jump", sessionId],
+        successfulJumpLayer({
+          workItemBySessionId: () =>
+            Effect.succeed(
+              foundWorkItem({
+                backendId: "unknown-backend",
+                worktreePath: null,
+              }),
+            ),
+          resolve: (command) => {
+            resolved = command
+            return Effect.succeed(`/usr/bin/${command}`)
+          },
+        }),
+      ).pipe(Effect.flip)
+
+      expect(resolved).toBeUndefined()
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toBe(
+          "Unsupported Agent Backend: unknown-backend",
+        )
+      }
+    }),
+  )
+
+  it.live("jump fails when the backend executable is not on PATH", () =>
+    Effect.gen(function* () {
+      let created = false
+      const result = yield* runOperator(
+        ["jump", sessionId],
+        successfulJumpLayer({
+          resolve: (command) =>
+            Effect.fail(
+              new JumpFailed({
+                message: `Agent Backend executable '${command}' is not on PATH`,
+              }),
+            ),
+          createJumpWindow: () => {
+            created = true
+            return Effect.void
+          },
+        }),
+      ).pipe(Effect.flip)
+
+      expect(created).toBe(false)
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toBe(
+          "Agent Backend executable 'opencode' is not on PATH",
+        )
+      }
+    }),
+  )
+
+  it.live("jump fails when tmux cannot create the window", () =>
+    Effect.gen(function* () {
+      const result = yield* runOperator(
+        ["jump", sessionId],
+        successfulJumpLayer({
+          createJumpWindow: () =>
+            Effect.fail(
+              new JumpFailed({
+                message: "tmux could not create and arrange the window",
+              }),
+            ),
+        }),
+      ).pipe(Effect.flip)
+
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toBe(
+          "tmux could not create and arrange the window",
+        )
+      }
+    }),
+  )
+
+  it.live("jump launches the interactive resume command for each backend", () =>
+    Effect.gen(function* () {
+      const worktree = mkdtempSync(join(tmpdir(), "rfa-jump-wt-"))
+      mkdirSync(join(worktree, "src"))
+      try {
+        const expected = {
+          opencode: {
+            executable: "/usr/bin/opencode",
+            arguments: [worktree, "--session", sessionId],
+          },
+          grok: {
+            executable: "/usr/bin/grok",
+            arguments: ["--cwd", worktree, "--resume", sessionId],
+          },
+          codex: {
+            executable: "/usr/bin/codex",
+            arguments: ["resume", "-C", worktree, sessionId],
+          },
+          claude: {
+            executable: "/usr/bin/claude",
+            arguments: ["--resume", sessionId],
+          },
+        } as const
+
+        for (const [backendId, want] of Object.entries(expected)) {
+          let captured: JumpWindowInput | undefined
+          yield* runOperator(
+            ["jump", sessionId],
+            successfulJumpLayer({
+              workItemBySessionId: () =>
+                Effect.succeed(
+                  foundWorkItem({ backendId, worktreePath: worktree }),
+                ),
+              createJumpWindow: (input) =>
+                Effect.sync(() => {
+                  captured = input
+                }),
+            }),
+          )
+          expect(captured).toEqual({
+            workingDirectory: worktree,
+            agentExecutable: want.executable,
+            agentArguments: want.arguments,
+          })
+        }
+      } finally {
+        rmSync(worktree, { recursive: true, force: true })
+      }
+    }),
+  )
+
+  it.live("jump uses the CLI cwd when the worktree is missing", () =>
+    Effect.gen(function* () {
+      let captured: JumpWindowInput | undefined
+      yield* runOperator(
+        ["jump", sessionId],
+        successfulJumpLayer({
+          workItemBySessionId: () =>
+            Effect.succeed(
+              foundWorkItem({
+                backendId: "opencode",
+                worktreePath: "/tmp/rfa-missing-worktree-does-not-exist",
+              }),
+            ),
+          createJumpWindow: (input) =>
+            Effect.sync(() => {
+              captured = input
+            }),
+        }),
+      )
+
+      expect(captured?.workingDirectory).toBe(process.cwd())
+      expect(captured?.agentArguments).toEqual([
+        process.cwd(),
+        "--session",
+        sessionId,
+      ])
+    }),
+  )
+
+  it.live("jump succeeds silently without mutating Work Item state", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      try {
+        yield* runOperator(["jump", sessionId], successfulJumpLayer({}))
+        expect(logs).toEqual([])
+      } finally {
+        console.log = originalLog
+      }
     }),
   )
 })

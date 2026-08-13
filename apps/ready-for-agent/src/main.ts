@@ -28,14 +28,18 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
   )
   const { cli } = await import("./cli.ts")
   const { ApplicationConfig } = await import("./services/application-config.ts")
+  const { ExecutablePath } = await import("./services/executable-path.ts")
   const { GraphqlApi } = await import("./services/graphql-api.ts")
   const { LocalGit } = await import("./services/local-git.ts")
   const { StartHarness } = await import("./services/start-harness.ts")
+  const { Tmux } = await import("./services/tmux.ts")
 
   const MainLive = Layer.mergeAll(
     LocalGit.layer,
     GraphqlApi.layer,
     StartHarness.layer,
+    Tmux.layer,
+    ExecutablePath.layer,
   ).pipe(
     Layer.provideMerge(ApplicationConfig.layer),
     Layer.provideMerge(BunServices.layer),
@@ -55,6 +59,11 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
     Effect.tapErrorTag("FiniteCommandFailed", (error) =>
       Effect.sync(() => {
         console.error(encodeCompactJson(error.document))
+      }),
+    ),
+    Effect.tapErrorTag("JumpFailed", (error) =>
+      Effect.sync(() => {
+        console.error(error.message)
       }),
     ),
   )
