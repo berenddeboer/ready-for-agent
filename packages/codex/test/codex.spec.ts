@@ -8,6 +8,7 @@ import {
   AgentBackendConfigError,
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
+  AgentBackendNotInstalledError,
   AgentBackendSessionIdMissingError,
   AgentBackendTimeoutError,
   type OnSessionId,
@@ -167,12 +168,14 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
   it("fails inspect when the binary is missing", async () => {
     const missing = join(tmpdir(), `codex-missing-${Date.now()}`)
     const error = await Effect.runPromise(inspect(missing).pipe(Effect.flip))
-    // Spawn failure surfaces as PlatformError (NotFound) through the shared runner.
-    expect(error).toBeDefined()
-    expect(error).not.toBeInstanceOf(AgentBackendConfigError)
-    expect((error as { _tag?: string })._tag).toBe("PlatformError")
-    const reason = (error as { reason?: { _tag?: string } }).reason
-    expect(reason?._tag).toBe("NotFound")
+    expect(error).toBeInstanceOf(AgentBackendNotInstalledError)
+    if (error instanceof AgentBackendNotInstalledError) {
+      expect(error.binary).toBe(missing)
+      expect(error.message).toContain(
+        `Codex Build CLI "${missing}" was not found on the Harness PATH.`,
+      )
+      expect(error.message).toContain("restart the Harness")
+    }
   })
 })
 

@@ -1,6 +1,7 @@
 import { Context, type Duration, type Effect } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { AgentBackendNotInstalledError } from "@ready-for-agent/agent-backend"
 import type {
   DatabaseError,
   RepositoryNotFoundError,
@@ -127,6 +128,7 @@ export type LifecycleStepError =
   | RepositoryNotFoundError
   | GitHubRequestError
   | GitHubTlsTrustError
+  | AgentBackendNotInstalledError
   | GitHubThrottledError
   | GitHubRepositoryUnavailableError
   | GitLabRequestError

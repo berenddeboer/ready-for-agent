@@ -5,6 +5,7 @@ import type {
   AgentBackendConfigError,
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
+  AgentBackendNotInstalledError,
   AgentBackendSessionIdMissingError,
   AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
@@ -24,6 +25,7 @@ export type AgentBackendError =
   | AgentBackendStartupTimeoutError
   | AgentBackendSessionIdMissingError
   | AgentBackendMalformedOutputError
+  | AgentBackendNotInstalledError
   | PlatformError
 
 /**

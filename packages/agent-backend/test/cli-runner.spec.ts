@@ -3,9 +3,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Deferred, Duration, Effect, Exit, Fiber } from "effect"
+import { systemError } from "effect/PlatformError"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   AgentBackendExitError,
+  AgentBackendNotInstalledError,
   AgentBackendSessionIdMissingError,
   AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
@@ -14,6 +16,8 @@ import {
   sanitizeInheritedEnvironment,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
+
+const TEST_BACKEND = { id: "claude" as const, label: "Claude Code" }
 
 const withExecutable = async <A>(
   body: string,
@@ -98,6 +102,7 @@ describe("runCliCapture", () => {
             withSpawner((spawner) =>
               runCliCapture({
                 spawner,
+                backend: TEST_BACKEND,
                 binary,
                 args: [],
                 cwd: directory,
@@ -126,6 +131,7 @@ describe("runCliCapture", () => {
         withSpawner((spawner) =>
           runCliCapture({
             spawner,
+            backend: TEST_BACKEND,
             binary,
             args: [],
             cwd: process.cwd(),
@@ -151,6 +157,7 @@ describe("runCliCapture", () => {
           withSpawner((spawner) =>
             runCliCapture({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -175,6 +182,7 @@ describe("runCliCapture", () => {
           withSpawner((spawner) =>
             runCliCapture({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -205,6 +213,7 @@ describe("runCliTurn", () => {
             withSpawner((spawner) =>
               runCliTurn({
                 spawner,
+                backend: TEST_BACKEND,
                 binary,
                 args: [],
                 cwd: process.cwd(),
@@ -237,6 +246,7 @@ describe("runCliTurn", () => {
               const fiber = yield* Effect.forkChild(
                 runCliTurn({
                   spawner,
+                  backend: TEST_BACKEND,
                   binary,
                   args: [],
                   cwd: process.cwd(),
@@ -272,6 +282,7 @@ describe("runCliTurn", () => {
           withSpawner((spawner) =>
             runCliTurn({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -301,6 +312,7 @@ describe("runCliTurn", () => {
           withSpawner((spawner) =>
             runCliTurn({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -327,6 +339,7 @@ describe("runCliTurn", () => {
         withSpawner((spawner) =>
           runCliTurn({
             spawner,
+            backend: TEST_BACKEND,
             binary,
             args: [],
             cwd: process.cwd(),
@@ -350,6 +363,7 @@ describe("runCliTurn", () => {
           withSpawner((spawner) =>
             runCliTurn({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -390,6 +404,7 @@ describe("runCliTurn", () => {
             withSpawner((spawner) =>
               runCliTurn({
                 spawner,
+                backend: TEST_BACKEND,
                 binary,
                 args: [],
                 cwd: process.cwd(),
@@ -442,6 +457,7 @@ describe("runCliTurn", () => {
             withSpawner((spawner) =>
               runCliTurn({
                 spawner,
+                backend: TEST_BACKEND,
                 binary,
                 args: [],
                 cwd: process.cwd(),
@@ -492,6 +508,7 @@ describe("runCliTurn", () => {
             withSpawner((spawner) =>
               runCliTurn({
                 spawner,
+                backend: TEST_BACKEND,
                 binary,
                 args: [],
                 cwd: process.cwd(),
@@ -560,6 +577,7 @@ describe("runCliTurn", () => {
             withSpawner((spawner) =>
               runCliTurn({
                 spawner,
+                backend: TEST_BACKEND,
                 binary,
                 args: [],
                 cwd: process.cwd(),
@@ -606,6 +624,7 @@ describe("runCliTurn", () => {
         withSpawner((spawner) =>
           runCliTurn({
             spawner,
+            backend: TEST_BACKEND,
             binary,
             args: [],
             cwd: process.cwd(),
@@ -632,6 +651,7 @@ describe("runCliTurn", () => {
         withSpawner((spawner) =>
           runCliTurn({
             spawner,
+            backend: TEST_BACKEND,
             binary,
             args: [],
             cwd: process.cwd(),
@@ -661,6 +681,7 @@ describe("runCliTurn", () => {
           withSpawner((spawner) =>
             runCliTurn({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -695,6 +716,7 @@ describe("runCliTurn", () => {
           withSpawner((spawner) =>
             runCliTurn({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -726,6 +748,7 @@ describe("runCliTurn", () => {
           withSpawner((spawner) =>
             runCliTurn({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -753,6 +776,7 @@ describe("runCliTurn", () => {
         withSpawner((spawner) =>
           runCliTurn({
             spawner,
+            backend: TEST_BACKEND,
             binary,
             args: [],
             cwd: process.cwd(),
@@ -787,6 +811,7 @@ describe("runCliTurn", () => {
           withSpawner((spawner) =>
             runCliTurn({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -819,6 +844,7 @@ describe("runCliTurn", () => {
           withSpawner((spawner) =>
             runCliTurn({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -855,6 +881,7 @@ describe("runCliTurn", () => {
           withSpawner((spawner) =>
             runCliTurn({
               spawner,
+              backend: TEST_BACKEND,
               binary,
               args: [],
               cwd: process.cwd(),
@@ -870,6 +897,116 @@ describe("runCliTurn", () => {
         })
       },
     )
+  })
+})
+
+const enoentPlatformError = systemError({
+  _tag: "NotFound",
+  module: "ChildProcess",
+  method: "spawn",
+  description: "ChildProcess.spawn (claude -p --output-format stream-json ...)",
+  cause: Object.assign(new Error('Executable not found in $PATH: "claude"'), {
+    code: "ENOENT",
+  }),
+})
+
+const eaccesPlatformError = systemError({
+  _tag: "PermissionDenied",
+  module: "ChildProcess",
+  method: "spawn",
+  description: "ChildProcess.spawn (claude)",
+  cause: Object.assign(new Error("permission denied"), { code: "EACCES" }),
+})
+
+const failingSpawner = (error: ReturnType<typeof systemError>) =>
+  ChildProcessSpawner.make(() => Effect.fail(error))
+
+describe("runCliCapture spawn not-found", () => {
+  it("maps an ENOENT spawn failure to AgentBackendNotInstalledError", async () => {
+    const error = await Effect.runPromise(
+      runCliCapture({
+        spawner: failingSpawner(enoentPlatformError),
+        backend: TEST_BACKEND,
+        binary: "claude",
+        args: [],
+        cwd: process.cwd(),
+        env: sanitizeInheritedEnvironment(),
+        timeout: Duration.seconds(2),
+      }).pipe(Effect.flip),
+    )
+    expect(error).toBeInstanceOf(AgentBackendNotInstalledError)
+    if (error instanceof AgentBackendNotInstalledError) {
+      expect(error.binary).toBe("claude")
+      expect(error.backend).toEqual(TEST_BACKEND)
+      expect(error.message).toContain(
+        'Claude Code CLI "claude" was not found on the Harness PATH.',
+      )
+      expect(error.message).toContain("`command -v claude`")
+      expect(error.message).toContain("restart the Harness")
+    }
+  })
+
+  it("leaves a non-ENOENT spawn PlatformError unclassified", async () => {
+    const error = await Effect.runPromise(
+      runCliCapture({
+        spawner: failingSpawner(eaccesPlatformError),
+        backend: TEST_BACKEND,
+        binary: "claude",
+        args: [],
+        cwd: process.cwd(),
+        env: sanitizeInheritedEnvironment(),
+        timeout: Duration.seconds(2),
+      }).pipe(Effect.flip),
+    )
+    expect(error).not.toBeInstanceOf(AgentBackendNotInstalledError)
+    expect((error as { _tag?: string })._tag).toBe("PlatformError")
+  })
+
+  it("leaves a missing cwd as PlatformError, not a missing CLI", async () => {
+    await withExecutable("exit 0", async (binary) => {
+      const missingCwd = join(
+        tmpdir(),
+        `agent-backend-missing-cwd-${Date.now()}`,
+      )
+      const error = await Effect.runPromise(
+        withSpawner((spawner) =>
+          runCliCapture({
+            spawner,
+            backend: TEST_BACKEND,
+            binary,
+            args: [],
+            cwd: missingCwd,
+            env: sanitizeInheritedEnvironment(),
+            timeout: Duration.seconds(2),
+          }).pipe(Effect.flip),
+        ),
+      )
+      expect(error).not.toBeInstanceOf(AgentBackendNotInstalledError)
+      expect((error as { _tag?: string })._tag).toBe("PlatformError")
+    })
+  })
+})
+
+describe("runCliTurn spawn not-found", () => {
+  it("maps an ENOENT spawn failure to AgentBackendNotInstalledError", async () => {
+    const error = await Effect.runPromise(
+      runCliTurn({
+        spawner: failingSpawner(enoentPlatformError),
+        backend: TEST_BACKEND,
+        binary: "claude",
+        args: [],
+        cwd: process.cwd(),
+        env: sanitizeInheritedEnvironment(),
+        timeout: Duration.seconds(2),
+        parseLine: parseSimpleLine,
+      }).pipe(Effect.flip),
+    )
+    expect(error).toBeInstanceOf(AgentBackendNotInstalledError)
+    if (error instanceof AgentBackendNotInstalledError) {
+      expect(error.message).toContain(
+        'Claude Code CLI "claude" was not found on the Harness PATH.',
+      )
+    }
   })
 })
 

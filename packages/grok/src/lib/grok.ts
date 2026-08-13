@@ -56,6 +56,7 @@ export class Grok {
         ) {
           const result = yield* runCliCapture({
             spawner,
+            backend: GROK_BACKEND,
             binary,
             args: ["--no-auto-update", "models"],
             cwd: input.cwd,
@@ -153,6 +154,7 @@ export class Grok {
 
               const turn = yield* runCliTurn({
                 spawner,
+                backend: GROK_BACKEND,
                 binary,
                 args,
                 cwd: input.cwd,

@@ -3,6 +3,10 @@ import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process"
 import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
 import {
+  findSpawnNotFoundCode,
+  formatAgentCliNotFoundRemediation,
+} from "./agent-cli-not-found.js"
+import {
   collectChildStdout,
   collectChildStdoutAndStderr,
 } from "./collect-child-stdout.js"
@@ -10,12 +14,13 @@ import {
   type AgentBackendErrorClassification,
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
+  AgentBackendNotInstalledError,
   AgentBackendSessionIdMissingError,
   AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
 } from "./errors.js"
 import { killProcessTree } from "./kill-process-tree.js"
-import type { OnSessionId } from "./types.js"
+import type { AgentBackendDescriptor, OnSessionId } from "./types.js"
 
 /** Graceful terminate then force-kill bound for the Agent Turn process tree. */
 export const DEFAULT_FORCE_KILL_AFTER = Duration.seconds(2)
@@ -33,6 +38,7 @@ export type AgentBackendCliError =
   | AgentBackendStartupTimeoutError
   | AgentBackendSessionIdMissingError
   | AgentBackendMalformedOutputError
+  | AgentBackendNotInstalledError
   | PlatformError
 
 export type CliLineEvent = {
@@ -54,6 +60,7 @@ export type CliLineEvent = {
 
 export type RunCliCaptureInput = {
   readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]
+  readonly backend: AgentBackendDescriptor
   readonly binary: string
   readonly args: ReadonlyArray<string>
   readonly cwd: string
@@ -77,6 +84,7 @@ export type RunCliCaptureInput = {
 
 export type RunCliTurnInput = {
   readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]
+  readonly backend: AgentBackendDescriptor
   readonly binary: string
   readonly args: ReadonlyArray<string>
   readonly cwd: string
@@ -130,6 +138,27 @@ const commandOptions = (input: {
   forceKillAfter: input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER,
 })
 
+const mapSpawnError = (
+  error: PlatformError,
+  input: {
+    readonly backend: AgentBackendDescriptor
+    readonly binary: string
+  },
+): PlatformError | AgentBackendNotInstalledError => {
+  if (findSpawnNotFoundCode(error) === undefined) {
+    return error
+  }
+  return new AgentBackendNotInstalledError({
+    message: formatAgentCliNotFoundRemediation({
+      backendLabel: input.backend.label,
+      binary: input.binary,
+    }),
+    backend: input.backend,
+    binary: input.binary,
+    cause: error,
+  })
+}
+
 /**
  * Terminate the harness-spawned CLI and every process it started.
  *
@@ -165,7 +194,10 @@ export const runCliCapture = (
     readonly stdout: string
     readonly stderr: string
   },
-  AgentBackendExitError | AgentBackendTimeoutError | PlatformError
+  | AgentBackendExitError
+  | AgentBackendTimeoutError
+  | AgentBackendNotInstalledError
+  | PlatformError
 > =>
   Effect.gen(function* () {
     const spawner = input.spawner
@@ -180,7 +212,9 @@ export const runCliCapture = (
 
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawner
+          .spawn(command)
+          .pipe(Effect.mapError((error) => mapSpawnError(error, input)))
         // Finalizer runs before Effect's handle cleanup (LIFO): snapshot the
         // tree while the root is still alive, then reap group + descendants.
         yield* Effect.addFinalizer(() =>
@@ -253,7 +287,9 @@ export const runCliTurn = (
 
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawner
+          .spawn(command)
+          .pipe(Effect.mapError((error) => mapSpawnError(error, input)))
         yield* Effect.addFinalizer(() =>
           terminateCliTree(handle, forceKillAfter),
         )

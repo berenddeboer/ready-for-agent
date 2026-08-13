@@ -97,6 +97,7 @@ export class Claude {
           // text for actionable ConfigError mapping.
           const result = yield* runCliCapture({
             spawner,
+            backend: CLAUDE_BACKEND,
             binary,
             args: ["auth", "status"],
             cwd: input.cwd,
@@ -230,6 +231,7 @@ export class Claude {
 
             const turn = yield* runCliTurn({
               spawner,
+              backend: CLAUDE_BACKEND,
               binary,
               args,
               cwd: input.cwd,

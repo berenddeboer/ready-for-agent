@@ -18,6 +18,7 @@ import {
   ActiveAgentBackend,
   type AgentBackendId,
   agentBackendLabel,
+  findAgentBackendNotInstalledError,
   isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
 import {
@@ -247,6 +248,13 @@ const classifyHandlerFailure = (
   const errorOption = Cause.findErrorOption(cause)
   if (Option.isSome(errorOption)) {
     const error = errorOption.value
+    const notInstalled = findAgentBackendNotInstalledError(error)
+    if (notInstalled !== undefined) {
+      return {
+        reasonCode: STEP_RUN_REASON.agentBackendUnavailable,
+        reasonMessage: notInstalled.message,
+      }
+    }
     if (Predicate.isTagged(error, "TimeoutError")) {
       return {
         reasonCode: STEP_RUN_REASON.timeout,
@@ -4203,6 +4211,29 @@ export const makeWorkItemLifecycleLive = (
                     const classification = classifyHandlerFailure(
                       handlerExit.cause,
                     )
+                    const notInstalled = findAgentBackendNotInstalledError(
+                      Cause.squash(handlerExit.cause),
+                    )
+                    if (
+                      notInstalled !== undefined &&
+                      isSelectableAgentBackendId(workItem.agent_backend)
+                    ) {
+                      const inspectCwd =
+                        workItem.worktree_path !== null &&
+                        workItem.worktree_path.trim() !== ""
+                          ? workItem.worktree_path
+                          : process.cwd()
+                      yield* activeAgentBackend
+                        .recheck(workItem.agent_backend, { cwd: inspectCwd })
+                        .pipe(
+                          Effect.catchCause((recheckCause) =>
+                            Effect.logWarning(
+                              "Failed to recheck Agent Backend after CLI not found",
+                              { cause: recheckCause },
+                            ),
+                          ),
+                        )
+                    }
                     const isTimeout =
                       classification.reasonCode === STEP_RUN_REASON.timeout
                     if (
