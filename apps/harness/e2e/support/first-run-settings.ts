@@ -203,7 +203,14 @@ export const dismissFirstRunSettingsIfPresent = async (page: Page) => {
   const dialog = settingsDialog(page)
   const landmark = pageLandmark(page)
 
-  await expect(dialog.or(landmark)).toBeVisible({ timeout: 30_000 })
+  // First-run Settings can sit on top of Repos/Pipeline. `dialog.or(landmark)`
+  // then matches two elements and Playwright's strict `toBeVisible` fails.
+  await expect
+    .poll(
+      async () => (await dialog.isVisible()) || (await landmark.isVisible()),
+      { timeout: 30_000 },
+    )
+    .toBe(true)
 
   if (await dialog.isVisible()) {
     await dialog.getByRole("button", { name: "Cancel" }).click()

@@ -225,7 +225,8 @@ parallel jobs (issue #999):
   Telemetry history and Kanban that seed persistence (`harness:e2e-ui-history`),
   plus vault-free `@no-backend` (`harness:e2e-no-backend`) and harness smoke.
   Does not need the fixture vault or a clone. May install OpenCode for
-  Settings catalog coverage.
+  Settings catalog coverage. UI-history Playwright workers are greater than 1;
+  each worker has its own Harness database, port, and Keymaxxer home / Sidecar.
 
 A **`harness`** rollup job still reports after both e2e jobs so the existing
 required-check name stays valid. Playwright Chromium is installed in each PR

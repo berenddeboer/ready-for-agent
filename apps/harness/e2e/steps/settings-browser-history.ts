@@ -268,8 +268,11 @@ Then(
 
 Then("a settings save error is shown", async ({ page }) => {
   const dialog = settingsDialog(page)
-  await expect(dialog.getByRole("alert")).toBeVisible()
-  await expect(dialog.getByRole("alert")).toContainText(
-    /Simulated settings save failure|could not be saved/i,
-  )
+  // Settings also shows per-backend Unavailable alerts (e.g. Codex NotFound
+  // in CI). Target the save-failure alert so Playwright strict mode stays
+  // unique when those banners are present.
+  const saveError = dialog.getByRole("alert").filter({
+    hasText: /Simulated settings save failure|could not be saved/i,
+  })
+  await expect(saveError).toBeVisible()
 })

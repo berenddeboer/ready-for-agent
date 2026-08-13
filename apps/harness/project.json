@@ -135,7 +135,8 @@
         "env": {
           "KEYMAXXER_ENABLED": "false",
           "E2E_KEYMAXXER_MASTER_KEY": "",
-          "KEYMAXXER_MASTER_KEY": ""
+          "KEYMAXXER_MASTER_KEY": "",
+          "E2E_HARNESS_WORKERS": "2"
         }
       },
       "dependsOn": [

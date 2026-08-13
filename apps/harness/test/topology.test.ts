@@ -116,6 +116,21 @@ describe("single application server topology", () => {
     expect(harness.targets["e2e-ui-history"]?.options?.command).toContain(
       "--grep @ui-history",
     )
+    // Isolated Harness per Playwright worker (issue #1000).
+    expect(
+      Number(
+        harness.targets["e2e-ui-history"]?.options?.env?.E2E_HARNESS_WORKERS,
+      ),
+    ).toBeGreaterThan(1)
+    expect(
+      harness.targets["e2e-live-forge"]?.options?.env?.E2E_HARNESS_WORKERS,
+    ).toBeUndefined()
+    expect(
+      harness.targets.e2e?.options?.env?.E2E_HARNESS_WORKERS,
+    ).toBeUndefined()
+    expect(
+      harness.targets["e2e-no-backend"]?.options?.env?.E2E_HARNESS_WORKERS,
+    ).toBeUndefined()
     // Vault-free @no-backend suite: soft-disable Keymaxxer, clear ambient
     // master keys so fixture mode cannot win, and strip OpenCode.
     expect(
