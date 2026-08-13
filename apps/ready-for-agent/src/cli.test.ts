@@ -1482,6 +1482,7 @@ describe("operator binary jump command", () => {
             workingDirectory: worktree,
             agentExecutable: want.executable,
             agentArguments: want.arguments,
+            backendId,
           })
         }
       } finally {
@@ -1543,7 +1544,97 @@ describe("operator binary jump command", () => {
     workingDirectory: "/tmp/rfa-jump-worktree",
     agentExecutable: "/usr/bin/opencode",
     agentArguments: ["/tmp/rfa-jump-worktree", "--session", sessionId],
+    backendId: "opencode",
   } as const
+
+  const omittedTmuxEnvPrefixes = [
+    "TMUX=",
+    "TMUX_PANE=",
+    "TERM=",
+    "PWD=",
+  ] as const
+
+  const tmuxFlagEnvAssignments = (
+    args: readonly string[],
+  ): readonly string[] => {
+    const separator = args.indexOf("--")
+    const limit = separator === -1 ? args.length : separator
+    const assignments: string[] = []
+    for (let i = 0; i < limit; i++) {
+      if (args[i] !== "-e") {
+        continue
+      }
+      const assignment = args[i + 1]
+      if (assignment !== undefined) {
+        assignments.push(assignment)
+      }
+      i += 1
+    }
+    return assignments
+  }
+
+  const withoutTmuxEnvFlags = (args: readonly string[]): string[] => {
+    const out: string[] = []
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "-e") {
+        i += 1
+        continue
+      }
+      const arg = args[i]
+      if (arg !== undefined) {
+        out.push(arg)
+      }
+    }
+    return out
+  }
+
+  const expectForwardedPaneEnvironment = (args: readonly string[]) => {
+    const assignments = tmuxFlagEnvAssignments(args)
+    expect(assignments).toContain("CLAUDE_CODE_USE_BEDROCK=1")
+    for (const prefix of omittedTmuxEnvPrefixes) {
+      expect(
+        assignments.some((assignment) => assignment.startsWith(prefix)),
+      ).toBe(false)
+    }
+    const separator = args.indexOf("--")
+    const firstEnv = args.indexOf("-e")
+    expect(firstEnv).toBeGreaterThan(-1)
+    expect(separator).toBeGreaterThan(firstEnv)
+  }
+
+  const jumpProcessEnvFixture = {
+    CLAUDE_CODE_USE_BEDROCK: "1",
+    TMUX: "/tmp/tmux-1000/default,1,0",
+    TMUX_PANE: "%9",
+    TERM: "xterm-256color",
+    PWD: "/tmp/wrong-pwd",
+  } as const
+
+  const withProcessEnv = (
+    overrides: Record<string, string>,
+    body: Effect.Effect<void, JumpFailed>,
+  ) =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous: Record<string, string | undefined> = {}
+        for (const [name, value] of Object.entries(overrides)) {
+          previous[name] = process.env[name]
+          process.env[name] = value
+        }
+        return previous
+      }),
+      () => body,
+      (previous) =>
+        Effect.sync(() => {
+          for (const [name, value] of Object.entries(previous)) {
+            if (value === undefined) {
+              delete process.env[name]
+            } else {
+              process.env[name] = value
+            }
+          }
+        }),
+    )
 
   const recordingTmux = (script: {
     readonly currentSession?: string
@@ -1656,7 +1747,7 @@ describe("operator binary jump command", () => {
           panes: "%2",
         })
         yield* runCreateJumpWindow(tmux.layer)
-        expect(tmux.invocations).toEqual([
+        expect(tmux.invocations.map(withoutTmuxEnvFlags)).toEqual([
           ["display-message", "-p", "#{session_id}"],
           ["list-windows", "-a", "-F", windowListFormat],
           ["list-panes", "-t", "@5", "-F", paneListFormat],
@@ -1712,7 +1803,7 @@ describe("operator binary jump command", () => {
       Effect.gen(function* () {
         const tmux = recordingTmux({})
         yield* runCreateJumpWindow(tmux.layer)
-        expect(tmux.invocations).toEqual([
+        expect(tmux.invocations.map(withoutTmuxEnvFlags)).toEqual([
           ["display-message", "-p", "#{session_id}"],
           ["list-windows", "-a", "-F", windowListFormat],
           [
@@ -1737,6 +1828,74 @@ describe("operator binary jump command", () => {
           ["select-window", "-t", "@1"],
         ])
       }),
+  )
+
+  it.live(
+    "jump forwards the operator environment on new-window and omits tmux-owned vars",
+    () =>
+      withProcessEnv(
+        jumpProcessEnvFixture,
+        Effect.gen(function* () {
+          const tmux = recordingTmux({})
+          yield* runCreateJumpWindow(tmux.layer)
+          const created = tmux.invocations.find((args) =>
+            args.includes("new-window"),
+          )
+          expect(created).toBeDefined()
+          if (created === undefined) {
+            return
+          }
+          expectForwardedPaneEnvironment(created)
+        }),
+      ),
+  )
+
+  it.live(
+    "jump forwards the operator environment when recreating the agent pane",
+    () =>
+      withProcessEnv(
+        jumpProcessEnvFixture,
+        Effect.gen(function* () {
+          const tmux = recordingTmux({
+            windows: `$0\tdefault\t@5\t3\t${sessionId}`,
+            panes: "%2",
+          })
+          yield* runCreateJumpWindow(tmux.layer)
+          const recreated = tmux.invocations.find(
+            (args) => args[0] === "split-window" && args.includes("-P"),
+          )
+          expect(recreated).toBeDefined()
+          if (recreated === undefined) {
+            return
+          }
+          expectForwardedPaneEnvironment(recreated)
+        }),
+      ),
+  )
+
+  it.live("jump sets DISABLE_AUTOUPDATER for the claude backend pane", () =>
+    withProcessEnv(
+      jumpProcessEnvFixture,
+      Effect.gen(function* () {
+        const tmux = recordingTmux({})
+        yield* runCreateJumpWindow(tmux.layer, {
+          ...jumpInput,
+          backendId: "claude",
+          agentExecutable: "/usr/bin/claude",
+          agentArguments: ["--resume", sessionId],
+        })
+        const created = tmux.invocations.find((args) =>
+          args.includes("new-window"),
+        )
+        expect(created).toBeDefined()
+        if (created === undefined) {
+          return
+        }
+        expect(tmuxFlagEnvAssignments(created)).toContain(
+          "DISABLE_AUTOUPDATER=1",
+        )
+      }),
+    ),
   )
 
   it.live(

@@ -62,6 +62,10 @@ Jump continues the canonical Session; it does not fork a human-only copy. It nev
 - If the tagged window remains but its agent pane has exited, Jump recreates the left agent pane in that window, restores the even split, and focuses the agent.
 - If a tagged window belongs to another tmux session, Jump fails and reports that session/window location. It neither moves the caller nor starts a second interactive writer.
 - Tmux starts the right pane without an explicit command, using its configured `default-command` and `default-shell` rather than interpreting `$SHELL` in the CLI.
+- The agent pane inherits the operator CLI's environment via repeated `tmux -e KEY=VALUE` flags on `new-window` (create) and `split-window` (recreate). This is the same source the non-interactive Agent Turn path uses (`process.env` after `sanitizeInheritedEnvironment`), so mise `[env]`, direnv, and Bedrock/AWS variables such as `CLAUDE_CODE_USE_BEDROCK` reach the pane. Jump does **not** wrap the agent in a login shell.
+- `TMUX`, `TMUX_PANE`, and `TERM` are omitted: tmux sets those on the pane, and a forwarded `TMUX_PANE` would break the agent's own tmux detection. `PWD`, `OLDPWD`, `SHLVL`, and `_` are omitted so `-c <workingDirectory>` remains authoritative.
+- Undefined values are dropped. Jump keeps ambient Forge tokens (`stripForgeTokens: false`) because this is an Interactive Session Continuation in the operator's shell, not an Agent Turn. Per-backend Agent Turn env builders are not reused: they would add four workspace deps, and OpenCode's builder is Effect/Keymaxxer-scoped. Claude panes also set `DISABLE_AUTOUPDATER=1`, matching `packages/claude` Agent Turns.
+- `tmux -e` requires tmux ≥ 3.0 on `new-window` and ≥ 3.2 on `split-window`. Jump documents this floor and does not version-gate: 3.2 shipped in 2021, and Jump already requires a working tmux client.
 
 ## Safety And Failures
 

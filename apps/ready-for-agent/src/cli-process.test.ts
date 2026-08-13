@@ -1121,9 +1121,68 @@ if (args[0] === "split-window" && args.includes("-P")) {
   const jumpEnv = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
     PATH: `${binDir}:${process.env.PATH ?? ""}`,
     TMUX: "/tmp/tmux-1000/default,123,0",
+    TMUX_PANE: "%9",
+    TERM: "xterm-256color",
+    PWD: "/tmp/wrong-pwd",
+    CLAUDE_CODE_USE_BEDROCK: "1",
     TMUX_ARGV_LOG: tmuxLog,
     ...overrides,
   })
+
+  const omittedTmuxEnvPrefixes = [
+    "TMUX=",
+    "TMUX_PANE=",
+    "TERM=",
+    "PWD=",
+  ] as const
+
+  const tmuxFlagEnvAssignments = (
+    args: readonly string[],
+  ): readonly string[] => {
+    const separator = args.indexOf("--")
+    const limit = separator === -1 ? args.length : separator
+    const assignments: string[] = []
+    for (let i = 0; i < limit; i++) {
+      if (args[i] !== "-e") {
+        continue
+      }
+      const assignment = args[i + 1]
+      if (assignment !== undefined) {
+        assignments.push(assignment)
+      }
+      i += 1
+    }
+    return assignments
+  }
+
+  const withoutTmuxEnvFlags = (args: readonly string[]): string[] => {
+    const out: string[] = []
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === "-e") {
+        i += 1
+        continue
+      }
+      const arg = args[i]
+      if (arg !== undefined) {
+        out.push(arg)
+      }
+    }
+    return out
+  }
+
+  const expectForwardedPaneEnvironment = (args: readonly string[]) => {
+    const assignments = tmuxFlagEnvAssignments(args)
+    expect(assignments).toContain("CLAUDE_CODE_USE_BEDROCK=1")
+    for (const prefix of omittedTmuxEnvPrefixes) {
+      expect(
+        assignments.some((assignment) => assignment.startsWith(prefix)),
+      ).toBe(false)
+    }
+    const separator = args.indexOf("--")
+    const firstEnv = args.indexOf("-e")
+    expect(firstEnv).toBeGreaterThan(-1)
+    expect(separator).toBeGreaterThan(firstEnv)
+  }
 
   test("jump outside tmux writes a text error and does not invoke tmux", async () => {
     const result = await runCli(
@@ -1296,7 +1355,12 @@ if (args[0] === "split-window" && args.includes("-P")) {
       expect(result.stderr.trim()).toBe("")
       const invocations = parseTmuxArgvLog(tmuxLog)
       const opencode = join(binDir, "opencode")
-      expect(invocations).toEqual([
+      const created = invocations.find((args) => args.includes("new-window"))
+      expect(created).toBeDefined()
+      if (created !== undefined) {
+        expectForwardedPaneEnvironment(created)
+      }
+      expect(invocations.map(withoutTmuxEnvFlags)).toEqual([
         ["display-message", "-p", "#{session_id}"],
         [
           "list-windows",
@@ -1348,7 +1412,14 @@ if (args[0] === "split-window" && args.includes("-P")) {
       const invocations = parseTmuxArgvLog(tmuxLog)
       const claude = join(binDir, "claude")
       const cliCwd = resolve(packageRoot)
-      expect(invocations[2]).toEqual([
+      expect(invocations[2]).toBeDefined()
+      if (invocations[2] !== undefined) {
+        expectForwardedPaneEnvironment(invocations[2])
+        expect(tmuxFlagEnvAssignments(invocations[2])).toContain(
+          "DISABLE_AUTOUPDATER=1",
+        )
+      }
+      expect(withoutTmuxEnvFlags(invocations[2] ?? [])).toEqual([
         "new-window",
         "-d",
         "-P",
@@ -1456,7 +1527,14 @@ if (args[0] === "split-window" && args.includes("-P")) {
       expect(invocations.some((args) => args.includes("new-window"))).toBe(
         false,
       )
-      expect(invocations).toContainEqual([
+      const recreated = invocations.find(
+        (args) => args[0] === "split-window" && args.includes("-P"),
+      )
+      expect(recreated).toBeDefined()
+      if (recreated !== undefined) {
+        expectForwardedPaneEnvironment(recreated)
+      }
+      expect(invocations.map(withoutTmuxEnvFlags)).toContainEqual([
         "split-window",
         "-h",
         "-b",

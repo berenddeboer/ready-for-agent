@@ -361,6 +361,7 @@ const jumpWorkflow = Effect.fn("Cli.jump")(function* (sessionId: string) {
     workingDirectory,
     agentExecutable,
     agentArguments: resume.arguments,
+    backendId: found.agentBackend.id,
   })
 })
 
