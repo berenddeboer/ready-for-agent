@@ -75,7 +75,12 @@ const openHomeAndDismissAutoSettings = async (page: Page) => {
     .or(page.getByRole("region", { name: "Lifecycle pipeline" }))
     .or(page.getByRole("region", { name: "Configured repositories" }))
 
-  await expect(dialog.or(landmark)).toBeVisible({ timeout: 60_000 })
+  await expect
+    .poll(
+      async () => (await dialog.isVisible()) || (await landmark.isVisible()),
+      { timeout: 60_000 },
+    )
+    .toBe(true)
 
   if (await dialog.isVisible()) {
     await dialog.getByRole("button", { name: "Cancel" }).click()
