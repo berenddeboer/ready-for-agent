@@ -150,6 +150,47 @@ export const serializeReasonDetail = (
 ): string | null => (detail === null ? null : JSON.stringify(detail))
 
 /**
+ * Read path for `step_run.reason_detail`. Re-sanitizes each stored message so
+ * display surfaces do not become a second disclosure path for helper text.
+ */
+export const parseReasonDetail = (
+  raw: string | null | undefined,
+): StepRunReasonDetail | null => {
+  if (raw === null || raw === undefined) return null
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch {
+    return null
+  }
+
+  const record = asRecord(parsed)
+  if (record === null) return null
+
+  const causeChain: CauseChainLink[] = []
+  if (Array.isArray(record.causeChain)) {
+    for (const item of record.causeChain) {
+      const link = linkFromValue(item)
+      if (link !== null) {
+        causeChain.push(link)
+      }
+    }
+  }
+
+  const code = readCode(record.code)
+  if (causeChain.length === 0 && code === undefined) {
+    return null
+  }
+  return {
+    causeChain,
+    ...(code !== undefined ? { code } : {}),
+  }
+}
+
+/**
  * Structured log annotations for a failure: short human `error` plus
  * `causeChain` / optional `code` so operators can distinguish TLS, auth,
  * timeout, and transport failures without prose parsing.

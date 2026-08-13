@@ -354,6 +354,7 @@ type StepRunRow = {
   readonly finished_at: number | null
   readonly reason_code: string | null
   readonly reason_message: string | null
+  readonly reason_detail: string | null
   readonly postponed_until: number | null
   readonly session_wait_ms: number | null
   readonly session_wait_started_at: number | null
@@ -432,7 +433,8 @@ const decodeLatestStepRunDeadlineRows = (rows: unknown) =>
 
 const STEP_RUN_SELECT_COLUMNS = `id, work_item_id, step, status, queue_job_id, queued_at,
                         started_at, finished_at, reason_code, reason_message,
-                        postponed_until, session_wait_ms, session_wait_started_at`
+                        reason_detail, postponed_until, session_wait_ms,
+                        session_wait_started_at`
 
 const deriveQueueWaitMs = (row: StepRunRow, nowMs: number): number => {
   const endMs = row.started_at ?? row.finished_at ?? nowMs
@@ -461,6 +463,7 @@ const toStepRunRecord = (row: StepRunRow, nowMs: number): StepRunRecord => {
     finishedAt: row.finished_at === null ? null : new Date(row.finished_at),
     reasonCode: row.reason_code,
     reasonMessage: row.reason_message,
+    reasonDetail: row.reason_detail,
     queueWaitMs: deriveQueueWaitMs(row, nowMs),
     executionDurationMs: deriveExecutionDurationMs(row, nowMs),
   }

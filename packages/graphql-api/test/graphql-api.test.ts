@@ -4816,6 +4816,82 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("exposes the latest Step Run cause chain as latestStepRunDetail", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const failedReview = {
+      ...workItem,
+      state: "review",
+      stepRuns: [
+        {
+          ...baseRun,
+          step: "review",
+          status: "failed",
+          reasonCode: STEP_RUN_REASON.handlerFailed,
+          reasonMessage: "OpenCode failed to review the Work Item",
+          reasonDetail: JSON.stringify({
+            causeChain: [
+              {
+                name: "Error",
+                code: "ENOENT",
+                message: 'ENOENT: Executable not found in $PATH: "claude"',
+              },
+            ],
+            code: "ENOENT",
+          }),
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([failedReview]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            status
+            statusMessage
+            latestStepRunDetail {
+              code
+              causeChain { name code message }
+            }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            status: "FAILED",
+            statusMessage: "OpenCode failed to review the Work Item",
+            latestStepRunDetail: {
+              code: "ENOENT",
+              causeChain: [
+                {
+                  name: "Error",
+                  code: "ENOENT",
+                  message: 'ENOENT: Executable not found in $PATH: "claude"',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    })
+  })
+
   test("keeps failed Review reasonMessage as statusMessage", async () => {
     const baseRun = workItem.stepRuns[0]!
     const failedReview = {

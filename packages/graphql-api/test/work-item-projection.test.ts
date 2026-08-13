@@ -4,6 +4,7 @@ import {
   lifecycleLabels,
   statusLabel,
   workItemCanRetry,
+  workItemLatestStepRunDetail,
   workItemPostponedUntil,
   workItemStatus,
   workItemStatusMessage,
@@ -21,6 +22,7 @@ const baseStepRun = {
   finishedAt: new Date("2026-07-14T08:38:36.000Z"),
   reasonCode: null,
   reasonMessage: null,
+  reasonDetail: null,
   postponedUntil: null,
   queueWaitMs: 1_000,
   executionDurationMs: 2_315_000, // 38m 35s
@@ -403,5 +405,47 @@ describe("lifecycleLabels cumulative duration", () => {
         durationMs: 10_000,
       },
     ])
+  })
+})
+
+describe("workItemLatestStepRunDetail", () => {
+  test("returns null when the latest Step Run has no persisted detail", () => {
+    expect(workItemLatestStepRunDetail(baseWorkItem)).toBeNull()
+  })
+
+  test("parses the latest Step Run cause chain for operator display", () => {
+    const failed = workItemWith({
+      state: "implement",
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "implement",
+          status: "failed",
+          reasonCode: "handler_failed",
+          reasonMessage: 'Executable not found in $PATH: "claude"',
+          reasonDetail: JSON.stringify({
+            causeChain: [
+              {
+                name: "Error",
+                code: "ENOENT",
+                message: 'ENOENT: Executable not found in $PATH: "claude"',
+              },
+            ],
+            code: "ENOENT",
+          }),
+        },
+      ],
+    })
+
+    expect(workItemLatestStepRunDetail(failed)).toEqual({
+      causeChain: [
+        {
+          name: "Error",
+          code: "ENOENT",
+          message: 'ENOENT: Executable not found in $PATH: "claude"',
+        },
+      ],
+      code: "ENOENT",
+    })
   })
 })

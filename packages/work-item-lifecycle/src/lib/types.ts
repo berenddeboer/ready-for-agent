@@ -73,6 +73,11 @@ interface StepRunRecordBase {
   readonly finishedAt: Date | null
   readonly reasonCode: string | null
   readonly reasonMessage: string | null
+  /**
+   * JSON diagnostic payload for failed Step Runs (cause chain + machine
+   * code). Null when nothing was persisted.
+   */
+  readonly reasonDetail: string | null
   /** Time from queued until start (or finish/now if never started). */
   readonly queueWaitMs: number
   /** Time from start until finish/now; null when execution never began. */
