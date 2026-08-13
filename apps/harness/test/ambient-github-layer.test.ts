@@ -5,6 +5,7 @@ import { expect, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import {
+  GitHubRepositoryUnavailableError,
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
@@ -279,6 +280,67 @@ it.effect("runs remote cleanup through the ambient coordinator operation", () =>
 
     expect(cleanups).toEqual(["rfa/issue-881"])
   }),
+)
+
+it.effect(
+  "ambient GitHub authentication refreshes once after repository-unavailable when the token changes",
+  () =>
+    Effect.gen(function* () {
+      const resolvedTokens = ["wrong-account-token", "right-account-token"]
+      let resolutions = 0
+      const usedTokens: string[] = []
+      const layer = ambientGitHubLayer({
+        workspaceRoot: "/workspace",
+        resolveToken: async () => resolvedTokens[resolutions++]!,
+        makeService: (token) => {
+          usedTokens.push(token)
+          return serviceWithList(() =>
+            token === "wrong-account-token"
+              ? Effect.fail(new GitHubRepositoryUnavailableError(repository))
+              : Effect.succeed([]),
+          )
+        },
+      })
+
+      const issues = yield* Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github.listReadyIssues(repository)
+      }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
+
+      expect(issues).toEqual([])
+      expect(resolutions).toBe(2)
+      expect(usedTokens).toEqual(["wrong-account-token", "right-account-token"])
+    }),
+)
+
+it.effect(
+  "a genuinely missing repository does not cause unbounded token re-resolution",
+  () =>
+    Effect.gen(function* () {
+      let resolutions = 0
+      let operations = 0
+      const layer = ambientGitHubLayer({
+        workspaceRoot: "/workspace",
+        resolveToken: async () => {
+          resolutions += 1
+          return "same-account-token"
+        },
+        makeService: () =>
+          serviceWithList(() => {
+            operations += 1
+            return Effect.fail(new GitHubRepositoryUnavailableError(repository))
+          }),
+      })
+
+      const exit = yield* Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* Effect.exit(github.listReadyIssues(repository))
+      }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
+
+      expect(exit._tag).toBe("Failure")
+      expect(resolutions).toBe(2)
+      expect(operations).toBe(1)
+    }),
 )
 
 it.effect("ambient GitHub authentication refreshes once after a 401", () =>
