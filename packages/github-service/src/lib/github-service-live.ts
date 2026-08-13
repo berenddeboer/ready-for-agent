@@ -39,6 +39,7 @@ import {
   GitHubRequestError,
   type GitHubThrottledError,
   GitHubTlsTrustError,
+  formatGitHubRepositoryUnavailableMessage,
   isGitHubThrottledError,
 } from "./errors.js"
 import { GitHubService, type GitHubServiceShape } from "./github-service.js"
@@ -137,13 +138,61 @@ const tlsTrustErrorFromCause = (
   })
 }
 
+const graphqlErrorField = (entry: unknown, field: string): unknown =>
+  typeof entry === "object" && entry !== null
+    ? Reflect.get(entry, field)
+    : undefined
+
+const isGraphqlRepositoryNotFound = (cause: unknown): cause is GenqlError => {
+  if (!(cause instanceof GenqlError)) {
+    return false
+  }
+  return cause.errors.some((entry) => {
+    if (graphqlErrorField(entry, "type") !== "NOT_FOUND") {
+      return false
+    }
+    const path = graphqlErrorField(entry, "path")
+    return Array.isArray(path) && path.length === 1 && path[0] === "repository"
+  })
+}
+
+const repositoryFromGraphqlNotFound = (
+  cause: GenqlError,
+): GitHubApiRepository => {
+  for (const entry of cause.errors) {
+    const message = graphqlErrorField(entry, "message")
+    if (typeof message !== "string") {
+      continue
+    }
+    const match = message.match(
+      /Could not resolve to a Repository with the name '([^']+)'/,
+    )
+    const nameWithOwner = match?.[1]
+    if (nameWithOwner === undefined) {
+      continue
+    }
+    const separator = nameWithOwner.indexOf("/")
+    if (separator <= 0 || separator === nameWithOwner.length - 1) {
+      continue
+    }
+    return {
+      owner: nameWithOwner.slice(0, separator),
+      name: nameWithOwner.slice(separator + 1),
+    }
+  }
+  return { owner: "", name: "" }
+}
+
+type GitHubRequestFailure =
+  | GitHubRequestError
+  | GitHubThrottledError
+  | GitHubTlsTrustError
+  | GitHubApiRepositoryUnavailableError
+
 const githubRequest = <A>(
   message: string,
   request: (signal: AbortSignal) => Promise<A>,
-): Effect.Effect<
-  A,
-  GitHubRequestError | GitHubThrottledError | GitHubTlsTrustError
-> =>
+): Effect.Effect<A, GitHubRequestFailure> =>
   Effect.tryPromise({
     try: request,
     catch: (cause) => {
@@ -157,6 +206,11 @@ const githubRequest = <A>(
         message: cause instanceof Error ? cause.message : "",
       })
       if (throttle !== undefined) return throttle
+      if (isGraphqlRepositoryNotFound(cause)) {
+        return new GitHubApiRepositoryUnavailableError(
+          repositoryFromGraphqlNotFound(cause),
+        )
+      }
       const code = extractErrorCode(cause)
       return new GitHubRequestError({
         message,
@@ -189,10 +243,7 @@ const githubRequest = <A>(
 const githubQuery = <A>(
   message: string,
   request: (signal: AbortSignal) => Promise<A>,
-): Effect.Effect<
-  A,
-  GitHubRequestError | GitHubThrottledError | GitHubTlsTrustError
-> =>
+): Effect.Effect<A, GitHubRequestFailure> =>
   githubRequest(message, request).pipe(
     Effect.retry({
       schedule: Schedule.addDelay(Schedule.recurs(2), () =>
@@ -308,10 +359,7 @@ export type LoadPrStatusCheckDiagnostics = (
   checks: readonly PrStatusCheckDiagnosticsRequest[],
   options: PrStatusCheckDiagnosticsOptions,
   signal?: AbortSignal,
-) => Effect.Effect<
-  readonly PrStatusCheckDiagnostic[],
-  GitHubRequestError | GitHubThrottledError | GitHubTlsTrustError
->
+) => Effect.Effect<readonly PrStatusCheckDiagnostic[], GitHubRequestFailure>
 
 /** Rerun an entire GitHub Actions workflow run. */
 export type RerunWorkflowRun = (
@@ -326,10 +374,7 @@ export type ObserveAutomatedReviewEvidence = (
   headRefName: string,
   checks: readonly AutomatedReviewEvidenceCheck[],
   signal?: AbortSignal,
-) => Effect.Effect<
-  AutomatedReviewEvidenceObservation,
-  GitHubRequestError | GitHubThrottledError | GitHubTlsTrustError
->
+) => Effect.Effect<AutomatedReviewEvidenceObservation, GitHubRequestFailure>
 
 const emptyTerminalChecks: readonly TerminalPrStatusCheck[] = []
 
@@ -2003,6 +2048,7 @@ const makeGitHubApiService = (
       let mergedPullRequest: GitHubMergePullRequestSnapshot | null | undefined
       if (Result.isFailure(mutationResult)) {
         if (
+          mutationResult.failure._tag !== "GitHubRequestError" ||
           !(mutationResult.failure.cause instanceof GenqlError) ||
           !isMergeGraphqlRejection(mutationResult.failure.cause)
         ) {
@@ -2752,7 +2798,41 @@ const toGitHubApiRepository = (
   }
 }
 
+const toPublicRepositoryUnavailable = (
+  service: GitHubApiServiceShape,
+  repository: GitHubRepository,
+) =>
+  Effect.gen(function* () {
+    const loginResult = yield* service
+      .getAuthenticatedUserLogin(toGitHubApiRepository(repository))
+      .pipe(Effect.result)
+    if (Result.isFailure(loginResult)) {
+      const error = loginResult.failure
+      if (
+        error._tag === "GitHubThrottledError" ||
+        error._tag === "GitHubTlsTrustError" ||
+        (error._tag === "GitHubRequestError" && error.statusCode === 401)
+      ) {
+        return yield* error
+      }
+      return yield* new GitHubRepositoryUnavailableError(repository)
+    }
+    const authenticatedLogin = loginResult.success.trim()
+    if (authenticatedLogin === "") {
+      return yield* new GitHubRepositoryUnavailableError(repository)
+    }
+    return yield* new GitHubRepositoryUnavailableError({
+      ...repository,
+      authenticatedLogin,
+      message: formatGitHubRepositoryUnavailableMessage(
+        repository.projectPath,
+        authenticatedLogin,
+      ),
+    })
+  })
+
 const adaptRepository =
+  (service: GitHubApiServiceShape) =>
   <Args extends readonly unknown[], A, E, R>(
     method: (
       repository: GitHubApiRepository,
@@ -2762,10 +2842,18 @@ const adaptRepository =
   (
     repository: GitHubRepository,
     ...args: Args
-  ): Effect.Effect<A, E | GitHubRepositoryUnavailableError, R> =>
+  ): Effect.Effect<
+    A,
+    | E
+    | GitHubRepositoryUnavailableError
+    | GitHubRequestError
+    | GitHubThrottledError
+    | GitHubTlsTrustError,
+    R
+  > =>
     method(toGitHubApiRepository(repository), ...args).pipe(
       Effect.catchTag("GitHubApiRepositoryUnavailableError", () =>
-        Effect.fail(new GitHubRepositoryUnavailableError(repository)),
+        toPublicRepositoryUnavailable(service, repository),
       ),
     )
 
@@ -2783,43 +2871,30 @@ export const makeGitHubService = (
     rerunWorkflowRunImpl,
     observeAutomatedReviewEvidenceImpl,
   )
+  const adapt = adaptRepository(service)
   return {
-    getAuthenticatedUserLogin: adaptRepository(
-      service.getAuthenticatedUserLogin,
-    ),
-    listReadyIssues: adaptRepository(service.listReadyIssues),
-    getPullRequestCheckStatus: adaptRepository(
-      service.getPullRequestCheckStatus,
-    ),
-    getPrStatusCheckDiagnostics: adaptRepository(
-      service.getPrStatusCheckDiagnostics,
-    ),
-    observeAutomatedReviewEvidence: adaptRepository(
+    getAuthenticatedUserLogin: adapt(service.getAuthenticatedUserLogin),
+    listReadyIssues: adapt(service.listReadyIssues),
+    getPullRequestCheckStatus: adapt(service.getPullRequestCheckStatus),
+    getPrStatusCheckDiagnostics: adapt(service.getPrStatusCheckDiagnostics),
+    observeAutomatedReviewEvidence: adapt(
       service.observeAutomatedReviewEvidence,
     ),
-    getPullRequestLifecycleStatus: adaptRepository(
-      service.getPullRequestLifecycleStatus,
-    ),
-    getOpenPullRequestNumber: adaptRepository(service.getOpenPullRequestNumber),
-    findOpenPullRequestNumber: adaptRepository(
-      service.findOpenPullRequestNumber,
-    ),
-    closeOpenPullRequestsAndDeleteBranch: adaptRepository(
+    getPullRequestLifecycleStatus: adapt(service.getPullRequestLifecycleStatus),
+    getOpenPullRequestNumber: adapt(service.getOpenPullRequestNumber),
+    findOpenPullRequestNumber: adapt(service.findOpenPullRequestNumber),
+    closeOpenPullRequestsAndDeleteBranch: adapt(
       service.closeOpenPullRequestsAndDeleteBranch,
     ),
-    countOpenNonDraftPullRequests: adaptRepository(
-      service.countOpenNonDraftPullRequests,
-    ),
-    createDraftPullRequest: adaptRepository(service.createDraftPullRequest),
-    updateOpenDraftPullRequestCopy: adaptRepository(
+    countOpenNonDraftPullRequests: adapt(service.countOpenNonDraftPullRequests),
+    createDraftPullRequest: adapt(service.createDraftPullRequest),
+    updateOpenDraftPullRequestCopy: adapt(
       service.updateOpenDraftPullRequestCopy,
     ),
-    markPullRequestReadyForReview: adaptRepository(
-      service.markPullRequestReadyForReview,
-    ),
-    mergePullRequest: adaptRepository(service.mergePullRequest),
-    rerunWorkflowRun: adaptRepository(service.rerunWorkflowRun),
-    ensureIssueCompletedWithSummary: adaptRepository(
+    markPullRequestReadyForReview: adapt(service.markPullRequestReadyForReview),
+    mergePullRequest: adapt(service.mergePullRequest),
+    rerunWorkflowRun: adapt(service.rerunWorkflowRun),
+    ensureIssueCompletedWithSummary: adapt(
       service.ensureIssueCompletedWithSummary,
     ),
   }

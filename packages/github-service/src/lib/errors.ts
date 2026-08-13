@@ -6,8 +6,22 @@ export class GitHubRepositoryUnavailableError extends Schema.TaggedErrorClass<Gi
     forge: Schema.String,
     forgeHost: Schema.String,
     projectPath: Schema.String,
+    /**
+     * Viewer login for the token that could not see the Repository, when
+     * resolved. Same identity can produce GitHub's NOT_FOUND for a private
+     * repo the account cannot access.
+     */
+    authenticatedLogin: Schema.optional(Schema.String),
+    message: Schema.optional(Schema.String),
   },
 ) {}
+
+/** Operator-facing copy when a token cannot see a Repository. */
+export const formatGitHubRepositoryUnavailableMessage = (
+  projectPath: string,
+  authenticatedLogin: string,
+): string =>
+  `${projectPath} is not visible to GitHub user ${authenticatedLogin} — it may not exist, or that account may not have access`
 
 export class GitHubRequestError extends Schema.TaggedErrorClass<GitHubRequestError>()(
   "GitHubRequestError",

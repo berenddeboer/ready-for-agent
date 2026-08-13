@@ -36,6 +36,31 @@ const repository = {
 }
 const apiRepository = { owner: "acme", name: "widgets" }
 
+const graphqlQueryText = (init?: RequestInit): string => {
+  if (typeof init?.body !== "string") {
+    return ""
+  }
+  try {
+    const parsed: unknown = JSON.parse(init.body)
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "query" in parsed &&
+      typeof parsed.query === "string"
+    ) {
+      return parsed.query
+    }
+  } catch {
+    return ""
+  }
+  return ""
+}
+
+const jsonGraphqlResponse = (body: unknown): Response =>
+  new Response(JSON.stringify(body), {
+    headers: { "content-type": "application/json" },
+  })
+
 const issue = (
   number: number,
   state: "OPEN" | "CLOSED" = "OPEN",
@@ -210,6 +235,155 @@ describe("GitHubService live implementation", () => {
       expect(requests).toBe(1)
     }),
   )
+
+  it.effect(
+    "classifies GraphQL repository NOT_FOUND as unavailable and names the token identity",
+    () =>
+      Effect.gen(function* () {
+        let repositoryQueries = 0
+        const service = makeGitHubServiceFromToken(
+          "token",
+          async (_input, init) => {
+            const query = graphqlQueryText(init)
+            if (query.includes("viewer")) {
+              return jsonGraphqlResponse({
+                data: { viewer: { login: "octocat" } },
+              })
+            }
+            repositoryQueries += 1
+            return jsonGraphqlResponse({
+              data: { repository: null },
+              errors: [
+                {
+                  type: "NOT_FOUND",
+                  path: ["repository"],
+                  message:
+                    "Could not resolve to a Repository with the name 'acme/widgets'.",
+                },
+              ],
+            })
+          },
+        )
+
+        const error = yield* service
+          .getPullRequestCheckStatus(repository, "rfa/acme-widgets/8/wi-1")
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubRepositoryUnavailableError)
+        expect(error).not.toBeInstanceOf(GitHubRequestError)
+        expect(formatUserFacingError(error)).toBe(
+          "acme/widgets is not visible to GitHub user octocat — it may not exist, or that account may not have access",
+        )
+        expect(
+          error instanceof GitHubRepositoryUnavailableError
+            ? error.authenticatedLogin
+            : undefined,
+        ).toBe("octocat")
+        expect(repositoryQueries).toBe(1)
+      }),
+  )
+
+  it.effect(
+    "propagates a throttle from the identity lookup after repository NOT_FOUND",
+    () =>
+      Effect.gen(function* () {
+        const resetSeconds = Math.floor(Date.now() / 1_000) + 120
+        const service = makeGitHubServiceFromToken(
+          "token",
+          async (_input, init) => {
+            const query = graphqlQueryText(init)
+            if (query.includes("viewer")) {
+              return new Response("API rate limit exceeded", {
+                status: 403,
+                headers: {
+                  "x-ratelimit-remaining": "0",
+                  "x-ratelimit-reset": String(resetSeconds),
+                },
+              })
+            }
+            return jsonGraphqlResponse({
+              data: { repository: null },
+              errors: [
+                {
+                  type: "NOT_FOUND",
+                  path: ["repository"],
+                  message:
+                    "Could not resolve to a Repository with the name 'acme/widgets'.",
+                },
+              ],
+            })
+          },
+        )
+
+        const error = yield* service
+          .getPullRequestCheckStatus(repository, "rfa/acme-widgets/8/wi-1")
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubThrottledError)
+        expect(error.retryAt).toBe(resetSeconds * 1_000)
+      }),
+  )
+
+  it.effect(
+    "keeps GraphQL NOT_FOUND on a nested field as a non-retryable request error",
+    () =>
+      Effect.gen(function* () {
+        let requests = 0
+        const service = makeGitHubService({
+          query: () => {
+            requests += 1
+            return Promise.reject(
+              new GenqlError(
+                [
+                  {
+                    type: "NOT_FOUND",
+                    path: ["repository", "issue"],
+                    message:
+                      "Could not resolve to an Issue with the number of 99.",
+                  },
+                ],
+                { repository: { issue: null } },
+              ),
+            )
+          },
+        })
+
+        const error = yield* service
+          .ensureIssueCompletedWithSummary(
+            repository,
+            99,
+            "wi-01HXSQK2KG72RRYVWEQH4S83FK",
+            "## Summary",
+          )
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubRequestError)
+        expect((error as GitHubRequestError).retryable).toBe(false)
+        expect(requests).toBe(1)
+      }),
+  )
+
+  it("retries HTTP 5xx as a retryable request error", async () => {
+    let requests = 0
+    const service = makeGitHubServiceFromToken("token", async () => {
+      requests += 1
+      return new Response("backend unavailable", {
+        status: 502,
+        statusText: "Bad Gateway",
+      })
+    })
+
+    const error = await Effect.runPromise(
+      service
+        .getPullRequestCheckStatus(repository, "rfa/acme-widgets/8/wi-1")
+        .pipe(Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(GitHubRequestError)
+    expect((error as GitHubRequestError).statusCode).toBe(502)
+    expect((error as GitHubRequestError).retryable).toBe(true)
+    expect(requests).toBe(3)
+  })
 
   it.effect(
     "classifies TLS certificate trust failures as non-retryable GitHubTlsTrustError",
