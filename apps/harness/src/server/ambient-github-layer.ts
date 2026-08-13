@@ -19,6 +19,13 @@ import {
 /** Unit key for the process-wide ambient GitHub CLI token cache. */
 const TOKEN_CACHE_KEY = true as const
 
+const isUnauthorizedRequest = (error: GitHubServiceError): boolean =>
+  error._tag === "GitHubRequestError" && error.statusCode === 401
+
+const shouldRefreshCachedToken = (error: GitHubServiceError): boolean =>
+  isUnauthorizedRequest(error) ||
+  error._tag === "GitHubRepositoryUnavailableError"
+
 /**
  * Identity is scoped to a Repository credential path, rather than to the
  * process-wide ambient token cache. This prevents similarly timed
@@ -111,10 +118,11 @@ export const ambientGitHubLayer = (options: {
 
       // Single-flight success cache: concurrent callers share one lookup;
       // failures expire immediately (TTL zero, not reused); success lives until
-      // 401 invalidate. Cache.get is forked into the layer scope so canceling one
-      // requester cannot abort a shared in-flight lookup for joiners. Nested
-      // consumers must build this layer with Layer.buildWithScope (not a
-      // short-lived Effect.provide) so that scope stays open.
+      // a 401 or repository-unavailable invalidate. Cache.get is forked into the
+      // layer scope so canceling one requester cannot abort a shared in-flight
+      // lookup for joiners. Nested consumers must build this layer with
+      // Layer.buildWithScope (not a short-lived Effect.provide) so that scope
+      // stays open.
       const tokenCache = yield* Cache.makeWith(
         (_key: typeof TOKEN_CACHE_KEY) => resolveToken(),
         {
@@ -133,9 +141,10 @@ export const ambientGitHubLayer = (options: {
         },
       )
 
-      // Ambient authentication has one process-wide credential. A 401 means
-      // every Repository-scoped identity derived from it is stale, even when
-      // a different Repository observed the failure.
+      // Ambient authentication has one process-wide credential. A 401 or a
+      // repository-unavailable (wrong-account token that still authenticates)
+      // means every Repository-scoped identity derived from it is stale, even
+      // when a different Repository observed the failure.
       let invalidateAuthenticatedUsers: Effect.Effect<void> = Effect.void
 
       const run = Effect.fn("AmbientGitHub.runAuthenticated")(function* <A>(
@@ -152,14 +161,14 @@ export const ambientGitHubLayer = (options: {
         )
         if (
           first._tag !== "Failure" ||
-          first.failure._tag !== "GitHubRequestError" ||
-          first.failure.statusCode !== 401
+          !shouldRefreshCachedToken(first.failure)
         ) {
           return yield* Effect.fromResult(first)
         }
 
-        // Only drop the cache entry if it still holds the token that 401'd —
-        // concurrent 401s share one refresh instead of stomping a newer token.
+        // Only drop the cache entry if it still holds the token that failed —
+        // concurrent refresh triggers share one lookup instead of stomping a
+        // newer token.
         yield* invalidateAuthenticatedUsers
         yield* Cache.invalidateWhen(
           tokenCache,
@@ -167,6 +176,15 @@ export const ambientGitHubLayer = (options: {
           (cached) => cached === token,
         )
         const refreshed = yield* acquireToken()
+        // A wrong-account token is not expired. Retry the operation only when
+        // `gh auth token` actually returned a different credential; a genuine
+        // missing repository keeps the original failure.
+        if (
+          first.failure._tag === "GitHubRepositoryUnavailableError" &&
+          refreshed === token
+        ) {
+          return yield* Effect.fromResult(first)
+        }
         return yield* operation(
           makeService(refreshed, coordinator.reportThrottle),
         )
