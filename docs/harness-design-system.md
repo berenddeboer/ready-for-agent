@@ -692,9 +692,11 @@ A permanent fixture at the **foot of the Queue platform**, always rendered
   (Build-lane blue plate, play-triangle start icon, mono "Implement" label)
   so operators recognize the primary action on Repos. Clicking the control
   starts **Implement now** immediately; it does not open a choice menu. The
-  same implementable row also keeps a rightmost kebab with the complete
-  **Implement now** and **Implement locally** actions. Queue for blocked issues
-  stays kebab-only and is not illustrated here.
+  same implementable row also keeps a rightmost kebab with **Implement now**,
+  **Implement with...**, and **Implement locally**, in that order. Implement
+  with opens the ephemeral issue-scoped execution-profile dialog described by
+  ADR 0052; Queue for blocked issues stays kebab-only and is not illustrated
+  here.
 - No primary "Manage repos" CTA — keep the hint focused on label → Implement.
 - No transit glyphs (no ⇄), no "Transfer" wording anywhere.
 

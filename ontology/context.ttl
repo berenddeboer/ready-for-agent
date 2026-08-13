@@ -213,7 +213,7 @@ rfa:Paused
 rfa:RepositorySettings
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Repository settings"@en ;
-  skos:definition "Per-Repository operator preferences: Paused, optional Agent Backend override, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, Include all Issue Authors, and Wait for checks to start after ready for review (`waitForReadyForReviewChecks`, default true). Forge identity (Forge, Forge Host, and Project Path) is also corrected through Repository settings, subject to the Work Item gate described under Repository. An absent Agent Backend override inherits the Harness Config default Agent Backend. Build and review model selections are backend-scoped: each Agent Backend has its own optional overrides. An absent build model inherits the whole Harness build selection for the Repository's effective Agent Backend; an absent review model inherits the Harness review selection for that backend and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. For a Work Item, build and review selections are resolved at each Agent Turn from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend, so a model settings change affects the next turn without rewriting the Work Item. Changing the Agent Backend override is rejected while any Work Item for that Repository is unfinished."@en ;
+  skos:definition "Per-Repository operator preferences: Paused, optional Agent Backend override, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, Include all Issue Authors, and Wait for checks to start after ready for review (`waitForReadyForReviewChecks`, default true). Forge identity (Forge, Forge Host, and Project Path) is also corrected through Repository settings, subject to the Work Item gate described under Repository. An absent Agent Backend override inherits the Harness Config default Agent Backend. Build and review model selections are backend-scoped: each Agent Backend has its own optional overrides. An absent build model inherits the whole Harness build selection for the Repository's effective Agent Backend; an absent review model inherits the Harness review selection for that backend and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. For a Work Item without an Explicit Work Item Execution Profile, build and review selections are resolved at each Agent Turn from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend, so a model settings change affects the next turn without rewriting the Work Item. Changing the Agent Backend override is rejected while the Repository has an unfinished Work Item whose routing depends on that effective backend; an unfinished Work Item with an Explicit Work Item Execution Profile does not block the change."@en ;
   skos:hiddenLabel "Project config"@en, "repo config file"@en .
 
 [
@@ -235,7 +235,7 @@ rfa:RepositorySettings
 rfa:HarnessConfig
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Harness Config"@en ;
-  skos:definition "Harness-wide operator preferences stored as a single config row: the default Agent Backend (OpenCode by default), backend-scoped optional default build Agent Model and Thinking Level, backend-scoped optional review Agent Model and Thinking Level (no review model means the build selection), and concurrency limits (default two concurrent Agent Turns and five concurrent Work Items). The default Agent Backend applies to Repositories without an override. Changing the default is rejected while any unfinished Work Item exists on a Repository that inherits the default; when allowed it hot-activates on Save (no Harness restart), remembers each backend's model selections separately, and may leave that backend's build model null (unconfigured) like first-run. On a fresh empty database the build model starts null; there is no product-seeded free model. First-run UI opens Settings and shows a banner until the default backend has a build model; Repositories with a fully configured override are not blocked by an unconfigured default. Creating a Work Item fails with a structured error when the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (`Select a default build model first`)."@en ;
+  skos:definition "Harness-wide operator preferences stored as a single config row: the default Agent Backend (OpenCode by default), backend-scoped optional default build Agent Model and Thinking Level, backend-scoped optional review Agent Model and Thinking Level (no review model means the build selection), and concurrency limits (default two concurrent Agent Turns and five concurrent Work Items). The default Agent Backend applies to Repositories without an override. Changing the default is rejected while an unfinished Work Item on an inheriting Repository depends on that effective backend; an unfinished Work Item with an Explicit Work Item Execution Profile does not block the change. When allowed, the change hot-activates on Save (no Harness restart), remembers each backend's model selections separately, and may leave that backend's build model null (unconfigured) like first-run. On a fresh empty database the build model starts null; there is no product-seeded free model. First-run UI opens Settings and shows a banner until the default backend has a build model; Repositories with a fully configured override are not blocked by an unconfigured default. Ordinary Work Item creation fails with a structured error when the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (`Select a default build model first`)."@en ;
   skos:hiddenLabel "Default model seed"@en, "product default model"@en .
 
 [
@@ -608,7 +608,7 @@ rfa:KeymaxxerSidecar
 rfa:AgentBackend
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Agent Backend"@en ;
-  skos:definition "A supported headless coding-agent CLI integration shipped with Ready for Agent that can execute Agent Turns for the Harness. The harness default and optional per-Repository overrides select among built-in backends; arbitrary external backend plugins are not part of this boundary. Work Items do not independently choose a backend: they capture the Repository's effective selection at creation."@en ;
+  skos:definition "A supported headless coding-agent CLI integration shipped with Ready for Agent that can execute Agent Turns for the Harness. Harness Config, Repository settings, and an Explicit Work Item Execution Profile may select among built-in backends; arbitrary external backend plugins are not part of this boundary."@en ;
   skos:hiddenLabel "Agent"@en, "model"@en, "provider"@en .
 
 [
@@ -638,7 +638,7 @@ rfa:AgentBackend
 rfa:EffectiveAgentBackend
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Effective Agent Backend"@en ;
-  skos:definition "The Agent Backend a Repository uses for new Work Items: the Repository override when set, otherwise the Harness Config default. At Work Item creation the effective selection is captured and becomes that Work Item's routing and provenance backend for its lifetime."@en ;
+  skos:definition "The Agent Backend a Repository uses for ordinary new Work Items: the Repository override when set, otherwise the Harness Config default. Ordinary creation requests capture it; Implement With may explicitly choose another backend for that Work Item without changing Repository settings or Harness Config."@en ;
   skos:hiddenLabel "Active Agent Backend"@en, "preferred backend without capture"@en .
 
 [
@@ -802,7 +802,7 @@ rfa:AgentBackendUnavailable
 rfa:AgentBackendPreview
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Agent Backend Preview"@en ;
-  skos:definition "A Settings-only inspection of a not-yet-saved Agent Backend that loads that backend's Agent Model catalog so the operator can pick backend-scoped model selections before Save. It does not add or change an Active Agent Backend or allow Agent Turns on the previewed backend."@en ;
+  skos:definition "An inspection of a not-yet-saved Agent Backend selection that loads that backend's Agent Model catalog for Settings or Implement With. It does not add or change an Active Agent Backend or allow Agent Turns on the previewed backend."@en ;
   skos:hiddenLabel "Hot activate"@en, "Recheck Agent Backend"@en .
 
 [
@@ -862,7 +862,7 @@ rfa:RecheckAgentBackend
 rfa:AgentModel
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Agent Model"@en ;
-  skos:definition "A model in an Agent Backend's catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific. Each Agent Turn resolves build and review Agent Models from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend rather than from Work Item-stored model fields. Selection is catalog-only: Settings offers exactly the selected Agent Backend's current catalog, and the same membership rule is enforced when settings are saved. A stored value the current catalog no longer lists is preserved and shown as unavailable rather than deleted, rewritten, or translated between provider modes; it cannot be saved, and it blocks Work Item creation and each Agent Turn with configuration guidance before the Agent Backend CLI is spawned. An Agent Backend that reports no catalog at all carries no membership information and does not block."@en ;
+  skos:definition "A model in an Agent Backend's catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific. Ordinary Work Items resolve build and review selections for each Agent Turn from current backend-scoped Repository settings falling back to Harness Config; an Explicit Work Item Execution Profile instead supplies durable selections for that Work Item. Selection is catalog-only: selection surfaces offer exactly the chosen Agent Backend's current catalog. A selected value the current catalog no longer lists is preserved and shown as unavailable rather than deleted, rewritten, translated between provider modes, or replaced by defaults; it blocks creation or a later Agent Turn before the Agent Backend CLI is spawned. An Agent Backend that reports no catalog at all carries no membership information and does not block ordinary work, but Implement With requires a non-empty catalog from which to make its explicit choices."@en ;
   skos:hiddenLabel "Provider"@en, "Agent Backend"@en, "model profile"@en .
 
 [
@@ -1416,7 +1416,7 @@ rfa:LeafIssue
 rfa:WorkItem
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Work Item"@en ;
-  skos:definition "A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing the Repository's effective Agent Backend at creation as both provenance and routing authority for Agent Turns, and a durable Merge Mode (ordinary by default). Build and review Agent Model selections are not stored on the Work Item; each Agent Turn resolves them from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the captured Agent Backend. The resolved build selection is used for Implement, Review Fix Rounds, Commit, and related steps; the resolved review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and issue number, captures the Issue title for identification after the Issue leaves the Issue store, records canonical agent-authored publication title and body after Commit generates them (shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time."@en ;
+  skos:definition "A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing an Agent Backend as provenance and routing authority, an optional Explicit Work Item Execution Profile, and a durable Merge Mode (ordinary by default). Without an explicit profile, each Agent Turn resolves build and review selections from current backend-scoped Repository settings falling back to Harness Config. With one, the profile's build selection is used for Implement, Review Fix Rounds, Commit, and related steps, while its review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and issue number, captures the Issue title for identification after the Issue leaves the Issue store, records canonical agent-authored publication title and body after Commit generates them (shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time."@en ;
   skos:hiddenLabel "Issue lifecycle"@en, "implementation job"@en, "attempt"@en .
 
 [
@@ -1425,6 +1425,36 @@ rfa:WorkItem
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Issue lifecycle"@en ;
   rfa:avoidanceRationale "CONTEXT.md prefers Work Item for this concept."@en ;
+] .
+
+rfa:ExplicitWorkItemExecutionProfile
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Explicit Work Item Execution Profile"@en ;
+  skos:definition "A durable, immutable override of the Agent Backend, build Agent Model and optional Thinking Level, and review selection used by one Work Item for its entire lifetime. The review selection is either a distinct Agent Model and optional Thinking Level or the durable intent to use exactly the build selection. Implement With always persists an explicit profile, even when the pre-filled choices are submitted unchanged, without changing Repository settings or Harness Config; ordinary creation has no explicit profile and keeps resolving models from current settings. Retry and Start retain the profile, missing catalog selections fail closed without substitution, and choosing another profile requires Reset followed by a new attempt."@en ;
+  skos:hiddenLabel "Issue settings"@en, "per-Issue settings"@en, "model snapshot"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ExplicitWorkItemExecutionProfile ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Issue settings"@en ;
+  rfa:avoidanceRationale "the selection belongs to one Work Item attempt, not the Issue"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ExplicitWorkItemExecutionProfile ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "per-Issue settings"@en ;
+  rfa:avoidanceRationale "the selection belongs to one Work Item attempt, not the Issue"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ExplicitWorkItemExecutionProfile ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "model snapshot"@en ;
+  rfa:avoidanceRationale "the profile also owns Agent Backend routing and Thinking Levels"@en ;
 ] .
 
 [
@@ -2009,6 +2039,36 @@ rfa:ImplementNow
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Auto-implement"@en ;
   rfa:avoidanceRationale "CONTEXT.md prefers Implement Now for this concept."@en ;
+] .
+
+rfa:ImplementWith
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Implement With"@en ;
+  skos:definition "An explicit operator request for an Actionable Issue that chooses an Explicit Work Item Execution Profile and then creates the Work Item through the same remote implementation and Worker Slot admission path as Implement Now. Its ephemeral `Implement issue #N with...` dialog is pre-filled from the Repository's effective backend and currently resolved model selections, keeps backend-scoped drafts while open, and permits any shipped Agent Backend. A missing default build model leaves a required blank choice, and a failed backend selection does not disable choosing another backend. It requires a non-empty model catalog; submission atomically revalidates Issue eligibility, activates and inspects the chosen backend when necessary, validates catalog membership and the complete profile, and creates nothing on failure. The dialog has Implement and Cancel actions and ordinary loading and failure feedback, but no recovery, recheck, fallback, or retry workflow. It is offered only as `Implement with...` directly below Implement now in the Issue actions menu and does not change Harness Config or Repository settings."@en ;
+  skos:hiddenLabel "Settings"@en, "Implement Locally With"@en, "per-Issue default"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementWith ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Settings"@en ;
+  rfa:avoidanceRationale "the request creates one Work Item and does not change defaults"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementWith ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Implement Locally With"@en ;
+  rfa:avoidanceRationale "the initial feature uses only the remote implementation path"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementWith ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "per-Issue default"@en ;
+  rfa:avoidanceRationale "the profile applies to one Work Item attempt"@en ;
 ] .
 
 [
