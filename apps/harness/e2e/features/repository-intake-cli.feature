@@ -1,3 +1,4 @@
+@live-forge
 Feature: Repository Intake CLI automation
   Automated operators discover Intake Candidates, start them through
   Repository Intake, and inspect Kanban status through the compiled CLI and

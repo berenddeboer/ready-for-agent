@@ -30,7 +30,7 @@ jobs:
           github_token: ${{ github.token }}
 
   # Quality gates + cheap harness slow-test (SSE idle-timeout). Parallel with
-  # `harness` (smoke + live e2e); no artifact handoff between the two.
+  # the live e2e jobs; no artifact handoff between them.
   quality-gates:
     runs-on: ubuntu-latest
     steps:
@@ -83,11 +83,10 @@ jobs:
       - name: Harness slow tests
         run: bunx nx run harness:slow-test
 
-  # Dev smoke + live Gherkin e2e. Independent of quality-gates (parallel job).
-  # Two live suites (issue #958): vault-free @no-backend first (no OpenCode),
-  # then vault-backed OpenCode suite (excludes @no-backend). Overnight owns
-  # published-install packaging; this job owns product behaviour.
-  harness:
+  # Live-Forge e2e (issue #999): add/refresh, Intake, catalog-only fixture path.
+  # Parallel with UI-history. Same-repo PRs fail closed without the vault
+  # secret; fork PRs skip this suite (secrets are not exposed).
+  harness-e2e-live-forge:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -109,51 +108,28 @@ jobs:
           pr-number: ${{ github.event.pull_request.number }}
           allow-save: "false"
 
-      # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
-      - name: Harness dev smoke
-        run: bunx nx run harness:smoke
-
-      # Chromium once for both live suites (no-backend always; full suite when vault).
-      # Cache is keyed on the resolved Playwright version so a bump installs fresh.
       - name: Restore/install Playwright Chromium
         uses: ./.github/actions/playwright-chromium
         with:
-          # Forks and Dependabot get a read-only token for cache writes; restore only.
           allow-save: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
 
-      # Product default-backend / first-run without OpenCode (vault-free; fork-safe).
-      - name: Live Harness e2e (no backend agents)
-        id: live-e2e-no-backend
-        run: bunx nx run harness:e2e-no-backend
-
-      - name: Upload Playwright diagnostics (no backend)
-        if: failure() && steps.live-e2e-no-backend.outcome == 'failure'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: playwright-report-no-backend
-          path: |
-            apps/harness/playwright-report/
-            apps/harness/test-results/
-          if-no-files-found: ignore
-          retention-days: 14
-
-      # Vault-backed OpenCode suite (same as ci-cd.yml on main).
-      # Same-repo PRs can read E2E_KEYMAXXER_MASTER_KEY; fork PRs cannot, so
-      # skip rather than fail-closed when the secret is empty.
-      - name: Check live e2e vault key
+      - name: Check live-Forge vault key
         id: e2e-vault
         env:
           E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
         run: |
-          if [ -z "${E2E_KEYMAXXER_MASTER_KEY}" ]; then
-            echo "has_key=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping vault-backed live Harness e2e: E2E_KEYMAXXER_MASTER_KEY is unavailable (expected for fork PRs)."
-          else
+          set -euo pipefail
+          if [ -n "${E2E_KEYMAXXER_MASTER_KEY}" ]; then
             echo "has_key=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          if [ "${{ github.event.pull_request.head.repo.full_name }}" = "${{ github.repository }}" ]; then
+            echo "error: same-repo PR requires repository secret E2E_KEYMAXXER_MASTER_KEY for live-Forge e2e" >&2
+            exit 1
+          fi
+          echo "has_key=false" >> "$GITHUB_OUTPUT"
+          echo "Skipping live-Forge e2e: E2E_KEYMAXXER_MASTER_KEY is unavailable (expected for fork PRs)."
 
-      # OpenCode only for the vault-backed suite: first-run model catalog via
-      # `opencode models --verbose` (empty catalog fails that suite).
       - name: Install OpenCode
         if: steps.e2e-vault.outputs.has_key == 'true'
         env:
@@ -172,22 +148,120 @@ jobs:
         if: steps.e2e-vault.outputs.has_key == 'true'
         run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 
-      - name: Live Harness e2e (with OpenCode)
+      - name: Live-Forge Harness e2e
         if: steps.e2e-vault.outputs.has_key == 'true'
-        id: live-e2e
+        id: live-e2e-live-forge
         env:
           E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
           KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
           KEYMAXXER_APPROVE: deny
-        run: bunx nx run harness:e2e
+        run: bunx nx run harness:e2e-live-forge
 
-      - name: Upload Playwright diagnostics
-        if: failure() && steps.live-e2e.outcome == 'failure'
+      - name: Upload Playwright diagnostics (live-Forge)
+        if: failure() && steps.live-e2e-live-forge.outcome == 'failure'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report
+          name: playwright-report-live-forge
           path: |
             apps/harness/playwright-report/
             apps/harness/test-results/
           if-no-files-found: ignore
           retention-days: 14
+
+  # UI-history e2e (issue #999): Settings / Repository settings / Session
+  # Telemetry history and Kanban that seed persistence. Vault-free. Also
+  # owns fork-safe @no-backend (issue #958). May install OpenCode for
+  # Settings catalog coverage.
+  harness-e2e-ui-history:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          filter: tree:0
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
+
+      # Restore only: quality-gates is the PR cache producer.
+      - name: Restore Nx cache
+        uses: ./.github/actions/nx-cache
+        with:
+          mode: pr
+          pr-number: ${{ github.event.pull_request.number }}
+          allow-save: "false"
+
+      # Dev-path GraphQL smoke (Bun + Vite SSR); no fixture vault required.
+      - name: Harness dev smoke
+        run: bunx nx run harness:smoke
+
+      - name: Restore/install Playwright Chromium
+        uses: ./.github/actions/playwright-chromium
+        with:
+          allow-save: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+
+      - name: Live Harness e2e (no backend agents)
+        id: live-e2e-no-backend
+        run: bunx nx run harness:e2e-no-backend
+
+      - name: Upload Playwright diagnostics (no backend)
+        if: failure() && steps.live-e2e-no-backend.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-no-backend
+          path: |
+            apps/harness/playwright-report/
+            apps/harness/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Settings first-run / catalog coverage prefers OpenCode when listed.
+      - name: Install OpenCode
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/anomalyco/opencode/releases/latest \
+            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+          test -n "$VERSION"
+          curl -fsSL https://opencode.ai/install | bash -s -- --version "$VERSION" --no-modify-path
+      - name: Add OpenCode to PATH
+        run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: UI-history Harness e2e
+        id: live-e2e-ui-history
+        run: bunx nx run harness:e2e-ui-history
+
+      - name: Upload Playwright diagnostics (UI-history)
+        if: failure() && steps.live-e2e-ui-history.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-ui-history
+          path: |
+            apps/harness/playwright-report/
+            apps/harness/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Required-check identity: existing `harness` still gates the PR after the
+  # serial job was split (issue #999).
+  harness:
+    if: always()
+    needs: [harness-e2e-live-forge, harness-e2e-ui-history]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require both live e2e jobs
+        run: |
+          set -euo pipefail
+          live="${{ needs.harness-e2e-live-forge.result }}"
+          ui="${{ needs.harness-e2e-ui-history.result }}"
+          echo "live-forge=${live} ui-history=${ui}"
+          test "${live}" = success
+          test "${ui}" = success

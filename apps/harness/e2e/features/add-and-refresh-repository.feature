@@ -1,3 +1,4 @@
+@live-forge
 Feature: Add and refresh a Repository
   Operators add a local checkout through the CLI and rely on credential
   activation's automatic first Refresh Job to surface Relevant Issues.

@@ -5,7 +5,8 @@
  * CI / fixture mode: temporary HOME with the checked-in encrypted vault.
  * Local mode: developer's vault; does not copy over ~/.keymaxxer.
  * Vault-free mode (`KEYMAXXER_ENABLED=false`): no Keymaxxer Sidecar or vault
- * (used by `@no-backend` / `harness:e2e-no-backend`, issue #958).
+ * (used by `@no-backend` / `harness:e2e-no-backend`, issue #958, and by
+ * `@ui-history` / `harness:e2e-ui-history`, issue #999).
  *
  * The Harness runs as a supervised child so scenarios can request a restart
  * and seed legacy rows against the stopped database (issue #838); see

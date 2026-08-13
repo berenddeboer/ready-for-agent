@@ -99,7 +99,7 @@ const fixtureVaultEnv = (): NodeJS.ProcessEnv | null => {
   if (policy.mode !== "fixture") {
     throw new Error(
       "Fixture Repository clone requires Keymaxxer; KEYMAXXER_ENABLED=false " +
-        "(vault-free e2e) cannot clone. Use harness:e2e for vault-backed scenarios.",
+        "(vault-free e2e) cannot clone. Use harness:e2e-live-forge for vault-backed scenarios.",
     )
   }
 

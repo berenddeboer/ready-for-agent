@@ -17,12 +17,13 @@ type WorkflowStep = {
   with?: Record<string, string>
 }
 
+const E2E_JOB_IDS = [
+  "harness-e2e-live-forge",
+  "harness-e2e-ui-history",
+] as const
+
 type WorkflowDocument = {
-  jobs?: {
-    harness?: {
-      steps?: WorkflowStep[]
-    }
-  }
+  jobs?: Record<string, { steps?: WorkflowStep[] }>
 }
 
 type CompositeActionDocument = {
@@ -84,24 +85,20 @@ const parseWorkflow = (value: unknown): WorkflowDocument => {
   if (!isRecord(jobsValue)) {
     throw new Error("expected jobs to be a mapping")
   }
-  const harnessValue = jobsValue.harness
-  if (harnessValue === undefined) {
-    return { jobs: {} }
+  const jobs: Record<string, { steps?: WorkflowStep[] }> = {}
+  for (const [name, jobValue] of Object.entries(jobsValue)) {
+    if (!isRecord(jobValue)) {
+      throw new Error(`expected ${name} job to be a mapping`)
+    }
+    const stepsValue = jobValue.steps
+    jobs[name] = {
+      steps:
+        stepsValue === undefined
+          ? undefined
+          : parseSteps(stepsValue, `${name} steps`),
+    }
   }
-  if (!isRecord(harnessValue)) {
-    throw new Error("expected harness job to be a mapping")
-  }
-  const stepsValue = harnessValue.steps
-  return {
-    jobs: {
-      harness: {
-        steps:
-          stepsValue === undefined
-            ? undefined
-            : parseSteps(stepsValue, "harness steps"),
-      },
-    },
-  }
+  return { jobs }
 }
 
 const parseCompositeAction = (value: unknown): CompositeActionDocument => {
@@ -151,89 +148,104 @@ const expandLocalActions = async (
   return expanded
 }
 
-const harnessSteps = async (): Promise<WorkflowStep[]> => {
+const e2eJobSteps = async (
+  jobId: (typeof E2E_JOB_IDS)[number],
+): Promise<WorkflowStep[]> => {
   const workflow = parseWorkflow(await loadYaml(".github/workflows/pr.yml"))
-  const steps = workflow.jobs?.harness?.steps
+  const steps = workflow.jobs?.[jobId]?.steps
   if (steps === undefined) {
-    throw new Error("PR workflow is missing the harness job steps")
+    throw new Error(`PR workflow is missing the ${jobId} job steps`)
   }
   return expandLocalActions(steps)
 }
 
 describe("PR harness Playwright Chromium cache (issue #996)", () => {
   test("caches Chromium keyed on the resolved Playwright version", async () => {
-    const steps = await harnessSteps()
+    for (const jobId of E2E_JOB_IDS) {
+      const steps = await e2eJobSteps(jobId)
 
-    const versionStep = steps.find(
-      (step) =>
-        step.run?.includes("@playwright/test/package.json") === true &&
-        step.run.includes("version"),
-    )
-    expect(versionStep?.id).toBeDefined()
+      const versionStep = steps.find(
+        (step) =>
+          step.run?.includes("@playwright/test/package.json") === true &&
+          step.run.includes("version"),
+      )
+      expect(versionStep?.id).toBeDefined()
 
-    const cacheStep = steps.find(
-      (step) =>
-        (step.uses?.startsWith("actions/cache@") === true ||
-          step.uses?.startsWith("actions/cache/restore@") === true) &&
-        step.with?.path.includes("ms-playwright") === true,
-    )
-    expect(cacheStep?.with?.path).toContain("ms-playwright")
-    expect(cacheStep?.with?.key).toContain("playwright")
-    expect(cacheStep?.with?.key).toContain(
-      `steps.${versionStep?.id}.outputs.version`,
-    )
-    expect(cacheStep?.with?.key).not.toContain("github.sha")
-    expect(cacheStep?.with?.["restore-keys"]).toBeUndefined()
+      const cacheStep = steps.find(
+        (step) =>
+          (step.uses?.startsWith("actions/cache@") === true ||
+            step.uses?.startsWith("actions/cache/restore@") === true) &&
+          step.with?.path.includes("ms-playwright") === true,
+      )
+      expect(cacheStep?.with?.path).toContain("ms-playwright")
+      expect(cacheStep?.with?.key).toContain("playwright")
+      expect(cacheStep?.with?.key).toContain(
+        `steps.${versionStep?.id}.outputs.version`,
+      )
+      expect(cacheStep?.with?.key).not.toContain("github.sha")
+      expect(cacheStep?.with?.["restore-keys"]).toBeUndefined()
+    }
   })
 
   test("a cache hit skips the Chromium download and still installs OS deps", async () => {
-    const steps = await harnessSteps()
+    for (const jobId of E2E_JOB_IDS) {
+      const steps = await e2eJobSteps(jobId)
 
-    const installBrowsers = steps.filter(
-      (step) =>
-        step.run?.includes("playwright install") === true &&
-        step.run.includes("chromium") &&
-        !step.run.includes("install-deps"),
-    )
-    expect(installBrowsers).toHaveLength(1)
-    expect(installBrowsers[0]?.if).toContain("cache-hit")
-    expect(installBrowsers[0]?.if).toMatch(/!=\s*'true'/)
+      const installBrowsers = steps.filter(
+        (step) =>
+          step.run?.includes("playwright install") === true &&
+          step.run.includes("chromium") &&
+          !step.run.includes("install-deps"),
+      )
+      expect(installBrowsers).toHaveLength(1)
+      expect(installBrowsers[0]?.if).toContain("cache-hit")
+      expect(installBrowsers[0]?.if).toMatch(/!=\s*'true'/)
 
-    const installDeps = steps.filter((step) =>
-      step.run?.includes("playwright install-deps"),
-    )
-    expect(installDeps).toHaveLength(1)
-    expect(installDeps[0]?.run).toContain("chromium")
-    expect(installDeps[0]?.if).toContain("cache-hit")
-    expect(installDeps[0]?.if).toMatch(/==\s*'true'/)
+      const installDeps = steps.filter((step) =>
+        step.run?.includes("playwright install-deps"),
+      )
+      expect(installDeps).toHaveLength(1)
+      expect(installDeps[0]?.run).toContain("chromium")
+      expect(installDeps[0]?.if).toContain("cache-hit")
+      expect(installDeps[0]?.if).toMatch(/==\s*'true'/)
+    }
   })
 
   test("both live e2e suites still run against Chromium after the cache/install steps", async () => {
     const workflow = parseWorkflow(await loadYaml(".github/workflows/pr.yml"))
-    const topLevel = workflow.jobs?.harness?.steps
-    if (topLevel === undefined) {
-      throw new Error("PR workflow is missing the harness job steps")
+
+    const liveForge = workflow.jobs?.["harness-e2e-live-forge"]?.steps
+    const uiHistory = workflow.jobs?.["harness-e2e-ui-history"]?.steps
+    if (liveForge === undefined || uiHistory === undefined) {
+      throw new Error("PR workflow is missing the split live e2e jobs")
     }
 
-    const chromiumReadyIndex = topLevel.findIndex(
-      (step) =>
-        step.uses?.includes("playwright-chromium") === true ||
-        (step.run?.includes("playwright install") === true &&
-          step.run.includes("chromium")),
-    )
-    expect(chromiumReadyIndex).toBeGreaterThanOrEqual(0)
+    const chromiumReadyIndex = (steps: WorkflowStep[]) =>
+      steps.findIndex(
+        (step) =>
+          step.uses?.includes("playwright-chromium") === true ||
+          (step.run?.includes("playwright install") === true &&
+            step.run.includes("chromium")),
+      )
 
-    const noBackendIndex = topLevel.findIndex(
+    const liveForgeChromium = chromiumReadyIndex(liveForge)
+    const uiHistoryChromium = chromiumReadyIndex(uiHistory)
+    expect(liveForgeChromium).toBeGreaterThanOrEqual(0)
+    expect(uiHistoryChromium).toBeGreaterThanOrEqual(0)
+
+    const liveForgeIndex = liveForge.findIndex(
+      (step) => step.run?.includes("harness:e2e-live-forge") === true,
+    )
+    const noBackendIndex = uiHistory.findIndex(
       (step) => step.run?.includes("harness:e2e-no-backend") === true,
     )
-    const vaultBackedIndex = topLevel.findIndex(
-      (step) =>
-        step.run === "bunx nx run harness:e2e" ||
-        step.run?.trim() === "bunx nx run harness:e2e",
+    const uiHistoryIndex = uiHistory.findIndex(
+      (step) => step.run?.includes("harness:e2e-ui-history") === true,
     )
 
-    expect(noBackendIndex).toBeGreaterThan(chromiumReadyIndex)
-    expect(vaultBackedIndex).toBeGreaterThan(chromiumReadyIndex)
-    expect(noBackendIndex).toBeLessThan(vaultBackedIndex)
+    expect(liveForgeIndex).toBeGreaterThan(liveForgeChromium)
+    expect(noBackendIndex).toBeGreaterThan(uiHistoryChromium)
+    expect(uiHistoryIndex).toBeGreaterThan(uiHistoryChromium)
+    expect(noBackendIndex).toBeLessThan(uiHistoryIndex)
   })
 })

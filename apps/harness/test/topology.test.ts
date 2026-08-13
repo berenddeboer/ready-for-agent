@@ -93,6 +93,29 @@ describe("single application server topology", () => {
     expect(harness.targets.e2e?.options?.command).toContain(
       "--grep-invert @no-backend",
     )
+    // Live-Forge: vault-backed fixture clone path (issue #999).
+    expect(
+      harness.targets["e2e-live-forge"]?.options?.env?.KEYMAXXER_ENABLED,
+    ).toBeUndefined()
+    expect(harness.targets["e2e-live-forge"]?.options?.command).toContain(
+      "--grep @live-forge",
+    )
+    // UI-history: vault-free persistence-seed path (issue #999).
+    expect(
+      harness.targets["e2e-ui-history"]?.options?.env?.KEYMAXXER_ENABLED,
+    ).toBe("false")
+    expect(
+      harness.targets["e2e-ui-history"]?.options?.env?.E2E_KEYMAXXER_MASTER_KEY,
+    ).toBe("")
+    expect(
+      harness.targets["e2e-ui-history"]?.options?.env?.KEYMAXXER_MASTER_KEY,
+    ).toBe("")
+    expect(
+      harness.targets["e2e-ui-history"]?.options?.env?.E2E_AGENT_BACKEND_MODE,
+    ).toBeUndefined()
+    expect(harness.targets["e2e-ui-history"]?.options?.command).toContain(
+      "--grep @ui-history",
+    )
     // Vault-free @no-backend suite: soft-disable Keymaxxer, clear ambient
     // master keys so fixture mode cannot win, and strip OpenCode.
     expect(

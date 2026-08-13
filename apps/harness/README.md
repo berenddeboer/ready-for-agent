@@ -83,26 +83,35 @@ without wrapping the Harness in a second coordinator process.
 ## Live end-to-end
 
 The Gherkin operator journeys under `e2e/features/` run the production build
-against a fresh isolated Harness database. There are **two** live suites
-(separate Playwright / `webServer` boots; issue #958):
+against a fresh isolated Harness database. There are **three** live suites
+plus a local/main union (separate Playwright / `webServer` boots; issues
+#958 and #999):
 
 | Target | Tag filter | Product PATH | Keymaxxer | What it covers |
 | --- | --- | --- | --- | --- |
 | `harness:e2e-no-backend` | `--grep @no-backend` | `E2E_AGENT_BACKEND_MODE=no-opencode` (ambient `opencode` stripped; fail-closed if still resolvable) | `KEYMAXXER_ENABLED=false` (vault-free) | Default Agent Backend Unavailable + first-run UI when OpenCode is absent; pure-absence and mixed-Ready (fake Claude) |
-| `harness:e2e` | `--grep-invert @no-backend` | Default (OpenCode expected in CI) | Fixture vault credential | Add/refresh fixture Repositories, Kanban, Settings history, catalog-only models, etc. |
+| `harness:e2e-live-forge` | `--grep @live-forge` | Default (OpenCode expected in CI) | Fixture vault credential | Add/refresh fixture Repositories, Intake, catalog-only fixture path |
+| `harness:e2e-ui-history` | `--grep @ui-history` | Default (OpenCode allowed for Settings catalog) | `KEYMAXXER_ENABLED=false` (no fixture vault) | Settings / Repository settings / Session Telemetry history and Kanban that seed persistence |
+| `harness:e2e` | `--grep-invert @no-backend` | Default (OpenCode expected in CI) | Fixture vault credential | Local / `main` union of live-Forge and UI-history |
 
 ```bash
 # Vault-free default-backend / first-run (no OpenCode install required)
 bunx nx run harness:e2e-no-backend
 
-# OpenCode-backed operator journeys (excludes @no-backend)
+# UI-history only (no fixture vault or clone)
+bunx nx run harness:e2e-ui-history
+
+# Live-Forge fixture path (requires vault)
+bunx nx run harness:e2e-live-forge
+
+# Union of live-Forge + UI-history (excludes @no-backend)
 bunx nx run harness:e2e
 ```
 
 Overnight published-install smoke (`.github/workflows/overnight-install-smoke.yml`)
 remains the packaging multi-arch gate; it does not replace these suites.
 
-### Vault-backed suite (`harness:e2e`)
+### Vault-backed suite (`harness:e2e` / `harness:e2e-live-forge`)
 
 Non-interactive by default and requires a Keymaxxer credential before it
 starts the Harness, Sidecar, or CLI at all — it never falls back to silently
@@ -126,13 +135,14 @@ The GitLab scenario soft-skips until the fixture vault includes the GitLab
 secret; set `E2E_REQUIRE_GITLAB=1` to fail closed after bootstrap. See
 `docs/e2e-fixture.md` and `docs/adr/0021-live-harness-end-to-end-test.md`.
 
-### Vault-free suite (`harness:e2e-no-backend`)
+### Vault-free suites (`harness:e2e-no-backend`, `harness:e2e-ui-history`)
 
-Does **not** require `E2E_KEYMAXXER_MASTER_KEY` (fork-PR safe). The supervisor
+Do **not** require `E2E_KEYMAXXER_MASTER_KEY` (fork-PR safe). The supervisor
 soft-disables Keymaxxer, always prepends a fake `claude` CLI, and in
-`no-opencode` mode removes every PATH directory that provides ambient
-`opencode` / `grok` / `codex` / `claude` so a local developer install cannot
-silently green pure-absence or mixed-Ready scenarios. It fails closed if those
-binaries still resolve (except the fake `claude`). Claude readiness is toggled
-per scenario via the live-harness control protocol
-(`firstParty` / `unauthenticated`).
+`no-opencode` mode (`e2e-no-backend` only) removes every PATH directory that
+provides ambient `opencode` / `grok` / `codex` / `claude` so a local
+developer install cannot silently green pure-absence or mixed-Ready
+scenarios. It fails closed if those binaries still resolve (except the fake
+`claude`). Claude readiness is toggled per scenario via the live-harness
+control protocol (`firstParty` / `unauthenticated`). `e2e-ui-history` leaves
+OpenCode on PATH when present so Settings catalog coverage can use it.
