@@ -308,10 +308,10 @@ Then(
 
 Then("a repository settings save error is shown", async ({ page }) => {
   const dialog = repositoryDialog(page)
-  await expect(dialog.getByRole("alert")).toBeVisible()
-  await expect(dialog.getByRole("alert")).toContainText(
-    /Simulated repository settings save failure|could not be saved/i,
-  )
+  const saveError = dialog.getByRole("alert").filter({
+    hasText: /Simulated repository settings save failure|could not be saved/i,
+  })
+  await expect(saveError).toBeVisible()
 })
 
 // Reuse shared "I go back/forward" and "I refresh" from settings-browser-history
