@@ -2,6 +2,7 @@
 
 > Spec ready for GitHub issue with label `ready-for-agent`.
 > Domain: `CONTEXT.md`, ADR 0037 (supersedes 0032; supersedes instance-wide portions of 0035).
+> Historical scope note: ADR 0052 later adds the deliberately separate Implement With path; the ordinary per-Repository behavior specified here remains unchanged.
 
 ## Problem Statement
 
@@ -97,10 +98,10 @@ Not required for acceptance: full dual-backend Playwright e2e (optional later).
 ## Out of Scope
 
 - Third-party or operator-defined Agent Backend plugins
-- Per-Work-Item backend selection independent of Repository effective selection
+- Per-Work-Item backend selection independent of Repository effective selection (superseded for the distinct Implement With path by ADR 0052)
 - Dual-backend routing mid-flight on a single unfinished Work Item (changing backend under an unfinished WI)
 - Per-backend concurrency limits
-- Snapshotting build/review models onto Work Items
+- Snapshotting build/review models onto Work Items (superseded only for ADR 0052's complete Explicit Work Item Execution Profile; ordinary Work Items remain settings-resolved)
 - Requiring all built-in CLIs installed when unused
 - Automatic silent fallback between backends
 - Materializing the default onto every Repository at create (no live inherit)
