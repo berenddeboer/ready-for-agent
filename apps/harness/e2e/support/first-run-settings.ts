@@ -1,5 +1,48 @@
 import { type Page, expect } from "@playwright/test"
 import { E2E_GRAPHQL_URL } from "./constants.ts"
+import {
+  CONTROL_FILES,
+  readLiveHarnessState,
+  writeControlFile,
+} from "./live-harness-control.ts"
+import { seedLiveHarnessAndRestart } from "./live-harness-seed.ts"
+
+export type DefaultBuildModelCatalogResolution =
+  | { readonly kind: "already-configured" }
+  | { readonly kind: "configure"; readonly modelId: string }
+  | { readonly kind: "empty-catalog" }
+
+/**
+ * Decide whether Config already has a usable catalog model, needs an
+ * update, or has no catalog at all (typically leftover unauthenticated
+ * fake Claude from a prior live-e2e scenario).
+ */
+export const resolveDefaultBuildModelFromCatalog = (input: {
+  readonly current: string | null
+  readonly models: ReadonlyArray<{ readonly id: string }>
+}): DefaultBuildModelCatalogResolution => {
+  const catalogIds = input.models
+    .map((model) => model.id)
+    .filter((id) => id.length > 0)
+  if (
+    input.current !== null &&
+    input.current.length > 0 &&
+    catalogIds.includes(input.current)
+  ) {
+    return { kind: "already-configured" }
+  }
+  const modelId = catalogIds[0]
+  if (modelId === undefined) {
+    return { kind: "empty-catalog" }
+  }
+  return { kind: "configure", modelId }
+}
+
+const restoreFakeClaudeFirstParty = async (): Promise<void> => {
+  const state = readLiveHarnessState()
+  writeControlFile(state, CONTROL_FILES.claudeMode, "firstParty")
+  await seedLiveHarnessAndRestart("")
+}
 
 export const settingsDialog = (page: Page) =>
   page.getByRole("dialog", {
@@ -63,21 +106,18 @@ const isFirstRunSettingsRequired = async (): Promise<boolean> => {
   )
 }
 
-/**
- * Ensure Harness Config has a catalog build model so Save is not blocked by
- * first-run emptiness. Used by history scenarios that cancel first-run and
- * then Save (issue #840 review) — independent of suite order.
- */
-export const ensureConfiguredDefaultBuildModel = async (): Promise<void> => {
-  const data = await graphqlJson<{
-    config: {
-      selectedAgentBackend: string
-      defaultModel: string | null
-      maxConcurrentAgentTurns: number
-      maxConcurrentWorkItems: number
-    }
-    models: ReadonlyArray<{ id: string }>
-  }>(`query {
+type ConfigAndModels = {
+  readonly config: {
+    readonly selectedAgentBackend: string
+    readonly defaultModel: string | null
+    readonly maxConcurrentAgentTurns: number
+    readonly maxConcurrentWorkItems: number
+  }
+  readonly models: ReadonlyArray<{ readonly id: string }>
+}
+
+const fetchConfigAndModels = async (): Promise<ConfigAndModels> =>
+  graphqlJson<ConfigAndModels>(`query {
     config {
       selectedAgentBackend
       defaultModel
@@ -87,18 +127,33 @@ export const ensureConfiguredDefaultBuildModel = async (): Promise<void> => {
     models { id }
   }`)
 
-  const catalogIds = new Set(
-    data.models.map((model) => model.id).filter((id) => id.length > 0),
-  )
-  const current = data.config.defaultModel
-  // Non-empty alone is not enough: a seeded non-catalog value (e.g. from another
-  // e2e feature's SQL fixture) still blocks Save via catalog-only gates (#841).
-  if (current !== null && current.length > 0 && catalogIds.has(current)) {
+/**
+ * Ensure Harness Config has a catalog build model so Save is not blocked by
+ * first-run emptiness. Used by history scenarios that cancel first-run and
+ * then Save (issue #840 review) — independent of suite order.
+ *
+ * When a prior live-e2e scenario left fake Claude unauthenticated (empty
+ * catalog), restore first-party readiness and retry once so later
+ * `@live-forge` scenarios such as Intake still have a usable catalog.
+ */
+export const ensureConfiguredDefaultBuildModel = async (): Promise<void> => {
+  let data = await fetchConfigAndModels()
+  let resolution = resolveDefaultBuildModelFromCatalog({
+    current: data.config.defaultModel,
+    models: data.models,
+  })
+  if (resolution.kind === "empty-catalog") {
+    await restoreFakeClaudeFirstParty()
+    data = await fetchConfigAndModels()
+    resolution = resolveDefaultBuildModelFromCatalog({
+      current: data.config.defaultModel,
+      models: data.models,
+    })
+  }
+  if (resolution.kind === "already-configured") {
     return
   }
-
-  const modelId = data.models.find((model) => model.id.length > 0)?.id
-  if (modelId === undefined) {
+  if (resolution.kind === "empty-catalog") {
     throw new Error(
       "Cannot configure default build model: Agent Model catalog is empty",
     )
@@ -115,7 +170,7 @@ export const ensureConfiguredDefaultBuildModel = async (): Promise<void> => {
     {
       input: {
         selectedAgentBackend: data.config.selectedAgentBackend,
-        defaultModel: modelId,
+        defaultModel: resolution.modelId,
         defaultThinkingLevel: null,
         reviewModel: null,
         reviewThinkingLevel: null,
