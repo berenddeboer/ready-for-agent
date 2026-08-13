@@ -1,4 +1,4 @@
-import { Console, Effect, Option } from "effect"
+import { Console, Effect, FileSystem, Option } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import {
   FiniteCommandFailed,
@@ -12,15 +12,19 @@ import {
   localGitErrorCode,
   toCanonicalRepositoryIdentity,
 } from "./cli-json.ts"
+import { interactiveResumeCommand } from "./interactive-resume.ts"
+import { JumpFailed } from "./jump-error.ts"
 import {
   type RepositoryIdentityFields,
   type RepositoryIdentityMatch,
   formatRepositoryFullIdentity,
   resolveRepositoryIdentity,
 } from "./repository-identity.ts"
+import { ExecutablePath } from "./services/executable-path.ts"
 import { GraphqlApi } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
 import { StartHarness } from "./services/start-harness.ts"
+import { Tmux } from "./services/tmux.ts"
 
 const pathArg = Argument.string("path").pipe(
   Argument.withDescription("Path to a local git repository"),
@@ -33,6 +37,10 @@ const repositoryIdentityArg = Argument.string("repository").pipe(
   Argument.withDescription(
     "Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)",
   ),
+)
+
+const sessionIdArg = Argument.string("session-id").pipe(
+  Argument.withDescription("Opaque backend Session ID to continue"),
 )
 
 const optionalRepositoryIdentityArg = Argument.string("repository").pipe(
@@ -303,6 +311,58 @@ const statusWorkflow = Effect.fn("Cli.status")(function* (
   )
 })
 
+const resolveJumpWorkingDirectory = (
+  worktreePath: string | null,
+): Effect.Effect<string, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    if (worktreePath === null) {
+      return process.cwd()
+    }
+    const fs = yield* FileSystem.FileSystem
+    const info = yield* fs
+      .stat(worktreePath)
+      .pipe(Effect.orElseSucceed(() => null))
+    if (info === null || info.type !== "Directory") {
+      return process.cwd()
+    }
+    return worktreePath
+  })
+
+const jumpWorkflow = Effect.fn("Cli.jump")(function* (sessionId: string) {
+  const tmux = yield* Tmux
+  const executablePath = yield* ExecutablePath
+  const graphqlApi = yield* GraphqlApi
+
+  yield* tmux.requireAttachedSession
+
+  const found = yield* graphqlApi
+    .workItemBySessionId(sessionId)
+    .pipe(
+      Effect.mapError((error) => new JumpFailed({ message: error.message })),
+    )
+
+  const workingDirectory = yield* resolveJumpWorkingDirectory(
+    found.worktreePath,
+  )
+  const resume = interactiveResumeCommand({
+    backendId: found.agentBackend.id,
+    sessionId: found.sessionId,
+    workingDirectory,
+  })
+  if (resume === null) {
+    return yield* new JumpFailed({
+      message: `Unsupported Agent Backend: ${found.agentBackend.id}`,
+    })
+  }
+
+  const agentExecutable = yield* executablePath.resolve(resume.executableName)
+  yield* tmux.createJumpWindow({
+    workingDirectory,
+    agentExecutable,
+    agentArguments: resume.arguments,
+  })
+})
+
 const startCommand = Command.make(
   "start",
   { noOpen: noOpenFlag, host: hostFlag },
@@ -362,6 +422,16 @@ const statusCommand = Command.make(
   ),
 )
 
+const jumpCommand = Command.make(
+  "jump",
+  { sessionId: sessionIdArg },
+  ({ sessionId }) => jumpWorkflow(sessionId),
+).pipe(
+  Command.withDescription(
+    "Continue a Work Item Session in a new tmux window (Interactive Session Continuation)",
+  ),
+)
+
 export const cli = Command.make(
   "ready-for-agent",
   { noOpen: noOpenFlag, host: hostFlag },
@@ -369,7 +439,7 @@ export const cli = Command.make(
     startHarnessWorkflow(noOpen, Option.getOrUndefined(host)),
 ).pipe(
   Command.withDescription(
-    "Ready for Agent operator binary (start Harness, add repositories, intake, Kanban status)",
+    "Ready for Agent operator binary (start Harness, add repositories, intake, Kanban status, jump)",
   ),
   Command.withSubcommands([
     startCommand,
@@ -377,5 +447,6 @@ export const cli = Command.make(
     candidatesCommand,
     intakeCommand,
     statusCommand,
+    jumpCommand,
   ]),
 )
