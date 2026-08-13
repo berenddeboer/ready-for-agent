@@ -208,6 +208,36 @@ export const isReposBackgroundPath = (pathname: string): boolean =>
   isRepositorySettingsPath(pathname)
 
 /**
+ * Completed is the canonical background for `/completed` and any nested
+ * archive path. Search (page, theme) is not part of this pathname check.
+ */
+export const isCompletedBackgroundPath = (pathname: string): boolean =>
+  pathname === "/completed" ||
+  pathname === "/completed/" ||
+  pathname.startsWith("/completed/")
+
+/** Jobs switcher destination derived from the runtime pathname. */
+export type JobsView = "pipeline" | "repos" | "completed"
+
+/**
+ * Exclusive route → Jobs view. Overlay backgrounds use the same helpers as
+ * the rest of the chrome so SSR and the client cannot pick different tabs.
+ * Callers pass the runtime pathname (masked Session Telemetry keeps origin).
+ */
+export const jobsViewForPath = (pathname: string): JobsView | undefined => {
+  if (isReposBackgroundPath(pathname)) {
+    return "repos"
+  }
+  if (isCompletedBackgroundPath(pathname)) {
+    return "completed"
+  }
+  if (isPipelineBackgroundPath(pathname)) {
+    return "pipeline"
+  }
+  return undefined
+}
+
+/**
  * Document-session flag: true only after an explicit in-app Session Telemetry
  * open in this SPA document. Module-level so Pipeline openers and root close
  * share it; full reload clears it so direct/refresh close uses replace → `/`.

@@ -97,7 +97,7 @@ describe("Session Telemetry route (issues #841 / #843 / #906)", () => {
 
   test("Jobs switcher derives the active background from the runtime route", () => {
     const switcher = jobsSwitcherSource()
-    expect(switcher).toContain("isPipelineBackgroundPath")
+    expect(switcher).toContain("jobsViewForPath")
     expect(switcher).not.toContain(
       "Explicit opens from Repos or Completed share",
     )

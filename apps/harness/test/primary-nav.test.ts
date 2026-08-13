@@ -216,7 +216,8 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
       tabs.indexOf("<ReposTabIcon"),
     )
     // Pipeline exact-match; filters stay after the primary trio.
-    expect(tabs).toContain("activeOptions={{ exact: true }}")
+    expect(tabs).toContain("exact")
+    expect(switcher).toContain("includeSearch: false")
     expect(switcher.indexOf("<JobsRepositoryFilters")).toBeGreaterThan(
       switcher.indexOf('id="jobs-tab-completed"'),
     )
@@ -289,7 +290,7 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
     expect(styles).toContain(".mast-theme-lever .handle")
     expect(styles).toContain(".mast-settings-cog .teeth")
     expect(root).toContain("function SettingsCogTeeth")
-    expect(switcher).toContain("className={ui.pipelineTab}")
+    expect(switcher).toContain("className: ui.pipelineTab")
     expect(switcher).not.toMatch(/rivet/i)
     expect(root).not.toMatch(/className=\{[^}]*rivet/i)
   })

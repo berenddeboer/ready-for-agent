@@ -7,9 +7,10 @@
  * (in-memory board); Repos and Completed hide them until server-side filter
  * support exists for the archive.
  */
-import { Link, useRouterState } from "@tanstack/react-router"
+import { useLinkProps, useRouterState } from "@tanstack/react-router"
+import type { ReactNode } from "react"
 import { JobsRepositoryFilters } from "./jobs-repository-filter.js"
-import { isPipelineBackgroundPath } from "./routed-dialog.js"
+import { jobsViewForPath } from "./routed-dialog.js"
 import { cx, ui } from "./ui.js"
 
 function PipelineTabIcon() {
@@ -58,15 +59,51 @@ function CompletedTabIcon() {
   )
 }
 
+/**
+ * Jobs destination link whose active attrs follow `jobsViewForPath`, not
+ * TanStack's path+search isActive. Link would otherwise set aria-current and
+ * data-status after our props, which can disagree on SSR/hydration when the
+ * retained `theme` search pin is present (issue #1041).
+ */
+function JobsDestinationLink({
+  to,
+  id,
+  current,
+  exact = false,
+  children,
+}: {
+  readonly to: "/" | "/repos" | "/completed"
+  readonly id: string
+  readonly current: boolean
+  readonly exact?: boolean
+  readonly children: ReactNode
+}) {
+  const props = useLinkProps({
+    to,
+    id,
+    className: ui.pipelineTab,
+    activeOptions: { exact, includeSearch: false },
+  })
+  return (
+    <a
+      {...props}
+      aria-current={current ? "page" : undefined}
+      data-status={current ? "active" : undefined}
+    >
+      {children}
+    </a>
+  )
+}
+
 export function JobsViewSwitcher() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const onCompleted =
-    pathname === "/completed" || pathname.startsWith("/completed/")
   // Direct `/settings` and telemetry loads use Pipeline as their canonical
   // background. Masked telemetry opens retain the runtime origin pathname, so
   // the originating Jobs tab remains active (issues #840–#843 / #906).
-  const pipelineActive = isPipelineBackgroundPath(pathname)
-  const reposActive = pathname === "/repos" || pathname.startsWith("/repos/")
+  const jobsView = jobsViewForPath(pathname)
+  const pipelineActive = jobsView === "pipeline"
+  const reposActive = jobsView === "repos"
+  const completedActive = jobsView === "completed"
   // Filters only drive the Pipeline board today (full in-memory item set).
   const showRepositoryFilters = pipelineActive
 
@@ -77,34 +114,31 @@ export function JobsViewSwitcher() {
           className={cx(ui.pipelineTabs, ui.jobsSwitcherPipelineTabs)}
           aria-label="Jobs"
         >
-          <Link
+          <JobsDestinationLink
             to="/"
             id="jobs-tab-pipeline"
-            className={ui.pipelineTab}
-            activeOptions={{ exact: true }}
-            aria-current={pipelineActive ? "page" : undefined}
+            exact
+            current={pipelineActive}
           >
             <PipelineTabIcon />
             Pipeline
-          </Link>
-          <Link
+          </JobsDestinationLink>
+          <JobsDestinationLink
             to="/repos"
             id="jobs-tab-repos"
-            className={ui.pipelineTab}
-            aria-current={reposActive ? "page" : undefined}
+            current={reposActive}
           >
             <ReposTabIcon />
             Repos
-          </Link>
-          <Link
+          </JobsDestinationLink>
+          <JobsDestinationLink
             to="/completed"
             id="jobs-tab-completed"
-            className={ui.pipelineTab}
-            aria-current={onCompleted ? "page" : undefined}
+            current={completedActive}
           >
             <CompletedTabIcon />
             Completed
-          </Link>
+          </JobsDestinationLink>
         </nav>
         {showRepositoryFilters ? (
           <JobsRepositoryFilters className={ui.jobsSwitcherRepositoryFilters} />

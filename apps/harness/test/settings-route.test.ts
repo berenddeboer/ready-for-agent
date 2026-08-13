@@ -83,7 +83,7 @@ describe("/settings route (issue #840)", () => {
 
   test("Jobs switcher treats /settings as Pipeline background", () => {
     const switcher = jobsSwitcherSource()
-    expect(switcher).toContain("isPipelineBackgroundPath")
+    expect(switcher).toContain("jobsViewForPath")
     const helpers = routedDialogSource()
     expect(helpers).toContain("isHarnessSettingsPath")
     expect(helpers).toContain('pathname === "/settings"')
