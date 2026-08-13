@@ -10,6 +10,10 @@
   "ignoreBinaries": ["skills", "pgrep", "ps"],
   "ignoreFiles": [".opencode/plugin/**"],
   "workspaces": {
+    ".": {
+      "entry": ["scripts/tool-pins.test.ts"],
+      "project": ["scripts/**/*.{ts,mjs}"]
+    },
     "apps/harness": {
       "entry": [
         "src/router.tsx",

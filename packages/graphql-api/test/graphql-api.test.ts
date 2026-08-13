@@ -8616,7 +8616,7 @@ describe("GraphQL API", () => {
   })
 
   test("kanbanStatus classifies lanes, windows, ordering, and repository filter", async () => {
-    const now = Date.parse("2026-08-12T12:00:00.000Z")
+    const now = Date.now()
     const otherRepo = makeRepositoryRecord({
       id: "repo-01J00000000000000000000001",
       projectPath: "acme/other",

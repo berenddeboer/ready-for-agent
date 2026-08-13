@@ -5,8 +5,10 @@
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
     "production": ["default"],
     "sharedGlobals": [
+      "{workspaceRoot}/mise.toml",
       "{workspaceRoot}/.github/workflows/ci-cd.yml",
-      "{workspaceRoot}/.github/workflows/pr.yml"
+      "{workspaceRoot}/.github/workflows/pr.yml",
+      "{workspaceRoot}/.github/workflows/overnight-install-smoke.yml"
     ]
   },
   "plugins": [
