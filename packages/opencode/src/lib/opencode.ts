@@ -65,6 +65,7 @@ export class Opencode {
         ) {
           const result = yield* runCliCapture({
             spawner,
+            backend: OPENCODE_BACKEND,
             binary,
             args: ["models", "--verbose"],
             cwd: input.cwd,
@@ -154,6 +155,7 @@ export class Opencode {
 
           return runCliTurn({
             spawner,
+            backend: OPENCODE_BACKEND,
             binary,
             args,
             cwd: input.cwd,

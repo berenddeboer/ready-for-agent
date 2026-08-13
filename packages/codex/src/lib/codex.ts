@@ -79,6 +79,7 @@ export class Codex {
           // (exit 1) keeps text for actionable ConfigError mapping.
           const result = yield* runCliCapture({
             spawner,
+            backend: CODEX_BACKEND,
             binary,
             args: ["login", "status"],
             cwd: input.cwd,
@@ -158,6 +159,7 @@ export class Codex {
 
             const turn = yield* runCliTurn({
               spawner,
+              backend: CODEX_BACKEND,
               binary,
               args,
               cwd: input.cwd,

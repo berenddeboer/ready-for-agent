@@ -94,3 +94,51 @@ export class AgentBackendMalformedOutputError extends Schema.TaggedErrorClass<Ag
     byteLength: Schema.Finite,
   },
 ) {}
+
+const AgentBackendDescriptorSchema = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+})
+
+/** Agent Backend CLI binary was not found on the Harness PATH (spawn ENOENT). */
+export class AgentBackendNotInstalledError extends Schema.TaggedErrorClass<AgentBackendNotInstalledError>()(
+  "AgentBackendNotInstalledError",
+  {
+    message: Schema.String,
+    backend: AgentBackendDescriptorSchema,
+    binary: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export const isAgentBackendNotInstalledError = (
+  value: unknown,
+): value is AgentBackendNotInstalledError =>
+  typeof value === "object" &&
+  value !== null &&
+  "_tag" in value &&
+  value._tag === "AgentBackendNotInstalledError"
+
+/**
+ * Walk a nested `cause` / `_tag` chain for AgentBackendNotInstalledError.
+ * Step handlers wrap the spawn error, so `instanceof` on the top-level
+ * failure is not enough.
+ */
+export const findAgentBackendNotInstalledError = (
+  cause: unknown,
+): AgentBackendNotInstalledError | undefined => {
+  const seen = new Set<unknown>()
+  let current: unknown = cause
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current)
+    if (isAgentBackendNotInstalledError(current)) {
+      return current
+    }
+    if (typeof current === "object" && "cause" in current) {
+      current = Reflect.get(current, "cause")
+      continue
+    }
+    break
+  }
+  return undefined
+}
