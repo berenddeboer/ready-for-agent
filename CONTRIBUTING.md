@@ -7,26 +7,60 @@ covers monorepo development of Ready for Agent.
 
 ## Prerequisites
 
-1. [Bun](https://bun.sh/) (workspace package manager and runtime)
-2. Product host tools from the product README: `git`, plus `gh` for GitHub
-   Repositories and `glab` for GitLab Repositories. Authenticate each Forge CLI
-   for the Repository's Forge Host.
-3. The selected Agent Backend on PATH (`opencode` by default), authenticated per
+Product host tools from the product README: `git`, plus `gh` for GitHub
+Repositories and `glab` for GitLab Repositories. Authenticate each Forge CLI
+for the Repository's Forge Host.
+
+Also needed to run or test the harness:
+
+1. The selected Agent Backend on PATH (`opencode` by default), authenticated per
    its own documentation.
-4. Optional: `keymaxxer` on PATH, or `KEYMAXXER_ENTRYPOINT` pointing at an
+2. Optional: `keymaxxer` on PATH, or `KEYMAXXER_ENTRYPOINT` pointing at an
    existing entrypoint (no hardcoded machine path). Not used by Grok Build
    Agent Turns.
-5. Contributor scripts only: `curl`, used by GitLab e2e and fixture scripts
+3. Contributor scripts only: `curl`, used by GitLab e2e and fixture scripts
    such as `scripts/setup-gitlab-e2e-fixture.sh` and
    `scripts/regenerate-e2e-keymaxxer-vault.sh`. It is not required to run the
    operator binary.
 
-## Install
+## Install with mise
+
+[mise](https://mise.jdx.dev/) 2026.7.0 or later installs the pinned Bun and hk
+versions, then workspace dependencies (which apply the existing Git hooks).
+
+```bash
+git clone git@github.com:berenddeboer/ready-for-agent.git
+cd ready-for-agent
+mise trust
+mise bootstrap
+```
+
+Optional browser/e2e setup (installs Chromium and native Playwright
+dependencies; not required for ordinary development):
+
+```bash
+mise run setup-e2e
+```
+
+## Install without mise
+
+Install the Bun version pinned in [`mise.toml`](mise.toml) from
+[bun.sh](https://bun.sh/). Then:
 
 ```bash
 git clone git@github.com:berenddeboer/ready-for-agent.git
 cd ready-for-agent
 bun install
+```
+
+`bun install` runs the root `prepare` script, which installs Git hooks when
+`hk` is on PATH (or resolvable through mise) and applies the existing package
+setup patches.
+
+Optional browser/e2e setup:
+
+```bash
+(cd apps/harness && bunx playwright install --with-deps chromium)
 ```
 
 ## Running the harness

@@ -1,0 +1,24 @@
+{
+  "name": "workspace-scripts",
+  "$schema": "../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "scripts",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "bun test tool-pins.test.ts",
+        "cwd": "{projectRoot}"
+      },
+      "inputs": [
+        "{workspaceRoot}/mise.toml",
+        "{workspaceRoot}/hk.pkl",
+        "{workspaceRoot}/.github/**/*.yml",
+        "{workspaceRoot}/.github/**/*.yaml",
+        "{projectRoot}/tool-pins.test.ts"
+      ],
+      "cache": true
+    }
+  }
+}
