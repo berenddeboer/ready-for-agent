@@ -647,6 +647,15 @@ rfa:AgentTurn
       owl:someValuesFrom rfa:AgentBackend ;
     ] .
 
+rfa:InteractiveSessionContinuation
+  rdfs:subClassOf
+    prov:Activity,
+    [
+      a owl:Restriction ;
+      owl:onProperty prov:wasAssociatedWith ;
+      owl:someValuesFrom rfa:AgentBackend ;
+    ] .
+
 rfa:AgentBackend
   rdfs:subClassOf prov:SoftwareAgent .
 
