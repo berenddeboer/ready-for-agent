@@ -1,7 +1,16 @@
-/** Live e2e Harness port. Override with `E2E_HARNESS_PORT` when 4174 is busy. */
-export const E2E_HARNESS_PORT = Number(process.env.E2E_HARNESS_PORT ?? 4174)
-export const E2E_BASE_URL = `http://127.0.0.1:${E2E_HARNESS_PORT}`
-export const E2E_GRAPHQL_URL = `${E2E_BASE_URL}/graphql`
+import {
+  liveHarnessWorkerIdentityForSlot,
+  resolvePlaywrightParallelIndex,
+} from "./live-harness-worker.ts"
+
+const playwrightSlot = liveHarnessWorkerIdentityForSlot({
+  workerIndex: resolvePlaywrightParallelIndex(),
+})
+
+/** Listen port for this Playwright worker. Base is env `E2E_HARNESS_PORT` (default 4174). */
+export const E2E_HARNESS_PORT = playwrightSlot.port
+export const E2E_BASE_URL = playwrightSlot.baseUrl
+export const E2E_GRAPHQL_URL = playwrightSlot.graphqlUrl
 
 // --- GitHub End-to-End Fixture Repository ---
 export const FIXTURE_GITHUB_OWNER = "berenddeboer"

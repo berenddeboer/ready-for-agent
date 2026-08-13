@@ -1,5 +1,8 @@
 /**
  * Start the production-built Harness with a fresh isolated database.
+ * When `E2E_HARNESS_WORKER_INDEX` is set (UI-history Playwright workers,
+ * issue #1000), listen port, supervisor state file, database, and Keymaxxer
+ * home / Sidecar are unique to that worker.
  * Production lifecycle owns migrations and Keymaxxer Sidecar coordination.
  *
  * CI / fixture mode: temporary HOME with the checked-in encrypted vault.
@@ -41,7 +44,6 @@ import {
   buildProductPath,
   resolveAgentBackendE2eMode,
 } from "./agent-backend-path.ts"
-import { E2E_HARNESS_PORT } from "./constants.ts"
 import {
   type KeymaxxerE2ePolicy,
   fixtureVaultEnvOverrides,
@@ -50,14 +52,17 @@ import {
 } from "./keymaxxer-e2e-policy.ts"
 import {
   CONTROL_FILES,
-  LIVE_HARNESS_STATE_FILE,
   type LiveHarnessState,
+  liveHarnessStateFilePath,
 } from "./live-harness-control.ts"
+import { liveHarnessSupervisorBindings } from "./live-harness-worker.ts"
 import { Database } from "bun:sqlite"
 
 const supportDir = dirname(fileURLToPath(import.meta.url))
 const harnessRoot = resolve(supportDir, "../..")
-const port = Number(process.env.E2E_HARNESS_PORT ?? E2E_HARNESS_PORT)
+const workerBindings = liveHarnessSupervisorBindings()
+const port = workerBindings.port
+const stateFile = liveHarnessStateFilePath(workerBindings.workerIndex)
 
 // Fail fast, before creating any temp dir, fake CLI, or production-build
 // check: a missing credential must never get far enough to touch the
@@ -175,7 +180,7 @@ if (!existsSync(distServer)) {
 }
 
 const state: LiveHarnessState = { dbPath, controlDir }
-writeFileSync(LIVE_HARNESS_STATE_FILE, JSON.stringify(state))
+writeFileSync(stateFile, JSON.stringify(state))
 
 let generation = 0
 let child: ChildProcess | null = null
@@ -202,7 +207,7 @@ const startChild = () => {
 
 const cleanup = () => {
   rmSync(runDir, { recursive: true, force: true })
-  rmSync(LIVE_HARNESS_STATE_FILE, { force: true })
+  rmSync(stateFile, { force: true })
 }
 
 const stopChild = () =>

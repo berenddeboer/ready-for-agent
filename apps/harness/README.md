@@ -85,13 +85,14 @@ without wrapping the Harness in a second coordinator process.
 The Gherkin operator journeys under `e2e/features/` run the production build
 against a fresh isolated Harness database. There are **three** live suites
 plus a local/main union (separate Playwright / `webServer` boots; issues
-#958 and #999):
+#958 and #999). UI-history (`E2E_HARNESS_WORKERS>1`) starts one Harness per
+Playwright worker instead of a shared `webServer` (issue #1000):
 
 | Target | Tag filter | Product PATH | Keymaxxer | What it covers |
 | --- | --- | --- | --- | --- |
 | `harness:e2e-no-backend` | `--grep @no-backend` | `E2E_AGENT_BACKEND_MODE=no-opencode` (ambient `opencode` stripped; fail-closed if still resolvable) | `KEYMAXXER_ENABLED=false` (vault-free) | Default Agent Backend Unavailable + first-run UI when OpenCode is absent; pure-absence and mixed-Ready (fake Claude) |
 | `harness:e2e-live-forge` | `--grep @live-forge` | Default (OpenCode expected in CI) | Fixture vault credential | Add/refresh fixture Repositories, Intake, catalog-only fixture path |
-| `harness:e2e-ui-history` | `--grep @ui-history` | Default (OpenCode allowed for Settings catalog) | `KEYMAXXER_ENABLED=false` (no fixture vault) | Settings / Repository settings / Session Telemetry history and Kanban that seed persistence |
+| `harness:e2e-ui-history` | `--grep @ui-history` | Default (OpenCode allowed for Settings catalog) | `KEYMAXXER_ENABLED=false` (no fixture vault); isolated Harness per Playwright worker (`E2E_HARNESS_WORKERS>1`) | Settings / Repository settings / Session Telemetry history and Kanban that seed persistence |
 | `harness:e2e` | `--grep-invert @no-backend` | Default (OpenCode expected in CI) | Fixture vault credential | Local / `main` union of live-Forge and UI-history |
 
 ```bash

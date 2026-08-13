@@ -15,21 +15,29 @@
  * Both are file-based so the step process never needs `bun:sqlite` or a
  * handle on the server process: steps drop a request in the control directory
  * and the supervisor (which owns the database and the child process) performs
- * it. The supervisor publishes its paths in a state file at a fixed location
- * so steps can find the directory without an environment handshake.
+ * it. The supervisor publishes its paths in a per-worker state file
+ * (`.live-harness-state.<index>.json`) so isolated Playwright workers do not
+ * share one Harness (issue #1000).
  */
 
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import {
+  liveHarnessStateFileName,
+  resolvePlaywrightParallelIndex,
+} from "./live-harness-worker.ts"
 
 const supportDir = dirname(fileURLToPath(import.meta.url))
 
-/** Written by the supervisor at startup; read by steps. Git-ignored. */
-export const LIVE_HARNESS_STATE_FILE = resolve(
-  supportDir,
-  "../.live-harness-state.json",
-)
+/**
+ * Supervisor writes this path with an explicit worker index. Step-side
+ * callers omit the index and must use Playwright's parallel slot so a
+ * leaked `E2E_HARNESS_WORKER_INDEX` cannot redirect seeds/restarts.
+ */
+export const liveHarnessStateFilePath = (
+  workerIndex = resolvePlaywrightParallelIndex(),
+): string => resolve(supportDir, `../${liveHarnessStateFileName(workerIndex)}`)
 
 export type LiveHarnessState = {
   /** Isolated SQLite database the Harness process is using. */
@@ -53,7 +61,9 @@ export const CONTROL_FILES = {
 } as const
 
 export const readLiveHarnessState = (): LiveHarnessState =>
-  JSON.parse(readFileSync(LIVE_HARNESS_STATE_FILE, "utf8")) as LiveHarnessState
+  JSON.parse(
+    readFileSync(liveHarnessStateFilePath(), "utf8"),
+  ) as LiveHarnessState
 
 export const controlFilePath = (
   state: LiveHarnessState,

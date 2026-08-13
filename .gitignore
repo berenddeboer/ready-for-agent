@@ -45,6 +45,7 @@ node_modules
 /apps/harness/test-results/
 /apps/harness/.features-gen/
 /apps/harness/e2e/.live-harness-state.json
+/apps/harness/e2e/.live-harness-state.*.json
 /apps/harness/prototypes/
 /libpeerconnection.log
 npm-debug.log
