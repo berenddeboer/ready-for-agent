@@ -8,6 +8,10 @@ import {
   seedLiveHarnessAndRestart,
 } from "../e2e/support/live-harness-seed.ts"
 import {
+  PAUSED_REPOSITORY_FIXTURE,
+  pausedRepositoryFixtureIsPresent,
+} from "../e2e/support/paused-repository-fixture.ts"
+import {
   SESSION_TELEMETRY_FIXTURE_WORK_ITEM_COUNT,
   SESSION_TELEMETRY_FIXTURE_WORK_ITEM_IDS,
   TELEMETRY_FIXTURE,
@@ -91,6 +95,36 @@ describe("seedLiveHarnessAndRestart", () => {
     expect(recording.files.get(CONTROL_FILES.seedSql)).toBe("")
     expect(recording.files.get(CONTROL_FILES.restart)).toBe("1")
     expect(recording.waitCalls).toBe(1)
+  })
+})
+
+describe("pausedRepositoryFixtureIsPresent", () => {
+  const present = {
+    id: PAUSED_REPOSITORY_FIXTURE.repositoryId,
+    paused: true,
+    issuesReconciledAt: "2026-08-13T10:00:00.000Z",
+  }
+
+  test("requires the seeded Paused Repository with Issue-store freshness", () => {
+    expect(pausedRepositoryFixtureIsPresent([])).toBe(false)
+    expect(
+      pausedRepositoryFixtureIsPresent([
+        {
+          id: "repo-01KZW59OTHER0REP0FXX0000001",
+          paused: true,
+          issuesReconciledAt: "2026-08-13T10:00:00.000Z",
+        },
+      ]),
+    ).toBe(false)
+    expect(
+      pausedRepositoryFixtureIsPresent([{ ...present, paused: false }]),
+    ).toBe(false)
+    expect(
+      pausedRepositoryFixtureIsPresent([
+        { ...present, issuesReconciledAt: null },
+      ]),
+    ).toBe(false)
+    expect(pausedRepositoryFixtureIsPresent([present])).toBe(true)
   })
 })
 
