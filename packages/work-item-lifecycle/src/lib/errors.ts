@@ -127,6 +127,22 @@ export class WorkItemNotFoundError extends Schema.TaggedErrorClass<WorkItemNotFo
   },
 ) {}
 
+/** No Work Item owns this opaque backend Session ID. */
+export class SessionIdNotFoundError extends Schema.TaggedErrorClass<SessionIdNotFoundError>()(
+  "SessionIdNotFoundError",
+  {
+    sessionId: Schema.String,
+  },
+) {}
+
+/** More than one Work Item owns this opaque backend Session ID. */
+export class SessionIdAmbiguousError extends Schema.TaggedErrorClass<SessionIdAmbiguousError>()(
+  "SessionIdAmbiguousError",
+  {
+    sessionId: Schema.String,
+  },
+) {}
+
 export class StepRunNotFoundError extends Schema.TaggedErrorClass<StepRunNotFoundError>()(
   "StepRunNotFoundError",
   {

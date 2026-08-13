@@ -91,6 +91,12 @@ type Query {
   """
   session(workItemId: ID!): Session
   """
+  Resolve an opaque backend Session ID to exactly one Work Item.
+  Matches work_item.session_id exactly. Zero matches fail as not found;
+  more than one match fails as ambiguous.
+  """
+  workItemBySessionId(sessionId: String!): SessionWorkItem!
+  """
   Current Intake Candidates for one Repository from the Issue projection.
   Does not request or wait for Refresh. Empty classification succeeds without
   Agent Backend or Agent Model preflight; nonempty classification runs one
@@ -117,6 +123,24 @@ enum SessionAvailability {
   MISSING
   UNAVAILABLE
   UNSUPPORTED
+}
+
+"""
+Work Item fields needed to continue a Session interactively.
+"""
+type SessionWorkItem {
+  """
+  Agent Backend captured at Work Item creation.
+  """
+  agentBackend: AgentBackendInfo!
+  """
+  Canonical backend Session ID.
+  """
+  sessionId: String!
+  """
+  Persisted worktree path. Null when unset or already cleaned up.
+  """
+  worktreePath: String
 }
 
 type SessionModel {

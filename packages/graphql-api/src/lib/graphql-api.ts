@@ -190,6 +190,10 @@ type SessionArgs = {
   workItemId: string
 }
 
+type WorkItemBySessionIdArgs = {
+  sessionId: string
+}
+
 type KanbanStatusArgs = {
   repositoryId?: string | null
 }
@@ -882,6 +886,27 @@ export const createGraphqlApi = <R>(
                 })
                 return toGraphqlSession(session)
               }).pipe(Effect.withSpan("graphql-api.session")),
+              context,
+            ),
+          workItemBySessionId: async (
+            _parent: unknown,
+            args: WorkItemBySessionIdArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                const found = yield* lifecycle.findWorkItemBySessionId(
+                  args.sessionId,
+                )
+                return {
+                  agentBackend: toGraphqlBackend(
+                    resolveWorkItemBackend(found.agentBackend),
+                  ),
+                  sessionId: found.sessionId,
+                  worktreePath: found.worktreePath,
+                }
+              }).pipe(Effect.withSpan("graphql-api.workItemBySessionId")),
               context,
             ),
           kanbanStatus: async (
