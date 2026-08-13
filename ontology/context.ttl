@@ -993,6 +993,36 @@ rfa:AgentTurn
   rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn for this concept."@en ;
 ] .
 
+rfa:InteractiveSessionContinuation
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Interactive Session Continuation"@en ;
+  skos:definition "An operator-driven interactive use of a Work Item's canonical Session through its captured Agent Backend and working directory. Its messages become part of the Session used by later Agent Turns, but the continuation is not itself an Agent Turn or Lifecycle Step."@en ;
+  skos:hiddenLabel "Agent Turn"@en, "Resume Work Item"@en, "human-only fork"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InteractiveSessionContinuation ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Agent Turn"@en ;
+  rfa:avoidanceRationale "an Interactive Session Continuation is operator-driven and interactive, not a headless Agent Turn"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InteractiveSessionContinuation ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Resume Work Item"@en ;
+  rfa:avoidanceRationale "Resume is a lifecycle Retry or Start Work Item synonym, not an interactive continuation"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InteractiveSessionContinuation ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "human-only fork"@en ;
+  rfa:avoidanceRationale "the continuation writes to the canonical Session, not a separate copy"@en ;
+] .
+
 rfa:AgentTurnResult
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Agent Turn Result"@en ;

@@ -155,6 +155,10 @@ _Avoid_: Agent Turn Result, required backend capability
 One fully unattended headless Agent Backend CLI invocation within a Session using an explicit Agent Model and optional Thinking Level. An Agent Backend must support both the first turn and later turns that continue the same Session; file, shell, and tool permissions cannot wait for operator approval during the turn.
 _Avoid_: Agent run, prompt run, OpenCode process
 
+**Interactive Session Continuation**:
+An operator-driven interactive use of a Work Item's canonical Session through its captured Agent Backend and working directory. Its messages become part of the Session used by later Agent Turns, but the continuation is not itself an Agent Turn or Lifecycle Step.
+_Avoid_: Agent Turn, Resume Work Item, human-only fork
+
 **Agent Turn Result**:
 The normalized successful output of an Agent Turn: its Session ID and ordered final assistant text, recovered from the Agent Backend's machine-readable output. Backend-specific events and terminal presentation are not part of the result.
 _Avoid_: CLI stdout, transcript, tool-event stream
