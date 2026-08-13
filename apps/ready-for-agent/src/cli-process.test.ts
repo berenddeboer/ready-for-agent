@@ -1079,12 +1079,33 @@ describe("operator binary jump process contract", () => {
       join(binDir, "tmux"),
       `#!/usr/bin/env bun
 import { appendFileSync } from "node:fs"
-appendFileSync(process.env.TMUX_ARGV_LOG ?? "", JSON.stringify(process.argv.slice(2)) + "\\n")
+const args = process.argv.slice(2)
+appendFileSync(process.env.TMUX_ARGV_LOG ?? "", JSON.stringify(args) + "\\n")
 if (process.env.TMUX_FAIL === "1") {
   process.exit(1)
 }
-if (process.argv.includes("new-window")) {
+if (process.env.TMUX_FAIL_ON !== undefined && args.includes(process.env.TMUX_FAIL_ON)) {
+  process.exit(1)
+}
+if (args[0] === "display-message") {
+  process.stdout.write((process.env.TMUX_CURRENT_SESSION ?? "$0") + "\\n")
+  process.exit(0)
+}
+if (args[0] === "list-windows") {
+  process.stdout.write((process.env.TMUX_LIST_WINDOWS ?? "") + "\\n")
+  process.exit(0)
+}
+if (args[0] === "list-panes") {
+  process.stdout.write((process.env.TMUX_LIST_PANES ?? "%1 1\\n%2") + "\\n")
+  process.exit(0)
+}
+if (args.includes("new-window")) {
   process.stdout.write("@1 %1\\n")
+  process.exit(0)
+}
+if (args[0] === "split-window" && args.includes("-P")) {
+  process.stdout.write("%3\\n")
+  process.exit(0)
 }
 `,
     )
@@ -1276,12 +1297,21 @@ if (process.argv.includes("new-window")) {
       const invocations = parseTmuxArgvLog(tmuxLog)
       const opencode = join(binDir, "opencode")
       expect(invocations).toEqual([
+        ["display-message", "-p", "#{session_id}"],
+        [
+          "list-windows",
+          "-a",
+          "-F",
+          "#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{@rfa-session-id}",
+        ],
         [
           "new-window",
           "-d",
           "-P",
           "-F",
           "#{window_id} #{pane_id}",
+          "-n",
+          "rfa:85312e9f",
           "-c",
           worktree,
           "--",
@@ -1290,6 +1320,8 @@ if (process.argv.includes("new-window")) {
           "--session",
           jumpSessionId,
         ],
+        ["set-option", "-w", "-t", "@1", "@rfa-session-id", jumpSessionId],
+        ["set-option", "-p", "-t", "%1", "@rfa-agent", "1"],
         ["split-window", "-h", "-t", "@1", "-c", worktree],
         ["select-layout", "-t", "@1", "even-horizontal"],
         ["select-pane", "-t", "%1"],
@@ -1316,12 +1348,14 @@ if (process.argv.includes("new-window")) {
       const invocations = parseTmuxArgvLog(tmuxLog)
       const claude = join(binDir, "claude")
       const cliCwd = resolve(packageRoot)
-      expect(invocations[0]).toEqual([
+      expect(invocations[2]).toEqual([
         "new-window",
         "-d",
         "-P",
         "-F",
         "#{window_id} #{pane_id}",
+        "-n",
+        "rfa:85312e9f",
         "-c",
         cliCwd,
         "--",
@@ -1329,7 +1363,7 @@ if (process.argv.includes("new-window")) {
         "--resume",
         jumpSessionId,
       ])
-      expect(invocations[1]).toEqual([
+      expect(invocations).toContainEqual([
         "split-window",
         "-h",
         "-t",
@@ -1362,13 +1396,208 @@ if (process.argv.includes("new-window")) {
         )
         expect(result.status).toBe(0)
         const invocations = parseTmuxArgvLog(tmuxLog)
-        expect(invocations[0]?.slice(8)).toEqual([
+        const created = invocations.find((args) => args[0] === "new-window")
+        const separator = created?.indexOf("--") ?? -1
+        expect(created?.slice(separator + 1)).toEqual([
           join(binDir, backendId),
           ...expectedTail,
         ])
       } finally {
         await graphql.close()
       }
+    }
+  })
+
+  test("jump selects the existing tagged window instead of creating another", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: null,
+    })
+    try {
+      const result = await runCli(["jump", jumpSessionId], graphql.url, {
+        ...jumpEnv(),
+        TMUX_LIST_WINDOWS: `$0\tdefault\t@5\t3\t${jumpSessionId}`,
+        TMUX_LIST_PANES: "%1 1\n%2",
+      })
+
+      expect(result.status).toBe(0)
+      expect(result.stdout.trim()).toBe("")
+      expect(result.stderr.trim()).toBe("")
+      const invocations = parseTmuxArgvLog(tmuxLog)
+      expect(invocations.some((args) => args.includes("new-window"))).toBe(
+        false,
+      )
+      expect(invocations).toContainEqual(["select-window", "-t", "@5"])
+      expect(invocations).toContainEqual(["select-pane", "-t", "%1"])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump recreates the left agent pane when only the shell remains", async () => {
+    const worktree = join(tempRoot, "reuse-worktree")
+    mkdirSync(worktree)
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: worktree,
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv({
+          TMUX_LIST_WINDOWS: `$0\tdefault\t@5\t3\t${jumpSessionId}`,
+          TMUX_LIST_PANES: "%2",
+        }),
+      )
+
+      expect(result.status).toBe(0)
+      const invocations = parseTmuxArgvLog(tmuxLog)
+      expect(invocations.some((args) => args.includes("new-window"))).toBe(
+        false,
+      )
+      expect(invocations).toContainEqual([
+        "split-window",
+        "-h",
+        "-b",
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "-t",
+        "@5",
+        "-c",
+        worktree,
+        "--",
+        join(binDir, "opencode"),
+        worktree,
+        "--session",
+        jumpSessionId,
+      ])
+      expect(invocations).toContainEqual([
+        "set-option",
+        "-p",
+        "-t",
+        "%3",
+        "@rfa-agent",
+        "1",
+      ])
+      expect(invocations).toContainEqual([
+        "select-layout",
+        "-t",
+        "@5",
+        "even-horizontal",
+      ])
+      expect(invocations).toContainEqual(["select-pane", "-t", "%3"])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump reuses a sole remaining tagged agent pane", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: null,
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv({
+          TMUX_LIST_WINDOWS: `$0\tdefault\t@5\t3\t${jumpSessionId}`,
+          TMUX_LIST_PANES: "%1 1",
+        }),
+      )
+
+      expect(result.status).toBe(0)
+      const invocations = parseTmuxArgvLog(tmuxLog)
+      expect(invocations.some((args) => args.includes("new-window"))).toBe(
+        false,
+      )
+      expect(invocations.some((args) => args.includes("split-window"))).toBe(
+        false,
+      )
+      expect(invocations).toContainEqual(["select-pane", "-t", "%1"])
+      expect(invocations).toContainEqual(["select-window", "-t", "@5"])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump does not kill the created window when only select-window fails", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: null,
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv({ TMUX_FAIL_ON: "select-window" }),
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(
+        "tmux could not create and arrange the window",
+      )
+      const invocations = parseTmuxArgvLog(tmuxLog)
+      expect(invocations.some((args) => args.includes("new-window"))).toBe(true)
+      expect(invocations.some((args) => args.includes("kill-window"))).toBe(
+        false,
+      )
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump refuses a tagged window that belongs to another tmux session", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: null,
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv({
+          TMUX_LIST_WINDOWS: `$1\tother\t@8\t2\t${jumpSessionId}`,
+        }),
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stdout.trim()).toBe("")
+      expect(result.stderr.trim()).toBe(
+        "Session already open in tmux session 'other' window 2",
+      )
+      const invocations = parseTmuxArgvLog(tmuxLog)
+      expect(invocations.some((args) => args.includes("new-window"))).toBe(
+        false,
+      )
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump kills only the window it created when split-window fails", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: null,
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv({ TMUX_FAIL_ON: "split-window" }),
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(
+        "tmux could not create and arrange the window",
+      )
+      const invocations = parseTmuxArgvLog(tmuxLog)
+      expect(invocations.some((args) => args.includes("new-window"))).toBe(true)
+      expect(invocations.at(-1)).toEqual(["kill-window", "-t", "@1"])
+    } finally {
+      await graphql.close()
     }
   })
 })

@@ -357,6 +357,7 @@ const jumpWorkflow = Effect.fn("Cli.jump")(function* (sessionId: string) {
 
   const agentExecutable = yield* executablePath.resolve(resume.executableName)
   yield* tmux.createJumpWindow({
+    sessionId: found.sessionId,
     workingDirectory,
     agentExecutable,
     agentArguments: resume.arguments,
