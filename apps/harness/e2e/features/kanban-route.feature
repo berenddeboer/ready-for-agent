@@ -41,6 +41,16 @@ Feature: View the work pipeline
     And the Pipeline top nav control is active
     And the Repos top nav control is not active
 
+  Scenario: Reloading Repos with a theme pin keeps Repos as the sole active Jobs destination
+    Given the Harness has a seeded Paused Repository
+    When I open the Repos page with theme light
+    Then the Repos top nav control is the sole active Jobs destination
+    And the Pipeline top nav control is not active
+    When I refresh the page
+    Then the Repos top nav control is the sole active Jobs destination
+    And the Pipeline top nav control is not active
+    And the server-rendered Repos document with theme light has Repos as the sole active Jobs destination
+
   Scenario: Switch from Pipeline to Repos via top nav
     Given the Harness has a seeded Paused Repository
     When I navigate to the Kanban board

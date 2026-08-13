@@ -119,6 +119,7 @@ describe("/repos/$repositoryId/settings route (issue #842)", () => {
 
   test("Jobs switcher treats repository settings as Repos background", () => {
     const switcher = jobsSwitcherSource()
-    expect(switcher).toContain('pathname.startsWith("/repos/")')
+    expect(switcher).toContain("jobsViewForPath")
+    expect(switcher).toContain('jobsView === "repos"')
   })
 })

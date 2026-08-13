@@ -57,6 +57,12 @@ When("I open the Repos page", async ({ page }) => {
   await dismissFirstRunSettingsIfPresent(page)
 })
 
+When("I open the Repos page with theme light", async ({ page }) => {
+  await page.goto("/repos?theme=light")
+  await expect(page).toHaveURL(/\/repos\?theme=light$/)
+  await dismissFirstRunSettingsIfPresent(page)
+})
+
 When("I click the Pipeline top nav control", async ({ page }) => {
   await jobsNav(page)
     .getByRole("link", { name: "Pipeline", exact: true })
@@ -163,6 +169,52 @@ Then("the Pipeline top nav control is not active", async ({ page }) => {
   await expect(pipeline).toBeVisible()
   await expect(pipeline).not.toHaveAttribute("aria-current", "page")
 })
+
+const JOBS_TAB_IDS = [
+  "jobs-tab-pipeline",
+  "jobs-tab-repos",
+  "jobs-tab-completed",
+] as const
+
+const jobsAnchorTag = (html: string, id: string): string => {
+  const match = html.match(new RegExp(`<a\\b[^>]*\\bid="${id}"[^>]*>`, "i"))
+  if (match === null || match[0] === undefined) {
+    throw new Error(`Expected Jobs destination anchor #${id} in the document`)
+  }
+  return match[0]
+}
+
+const assertSoleActiveJobsDestination = async (
+  page: Page,
+  name: "Pipeline" | "Repos" | "Completed",
+) => {
+  const current = jobsNav(page).locator('a[aria-current="page"]')
+  await expect(current).toHaveCount(1)
+  await expect(current).toHaveAccessibleName(name)
+}
+
+Then(
+  "the Repos top nav control is the sole active Jobs destination",
+  async ({ page }) => {
+    await assertSoleActiveJobsDestination(page, "Repos")
+  },
+)
+
+Then(
+  "the server-rendered Repos document with theme light has Repos as the sole active Jobs destination",
+  async ({ page }) => {
+    const response = await page.request.get("/repos?theme=light")
+    expect(response.ok()).toBe(true)
+    const html = await response.text()
+    const currentIds = JOBS_TAB_IDS.filter((id) =>
+      /aria-current=["']page["']/.test(jobsAnchorTag(html, id)),
+    )
+    expect(currentIds).toEqual(["jobs-tab-repos"])
+    expect(jobsAnchorTag(html, "jobs-tab-pipeline")).not.toMatch(
+      /aria-current=["']page["']/,
+    )
+  },
+)
 
 Then("I am on the Kanban board", async ({ page }) => {
   await expect(page).toHaveURL(/\/$/)

@@ -1,4 +1,5 @@
 import {
+  isCompletedBackgroundPath,
   isHarnessSettingsPath,
   isOtherRoutedDialogPath,
   isPipelineBackgroundPath,
@@ -6,6 +7,7 @@ import {
   isRepositorySettingsPath,
   isRepositorySettingsPathFor,
   isSessionTelemetryPath,
+  jobsViewForPath,
   markRepositorySettingsOpenedFromInApp,
   markSessionTelemetryOpenedFromInApp,
   parseRepositorySettingsRepositoryId,
@@ -129,6 +131,32 @@ describe("Repository settings route helpers (issue #842)", () => {
     expect(isReposBackgroundPath("/repos/repo-1/settings")).toBe(true)
     expect(isReposBackgroundPath("/")).toBe(false)
     expect(isReposBackgroundPath("/settings")).toBe(false)
+  })
+
+  test("Completed background includes /completed and nested archive paths", () => {
+    expect(isCompletedBackgroundPath("/completed")).toBe(true)
+    expect(isCompletedBackgroundPath("/completed/")).toBe(true)
+    expect(isCompletedBackgroundPath("/completed/page")).toBe(true)
+    expect(isCompletedBackgroundPath("/")).toBe(false)
+    expect(isCompletedBackgroundPath("/repos")).toBe(false)
+  })
+
+  test("jobsViewForPath picks exactly one Jobs destination per runtime path", () => {
+    expect(jobsViewForPath("/")).toBe("pipeline")
+    expect(jobsViewForPath("/settings")).toBe("pipeline")
+    expect(jobsViewForPath("/settings/")).toBe("pipeline")
+    expect(jobsViewForPath("/session/wi-1/telemetry")).toBe("pipeline")
+    expect(jobsViewForPath("/session/wi-1/telemetry/")).toBe("pipeline")
+
+    expect(jobsViewForPath("/repos")).toBe("repos")
+    expect(jobsViewForPath("/repos/")).toBe("repos")
+    expect(jobsViewForPath("/repos/repo-1/settings")).toBe("repos")
+
+    expect(jobsViewForPath("/completed")).toBe("completed")
+    expect(jobsViewForPath("/completed/")).toBe("completed")
+
+    expect(jobsViewForPath("/repos")).not.toBe("pipeline")
+    expect(jobsViewForPath("/unknown")).toBeUndefined()
   })
 
   test("reads the Repository settings in-app origin history marker", () => {

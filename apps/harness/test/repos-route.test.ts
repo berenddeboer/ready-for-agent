@@ -60,7 +60,9 @@ describe("/repos route", () => {
     expect(reposIdx).toBeGreaterThan(pipelineIdx)
     expect(completedIdx).toBeGreaterThan(reposIdx)
     expect(tabs).toContain("<ReposTabIcon")
-    expect(tabs).toMatch(/Repos\s*<\/Link>/)
+    expect(tabs).toMatch(/Repos\s*<\/JobsDestinationLink>/)
+    expect(switcher).toContain("jobsViewForPath")
+    expect(switcher).toContain("useLinkProps")
   })
 
   test("Repos page body keeps the reading-width cap", () => {
