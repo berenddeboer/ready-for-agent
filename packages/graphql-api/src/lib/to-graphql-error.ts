@@ -22,6 +22,7 @@ type TaggedError = {
   readonly unfinishedWorkItemCount?: number
   readonly scope?: string
   readonly retryAt?: number
+  readonly sessionId?: string
 }
 
 const isTaggedError = (error: unknown): error is TaggedError =>
@@ -147,6 +148,18 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
       return gql(
         `Work Item not found: ${error.workItemId}`,
         "WORK_ITEM_NOT_FOUND",
+      )
+    case "SessionIdNotFoundError":
+      return gql(
+        `No Work Item owns Session ID: ${error.sessionId}`,
+        "SESSION_NOT_FOUND",
+        { sessionId: error.sessionId },
+      )
+    case "SessionIdAmbiguousError":
+      return gql(
+        `Multiple Work Items own Session ID: ${error.sessionId}`,
+        "SESSION_AMBIGUOUS",
+        { sessionId: error.sessionId },
       )
     case "WorkItemTerminalError":
       return gql(

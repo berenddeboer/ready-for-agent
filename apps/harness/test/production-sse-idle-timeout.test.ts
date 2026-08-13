@@ -383,6 +383,7 @@ describe("production GraphQL SSE idle timeout", () => {
         listWorkItemsForRepository: unused,
         listCompletedWorkItems: unused,
         ownsSessionId: () => Effect.succeed(false),
+        findWorkItemBySessionId: unused,
         countCommittedPullRequests: unused,
         continueAfterHumanPrOutcome: unused,
         admitWaitingWorkItems: Effect.succeed(0),

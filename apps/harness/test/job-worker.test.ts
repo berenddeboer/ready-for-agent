@@ -324,6 +324,7 @@ const queueLayer = (
       listCompletedWorkItems: () =>
         Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
       ownsSessionId: () => Effect.succeed(false),
+      findWorkItemBySessionId: unused,
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
@@ -2216,6 +2217,7 @@ describe("Job worker", () => {
           listCompletedWorkItems: () =>
             Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
           ownsSessionId: () => Effect.succeed(false),
+          findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
           continueAfterHumanPrOutcome: unused,
           admitWaitingWorkItems: Effect.succeed(0),
@@ -2456,6 +2458,7 @@ describe("Job worker", () => {
           listCompletedWorkItems: () =>
             Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
           ownsSessionId: () => Effect.succeed(false),
+          findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
           continueAfterHumanPrOutcome: unused,
           admitWaitingWorkItems: Effect.succeed(0),
@@ -2532,6 +2535,7 @@ describe("Job worker", () => {
           listCompletedWorkItems: () =>
             Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
           ownsSessionId: () => Effect.succeed(false),
+          findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
           continueAfterHumanPrOutcome: unused,
           admitWaitingWorkItems: Effect.succeed(0),
@@ -2676,6 +2680,7 @@ describe("Job worker", () => {
           listCompletedWorkItems: () =>
             Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
           ownsSessionId: () => Effect.succeed(false),
+          findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
           continueAfterHumanPrOutcome: unused,
           admitWaitingWorkItems: Effect.succeed(0),
@@ -2877,6 +2882,7 @@ describe("Job worker", () => {
         listCompletedWorkItems: () =>
           Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
         ownsSessionId: () => Effect.succeed(false),
+        findWorkItemBySessionId: unused,
         countCommittedPullRequests: () => Effect.succeed(0),
         continueAfterHumanPrOutcome: unused,
         admitWaitingWorkItems: Effect.succeed(0),
@@ -2998,6 +3004,7 @@ describe("Job worker", () => {
           listCompletedWorkItems: () =>
             Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
           ownsSessionId: () => Effect.succeed(false),
+          findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
           continueAfterHumanPrOutcome: unused,
           admitWaitingWorkItems: Effect.succeed(0),

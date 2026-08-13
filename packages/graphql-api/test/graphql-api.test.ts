@@ -46,6 +46,8 @@ import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
   IssueNotFoundError,
   STEP_RUN_REASON,
+  SessionIdAmbiguousError,
+  SessionIdNotFoundError,
   UnfinishedWorkItemExistsError,
   WAITING_FOR_AGENT_TURN_MESSAGE,
   WorkItemLifecycle,
@@ -325,6 +327,7 @@ const makeRuntime = (
     recoverOrphanedStepRuns: Effect.succeed(0),
     interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
     runStep: unused,
+    wakePostponedStep: unused,
     retry: unused,
     pause: unused,
     start: unused,
@@ -335,6 +338,7 @@ const makeRuntime = (
     listWorkItemsForRepository: unused,
     listCompletedWorkItems: unused,
     ownsSessionId: () => Effect.succeed(false),
+    findWorkItemBySessionId: unused,
     countCommittedPullRequests: unused,
     continueAfterHumanPrOutcome: unused,
     admitWaitingWorkItems: Effect.succeed(0),
@@ -8087,6 +8091,120 @@ describe("GraphQL API", () => {
           cost: null,
         },
       },
+    })
+  })
+
+  test("workItemBySessionId returns backend, Session ID, and worktree for one match", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        findWorkItemBySessionId: (sessionId) =>
+          Effect.succeed({
+            agentBackend: "grok",
+            sessionId,
+            worktreePath: "/tmp/worktrees/acme-widgets-7",
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItemBySessionId($sessionId: String!) {
+          workItemBySessionId(sessionId: $sessionId) {
+            agentBackend { id label }
+            sessionId
+            worktreePath
+          }
+        }`,
+        variables: { sessionId: "85312e9f-9c57-42ef-9757-b2512cee57cd" },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        workItemBySessionId: {
+          agentBackend: { id: "grok", label: "Grok Build" },
+          sessionId: "85312e9f-9c57-42ef-9757-b2512cee57cd",
+          worktreePath: "/tmp/worktrees/acme-widgets-7",
+        },
+      },
+    })
+  })
+
+  test("workItemBySessionId fails as not found for zero matches", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        findWorkItemBySessionId: (sessionId) =>
+          Effect.fail(new SessionIdNotFoundError({ sessionId })),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItemBySessionId($sessionId: String!) {
+          workItemBySessionId(sessionId: $sessionId) {
+            sessionId
+          }
+        }`,
+        variables: { sessionId: "missing-session" },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "No Work Item owns Session ID: missing-session",
+          extensions: {
+            code: "SESSION_NOT_FOUND",
+            sessionId: "missing-session",
+          },
+        }),
+      ],
+    })
+  })
+
+  test("workItemBySessionId fails as ambiguous for multiple matches", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        findWorkItemBySessionId: (sessionId) =>
+          Effect.fail(new SessionIdAmbiguousError({ sessionId })),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItemBySessionId($sessionId: String!) {
+          workItemBySessionId(sessionId: $sessionId) {
+            sessionId
+          }
+        }`,
+        variables: { sessionId: "shared-session" },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "Multiple Work Items own Session ID: shared-session",
+          extensions: {
+            code: "SESSION_AMBIGUOUS",
+            sessionId: "shared-session",
+          },
+        }),
+      ],
     })
   })
 

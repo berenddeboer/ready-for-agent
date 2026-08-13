@@ -73,6 +73,8 @@ import {
   ParentIssueError,
   ResetCleanupError,
   RetryNotEligibleError,
+  SessionIdAmbiguousError,
+  SessionIdNotFoundError,
   StepRunNotFoundError,
   UnfinishedWorkItemExistsError,
   UnsupportedIssueHierarchyError,
@@ -673,6 +675,21 @@ export type GetWorkItemError =
 
 export type ListWorkItemsError = WorkItemLifecycleDatabaseError
 
+/**
+ * Captured Agent Backend, canonical Session ID, and worktree for a Session
+ * owned by exactly one Work Item.
+ */
+export type WorkItemSessionLookup = {
+  readonly agentBackend: string
+  readonly sessionId: string
+  readonly worktreePath: string | null
+}
+
+export type FindWorkItemBySessionIdError =
+  | SessionIdNotFoundError
+  | SessionIdAmbiguousError
+  | WorkItemLifecycleDatabaseError
+
 export type RunStepError =
   | StepRunNotFoundError
   | WorkItemNotFoundError
@@ -860,6 +877,13 @@ export interface WorkItemLifecycleShape {
   readonly ownsSessionId: (
     sessionId: string,
   ) => Effect.Effect<boolean, ListWorkItemsError>
+  /**
+   * Resolve an opaque backend Session ID to exactly one Work Item.
+   * Fetches two rows so zero, one, and multiple matches are distinct.
+   */
+  readonly findWorkItemBySessionId: (
+    sessionId: string,
+  ) => Effect.Effect<WorkItemSessionLookup, FindWorkItemBySessionIdError>
   /**
    * Count unique Work Items with a non-null GitHub PR number and a successful
    * commit Step Run whose finished_at is in the half-open range [fromMs, toMs).
@@ -1262,6 +1286,37 @@ export const makeWorkItemLifecycleLive = (
           return rows.length > 0
         },
       )
+
+      const findWorkItemBySessionId = Effect.fn(
+        "WorkItemLifecycle.findWorkItemBySessionId",
+      )(function* (sessionId: string) {
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT agent_backend, worktree_path
+             FROM work_item
+             WHERE session_id = ?
+             LIMIT 2`,
+            [sessionId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly agent_backend: string
+          readonly worktree_path: string | null
+        }[]
+
+        const row = rows[0]
+        if (row === undefined) {
+          return yield* new SessionIdNotFoundError({ sessionId })
+        }
+        if (rows.length > 1) {
+          return yield* new SessionIdAmbiguousError({ sessionId })
+        }
+
+        return {
+          agentBackend: row.agent_backend,
+          sessionId,
+          worktreePath: row.worktree_path,
+        } satisfies WorkItemSessionLookup
+      })
 
       const countCommittedPullRequests = Effect.fn(
         "WorkItemLifecycle.countCommittedPullRequests",
@@ -6512,6 +6567,7 @@ export const makeWorkItemLifecycleLive = (
         listWorkItemsForRepository,
         listCompletedWorkItems,
         ownsSessionId,
+        findWorkItemBySessionId,
         countCommittedPullRequests,
         continueAfterHumanPrOutcome,
         admitWaitingWorkItems,
