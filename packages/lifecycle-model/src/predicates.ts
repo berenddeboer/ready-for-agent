@@ -241,9 +241,13 @@ export const evaluateActionableIssue = (
 const activeClosingPullRequest = (
   pullRequest: RelevantIssuePredicateShape["closingPullRequests"][number],
   forge: string,
-): boolean =>
-  pullRequest.state === "MERGED" ||
-  (pullRequest.state === "OPEN" && (forge === "gitlab" || !pullRequest.isDraft))
+  issueState: string,
+): boolean => {
+  if (pullRequest.state === "OPEN") {
+    return forge === "gitlab" || !pullRequest.isDraft
+  }
+  return pullRequest.state === "MERGED" && issueState !== "OPEN"
+}
 
 export const evaluateRelevantIssue = (
   issue: RelevantIssuePredicateShape | null | undefined,
@@ -280,7 +284,8 @@ export const evaluateRelevantIssue = (
   }
 
   const activeClosingPullRequests = issue.closingPullRequests.filter(
-    (pullRequest) => activeClosingPullRequest(pullRequest, context.forge),
+    (pullRequest) =>
+      activeClosingPullRequest(pullRequest, context.forge, issue.state),
   )
   const satisfiesClosingPullRequestCondition =
     activeClosingPullRequests.length === 0 ||

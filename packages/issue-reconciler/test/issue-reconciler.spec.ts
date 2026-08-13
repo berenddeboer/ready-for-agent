@@ -322,6 +322,18 @@ describe("IssueReconciler", () => {
           },
         ],
       }),
+      remoteIssue(6, {
+        hierarchySupported: false,
+        state: "CLOSED",
+        closingPullRequests: [
+          {
+            number: 106,
+            repository: "project/oauth_client",
+            state: "MERGED",
+            isDraft: false,
+          },
+        ],
+      }),
     ]
     const gitlab = Layer.succeed(GitLabService, {
       ...defaultGitLabShape,
@@ -339,14 +351,14 @@ describe("IssueReconciler", () => {
         const summary = yield* reconciler.reconcile(gitlabRepository)
 
         expect(summary).toEqual({
-          fetched: 5,
-          inserted: 3,
+          fetched: 6,
+          inserted: 4,
           updated: 0,
           deleted: 0,
           unchanged: 0,
         })
         expect(db.stored.map(({ issueNumber }) => issueNumber)).toEqual([
-          1, 4, 5,
+          1, 3, 4, 5,
         ])
         expect(db.stored[0]?.blockedBy).toEqual([
           {
@@ -682,7 +694,7 @@ describe("IssueReconciler", () => {
             {
               number: 303,
               repository: "acme/widgets",
-              state: "MERGED",
+              state: "OPEN",
               isDraft: false,
             },
           ],
@@ -746,6 +758,89 @@ describe("IssueReconciler", () => {
         expect(db.stored.map((issue) => issue.issueNumber)).toEqual([
           1, 2, 3, 6, 7,
         ])
+      }),
+      db.layer,
+      github,
+    )
+  })
+
+  it("restores a reopened Issue whose only closing PR is an unowned merged PR", () => {
+    const parent = {
+      number: 1014,
+      url: "https://github.com/acme/widgets/issues/1014",
+      state: "OPEN" as const,
+      isReadyLabeled: true,
+    }
+    const db = makeDbFixture({
+      issues: [localIssue(1017), localIssue(1018), localIssue(1019)],
+    })
+    const github = makeGitHubLayer(
+      [
+        remoteIssue(1014, {
+          closingPullRequests: [
+            {
+              number: 900,
+              repository: "acme/widgets",
+              state: "MERGED",
+              isDraft: false,
+            },
+          ],
+        }),
+        remoteIssue(1015, {
+          closingPullRequests: [
+            {
+              number: 901,
+              repository: "acme/widgets",
+              state: "OPEN",
+              isDraft: false,
+            },
+          ],
+        }),
+        remoteIssue(1016, {
+          state: "CLOSED",
+          parent,
+          closingPullRequests: [
+            {
+              number: 902,
+              repository: "acme/widgets",
+              state: "MERGED",
+              isDraft: false,
+            },
+          ],
+        }),
+        remoteIssue(1017, { parent }),
+        remoteIssue(1018, { parent }),
+        remoteIssue(1019, { parent }),
+      ],
+      db.actions,
+    )
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(repository)
+
+        expect(summary).toEqual({
+          fetched: 6,
+          inserted: 1,
+          updated: 3,
+          deleted: 0,
+          unchanged: 0,
+        })
+        expect(
+          db.stored
+            .map((issue) => issue.issueNumber)
+            .sort((left, right) => left - right),
+        ).toEqual([1014, 1017, 1018, 1019])
+        expect(
+          db.stored
+            .filter((issue) => issue.issueNumber !== 1014)
+            .every(
+              (issue) =>
+                issue.parent?.issueNumber === 1014 &&
+                issue.parent.issueUrl === parent.url,
+            ),
+        ).toBe(true)
       }),
       db.layer,
       github,
