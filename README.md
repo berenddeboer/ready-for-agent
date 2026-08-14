@@ -128,6 +128,8 @@ issues that come with running compute in the cloud.
 - "Implement locally" to inspect the work before any commit or PR
   exists.
 - Select a parent issue and it implements all child issues.
+- Optionally include `ready-for-agent` issues created by any author,
+  not just issues you created yourself.
 - Runs on your laptop against your existing local clone — no cloud
   spend, no environment drift.
 - Works with your existing Claude (or other) subscription rather than
@@ -264,8 +266,9 @@ missing coding agent never does — it shows as Unavailable instead
 
 - The issue must carry the `ready-for-agent` label — the harness only
   shows those.
-- By default only issues **you** authored are listed. Enable "Include
-  all Issue Authors" in the repo settings to include everyone's.
+- By default only issues **you** authored are listed. If someone else's
+  `ready-for-agent` issue is missing, enable **Include all Issue Authors**
+  in the repo settings to include issues created by any author.
 
 ### The coding agent shows as Unavailable
 
