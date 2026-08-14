@@ -112,6 +112,18 @@ export class BuildModelNotConfiguredError extends Schema.TaggedErrorClass<BuildM
   },
 ) {}
 
+/**
+ * Implement With rejected a complete-profile input (partial fields, catalog
+ * membership, or Thinking Level) before creating a Work Item.
+ */
+export class InvalidExecutionProfileError extends Schema.TaggedErrorClass<InvalidExecutionProfileError>()(
+  "InvalidExecutionProfileError",
+  {
+    message: Schema.String,
+    field: Schema.optionalKey(Schema.String),
+  },
+) {}
+
 export class AgentBackendUnavailableError extends Schema.TaggedErrorClass<AgentBackendUnavailableError>()(
   "AgentBackendUnavailableError",
   {

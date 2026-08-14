@@ -44,6 +44,7 @@ import {
 } from "@ready-for-agent/queue-service"
 import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
+  InvalidExecutionProfileError,
   IssueNotFoundError,
   STEP_RUN_REASON,
   SessionIdAmbiguousError,
@@ -321,6 +322,7 @@ const makeRuntime = (
       local_cleanup: Duration.minutes(5),
     },
     implementNow: unused,
+    implementWith: unused,
     implementLocally: unused,
     implementAllWithAutoMerge: unused,
     queue: unused,
@@ -3584,6 +3586,181 @@ describe("GraphQL API", () => {
             "No build model set for acme/widgets on Agent Backend 'Claude Code'. Available: haiku, sonnet. Set one in Settings, or per repository.",
           extensions: expect.objectContaining({
             code: "BUILD_MODEL_NOT_CONFIGURED",
+          }),
+        }),
+      ],
+    })
+  })
+
+  test("implementWith projects an explicit profile and Same as build intent", async () => {
+    const profiled = {
+      ...workItem,
+      executionProfile: {
+        agentBackend: "opencode",
+        build: { model: "build-model", thinkingLevel: "high" },
+        review: { kind: "same_as_build" as const },
+      },
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementWith: (repositoryId, issueNumber, profile) => {
+          expect(repositoryId).toBe(repository.id)
+          expect(issueNumber).toBe(issue.issueNumber)
+          expect(profile).toEqual({
+            agentBackendId: "opencode",
+            buildModel: "build-model",
+            buildThinkingLevel: "high",
+            reviewSameAsBuild: true,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          })
+          return Effect.succeed(profiled)
+        },
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementWith(
+          $repositoryId: ID!
+          $issueNumber: Int!
+          $profile: ExplicitWorkItemExecutionProfileInput!
+        ) {
+          implementWith(
+            repositoryId: $repositoryId
+            issueNumber: $issueNumber
+            profile: $profile
+          ) {
+            id
+            executionProfile {
+              backend { id label }
+              buildModel
+              buildThinkingLevel
+              reviewSameAsBuild
+              reviewModel
+              reviewThinkingLevel
+            }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+          profile: {
+            agentBackendId: "opencode",
+            buildModel: "build-model",
+            buildThinkingLevel: "high",
+            reviewSameAsBuild: true,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        implementWith: {
+          id: workItem.id,
+          executionProfile: {
+            backend: { id: "opencode", label: "OpenCode" },
+            buildModel: "build-model",
+            buildThinkingLevel: "high",
+            reviewSameAsBuild: true,
+            reviewModel: "build-model",
+            reviewThinkingLevel: "high",
+          },
+        },
+      },
+    })
+  })
+
+  test("implementNow still omits an execution profile", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementNow: () =>
+          Effect.succeed({ ...workItem, executionProfile: null }),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
+          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            id
+            executionProfile { buildModel }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        implementNow: {
+          id: workItem.id,
+          executionProfile: null,
+        },
+      },
+    })
+  })
+
+  test("surfaces Implement With validation errors", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementWith: () =>
+          Effect.fail(
+            new InvalidExecutionProfileError({
+              message:
+                "Implement With requires a review Agent Model unless Same as build is selected",
+              field: "reviewModel",
+            }),
+          ),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementWith(
+          $repositoryId: ID!
+          $issueNumber: Int!
+          $profile: ExplicitWorkItemExecutionProfileInput!
+        ) {
+          implementWith(
+            repositoryId: $repositoryId
+            issueNumber: $issueNumber
+            profile: $profile
+          ) {
+            id
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+          profile: {
+            agentBackendId: "opencode",
+            buildModel: "build-model",
+            reviewSameAsBuild: false,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message:
+            "Implement With requires a review Agent Model unless Same as build is selected",
+          extensions: expect.objectContaining({
+            code: "INVALID_EXECUTION_PROFILE",
+            field: "reviewModel",
           }),
         }),
       ],

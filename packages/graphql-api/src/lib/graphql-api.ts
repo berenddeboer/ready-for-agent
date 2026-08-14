@@ -48,6 +48,7 @@ import {
   isJobsCompletedWorkItemState,
   isJobsWorkingWorkItem,
   isRetryableFailedWorkItem,
+  resolveExecutionProfileSelection,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
   commandExistsOnPath,
@@ -314,6 +315,17 @@ const toWorkItemsListKind = (
 
 type ImplementNowArgs = IssuesArgs & {
   issueNumber: number
+}
+
+type ImplementWithArgs = ImplementNowArgs & {
+  profile: {
+    readonly agentBackendId: string
+    readonly buildModel: string
+    readonly buildThinkingLevel?: string | null
+    readonly reviewSameAsBuild: boolean
+    readonly reviewModel?: string | null
+    readonly reviewThinkingLevel?: string | null
+  }
 }
 
 type WorkItemArgs = {
@@ -1100,6 +1112,21 @@ export const createGraphqlApi = <R>(
             toGraphqlBackend(resolveWorkItemBackend(workItem.agentBackend)),
           mergeMode: (workItem: { mergeMode: string }) =>
             workItem.mergeMode.toUpperCase(),
+          executionProfile: (workItem: WorkItemRecord) => {
+            const profile = workItem.executionProfile
+            if (profile === null || profile === undefined) return null
+            const selection = resolveExecutionProfileSelection(profile)
+            return {
+              backend: toGraphqlBackend(
+                resolveWorkItemBackend(profile.agentBackend),
+              ),
+              buildModel: profile.build.model,
+              buildThinkingLevel: profile.build.thinkingLevel,
+              reviewSameAsBuild: profile.review.kind === "same_as_build",
+              reviewModel: selection.reviewModel,
+              reviewThinkingLevel: selection.reviewThinkingLevel,
+            }
+          },
           state: (workItem: { state: string }) => workItem.state.toUpperCase(),
           stateLabel: (workItem: WorkItemRecord) =>
             workItemStateLabel(workItem),
@@ -1886,6 +1913,30 @@ export const createGraphqlApi = <R>(
                   args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementNow")),
+              context,
+            ),
+          implementWith: async (
+            _parent: unknown,
+            args: ImplementWithArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                return yield* lifecycle.implementWith(
+                  args.repositoryId,
+                  args.issueNumber,
+                  {
+                    agentBackendId: args.profile.agentBackendId,
+                    buildModel: args.profile.buildModel,
+                    buildThinkingLevel: args.profile.buildThinkingLevel ?? null,
+                    reviewSameAsBuild: args.profile.reviewSameAsBuild,
+                    reviewModel: args.profile.reviewModel ?? null,
+                    reviewThinkingLevel:
+                      args.profile.reviewThinkingLevel ?? null,
+                  },
+                )
+              }).pipe(Effect.withSpan("graphql-api.implementWith")),
               context,
             ),
           implementLocally: async (

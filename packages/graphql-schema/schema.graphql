@@ -157,6 +157,33 @@ type SessionTokens {
   cacheWrite: Int!
 }
 
+"""
+Durable Explicit Work Item Execution Profile. reviewSameAsBuild is persisted
+intent; reviewModel and reviewThinkingLevel are the resolved review selection
+(exactly the build selection when Same as build).
+"""
+type WorkItemExecutionProfile {
+  backend: AgentBackendInfo!
+  buildModel: String!
+  buildThinkingLevel: String
+  reviewSameAsBuild: Boolean!
+  reviewModel: String!
+  reviewThinkingLevel: String
+}
+
+"""
+Complete Implement With profile. When reviewSameAsBuild is true, reviewModel
+and reviewThinkingLevel must be omitted. When false, reviewModel is required.
+"""
+input ExplicitWorkItemExecutionProfileInput {
+  agentBackendId: String!
+  buildModel: String!
+  buildThinkingLevel: String
+  reviewSameAsBuild: Boolean!
+  reviewModel: String
+  reviewThinkingLevel: String
+}
+
 type AgentBackendInfo {
   id: String!
   label: String!
@@ -677,6 +704,11 @@ type WorkItem {
   Durable merge policy for this Work Item.
   """
   mergeMode: MergeMode!
+  """
+  Explicit Work Item Execution Profile when created through Implement With.
+  Null for ordinary settings-resolved Work Items.
+  """
+  executionProfile: WorkItemExecutionProfile
   state: WorkItemState!
   stateLabel: String!
   status: WorkItemStatus!
@@ -782,6 +814,16 @@ type Mutation {
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!
   implementNow(repositoryId: ID!, issueNumber: Int!): WorkItem!
+  """
+  Create a Work Item for an Actionable Issue with one complete Explicit Work
+  Item Execution Profile. The chosen Agent Backend must already be Active.
+  Partial profiles cannot be represented. Failure creates nothing.
+  """
+  implementWith(
+    repositoryId: ID!
+    issueNumber: Int!
+    profile: ExplicitWorkItemExecutionProfileInput!
+  ): WorkItem!
   """
   Create a Work Item that runs local steps through Review, then pauses before Commit.
   """

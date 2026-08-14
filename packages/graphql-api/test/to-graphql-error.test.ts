@@ -2,6 +2,22 @@ import { toGraphQLError } from "../src/lib/to-graphql-error.js"
 import { describe, expect, test } from "bun:test"
 
 describe("toGraphQLError", () => {
+  test("maps InvalidExecutionProfileError to INVALID_EXECUTION_PROFILE", () => {
+    const error = {
+      _tag: "InvalidExecutionProfileError" as const,
+      message: "Implement With requires a build Agent Model",
+      field: "buildModel",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toBe("Implement With requires a build Agent Model")
+    expect(gqlError.extensions).toMatchObject({
+      code: "INVALID_EXECUTION_PROFILE",
+      field: "buildModel",
+    })
+  })
+
   test("maps RepositoryHasRunningStepError to REPOSITORY_HAS_RUNNING_STEP", () => {
     const error = {
       _tag: "RepositoryHasRunningStepError" as const,

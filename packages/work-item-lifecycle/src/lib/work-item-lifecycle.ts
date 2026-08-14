@@ -67,6 +67,7 @@ import {
   AgentBackendUnavailableError,
   BuildModelNotConfiguredError,
   ImplementAllWithAutoMergeNotEligibleError,
+  InvalidExecutionProfileError,
   IssueBlockedError,
   IssueNotBlockedError,
   IssueNotFoundError,
@@ -88,6 +89,14 @@ import {
   WorkItemTerminalError,
   WorkItemWaitingForBlockersError,
 } from "./errors.js"
+import {
+  type ExplicitWorkItemExecutionProfile,
+  type ImplementWithProfileInput,
+  decodeImplementWithProfile,
+  explicitProfileThinkingLevelViolation,
+  resolveExecutionProfileSelection,
+  validateExecutionProfileCatalog,
+} from "./execution-profile.js"
 import {
   type LifecycleStepContext,
   LifecycleSteps,
@@ -310,6 +319,12 @@ type WorkItemRow = {
   readonly issue_title: string | null
   readonly pull_request_number: number | null
   readonly agent_backend: string
+  readonly execution_profile_present: boolean | number | null
+  readonly execution_profile_build_model: string | null
+  readonly execution_profile_build_thinking_level: string | null
+  readonly execution_profile_review_same_as_build: boolean | number | null
+  readonly execution_profile_review_model: string | null
+  readonly execution_profile_review_thinking_level: string | null
   readonly state: WorkItemState
   readonly state_ready_at: number
   readonly paused: boolean | number
@@ -337,6 +352,42 @@ type WorkItemRow = {
 
 const decodeMergeMode = (value: string | null | undefined): MergeMode =>
   value === "always" ? "always" : "ordinary"
+
+const decodeExecutionProfile = (
+  row: WorkItemRow,
+): ExplicitWorkItemExecutionProfile | null => {
+  if (!row.execution_profile_present) return null
+  const buildModel = row.execution_profile_build_model
+  if (buildModel === null || buildModel.trim() === "") return null
+  const buildThinkingLevel =
+    row.execution_profile_build_thinking_level === null ||
+    row.execution_profile_build_thinking_level.trim() === ""
+      ? null
+      : row.execution_profile_build_thinking_level
+  if (row.execution_profile_review_same_as_build) {
+    return {
+      agentBackend: row.agent_backend,
+      build: { model: buildModel, thinkingLevel: buildThinkingLevel },
+      review: { kind: "same_as_build" },
+    }
+  }
+  const reviewModel = row.execution_profile_review_model
+  if (reviewModel === null || reviewModel.trim() === "") return null
+  const reviewThinkingLevel =
+    row.execution_profile_review_thinking_level === null ||
+    row.execution_profile_review_thinking_level.trim() === ""
+      ? null
+      : row.execution_profile_review_thinking_level
+  return {
+    agentBackend: row.agent_backend,
+    build: { model: buildModel, thinkingLevel: buildThinkingLevel },
+    review: {
+      kind: "explicit",
+      model: reviewModel,
+      thinkingLevel: reviewThinkingLevel,
+    },
+  }
+}
 
 /**
  * After pre-merge lifecycle settles: Always skips Decide PR Merge.
@@ -498,6 +549,7 @@ const toWorkItemRecord = (
   issueTitle: row.issue_title,
   pullRequestNumber: row.pull_request_number,
   agentBackend: row.agent_backend,
+  executionProfile: decodeExecutionProfile(row),
   state: row.state,
   stateReadyAt: new Date(row.state_ready_at),
   paused: Boolean(row.paused),
@@ -524,6 +576,11 @@ const toWorkItemRecord = (
 })
 
 const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, issue_number, issue_title, agent_backend,
+                   execution_profile_present, execution_profile_build_model,
+                   execution_profile_build_thinking_level,
+                   execution_profile_review_same_as_build,
+                   execution_profile_review_model,
+                   execution_profile_review_thinking_level,
                    state, state_ready_at, paused, waiting_since, waiting_for_blockers, merge_mode,
                    holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary,
@@ -651,12 +708,15 @@ export type ImplementNowError =
   | IssueBlockedError
   | UnfinishedWorkItemExistsError
   | BuildModelNotConfiguredError
+  | InvalidExecutionProfileError
   | AgentBackendUnavailableError
   | WorkItemLifecycleDatabaseError
   | RepositoryNotFoundError
   | DatabaseError
   | EnqueueError
   | InvalidQueueNameError
+
+export type ImplementWithError = ImplementNowError
 
 export type ImplementAllWithAutoMergeError =
   | IssueNotFoundError
@@ -816,6 +876,11 @@ export interface WorkItemLifecycleShape {
     repositoryId: string,
     issueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
+  readonly implementWith: (
+    repositoryId: string,
+    issueNumber: number,
+    profile: ImplementWithProfileInput,
+  ) => Effect.Effect<WorkItemRecord, ImplementWithError>
   readonly implementLocally: (
     repositoryId: string,
     issueNumber: number,
@@ -4047,59 +4112,67 @@ export const makeWorkItemLifecycleLive = (
               }
 
               const maxDuration = maxDurations[stepRun.step]
-              const modelOutcome = yield* resolveModelsForBackend(
-                workItem.repository_id,
-                workItem.agent_backend,
-              ).pipe(
-                Effect.map(
-                  (
-                    selection,
-                  ):
-                    | {
-                        readonly _tag: "ok"
-                        readonly selection: AgentModelSelection
-                      }
-                    | {
-                        readonly _tag: "failed"
-                        readonly workItem: WorkItemRecord
-                      } => ({ _tag: "ok", selection }),
-                ),
-                Effect.catchTag(
-                  "BuildModelNotConfiguredError",
-                  (
-                    error,
-                  ): Effect.Effect<
-                    | {
-                        readonly _tag: "ok"
-                        readonly selection: AgentModelSelection
-                      }
-                    | {
-                        readonly _tag: "failed"
-                        readonly workItem: WorkItemRecord
-                      },
-                    RunStepError
-                  > => {
-                    if (!isAgentDependentLifecycleStep(stepRun.step)) {
-                      return Effect.succeed({
-                        _tag: "ok",
-                        selection: EMPTY_AGENT_MODEL_SELECTION,
-                      })
-                    }
-                    return completeFailedStep({
-                      stepRun: afterStart,
-                      workItem,
-                      reasonCode: STEP_RUN_REASON.buildModelNotConfigured,
-                      reasonMessage: error.message,
-                      cause: Cause.fail(error.message),
-                    }).pipe(
-                      Effect.map((failed) => ({
-                        _tag: "failed" as const,
-                        workItem: failed,
-                      })),
+              const explicitProfile = decodeExecutionProfile(workItem)
+              const modelOutcome =
+                explicitProfile !== null
+                  ? ({
+                      _tag: "ok" as const,
+                      selection:
+                        resolveExecutionProfileSelection(explicitProfile),
+                    } as const)
+                  : yield* resolveModelsForBackend(
+                      workItem.repository_id,
+                      workItem.agent_backend,
+                    ).pipe(
+                      Effect.map(
+                        (
+                          selection,
+                        ):
+                          | {
+                              readonly _tag: "ok"
+                              readonly selection: AgentModelSelection
+                            }
+                          | {
+                              readonly _tag: "failed"
+                              readonly workItem: WorkItemRecord
+                            } => ({ _tag: "ok", selection }),
+                      ),
+                      Effect.catchTag(
+                        "BuildModelNotConfiguredError",
+                        (
+                          error,
+                        ): Effect.Effect<
+                          | {
+                              readonly _tag: "ok"
+                              readonly selection: AgentModelSelection
+                            }
+                          | {
+                              readonly _tag: "failed"
+                              readonly workItem: WorkItemRecord
+                            },
+                          RunStepError
+                        > => {
+                          if (!isAgentDependentLifecycleStep(stepRun.step)) {
+                            return Effect.succeed({
+                              _tag: "ok",
+                              selection: EMPTY_AGENT_MODEL_SELECTION,
+                            })
+                          }
+                          return completeFailedStep({
+                            stepRun: afterStart,
+                            workItem,
+                            reasonCode: STEP_RUN_REASON.buildModelNotConfigured,
+                            reasonMessage: error.message,
+                            cause: Cause.fail(error.message),
+                          }).pipe(
+                            Effect.map((failed) => ({
+                              _tag: "failed" as const,
+                              workItem: failed,
+                            })),
+                          )
+                        },
+                      ),
                     )
-                  },
-                ),
-              )
               if (modelOutcome._tag === "failed") {
                 return {
                   _tag: "processed" as const,
@@ -4120,14 +4193,23 @@ export const makeWorkItemLifecycleLive = (
                 const violation =
                   catalogStatus === null || catalogStatus.kind !== "ready"
                     ? null
-                    : agentModelCatalogViolation({
+                    : (agentModelCatalogViolation({
                         backendLabel: catalogStatus.backend.label,
                         catalogModelIds: catalogStatus.models.map(
                           (model) => model.id,
                         ),
                         selection,
                         includeReviewModel: stepRun.step === "review",
-                      })
+                        explicitProfile: explicitProfile !== null,
+                      }) ??
+                      (explicitProfile === null
+                        ? null
+                        : explicitProfileThinkingLevelViolation({
+                            backendLabel: catalogStatus.backend.label,
+                            catalog: catalogStatus.models,
+                            selection,
+                            includeReviewModel: stepRun.step === "review",
+                          })))
                 if (violation !== null) {
                   const failed = yield* completeFailedStep({
                     stepRun: afterStart,
@@ -6186,8 +6268,9 @@ export const makeWorkItemLifecycleLive = (
         options: {
           readonly pauseBeforeStep: OperationalLifecycleStep | null
           readonly mergeMode?: MergeMode
+          readonly executionProfile?: ExplicitWorkItemExecutionProfile
         },
-      ): Effect.Effect<WorkItemRecord, ImplementNowError> =>
+      ): Effect.Effect<WorkItemRecord, ImplementWithError> =>
         Effect.gen(function* () {
           const issues = yield* db.listIssues(repositoryId)
           const issue = issues.find(
@@ -6244,23 +6327,83 @@ export const makeWorkItemLifecycleLive = (
           // runs inside the same section so it matches the backend that is stamped.
           const createdId = yield* activeAgentBackend.withConfigCoordination(
             Effect.gen(function* () {
-              // Effective Agent Backend: Repository override or harness default.
-              // Capture it as routing authority for the Work Item lifetime.
-              const harnessConfig = yield* db.getConfig
-              const repositories = yield* db.listRepositories
-              const repository = repositories.find(
-                ({ id }) => id === repositoryId,
-              )
-              const rawCaptureBackendId =
-                repository?.selectedAgentBackend ??
-                harnessConfig.selectedAgentBackend
-              if (!isSelectableAgentBackendId(rawCaptureBackendId)) {
-                return yield* new AgentBackendUnavailableError({
-                  message: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
-                  reason: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
+              const explicitProfile = options.executionProfile
+              let captureBackendId: AgentBackendId
+              if (explicitProfile !== undefined) {
+                if (!isSelectableAgentBackendId(explicitProfile.agentBackend)) {
+                  return yield* new AgentBackendUnavailableError({
+                    message: `Unknown or unsupported Agent Backend: ${explicitProfile.agentBackend}`,
+                    reason: `Unknown or unsupported Agent Backend: ${explicitProfile.agentBackend}`,
+                  })
+                }
+                captureBackendId = explicitProfile.agentBackend
+                const captureStatus =
+                  yield* activeAgentBackend.getBackendStatus(captureBackendId)
+                if (captureStatus === null) {
+                  return yield* new AgentBackendUnavailableError({
+                    message: `Agent Backend is not Active: ${explicitProfile.agentBackend}`,
+                    reason: "Agent Backend is not Active",
+                  })
+                }
+                if (captureStatus.kind === "unavailable") {
+                  return yield* new AgentBackendUnavailableError({
+                    message:
+                      captureStatus.reason ?? "Agent Backend is unavailable",
+                    reason:
+                      captureStatus.reason ?? "Agent Backend is unavailable",
+                  })
+                }
+                const catalogError = validateExecutionProfileCatalog({
+                  backendLabel: captureStatus.backend.label,
+                  catalog: captureStatus.models,
+                  profile: explicitProfile,
                 })
+                if (catalogError !== null) {
+                  return yield* catalogError
+                }
+              } else {
+                // Effective Agent Backend: Repository override or harness default.
+                // Capture it as routing authority for the Work Item lifetime.
+                const harnessConfig = yield* db.getConfig
+                const repositories = yield* db.listRepositories
+                const repository = repositories.find(
+                  ({ id }) => id === repositoryId,
+                )
+                const rawCaptureBackendId =
+                  repository?.selectedAgentBackend ??
+                  harnessConfig.selectedAgentBackend
+                if (!isSelectableAgentBackendId(rawCaptureBackendId)) {
+                  return yield* new AgentBackendUnavailableError({
+                    message: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
+                    reason: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
+                  })
+                }
+                captureBackendId = rawCaptureBackendId
+                // Models are not stored on ordinary Work Items; resolve against
+                // the captured backend's prefs after coordination has locked
+                // the switch.
+                const capturedSelection = yield* resolveModelsForBackend(
+                  repositoryId,
+                  captureBackendId,
+                )
+                const captureStatus =
+                  yield* activeAgentBackend.getBackendStatus(captureBackendId)
+                if (captureStatus !== null && captureStatus.kind === "ready") {
+                  const violation = agentModelCatalogViolation({
+                    backendLabel: captureStatus.backend.label,
+                    catalogModelIds: captureStatus.models.map(
+                      (model) => model.id,
+                    ),
+                    selection: capturedSelection,
+                    includeReviewModel: true,
+                  })
+                  if (violation !== null) {
+                    return yield* new BuildModelNotConfiguredError({
+                      message: violation,
+                    })
+                  }
+                }
               }
-              const captureBackendId = rawCaptureBackendId
               yield* activeAgentBackend
                 .requireAgentTurnsAllowed(captureBackendId)
                 .pipe(
@@ -6272,33 +6415,6 @@ export const makeWorkItemLifecycleLive = (
                       }),
                   ),
                 )
-              // Models are not stored on the Work Item; resolve against the
-              // captured backend's prefs after coordination has locked the switch.
-              const capturedSelection = yield* resolveModelsForBackend(
-                repositoryId,
-                captureBackendId,
-              )
-              // Catalog admission (issue #838): refuse to create a Work Item
-              // whose resolved models the captured backend no longer offers,
-              // so the failure surfaces at the operator action rather than as
-              // a dead Agent Turn later.
-              const captureStatus =
-                yield* activeAgentBackend.getBackendStatus(captureBackendId)
-              if (captureStatus !== null && captureStatus.kind === "ready") {
-                const violation = agentModelCatalogViolation({
-                  backendLabel: captureStatus.backend.label,
-                  catalogModelIds: captureStatus.models.map(
-                    (model) => model.id,
-                  ),
-                  selection: capturedSelection,
-                  includeReviewModel: true,
-                })
-                if (violation !== null) {
-                  return yield* new BuildModelNotConfiguredError({
-                    message: violation,
-                  })
-                }
-              }
               const activeRegistration =
                 yield* activeAgentBackend.getRegistration(captureBackendId)
               const agentBackendId = activeRegistration.descriptor.id
@@ -6313,30 +6429,74 @@ export const makeWorkItemLifecycleLive = (
                     const occupied = yield* countOccupiedWorkerSlots()
                     const admit = occupied < limit
 
-                    yield* sql.unsafe(
-                      `INSERT INTO work_item (
+                    if (explicitProfile !== undefined) {
+                      yield* sql.unsafe(
+                        `INSERT INTO work_item (
+                 id, repository_id, issue_number, agent_backend,
+                  issue_title, state, state_ready_at, paused,
+                  waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
+                  pause_before_step, worktree_path, session_id, failure_code,
+                  failure_message,
+                  execution_profile_present, execution_profile_build_model,
+                  execution_profile_build_thinking_level,
+                  execution_profile_review_same_as_build,
+                  execution_profile_review_model,
+                  execution_profile_review_thinking_level,
+                  created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, 1, ?, ?, ?, ?, ?, ?, ?)`,
+                        [
+                          workItemId,
+                          repositoryId,
+                          issueNumber,
+                          agentBackendId,
+                          matchedIssue.title,
+                          step,
+                          now,
+                          admit ? null : now,
+                          mergeMode,
+                          admit ? 1 : 0,
+                          options.pauseBeforeStep,
+                          explicitProfile.build.model,
+                          explicitProfile.build.thinkingLevel,
+                          explicitProfile.review.kind === "same_as_build"
+                            ? 1
+                            : 0,
+                          explicitProfile.review.kind === "explicit"
+                            ? explicitProfile.review.model
+                            : null,
+                          explicitProfile.review.kind === "explicit"
+                            ? explicitProfile.review.thinkingLevel
+                            : null,
+                          now,
+                          now,
+                        ],
+                      )
+                    } else {
+                      yield* sql.unsafe(
+                        `INSERT INTO work_item (
                  id, repository_id, issue_number, agent_backend,
                   issue_title, state, state_ready_at, paused,
                   waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
-                      [
-                        workItemId,
-                        repositoryId,
-                        issueNumber,
-                        agentBackendId,
-                        matchedIssue.title,
-                        step,
-                        now,
-                        admit ? null : now,
-                        mergeMode,
-                        admit ? 1 : 0,
-                        options.pauseBeforeStep,
-                        now,
-                        now,
-                      ],
-                    )
+                        [
+                          workItemId,
+                          repositoryId,
+                          issueNumber,
+                          agentBackendId,
+                          matchedIssue.title,
+                          step,
+                          now,
+                          admit ? null : now,
+                          mergeMode,
+                          admit ? 1 : 0,
+                          options.pauseBeforeStep,
+                          now,
+                          now,
+                        ],
+                      )
+                    }
 
                     if (admit) {
                       yield* enqueueStepRunForWorkItem(workItemId, step, now)
@@ -6347,7 +6507,7 @@ export const makeWorkItemLifecycleLive = (
                 )
                 .pipe(
                   Effect.catch(
-                    (error): Effect.Effect<never, ImplementNowError> => {
+                    (error): Effect.Effect<never, ImplementWithError> => {
                       if (error instanceof WorkItemLifecycleDatabaseError) {
                         return Effect.fail(error)
                       }
@@ -6402,6 +6562,23 @@ export const makeWorkItemLifecycleLive = (
         function* (repositoryId: string, issueNumber: number) {
           return yield* createWorkItem(repositoryId, issueNumber, {
             pauseBeforeStep: null,
+          })
+        },
+      )
+
+      const implementWith = Effect.fn("WorkItemLifecycle.implementWith")(
+        function* (
+          repositoryId: string,
+          issueNumber: number,
+          profileInput: ImplementWithProfileInput,
+        ) {
+          const decoded = decodeImplementWithProfile(profileInput)
+          if (decoded instanceof InvalidExecutionProfileError) {
+            return yield* decoded
+          }
+          return yield* createWorkItem(repositoryId, issueNumber, {
+            pauseBeforeStep: null,
+            executionProfile: decoded,
           })
         },
       )
@@ -6904,6 +7081,7 @@ export const makeWorkItemLifecycleLive = (
         recoverOrphanedStepRuns,
         interruptRunningStepRunsFromPriorWorker,
         implementNow,
+        implementWith,
         implementLocally,
         implementAllWithAutoMerge,
         queue: queueIssue,

@@ -153,6 +153,11 @@ export const agentModelCatalogViolation = (input: {
   readonly selection: AgentModelSelection
   /** Review model is only used by the review step. */
   readonly includeReviewModel: boolean
+  /**
+   * When true, operator copy refuses settings fallback (Explicit Work Item
+   * Execution Profile).
+   */
+  readonly explicitProfile?: boolean
 }): string | null => {
   if (input.catalogModelIds.length === 0) {
     return null
@@ -165,7 +170,9 @@ export const agentModelCatalogViolation = (input: {
   ]
   for (const [role, model] of checked) {
     if (model.length > 0 && !input.catalogModelIds.includes(model)) {
-      return `${role} Agent Model "${model}" is not in the current ${input.backendLabel} Agent Model catalog. Choose a model the Agent Backend currently offers in Settings, then start this work again.`
+      return input.explicitProfile === true
+        ? `${role} Agent Model "${model}" is not in the current ${input.backendLabel} Agent Model catalog. The Explicit Work Item Execution Profile cannot substitute another model. Reset this Work Item and create a new attempt with a current catalog choice.`
+        : `${role} Agent Model "${model}" is not in the current ${input.backendLabel} Agent Model catalog. Choose a model the Agent Backend currently offers in Settings, then start this work again.`
     }
   }
   return null

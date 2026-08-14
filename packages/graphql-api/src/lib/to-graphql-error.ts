@@ -118,6 +118,12 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         error.message ?? "Build model not configured",
         "BUILD_MODEL_NOT_CONFIGURED",
       )
+    case "InvalidExecutionProfileError":
+      return gql(
+        error.message ?? "Invalid Explicit Work Item Execution Profile",
+        "INVALID_EXECUTION_PROFILE",
+        { field: "field" in error ? error.field : undefined },
+      )
     case "AgentBackendUnavailableError":
       return gql(
         error.message ?? "Agent Backend is unavailable",
