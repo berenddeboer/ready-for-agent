@@ -9,7 +9,7 @@ import {
 import { Database } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 
-const createFixtureDb = (dir: string): string => {
+const createEmptySessionDb = (dir: string): string => {
   const path = join(dir, "opencode.db")
   const db = new Database(path)
   db.exec(`
@@ -26,6 +26,13 @@ const createFixtureDb = (dir: string): string => {
       time_updated integer NOT NULL
     )
   `)
+  db.close()
+  return path
+}
+
+const createFixtureDb = (dir: string): string => {
+  const path = createEmptySessionDb(dir)
+  const db = new Database(path)
   db.query(
     `INSERT INTO session (
        id, model, cost, tokens_input, tokens_output, tokens_reasoning,
@@ -126,5 +133,30 @@ describe("OpencodeSessionStore", () => {
     expect(session.model).toBeNull()
     expect(session.tokens).toBeNull()
     expect(session.cost).toBeNull()
+  })
+
+  test("OPENCODE_DB fallback reports MISSING when the CLI cannot resolve the path", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opencode-session-"))
+    try {
+      const dbPath = createEmptySessionDb(dir)
+      const runtime = ManagedRuntime.make(
+        OpencodeSessionStoreLive({
+          pathInput: {
+            binary: join(dir, "no-such-opencode"),
+            env: { OPENCODE_DB: dbPath, HOME: dir },
+          },
+        }),
+      )
+      const session = await runtime.runPromise(
+        Effect.gen(function* () {
+          const store = yield* OpencodeSessionStore
+          return yield* store.getSession("ses_e2e_fixture_missing")
+        }),
+      )
+      await runtime.dispose()
+      expect(session.availability).toBe("missing")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
