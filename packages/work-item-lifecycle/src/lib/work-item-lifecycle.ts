@@ -1115,6 +1115,10 @@ export const makeWorkItemLifecycleLive = (
         ...DEFAULT_LIFECYCLE_MAX_DURATIONS,
         ...config.maxDurations,
       }
+      const inspectInput = {
+        cwd: config.inspectCwd ?? process.cwd(),
+        timeout: "30 seconds" as const,
+      }
       const activeStepExecutions = new Map<
         string,
         {
@@ -6329,6 +6333,7 @@ export const makeWorkItemLifecycleLive = (
             Effect.gen(function* () {
               const explicitProfile = options.executionProfile
               let captureBackendId: AgentBackendId
+              let restoreAddedBackend: Effect.Effect<unknown> = Effect.void
               if (explicitProfile !== undefined) {
                 if (!isSelectableAgentBackendId(explicitProfile.agentBackend)) {
                   return yield* new AgentBackendUnavailableError({
@@ -6337,15 +6342,47 @@ export const makeWorkItemLifecycleLive = (
                   })
                 }
                 captureBackendId = explicitProfile.agentBackend
+                const priorStatus =
+                  yield* activeAgentBackend.getBackendStatus(captureBackendId)
+                const addedForAttempt = priorStatus === null
+                const previousSelectedOrInUse = addedForAttempt
+                  ? yield* db.listSelectedOrInUseBackendIds
+                  : []
+                restoreAddedBackend = addedForAttempt
+                  ? activeAgentBackend.setSelectedOrInUse(
+                      previousSelectedOrInUse.filter(
+                        (id): id is AgentBackendId =>
+                          isSelectableAgentBackendId(id),
+                      ),
+                      inspectInput,
+                    )
+                  : Effect.void
+                if (addedForAttempt) {
+                  const nextSelectedOrInUse = [
+                    ...new Set([
+                      ...previousSelectedOrInUse.filter(
+                        (id): id is AgentBackendId =>
+                          isSelectableAgentBackendId(id),
+                      ),
+                      captureBackendId,
+                    ]),
+                  ]
+                  yield* activeAgentBackend.setSelectedOrInUse(
+                    nextSelectedOrInUse,
+                    inspectInput,
+                  )
+                }
                 const captureStatus =
                   yield* activeAgentBackend.getBackendStatus(captureBackendId)
                 if (captureStatus === null) {
+                  yield* restoreAddedBackend
                   return yield* new AgentBackendUnavailableError({
                     message: `Agent Backend is not Active: ${explicitProfile.agentBackend}`,
                     reason: "Agent Backend is not Active",
                   })
                 }
                 if (captureStatus.kind === "unavailable") {
+                  yield* restoreAddedBackend
                   return yield* new AgentBackendUnavailableError({
                     message:
                       captureStatus.reason ?? "Agent Backend is unavailable",
@@ -6359,6 +6396,7 @@ export const makeWorkItemLifecycleLive = (
                   profile: explicitProfile,
                 })
                 if (catalogError !== null) {
+                  yield* restoreAddedBackend
                   return yield* catalogError
                 }
               } else {
@@ -6414,6 +6452,7 @@ export const makeWorkItemLifecycleLive = (
                         reason: error.reason,
                       }),
                   ),
+                  Effect.tapError(() => restoreAddedBackend),
                 )
               const activeRegistration =
                 yield* activeAgentBackend.getRegistration(captureBackendId)
@@ -6506,6 +6545,7 @@ export const makeWorkItemLifecycleLive = (
                   }),
                 )
                 .pipe(
+                  Effect.tapError(() => restoreAddedBackend),
                   Effect.catch(
                     (error): Effect.Effect<never, ImplementWithError> => {
                       if (error instanceof WorkItemLifecycleDatabaseError) {

@@ -4000,6 +4000,51 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("repositoryModelPrefs returns backend-scoped Repository prefs without mutating settings", async () => {
+    const prefsCalls: Array<{ repositoryId: string; backendId: string }> = []
+    await runtime.dispose()
+    runtime = makeRuntime({
+      getRepositoryBackendModelPrefs: (repositoryId, backendId) => {
+        prefsCalls.push({ repositoryId, backendId })
+        return Effect.succeed({
+          defaultModel: "grok-code",
+          defaultThinkingLevel: "high",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+        })
+      },
+    })
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query RepositoryModelPrefs($repositoryId: ID!, $backendId: String!) {
+          repositoryModelPrefs(repositoryId: $repositoryId, backendId: $backendId) {
+            defaultModel
+            defaultThinkingLevel
+            reviewModel
+            reviewThinkingLevel
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          backendId: "grok",
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        repositoryModelPrefs: {
+          defaultModel: "grok-code",
+          defaultThinkingLevel: "high",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+        },
+      },
+    })
+    expect(prefsCalls).toEqual([
+      { repositoryId: repository.id, backendId: "grok" },
+    ])
+  })
+
   test("pauses and unpauses a repository", async () => {
     await runtime.dispose()
     runtime = makeRuntime({

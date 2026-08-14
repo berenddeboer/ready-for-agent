@@ -45,6 +45,14 @@ type Query {
   """
   harnessModelPrefs(backendId: String!): BackendModelPrefs!
   """
+  Remembered build/review model prefs for a backend on one Repository.
+  Does not change settings. Empty when that backend has no stored override.
+  """
+  repositoryModelPrefs(
+    repositoryId: ID!
+    backendId: String!
+  ): BackendModelPrefs!
+  """
   Agent Models available from the Active Agent Backend, each with optional
   Thinking Levels. Empty thinkingLevels means the model has no Thinking Levels.
   Empty when the backend is unavailable.
@@ -822,8 +830,10 @@ type Mutation {
   implementNow(repositoryId: ID!, issueNumber: Int!): WorkItem!
   """
   Create a Work Item for an Actionable Issue with one complete Explicit Work
-  Item Execution Profile. The chosen Agent Backend must already be Active.
-  Partial profiles cannot be represented. Failure creates nothing.
+  Item Execution Profile. Submission activates and inspects an otherwise
+  inactive shipped Agent Backend under the settings/create coordination
+  boundary. Partial profiles cannot be represented. Failure creates nothing
+  and leaves saved defaults unchanged.
   """
   implementWith(
     repositoryId: ID!

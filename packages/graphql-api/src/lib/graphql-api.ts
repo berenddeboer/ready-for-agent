@@ -715,6 +715,21 @@ export const createGraphqlApi = <R>(
               }).pipe(Effect.withSpan("graphql-api.harnessModelPrefs")),
               context,
             ),
+          repositoryModelPrefs: async (
+            _parent: unknown,
+            args: { repositoryId: string; backendId: string },
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                return yield* db.getRepositoryBackendModelPrefs(
+                  args.repositoryId,
+                  args.backendId,
+                )
+              }).pipe(Effect.withSpan("graphql-api.repositoryModelPrefs")),
+              context,
+            ),
           models: async (
             _parent: unknown,
             _args: unknown,

@@ -1,7 +1,7 @@
 import { Effect, Layer } from "effect"
 import {
   AGENT_BACKEND_IDS,
-  type ActiveAgentBackend,
+  ActiveAgentBackend,
   getBuiltInAgentBackend,
 } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
@@ -330,11 +330,16 @@ describe("implementWith", () => {
     )
   })
 
-  it("does not create a Work Item when the Agent Backend is not Active", async () => {
+  it("activates an inactive shipped backend and keeps it captured without changing saved defaults", async () => {
+    const active = stubActiveAgentBackendLayer({
+      registration: opencodeRegistration,
+      models: catalog,
+    })
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = yield* DbService
         const lifecycle = yield* WorkItemLifecycle
+        const backends = yield* ActiveAgentBackend
         const repo = yield* db.addRepository({
           forge: "github",
           forgeHost: "github.com",
@@ -347,25 +352,78 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 5)
+        expect(
+          yield* backends.getBackendStatus(AGENT_BACKEND_IDS.grok),
+        ).toBeNull()
+        const created = yield* lifecycle.implementWith(repo.id, 5, {
+          ...sameAsBuildProfile,
+          agentBackendId: "grok",
+        })
+        expect(created.agentBackend).toBe("grok")
+        expect(created.executionProfile).toEqual({
+          agentBackend: "grok",
+          build: { model: "build-model", thinkingLevel: "high" },
+          review: { kind: "same_as_build" },
+        })
+        expect(yield* db.getConfig).toMatchObject({
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        expect((yield* db.listRepositories)[0]?.selectedAgentBackend).toBeNull()
+        expect(yield* db.listSelectedOrInUseBackendIds).toEqual([
+          "opencode",
+          "grok",
+        ])
+        expect(
+          yield* backends.getBackendStatus(AGENT_BACKEND_IDS.grok),
+        ).not.toBeNull()
+      }).pipe(Effect.provide(lifecycleLayer(active))),
+    )
+  })
+
+  it("creates no Work Item and leaves defaults unchanged when activation inspect fails", async () => {
+    const active = stubActiveAgentBackendLayer({
+      registration: opencodeRegistration,
+      models: catalog,
+      newlyActivatedKind: "unavailable",
+      newlyActivatedReason: "Grok Build CLI is not installed",
+    })
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const backends = yield* ActiveAgentBackend
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-activate-fail.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 15)
         const error = yield* Effect.flip(
-          lifecycle.implementWith(repo.id, 5, {
+          lifecycle.implementWith(repo.id, 15, {
             ...sameAsBuildProfile,
             agentBackendId: "grok",
           }),
         )
         expect(error).toBeInstanceOf(LifecycleUnavailableError)
-        expect(error.message).toContain("not Active")
-        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 5)).toEqual([])
-      }).pipe(
-        Effect.provide(
-          lifecycleLayer(
-            stubActiveAgentBackendLayer({
-              registration: opencodeRegistration,
-              models: catalog,
-            }),
-          ),
-        ),
-      ),
+        expect(error.message).toContain("Grok Build CLI is not installed")
+        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 15)).toEqual([])
+        expect(yield* db.getConfig).toMatchObject({
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        expect((yield* db.listRepositories)[0]?.selectedAgentBackend).toBeNull()
+        expect(yield* db.listSelectedOrInUseBackendIds).toEqual(["opencode"])
+        expect(
+          yield* backends.getBackendStatus(AGENT_BACKEND_IDS.grok),
+        ).toBeNull()
+      }).pipe(Effect.provide(lifecycleLayer(active))),
     )
   })
 
@@ -422,6 +480,63 @@ describe("implementWith", () => {
         const items = yield* lifecycle.listWorkItemsForIssue(repo.id, 7)
         expect(items.map((item) => item.id)).toEqual([first.id])
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
+  it("routes Agent Turns through the captured backend after activating it", async () => {
+    const backends: string[] = []
+    const recording: LifecycleStepsShape = {
+      ...successfulSteps,
+      implement: (context: LifecycleStepContext) =>
+        Effect.sync(() => {
+          backends.push(context.agentBackend)
+          return "ses_test"
+        }),
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-route-grok.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 16)
+        const created = yield* lifecycle.implementWith(repo.id, 16, {
+          ...sameAsBuildProfile,
+          agentBackendId: "grok",
+        })
+        expect(created.agentBackend).toBe("grok")
+        const afterCreate = yield* advanceToQueued(
+          lifecycle,
+          created.stepRuns[0]!.id,
+          "install_dependencies",
+        )
+        const afterInstall = yield* advanceToQueued(
+          lifecycle,
+          afterCreate!.id,
+          "implement",
+        )
+        yield* lifecycle.runStep(afterInstall!.id)
+        expect(backends).toEqual(["grok"])
+      }).pipe(
+        Effect.provide(
+          lifecycleLayer(
+            stubActiveAgentBackendLayer({
+              registration: opencodeRegistration,
+              models: catalog,
+            }),
+            recording,
+          ),
+        ),
+      ),
     )
   })
 

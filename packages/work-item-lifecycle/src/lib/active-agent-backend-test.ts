@@ -58,6 +58,12 @@ export const stubActiveAgentBackendLayer = (
      * Agent Model admission (issue #838).
      */
     readonly models: AgentBackendRuntimeStatus["models"]
+    /**
+     * Status applied to backends that become Active only through
+     * activate / setSelectedOrInUse (not in the initial registrations).
+     */
+    readonly newlyActivatedKind?: AgentBackendRuntimeStatus["kind"]
+    readonly newlyActivatedReason?: string
     readonly getStatus: Effect.Effect<AgentBackendStatus>
     readonly requireAgentTurnsAllowed: Effect.Effect<
       void,
@@ -93,6 +99,7 @@ export const stubActiveAgentBackendLayer = (
   const readyFor = (entry: AgentBackendRegistration) =>
     runtimeStatus(entry, overrides.models ?? [])
   const allReady = allRegistrations.map(readyFor)
+  const activeIds = new Set<AgentBackendId>(byId.keys())
   const legacyStatus =
     overrides.getStatus ?? Effect.succeed(readyStatus(registration))
   const requireAllowed = overrides.requireAgentTurnsAllowed ?? Effect.void
@@ -122,14 +129,44 @@ export const stubActiveAgentBackendLayer = (
     ActiveAgentBackend.of({
       listStatuses: Effect.succeed(allReady),
       getBackendStatus: (backendId: AgentBackendId) => {
-        const entry = byId.get(backendId)
-        return Effect.succeed(entry === undefined ? null : readyFor(entry))
+        if (!activeIds.has(backendId)) {
+          return Effect.succeed(null)
+        }
+        if (
+          !byId.has(backendId) &&
+          overrides.newlyActivatedKind === "unavailable"
+        ) {
+          return Effect.succeed(
+            runtimeStatus(
+              registrationFor(backendId),
+              [],
+              "unavailable",
+              overrides.newlyActivatedReason ?? "inspect failed",
+            ),
+          )
+        }
+        return Effect.succeed(readyFor(registrationFor(backendId)))
       },
       getStatus: legacyStatus,
-      setSelectedOrInUse: () => Effect.succeed(allReady),
+      setSelectedOrInUse: (backendIds) =>
+        Effect.sync(() => {
+          activeIds.clear()
+          for (const backendId of backendIds) {
+            activeIds.add(backendId)
+          }
+          return [...activeIds].map((backendId) =>
+            readyFor(registrationFor(backendId)),
+          )
+        }),
       activate: (backendId) =>
-        Effect.succeed(readyFor(registrationFor(backendId))),
-      drop: () => Effect.void,
+        Effect.sync(() => {
+          activeIds.add(backendId)
+          return readyFor(registrationFor(backendId))
+        }),
+      drop: (backendId) =>
+        Effect.sync(() => {
+          activeIds.delete(backendId)
+        }),
       recheck: (backendId) =>
         Effect.succeed(readyFor(registrationFor(backendId))),
       requireAgentTurnsAllowed: (backendId) => requireFor(backendId),

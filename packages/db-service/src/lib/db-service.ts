@@ -340,6 +340,14 @@ export interface DbServiceShape {
   readonly getBackendModelPrefs: (
     backendId: string,
   ) => Effect.Effect<BackendModelPrefs, DatabaseError>
+  /**
+   * Repository-scoped build/review prefs for one Agent Backend. Empty when
+   * that backend has no stored override on the Repository.
+   */
+  readonly getRepositoryBackendModelPrefs: (
+    repositoryId: string,
+    backendId: string,
+  ) => Effect.Effect<BackendModelPrefs, DatabaseError | RepositoryNotFoundError>
   readonly updateConfig: (
     input: UpdateConfigInput,
   ) => Effect.Effect<
@@ -735,6 +743,28 @@ export const DbServiceLive = Layer.effect(
         return prefsForBackend(map, backendId.trim())
       },
     )
+
+    const getRepositoryBackendModelPrefs = Effect.fn(
+      "DbService.getRepositoryBackendModelPrefs",
+    )(function* (repositoryId: string, backendId: string) {
+      const rows = (yield* sql
+        .unsafe(
+          `SELECT backend_model_prefs AS backendModelPrefs
+           FROM repository WHERE id = ?`,
+          [repositoryId],
+        )
+        .pipe(Effect.mapError(toDatabaseError))) as readonly {
+        readonly backendModelPrefs: string
+      }[]
+      const row = rows[0]
+      if (row === undefined) {
+        return yield* new RepositoryNotFoundError({ repositoryId })
+      }
+      return prefsForBackend(
+        parseBackendModelPrefsMap(row.backendModelPrefs ?? "{}"),
+        backendId.trim(),
+      )
+    })
 
     /**
      * Re-project flat model columns from backendModelPrefs for repositories
@@ -1818,6 +1848,7 @@ export const DbServiceLive = Layer.effect(
       notifyWorkItemsChanged,
       getConfig,
       getBackendModelPrefs,
+      getRepositoryBackendModelPrefs,
       updateConfig,
       countUnfinishedWorkItems,
       countBlockingUnfinishedForGlobalDefault,
