@@ -2610,6 +2610,32 @@ describe("PR status check steps", () => {
     })
   })
 
+  it("accepts RERUN_REVIEW arguments wrapped in one pair of placeholder brackets", () => {
+    expect(
+      parseInvestigationResult(
+        "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <29906669357>",
+      ),
+    ).toEqual({
+      _tag: "rerun_review",
+      workflowRunId: 29906669357,
+      workflowName: null,
+    })
+    expect(
+      parseInvestigationResult(
+        "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <42> <Claude Code Review>",
+      ),
+    ).toEqual({
+      _tag: "rerun_review",
+      workflowRunId: 42,
+      workflowName: "Claude Code Review",
+    })
+    expect(
+      parseInvestigationResult(
+        "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id>",
+      ),
+    ).toBeNull()
+  })
+
   it("treats the production success+skipped name-only shape as a green-only PROCESSED no-op", async () => {
     const prompts: string[] = []
     let rerunCalls = 0

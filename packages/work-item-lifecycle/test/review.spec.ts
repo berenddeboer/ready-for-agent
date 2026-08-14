@@ -192,6 +192,20 @@ describe("parseReviewResult", () => {
     ).toEqual({ _tag: "has_findings", severity: "high" })
   })
 
+  it("accepts a severity wrapped in one pair of placeholder brackets", () => {
+    expect(
+      parseReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <medium>",
+      ),
+    ).toEqual({ _tag: "has_findings", severity: "medium" })
+    expect(
+      parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low>"),
+    ).toEqual({ _tag: "has_findings", severity: "low" })
+    expect(
+      parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <high>"),
+    ).toEqual({ _tag: "has_findings", severity: "high" })
+  })
+
   it("accepts the last valid marker amid duplicates or trailing prose", () => {
     expect(
       parseReviewResult(
@@ -216,6 +230,11 @@ describe("parseReviewResult", () => {
     expect(
       parseReviewResult(
         "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: critical",
+      ),
+    ).toBeNull()
+    expect(
+      parseReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
       ),
     ).toBeNull()
     expect(parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_FIXED")).toBeNull()
@@ -258,6 +277,37 @@ describe("parseApplyReviewResult", () => {
       _tag: "unresolved_high",
       reason: "auth bypass still open",
     })
+  })
+
+  it("accepts enum and reason arguments wrapped in one pair of placeholder brackets", () => {
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <medium>: naming only",
+      ),
+    ).toEqual({
+      _tag: "deferred",
+      severity: "medium",
+      reason: "naming only",
+    })
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: <low>: <style nits remain>",
+      ),
+    ).toEqual({
+      _tag: "fixed_and_deferred",
+      severity: "low",
+      reason: "style nits remain",
+    })
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: <false positive>",
+      ),
+    ).toEqual({ _tag: "cleared", reason: "false positive" })
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <low|medium>: leftover nits",
+      ),
+    ).toBeNull()
   })
 
   it("accepts the last valid marker amid duplicates or trailing prose", () => {
@@ -351,6 +401,17 @@ describe("parseRerunAssessmentResult", () => {
     expect(
       parseRerunAssessmentResult(
         "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: expanded into parser behavior",
+      ),
+    ).toEqual({
+      _tag: "rerun_required",
+      reason: "expanded into parser behavior",
+    })
+  })
+
+  it("accepts assessment reasons wrapped in one pair of placeholder brackets", () => {
+    expect(
+      parseRerunAssessmentResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: <expanded into parser behavior>",
       ),
     ).toEqual({
       _tag: "rerun_required",
@@ -1816,6 +1877,29 @@ describe("review", () => {
         }),
       )
       expect(error).toBeInstanceOf(ReviewResultError)
+      expect((error as ReviewResultError).message).toContain(
+        "did not report a valid READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high>",
+      )
+      expect((error as ReviewResultError).message).not.toContain("(got ")
+    }))
+
+  it("quotes the emitted result line when the reviewing verdict is invalid", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        review(baseContext(root)).pipe(Effect.flip),
+        stubOpencode({
+          continueTurn: () =>
+            Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
+            }),
+        }),
+      )
+      expect(error).toBeInstanceOf(ReviewResultError)
+      expect((error as ReviewResultError).message).toContain(
+        'got "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>"',
+      )
     }))
 
   it("fails when apply-path READY_FOR_AGENT_RESULT is missing or ambiguous", () =>
@@ -1838,6 +1922,31 @@ describe("review", () => {
       )
       expect(error).toBeInstanceOf(ReviewResultError)
       expect((error as ReviewResultError).message).toContain("REVIEW_FIXED")
+      expect((error as ReviewResultError).message).not.toContain("(got ")
+    }))
+
+  it("quotes the emitted result line when the apply-path verdict is invalid", () =>
+    withTemp(async (root) => {
+      let turn = 0
+      const error = await run(
+        review(baseContext(root)).pipe(Effect.flip),
+        stubOpencode({
+          continueTurn: () => {
+            turn += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                turn === 1
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low"
+                  : "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <low|medium>: leftover nits",
+            })
+          },
+        }),
+      )
+      expect(error).toBeInstanceOf(ReviewResultError)
+      expect((error as ReviewResultError).message).toContain(
+        'got "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <low|medium>: leftover nits"',
+      )
     }))
 
   it("accepts the last valid marker when READY_FOR_AGENT_RESULT lines are duplicated", () =>

@@ -31,6 +31,7 @@ import {
   STEP_RUN_REASON,
   type StepRunReasonCode,
 } from "./types.js"
+import { unwrapSentinelArgument } from "./unwrap-sentinel-argument.js"
 import { workItemBranchName } from "./worktree-names.js"
 
 export class PrStatusChecksContextError extends Schema.TaggedErrorClass<PrStatusChecksContextError>()(
@@ -403,15 +404,17 @@ export const parseInvestigationResult = (
     return "checks_triggered"
   }
   const rerunReview = finalLine.match(
-    /^READY_FOR_AGENT_RESULT:\s*RERUN_REVIEW\s*:\s*(\d+)(?:\s+(.+))?$/i,
+    /^READY_FOR_AGENT_RESULT:\s*RERUN_REVIEW\s*:\s*(\S+)(?:\s+(.+))?$/i,
   )
   if (rerunReview?.[1] !== undefined) {
-    const workflowRunId = Number(rerunReview[1])
+    const workflowRunId = Number(unwrapSentinelArgument(rerunReview[1]))
     if (Number.isSafeInteger(workflowRunId) && workflowRunId > 0) {
+      const workflowNameRaw =
+        rerunReview[2] === undefined
+          ? ""
+          : unwrapSentinelArgument(rerunReview[2])
       const workflowName =
-        rerunReview[2] !== undefined && rerunReview[2].trim() !== ""
-          ? rerunReview[2].trim().slice(0, 200)
-          : null
+        workflowNameRaw !== "" ? workflowNameRaw.slice(0, 200) : null
       return {
         _tag: "rerun_review",
         workflowRunId,
@@ -422,19 +425,25 @@ export const parseInvestigationResult = (
   const needsHuman = finalLine.match(
     /^READY_FOR_AGENT_RESULT:\s*NEEDS_HUMAN\s*:\s*(.+)$/i,
   )
-  if (needsHuman?.[1] !== undefined && needsHuman[1].trim() !== "") {
-    return {
-      _tag: "needs_human",
-      reason: needsHuman[1].trim().slice(0, 500),
+  if (needsHuman?.[1] !== undefined) {
+    const reason = unwrapSentinelArgument(needsHuman[1])
+    if (reason !== "") {
+      return {
+        _tag: "needs_human",
+        reason: reason.slice(0, 500),
+      }
     }
   }
   const failed = finalLine.match(
     /^READY_FOR_AGENT_RESULT:\s*FAILED\s*:\s*(.+)$/i,
   )
-  if (failed?.[1] !== undefined && failed[1].trim() !== "") {
-    return {
-      _tag: "failed",
-      reason: failed[1].trim().slice(0, 500),
+  if (failed?.[1] !== undefined) {
+    const reason = unwrapSentinelArgument(failed[1])
+    if (reason !== "") {
+      return {
+        _tag: "failed",
+        reason: reason.slice(0, 500),
+      }
     }
   }
   return null

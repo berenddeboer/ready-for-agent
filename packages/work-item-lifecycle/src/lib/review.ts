@@ -24,6 +24,7 @@ import {
   REVIEW_REVIEWING_MESSAGE,
   STEP_RUN_REASON,
 } from "./types.js"
+import { unwrapSentinelArgument } from "./unwrap-sentinel-argument.js"
 
 /**
  * Operator-facing Review agent failure text. Retains the specific startup
@@ -224,8 +225,13 @@ const lastValidResult = <T>(
 const hasResultLine = (output: string): boolean =>
   candidateResultLines(output).length > 0
 
+const quotedResultLineSuffix = (output: string): string => {
+  const last = candidateResultLines(output).at(-1)
+  return last === undefined ? "" : ` (got ${JSON.stringify(last)})`
+}
+
 const parseSeverity = (raw: string): ReviewSeverity | null => {
-  const value = raw.trim().toLowerCase()
+  const value = unwrapSentinelArgument(raw).toLowerCase()
   if (value === "low" || value === "medium" || value === "high") {
     return value
   }
@@ -240,7 +246,8 @@ const parseDeferredSeverity = (raw: string): DeferredReviewSeverity | null => {
   return null
 }
 
-const boundReason = (reason: string): string => reason.trim().slice(0, 500)
+const boundReason = (reason: string): string =>
+  unwrapSentinelArgument(reason).slice(0, 500)
 
 const tryParseReviewLine = (line: string): ReviewingPassResult | null => {
   if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_CLEAN$/i.test(line)) {
@@ -274,7 +281,7 @@ const tryParseApplyReviewLine = (line: string): ApplyReviewResult | null => {
   }
 
   const fixedAndDeferred = line.match(
-    /^READY_FOR_AGENT_RESULT:\s*REVIEW_FIXED_AND_DEFERRED\s*:\s*(low|medium)\s*:\s*(.+)$/i,
+    /^READY_FOR_AGENT_RESULT:\s*REVIEW_FIXED_AND_DEFERRED\s*:\s*([^:]+)\s*:\s*(.+)$/i,
   )
   if (
     fixedAndDeferred?.[1] !== undefined &&
@@ -292,7 +299,7 @@ const tryParseApplyReviewLine = (line: string): ApplyReviewResult | null => {
   }
 
   const deferred = line.match(
-    /^READY_FOR_AGENT_RESULT:\s*REVIEW_DEFERRED\s*:\s*(low|medium)\s*:\s*(.+)$/i,
+    /^READY_FOR_AGENT_RESULT:\s*REVIEW_DEFERRED\s*:\s*([^:]+)\s*:\s*(.+)$/i,
   )
   if (
     deferred?.[1] !== undefined &&
@@ -528,8 +535,9 @@ export const review = (context: LifecycleStepContext) =>
           ),
         )
 
-      let reviewingParsed = parseReviewResult(reviewing.assistantText)
-      if (reviewingParsed === null && !hasResultLine(reviewing.assistantText)) {
+      let reviewingOutput = reviewing.assistantText
+      let reviewingParsed = parseReviewResult(reviewingOutput)
+      if (reviewingParsed === null && !hasResultLine(reviewingOutput)) {
         const verdict = yield* agentBackend
           .continueTurn({
             sessionId,
@@ -554,13 +562,14 @@ export const review = (context: LifecycleStepContext) =>
                 }),
             ),
           )
-        reviewingParsed = parseReviewResult(verdict.assistantText)
+        reviewingOutput = verdict.assistantText
+        reviewingParsed = parseReviewResult(reviewingOutput)
       }
 
       if (reviewingParsed === null) {
         return yield* new ReviewResultError({
           workItemId: context.workItemId,
-          message: `${agentBackendLabel(context.agentBackend)} did not report a valid READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high>`,
+          message: `${agentBackendLabel(context.agentBackend)} did not report a valid READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high>${quotedResultLineSuffix(reviewingOutput)}`,
         })
       }
 
@@ -608,7 +617,7 @@ export const review = (context: LifecycleStepContext) =>
       if (applyParsed === null) {
         return yield* new ReviewResultError({
           workItemId: context.workItemId,
-          message: `${agentBackendLabel(context.agentBackend)} did not report a valid READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_FIXED_AND_DEFERRED: <low|medium>: <reason>, REVIEW_DEFERRED: <low|medium>: <reason>, REVIEW_CLEARED: <reason>, or REVIEW_UNRESOLVED_HIGH: <reason>`,
+          message: `${agentBackendLabel(context.agentBackend)} did not report a valid READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_FIXED_AND_DEFERRED: <low|medium>: <reason>, REVIEW_DEFERRED: <low|medium>: <reason>, REVIEW_CLEARED: <reason>, or REVIEW_UNRESOLVED_HIGH: <reason>${quotedResultLineSuffix(applying.assistantText)}`,
         })
       }
 
