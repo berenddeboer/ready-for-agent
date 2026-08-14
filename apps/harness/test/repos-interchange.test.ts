@@ -125,7 +125,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     const implementAction = sliceBetweenMarkers(
       issues,
       "{canImplement && (",
-      "{(canImplement || canQueue) && (",
+      "{issue.issueAuthor !== null",
     )
     expect(implementAction).toContain("onClick={startImplementNow}")
     expect(implementAction).not.toContain('aria-haspopup="menu"')
@@ -134,36 +134,22 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     const actionHandlers = sliceBetweenMarkers(
       issues,
       "const startImplementNow = () => {",
-      "useEffect(() => {",
+      "return (",
     )
     expect(actionHandlers).toContain("implementLocally.reset()")
     expect(actionHandlers).toContain("queueIssue.reset()")
     expect(actionHandlers).toContain("implementNow.mutate()")
     expect(actionHandlers).toContain("implementLocally.mutate()")
     expect(actionHandlers).toContain("queueIssue.mutate()")
-    expect(actionHandlers).toContain("const runMenuAction =")
-    const completeMenuStart = issues.indexOf("{(canImplement || canQueue) && (")
-    expect(completeMenuStart).toBeGreaterThan(-1)
-    const completeMenu = issues.slice(completeMenuStart)
-    expect(completeMenu).toContain("{canImplement && (")
-    expect(completeMenu).toContain("Implement now")
-    expect(completeMenu).toContain("Implement locally")
-    expect(completeMenu).toContain(
-      "runMenuAction({ action: startImplementNow })",
-    )
-    expect(completeMenu).toContain(
-      "runMenuAction({ action: startImplementLocally })",
-    )
-    expect(completeMenu).toContain("{canQueue && (")
-    expect(completeMenu).toContain("runMenuAction({ action: startQueue })")
-    expect(completeMenu).toContain(
-      'queueIssue.isPending ? "Queueing..." : "Queue"',
-    )
+    expect(actionHandlers).toContain("setImplementWithOpen(true)")
+    expect(issues).toContain("<IssueActionsMenu")
+    expect(issues).toContain("onImplementWith={startImplementWith}")
+    expect(issues).toContain("<ImplementWithIssueDialog")
     expect(issues.indexOf("ui.repoIssueImplementBtn")).toBeLessThan(
       issues.indexOf("ui.repoIssueActions"),
     )
     expect(issues.indexOf("ui.repoIssueActions")).toBeLessThan(
-      issues.indexOf("{(canImplement || canQueue) && ("),
+      issues.indexOf("<IssueActionsMenu"),
     )
     expect(issues).toContain("ui.repoIssueAuthor")
     expect(issues).toContain("ui.stamp")
@@ -465,6 +451,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(leaf).toContain("startWorkBannerMessage")
     expect(leaf).toContain("queueIssue.error")
     expect(leaf).toContain("implementNow.error")
+    expect(leaf).toContain("implementWith.error")
     expect(leaf).toContain("implementLocally.error")
     expect(leaf).toContain("Could not queue issue")
     expect(leaf).toContain("Could not start implementation")

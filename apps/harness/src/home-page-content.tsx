@@ -41,12 +41,16 @@ import { Banner } from "./banner.js"
 import { repositoryCardCollapseId, useCardCollapsed } from "./card-collapse.js"
 import { CardCollapseToggle } from "./card-collapse-toggle.js"
 import { Copy } from "./copy.js"
+import type { ImplementWithProfileInput } from "./execution-profile-draft.js"
+import { ExecutionProfileSummary } from "./execution-profile-summary.js"
 import { forgeChangeRequestShort } from "./forge-change-request.js"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
+import { ImplementWithIssueDialog } from "./implement-with-issue-dialog.js"
 import {
   type GraphqlWorkItemState,
   issueActionEligibility,
 } from "./issue-action-eligibility.js"
+import { IssueActionsMenu } from "./issue-actions-menu.js"
 import {
   formatLastRefreshedAgo,
   isIssueProjectionStale,
@@ -275,6 +279,14 @@ export type WorkItem = {
   issueTitle: string | null
   pullRequestNumber: number | null
   agentBackend: { id: string; label: string }
+  executionProfile?: {
+    backend: { id: string; label: string }
+    buildModel: string
+    buildThinkingLevel: string | null
+    reviewSameAsBuild: boolean
+    reviewModel: string
+    reviewThinkingLevel: string | null
+  } | null
   state: WorkItemState
   stateLabel: string
   status: WorkItemStatus
@@ -313,6 +325,14 @@ const workItemFields = {
   issueTitle: true,
   pullRequestNumber: true,
   agentBackend: { id: true, label: true },
+  executionProfile: {
+    backend: { id: true, label: true },
+    buildModel: true,
+    buildThinkingLevel: true,
+    reviewSameAsBuild: true,
+    reviewModel: true,
+    reviewThinkingLevel: true,
+  },
   mergeMode: true,
   state: true,
   stateLabel: true,
@@ -2958,7 +2978,7 @@ function RepositoryIssueRow({
   workItemsLoading: boolean
   readonly onOpenSession: (workItemId: string, sessionId: string) => void
 }) {
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [implementWithOpen, setImplementWithOpen] = useState(false)
   const queryClient = useQueryClient()
   const query = workItemsQuery(issue.repositoryId)
   const issueWorkItems = workItems.filter(
@@ -2991,6 +3011,25 @@ function RepositoryIssueRow({
     },
     onSuccess: onImplementSuccess,
   })
+  const implementWith = useMutation({
+    mutationFn: async (profile: ImplementWithProfileInput) => {
+      const result = await graphql.mutation({
+        implementWith: {
+          __args: {
+            repositoryId: issue.repositoryId,
+            issueNumber: issue.issueNumber,
+            profile,
+          },
+          ...workItemFields,
+        },
+      })
+      return result.implementWith
+    },
+    onSuccess: (workItem) => {
+      setImplementWithOpen(false)
+      onImplementSuccess(workItem)
+    },
+  })
   const implementLocally = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -3022,45 +3061,35 @@ function RepositoryIssueRow({
     onSuccess: onImplementSuccess,
   })
   const implementPending =
-    implementNow.isPending || implementLocally.isPending || queueIssue.isPending
+    implementNow.isPending ||
+    implementWith.isPending ||
+    implementLocally.isPending ||
+    queueIssue.isPending
   const startImplementNow = () => {
+    implementWith.reset()
     implementLocally.reset()
     queueIssue.reset()
     implementNow.mutate()
   }
+  const startImplementWith = () => {
+    implementNow.reset()
+    implementLocally.reset()
+    queueIssue.reset()
+    implementWith.reset()
+    setImplementWithOpen(true)
+  }
   const startImplementLocally = () => {
     implementNow.reset()
+    implementWith.reset()
     queueIssue.reset()
     implementLocally.mutate()
   }
   const startQueue = () => {
     implementNow.reset()
+    implementWith.reset()
     implementLocally.reset()
     queueIssue.mutate()
   }
-  const runMenuAction = ({ action }: { readonly action: () => void }) => {
-    setMenuOpen(false)
-    action()
-  }
-
-  useEffect(() => {
-    if (!menuOpen) return
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target
-      if (!(target instanceof Element)) return
-      if (target.closest(`[data-issue-menu="${issue.id}"]`)) return
-      setMenuOpen(false)
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false)
-    }
-    document.addEventListener("pointerdown", onPointerDown)
-    document.addEventListener("keydown", onKeyDown)
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown)
-      document.removeEventListener("keydown", onKeyDown)
-    }
-  }, [issue.id, menuOpen])
 
   return (
     <li className={ui.repoIssue}>
@@ -3124,6 +3153,7 @@ function RepositoryIssueRow({
             />
           )}
           {(implementNow.isError ||
+            implementWith.isError ||
             implementLocally.isError ||
             queueIssue.isError) && (
             <Banner
@@ -3137,7 +3167,9 @@ function RepositoryIssueRow({
                   ? queueIssue.error
                   : implementNow.isError
                     ? implementNow.error
-                    : implementLocally.error,
+                    : implementWith.isError
+                      ? implementWith.error
+                      : implementLocally.error,
                 fallback: queueIssue.isError
                   ? "Could not queue issue. Refresh the issues and try again."
                   : "Could not start implementation. Refresh the issues and try again.",
@@ -3163,71 +3195,50 @@ function RepositoryIssueRow({
           {issue.blockedBy.length > 0 && (
             <span className={cx(ui.stamp, ui.stampBlocked)}>Blocked</span>
           )}
-          {(canImplement || canQueue) && (
-            <span className="relative" data-issue-menu={issue.id}>
-              <button
-                type="button"
-                className={ui.iconBtn}
-                aria-label={`Actions for issue #${issue.issueNumber}`}
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((open) => !open)}
-              >
-                <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="12" cy="5" r="1.75" />
-                  <circle cx="12" cy="12" r="1.75" />
-                  <circle cx="12" cy="19" r="1.75" />
-                </svg>
-              </button>
-              {menuOpen && (
-                <div role="menu" className={cx(ui.menuPanel, "min-w-44")}>
-                  {canImplement && (
-                    <>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className={ui.menuItem}
-                        disabled={implementPending}
-                        onClick={() =>
-                          runMenuAction({ action: startImplementNow })
-                        }
-                      >
-                        {implementNow.isPending
-                          ? "Starting..."
-                          : "Implement now"}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className={ui.menuItem}
-                        disabled={implementPending}
-                        onClick={() =>
-                          runMenuAction({ action: startImplementLocally })
-                        }
-                      >
-                        {implementLocally.isPending
-                          ? "Starting..."
-                          : "Implement locally"}
-                      </button>
-                    </>
-                  )}
-                  {canQueue && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={ui.menuItem}
-                      disabled={implementPending}
-                      onClick={() => runMenuAction({ action: startQueue })}
-                    >
-                      {queueIssue.isPending ? "Queueing..." : "Queue"}
-                    </button>
-                  )}
-                </div>
-              )}
-            </span>
-          )}
+          <IssueActionsMenu
+            issueNumber={issue.issueNumber}
+            issueId={issue.id}
+            canImplement={canImplement}
+            canQueue={canQueue}
+            implementPending={implementPending}
+            implementNowPending={implementNow.isPending}
+            implementLocallyPending={implementLocally.isPending}
+            queuePending={queueIssue.isPending}
+            onImplementNow={startImplementNow}
+            onImplementWith={startImplementWith}
+            onImplementLocally={startImplementLocally}
+            onQueue={startQueue}
+          />
         </span>
       </div>
+      {implementWithOpen && (
+        <ImplementWithIssueDialog
+          issueNumber={issue.issueNumber}
+          backendId={repository.effectiveAgentBackend}
+          repositoryPrefs={{
+            defaultModel: repository.defaultModel,
+            defaultThinkingLevel: repository.defaultThinkingLevel,
+            reviewModel: repository.reviewModel,
+            reviewThinkingLevel: repository.reviewThinkingLevel,
+          }}
+          submitPending={implementWith.isPending}
+          submitError={
+            implementWith.isError
+              ? startWorkBannerMessage({
+                  error: implementWith.error,
+                  fallback:
+                    "Could not start implementation. Refresh the issues and try again.",
+                })
+              : null
+          }
+          onSubmit={(profile) => implementWith.mutate(profile)}
+          onCancel={() => {
+            if (!implementWith.isPending) {
+              setImplementWithOpen(false)
+            }
+          }}
+        />
+      )}
     </li>
   )
 }
@@ -3645,6 +3656,7 @@ export function WorkItemLifecycleStatus({
           <p className={ui.jobTicketRuntimeLine}>
             {workItem.agentBackend.label}
           </p>
+          <ExecutionProfileSummary profile={workItem.executionProfile} />
           {sessionId !== null ? (
             <div
               className={cx(

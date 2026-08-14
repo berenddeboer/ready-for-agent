@@ -148,6 +148,8 @@ describe("Completed surface routes", () => {
     expect(row).not.toContain("formatSessionShort")
     expect(row).not.toContain("WorkItemLifecycleStatus")
     expect(row).not.toContain("stateLabel")
+    expect(row).toContain("<ExecutionProfileSummary")
+    expect(row).toContain("workItem.executionProfile")
 
     const ui = uiSource()
     // Hover is PR-green (same as board merged-lane prBadge).
