@@ -3371,9 +3371,10 @@ function CauseChainDisclosure({
       <summary className={ui.statusMessageDetailSummary}>Cause chain</summary>
       {detail.causeChain.length > 0 ? (
         <ol className={ui.statusMessageDetailList}>
-          {detail.causeChain.map((link) => {
+          {detail.causeChain.map((link, index) => {
             const label = formatCauseChainLink(link)
-            return <li key={label}>{label}</li>
+            // biome-ignore lint/suspicious/noArrayIndexKey: ordered static stateless text walk; position is the identity
+            return <li key={index}>{label}</li>
           })}
         </ol>
       ) : null}

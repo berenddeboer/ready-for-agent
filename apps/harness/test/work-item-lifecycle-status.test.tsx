@@ -1,4 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Window } from "happy-dom"
+import type { ReactNode } from "react"
+import { flushSync } from "react-dom"
+import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import {
   type WorkItem,
@@ -99,4 +103,133 @@ describe("WorkItemLifecycleStatus", () => {
     expect(html).toContain("Error ENOENT")
     expect(html).toContain("Code: ENOENT")
   })
+
+  test("renders identically labeled cause-chain links without a duplicate-key warning", async () => {
+    const failedWorkItem = {
+      ...waitingForGitHubWorkItem,
+      state: "IMPLEMENT",
+      stateLabel: "Build",
+      status: "FAILED",
+      statusLabel: "Failed",
+      statusMessage: "Agent timed out",
+      postponedUntil: null,
+      canRetry: true,
+      latestStepRunDetail: {
+        code: "TIMEOUT",
+        causeChain: [
+          {
+            name: "TimeoutError",
+            code: "TIMEOUT",
+            message: null,
+          },
+          {
+            name: "TimeoutError",
+            code: "TIMEOUT",
+            message: null,
+          },
+        ],
+      },
+      lifecycleLabels: [
+        {
+          phase: "IMPLEMENT",
+          label: "Build: Failed",
+          status: "FAILED",
+          durationMs: 1200,
+        },
+      ],
+    } satisfies WorkItem
+
+    const tree = (
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkItemLifecycleStatus workItem={failedWorkItem} compact />
+      </QueryClientProvider>
+    )
+    const html = renderToStaticMarkup(tree)
+    expect(html).toContain("Cause chain")
+    expect(causeChainLabels(html)).toEqual([
+      "TimeoutError TIMEOUT",
+      "TimeoutError TIMEOUT",
+    ])
+
+    const warnings = await renderAndCollectConsoleErrors(tree)
+    expect(warnings.join("\n")).not.toMatch(
+      /Encountered two children with the same key/,
+    )
+  })
 })
+
+function causeChainLabels(html: string): readonly string[] {
+  const section = html.match(/Cause chain<\/summary>([\s\S]*?)<\/details>/)
+  if (section === null) {
+    return []
+  }
+  return [...section[1].matchAll(/<li>([\s\S]*?)<\/li>/g)].map(
+    (match) => match[1],
+  )
+}
+
+const INSTALLED_GLOBAL_KEYS = [
+  "window",
+  "document",
+  "HTMLElement",
+  "Element",
+  "Node",
+  "DocumentFragment",
+  "SVGElement",
+  "navigator",
+  "getComputedStyle",
+  "IS_REACT_ACT_ENVIRONMENT",
+] as const
+
+async function renderAndCollectConsoleErrors(
+  tree: ReactNode,
+): Promise<readonly string[]> {
+  const previous = new Map<string, { had: boolean; value: unknown }>()
+  const g = globalThis as unknown as Record<string, unknown>
+  for (const key of INSTALLED_GLOBAL_KEYS) {
+    previous.set(key, { had: Object.hasOwn(g, key), value: g[key] })
+  }
+  const happyWindow = new Window({ url: "https://localhost/" })
+  g.window = happyWindow
+  g.document = happyWindow.document
+  g.HTMLElement = happyWindow.HTMLElement
+  g.Element = happyWindow.Element
+  g.Node = happyWindow.Node
+  g.DocumentFragment = happyWindow.DocumentFragment
+  g.SVGElement = happyWindow.SVGElement
+  g.navigator = happyWindow.navigator
+  g.getComputedStyle = happyWindow.getComputedStyle.bind(happyWindow)
+  g.IS_REACT_ACT_ENVIRONMENT = false
+
+  const container = happyWindow.document.createElement("div")
+  happyWindow.document.body.appendChild(container)
+  const warnings: string[] = []
+  const originalError = console.error
+  console.error = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "))
+  }
+  const root = createRoot(container as unknown as HTMLElement)
+  try {
+    flushSync(() => {
+      root.render(tree)
+    })
+    return warnings
+  } finally {
+    flushSync(() => {
+      root.unmount()
+    })
+    // React may schedule a NormalPriority callback that reads `window.event`.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0)
+    })
+    console.error = originalError
+    happyWindow.close()
+    for (const [key, entry] of previous) {
+      if (entry.had) {
+        g[key] = entry.value
+      } else {
+        delete g[key]
+      }
+    }
+  }
+}
