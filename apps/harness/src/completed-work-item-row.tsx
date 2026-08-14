@@ -8,6 +8,7 @@ import {
   planArchiveLegs,
 } from "./archive-legs.js"
 import { Copy } from "./copy.js"
+import { ExecutionProfileSummary } from "./execution-profile-summary.js"
 import {
   forgeChangeRequestNoun,
   forgeChangeRequestShort,
@@ -174,6 +175,10 @@ export function CompletedWorkItemRow({
         </p>
       )}
 
+      <ExecutionProfileSummary
+        className="mt-[0.25rem]"
+        profile={workItem.executionProfile}
+      />
       <p className={ui.archiveMeta}>
         {workItem.agentBackend.label}
         {sessionId !== null ? (

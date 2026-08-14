@@ -3,6 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { type CSSProperties, Suspense, useMemo, useState } from "react"
 import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
+import { ExecutionProfileSummary } from "./execution-profile-summary.js"
 import {
   JobsCardSkeleton,
   type Repository,
@@ -246,6 +247,7 @@ function PipelineTicket({
       )}
       <div className={ui.jobTicketRuntime}>
         <p className={ui.jobTicketRuntimeLine}>{workItem.agentBackend.label}</p>
+        <ExecutionProfileSummary profile={workItem.executionProfile} />
         {sessionId !== null ? (
           <div
             className={cx(

@@ -80,9 +80,8 @@ describe("Waiting for blockers Working-row polish", () => {
   test("Issue row keeps direct Implement and restores the complete kebab", () => {
     const source = homeSource()
     expect(source).toContain("issueActionEligibility({")
-    expect(source).toContain('queueIssue.isPending ? "Queueing..." : "Queue"')
     expect(source).toContain("{canImplement && (")
-    expect(source).toContain("{(canImplement || canQueue) && (")
+    expect(source).toContain("<IssueActionsMenu")
     // Primary blue cue after the title for implementable issues only.
     expect(source).toContain("ui.repoIssueImplementBtn")
     expect(source).toContain("ui.repoIssueImplementIcon")
@@ -92,13 +91,13 @@ describe("Waiting for blockers Working-row polish", () => {
     expect(source).toContain("queueIssue.reset()")
     expect(source).toContain("implementNow.mutate()")
     expect(source).toContain("onClick={startImplementNow}")
-    // The rightmost kebab retains both implementation paths.
-    expect(source).toContain("Implement now")
-    expect(source).toContain("Implement locally")
+    // The rightmost kebab retains Implement now, Implement with..., locally.
+    expect(source).toContain("<IssueActionsMenu")
+    expect(source).toContain("onImplementWith={startImplementWith}")
     expect(source).toContain("implementLocally.mutate()")
-    expect(source).toContain("runMenuAction({ action: startImplementLocally })")
+    expect(source).toContain("setImplementWithOpen(true)")
     expect(source).toMatch(
-      /implementNow\.isPending \|\|\s*implementLocally\.isPending \|\| queueIssue\.isPending/,
+      /implementNow\.isPending \|\|\s*implementWith\.isPending \|\|\s*implementLocally\.isPending \|\|\s*queueIssue\.isPending/,
     )
     expect(source).toContain("implementLocally.isError")
     // Pending disables the primary cue (styles + behavior stay aligned).

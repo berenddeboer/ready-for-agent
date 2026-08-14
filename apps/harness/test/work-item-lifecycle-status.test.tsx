@@ -57,6 +57,29 @@ describe("WorkItemLifecycleStatus", () => {
     expect(html).toContain("Status checks: Postponed")
     expect(html).not.toContain(">Retry<")
     expect(html).not.toContain("Cause chain")
+    expect(html).not.toContain("Explicit Work Item Execution Profile")
+  })
+
+  test("shows an Explicit Work Item Execution Profile on Work Item detail", () => {
+    const profiled = {
+      ...waitingForGitHubWorkItem,
+      executionProfile: {
+        backend: { id: "opencode", label: "OpenCode" },
+        buildModel: "big-pickle",
+        buildThinkingLevel: "high",
+        reviewSameAsBuild: true,
+        reviewModel: "big-pickle",
+        reviewThinkingLevel: "high",
+      },
+    } satisfies WorkItem
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkItemLifecycleStatus workItem={profiled} />
+      </QueryClientProvider>,
+    )
+    expect(html).toContain("Explicit Work Item Execution Profile")
+    expect(html).toContain("Build big-pickle · High")
+    expect(html).toContain("Review Same as build")
   })
 
   test("hides the cause chain behind a collapsed disclosure on a failed card", () => {

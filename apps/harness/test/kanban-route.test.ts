@@ -438,6 +438,8 @@ describe("kanban home board", () => {
       source.indexOf("function KanbanJobsBoard()"),
     )
     expect(ticket).toContain("{workItem.agentBackend.label}")
+    expect(ticket).toContain("<ExecutionProfileSummary")
+    expect(ticket).toContain("workItem.executionProfile")
     expect(ticket).toContain("ui.jobTicketRuntime")
     // Backend label is its own line; session sits on a following row.
     expect(ticket).toMatch(
