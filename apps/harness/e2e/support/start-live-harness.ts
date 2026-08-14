@@ -84,35 +84,6 @@ const binDir = join(runDir, "bin")
 mkdirSync(controlDir, { recursive: true })
 mkdirSync(binDir, { recursive: true })
 
-/**
- * Empty OpenCode session DB so Session Telemetry can return MISSING when
- * `opencode db path` fails (CI inspect AgentBackendExitError). Absent file
- * or unresolved path is UNAVAILABLE, which is not the e2e missing-session
- * fixture outcome.
- */
-const openCodeDbPath = join(runDir, "opencode.db")
-{
-  const openCodeDb = new Database(openCodeDbPath)
-  try {
-    openCodeDb.exec(`
-      CREATE TABLE session (
-        id text PRIMARY KEY,
-        model text,
-        cost real DEFAULT 0 NOT NULL,
-        tokens_input integer DEFAULT 0 NOT NULL,
-        tokens_output integer DEFAULT 0 NOT NULL,
-        tokens_reasoning integer DEFAULT 0 NOT NULL,
-        tokens_cache_read integer DEFAULT 0 NOT NULL,
-        tokens_cache_write integer DEFAULT 0 NOT NULL,
-        time_created integer NOT NULL,
-        time_updated integer NOT NULL
-      )
-    `)
-  } finally {
-    openCodeDb.close()
-  }
-}
-
 const controlFile = (
   file: (typeof CONTROL_FILES)[keyof typeof CONTROL_FILES],
 ) => join(controlDir, file)
@@ -169,7 +140,6 @@ const env: NodeJS.ProcessEnv = {
   ...process.env,
   PATH: productPath,
   SQLITE_DATABASE_PATH: dbPath,
-  OPENCODE_DB: openCodeDbPath,
   PORT: String(port),
   NO_BROWSER: "1",
 }

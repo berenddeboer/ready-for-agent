@@ -43,6 +43,25 @@ export const resolveDefaultBuildModelFromCatalog = (input: {
  * backends so an unauthenticated / inspect-failed OpenCode does not stall
  * on an empty catalog (CI ui-history).
  */
+/**
+ * When the selected backend's `models` query is empty (inspect-failed
+ * OpenCode), use a Claude preview catalog and switch the saved backend.
+ */
+export const resolveClaudePreviewCatalog = (input: {
+  readonly models: ReadonlyArray<{ readonly id: string }>
+}):
+  | { readonly kind: "configure"; readonly modelId: string }
+  | { readonly kind: "empty-catalog" } => {
+  const resolution = resolveDefaultBuildModelFromCatalog({
+    current: null,
+    models: input.models,
+  })
+  if (resolution.kind === "configure") {
+    return resolution
+  }
+  return { kind: "empty-catalog" }
+}
+
 export const preferredFirstRunBackendIds = (
   backendIds: readonly string[],
 ): readonly string[] => {
@@ -163,6 +182,26 @@ export const ensureConfiguredDefaultBuildModel = async (): Promise<void> => {
       current: data.config.defaultModel,
       models: data.models,
     })
+  }
+  // Selected backend can stay OpenCode after inspect failure; `models` is then
+  // empty even though fake Claude is Ready. Preview Claude and switch.
+  if (resolution.kind === "empty-catalog") {
+    const preview = await graphqlJson<{
+      previewAgentBackend: {
+        readonly models: ReadonlyArray<{ readonly id: string }>
+      }
+    }>(`query {
+      previewAgentBackend(backendId: "claude") { models { id } }
+    }`)
+    resolution = resolveClaudePreviewCatalog({
+      models: preview.previewAgentBackend.models,
+    })
+    if (resolution.kind === "configure") {
+      data = {
+        ...data,
+        config: { ...data.config, selectedAgentBackend: "claude" },
+      }
+    }
   }
   if (resolution.kind === "already-configured") {
     return

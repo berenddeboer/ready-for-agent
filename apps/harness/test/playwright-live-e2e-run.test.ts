@@ -55,6 +55,5 @@ describe("UI-history Playwright wiring (issue #1000)", () => {
     expect(fixtures).toContain("isolateHarnessWorkers")
     expect(supervisor).toContain("liveHarnessSupervisorBindings")
     expect(supervisor).toContain("liveHarnessStateFilePath")
-    expect(supervisor).toContain("OPENCODE_DB")
   })
 })
