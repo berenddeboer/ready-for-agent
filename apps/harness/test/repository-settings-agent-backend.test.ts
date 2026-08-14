@@ -32,6 +32,9 @@ describe("Repository settings Agent Backend override", () => {
     expect(source).toContain("backendChangeBlocked")
     expect(source).toContain("blockingUnfinishedWorkItemCount")
     expect(source).toContain("on this Repository")
+    expect(source).toContain(
+      "on this Repository — finish or abandon them before changing Agent Backend.",
+    )
     expect(source).toMatch(
       /updateSettings\.mutate\(\{[\s\S]*selectedAgentBackend,[\s\S]*\}\)/,
     )

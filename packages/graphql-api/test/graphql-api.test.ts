@@ -9,7 +9,11 @@ import {
   missingSessionTelemetry,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
-import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
+import {
+  AgentBackendChangeBlockedError,
+  DbService,
+  type DbServiceShape,
+} from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
   stubDbService,
@@ -2456,6 +2460,207 @@ describe("GraphQL API", () => {
         projectPath: repository.projectPath,
       },
     ])
+  })
+
+  test("updateConfig returns a zero blocking count while unfinished Work Items remain", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime({
+      countUnfinishedWorkItems: Effect.succeed(2),
+      countBlockingUnfinishedForGlobalDefault: Effect.succeed(0),
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) {
+            selectedAgentBackend
+            unfinishedWorkItemCount
+            blockingUnfinishedWorkItemCount
+          }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "grok",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        updateConfig: {
+          selectedAgentBackend: "grok",
+          unfinishedWorkItemCount: 2,
+          blockingUnfinishedWorkItemCount: 0,
+        },
+      },
+    })
+  })
+
+  test("updateConfig maps AgentBackendChangeBlockedError for a global ordinary gate", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime({
+      updateConfig: () =>
+        Effect.fail(
+          new AgentBackendChangeBlockedError({
+            message:
+              "Cannot change default Agent Backend while 1 Work Item(s) are unfinished on Repositories that inherit the default",
+            unfinishedWorkItemCount: 1,
+            scope: "global",
+          }),
+        ),
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { selectedAgentBackend }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "grok",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message:
+            "Cannot change default Agent Backend while 1 Work Item(s) are unfinished on Repositories that inherit the default",
+          extensions: {
+            code: "AGENT_BACKEND_CHANGE_BLOCKED",
+            unfinishedWorkItemCount: 1,
+            scope: "global",
+          },
+        }),
+      ],
+    })
+  })
+
+  test("updateRepositorySettings persists an override when the repository blocking count is zero", async () => {
+    await runtime.dispose()
+    let savedBackend: string | null | undefined
+    runtime = makeRuntime({
+      countBlockingUnfinishedForRepository: () => Effect.succeed(0),
+      updateRepositorySettings: (input) => {
+        savedBackend = input.selectedAgentBackend
+        return Effect.succeed({
+          ...repository,
+          paused: input.paused,
+          selectedAgentBackend:
+            input.selectedAgentBackend === undefined
+              ? repository.selectedAgentBackend
+              : input.selectedAgentBackend,
+          defaultModel: input.defaultModel,
+          defaultThinkingLevel: input.defaultThinkingLevel,
+          reviewModel: input.reviewModel,
+          reviewThinkingLevel: input.reviewThinkingLevel,
+          autoMerge: input.autoMerge,
+          includeAllIssueAuthors: input.includeAllIssueAuthors,
+          waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
+        })
+      },
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) {
+            selectedAgentBackend
+            blockingUnfinishedWorkItemCount
+          }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: true,
+            selectedAgentBackend: "grok",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        updateRepositorySettings: {
+          selectedAgentBackend: "grok",
+          blockingUnfinishedWorkItemCount: 0,
+        },
+      },
+    })
+    expect(savedBackend).toBe("grok")
+  })
+
+  test("updateRepositorySettings maps AgentBackendChangeBlockedError for a repository ordinary gate", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime({
+      updateRepositorySettings: () =>
+        Effect.fail(
+          new AgentBackendChangeBlockedError({
+            message:
+              "Cannot change Repository Agent Backend while 1 Work Item(s) are unfinished on this Repository",
+            unfinishedWorkItemCount: 1,
+            scope: "repository",
+            repositoryId: repository.id,
+          }),
+        ),
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { selectedAgentBackend }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: true,
+            selectedAgentBackend: "grok",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message:
+            "Cannot change Repository Agent Backend while 1 Work Item(s) are unfinished on this Repository",
+          extensions: {
+            code: "AGENT_BACKEND_CHANGE_BLOCKED",
+            unfinishedWorkItemCount: 1,
+            scope: "repository",
+            repositoryId: repository.id,
+          },
+        }),
+      ],
+    })
   })
 
   test("reports ambient GitLab credential status when no vault secret exists", async () => {

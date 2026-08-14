@@ -44,6 +44,88 @@ describe("DbService", () => {
     blockedBy: [],
   }
 
+  const insertWorkItem = (
+    sql: SqlClient.SqlClient,
+    input: {
+      readonly id: string
+      readonly repositoryId: string
+      readonly issueNumber: number
+      readonly state?: string
+      readonly agentBackend?: string
+      readonly explicitProfile?: {
+        readonly buildModel: string
+        readonly buildThinkingLevel: string | null
+        readonly reviewSameAsBuild?: boolean
+        readonly reviewModel?: string | null
+        readonly reviewThinkingLevel?: string | null
+      }
+    },
+  ) => {
+    const now = Date.now()
+    const state = input.state ?? "implement"
+    const agentBackend = input.agentBackend ?? "opencode"
+    const profile = input.explicitProfile
+    if (profile === undefined) {
+      return sql.unsafe(
+        `INSERT INTO work_item (
+           id, repository_id, issue_number, state, state_ready_at,
+           agent_backend, worktree_path, session_id, failure_code,
+           failure_message, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+        [
+          input.id,
+          input.repositoryId,
+          input.issueNumber,
+          state,
+          now,
+          agentBackend,
+          now,
+          now,
+        ],
+      )
+    }
+    const sameAsBuild = profile.reviewSameAsBuild !== false
+    return sql.unsafe(
+      `INSERT INTO work_item (
+         id, repository_id, issue_number, state, state_ready_at,
+         agent_backend, execution_profile_present,
+         execution_profile_build_model, execution_profile_build_thinking_level,
+         execution_profile_review_same_as_build,
+         execution_profile_review_model, execution_profile_review_thinking_level,
+         worktree_path, session_id, failure_code, failure_message,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+      [
+        input.id,
+        input.repositoryId,
+        input.issueNumber,
+        state,
+        now,
+        agentBackend,
+        profile.buildModel,
+        profile.buildThinkingLevel,
+        sameAsBuild ? 1 : 0,
+        sameAsBuild ? null : (profile.reviewModel ?? null),
+        sameAsBuild ? null : (profile.reviewThinkingLevel ?? null),
+        now,
+        now,
+      ],
+    )
+  }
+
+  const readWorkItemProfile = (sql: SqlClient.SqlClient, id: string) =>
+    sql.unsafe(
+      `SELECT agent_backend AS agentBackend,
+              execution_profile_present AS executionProfilePresent,
+              execution_profile_build_model AS buildModel,
+              execution_profile_build_thinking_level AS buildThinkingLevel,
+              execution_profile_review_same_as_build AS reviewSameAsBuild,
+              execution_profile_review_model AS reviewModel,
+              execution_profile_review_thinking_level AS reviewThinkingLevel
+       FROM work_item WHERE id = ?`,
+      [id],
+    )
+
   describe("config", () => {
     it("returns null build model on empty DB and persists updates", () =>
       runTest(
@@ -368,6 +450,136 @@ describe("DbService", () => {
             "opencode",
             "grok",
           ])
+        }),
+      ))
+
+    it("allows default Agent Backend change when only explicit-profile Work Items are unfinished on inheriting Repositories", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const inheriting = yield* db.addRepository(sampleInput)
+          yield* insertWorkItem(sql, {
+            id: "wi-explicit-inheriting",
+            repositoryId: inheriting.id,
+            issueNumber: 7,
+            agentBackend: "grok",
+            explicitProfile: {
+              buildModel: "grok-code",
+              buildThinkingLevel: "high",
+            },
+          })
+
+          expect(yield* db.countUnfinishedWorkItems).toBe(1)
+          expect(yield* db.countBlockingUnfinishedForGlobalDefault).toBe(0)
+          expect(
+            yield* db.countBlockingUnfinishedForRepository(inheriting.id),
+          ).toBe(0)
+
+          const switched = yield* db.updateConfig({
+            selectedAgentBackend: "claude",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          expect(switched.selectedAgentBackend).toBe("claude")
+          expect(yield* db.countUnfinishedWorkItems).toBe(1)
+          const profile = (yield* readWorkItemProfile(
+            sql,
+            "wi-explicit-inheriting",
+          ))[0]
+          expect(profile).toMatchObject({
+            agentBackend: "grok",
+            executionProfilePresent: 1,
+            buildModel: "grok-code",
+            buildThinkingLevel: "high",
+            reviewSameAsBuild: 1,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          })
+          expect(yield* db.listSelectedOrInUseBackendIds).toEqual([
+            "claude",
+            "grok",
+          ])
+        }),
+      ))
+
+    it("blocks default Agent Backend change only for ordinary inheriting Work Items", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const inheriting = yield* db.addRepository(sampleInput)
+          const overridden = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/other",
+            localPath: "/repos/acme/other.git",
+            isBare: true,
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: overridden.id,
+            paused: true,
+            selectedAgentBackend: "grok",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+          yield* insertWorkItem(sql, {
+            id: "wi-ordinary-inheriting",
+            repositoryId: inheriting.id,
+            issueNumber: 1,
+            state: "needs_human",
+            agentBackend: "opencode",
+          })
+          yield* insertWorkItem(sql, {
+            id: "wi-explicit-inheriting",
+            repositoryId: inheriting.id,
+            issueNumber: 2,
+            agentBackend: "claude",
+            explicitProfile: {
+              buildModel: "claude-opus",
+              buildThinkingLevel: null,
+            },
+          })
+          yield* insertWorkItem(sql, {
+            id: "wi-ordinary-override",
+            repositoryId: overridden.id,
+            issueNumber: 3,
+            agentBackend: "grok",
+          })
+
+          const error = yield* Effect.flip(
+            db.updateConfig({
+              selectedAgentBackend: "grok",
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              maxConcurrentAgentTurns: 2,
+              maxConcurrentWorkItems: 5,
+            }),
+          )
+          expect(error).toMatchObject({
+            _tag: "AgentBackendChangeBlockedError",
+            unfinishedWorkItemCount: 1,
+            scope: "global",
+          })
+          expect(yield* db.countUnfinishedWorkItems).toBe(3)
+          expect(yield* db.countBlockingUnfinishedForGlobalDefault).toBe(1)
+          expect(
+            yield* db.countBlockingUnfinishedForRepository(inheriting.id),
+          ).toBe(1)
+          expect(
+            yield* db.countBlockingUnfinishedForRepository(overridden.id),
+          ).toBe(1)
         }),
       ))
 
@@ -984,6 +1196,117 @@ describe("DbService", () => {
           })
           expect(sameOverride.paused).toBe(false)
           expect(sameOverride.selectedAgentBackend).toBeNull()
+        }),
+      ))
+
+    it("allows Repository Agent Backend override change when only explicit-profile Work Items are unfinished", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* db.addRepository(sampleInput)
+          yield* insertWorkItem(sql, {
+            id: "wi-explicit-repo",
+            repositoryId: repository.id,
+            issueNumber: 9,
+            agentBackend: "grok",
+            explicitProfile: {
+              buildModel: "grok-code",
+              buildThinkingLevel: "high",
+              reviewSameAsBuild: false,
+              reviewModel: "grok-review",
+              reviewThinkingLevel: "max",
+            },
+          })
+
+          expect(yield* db.countUnfinishedWorkItems).toBe(1)
+          expect(
+            yield* db.countBlockingUnfinishedForRepository(repository.id),
+          ).toBe(0)
+
+          const updated = yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: true,
+            selectedAgentBackend: "claude",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+          expect(updated.selectedAgentBackend).toBe("claude")
+          const profile = (yield* readWorkItemProfile(
+            sql,
+            "wi-explicit-repo",
+          ))[0]
+          expect(profile).toMatchObject({
+            agentBackend: "grok",
+            executionProfilePresent: 1,
+            buildModel: "grok-code",
+            buildThinkingLevel: "high",
+            reviewSameAsBuild: 0,
+            reviewModel: "grok-review",
+            reviewThinkingLevel: "max",
+          })
+          expect(yield* db.listSelectedOrInUseBackendIds).toEqual([
+            "opencode",
+            "claude",
+            "grok",
+          ])
+        }),
+      ))
+
+    it("blocks Repository Agent Backend override change only for ordinary unfinished Work Items", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* db.addRepository(sampleInput)
+          yield* insertWorkItem(sql, {
+            id: "wi-ordinary-repo",
+            repositoryId: repository.id,
+            issueNumber: 1,
+            state: "needs_human",
+            agentBackend: "opencode",
+          })
+          yield* insertWorkItem(sql, {
+            id: "wi-explicit-repo",
+            repositoryId: repository.id,
+            issueNumber: 2,
+            agentBackend: "grok",
+            explicitProfile: {
+              buildModel: "grok-code",
+              buildThinkingLevel: null,
+            },
+          })
+
+          expect(yield* db.countUnfinishedWorkItems).toBe(2)
+          expect(
+            yield* db.countBlockingUnfinishedForRepository(repository.id),
+          ).toBe(1)
+
+          const error = yield* Effect.flip(
+            db.updateRepositorySettings({
+              repositoryId: repository.id,
+              paused: true,
+              selectedAgentBackend: "claude",
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              autoMerge: false,
+              includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
+            }),
+          )
+          expect(error).toMatchObject({
+            _tag: "AgentBackendChangeBlockedError",
+            unfinishedWorkItemCount: 1,
+            scope: "repository",
+            repositoryId: repository.id,
+          })
         }),
       ))
 

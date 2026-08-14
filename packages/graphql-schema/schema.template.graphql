@@ -389,8 +389,9 @@ type Config {
   """
   unfinishedWorkItemCount: Int!
   """
-  Unfinished Work Items on Repositories that inherit the harness default.
-  Changing selectedAgentBackend is rejected while this is greater than zero.
+  Unfinished ordinary Work Items on Repositories that inherit the harness
+  default. Explicit-profile Work Items are excluded. Changing
+  selectedAgentBackend is rejected while this is greater than zero.
   """
   blockingUnfinishedWorkItemCount: Int!
 }
@@ -453,8 +454,9 @@ type Repository {
   waitForReadyForReviewChecks: Boolean!
   issuesReconciledAt: String
   """
-  Unfinished Work Items on this Repository. Changing selectedAgentBackend is
-  rejected while this is greater than zero.
+  Unfinished ordinary Work Items on this Repository. Explicit-profile Work
+  Items are excluded. Changing selectedAgentBackend is rejected while this
+  is greater than zero.
   """
   blockingUnfinishedWorkItemCount: Int!
   """
