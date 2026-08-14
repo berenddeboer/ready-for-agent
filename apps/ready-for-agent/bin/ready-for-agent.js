@@ -59,7 +59,7 @@ const result = spawnSync(binaryPath, process.argv.slice(2), {
   stdio: "inherit",
 })
 
-const spawnFailure = binarySpawnFailureMessage(result)
+const spawnFailure = binarySpawnFailureMessage(selection.platformKey, result)
 if (spawnFailure !== undefined) {
   console.error(spawnFailure)
   process.exit(1)

@@ -263,9 +263,10 @@ missing coding agent never does — it shows as Unavailable instead
 ### Startup fails with SIGILL / "Illegal instruction"
 
 The published Linux x64 binary is compiled with Bun's
-`bun-linux-x64-baseline` target so pre-Haswell CPUs (no AVX2/BMI2,
-for example Ivy Bridge) can run it. If an older install still dies
-with `SIGILL` or `Illegal instruction`, reinstall:
+`bun-linux-x64-baseline` target so CPUs with SSE4.2 but without
+AVX2/BMI2 (for example Ivy Bridge) can run it. Older x64 CPUs without
+SSE4.2 remain unsupported. If an older install still dies with `SIGILL`
+or `Illegal instruction`, reinstall:
 
 ```bash
 npx ready-for-agent@latest
