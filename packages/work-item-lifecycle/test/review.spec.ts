@@ -1356,7 +1356,11 @@ describe("review", () => {
               })
             }
             return Effect.fail(
-              AgentBackendExitError.new({ exitCode: 2, cwd: root }),
+              AgentBackendExitError.new({
+                exitCode: 2,
+                cwd: root,
+                message: "OpenCode failed with exit code 2",
+              }),
             )
           },
         }),
@@ -2004,7 +2008,11 @@ describe("review", () => {
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
             continueTurn: () =>
               Effect.fail(
-                AgentBackendExitError.new({ exitCode: 2, cwd: root }),
+                AgentBackendExitError.new({
+                  exitCode: 2,
+                  cwd: root,
+                  message: "OpenCode failed with exit code 2",
+                }),
               ),
             inspect: () =>
               Effect.succeed({

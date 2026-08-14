@@ -389,6 +389,7 @@ describe("preCommit", () => {
                 exitCode: 2,
                 cwd: root,
                 sessionId: "ses_pre_commit",
+                message: "OpenCode failed with exit code 2",
               }),
             ),
         }),

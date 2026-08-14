@@ -1103,6 +1103,7 @@ describe("createPr", () => {
                 _tag: "AgentBackendExitError",
                 exitCode: 2,
                 cwd: root,
+                message: "OpenCode failed with exit code 2",
               } as never),
             inspect: () =>
               Effect.succeed({
