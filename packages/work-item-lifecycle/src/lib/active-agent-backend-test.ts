@@ -178,6 +178,8 @@ export const stubActiveAgentBackendLayer = (
         }),
       recheck: (backendId) =>
         Effect.succeed(readyFor(registrationFor(backendId))),
+      inspectStartupBackend: (backendId) =>
+        Effect.succeed(readyFor(registrationFor(backendId))),
       requireAgentTurnsAllowed: (backendId) => requireFor(backendId),
       preview: (backendId) =>
         Effect.succeed({

@@ -5,8 +5,10 @@ import {
   ActiveAgentBackendLive,
   AgentBackend,
   AgentBackendConfigError,
+  type AgentBackendError,
   AgentBackendExitError,
   type AgentBackendId,
+  AgentBackendMalformedOutputError,
   type AgentTurnResult,
   type ResolveAgentBackendRuntime,
   SessionTelemetryProvider,
@@ -843,6 +845,156 @@ describe("ActiveAgentBackend multi-backend registry", () => {
         // Unknown / non-active still falls back to built-in table.
         const builtIn = yield* active.getRegistration(AGENT_BACKEND_IDS.grok)
         expect(builtIn.descriptor.id).toBe("grok")
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+})
+
+describe("inspectStartupBackend malformed-output confirmation", () => {
+  type SequencedInspect =
+    | { kind: "ready" }
+    | { kind: "fail"; error: () => AgentBackendError }
+
+  const makeSequencedResolve = (
+    inspectResults: ReadonlyArray<SequencedInspect>,
+  ): {
+    resolveRuntime: ResolveAgentBackendRuntime
+    inspectCount: () => number
+  } => {
+    let inspectCount = 0
+    const resolveRuntime: ResolveAgentBackendRuntime = (backendId) => {
+      const reg = registration(backendId)
+      return Effect.succeed({
+        registration: reg,
+        adapter: {
+          inspect: () => {
+            const index = Math.min(inspectCount, inspectResults.length - 1)
+            inspectCount += 1
+            const result = inspectResults[index]
+            if (result === undefined || result.kind === "ready") {
+              return Effect.succeed({
+                backend: reg.descriptor,
+                models: [
+                  {
+                    id: `${backendId}/model-a`,
+                    thinkingLevels: ["low", "high"],
+                  },
+                ],
+                provider: null,
+                warnings: [],
+              })
+            }
+            return Effect.fail(result.error())
+          },
+          startTurn: () => Effect.succeed(turnResult(`${backendId}-start`)),
+          continueTurn: () =>
+            Effect.succeed(turnResult(`${backendId}-continue`)),
+        },
+        telemetry: {
+          getSession: (sessionId: string) =>
+            Effect.succeed(
+              unsupportedSessionTelemetry(sessionId, reg.descriptor),
+            ),
+        },
+      })
+    }
+    return { resolveRuntime, inspectCount: () => inspectCount }
+  }
+
+  const malformed = () =>
+    new AgentBackendMalformedOutputError({ cwd: "/tmp", byteLength: 3 })
+
+  it("confirms a transient malformed startup inspection and leaves the backend Ready", async () => {
+    const { resolveRuntime, inspectCount } = makeSequencedResolve([
+      { kind: "fail", error: malformed },
+      { kind: "ready" },
+    ])
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const status = yield* active.inspectStartupBackend(
+          AGENT_BACKEND_IDS.opencode,
+          { cwd: "/tmp" },
+        )
+        expect(status.kind).toBe("ready")
+        expect(status.backend.id).toBe("opencode")
+        expect(inspectCount()).toBe(2)
+        expect(
+          (yield* active.getBackendStatus(AGENT_BACKEND_IDS.opencode))?.kind,
+        ).toBe("ready")
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
+  it("keeps the backend Unavailable after two malformed results with exactly two attempts", async () => {
+    const { resolveRuntime, inspectCount } = makeSequencedResolve([
+      { kind: "fail", error: malformed },
+      { kind: "fail", error: malformed },
+    ])
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const status = yield* active.inspectStartupBackend(
+          AGENT_BACKEND_IDS.opencode,
+          { cwd: "/tmp" },
+        )
+        expect(status.kind).toBe("unavailable")
+        expect(status.reason).toContain("AgentBackendMalformedOutputError")
+        expect(inspectCount()).toBe(2)
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
+  it("does not retry non-malformed inspect failures", async () => {
+    const { resolveRuntime, inspectCount } = makeSequencedResolve([
+      {
+        kind: "fail",
+        error: () => new AgentBackendConfigError({ message: "binary missing" }),
+      },
+    ])
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const status = yield* active.inspectStartupBackend(
+          AGENT_BACKEND_IDS.opencode,
+          { cwd: "/tmp" },
+        )
+        expect(status.kind).toBe("unavailable")
+        expect(status.reason).toContain("binary missing")
+        expect(inspectCount()).toBe(1)
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
+  it("explicit recheck stays single-attempt for malformed output", async () => {
+    const { resolveRuntime, inspectCount } = makeSequencedResolve([
+      { kind: "fail", error: malformed },
+      { kind: "ready" },
+    ])
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const status = yield* active.recheck(AGENT_BACKEND_IDS.opencode, {
+          cwd: "/tmp",
+        })
+        expect(status.kind).toBe("unavailable")
+        expect(inspectCount()).toBe(1)
       }).pipe(Effect.provide(layer)),
     )
   })

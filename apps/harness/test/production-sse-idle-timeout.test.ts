@@ -306,6 +306,7 @@ describe("production GraphQL SSE idle timeout", () => {
         getStatus: Effect.succeed(readyStatus()),
         setSelectedOrInUse: () => Effect.succeed([ready]),
         recheck: () => Effect.succeed(ready),
+        inspectStartupBackend: () => Effect.succeed(ready),
         requireAgentTurnsAllowed: () => Effect.void,
         activate: () => Effect.succeed(ready),
         drop: () => Effect.void,
