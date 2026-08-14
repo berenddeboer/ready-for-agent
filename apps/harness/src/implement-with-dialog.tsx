@@ -35,7 +35,7 @@ type ImplementWithCatalog = {
   readonly warnings: readonly string[]
 }
 
-export type ImplementWithBackendOption = {
+type ImplementWithBackendOption = {
   readonly id: string
   readonly label: string
 }
