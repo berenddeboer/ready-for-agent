@@ -271,6 +271,12 @@ export const workItem = snakeCase.table(
       .notNull()
       .default("ordinary"),
     /**
+     * Work Item Auto-merge override. Null follows the live Repository
+     * Auto-merge setting; true/false is a concrete Decide PR Merge policy
+     * for this Work Item. Distinct from Merge Mode Always.
+     */
+    autoMergeOverride: integer({ mode: "boolean" }),
+    /**
      * Whether this Work Item currently occupies a Worker Slot (Admitted).
      */
     holdsWorkerSlot: integer({ mode: "boolean" }).notNull().default(false),

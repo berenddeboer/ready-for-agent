@@ -295,6 +295,7 @@ describe("WorkItemLifecycle", () => {
           expect(workItem.state).toBe("create_worktree")
           expect(workItem.paused).toBe(false)
           expect(workItem.pauseBeforeStep).toBeNull()
+          expect(workItem.autoMergeOverride).toBeNull()
           expect(workItem.worktreePath).toBeNull()
           expect(workItem.sessionId).toBeNull()
           expect(workItem.failureCode).toBeNull()
@@ -623,6 +624,7 @@ describe("WorkItemLifecycle", () => {
           expect(workItem.state).toBe("create_worktree")
           expect(workItem.paused).toBe(false)
           expect(workItem.pauseBeforeStep).toBe("commit")
+          expect(workItem.autoMergeOverride).toBeNull()
           expect(workItem.stepRuns).toHaveLength(1)
           expect(workItem.stepRuns[0]!.status).toBe("queued")
         }),

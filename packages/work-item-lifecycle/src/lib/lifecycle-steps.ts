@@ -89,6 +89,10 @@ export interface LifecycleStepContext {
   readonly publicationTitle: string | null
   readonly publicationBody: string | null
   readonly sessionId: string | null
+  /**
+   * Work Item Auto-merge override. Null/omitted follows Repository Auto-merge.
+   */
+  readonly autoMergeOverride?: boolean | null
   readonly maxDuration?: Duration.Duration
 }
 

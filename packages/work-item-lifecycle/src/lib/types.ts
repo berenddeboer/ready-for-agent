@@ -19,8 +19,10 @@ import {
 export type {
   ExecutionProfileReviewSelection,
   ExplicitWorkItemExecutionProfile,
+  ImplementWithOptionsInput,
   ImplementWithProfileInput,
 } from "./execution-profile.js"
+export { decodeImplementWithOptions } from "./execution-profile.js"
 export {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
   COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE,
@@ -141,6 +143,11 @@ export interface WorkItemRecord {
    * Durable merge policy. `always` skips Decide PR Merge; `ordinary` does not.
    */
   readonly mergeMode: MergeMode
+  /**
+   * Work Item Auto-merge override. Null follows the live Repository
+   * Auto-merge setting; true/false is a concrete Decide PR Merge policy.
+   */
+  readonly autoMergeOverride: boolean | null
   /** Whether this Work Item currently occupies a Worker Slot (Admitted). */
   readonly holdsWorkerSlot: boolean
   /** When set, advancement into this step auto-pauses (no Step Run enqueued). */

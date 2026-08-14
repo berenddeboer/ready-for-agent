@@ -2,7 +2,7 @@ import { Window } from "happy-dom"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { ImplementWithProfileInput } from "../src/execution-profile-draft.js"
+import type { ImplementWithSubmitInput } from "../src/execution-profile-draft.js"
 import {
   ImplementWithDialog,
   type ImplementWithDialogProps,
@@ -31,6 +31,7 @@ const INSTALLED_GLOBAL_KEYS = [
   "HTMLSelectElement",
   "HTMLButtonElement",
   "HTMLFormElement",
+  "HTMLInputElement",
   "Element",
   "Node",
   "DocumentFragment",
@@ -54,6 +55,7 @@ const installDom = () => {
   g.HTMLSelectElement = happyWindow.HTMLSelectElement
   g.HTMLButtonElement = happyWindow.HTMLButtonElement
   g.HTMLFormElement = happyWindow.HTMLFormElement
+  g.HTMLInputElement = happyWindow.HTMLInputElement
   g.Element = happyWindow.Element
   g.Node = happyWindow.Node
   g.DocumentFragment = happyWindow.DocumentFragment
@@ -116,6 +118,7 @@ const baseProps = {
     reviewSameAsBuild: true as const,
   },
   catalog: readyCatalog,
+  initialAutoMerge: false,
   submitPending: false,
   submitError: null,
   onSubmit: () => undefined,
@@ -140,8 +143,24 @@ describe("ImplementWithDialog copy and catalog", () => {
     expect(html).toContain(">Cancel<")
     expect(html).not.toContain("Recheck")
     expect(html).not.toContain('href="/settings"')
-    expect(html).not.toContain("<input")
     expect(html).not.toContain("<datalist")
+    expect(html).toContain('name="autoMerge"')
+    expect(html).toContain('name="implementLocally"')
+    expect(html).toContain("inspect the worktree")
+  })
+
+  test("initializes Auto-merge from the Repository setting and Implement locally to false", () => {
+    const disabled = renderToStaticMarkup(
+      <ImplementWithDialog {...baseProps} initialAutoMerge={false} />,
+    )
+    expect(disabled).toContain('name="autoMerge"')
+    expect(disabled).not.toMatch(/name="autoMerge"[^>]*checked/)
+    expect(disabled).not.toMatch(/name="implementLocally"[^>]*checked/)
+    const enabled = renderToStaticMarkup(
+      <ImplementWithDialog {...baseProps} initialAutoMerge={true} />,
+    )
+    expect(enabled).toMatch(/name="autoMerge"[^>]*checked/)
+    expect(enabled).not.toMatch(/name="implementLocally"[^>]*checked/)
   })
 
   test("starts from pre-filled build values and Same as build", () => {
@@ -268,7 +287,7 @@ describe("ImplementWithDialog interaction", () => {
     container = installed.document.createElement("div")
     installed.document.body.appendChild(container)
     root = createRoot(container)
-    const submitted: ImplementWithProfileInput[] = []
+    const submitted: ImplementWithSubmitInput[] = []
     const backendChanges: string[] = []
     let cancelled = 0
     const rerender = (next: Partial<ImplementWithDialogProps> = {}) => {
@@ -278,7 +297,7 @@ describe("ImplementWithDialog interaction", () => {
             {...baseProps}
             {...props}
             {...next}
-            onSubmit={(profile) => submitted.push(profile)}
+            onSubmit={(input) => submitted.push(input)}
             onBackendChange={(backendId) => backendChanges.push(backendId)}
             onCancel={() => {
               cancelled += 1
@@ -304,6 +323,17 @@ describe("ImplementWithDialog interaction", () => {
     fireEvent(target, type)
   }
 
+  const toggleCheckbox = (input: HTMLInputElement, checked: boolean) => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "checked",
+    )
+    descriptor?.set?.call(input, checked)
+    fire(input, "click")
+    fire(input, "input")
+    fire(input, "change")
+  }
+
   const selectNamed = (node: HTMLElement, name: string): HTMLSelectElement => {
     const select = node.querySelector(`select[name="${name}"]`)
     if (select === null) {
@@ -320,12 +350,15 @@ describe("ImplementWithDialog interaction", () => {
     })
     expect(submitted).toEqual([
       {
-        agentBackendId: "opencode",
-        buildModel: "sonnet",
-        buildThinkingLevel: "high",
-        reviewSameAsBuild: true,
-        reviewModel: null,
-        reviewThinkingLevel: null,
+        profile: {
+          agentBackendId: "opencode",
+          buildModel: "sonnet",
+          buildThinkingLevel: "high",
+          reviewSameAsBuild: true,
+          reviewModel: null,
+          reviewThinkingLevel: null,
+        },
+        options: { autoMerge: false, implementLocally: false },
       },
     ])
   })
@@ -347,12 +380,15 @@ describe("ImplementWithDialog interaction", () => {
       fire(node.querySelector("form"), "submit")
     })
     expect(submitted.at(-1)).toEqual({
-      agentBackendId: "opencode",
-      buildModel: "sonnet",
-      buildThinkingLevel: "high",
-      reviewSameAsBuild: false,
-      reviewModel: "haiku",
-      reviewThinkingLevel: "low",
+      profile: {
+        agentBackendId: "opencode",
+        buildModel: "sonnet",
+        buildThinkingLevel: "high",
+        reviewSameAsBuild: false,
+        reviewModel: "haiku",
+        reviewThinkingLevel: "low",
+      },
+      options: { autoMerge: false, implementLocally: false },
     })
   })
 
@@ -366,11 +402,11 @@ describe("ImplementWithDialog interaction", () => {
     flushSync(() => {
       fire(node.querySelector("form"), "submit")
     })
-    expect(submitted.at(-1)?.buildModel).toBe("haiku")
-    expect(submitted.at(-1)?.buildThinkingLevel).toBeNull()
+    expect(submitted.at(-1)?.profile.buildModel).toBe("haiku")
+    expect(submitted.at(-1)?.profile.buildThinkingLevel).toBeNull()
   })
 
-  test("pending submission disables Implement and Cancel", () => {
+  test("pending submission disables Implement, Cancel, and the option checkboxes", () => {
     const { node } = render({ submitPending: true })
     const implement = [...node.querySelectorAll("button")].find(
       (button) => button.textContent === "Starting...",
@@ -378,8 +414,16 @@ describe("ImplementWithDialog interaction", () => {
     const cancel = [...node.querySelectorAll("button")].find(
       (button) => button.textContent === "Cancel",
     )
+    const autoMerge = node.querySelector(
+      'input[name="autoMerge"]',
+    ) as HTMLInputElement | null
+    const implementLocally = node.querySelector(
+      'input[name="implementLocally"]',
+    ) as HTMLInputElement | null
     expect(implement?.disabled).toBe(true)
     expect(cancel?.disabled).toBe(true)
+    expect(autoMerge?.disabled).toBe(true)
+    expect(implementLocally?.disabled).toBe(true)
   })
 
   test("a failed submission keeps the dialog open with the actionable error", () => {
@@ -451,12 +495,15 @@ describe("ImplementWithDialog interaction", () => {
       fire(node.querySelector("form"), "submit")
     })
     expect(submitted.at(-1)).toEqual({
-      agentBackendId: "opencode",
-      buildModel: "haiku",
-      buildThinkingLevel: null,
-      reviewSameAsBuild: true,
-      reviewModel: null,
-      reviewThinkingLevel: null,
+      profile: {
+        agentBackendId: "opencode",
+        buildModel: "haiku",
+        buildThinkingLevel: null,
+        reviewSameAsBuild: true,
+        reviewModel: null,
+        reviewThinkingLevel: null,
+      },
+      options: { autoMerge: false, implementLocally: false },
     })
     rerender({
       backendId: "grok",
@@ -471,13 +518,88 @@ describe("ImplementWithDialog interaction", () => {
       fire(node.querySelector("form"), "submit")
     })
     expect(submitted.at(-1)).toEqual({
-      agentBackendId: "grok",
-      buildModel: "grok-code",
-      buildThinkingLevel: "high",
-      reviewSameAsBuild: true,
-      reviewModel: null,
-      reviewThinkingLevel: null,
+      profile: {
+        agentBackendId: "grok",
+        buildModel: "grok-code",
+        buildThinkingLevel: "high",
+        reviewSameAsBuild: true,
+        reviewModel: null,
+        reviewThinkingLevel: null,
+      },
+      options: { autoMerge: false, implementLocally: false },
     })
+  })
+
+  test("toggling options does not change model drafts and survives backend switching", () => {
+    const { node, submitted, rerender } = render({ initialAutoMerge: true })
+    const autoMerge = node.querySelector(
+      'input[name="autoMerge"]',
+    ) as HTMLInputElement
+    const implementLocally = node.querySelector(
+      'input[name="implementLocally"]',
+    ) as HTMLInputElement
+    expect(autoMerge.checked).toBe(true)
+    expect(implementLocally.checked).toBe(false)
+    flushSync(() => {
+      toggleCheckbox(autoMerge, false)
+      toggleCheckbox(implementLocally, true)
+    })
+    expect(autoMerge.checked).toBe(false)
+    expect(implementLocally.checked).toBe(true)
+    rerender({
+      backendId: "grok",
+      catalog: grokCatalog,
+      initialDraft: {
+        buildModel: "grok-code",
+        buildThinkingLevel: "low",
+        reviewSameAsBuild: true,
+      },
+      initialAutoMerge: true,
+    })
+    expect(
+      (node.querySelector('input[name="autoMerge"]') as HTMLInputElement)
+        .checked,
+    ).toBe(false)
+    expect(
+      (node.querySelector('input[name="implementLocally"]') as HTMLInputElement)
+        .checked,
+    ).toBe(true)
+    flushSync(() => {
+      fire(node.querySelector("form"), "submit")
+    })
+    expect(submitted.at(-1)?.options).toEqual({
+      autoMerge: false,
+      implementLocally: true,
+    })
+    rerender({
+      catalog: {
+        loading: true,
+        failed: false,
+        error: null,
+        models: undefined,
+        warnings: [],
+      },
+    })
+    expect(
+      (node.querySelector('input[name="autoMerge"]') as HTMLInputElement)
+        .checked,
+    ).toBe(false)
+    expect(
+      (node.querySelector('input[name="implementLocally"]') as HTMLInputElement)
+        .checked,
+    ).toBe(true)
+  })
+
+  test("reopening restores Auto-merge from the current Repository value", () => {
+    const first = renderToStaticMarkup(
+      <ImplementWithDialog {...baseProps} initialAutoMerge={true} />,
+    )
+    expect(first).toMatch(/name="autoMerge"[^>]*checked/)
+    const second = renderToStaticMarkup(
+      <ImplementWithDialog {...baseProps} initialAutoMerge={false} />,
+    )
+    expect(second).not.toMatch(/name="autoMerge"[^>]*checked/)
+    expect(second).not.toMatch(/name="implementLocally"[^>]*checked/)
   })
 
   test("a failed backend does not disable switching to another shipped backend", () => {

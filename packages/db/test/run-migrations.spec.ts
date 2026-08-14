@@ -218,6 +218,7 @@ describe("runMigrations", () => {
           { name: "20260811120000_step_run_reason_detail" },
           { name: "20260812120000_automated_review_rerun_signature" },
           { name: "20260814120000_work_item_execution_profile" },
+          { name: "20260815120000_work_item_auto_merge_override" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -250,6 +251,26 @@ describe("runMigrations", () => {
         expect(names.has("execution_profile_present")).toBe(true)
         expect(names.has("execution_profile_build_model")).toBe(true)
         expect(names.has("execution_profile_review_same_as_build")).toBe(true)
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("adds a nullable Work Item Auto-merge override", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* runMigrations(defaultMigrationsFolder)
+        const columns = (yield* sql.unsafe(
+          `PRAGMA table_info(work_item)`,
+        )) as readonly {
+          readonly name: string
+          readonly notnull: number
+        }[]
+        const override = columns.find(
+          (column) => column.name === "auto_merge_override",
+        )
+        expect(override).toBeDefined()
+        expect(override?.notnull).toBe(0)
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

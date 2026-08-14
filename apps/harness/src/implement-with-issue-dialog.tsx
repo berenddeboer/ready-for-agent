@@ -4,7 +4,7 @@ import type { AgentModelOption } from "./agent-model-settings.js"
 import {
   type ExecutionProfileDraft,
   type ExecutionProfilePrefSource,
-  type ImplementWithProfileInput,
+  type ImplementWithSubmitInput,
   resolveExecutionProfileDraft,
   usablePreviewCatalog,
 } from "./execution-profile-draft.js"
@@ -34,9 +34,10 @@ export type ImplementWithIssueDialogProps = {
   readonly repositoryId: string
   readonly initialBackendId: string
   readonly repositoryPrefs: ExecutionProfilePrefSource
+  readonly initialAutoMerge: boolean
   readonly submitPending: boolean
   readonly submitError: string | null
-  readonly onSubmit: (profile: ImplementWithProfileInput) => void
+  readonly onSubmit: (input: ImplementWithSubmitInput) => void
   readonly onCancel: () => void
 }
 
@@ -50,6 +51,7 @@ export function ImplementWithIssueDialog({
   repositoryId,
   initialBackendId,
   repositoryPrefs,
+  initialAutoMerge,
   submitPending,
   submitError,
   onSubmit,
@@ -217,6 +219,7 @@ export function ImplementWithIssueDialog({
       initialDraft={initialDraft}
       catalog={catalog}
       prefsError={prefsError}
+      initialAutoMerge={initialAutoMerge}
       submitPending={submitPending}
       submitError={submitError}
       onSubmit={onSubmit}

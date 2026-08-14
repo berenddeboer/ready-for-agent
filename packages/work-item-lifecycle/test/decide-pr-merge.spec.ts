@@ -13,6 +13,7 @@ import {
   decidePrMerge,
   makeWorkItemId,
   parseDecidePrMergeResult,
+  resolveDecidePrMergeAutoMerge,
   stubActiveAgentBackendLayer,
   stubGrokActiveAgentBackendLayer,
 } from "../src/index.js"
@@ -99,6 +100,32 @@ describe("parseDecidePrMergeResult", () => {
         "READY_FOR_AGENT_RESULT: CLANKER_MERGE\nAdditional output",
       ),
     ).toBeNull()
+  })
+})
+
+describe("resolveDecidePrMergeAutoMerge", () => {
+  it("lets a Work Item override disagree with the live Repository setting", () => {
+    expect(
+      resolveDecidePrMergeAutoMerge({
+        repositoryAutoMerge: true,
+        workItemAutoMergeOverride: false,
+      }),
+    ).toEqual({
+      allowed: false,
+      reason: "Auto-merge is disabled for this Work Item",
+    })
+    expect(
+      resolveDecidePrMergeAutoMerge({
+        repositoryAutoMerge: false,
+        workItemAutoMergeOverride: true,
+      }),
+    ).toEqual({ allowed: true })
+    expect(
+      resolveDecidePrMergeAutoMerge({
+        repositoryAutoMerge: true,
+        workItemAutoMergeOverride: null,
+      }),
+    ).toEqual({ allowed: true })
   })
 })
 
@@ -330,5 +357,84 @@ describe("decidePrMerge", () => {
       _tag: "needs_human",
       reason: "Auto-merge is disabled for this repository",
     })
+  })
+
+  it("skips the merge-risk Agent Turn when the Work Item override is false", async () => {
+    let continued = false
+    const agentBackend = Layer.succeed(
+      AgentBackend,
+      AgentBackend.of({
+        startTurn: () => Effect.die("unused"),
+        continueTurn: () => {
+          continued = true
+          return Effect.die("should not run")
+        },
+        inspect: () =>
+          Effect.succeed({
+            backend: { id: "opencode" as const, label: "OpenCode" },
+            models: [],
+          }),
+      }),
+    )
+
+    const result = await Effect.runPromise(
+      decidePrMerge({ ...context, autoMergeOverride: false }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            keymaxxer,
+            agentBackend,
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+
+    expect(continued).toBe(false)
+    expect(result).toEqual({
+      _tag: "needs_human",
+      reason: "Auto-merge is disabled for this Work Item",
+    })
+  })
+
+  it("runs risk assessment when the Work Item override is true and Repository Auto-merge is false", async () => {
+    const disabledRepoDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([{ ...repository, autoMerge: false }]),
+    })
+    let continued = false
+    const agentBackend = Layer.succeed(
+      AgentBackend,
+      AgentBackend.of({
+        startTurn: () => Effect.die("unused"),
+        continueTurn: () => {
+          continued = true
+          return Effect.succeed({
+            sessionId: "ses_implement",
+            assistantText: "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
+          })
+        },
+        inspect: () =>
+          Effect.succeed({
+            backend: { id: "opencode" as const, label: "OpenCode" },
+            models: [],
+          }),
+      }),
+    )
+
+    const result = await Effect.runPromise(
+      decidePrMerge({ ...context, autoMergeOverride: true }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            disabledRepoDb,
+            keymaxxer,
+            agentBackend,
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+
+    expect(continued).toBe(true)
+    expect(result).toEqual({ _tag: "clanker_merge" })
   })
 })

@@ -326,6 +326,10 @@ type ImplementWithArgs = ImplementNowArgs & {
     readonly reviewModel?: string | null
     readonly reviewThinkingLevel?: string | null
   }
+  options?: {
+    readonly autoMerge: boolean
+    readonly implementLocally: boolean
+  } | null
 }
 
 type WorkItemArgs = {
@@ -1149,6 +1153,12 @@ export const createGraphqlApi = <R>(
               reviewThinkingLevel: selection.reviewThinkingLevel,
             }
           },
+          autoMergeOverride: (workItem: WorkItemRecord) =>
+            workItem.autoMergeOverride ?? null,
+          pauseBeforeStep: (workItem: WorkItemRecord) =>
+            workItem.pauseBeforeStep == null
+              ? null
+              : workItem.pauseBeforeStep.toUpperCase(),
           state: (workItem: { state: string }) => workItem.state.toUpperCase(),
           stateLabel: (workItem: WorkItemRecord) =>
             workItemStateLabel(workItem),
@@ -1985,6 +1995,12 @@ export const createGraphqlApi = <R>(
                     reviewThinkingLevel:
                       args.profile.reviewThinkingLevel ?? null,
                   },
+                  args.options === undefined || args.options === null
+                    ? undefined
+                    : {
+                        autoMerge: args.options.autoMerge,
+                        implementLocally: args.options.implementLocally,
+                      },
                 )
               }).pipe(Effect.withSpan("graphql-api.implementWith")),
               context,

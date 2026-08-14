@@ -91,6 +91,17 @@ export type ImplementWithProfileInput = {
   readonly reviewThinkingLevel: string | null
 }
 
+/** GraphQL `implementWith` options. The dialog always submits both values. */
+export type ImplementWithOptionsInput = {
+  readonly autoMerge: boolean
+  readonly implementLocally: boolean
+}
+
+export type ImplementWithSubmitInput = {
+  readonly profile: ImplementWithProfileInput
+  readonly options: ImplementWithOptionsInput
+}
+
 const emptyToNull = (value: string): string | null =>
   value.trim().length === 0 ? null : value
 
