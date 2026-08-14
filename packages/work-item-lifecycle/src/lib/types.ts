@@ -445,4 +445,9 @@ export type StepRunReasonCode =
 
 export type WorkItemLifecycleConfig = {
   readonly maxDurations?: LifecycleMaxDurations
+  /**
+   * Working directory used when Implement With activates an otherwise
+   * inactive shipped Agent Backend. Defaults to `process.cwd()`.
+   */
+  readonly inspectCwd?: string
 }

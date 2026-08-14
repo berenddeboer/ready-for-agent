@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import type { AgentModelOption } from "./agent-model-settings.js"
 import {
   type ExecutionProfileDraft,
@@ -31,7 +31,8 @@ const agentBackendsQuery = {
 
 export type ImplementWithIssueDialogProps = {
   readonly issueNumber: number
-  readonly backendId: string
+  readonly repositoryId: string
+  readonly initialBackendId: string
   readonly repositoryPrefs: ExecutionProfilePrefSource
   readonly submitPending: boolean
   readonly submitError: string | null
@@ -40,18 +41,21 @@ export type ImplementWithIssueDialogProps = {
 }
 
 /**
- * Loads Effective Agent Backend catalog and Harness prefs, then hosts the
- * ephemeral Implement With dialog. Does not mutate settings.
+ * Loads shipped Agent Backend catalogs and resolved prefs, then hosts the
+ * ephemeral Implement With dialog. Preview and pref reads do not mutate
+ * settings or the Active set.
  */
 export function ImplementWithIssueDialog({
   issueNumber,
-  backendId,
+  repositoryId,
+  initialBackendId,
   repositoryPrefs,
   submitPending,
   submitError,
   onSubmit,
   onCancel,
 }: ImplementWithIssueDialogProps): ReactNode {
+  const [backendId, setBackendId] = useState(initialBackendId)
   const agentBackends = useQuery(agentBackendsQuery)
   const harnessPrefs = useQuery({
     queryKey: ["implement-with", "harness-prefs", backendId] as const,
@@ -66,6 +70,26 @@ export function ImplementWithIssueDialog({
         },
       })
       return result.harnessModelPrefs
+    },
+  })
+  const repositoryScopedPrefs = useQuery({
+    queryKey: [
+      "implement-with",
+      "repository-prefs",
+      repositoryId,
+      backendId,
+    ] as const,
+    queryFn: async (): Promise<ExecutionProfilePrefSource> => {
+      const result = await graphql.query({
+        repositoryModelPrefs: {
+          __args: { repositoryId, backendId },
+          defaultModel: true,
+          defaultThinkingLevel: true,
+          reviewModel: true,
+          reviewThinkingLevel: true,
+        },
+      })
+      return result.repositoryModelPrefs
     },
   })
   const preview = useQuery({
@@ -90,11 +114,8 @@ export function ImplementWithIssueDialog({
     },
   })
 
-  const backend = (agentBackends.data ?? []).find(
-    (candidate) => candidate.id === backendId,
-  )
-  const backendLabel =
-    preview.data?.backend.label ?? backend?.label ?? backendId
+  const backends = agentBackends.data ?? []
+  const backend = backends.find((candidate) => candidate.id === backendId)
   const configurationMode = backend?.configurationMode ?? null
   const mappedPreview =
     preview.data === undefined
@@ -130,7 +151,11 @@ export function ImplementWithIssueDialog({
     warnings: preview.data?.warnings ?? [],
   }
 
-  if (harnessPrefs.isPending) {
+  const firstPrefsPending =
+    backendId === initialBackendId &&
+    harnessPrefs.isPending &&
+    harnessPrefs.data === undefined
+  if (firstPrefsPending) {
     const loadingTitleId = `implement-with-loading-${issueNumber}`
     return (
       <ImplementWithModalDialog labelledBy={loadingTitleId} onCancel={onCancel}>
@@ -156,27 +181,38 @@ export function ImplementWithIssueDialog({
     )
   }
 
-  const harness: ExecutionProfilePrefSource = harnessPrefs.data ?? {
+  const emptyPrefs: ExecutionProfilePrefSource = {
     defaultModel: null,
     defaultThinkingLevel: null,
     reviewModel: null,
     reviewThinkingLevel: null,
   }
+  const harness: ExecutionProfilePrefSource = harnessPrefs.data ?? emptyPrefs
+  const repositoryForBackend =
+    backendId === initialBackendId
+      ? repositoryPrefs
+      : (repositoryScopedPrefs.data ?? emptyPrefs)
   const initialDraft: ExecutionProfileDraft = resolveExecutionProfileDraft({
-    repository: repositoryPrefs,
+    repository: repositoryForBackend,
     harness,
   })
   const prefsError = harnessPrefs.isError
     ? harnessPrefs.error instanceof Error
       ? harnessPrefs.error.message
       : "Could not load Harness model preferences for this Agent Backend."
-    : null
+    : repositoryScopedPrefs.isError
+      ? repositoryScopedPrefs.error instanceof Error
+        ? repositoryScopedPrefs.error.message
+        : "Could not load Repository model preferences for this Agent Backend."
+      : null
 
   return (
     <ImplementWithDialog
       issueNumber={issueNumber}
       backendId={backendId}
-      backendLabel={backendLabel}
+      backends={
+        backends.length > 0 ? backends : [{ id: backendId, label: backendId }]
+      }
       configurationMode={configurationMode}
       initialDraft={initialDraft}
       catalog={catalog}
@@ -184,6 +220,7 @@ export function ImplementWithIssueDialog({
       submitPending={submitPending}
       submitError={submitError}
       onSubmit={onSubmit}
+      onBackendChange={setBackendId}
       onCancel={onCancel}
     />
   )

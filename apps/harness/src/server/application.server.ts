@@ -45,7 +45,7 @@ import {
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   LifecycleStepsLive,
-  WorkItemLifecycleLive,
+  makeWorkItemLifecycleLive,
 } from "@ready-for-agent/work-item-lifecycle"
 import type { ApplicationRequestContext } from "../application-request-context.js"
 import { READY_FOR_AGENT_VERSION } from "../generated/version.js"
@@ -212,7 +212,9 @@ export const createApplication = async (
     }),
   ).pipe(Layer.provide(databaseLayer))
 
-  const lifecycleLayer = WorkItemLifecycleLive.pipe(
+  const lifecycleLayer = makeWorkItemLifecycleLive({
+    inspectCwd: toolCwd,
+  }).pipe(
     Layer.provideMerge(LifecycleStepsLive),
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(queueLayer),

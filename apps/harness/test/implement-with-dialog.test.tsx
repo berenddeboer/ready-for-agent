@@ -88,10 +88,27 @@ const installDom = () => {
   }
 }
 
+const shippedBackends = [
+  { id: "opencode", label: "OpenCode" },
+  { id: "grok", label: "Grok Build" },
+  { id: "codex", label: "Codex Build" },
+  { id: "claude", label: "Claude Code" },
+] as const
+
+const grokCatalog = {
+  loading: false,
+  failed: false,
+  error: null,
+  models: [
+    { id: "grok-code", thinkingLevels: ["low", "high"], name: "Grok Code" },
+  ],
+  warnings: [],
+}
+
 const baseProps = {
   issueNumber: 1034,
   backendId: "opencode",
-  backendLabel: "OpenCode",
+  backends: shippedBackends,
   configurationMode: null,
   initialDraft: {
     buildModel: "sonnet",
@@ -102,6 +119,7 @@ const baseProps = {
   submitPending: false,
   submitError: null,
   onSubmit: () => undefined,
+  onBackendChange: () => undefined,
   onCancel: () => undefined,
 } satisfies ImplementWithDialogProps
 
@@ -112,7 +130,12 @@ describe("ImplementWithDialog copy and catalog", () => {
     expect(html).toContain("These choices apply only to this Work Item")
     expect(html).toContain("never change Repository settings or Harness Config")
     expect(html).toContain("OpenCode")
-    expect(html).toContain("Repository Effective Agent Backend")
+    expect(html).toContain("Grok Build")
+    expect(html).toContain("Codex Build")
+    expect(html).toContain("Claude Code")
+    expect(html).toContain('name="agentBackend"')
+    expect(html).not.toContain("Repository Effective Agent Backend")
+    expect(html).toContain("does not change saved defaults")
     expect(html).toContain(">Implement<")
     expect(html).toContain(">Cancel<")
     expect(html).not.toContain("Recheck")
@@ -175,6 +198,50 @@ describe("ImplementWithDialog copy and catalog", () => {
     expect(html).toContain(">Select a build model</option>")
     expect(html).toContain("Select a model from the Agent Model catalog.")
   })
+
+  test("a failed Preview keeps the backend selector usable and blocks Implement", () => {
+    const html = renderToStaticMarkup(
+      <ImplementWithDialog
+        {...baseProps}
+        catalog={{
+          loading: false,
+          failed: true,
+          error: "Could not inspect Grok Build.",
+          models: [],
+          warnings: [],
+        }}
+      />,
+    )
+    expect(html).toContain("Could not inspect Grok Build.")
+    expect(html).toContain('name="agentBackend"')
+    expect(html).not.toMatch(/name="agentBackend"[^>]*disabled/)
+    expect(html).toContain('name="buildModel"')
+    expect(html).toMatch(/name="buildModel"[^>]*disabled/)
+    expect(html).toContain(">Implement<")
+    expect(html).toMatch(/type="submit"[^>]*disabled/)
+    expect(html).not.toContain("Recheck")
+    expect(html).not.toContain('href="/settings"')
+  })
+
+  test("an empty catalog cannot be submitted and explains why", () => {
+    const html = renderToStaticMarkup(
+      <ImplementWithDialog
+        {...baseProps}
+        catalog={{
+          loading: false,
+          failed: false,
+          error: null,
+          models: [],
+          warnings: [],
+        }}
+      />,
+    )
+    expect(html).toContain(
+      "Implement With requires a non-empty Agent Model catalog.",
+    )
+    expect(html).toMatch(/type="submit"[^>]*disabled/)
+    expect(html).not.toContain("Recheck")
+  })
 })
 
 describe("ImplementWithDialog interaction", () => {
@@ -202,20 +269,32 @@ describe("ImplementWithDialog interaction", () => {
     installed.document.body.appendChild(container)
     root = createRoot(container)
     const submitted: ImplementWithProfileInput[] = []
+    const backendChanges: string[] = []
     let cancelled = 0
-    flushSync(() => {
-      root?.render(
-        <ImplementWithDialog
-          {...baseProps}
-          {...props}
-          onSubmit={(profile) => submitted.push(profile)}
-          onCancel={() => {
-            cancelled += 1
-          }}
-        />,
-      )
-    })
-    return { node: container, submitted, cancelled: () => cancelled }
+    const rerender = (next: Partial<ImplementWithDialogProps> = {}) => {
+      flushSync(() => {
+        root?.render(
+          <ImplementWithDialog
+            {...baseProps}
+            {...props}
+            {...next}
+            onSubmit={(profile) => submitted.push(profile)}
+            onBackendChange={(backendId) => backendChanges.push(backendId)}
+            onCancel={() => {
+              cancelled += 1
+            }}
+          />,
+        )
+      })
+    }
+    rerender()
+    return {
+      node: container as HTMLElement,
+      submitted,
+      backendChanges,
+      cancelled: () => cancelled,
+      rerender,
+    }
   }
 
   const fire = (target: EventTarget | null, type: string) => {
@@ -324,5 +403,99 @@ describe("ImplementWithDialog interaction", () => {
       fire(cancel ?? null, "click")
     })
     expect(cancelled()).toBe(1)
+  })
+
+  test("switching backends loads that backend's prefill without discarding the other draft", () => {
+    const { node, submitted, backendChanges, rerender } = render()
+    const backend = selectNamed(node, "agentBackend")
+    const build = selectNamed(node, "buildModel")
+    flushSync(() => {
+      build.value = "haiku"
+      fire(build, "change")
+    })
+    flushSync(() => {
+      backend.value = "grok"
+      fire(backend, "change")
+    })
+    expect(backendChanges).toEqual(["grok"])
+    rerender({
+      backendId: "grok",
+      catalog: grokCatalog,
+      initialDraft: {
+        buildModel: "grok-code",
+        buildThinkingLevel: "low",
+        reviewSameAsBuild: true,
+      },
+    })
+    expect(selectNamed(node, "buildModel").value).toBe("grok-code")
+    expect(selectNamed(node, "buildThinkingLevel").value).toBe("low")
+    flushSync(() => {
+      selectNamed(node, "buildThinkingLevel").value = "high"
+      fire(selectNamed(node, "buildThinkingLevel"), "change")
+    })
+    flushSync(() => {
+      selectNamed(node, "agentBackend").value = "opencode"
+      fire(selectNamed(node, "agentBackend"), "change")
+    })
+    rerender({
+      backendId: "opencode",
+      catalog: readyCatalog,
+      initialDraft: {
+        buildModel: "sonnet",
+        buildThinkingLevel: "high",
+        reviewSameAsBuild: true,
+      },
+    })
+    expect(selectNamed(node, "buildModel").value).toBe("haiku")
+    flushSync(() => {
+      fire(node.querySelector("form"), "submit")
+    })
+    expect(submitted.at(-1)).toEqual({
+      agentBackendId: "opencode",
+      buildModel: "haiku",
+      buildThinkingLevel: null,
+      reviewSameAsBuild: true,
+      reviewModel: null,
+      reviewThinkingLevel: null,
+    })
+    rerender({
+      backendId: "grok",
+      catalog: grokCatalog,
+      initialDraft: {
+        buildModel: "grok-code",
+        buildThinkingLevel: "low",
+        reviewSameAsBuild: true,
+      },
+    })
+    flushSync(() => {
+      fire(node.querySelector("form"), "submit")
+    })
+    expect(submitted.at(-1)).toEqual({
+      agentBackendId: "grok",
+      buildModel: "grok-code",
+      buildThinkingLevel: "high",
+      reviewSameAsBuild: true,
+      reviewModel: null,
+      reviewThinkingLevel: null,
+    })
+  })
+
+  test("a failed backend does not disable switching to another shipped backend", () => {
+    const { node, backendChanges } = render({
+      catalog: {
+        loading: false,
+        failed: true,
+        error: "Could not inspect OpenCode.",
+        models: [],
+        warnings: [],
+      },
+    })
+    const backend = selectNamed(node, "agentBackend")
+    expect(backend.disabled).toBe(false)
+    flushSync(() => {
+      backend.value = "claude"
+      fire(backend, "change")
+    })
+    expect(backendChanges).toEqual(["claude"])
   })
 })

@@ -1422,6 +1422,30 @@ describe("DbService", () => {
             reviewModel: null,
             reviewThinkingLevel: null,
           })
+          expect(
+            yield* db.getRepositoryBackendModelPrefs(repo.id, "opencode"),
+          ).toEqual({
+            defaultModel: "openai/opencode-model-v2",
+            defaultThinkingLevel: "low",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          })
+          expect(
+            yield* db.getRepositoryBackendModelPrefs(repo.id, "grok"),
+          ).toEqual({
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          })
+          expect(
+            yield* db.getRepositoryBackendModelPrefs(repo.id, "claude"),
+          ).toEqual({
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          })
         }),
       ))
 

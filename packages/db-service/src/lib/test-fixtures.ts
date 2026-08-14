@@ -55,6 +55,13 @@ export const stubDbService = (
       reviewModel: null,
       reviewThinkingLevel: null,
     }),
+  getRepositoryBackendModelPrefs: () =>
+    Effect.succeed({
+      defaultModel: null,
+      defaultThinkingLevel: null,
+      reviewModel: null,
+      reviewThinkingLevel: null,
+    }),
   updateConfig: unused,
   countUnfinishedWorkItems: Effect.succeed(0),
   countBlockingUnfinishedForGlobalDefault: Effect.succeed(0),

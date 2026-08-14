@@ -2,6 +2,7 @@ import {
   type FormEvent,
   type ReactNode,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react"
@@ -34,10 +35,15 @@ type ImplementWithCatalog = {
   readonly warnings: readonly string[]
 }
 
+export type ImplementWithBackendOption = {
+  readonly id: string
+  readonly label: string
+}
+
 export type ImplementWithDialogProps = {
   readonly issueNumber: number
   readonly backendId: string
-  readonly backendLabel: string
+  readonly backends: readonly ImplementWithBackendOption[]
   readonly configurationMode: string | null
   readonly initialDraft: ExecutionProfileDraft
   readonly catalog: ImplementWithCatalog
@@ -45,7 +51,13 @@ export type ImplementWithDialogProps = {
   readonly submitPending: boolean
   readonly submitError: string | null
   readonly onSubmit: (profile: ImplementWithProfileInput) => void
+  readonly onBackendChange: (backendId: string) => void
   readonly onCancel: () => void
+}
+
+type DraftSlot = {
+  readonly source: "prefs" | "user"
+  readonly draft: ExecutionProfileDraft
 }
 
 /**
@@ -109,7 +121,7 @@ const sameAsBuildDraft = (
 export function ImplementWithDialog({
   issueNumber,
   backendId,
-  backendLabel,
+  backends,
   configurationMode,
   initialDraft,
   catalog,
@@ -117,8 +129,10 @@ export function ImplementWithDialog({
   submitPending,
   submitError,
   onSubmit,
+  onBackendChange,
   onCancel,
 }: ImplementWithDialogProps): ReactNode {
+  const draftSlotsRef = useRef<Record<string, DraftSlot>>({})
   const [draft, setDraft] = useState(() =>
     reconcileExecutionProfileDraft({
       draft: initialDraft,
@@ -126,15 +140,30 @@ export function ImplementWithDialog({
     }),
   )
   const titleId = `implement-with-title-${issueNumber}`
+  const backendLabel =
+    backends.find((backend) => backend.id === backendId)?.label ?? backendId
 
-  useEffect(() => {
-    setDraft((current) =>
-      reconcileExecutionProfileDraft({
-        draft: current,
-        models: catalog.models,
-      }),
-    )
-  }, [catalog.models])
+  useLayoutEffect(() => {
+    const slot = draftSlotsRef.current[backendId]
+    const source = slot?.source === "user" ? "user" : "prefs"
+    const nextDraft = reconcileExecutionProfileDraft({
+      draft:
+        source === "user" && slot !== undefined ? slot.draft : initialDraft,
+      models: catalog.models,
+    })
+    draftSlotsRef.current[backendId] = { source, draft: nextDraft }
+    setDraft(nextDraft)
+  }, [backendId, catalog.models, initialDraft])
+
+  const replaceDraft = (
+    updater: (current: ExecutionProfileDraft) => ExecutionProfileDraft,
+  ) => {
+    setDraft((current) => {
+      const next = updater(current)
+      draftSlotsRef.current[backendId] = { source: "user", draft: next }
+      return next
+    })
+  }
 
   const catalogModels = catalog.models
   const catalogState = {
@@ -215,7 +244,7 @@ export function ImplementWithDialog({
 
   const updateBuild = (nextModel: string) => {
     const nextVariants = thinkingLevelsForModel(catalogModels, nextModel)
-    setDraft((current) => ({
+    replaceDraft((current) => ({
       ...current,
       buildModel: nextModel,
       buildThinkingLevel: reconcileVariantForModel(
@@ -262,13 +291,31 @@ export function ImplementWithDialog({
               <h3 id="implement-with-backend" className={ui.dialogSectionTitle}>
                 Agent Backend
               </h3>
-              <span className={ui.dialogSectionMeta}>Effective</span>
+              <span className={ui.dialogSectionMeta}>Shipped</span>
             </div>
-            <p className={ui.dialogNote}>{backendLabel}</p>
-            <span className={ui.dialogFieldHint}>
-              Repository Effective Agent Backend. This Work Item will keep this
-              backend and the model choices below.
-            </span>
+            <label className={ui.dialogField}>
+              Agent Backend
+              <select
+                className={ui.dialogInput}
+                name="agentBackend"
+                value={backendId}
+                disabled={submitPending}
+                onChange={(event) => onBackendChange(event.target.value)}
+              >
+                {backends.some((backend) => backend.id === backendId) ? null : (
+                  <option value={backendId}>{backendLabel}</option>
+                )}
+                {backends.map((backend) => (
+                  <option key={backend.id} value={backend.id}>
+                    {backend.label}
+                  </option>
+                ))}
+              </select>
+              <span className={ui.dialogFieldHint}>
+                Previewing another Agent Backend does not change saved defaults.
+                This Work Item will keep the backend you submit.
+              </span>
+            </label>
           </section>
 
           <section
@@ -356,7 +403,7 @@ export function ImplementWithDialog({
                     modelSelectDisabled || draft.buildModel.length === 0
                   }
                   onChange={(event) =>
-                    setDraft((current) => ({
+                    replaceDraft((current) => ({
                       ...current,
                       buildThinkingLevel: event.target.value,
                     }))
@@ -397,14 +444,14 @@ export function ImplementWithDialog({
               hint="Same as build uses exactly the build Agent Model and Thinking Level."
               onChange={(nextModel) => {
                 if (nextModel.length === 0) {
-                  setDraft((current) => sameAsBuildDraft(current))
+                  replaceDraft((current) => sameAsBuildDraft(current))
                   return
                 }
                 const nextVariants = thinkingLevelsForModel(
                   catalogModels,
                   nextModel,
                 )
-                setDraft((current) => ({
+                replaceDraft((current) => ({
                   buildModel: current.buildModel,
                   buildThinkingLevel: current.buildThinkingLevel,
                   reviewSameAsBuild: false,
@@ -451,7 +498,7 @@ export function ImplementWithDialog({
                     reviewThinkingLevels.length === 0
                   }
                   onChange={(event) =>
-                    setDraft((current) =>
+                    replaceDraft((current) =>
                       current.reviewSameAsBuild
                         ? current
                         : {

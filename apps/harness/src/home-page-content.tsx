@@ -858,7 +858,7 @@ function RepositoryCard({
   } | null>(null)
   const previewGenerationRef = useRef(0)
   // Dialog-session stash so switching backends and back restores form fields.
-  // Server map for non-projected backends needs repositoryModelPrefs (not in API).
+  // Server map for non-projected backends needs repositoryModelPrefs.
   type DraftModelPrefs = {
     defaultModel: string | null
     defaultThinkingLevel: string | null
@@ -3028,6 +3028,9 @@ function RepositoryIssueRow({
     onSuccess: (workItem) => {
       setImplementWithOpen(false)
       onImplementSuccess(workItem)
+      void queryClient.invalidateQueries({
+        queryKey: ["agentBackendStatus"],
+      })
     },
   })
   const implementLocally = useMutation({
@@ -3214,7 +3217,8 @@ function RepositoryIssueRow({
       {implementWithOpen && (
         <ImplementWithIssueDialog
           issueNumber={issue.issueNumber}
-          backendId={repository.effectiveAgentBackend}
+          repositoryId={repository.id}
+          initialBackendId={repository.effectiveAgentBackend}
           repositoryPrefs={{
             defaultModel: repository.defaultModel,
             defaultThinkingLevel: repository.defaultThinkingLevel,
