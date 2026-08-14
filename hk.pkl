@@ -34,7 +34,9 @@ esac
         exclude = "**/generated/**"
         // Strip git local-env-vars and NX_* so hooks under `nx run harness:dev`
         // are not treated as nested Nx invocations (false recursive-task errors).
+        // Repair Bun's nested typescript@7 shadow before Nx typescript-sync.
         fix = #"""
+node scripts/fix-bun-typescript-for-nx.mjs
 unset $(git rev-parse --local-env-vars)
 for v in $(printenv | cut -d= -f1 | grep '^NX_'); do unset "$v"; done
 bunx nx affected -t lint --fix --batch --excludeTaskDependencies
@@ -43,6 +45,7 @@ bunx nx affected -t lint --fix --batch --excludeTaskDependencies
       ["nx-affected"] {
         depends = List("biome-json", "nx-lint-fix")
         check = #"""
+node scripts/fix-bun-typescript-for-nx.mjs
 unset $(git rev-parse --local-env-vars)
 for v in $(printenv | cut -d= -f1 | grep '^NX_'); do unset "$v"; done
 bunx nx affected -t lint,typecheck,test --batch

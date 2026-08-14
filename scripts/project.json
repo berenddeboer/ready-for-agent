@@ -8,7 +8,7 @@
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "bun test tool-pins.test.ts",
+        "command": "bun test tool-pins.test.ts fix-bun-typescript-for-nx.test.ts",
         "cwd": "{projectRoot}"
       },
       "inputs": [
@@ -16,7 +16,9 @@
         "{workspaceRoot}/hk.pkl",
         "{workspaceRoot}/.github/**/*.yml",
         "{workspaceRoot}/.github/**/*.yaml",
-        "{projectRoot}/tool-pins.test.ts"
+        "{projectRoot}/tool-pins.test.ts",
+        "{projectRoot}/fix-bun-typescript-for-nx.mjs",
+        "{projectRoot}/fix-bun-typescript-for-nx.test.ts"
       ],
       "cache": true
     }

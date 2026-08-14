@@ -26,11 +26,14 @@ import {
   buildIntakeSuccessDocument,
   buildStatusSuccessDocument,
 } from "./cli-json.ts"
+import { READY_FOR_AGENT_VERSION } from "./generated/version.ts"
 import {
   GRAPHQL_URL_NOT_ENDPOINT_CODE,
   HARNESS_START_HINT,
   HARNESS_UNREACHABLE_CODE,
+  HARNESS_VERSION_MISMATCH_CODE,
   harnessNotRunningMessage,
+  harnessVersionMismatchMessage,
 } from "./graphql-error.ts"
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
@@ -474,6 +477,244 @@ describe("operator binary finite-command process contract", () => {
       })
       expect(result.stderr).not.toMatch(/\s+at\s+\S+\s+\(/)
       expect(result.stderr).not.toContain("FiniteCommandFailed:")
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("candidates against an older Harness schema emits HARNESS_VERSION_MISMATCH", async () => {
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        if (body.includes("intakeCandidates")) {
+          res.end(
+            JSON.stringify({
+              data: null,
+              errors: [
+                {
+                  message:
+                    'Cannot query field "intakeCandidates" on type "Query".',
+                  extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+                },
+              ],
+            }),
+          )
+          return
+        }
+        if (body.includes("version")) {
+          res.end(
+            JSON.stringify({
+              data: null,
+              errors: [
+                {
+                  message: 'Cannot query field "version" on type "Query".',
+                  extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+                },
+              ],
+            }),
+          )
+          return
+        }
+        res.end(JSON.stringify({ data: null }))
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["candidates", "github.com/owner/repo"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stdout.trim()).toBe("")
+      expect(parseExactlyOneJsonDocument(result.stderr)).toEqual({
+        schemaVersion: CLI_SCHEMA_VERSION,
+        command: "candidates",
+        error: {
+          code: HARNESS_VERSION_MISMATCH_CODE,
+          message: harnessVersionMismatchMessage({
+            cliVersion: READY_FOR_AGENT_VERSION,
+            harnessBaseUrl: `http://127.0.0.1:${port}`,
+            command: "candidates",
+          }),
+        },
+      })
+      expect(result.stderr).not.toContain("GRAPHQL_VALIDATION_FAILED")
+      expect(result.stderr).not.toContain("intakeCandidates")
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("candidates names the older Harness version when Query.version exists", async () => {
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        if (body.includes("intakeCandidates")) {
+          res.end(
+            JSON.stringify({
+              data: null,
+              errors: [
+                {
+                  message:
+                    'Cannot query field "intakeCandidates" on type "Query".',
+                  extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+                },
+              ],
+            }),
+          )
+          return
+        }
+        if (body.includes("version")) {
+          res.end(JSON.stringify({ data: { version: "0.18.0" } }))
+          return
+        }
+        res.end(JSON.stringify({ data: null }))
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["candidates", "github.com/owner/repo"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stdout.trim()).toBe("")
+      expect(parseExactlyOneJsonDocument(result.stderr)).toEqual({
+        schemaVersion: CLI_SCHEMA_VERSION,
+        command: "candidates",
+        error: {
+          code: HARNESS_VERSION_MISMATCH_CODE,
+          message: harnessVersionMismatchMessage({
+            cliVersion: READY_FOR_AGENT_VERSION,
+            harnessVersion: "0.18.0",
+            harnessBaseUrl: `http://127.0.0.1:${port}`,
+            command: "candidates",
+          }),
+        },
+      })
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("status against an older Harness schema emits HARNESS_VERSION_MISMATCH", async () => {
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("kanbanStatus")) {
+          res.end(
+            JSON.stringify({
+              data: null,
+              errors: [
+                {
+                  message: 'Cannot query field "kanbanStatus" on type "Query".',
+                  extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+                },
+              ],
+            }),
+          )
+          return
+        }
+        if (body.includes("version")) {
+          res.end(JSON.stringify({ data: { version: "0.18.0" } }))
+          return
+        }
+        res.end(JSON.stringify({ data: null }))
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["status"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stdout.trim()).toBe("")
+      expect(parseExactlyOneJsonDocument(result.stderr)).toEqual({
+        schemaVersion: CLI_SCHEMA_VERSION,
+        command: "status",
+        error: {
+          code: HARNESS_VERSION_MISMATCH_CODE,
+          message: harnessVersionMismatchMessage({
+            cliVersion: READY_FOR_AGENT_VERSION,
+            harnessVersion: "0.18.0",
+            harnessBaseUrl: `http://127.0.0.1:${port}`,
+            command: "status",
+          }),
+        },
+      })
+      expect(result.stderr).not.toContain("GRAPHQL_VALIDATION_FAILED")
+      expect(result.stderr).not.toContain("kanbanStatus")
     } finally {
       await closeServer(server)
     }
