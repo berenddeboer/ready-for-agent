@@ -4,13 +4,14 @@ import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Deferred, Duration, Effect, Exit, Fiber } from "effect"
 import { systemError } from "effect/PlatformError"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   AgentBackendExitError,
   AgentBackendNotInstalledError,
   AgentBackendSessionIdMissingError,
   AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
+  collectChildStderrTail,
   runCliCapture,
   runCliTurn,
   sanitizeInheritedEnvironment,
@@ -962,6 +963,337 @@ describe("runCliTurn", () => {
         })
       },
     )
+  })
+
+  it("puts a stderr-only failure reason on AgentBackendExitError", async () => {
+    await withExecutable(
+      [
+        "printf 'Error: Token has expired and refresh failed\\n' >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              parseLine: parseSimpleLine,
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toEqual(
+          AgentBackendExitError.new({
+            exitCode: 1,
+            cwd: process.cwd(),
+            message: "Error: Token has expired and refresh failed",
+          }),
+        )
+      },
+    )
+  })
+
+  it("prefers an adapter-supplied reason over the stderr tail", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"sessionID":"ses_reason","errorMessage":"model overloaded"}'`,
+        "printf 'raw stderr should lose\\n' >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              parseLine: parseSimpleLine,
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toEqual(
+          AgentBackendExitError.new({
+            exitCode: 1,
+            cwd: process.cwd(),
+            sessionId: "ses_reason",
+            message: "model overloaded",
+          }),
+        )
+      },
+    )
+  })
+
+  it("completes a CLI that floods stderr and keeps only the most recent tail", async () => {
+    await withExecutable(
+      [
+        "printf 'prefix-marker' >&2",
+        "printf '%05000d' 0 >&2",
+        "printf 'tail-marker' >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(5),
+              parseLine: parseSimpleLine,
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.message).toContain("tail-marker")
+          expect(error.message).not.toContain("prefix-marker")
+          expect(error.message.length).toBeLessThanOrEqual(500)
+        }
+      },
+    )
+  })
+
+  it("bounds the stderr fold to the last 4000 characters", async () => {
+    await withExecutable(
+      [
+        "printf 'prefix-marker' >&2",
+        "printf '%05000d' 0 >&2",
+        "printf 'tail-marker' >&2",
+      ].join("\n"),
+      async (binary) => {
+        const fold = await Effect.runPromise(
+          withSpawner((spawner) =>
+            Effect.scoped(
+              Effect.gen(function* () {
+                const handle = yield* spawner.spawn(
+                  ChildProcess.make(binary, [], {
+                    cwd: process.cwd(),
+                    stdin: "ignore",
+                    stderr: "pipe",
+                  }),
+                )
+                const [tail] = yield* Effect.all(
+                  [collectChildStderrTail(handle), handle.exitCode],
+                  { concurrency: 2 },
+                )
+                return tail
+              }),
+            ),
+          ),
+        )
+        expect(fold).toContain("tail-marker")
+        expect(fold).not.toContain("prefix-marker")
+        expect(fold.length).toBeLessThanOrEqual(4_000)
+      },
+    )
+  })
+
+  it("sanitizes the stderr tail before it becomes the exit message", async () => {
+    const secret = "ghp_this_must_never_appear_in_exit_message"
+    const esc = String.fromCharCode(0x1b)
+    await withExecutable(
+      [
+        `printf '${esc}[31mauth failed with ${secret}${esc}[0m\\n' >&2`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              parseLine: parseSimpleLine,
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.message).not.toContain(secret)
+          expect(error.message).not.toMatch(/ghp_[A-Za-z0-9]+/)
+          expect(error.message).toContain("[redacted]")
+          expect(error.message.includes(`${esc}[`)).toBe(false)
+          expect(error.message).toContain("auth failed")
+        }
+      },
+    )
+  })
+
+  it("redacts a stderr token that would be split by the message-length cut", async () => {
+    const secret = "ghp_this_must_never_appear_in_exit_message"
+    await withExecutable(
+      [
+        "printf '%0100d ' 0 >&2",
+        `printf '${secret}' >&2`,
+        "printf ' %0470d' 1 >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              parseLine: parseSimpleLine,
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.message).toContain("[redacted]")
+          expect(error.message).not.toContain(secret)
+          expect(error.message).not.toMatch(/ghp_[A-Za-z0-9_]+/)
+          expect(error.message.includes("this_must_never")).toBe(false)
+        }
+      },
+    )
+  })
+
+  it("does not delay finalize tree-kill when stderr keeps flowing", async () => {
+    const markerDir = await mkdtemp(join(tmpdir(), "agent-backend-stderr-fin-"))
+    const childAlive = join(markerDir, "child-alive")
+    const grandPidFile = join(markerDir, "grand.pid")
+    try {
+      await withExecutable(
+        [
+          `setsid sh -c 'echo $$ > "${grandPidFile}"; while true; do printf "noise\\n" >&2; touch "${childAlive}"; sleep 0.05; done' &`,
+          `while [ ! -s "${grandPidFile}" ]; do sleep 0.01; done`,
+          `printf '%s\\n' '{"sessionID":"ses_fin_err","finalize":"done"}'`,
+          "sleep 100",
+        ].join("\n"),
+        async (binary) => {
+          const startedAt = Date.now()
+          const result = await Effect.runPromise(
+            withSpawner((spawner) =>
+              runCliTurn({
+                spawner,
+                backend: TEST_BACKEND,
+                binary,
+                args: [],
+                cwd: process.cwd(),
+                env: sanitizeInheritedEnvironment(),
+                timeout: Duration.seconds(10),
+                forceKillAfter: Duration.millis(100),
+                parseLine: (line) => {
+                  try {
+                    const parsed = JSON.parse(line) as {
+                      sessionID?: string
+                      finalize?: string
+                    }
+                    if (
+                      typeof parsed.sessionID === "string" &&
+                      typeof parsed.finalize === "string"
+                    ) {
+                      return {
+                        sessionId: parsed.sessionID,
+                        finalizeText: parsed.finalize,
+                      }
+                    }
+                    return parseSimpleLine(line)
+                  } catch {
+                    return {}
+                  }
+                },
+              }),
+            ),
+          )
+          const elapsed = Date.now() - startedAt
+
+          expect(result).toEqual({
+            sessionId: "ses_fin_err",
+            assistantText: "done",
+          })
+          expect(elapsed).toBeLessThan(2_000)
+
+          await Bun.sleep(300)
+          const grandPid = Number(
+            (
+              await Bun.file(grandPidFile)
+                .text()
+                .catch(() => "")
+            ).trim(),
+          )
+          expect(Number.isFinite(grandPid) && grandPid > 0).toBe(true)
+          expect(isPidAlive(grandPid)).toBe(false)
+        },
+      )
+    } finally {
+      await rm(markerDir, { recursive: true, force: true })
+    }
+  })
+
+  it("still hits the startup watchdog when the CLI writes only to stderr", async () => {
+    const markerDir = await mkdtemp(join(tmpdir(), "agent-backend-stderr-wd-"))
+    const grandPidFile = join(markerDir, "grand.pid")
+    try {
+      await withExecutable(
+        [
+          `setsid sh -c 'echo $$ > "${grandPidFile}"; while true; do printf "auth noise\\n" >&2; sleep 0.05; done' &`,
+          `while [ ! -s "${grandPidFile}" ]; do sleep 0.01; done`,
+          "sleep 100",
+        ].join("\n"),
+        async (binary) => {
+          const startedAt = Date.now()
+          const error = await Effect.runPromise(
+            withSpawner((spawner) =>
+              runCliTurn({
+                spawner,
+                backend: TEST_BACKEND,
+                binary,
+                args: [],
+                cwd: process.cwd(),
+                env: sanitizeInheritedEnvironment(),
+                timeout: Duration.seconds(30),
+                startupTimeout: Duration.millis(300),
+                forceKillAfter: Duration.millis(100),
+                parseLine: parseSimpleLine,
+              }).pipe(Effect.flip),
+            ),
+          )
+          const elapsed = Date.now() - startedAt
+
+          expect(error).toEqual(
+            new AgentBackendStartupTimeoutError({
+              cwd: process.cwd(),
+              startupTimeoutMs: 300,
+            }),
+          )
+          expect(elapsed).toBeLessThan(5_000)
+
+          const grandPid = Number(
+            (
+              await Bun.file(grandPidFile)
+                .text()
+                .catch(() => "")
+            ).trim(),
+          )
+          expect(Number.isFinite(grandPid) && grandPid > 0).toBe(true)
+          expect(isPidAlive(grandPid)).toBe(false)
+        },
+      )
+    } finally {
+      await rm(markerDir, { recursive: true, force: true })
+    }
   })
 })
 

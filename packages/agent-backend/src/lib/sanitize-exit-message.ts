@@ -11,9 +11,24 @@ const TOKEN_SHAPED_RE =
 /** Operator-visible exit reasons are persisted and rendered in a browser. */
 const AGENT_BACKEND_EXIT_MESSAGE_MAX = 500
 
+const cleanOperatorFacingText = (text: string): string =>
+  text.replace(ANSI_ESCAPE_RE, "").replace(TOKEN_SHAPED_RE, "[redacted]").trim()
+
 export const sanitizeAgentBackendExitMessage = (text: string): string =>
-  text
-    .replace(ANSI_ESCAPE_RE, "")
-    .replace(TOKEN_SHAPED_RE, "[redacted]")
-    .trim()
-    .slice(0, AGENT_BACKEND_EXIT_MESSAGE_MAX)
+  cleanOperatorFacingText(text).slice(0, AGENT_BACKEND_EXIT_MESSAGE_MAX)
+
+/**
+ * Redact the full captured tail, then keep the most recent bound so a
+ * token that would straddle a raw suffix cut is already gone.
+ */
+export const sanitizeAgentBackendStderrTail = (
+  text: string,
+): string | undefined => {
+  const cleaned = cleanOperatorFacingText(text)
+  if (cleaned.length === 0) {
+    return undefined
+  }
+  return cleaned.length <= AGENT_BACKEND_EXIT_MESSAGE_MAX
+    ? cleaned
+    : cleaned.slice(-AGENT_BACKEND_EXIT_MESSAGE_MAX)
+}

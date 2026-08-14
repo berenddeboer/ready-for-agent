@@ -7,6 +7,7 @@ import {
   formatAgentCliNotFoundRemediation,
 } from "./agent-cli-not-found.js"
 import {
+  collectChildStderrTail,
   collectChildStdout,
   collectChildStdoutAndStderr,
 } from "./collect-child-stdout.js"
@@ -20,6 +21,7 @@ import {
   AgentBackendTimeoutError,
 } from "./errors.js"
 import { killProcessTree } from "./kill-process-tree.js"
+import { sanitizeAgentBackendStderrTail } from "./sanitize-exit-message.js"
 import type { AgentBackendDescriptor, OnSessionId } from "./types.js"
 
 /** Graceful terminate then force-kill bound for the Agent Turn process tree. */
@@ -143,8 +145,8 @@ const commandOptions = (input: {
   env: input.env,
   extendEnv: false as const,
   stdin: input.stdin ?? ("ignore" as const),
-  // Turns always ignore stderr so a chatty CLI cannot fill an undrained pipe.
-  // Capture probes opt in via captureStderr on runCliCapture only.
+  // Piped streams must be drained inside the same raced collect as exitCode.
+  // Never leave a piped stream undrained (an undrained pipe can deadlock).
   stderr: (input.captureStderr === true ? "pipe" : "ignore") as
     | "pipe"
     | "ignore",
@@ -270,7 +272,8 @@ export const runCliCapture = (
 
 /**
  * Run a CLI Agent Turn: stream stdout lines, observe early Session ID, fold
- * ordered assistant text, require a Session ID on success.
+ * ordered assistant text, drain stderr into a bounded tail, require a
+ * Session ID on success.
  *
  * A startup-only inactivity bound fails the turn as soon as it is clear the CLI
  * never started (no stdout output and no successful `observeStartup` within
@@ -300,8 +303,7 @@ export const runCliTurn = (
     const command = ChildProcess.make(
       input.binary,
       [...input.args],
-      // Never pipe stderr for turns (undrained stderr can deadlock).
-      commandOptions({ ...input, captureStderr: false }),
+      commandOptions({ ...input, captureStderr: true }),
     )
 
     const result = yield* Effect.scoped(
@@ -443,12 +445,19 @@ export const runCliTurn = (
           ),
         )
 
-        const [exitOutcome, output] = yield* Effect.all(
-          [handle.exitCode.pipe(Effect.result), collectOutput],
-          { concurrency: 2 },
+        const [exitOutcome, output, stderrTail] = yield* Effect.all(
+          [
+            handle.exitCode.pipe(Effect.result),
+            collectOutput,
+            collectChildStderrTail(handle),
+          ],
+          { concurrency: 3 },
         ).pipe(
           // raceFirst so the armed watchdog failure ends the turn immediately
           // instead of waiting for the silent CLI to exit on its own.
+          // The stderr fold is inside this race so a piped stream is never
+          // left undrained, a finalize kill is not blocked waiting for it,
+          // and interrupting the race cannot leak the fold fiber.
           Effect.raceFirst(startupWatchdog),
         )
 
@@ -459,6 +468,7 @@ export const runCliTurn = (
           finalized: output.finalized,
           errorClassification: output.errorClassification,
           errorMessage: output.errorMessage,
+          stderrTail,
         }
       }),
     ).pipe(
@@ -485,6 +495,9 @@ export const runCliTurn = (
       const exitCode = Number(result.exitOutcome.success)
       if (exitCode !== 0) {
         const sessionId = result.sessionId ?? knownSessionId
+        const message =
+          result.errorMessage ??
+          sanitizeAgentBackendStderrTail(result.stderrTail)
         return yield* AgentBackendExitError.new({
           exitCode,
           cwd: input.cwd,
@@ -492,9 +505,7 @@ export const runCliTurn = (
           ...(result.errorClassification !== undefined
             ? { classification: result.errorClassification }
             : {}),
-          ...(result.errorMessage !== undefined
-            ? { message: result.errorMessage }
-            : {}),
+          ...(message !== undefined ? { message } : {}),
         })
       }
     }

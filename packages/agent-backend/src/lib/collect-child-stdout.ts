@@ -24,6 +24,41 @@ export const collectChildStdout = (
   })
 
 /**
+ * Memory bound for an Agent Turn stderr fold. Only this many characters
+ * are retained; older output is dropped. Matches the Install Dependencies
+ * diagnostic tail so a chatty CLI cannot grow unbounded.
+ */
+const CLI_TURN_STDERR_TAIL_LIMIT = 4_000
+
+const appendStderrTail = (
+  tail: string,
+  chunk: string,
+  limit = CLI_TURN_STDERR_TAIL_LIMIT,
+): string => {
+  const combined = `${tail}${chunk}`
+  return combined.length <= limit
+    ? combined
+    : `…${combined.slice(-(limit - 1))}`
+}
+
+/**
+ * Drain stderr to EOF, keeping only the most recent `limit` characters.
+ *
+ * Must be composed into the same concurrent collect as `exitCode` (and
+ * stdout) whenever stderr is piped — never leave a piped stream undrained.
+ */
+export const collectChildStderrTail = (
+  handle: ChildProcessHandle,
+  limit = CLI_TURN_STDERR_TAIL_LIMIT,
+): Effect.Effect<string, PlatformError> =>
+  Stream.decodeText(handle.stderr).pipe(
+    Stream.runFold(
+      () => "",
+      (tail, chunk) => appendStderrTail(tail, chunk, limit),
+    ),
+  )
+
+/**
  * Drain stdout and stderr concurrently to EOF, then read exit code.
  *
  * Concurrent drain avoids pipe-buffer deadlock when both streams produce
