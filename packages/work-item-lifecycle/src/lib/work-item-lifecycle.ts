@@ -17,8 +17,12 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
   ActiveAgentBackend,
   type AgentBackendId,
+  type AgentBackendProvider,
   agentBackendLabel,
+  classifyProviderCredentialText,
+  findAgentBackendExitError,
   findAgentBackendNotInstalledError,
+  formatTerminalAuthErrorMessage,
   isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
 import {
@@ -243,8 +247,45 @@ const closeIssueEligibilityFailure = (
   return null
 }
 
+const resolveTerminalAuthProvider = (input: {
+  readonly backendId: string | undefined
+  readonly cachedProvider: AgentBackendProvider | null | undefined
+  readonly textProvider: AgentBackendProvider | null
+}): AgentBackendProvider | null => {
+  if (input.cachedProvider != null) {
+    return input.cachedProvider
+  }
+  // Claude's only AWS-hosted path is Amazon Bedrock; do not leave the
+  // operator guessing between first-party Anthropic and Bedrock.
+  if (input.backendId === "claude" && input.textProvider?.id === "aws") {
+    return { id: "bedrock", label: "Amazon Bedrock" }
+  }
+  return input.textProvider
+}
+
+const terminalAuthFromCause = (
+  error: unknown,
+): { readonly provider: AgentBackendProvider | null } | undefined => {
+  const exitError = findAgentBackendExitError(error)
+  const fromText =
+    exitError?.message !== undefined
+      ? classifyProviderCredentialText(exitError.message)
+      : undefined
+  if (
+    exitError?.classification === "terminal_auth_error" ||
+    fromText !== undefined
+  ) {
+    return { provider: fromText?.provider ?? null }
+  }
+  return undefined
+}
+
 const classifyHandlerFailure = (
   cause: Cause.Cause<HandlerExitError>,
+  context: {
+    readonly backendId?: string
+    readonly provider?: AgentBackendProvider | null
+  } = {},
 ): {
   readonly reasonCode: string
   readonly reasonMessage: string
@@ -265,6 +306,24 @@ const classifyHandlerFailure = (
       return {
         reasonCode: STEP_RUN_REASON.agentBackendUnavailable,
         reasonMessage: notInstalled.message,
+      }
+    }
+    const auth = terminalAuthFromCause(error)
+    if (auth !== undefined) {
+      const backendId = context.backendId
+      return {
+        reasonCode: STEP_RUN_REASON.agentBackendAuthRejected,
+        reasonMessage: formatTerminalAuthErrorMessage({
+          backendLabel:
+            backendId !== undefined && backendId.length > 0
+              ? agentBackendLabel(backendId)
+              : "Agent Backend",
+          provider: resolveTerminalAuthProvider({
+            backendId,
+            cachedProvider: context.provider,
+            textProvider: auth.provider,
+          }),
+        }),
       }
     }
     if (Predicate.isTagged(error, "TimeoutError")) {
@@ -4319,8 +4378,25 @@ export const makeWorkItemLifecycleLive = (
                         workItem: postponed,
                       }
                     }
+                    const capturedBackendId = isSelectableAgentBackendId(
+                      workItem.agent_backend,
+                    )
+                      ? (workItem.agent_backend as AgentBackendId)
+                      : undefined
+                    const capturedStatus =
+                      capturedBackendId === undefined
+                        ? null
+                        : yield* activeAgentBackend.getBackendStatus(
+                            capturedBackendId,
+                          )
                     const classification = classifyHandlerFailure(
                       handlerExit.cause,
+                      {
+                        ...(capturedBackendId !== undefined
+                          ? { backendId: capturedBackendId }
+                          : {}),
+                        provider: capturedStatus?.provider ?? null,
+                      },
                     )
                     const notInstalled = findAgentBackendNotInstalledError(
                       Cause.squash(handlerExit.cause),

@@ -1,3 +1,5 @@
+import { scrubProviderCredentialSecrets } from "./classify-credential-error.js"
+
 const ESC = String.fromCharCode(0x1b)
 const CSI = String.fromCharCode(0x9b)
 const ANSI_ESCAPE_RE = new RegExp(
@@ -12,7 +14,9 @@ const TOKEN_SHAPED_RE =
 const AGENT_BACKEND_EXIT_MESSAGE_MAX = 500
 
 const cleanOperatorFacingText = (text: string): string =>
-  text.replace(ANSI_ESCAPE_RE, "").replace(TOKEN_SHAPED_RE, "[redacted]").trim()
+  scrubProviderCredentialSecrets(
+    text.replace(ANSI_ESCAPE_RE, "").replace(TOKEN_SHAPED_RE, "[redacted]"),
+  ).trim()
 
 export const sanitizeAgentBackendExitMessage = (text: string): string =>
   cleanOperatorFacingText(text).slice(0, AGENT_BACKEND_EXIT_MESSAGE_MAX)

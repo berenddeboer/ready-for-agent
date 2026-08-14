@@ -370,6 +370,27 @@ describe("Grok AgentBackend adapter", () => {
     )
   })
 
+  it("classifies a stream credential error as terminal_auth_error", async () => {
+    await withExecutable(
+      [
+        captureSessionScript,
+        `printf '%s\\n' '{"type":"error","message":"Unable to locate credentials"}'`,
+        `printf '%s\\n' "{\\"type\\":\\"end\\",\\"stopReason\\":\\"EndTurn\\",\\"sessionId\\":\\"$sid\\"}"`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.classification).toBe("terminal_auth_error")
+          expect(error.message).toBe("Unable to locate credentials")
+        }
+      },
+    )
+  })
+
   it("maps stream error events to exit failure with the reported reason", async () => {
     await withExecutable(
       [

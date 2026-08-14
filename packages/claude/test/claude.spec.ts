@@ -852,6 +852,46 @@ describe("Claude AgentBackend adapter (Agent Turns)", () => {
     )
   })
 
+  it("classifies a stderr-only expired credential exit as terminal_auth_error", async () => {
+    await withExecutable(
+      [
+        captureSessionScript,
+        "printf 'ExpiredTokenException: The security token included in the request is expired\\n' >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.classification).toBe("terminal_auth_error")
+          expect(error.message).toContain("security token")
+        }
+      },
+    )
+  })
+
+  it("classifies a result is_error credential failure as terminal_auth_error", async () => {
+    await withExecutable(
+      [
+        captureSessionScript,
+        `printf '%s\\n' "{\\"type\\":\\"result\\",\\"subtype\\":\\"error\\",\\"session_id\\":\\"$sid\\",\\"is_error\\":true,\\"error\\":\\"Unable to locate credentials\\"}"`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.classification).toBe("terminal_auth_error")
+          expect(error.message).toBe("Unable to locate credentials")
+        }
+      },
+    )
+  })
+
   it("maps result is_error to exit failure with known session", async () => {
     await withExecutable(
       [

@@ -28,12 +28,13 @@ const runtimeStatus = (
   models: AgentBackendRuntimeStatus["models"] = [],
   kind: AgentBackendRuntimeStatus["kind"] = "ready",
   reason: string | null = null,
+  provider: AgentBackendRuntimeStatus["provider"] = null,
 ): AgentBackendRuntimeStatus => ({
   backend: registration.descriptor,
   kind,
   reason: kind === "unavailable" ? (reason ?? "unavailable") : null,
   models: kind === "unavailable" ? [] : models,
-  provider: null,
+  provider,
   warnings: [],
 })
 
@@ -64,6 +65,8 @@ export const stubActiveAgentBackendLayer = (
      */
     readonly newlyActivatedKind?: AgentBackendRuntimeStatus["kind"]
     readonly newlyActivatedReason?: string
+    /** Cached inspect provider reported on every Ready status. */
+    readonly provider: AgentBackendRuntimeStatus["provider"]
     readonly getStatus: Effect.Effect<AgentBackendStatus>
     readonly requireAgentTurnsAllowed: Effect.Effect<
       void,
@@ -97,7 +100,13 @@ export const stubActiveAgentBackendLayer = (
     allRegistrations.map((entry) => [entry.descriptor.id, entry] as const),
   )
   const readyFor = (entry: AgentBackendRegistration) =>
-    runtimeStatus(entry, overrides.models ?? [])
+    runtimeStatus(
+      entry,
+      overrides.models ?? [],
+      "ready",
+      null,
+      overrides.provider ?? null,
+    )
   const allReady = allRegistrations.map(readyFor)
   const activeIds = new Set<AgentBackendId>(byId.keys())
   const legacyStatus =
@@ -176,7 +185,7 @@ export const stubActiveAgentBackendLayer = (
           kind: "ready" as const,
           reason: null,
           models: overrides.models ?? [],
-          provider: null,
+          provider: overrides.provider ?? null,
           warnings: [],
         }),
       withConfigCoordination: (effect) => effect,
