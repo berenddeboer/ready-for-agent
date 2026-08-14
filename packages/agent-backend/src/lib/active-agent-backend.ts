@@ -1,7 +1,10 @@
 import { Context, Effect, Layer, Ref, Result, Schema, Semaphore } from "effect"
 import type { AgentBackend, AgentBackendError } from "./agent-backend.js"
 import { AgentBackend as AgentBackendService } from "./agent-backend.js"
-import { AgentBackendConfigError } from "./errors.js"
+import {
+  AgentBackendConfigError,
+  isAgentBackendMalformedOutputError,
+} from "./errors.js"
 import {
   type AgentBackendRegistration,
   capabilitySupported,
@@ -316,6 +319,17 @@ export type ActiveAgentBackendShape = {
     backendId: AgentBackendId,
     input: InspectInput,
   ) => Effect.Effect<AgentBackendRuntimeStatus>
+  /**
+   * Startup-only inspect for one Active backend. Like `recheck`, but confirms a
+   * transient `AgentBackendMalformedOutputError` once (bounded by the same
+   * inspect input timeout) before declaring the backend Unavailable. Explicit
+   * Preview and Recheck keep their single-attempt semantics; only automatic
+   * Harness startup uses this method.
+   */
+  readonly inspectStartupBackend: (
+    backendId: AgentBackendId,
+    input: InspectInput,
+  ) => Effect.Effect<AgentBackendRuntimeStatus>
   readonly requireAgentTurnsAllowed: (
     backendId: AgentBackendId,
   ) => Effect.Effect<void, AgentBackendUnavailableError>
@@ -553,11 +567,17 @@ export const ActiveAgentBackendLive = (
         },
       )
 
+      type InspectActiveOutcome = {
+        readonly status: AgentBackendRuntimeStatus
+        /** The raw inspect failure, or null when inspect succeeded. */
+        readonly failure: unknown | null
+      }
+
       const inspectActiveEntry = (
         inspectedBackendId: AgentBackendId,
         entryAtStart: ActiveEntry,
         input: InspectInput,
-      ): Effect.Effect<AgentBackendRuntimeStatus> =>
+      ): Effect.Effect<InspectActiveOutcome> =>
         Effect.gen(function* () {
           // Claim a generation before calling inspect so concurrent Rechecks
           // that finish later cannot clobber a fresher catalog/provider/warning
@@ -584,7 +604,10 @@ export const ActiveAgentBackendLive = (
             // the current status when still Active under the replacement;
             // only report not-Active when the id is truly absent.
             const current = yield* getBackendStatus(inspectedBackendId)
-            return current ?? notActiveStatus(inspectedBackendId)
+            return {
+              status: current ?? notActiveStatus(inspectedBackendId),
+              failure: null,
+            }
           }
 
           const inspected = yield* Effect.result(
@@ -626,7 +649,10 @@ export const ActiveAgentBackendLive = (
               return { ...state, entries }
             })
             const status = yield* getBackendStatus(inspectedBackendId)
-            return status ?? notActiveStatus(inspectedBackendId)
+            return {
+              status: status ?? notActiveStatus(inspectedBackendId),
+              failure: inspected.failure,
+            }
           }
           yield* Ref.update(stateRef, (state) => {
             if (!stillCurrentInspect(state)) {
@@ -648,7 +674,10 @@ export const ActiveAgentBackendLive = (
             return { ...state, entries }
           })
           const status = yield* getBackendStatus(inspectedBackendId)
-          return status ?? notActiveStatus(inspectedBackendId)
+          return {
+            status: status ?? notActiveStatus(inspectedBackendId),
+            failure: null,
+          }
         })
 
       const recheck = Effect.fn("ActiveAgentBackend.recheck")(function* (
@@ -662,7 +691,30 @@ export const ActiveAgentBackendLive = (
           // Recheck does not expand the Active set.
           return notActiveStatus(resolvedId)
         }
-        return yield* inspectActiveEntry(resolvedId, entry, input)
+        return (yield* inspectActiveEntry(resolvedId, entry, input)).status
+      })
+
+      const inspectStartupBackend = Effect.fn(
+        "ActiveAgentBackend.inspectStartupBackend",
+      )(function* (backendId: AgentBackendId, input: InspectInput) {
+        const resolvedId = normalizeBackendId(backendId)
+        const current = yield* Ref.get(stateRef)
+        const entry = current.entries.get(resolvedId)
+        if (entry === undefined) {
+          // Startup inspect does not expand the Active set.
+          return notActiveStatus(resolvedId)
+        }
+        const first = yield* inspectActiveEntry(resolvedId, entry, input)
+        // Confirm once only for the transient cold-start malformed-output race;
+        // definite failures (not installed, config, non-zero exit) stay final.
+        if (
+          first.failure === null ||
+          !isAgentBackendMalformedOutputError(first.failure)
+        ) {
+          return first.status
+        }
+        const confirmed = yield* inspectActiveEntry(resolvedId, entry, input)
+        return confirmed.status
       })
 
       const activate = Effect.fn("ActiveAgentBackend.activate")(function* (
@@ -689,11 +741,11 @@ export const ActiveAgentBackendLive = (
           ...state,
           proxyBackendId: resolvedId,
         }))
-        return yield* inspectActiveEntry(
+        return (yield* inspectActiveEntry(
           ensured.resolvedId,
           ensured.entry,
           input,
-        )
+        )).status
       })
 
       const drop = Effect.fn("ActiveAgentBackend.drop")(function* (
@@ -748,6 +800,7 @@ export const ActiveAgentBackendLive = (
               Effect.flatMap((ensured) =>
                 inspectActiveEntry(ensured.resolvedId, ensured.entry, input),
               ),
+              Effect.map((outcome) => outcome.status),
             )
           }
         }
@@ -918,6 +971,7 @@ export const ActiveAgentBackendLive = (
         activate,
         drop,
         recheck,
+        inspectStartupBackend,
         requireAgentTurnsAllowed,
         preview,
         withConfigCoordination,

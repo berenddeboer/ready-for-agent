@@ -140,6 +140,14 @@ export class AgentBackendMalformedOutputError extends Schema.TaggedErrorClass<Ag
   },
 ) {}
 
+export const isAgentBackendMalformedOutputError = (
+  value: unknown,
+): value is AgentBackendMalformedOutputError =>
+  typeof value === "object" &&
+  value !== null &&
+  "_tag" in value &&
+  value._tag === "AgentBackendMalformedOutputError"
+
 const AgentBackendDescriptorSchema = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
