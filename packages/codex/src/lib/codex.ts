@@ -99,7 +99,7 @@ export class Codex {
             })
           }
           if (status.kind === "failed") {
-            return yield* new AgentBackendExitError({
+            return yield* AgentBackendExitError.new({
               exitCode: status.exitCode,
               cwd: input.cwd,
               message: `Codex Build readiness probe failed (exit ${status.exitCode}): ${clipProbeOutput(statusOutput)}`,
@@ -219,7 +219,7 @@ export class Codex {
                 sessionId: stream.threadId ?? input.sessionId,
                 message: stream.turnFailedMessage ?? "Codex turn.failed",
               })
-              return yield* new AgentBackendExitError({
+              return yield* AgentBackendExitError.new({
                 exitCode: 1,
                 cwd: input.cwd,
                 message: stream.turnFailedMessage ?? "Codex turn.failed",

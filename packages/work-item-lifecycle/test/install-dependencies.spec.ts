@@ -442,7 +442,7 @@ describe("installDependencies fallback failure", () => {
               AgentBackend.of({
                 startTurn: () =>
                   Effect.fail(
-                    new AgentBackendExitError({
+                    AgentBackendExitError.new({
                       exitCode: 2,
                       cwd: root,
                       message: "npm install failed: EACCES",

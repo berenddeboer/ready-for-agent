@@ -193,7 +193,7 @@ export class Grok {
                 )
               }
               if (stream.errorMessage !== undefined) {
-                return yield* new AgentBackendExitError({
+                return yield* AgentBackendExitError.new({
                   exitCode: 1,
                   cwd: input.cwd,
                   sessionId: input.sessionId,
@@ -201,7 +201,7 @@ export class Grok {
                 })
               }
               if (stream.maxTurnsReached) {
-                return yield* new AgentBackendExitError({
+                return yield* AgentBackendExitError.new({
                   exitCode: 1,
                   cwd: input.cwd,
                   sessionId: input.sessionId,

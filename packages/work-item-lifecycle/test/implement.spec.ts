@@ -546,7 +546,7 @@ describe("implement", () => {
           AgentBackend.of({
             startTurn: () =>
               Effect.fail(
-                new AgentBackendExitError({ exitCode: 2, cwd: root }),
+                AgentBackendExitError.new({ exitCode: 2, cwd: root }),
               ),
             continueTurn: () =>
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
@@ -705,7 +705,7 @@ describe("implement", () => {
             Effect.gen(function* () {
               yield* input.onSessionId!("ses_failed_after_emit")
               return yield* Effect.fail(
-                new AgentBackendExitError({ exitCode: 2, cwd: root }),
+                AgentBackendExitError.new({ exitCode: 2, cwd: root }),
               )
             }),
         }),

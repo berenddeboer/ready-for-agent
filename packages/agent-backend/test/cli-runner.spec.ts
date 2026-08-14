@@ -145,7 +145,7 @@ describe("runCliCapture", () => {
         ),
       )
       expect(error).toEqual(
-        new AgentBackendExitError({
+        AgentBackendExitError.new({
           exitCode: 9,
           cwd: process.cwd(),
         }),
@@ -325,7 +325,7 @@ describe("runCliTurn", () => {
           ),
         )
         expect(error).toEqual(
-          new AgentBackendExitError({
+          AgentBackendExitError.new({
             exitCode: 1,
             cwd: process.cwd(),
             sessionId: "ses_retry",
@@ -358,7 +358,7 @@ describe("runCliTurn", () => {
           ),
         )
         expect(error).toEqual(
-          new AgentBackendExitError({
+          AgentBackendExitError.new({
             exitCode: 1,
             cwd: process.cwd(),
             sessionId: "ses_reason",
@@ -388,7 +388,7 @@ describe("runCliTurn", () => {
           ),
         )
         expect(error).toEqual(
-          new AgentBackendExitError({
+          AgentBackendExitError.new({
             exitCode: 1,
             cwd: process.cwd(),
             sessionId: "ses_plain",
@@ -728,7 +728,7 @@ describe("runCliTurn", () => {
         ),
       )
       expect(error).toEqual(
-        new AgentBackendExitError({ exitCode: 7, cwd: process.cwd() }),
+        AgentBackendExitError.new({ exitCode: 7, cwd: process.cwd() }),
       )
     })
   })

@@ -77,12 +77,13 @@ export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendE
     message: Schema.optionalKey(Schema.String),
   },
 ) {
-  constructor(props: AgentBackendExitErrorProps) {
+  /** Sanitize the operator-visible reason before the Schema constructor. */
+  static new(props: AgentBackendExitErrorProps): AgentBackendExitError {
     const sanitized =
       props.message === undefined
         ? undefined
         : sanitizeAgentBackendExitMessage(props.message)
-    super({
+    return new AgentBackendExitError({
       exitCode: props.exitCode,
       cwd: props.cwd,
       ...(props.sessionId !== undefined ? { sessionId: props.sessionId } : {}),

@@ -501,7 +501,7 @@ describe("ActiveAgentBackend multi-backend registry", () => {
         adapter: {
           inspect: () =>
             Effect.fail(
-              new AgentBackendExitError({
+              AgentBackendExitError.new({
                 exitCode: 7,
                 cwd: "/tmp",
                 message: "internal crash in login status",

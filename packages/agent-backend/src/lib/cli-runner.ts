@@ -258,7 +258,7 @@ export const runCliCapture = (
 
     if (result.exitCode !== 0 && input.allowNonZeroExit !== true) {
       const message = capturedCliOutputMessage(result.stdout, result.stderr)
-      return yield* new AgentBackendExitError({
+      return yield* AgentBackendExitError.new({
         exitCode: result.exitCode,
         cwd: input.cwd,
         ...(message !== undefined ? { message } : {}),
@@ -485,7 +485,7 @@ export const runCliTurn = (
       const exitCode = Number(result.exitOutcome.success)
       if (exitCode !== 0) {
         const sessionId = result.sessionId ?? knownSessionId
-        return yield* new AgentBackendExitError({
+        return yield* AgentBackendExitError.new({
           exitCode,
           cwd: input.cwd,
           ...(sessionId !== undefined ? { sessionId } : {}),

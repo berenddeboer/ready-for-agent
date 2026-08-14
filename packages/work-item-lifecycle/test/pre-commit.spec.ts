@@ -385,7 +385,7 @@ describe("preCommit", () => {
         stubOpencode({
           continueTurn: () =>
             Effect.fail(
-              new AgentBackendExitError({
+              AgentBackendExitError.new({
                 exitCode: 2,
                 cwd: root,
                 sessionId: "ses_pre_commit",

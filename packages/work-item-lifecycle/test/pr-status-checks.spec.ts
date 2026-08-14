@@ -1416,7 +1416,7 @@ describe("PR status check steps", () => {
                 startTurn: () => Effect.die("unused"),
                 continueTurn: () =>
                   Effect.fail(
-                    new AgentBackendExitError({
+                    AgentBackendExitError.new({
                       exitCode: 1,
                       cwd: "/tmp/worktree",
                     }),

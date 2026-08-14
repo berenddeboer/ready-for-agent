@@ -278,7 +278,7 @@ export class Claude {
                 sessionId: input.sessionId,
                 message: stream.errorMessage ?? "Claude Code turn failed",
               })
-              return yield* new AgentBackendExitError({
+              return yield* AgentBackendExitError.new({
                 exitCode: 1,
                 cwd: input.cwd,
                 sessionId: input.sessionId,
