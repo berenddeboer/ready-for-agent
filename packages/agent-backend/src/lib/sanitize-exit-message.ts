@@ -9,7 +9,7 @@ const TOKEN_SHAPED_RE =
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b|\bglpat-[A-Za-z0-9_-]{20,}\b|\bsk-ant-[A-Za-z0-9_-]{16,}\b|\bsk-[A-Za-z0-9]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi
 
 /** Operator-visible exit reasons are persisted and rendered in a browser. */
-export const AGENT_BACKEND_EXIT_MESSAGE_MAX = 500
+const AGENT_BACKEND_EXIT_MESSAGE_MAX = 500
 
 export const sanitizeAgentBackendExitMessage = (text: string): string =>
   text
