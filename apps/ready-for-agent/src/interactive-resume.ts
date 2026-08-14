@@ -1,6 +1,9 @@
 /**
  * Interactive continuation argv for a captured Agent Backend.
  * Distinct from headless Agent Turn argument builders.
+ *
+ * Permission bypass is launch-scoped argv only: it does not write user,
+ * Repository, Harness Config, or Agent Backend configuration.
  */
 export type InteractiveResumeCommand = {
   readonly executableName: string
@@ -16,7 +19,12 @@ export const interactiveResumeCommand = (input: {
     case "opencode":
       return {
         executableName: "opencode",
-        arguments: [input.workingDirectory, "--session", input.sessionId],
+        arguments: [
+          input.workingDirectory,
+          "--session",
+          input.sessionId,
+          "--auto",
+        ],
       }
     case "grok":
       return {
@@ -26,17 +34,29 @@ export const interactiveResumeCommand = (input: {
           input.workingDirectory,
           "--resume",
           input.sessionId,
+          "--permission-mode",
+          "bypassPermissions",
         ],
       }
     case "codex":
       return {
         executableName: "codex",
-        arguments: ["resume", "-C", input.workingDirectory, input.sessionId],
+        arguments: [
+          "resume",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "-C",
+          input.workingDirectory,
+          input.sessionId,
+        ],
       }
     case "claude":
       return {
         executableName: "claude",
-        arguments: ["--resume", input.sessionId],
+        arguments: [
+          "--resume",
+          input.sessionId,
+          "--dangerously-skip-permissions",
+        ],
       }
     default:
       return null

@@ -98,7 +98,7 @@ const compileWithTarget = (target: string) => {
     entrypoint,
   ]
   console.log(`Compiling ${platformKey} (${target}) → ${outfile}`)
-  return Bun.spawnSync(["bun", ...args], {
+  return Bun.spawnSync([process.execPath, ...args], {
     cwd: workspaceRoot,
     stdout: "inherit",
     stderr: "pipe",
