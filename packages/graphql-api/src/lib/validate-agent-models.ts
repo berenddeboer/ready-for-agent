@@ -29,7 +29,7 @@ import {
 /** Model fields carried by Harness Config and Repository settings. */
 export type AgentModelField = "defaultModel" | "reviewModel"
 
-export type ThinkingLevelField = "defaultThinkingLevel" | "reviewThinkingLevel"
+type ThinkingLevelField = "defaultThinkingLevel" | "reviewThinkingLevel"
 
 export type SettingsCatalogField = AgentModelField | ThinkingLevelField
 
@@ -100,7 +100,7 @@ type ApplicableThinkingLevel = {
  * Dormant Repository levels (Harness still governs that role) are omitted so
  * they can be preserved without blocking an unrelated save.
  */
-export const applicableThinkingLevels = (input: {
+const applicableThinkingLevels = (input: {
   readonly scope: "harness" | "repository"
   readonly submitted: AgentModelSettingsSource
   readonly harness: AgentModelSettingsSource
