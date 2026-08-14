@@ -1,4 +1,13 @@
-import { readFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
@@ -7,6 +16,7 @@ import {
   SUPPORTED_PLATFORM_KEYS,
   WINDOWS_BINARY_RELATIVE_PATH,
   binaryRelativePathFor,
+  binarySpawnFailureMessage,
   bunCompileTarget,
   selectPlatformPackage,
   unsupportedPlatformMessage,
@@ -14,10 +24,8 @@ import {
 import { describe, expect, test } from "bun:test"
 
 const binDir = dirname(fileURLToPath(import.meta.url))
-const launcherSource = readFileSync(
-  join(binDir, "../bin/ready-for-agent.js"),
-  "utf8",
-)
+const linuxX64Test =
+  process.platform === "linux" && process.arch === "x64" ? test : test.skip
 
 describe("selectPlatformPackage", () => {
   test("selects each supported linux/darwin/win32 × x64/arm64 package", () => {
@@ -141,8 +149,8 @@ describe("selectPlatformPackage", () => {
     )
   })
 
-  test("bun compile targets map 1:1 for supported platforms", () => {
-    expect(bunCompileTarget("linux-x64")).toBe("bun-linux-x64")
+  test("bun compile targets map supported platforms", () => {
+    expect(bunCompileTarget("linux-x64")).toBe("bun-linux-x64-baseline")
     expect(bunCompileTarget("linux-arm64")).toBe("bun-linux-arm64")
     expect(bunCompileTarget("darwin-x64")).toBe("bun-darwin-x64")
     expect(bunCompileTarget("darwin-arm64")).toBe("bun-darwin-arm64")
@@ -150,11 +158,104 @@ describe("selectPlatformPackage", () => {
     expect(bunCompileTarget("win32-arm64")).toBe("bun-windows-arm64")
   })
 
-  test("launcher bin imports the shared select-platform pure seam", () => {
-    expect(launcherSource).toContain('from "./select-platform.js"')
-    expect(launcherSource).toContain("selectPlatformPackage")
-    for (const name of Object.values(PLATFORM_PACKAGE_NAMES)) {
-      expect(Object.values(PLATFORM_PACKAGE_NAMES)).toContain(name)
+  test("binarySpawnFailureMessage names SIGILL and the linux-x64 baseline target", () => {
+    const message = binarySpawnFailureMessage("linux-x64", {
+      error: undefined,
+      signal: "SIGILL",
+      status: null,
+    })
+    expect(message).toContain("SIGILL")
+    expect(message).toContain("bun-linux-x64-baseline")
+    expect(message).toContain("likely")
+    expect(message).toContain("SSE4.2")
+  })
+
+  test("binarySpawnFailureMessage does not diagnose SIGILL on other platforms", () => {
+    expect(
+      binarySpawnFailureMessage("linux-arm64", {
+        error: undefined,
+        signal: "SIGILL",
+        status: null,
+      }),
+    ).toBeUndefined()
+  })
+
+  test("binarySpawnFailureMessage prefers spawn error text over signal", () => {
+    expect(
+      binarySpawnFailureMessage("darwin-arm64", {
+        error: new Error("spawn EACCES"),
+        signal: null,
+        status: null,
+      }),
+    ).toBe("spawn EACCES")
+  })
+
+  test("binarySpawnFailureMessage is silent on a normal exit", () => {
+    expect(
+      binarySpawnFailureMessage("linux-x64", {
+        error: undefined,
+        signal: null,
+        status: 2,
+      }),
+    ).toBeUndefined()
+    expect(
+      binarySpawnFailureMessage("linux-x64", {
+        error: undefined,
+        signal: "SIGTERM",
+        status: null,
+      }),
+    ).toBeUndefined()
+  })
+
+  linuxX64Test("launcher reports a signaled platform binary", () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "rfa-sigill-launcher-"))
+    try {
+      const launcherRoot = join(fixtureRoot, "ready-for-agent")
+      const launcherBin = join(launcherRoot, "bin")
+      const platformRoot = join(
+        launcherRoot,
+        "node_modules",
+        "ready-for-agent-linux-x64",
+      )
+      const platformBin = join(platformRoot, BINARY_RELATIVE_PATH)
+
+      mkdirSync(launcherBin, { recursive: true })
+      mkdirSync(dirname(platformBin), { recursive: true })
+      copyFileSync(
+        join(binDir, "../bin/ready-for-agent.js"),
+        join(launcherBin, "ready-for-agent.js"),
+      )
+      copyFileSync(
+        join(binDir, "../bin/select-platform.js"),
+        join(launcherBin, "select-platform.js"),
+      )
+      writeFileSync(
+        join(launcherRoot, "package.json"),
+        JSON.stringify({ type: "module" }),
+      )
+      writeFileSync(
+        join(platformRoot, "package.json"),
+        JSON.stringify({ name: "ready-for-agent-linux-x64" }),
+      )
+      writeFileSync(platformBin, "#!/bin/sh\nkill -ILL $$\n")
+      chmodSync(platformBin, 0o755)
+
+      const node = Bun.which("node")
+      if (node === null) throw new Error("node is required for launcher tests")
+      const result = spawnSync(
+        node,
+        [join(launcherBin, "ready-for-agent.js")],
+        {
+          encoding: "utf8",
+        },
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.signal).toBeNull()
+      expect(result.stderr).toContain("SIGILL")
+      expect(result.stderr).toContain("bun-linux-x64-baseline")
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true })
     }
   })
 })

@@ -132,7 +132,7 @@ export const unsupportedPlatformMessage = (platform, arch) => {
 export const bunCompileTarget = (platformKey) => {
   switch (platformKey) {
     case "linux-x64":
-      return "bun-linux-x64"
+      return "bun-linux-x64-baseline"
     case "linux-arm64":
       return "bun-linux-arm64"
     case "darwin-x64":
@@ -148,4 +148,32 @@ export const bunCompileTarget = (platformKey) => {
       return _exhaustive
     }
   }
+}
+
+/**
+ * Operator-facing error when the compiled binary dies before the Harness
+ * starts.
+ *
+ * @param {SupportedPlatformKey} platformKey
+ * @param {{
+ *   error?: Error | null
+ *   signal?: NodeJS.Signals | string | null
+ *   status?: number | null
+ * }} result
+ * @returns {string | undefined}
+ */
+export const binarySpawnFailureMessage = (platformKey, result) => {
+  if (result.error !== undefined && result.error !== null) {
+    return result.error.message
+  }
+  if (platformKey === "linux-x64" && result.signal === "SIGILL") {
+    return (
+      "The ready-for-agent Linux x64 platform binary died with SIGILL (illegal instruction). " +
+      "This likely means the CPU lacks SSE4.2, which bun-linux-x64-baseline requires, " +
+      "although SIGILL can have other causes. Reinstall " +
+      "ready-for-agent@latest, or in a monorepo checkout run: bunx nx run " +
+      "ready-for-agent:compile"
+    )
+  }
+  return undefined
 }

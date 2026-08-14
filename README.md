@@ -262,6 +262,23 @@ repositories (`gh` for GitHub, `glab` for GitLab) block startup. A
 missing coding agent never does — it shows as Unavailable instead
 (see below).
 
+### Startup fails with SIGILL / "Illegal instruction"
+
+The published Linux x64 binary is compiled with Bun's
+`bun-linux-x64-baseline` target so CPUs with SSE4.2 but without
+AVX2/BMI2 (for example Ivy Bridge) can run it. Older x64 CPUs without
+SSE4.2 remain unsupported. If an older install still dies with `SIGILL`
+or `Illegal instruction`, reinstall:
+
+```bash
+npx ready-for-agent@latest
+```
+
+`npx` can swallow the crash and print nothing. Run the platform
+binary directly, or look for a launcher message that names
+`bun-linux-x64-baseline`. Source checkouts on the same machine are
+unaffected (`bun run ready-for-agent`).
+
 ### A labelled issue does not show up
 
 - The issue must carry the `ready-for-agent` label — the harness only

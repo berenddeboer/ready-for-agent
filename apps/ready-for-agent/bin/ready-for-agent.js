@@ -3,7 +3,10 @@ import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join } from "node:path"
-import { selectPlatformPackage } from "./select-platform.js"
+import {
+  binarySpawnFailureMessage,
+  selectPlatformPackage,
+} from "./select-platform.js"
 
 const require = createRequire(import.meta.url)
 
@@ -56,8 +59,9 @@ const result = spawnSync(binaryPath, process.argv.slice(2), {
   stdio: "inherit",
 })
 
-if (result.error) {
-  console.error(result.error.message)
+const spawnFailure = binarySpawnFailureMessage(selection.platformKey, result)
+if (spawnFailure !== undefined) {
+  console.error(spawnFailure)
   process.exit(1)
 }
 
