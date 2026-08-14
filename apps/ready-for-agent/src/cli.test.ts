@@ -25,6 +25,10 @@ import {
   harnessNotRunningMessage,
 } from "./graphql-error.ts"
 import { JumpFailed } from "./jump-error.ts"
+import {
+  type DirectLaunchInput,
+  DirectTerminal,
+} from "./services/direct-terminal.ts"
 import { ExecutablePath } from "./services/executable-path.ts"
 import {
   GraphqlApi,
@@ -53,8 +57,12 @@ const unusedGraphql = {
 
 const unusedJumpServices = Layer.mergeAll(
   Layer.succeed(Tmux, {
-    requireAttachedSession: Effect.die("tmux should not run"),
+    tmuxModeSelected: Effect.die("tmux should not run"),
     createJumpWindow: () => Effect.die("tmux should not run"),
+  }),
+  Layer.succeed(DirectTerminal, {
+    requireInteractiveTerminal: Effect.die("direct terminal should not run"),
+    run: () => Effect.die("direct terminal should not run"),
   }),
   Layer.succeed(ExecutablePath, {
     resolve: () => Effect.die("executable path should not run"),
@@ -1197,10 +1205,14 @@ describe("operator binary jump command", () => {
     readonly workItemBySessionId?: (
       id: string,
     ) => Effect.Effect<SessionWorkItemLookup, GraphqlRequestFailed>
-    readonly requireAttachedSession?: Effect.Effect<void, JumpFailed>
+    readonly tmuxModeSelected?: Effect.Effect<boolean>
     readonly createJumpWindow?: (
       input: JumpWindowInput,
     ) => Effect.Effect<void, JumpFailed>
+    readonly requireInteractiveTerminal?: Effect.Effect<void, JumpFailed>
+    readonly runDirect?: (
+      input: DirectLaunchInput,
+    ) => Effect.Effect<number, JumpFailed>
     readonly resolve?: (command: string) => Effect.Effect<string, JumpFailed>
   }) =>
     mockStart.pipe(
@@ -1219,8 +1231,15 @@ describe("operator binary jump command", () => {
       ),
       Layer.provideMerge(
         Layer.succeed(Tmux, {
-          requireAttachedSession: options.requireAttachedSession ?? Effect.void,
+          tmuxModeSelected: options.tmuxModeSelected ?? Effect.succeed(true),
           createJumpWindow: options.createJumpWindow ?? (() => Effect.void),
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(DirectTerminal, {
+          requireInteractiveTerminal:
+            options.requireInteractiveTerminal ?? Effect.void,
+          run: options.runDirect ?? (() => Effect.succeed(0)),
         }),
       ),
       Layer.provideMerge(
@@ -1250,29 +1269,111 @@ describe("operator binary jump command", () => {
     }),
   )
 
-  it.live("jump fails when invoked outside tmux", () =>
+  it.live("jump rejects a non-interactive terminal before GraphQL", () =>
     Effect.gen(function* () {
       let lookedUp = false
+      let launched = false
       const result = yield* runOperator(
         ["jump", sessionId],
         successfulJumpLayer({
-          requireAttachedSession: Effect.fail(
+          tmuxModeSelected: Effect.succeed(false),
+          requireInteractiveTerminal: Effect.fail(
             new JumpFailed({
-              message: "jump must be run from inside a tmux session",
+              message: "jump requires an interactive terminal",
             }),
           ),
           workItemBySessionId: () => {
             lookedUp = true
-            return Effect.die("GraphQL should not run outside tmux")
+            return Effect.die("GraphQL should not run without a TTY")
+          },
+          runDirect: () => {
+            launched = true
+            return Effect.die("direct launch should not run without a TTY")
           },
         }),
       ).pipe(Effect.flip)
 
       expect(lookedUp).toBe(false)
+      expect(launched).toBe(false)
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toBe("jump requires an interactive terminal")
+      }
+    }),
+  )
+
+  it.live("jump routes to direct continuation when tmux mode is off", () =>
+    Effect.gen(function* () {
+      let created = false
+      let launched: DirectLaunchInput | undefined
+      const previousExitCode = process.exitCode
+      try {
+        yield* runOperator(
+          ["jump", sessionId],
+          successfulJumpLayer({
+            tmuxModeSelected: Effect.succeed(false),
+            createJumpWindow: () => {
+              created = true
+              return Effect.void
+            },
+            runDirect: (input) =>
+              Effect.sync(() => {
+                launched = input
+                return 0
+              }),
+          }),
+        )
+        expect(created).toBe(false)
+        expect(launched).toEqual({
+          agentExecutable: "/usr/bin/opencode",
+          agentArguments: [process.cwd(), "--session", sessionId, "--auto"],
+          workingDirectory: process.cwd(),
+        })
+        expect(process.exitCode ?? 0).toBe(0)
+      } finally {
+        process.exitCode = previousExitCode
+      }
+    }),
+  )
+
+  it.live("jump returns a backend exit status without JumpFailed", () =>
+    Effect.gen(function* () {
+      const previousExitCode = process.exitCode
+      try {
+        yield* runOperator(
+          ["jump", sessionId],
+          successfulJumpLayer({
+            tmuxModeSelected: Effect.succeed(false),
+            runDirect: () => Effect.succeed(7),
+          }),
+        )
+        expect(process.exitCode).toBe(7)
+      } finally {
+        process.exitCode = previousExitCode
+      }
+    }),
+  )
+
+  it.live("jump maps a direct spawn failure to JumpFailed", () =>
+    Effect.gen(function* () {
+      const result = yield* runOperator(
+        ["jump", sessionId],
+        successfulJumpLayer({
+          tmuxModeSelected: Effect.succeed(false),
+          runDirect: () =>
+            Effect.fail(
+              new JumpFailed({
+                message:
+                  "could not start Agent Backend executable '/usr/bin/opencode'",
+              }),
+            ),
+        }),
+      ).pipe(Effect.flip)
+
       expect(result).toBeInstanceOf(JumpFailed)
       if (result instanceof JumpFailed) {
         expect(result.message).toBe(
-          "jump must be run from inside a tmux session",
+          "could not start Agent Backend executable '/usr/bin/opencode'",
         )
       }
     }),

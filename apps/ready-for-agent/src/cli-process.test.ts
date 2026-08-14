@@ -999,6 +999,183 @@ const parseTmuxArgvLog = (logPath: string): readonly (readonly string[])[] => {
   return text.split("\n").map((line) => JSON.parse(line) as string[])
 }
 
+const ptyRunnerSource = `import os
+import pty
+import sys
+
+stderr_path = os.environ.pop("RFA_PTY_STDERR", "")
+sigint_after = os.environ.pop("RFA_PTY_SEND_SIGINT_AFTER", "")
+cmd = sys.argv[1:]
+if len(cmd) == 0:
+    sys.exit(2)
+
+def copy_master(master: int) -> None:
+    sent = False
+    buf = b""
+    while True:
+        try:
+            data = os.read(master, 4096)
+        except OSError:
+            break
+        if not data:
+            break
+        os.write(1, data)
+        if sigint_after and not sent:
+            buf += data
+            if sigint_after.encode() in buf:
+                os.write(master, b"\\x03")
+                sent = True
+
+if stderr_path:
+    master, slave = pty.openpty()
+    pid = os.fork()
+    if pid == 0:
+        os.close(master)
+        os.dup2(slave, 0)
+        os.dup2(slave, 1)
+        err = os.open(stderr_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+        os.dup2(err, 2)
+        os.close(err)
+        os.close(slave)
+        os.execvpe(cmd[0], cmd, os.environ)
+        os._exit(127)
+    os.close(slave)
+    copy_master(master)
+    _, status = os.waitpid(pid, 0)
+    os.close(master)
+    sys.exit(os.waitstatus_to_exitcode(status))
+
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvpe(cmd[0], cmd, os.environ)
+    os._exit(127)
+copy_master(fd)
+_, status = os.waitpid(pid, 0)
+sys.exit(os.waitstatus_to_exitcode(status))
+`
+
+const recordingBackendScript = `#!/usr/bin/env bun
+import { writeFileSync } from "node:fs"
+
+const recordPath = process.env.BACKEND_RECORD
+if (recordPath !== undefined && recordPath.length > 0) {
+  writeFileSync(
+    recordPath,
+    JSON.stringify({
+      argv: process.argv.slice(2),
+      argv1: process.argv[1],
+      cwd: process.cwd(),
+      envMarker: process.env.RFA_DIRECT_MARKER ?? null,
+      stdinIsTTY: Boolean(process.stdin.isTTY),
+      stdoutIsTTY: Boolean(process.stdout.isTTY),
+      stderrIsTTY: Boolean(process.stderr.isTTY),
+    }),
+  )
+}
+
+if (process.env.BACKEND_IGNORE_SIGINT === "1") {
+  process.on("SIGINT", () => {})
+}
+
+process.stdout.write("backend-ready\\n")
+
+if (process.env.BACKEND_STDERR_TEXT !== undefined) {
+  process.stderr.write(process.env.BACKEND_STDERR_TEXT)
+}
+
+const signal = process.env.BACKEND_SIGNAL
+if (process.env.BACKEND_IGNORE_SIGINT === "1") {
+  setTimeout(() => process.exit(0), 400)
+} else if (signal !== undefined && signal.length > 0) {
+  process.kill(process.pid, signal)
+} else {
+  process.exit(Number(process.env.BACKEND_EXIT ?? "0"))
+}
+`
+
+type BackendRecord = {
+  readonly argv: readonly string[]
+  readonly argv1: string
+  readonly cwd: string
+  readonly envMarker: string | null
+  readonly stdinIsTTY: boolean
+  readonly stdoutIsTTY: boolean
+  readonly stderrIsTTY: boolean
+}
+
+const readBackendRecord = (path: string): BackendRecord =>
+  JSON.parse(readFileSync(path, "utf8")) as BackendRecord
+
+const runCliOnPty = (
+  args: readonly string[],
+  graphqlUrl: string,
+  extraEnv: NodeJS.ProcessEnv = {},
+  options: {
+    readonly stderrPath?: string
+    readonly sendSigintAfter?: string
+  } = {},
+): Promise<ProcessResult> =>
+  new Promise((resolve, reject) => {
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      READY_FOR_AGENT_GRAPHQL_URL: graphqlUrl,
+      NO_COLOR: "1",
+      FORCE_COLOR: "0",
+      ...extraEnv,
+    }
+    if (!("TMUX" in extraEnv)) {
+      delete env.TMUX
+    }
+    const bunArgs = [
+      process.execPath,
+      "--conditions",
+      "@ready-for-agent/source",
+      "src/main.ts",
+      ...args,
+    ]
+    if (options.stderrPath !== undefined) {
+      env.RFA_PTY_STDERR = options.stderrPath
+    } else {
+      delete env.RFA_PTY_STDERR
+    }
+    if (options.sendSigintAfter !== undefined) {
+      env.RFA_PTY_SEND_SIGINT_AFTER = options.sendSigintAfter
+    } else {
+      delete env.RFA_PTY_SEND_SIGINT_AFTER
+    }
+    const python = Bun.which("python3") ?? "python3"
+    const child = spawn(python, ["-c", ptyRunnerSource, ...bunArgs], {
+      cwd: packageRoot,
+      env,
+    })
+    let stdout = ""
+    let stderr = ""
+    child.stdout.setEncoding("utf8")
+    child.stderr.setEncoding("utf8")
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk
+    })
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk
+    })
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL")
+      reject(
+        new Error(
+          `pty ${args.join(" ")} timed out\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+        ),
+      )
+    }, 20_000)
+    child.on("error", (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on("close", (status) => {
+      clearTimeout(timer)
+      resolve({ status, stdout, stderr })
+    })
+  })
+
 const startJumpGraphqlServer = (options: {
   readonly backendId?: string
   readonly worktreePath?: string | null
@@ -1110,7 +1287,7 @@ if (args[0] === "split-window" && args.includes("-P")) {
 `,
     )
     for (const name of ["opencode", "grok", "codex", "claude"] as const) {
-      writeExecutable(join(binDir, name), "#!/usr/bin/env bash\nexit 0\n")
+      writeExecutable(join(binDir, name), recordingBackendScript)
     }
   })
 
@@ -1184,7 +1361,7 @@ if (args[0] === "split-window" && args.includes("-P")) {
     expect(separator).toBeGreaterThan(firstEnv)
   }
 
-  test("jump outside tmux writes a text error and does not invoke tmux", async () => {
+  test("jump without a TTY rejects before contacting the Harness or tmux", async () => {
     const result = await runCli(
       ["jump", jumpSessionId],
       "http://127.0.0.1:1/graphql",
@@ -1192,11 +1369,21 @@ if (args[0] === "split-window" && args.includes("-P")) {
 
     expect(result.status).toBe(1)
     expect(result.stdout.trim()).toBe("")
-    expect(result.stderr.trim()).toBe(
-      "jump must be run from inside a tmux session",
-    )
+    expect(result.stderr.trim()).toBe("jump requires an interactive terminal")
     expect(result.stderr).not.toContain("schemaVersion")
     expect(result.stderr).not.toMatch(/\s+at\s+\S+\s+\(/)
+    expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+  })
+
+  test("jump with an empty TMUX still selects direct mode", async () => {
+    const result = await runCli(
+      ["jump", jumpSessionId],
+      "http://127.0.0.1:1/graphql",
+      { TMUX: "" },
+    )
+
+    expect(result.status).toBe(1)
+    expect(result.stderr.trim()).toBe("jump requires an interactive terminal")
     expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
   })
 
@@ -1696,6 +1883,301 @@ if (args[0] === "split-window" && args.includes("-P")) {
       const invocations = parseTmuxArgvLog(tmuxLog)
       expect(invocations.some((args) => args.includes("new-window"))).toBe(true)
       expect(invocations.at(-1)).toEqual(["kill-window", "-t", "@1"])
+    } finally {
+      await graphql.close()
+    }
+  })
+})
+
+describe("operator binary jump direct process contract", () => {
+  let tempRoot = ""
+  let binDir = ""
+  let tmuxLog = ""
+  let backendRecord = ""
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), "ready-for-agent-jump-direct-"))
+    binDir = join(tempRoot, "bin")
+    mkdirSync(binDir)
+    tmuxLog = join(tempRoot, "tmux-argv.log")
+    backendRecord = join(tempRoot, "backend-record.json")
+    writeFileSync(tmuxLog, "")
+    writeExecutable(
+      join(binDir, "tmux"),
+      `#!/usr/bin/env bun
+import { appendFileSync } from "node:fs"
+appendFileSync(process.env.TMUX_ARGV_LOG ?? "", JSON.stringify(process.argv.slice(2)) + "\\n")
+process.exit(1)
+`,
+    )
+    for (const name of ["opencode", "grok", "codex", "claude"] as const) {
+      writeExecutable(join(binDir, name), recordingBackendScript)
+    }
+  })
+
+  afterEach(() => {
+    rmSync(tempRoot, { recursive: true, force: true })
+  })
+
+  const directEnv = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+    PATH: `${binDir}:${dirname(process.execPath)}`,
+    TMUX_ARGV_LOG: tmuxLog,
+    BACKEND_RECORD: backendRecord,
+    RFA_DIRECT_MARKER: "from-parent",
+    ...overrides,
+  })
+
+  const expectedResumeArgs = {
+    opencode: (workingDirectory: string) => [
+      workingDirectory,
+      "--session",
+      jumpSessionId,
+      "--auto",
+    ],
+    grok: (workingDirectory: string) => [
+      "--cwd",
+      workingDirectory,
+      "--resume",
+      jumpSessionId,
+      "--permission-mode",
+      "bypassPermissions",
+    ],
+    codex: (workingDirectory: string) => [
+      "resume",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "-C",
+      workingDirectory,
+      jumpSessionId,
+    ],
+    claude: (_workingDirectory: string) => [
+      "--resume",
+      jumpSessionId,
+      "--dangerously-skip-permissions",
+    ],
+  } as const
+
+  test("jump help describes Interactive Session Continuation without requiring tmux", async () => {
+    const result = await runCli(
+      ["jump", "--help"],
+      "http://127.0.0.1:1/graphql",
+    )
+
+    expect(result.status).toBe(0)
+    const output = `${result.stdout}\n${result.stderr}`
+    expect(output).toContain("Interactive Session Continuation")
+    expect(output.toLowerCase()).not.toContain("must be run from inside a tmux")
+    expect(output).not.toContain("new tmux window")
+  })
+
+  test("jump continues each backend directly outside tmux", async () => {
+    const worktree = join(tempRoot, "worktree")
+    mkdirSync(worktree)
+
+    for (const backendId of ["opencode", "grok", "codex", "claude"] as const) {
+      writeFileSync(backendRecord, "")
+      writeFileSync(tmuxLog, "")
+      const graphql = await startJumpGraphqlServer({
+        backendId,
+        worktreePath: worktree,
+      })
+      try {
+        const result = await runCliOnPty(
+          ["jump", jumpSessionId],
+          graphql.url,
+          directEnv(),
+        )
+
+        expect(result.status).toBe(0)
+        expect(result.stdout.replaceAll("\r", "")).toContain("backend-ready")
+        expect(result.stdout).not.toContain("Continuing")
+        expect(result.stdout).not.toContain("Session continued")
+        expect(result.stderr.replaceAll("\r", "").trim()).toBe("")
+        expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+        const record = readBackendRecord(backendRecord)
+        expect(record.argv1).toBe(join(binDir, backendId))
+        expect(record.argv).toEqual(expectedResumeArgs[backendId](worktree))
+        expect(record.cwd).toBe(worktree)
+        expect(record.envMarker).toBe("from-parent")
+        expect(record.stdinIsTTY).toBe(true)
+        expect(record.stdoutIsTTY).toBe(true)
+      } finally {
+        await graphql.close()
+      }
+    }
+  })
+
+  test("jump uses the CLI cwd when the worktree is gone in direct mode", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "claude",
+      worktreePath: join(tempRoot, "cleaned-up-worktree"),
+    })
+    try {
+      const result = await runCliOnPty(
+        ["jump", jumpSessionId],
+        graphql.url,
+        directEnv(),
+      )
+
+      expect(result.status).toBe(0)
+      expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+      const record = readBackendRecord(backendRecord)
+      expect(record.cwd).toBe(resolve(packageRoot))
+      expect(record.argv).toEqual(
+        expectedResumeArgs.claude(resolve(packageRoot)),
+      )
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump returns a nonzero backend exit without a Jump diagnostic", async () => {
+    const worktree = join(tempRoot, "nonzero-wt")
+    mkdirSync(worktree)
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: worktree,
+    })
+    try {
+      const result = await runCliOnPty(
+        ["jump", jumpSessionId],
+        graphql.url,
+        directEnv({ BACKEND_EXIT: "7" }),
+      )
+
+      expect(result.status).toBe(7)
+      expect(result.stdout.replaceAll("\r", "")).toContain("backend-ready")
+      expect(result.stderr.replaceAll("\r", "").trim()).toBe("")
+      expect(result.stderr).not.toContain("jump")
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump returns a conventional signal-derived backend exit", async () => {
+    const worktree = join(tempRoot, "signal-wt")
+    mkdirSync(worktree)
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: worktree,
+    })
+    try {
+      const result = await runCliOnPty(
+        ["jump", jumpSessionId],
+        graphql.url,
+        directEnv({ BACKEND_SIGNAL: "SIGTERM" }),
+      )
+
+      expect(result.status).toBe(143)
+      expect(result.stderr.replaceAll("\r", "").trim()).toBe("")
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump waits for a backend that survives a process-group SIGINT", async () => {
+    const worktree = join(tempRoot, "sigint-wt")
+    mkdirSync(worktree)
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: worktree,
+    })
+    try {
+      const result = await runCliOnPty(
+        ["jump", jumpSessionId],
+        graphql.url,
+        directEnv({ BACKEND_IGNORE_SIGINT: "1" }),
+        { sendSigintAfter: "backend-ready" },
+      )
+
+      expect(result.status).toBe(0)
+      expect(result.stdout.replaceAll("\r", "")).toContain("backend-ready")
+      expect(`${result.stdout}\n${result.stderr}`).not.toContain(
+        "could not start Agent Backend executable",
+      )
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump allows redirected stderr when stdin and stdout are TTYs", async () => {
+    const worktree = join(tempRoot, "stderr-wt")
+    mkdirSync(worktree)
+    const stderrPath = join(tempRoot, "redirected.err")
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: worktree,
+    })
+    try {
+      const result = await runCliOnPty(
+        ["jump", jumpSessionId],
+        graphql.url,
+        directEnv({ BACKEND_STDERR_TEXT: "backend-stderr\n" }),
+        { stderrPath },
+      )
+
+      expect(result.status).toBe(0)
+      expect(result.stdout.replaceAll("\r", "")).toContain("backend-ready")
+      expect(readFileSync(stderrPath, "utf8")).toContain("backend-stderr")
+      const record = readBackendRecord(backendRecord)
+      expect(record.stdinIsTTY).toBe(true)
+      expect(record.stdoutIsTTY).toBe(true)
+      expect(record.stderrIsTTY).toBe(false)
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump spawn failure is a Jump-owned exit 1 after Session resolution", async () => {
+    writeExecutable(join(binDir, "opencode"), "#!/no/such/interpreter\n")
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: null,
+    })
+    try {
+      const result = await runCliOnPty(
+        ["jump", jumpSessionId],
+        graphql.url,
+        directEnv(),
+      )
+
+      expect(result.status).toBe(1)
+      expect(
+        graphql.seenBodies.some((body) => body.includes("workItemBySessionId")),
+      ).toBe(true)
+      const diagnostic = `${result.stdout}\n${result.stderr}`.replaceAll(
+        "\r",
+        "",
+      )
+      expect(diagnostic).toContain(
+        `could not start Agent Backend executable '${join(binDir, "opencode")}'`,
+      )
+      expect(diagnostic).not.toContain("schemaVersion")
+      expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("a stale TMUX value stays on the tmux path and does not start the backend", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: null,
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        directEnv({
+          TMUX: "/tmp/missing-tmux-socket,1,0",
+        }),
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(
+        "tmux could not create and arrange the window",
+      )
+      expect(parseTmuxArgvLog(tmuxLog).length).toBeGreaterThan(0)
+      expect(() => readFileSync(backendRecord, "utf8")).toThrow()
     } finally {
       await graphql.close()
     }

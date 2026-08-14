@@ -32,6 +32,7 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
   const { GraphqlApi } = await import("./services/graphql-api.ts")
   const { LocalGit } = await import("./services/local-git.ts")
   const { StartHarness } = await import("./services/start-harness.ts")
+  const { DirectTerminal } = await import("./services/direct-terminal.ts")
   const { Tmux } = await import("./services/tmux.ts")
 
   const MainLive = Layer.mergeAll(
@@ -39,6 +40,7 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
     GraphqlApi.layer,
     StartHarness.layer,
     Tmux.layer,
+    DirectTerminal.layer,
     ExecutablePath.layer,
   ).pipe(
     Layer.provideMerge(ApplicationConfig.layer),

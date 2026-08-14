@@ -20,6 +20,7 @@ import {
   formatRepositoryFullIdentity,
   resolveRepositoryIdentity,
 } from "./repository-identity.ts"
+import { DirectTerminal } from "./services/direct-terminal.ts"
 import { ExecutablePath } from "./services/executable-path.ts"
 import { GraphqlApi } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
@@ -330,10 +331,14 @@ const resolveJumpWorkingDirectory = (
 
 const jumpWorkflow = Effect.fn("Cli.jump")(function* (sessionId: string) {
   const tmux = yield* Tmux
+  const directTerminal = yield* DirectTerminal
   const executablePath = yield* ExecutablePath
   const graphqlApi = yield* GraphqlApi
 
-  yield* tmux.requireAttachedSession
+  const tmuxModeSelected = yield* tmux.tmuxModeSelected
+  if (!tmuxModeSelected) {
+    yield* directTerminal.requireInteractiveTerminal
+  }
 
   const found = yield* graphqlApi
     .workItemBySessionId(sessionId)
@@ -356,12 +361,24 @@ const jumpWorkflow = Effect.fn("Cli.jump")(function* (sessionId: string) {
   }
 
   const agentExecutable = yield* executablePath.resolve(resume.executableName)
-  yield* tmux.createJumpWindow({
-    sessionId: found.sessionId,
-    workingDirectory,
+  if (tmuxModeSelected) {
+    yield* tmux.createJumpWindow({
+      sessionId: found.sessionId,
+      workingDirectory,
+      agentExecutable,
+      agentArguments: resume.arguments,
+      backendId: found.agentBackend.id,
+    })
+    return
+  }
+
+  const exitStatus = yield* directTerminal.run({
     agentExecutable,
     agentArguments: resume.arguments,
-    backendId: found.agentBackend.id,
+    workingDirectory,
+  })
+  yield* Effect.sync(() => {
+    process.exitCode = exitStatus
   })
 })
 
@@ -430,7 +447,7 @@ const jumpCommand = Command.make(
   ({ sessionId }) => jumpWorkflow(sessionId),
 ).pipe(
   Command.withDescription(
-    "Continue a Work Item Session in a new tmux window (Interactive Session Continuation)",
+    "Continue a Work Item Session (Interactive Session Continuation)",
   ),
 )
 

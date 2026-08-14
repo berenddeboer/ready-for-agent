@@ -11,8 +11,6 @@ export type JumpWindowInput = {
   readonly backendId: string
 }
 
-const tmuxMissingMessage = "jump must be run from inside a tmux session"
-
 const sessionOptionName = "@rfa-session-id"
 const agentPaneOptionName = "@rfa-agent"
 const agentPaneMarker = "1"
@@ -96,7 +94,7 @@ const taggedAgentPaneId = (listing: string): string | undefined => {
 export class Tmux extends Context.Service<
   Tmux,
   {
-    readonly requireAttachedSession: Effect.Effect<void, JumpFailed>
+    readonly tmuxModeSelected: Effect.Effect<boolean>
     readonly createJumpWindow: (
       input: JumpWindowInput,
     ) => Effect.Effect<void, JumpFailed>
@@ -107,16 +105,10 @@ export class Tmux extends Context.Service<
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
-      const requireAttachedSession = Effect.sync(() => {
+      const tmuxModeSelected = Effect.sync(() => {
         const tmux = process.env.TMUX
         return tmux !== undefined && tmux.length > 0
-      }).pipe(
-        Effect.flatMap((inside) =>
-          inside
-            ? Effect.void
-            : Effect.fail(new JumpFailed({ message: tmuxMissingMessage })),
-        ),
-      )
+      })
 
       const runTmux = (args: readonly string[]) =>
         Effect.scoped(
@@ -327,7 +319,7 @@ export class Tmux extends Context.Service<
         }
       })
 
-      return { requireAttachedSession, createJumpWindow }
+      return { tmuxModeSelected, createJumpWindow }
     }),
   )
 }
