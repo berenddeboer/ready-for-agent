@@ -159,7 +159,7 @@ const seedHarness = (
   db.updateConfig({
     selectedAgentBackend: input.selectedAgentBackend,
     defaultModel: input.defaultModel,
-    defaultThinkingLevel: input.defaultModel === null ? null : "low",
+    defaultThinkingLevel: null,
     reviewModel: null,
     reviewThinkingLevel: null,
     maxConcurrentAgentTurns: 2,

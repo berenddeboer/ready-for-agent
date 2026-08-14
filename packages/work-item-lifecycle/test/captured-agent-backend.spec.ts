@@ -108,7 +108,7 @@ const seedHarness = (
   db.updateConfig({
     selectedAgentBackend: input.selectedAgentBackend,
     defaultModel: input.defaultModel,
-    defaultThinkingLevel: input.defaultModel === null ? null : "low",
+    defaultThinkingLevel: null,
     reviewModel: null,
     reviewThinkingLevel: null,
     maxConcurrentAgentTurns: 2,
@@ -844,6 +844,199 @@ describe("Agent Model catalog admission (issue #838)", () => {
         expect(failed?.reasonMessage).toContain(STALE_BEDROCK_PROFILE)
         expect(failed?.reasonMessage).toContain("Settings")
         // The step never ran, so no Agent Backend CLI was spawned.
+        expect(invoked).toEqual([])
+      }).pipe(
+        Effect.provide(
+          lifecycleLayer(
+            stubActiveAgentBackendLayer({
+              registration: opencodeRegistration,
+              models: opencodeCatalog,
+            }),
+            recordingSteps(invoked),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("rejects create when the resolved Thinking Level is not advertised", async () => {
+    const invoked: string[] = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-stale-thinking.git",
+          isBare: true,
+        })
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "medium",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
+          maxConcurrentWorkItems: 5,
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 25)
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 25))
+        expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
+        expect(error.message).toContain("medium")
+        expect(error.message).toContain("opencode/deepseek-v4-flash-free")
+        expect(error.message).toContain("Settings")
+        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 25)).toEqual([])
+        expect(invoked).toEqual([])
+      }).pipe(
+        Effect.provide(
+          lifecycleLayer(
+            stubActiveAgentBackendLayer({
+              registration: opencodeRegistration,
+              models: opencodeCatalog,
+            }),
+            recordingSteps(invoked),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("rejects create when only the review Thinking Level is not advertised", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-stale-review-thinking.git",
+          isBare: true,
+        })
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/gpt-5",
+          defaultThinkingLevel: null,
+          reviewModel: "opencode/deepseek-v4-flash-free",
+          reviewThinkingLevel: "medium",
+          maxConcurrentAgentTurns: 2,
+          maxConcurrentWorkItems: 5,
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 26)
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 26))
+        expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
+        expect(error.message).toContain("Review Thinking Level")
+        expect(error.message).toContain("medium")
+      }).pipe(
+        Effect.provide(
+          lifecycleLayer(
+            stubActiveAgentBackendLayer({
+              registration: opencodeRegistration,
+              models: opencodeCatalog,
+            }),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("admits create when the Thinking Level is advertised or null", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-valid-thinking.git",
+          isBare: true,
+        })
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "high",
+          reviewModel: "opencode/gpt-5",
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
+          maxConcurrentWorkItems: 5,
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 27)
+        const created = yield* lifecycle.implementNow(repo.id, 27)
+        expect(created.agentBackend).toBe("opencode")
+      }).pipe(
+        Effect.provide(
+          lifecycleLayer(
+            stubActiveAgentBackendLayer({
+              registration: opencodeRegistration,
+              models: opencodeCatalog,
+            }),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("fails an agent-dependent step whose Thinking Level left the catalog, without an Agent Turn", async () => {
+    const invoked: string[] = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-thinking-drift.git",
+          isBare: true,
+        })
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "high",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
+          maxConcurrentWorkItems: 5,
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 28)
+        const created = yield* lifecycle.implementNow(repo.id, 28)
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "medium",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
+          maxConcurrentWorkItems: 5,
+        })
+        const createRun = created.stepRuns[0]
+        expect(createRun?.step).toBe("create_worktree")
+        const afterCreate = yield* lifecycle.runStep(createRun!.id)
+        expect(afterCreate._tag).toBe("processed")
+        if (afterCreate._tag !== "processed") {
+          return
+        }
+        const agentStep = afterCreate.workItem.stepRuns.find(
+          (run) => run.status === "queued",
+        )
+        expect(agentStep).toBeDefined()
+        const afterAgentStep = yield* lifecycle.runStep(agentStep!.id)
+        expect(afterAgentStep._tag).toBe("processed")
+        if (afterAgentStep._tag !== "processed") {
+          return
+        }
+        const failed = afterAgentStep.workItem.stepRuns.find(
+          (run) => run.id === agentStep!.id,
+        )
+        expect(failed?.status).toBe("failed")
+        expect(failed?.reasonCode).toBe(
+          STEP_RUN_REASON.thinkingLevelNotInCatalog,
+        )
+        expect(failed?.reasonMessage).toContain("medium")
+        expect(failed?.reasonMessage).toContain("Settings")
         expect(invoked).toEqual([])
       }).pipe(
         Effect.provide(

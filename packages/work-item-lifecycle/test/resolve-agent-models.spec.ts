@@ -1,4 +1,7 @@
-import { resolveAgentModelSelection } from "../src/lib/resolve-agent-models.js"
+import {
+  resolveAgentModelSelection,
+  resolvedSelectionCatalogViolation,
+} from "../src/lib/resolve-agent-models.js"
 import { describe, expect, it } from "bun:test"
 
 describe("resolveAgentModelSelection", () => {
@@ -179,5 +182,94 @@ describe("resolveAgentModelSelection", () => {
       reviewModel: "anthropic/claude-opus-4-6",
       reviewThinkingLevel: "max",
     })
+  })
+})
+
+describe("resolvedSelectionCatalogViolation", () => {
+  const catalog = [
+    { id: "opencode/deepseek-v4-flash-free", thinkingLevels: ["high"] },
+    { id: "opencode/gpt-5", thinkingLevels: [] },
+  ]
+
+  it("returns null for an empty catalog", () => {
+    expect(
+      resolvedSelectionCatalogViolation({
+        backendLabel: "OpenCode",
+        catalog: [],
+        selection: {
+          model: "missing",
+          thinkingLevel: "medium",
+          reviewModel: "missing",
+          reviewThinkingLevel: "medium",
+        },
+        includeReviewModel: true,
+      }),
+    ).toBeNull()
+  })
+
+  it("reports a missing model before a Thinking Level mismatch", () => {
+    const violation = resolvedSelectionCatalogViolation({
+      backendLabel: "OpenCode",
+      catalog,
+      selection: {
+        model: "missing",
+        thinkingLevel: "medium",
+        reviewModel: "opencode/gpt-5",
+        reviewThinkingLevel: null,
+      },
+      includeReviewModel: true,
+    })
+    expect(violation?.kind).toBe("model")
+    expect(violation?.message).toContain("missing")
+    expect(violation?.message).toContain("Agent Model catalog")
+  })
+
+  it("reports an unsupported Thinking Level with a distinct kind", () => {
+    const violation = resolvedSelectionCatalogViolation({
+      backendLabel: "OpenCode",
+      catalog,
+      selection: {
+        model: "opencode/deepseek-v4-flash-free",
+        thinkingLevel: "medium",
+        reviewModel: "opencode/gpt-5",
+        reviewThinkingLevel: null,
+      },
+      includeReviewModel: true,
+    })
+    expect(violation?.kind).toBe("thinking_level")
+    expect(violation?.message).toContain("medium")
+    expect(violation?.message).toContain("opencode/deepseek-v4-flash-free")
+  })
+
+  it("rejects a non-null level when the catalog entry advertises none", () => {
+    const violation = resolvedSelectionCatalogViolation({
+      backendLabel: "OpenCode",
+      catalog,
+      selection: {
+        model: "opencode/gpt-5",
+        thinkingLevel: "low",
+        reviewModel: "opencode/gpt-5",
+        reviewThinkingLevel: null,
+      },
+      includeReviewModel: false,
+    })
+    expect(violation?.kind).toBe("thinking_level")
+    expect(violation?.message).toContain("offers no Thinking Levels")
+  })
+
+  it("accepts an advertised level and a null level", () => {
+    expect(
+      resolvedSelectionCatalogViolation({
+        backendLabel: "OpenCode",
+        catalog,
+        selection: {
+          model: "opencode/deepseek-v4-flash-free",
+          thinkingLevel: "high",
+          reviewModel: "opencode/gpt-5",
+          reviewThinkingLevel: null,
+        },
+        includeReviewModel: true,
+      }),
+    ).toBeNull()
   })
 })

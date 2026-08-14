@@ -295,3 +295,93 @@ export const reconcileVariantForModel = (
   modelVariants: readonly string[],
 ): string =>
   variant.length > 0 && modelVariants.includes(variant) ? variant : ""
+
+/**
+ * Governing review Agent Model using the same fallback order as runtime
+ * resolution (issue #1073): explicit review, then inherited Harness review,
+ * then the resolved build model.
+ */
+export const governingReviewModelId = (input: {
+  readonly reviewModel: string
+  readonly harnessReviewModel?: string
+  readonly resolvedBuildModel: string
+}): string => {
+  if (input.reviewModel.length > 0) {
+    return input.reviewModel
+  }
+  if ((input.harnessReviewModel ?? "").length > 0) {
+    return input.harnessReviewModel ?? ""
+  }
+  return input.resolvedBuildModel
+}
+
+export type ThinkingLevelSaveInput = AgentModelCatalogState & {
+  /** Whether this stored Thinking Level contributes to the next resolved pair. */
+  readonly applicable: boolean
+  readonly thinkingLevel: string
+  readonly governingModelId: string
+}
+
+/**
+ * Block Save when an applicable non-null Thinking Level is not advertised by
+ * the governing catalog entry. Dormant Repository levels do not block.
+ */
+export const blocksThinkingLevelSave = (
+  input: ThinkingLevelSaveInput,
+): boolean => {
+  if (!input.applicable) {
+    return false
+  }
+  const thinkingLevel = input.thinkingLevel.trim()
+  if (thinkingLevel.length === 0) {
+    return false
+  }
+  if (input.catalogFailed === true) {
+    return true
+  }
+  if (input.catalogLoading || input.catalogModels === undefined) {
+    return true
+  }
+  if (input.governingModelId.length === 0) {
+    return false
+  }
+  const entry = findCatalogModel(input.catalogModels, input.governingModelId)
+  if (entry === undefined) {
+    return true
+  }
+  return !entry.thinkingLevels.includes(thinkingLevel)
+}
+
+export const thinkingLevelSaveBlockReason = (
+  input: ThinkingLevelSaveInput,
+): string | null =>
+  blocksThinkingLevelSave(input)
+    ? "The selected Thinking Level is not advertised by the governing Agent Model. Choose a listed level or clear the field before saving."
+    : null
+
+/**
+ * Empty-option copy for a Thinking Level control. An explicit model means
+ * backend/model default; an inherited complete Harness selection names that
+ * selection; review-with-build fallback names the build selection.
+ */
+export const emptyThinkingLevelOptionLabel = (input: {
+  readonly explicitModel: boolean
+  readonly inheritedLabel?: string
+  readonly fallsBackToBuild: boolean
+}): string => {
+  if (input.fallsBackToBuild) {
+    const inherited = input.inheritedLabel?.trim() ?? ""
+    if (inherited.length > 0) {
+      return `Harness default (${inherited})`
+    }
+    return "Same as build effort (thinking)"
+  }
+  if (input.explicitModel) {
+    return "Model default"
+  }
+  const inherited = input.inheritedLabel?.trim() ?? ""
+  if (inherited.length > 0) {
+    return `Harness default (${inherited})`
+  }
+  return "Model default"
+}

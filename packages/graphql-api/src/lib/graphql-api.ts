@@ -1284,12 +1284,25 @@ export const createGraphqlApi = <R>(
                     // Catalog-only Agent Models (issue #838): validate against
                     // the backend this Save is about to select, inside the same
                     // coordinated section that commits and activates it.
+                    const submitted = {
+                      defaultModel: args.input.defaultModel ?? null,
+                      defaultThinkingLevel:
+                        args.input.defaultThinkingLevel ?? null,
+                      reviewModel: args.input.reviewModel ?? null,
+                      reviewThinkingLevel:
+                        args.input.reviewThinkingLevel ?? null,
+                    }
                     yield* validateAgentModelsAgainstCatalog({
                       backendId: args.input.selectedAgentBackend,
                       inspectInput: inspectInput(agentBackendCwd),
                       models: {
-                        defaultModel: args.input.defaultModel,
-                        reviewModel: args.input.reviewModel,
+                        defaultModel: submitted.defaultModel,
+                        reviewModel: submitted.reviewModel,
+                      },
+                      thinking: {
+                        scope: "harness",
+                        submitted,
+                        harness: submitted,
                       },
                       onInvalid: (field, message) =>
                         new InvalidConfigInputError({ field, message }),
@@ -1448,12 +1461,27 @@ export const createGraphqlApi = <R>(
                         : args.input.selectedAgentBackend
                     const nextEffective =
                       nextSelected ?? (yield* db.getConfig).selectedAgentBackend
+                    const harnessPrefs =
+                      yield* db.getBackendModelPrefs(nextEffective)
+                    const submitted = {
+                      defaultModel: args.input.defaultModel ?? null,
+                      defaultThinkingLevel:
+                        args.input.defaultThinkingLevel ?? null,
+                      reviewModel: args.input.reviewModel ?? null,
+                      reviewThinkingLevel:
+                        args.input.reviewThinkingLevel ?? null,
+                    }
                     yield* validateAgentModelsAgainstCatalog({
                       backendId: nextEffective,
                       inspectInput: inspectInput(agentBackendCwd),
                       models: {
-                        defaultModel: args.input.defaultModel,
-                        reviewModel: args.input.reviewModel,
+                        defaultModel: submitted.defaultModel,
+                        reviewModel: submitted.reviewModel,
+                      },
+                      thinking: {
+                        scope: "repository",
+                        submitted,
+                        harness: harnessPrefs,
                       },
                       onInvalid: (field, message) =>
                         new InvalidRepositorySettingsError({ field, message }),

@@ -389,6 +389,12 @@ export const STEP_RUN_REASON = {
    * before the backend CLI is spawned.
    */
   agentModelNotInCatalog: "agent_model_not_in_catalog",
+  /**
+   * Agent-dependent step blocked because the resolved Thinking Level is not
+   * advertised by the governing Agent Model's current catalog entry
+   * (issue #1073). Rejected before the backend CLI is spawned.
+   */
+  thinkingLevelNotInCatalog: "thinking_level_not_in_catalog",
   /** Mid-run: Review is running the reviewing OpenCode pass. */
   reviewReviewing: "review_reviewing",
   /** Mid-run: Review is applying findings with the build model. */

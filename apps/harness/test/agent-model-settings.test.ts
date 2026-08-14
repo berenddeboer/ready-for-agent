@@ -6,13 +6,17 @@ import {
   agentModelCatalogNotice,
   agentModelSaveBlockReason,
   blocksAgentModelSave,
+  blocksThinkingLevelSave,
+  emptyThinkingLevelOptionLabel,
   findCatalogModel,
   formatAgentModelKindLabel,
   formatAgentModelLabel,
   formatUnavailableVariantLabel,
+  governingReviewModelId,
   isClaudeBedrockConfigurationMode,
   isUnavailableCatalogModel,
   reconcileVariantForModel,
+  thinkingLevelSaveBlockReason,
   thinkingLevelsForModel,
 } from "../src/agent-model-settings.js"
 import { describe, expect, test } from "bun:test"
@@ -307,6 +311,96 @@ describe("Thinking Levels derive from the selected catalog entry (issue #838)", 
     expect(formatUnavailableVariantLabel("xhigh")).toBe(
       "Xhigh (not available for this model)",
     )
+  })
+
+  test("review options follow runtime fallback order", () => {
+    expect(
+      governingReviewModelId({
+        reviewModel: "repo-review",
+        harnessReviewModel: "harness-review",
+        resolvedBuildModel: "repo-build",
+      }),
+    ).toBe("repo-review")
+    expect(
+      governingReviewModelId({
+        reviewModel: "",
+        harnessReviewModel: "harness-review",
+        resolvedBuildModel: "repo-build",
+      }),
+    ).toBe("harness-review")
+    expect(
+      governingReviewModelId({
+        reviewModel: "",
+        harnessReviewModel: "",
+        resolvedBuildModel: "repo-build",
+      }),
+    ).toBe("repo-build")
+  })
+
+  test("an applicable incompatible Thinking Level blocks Save", () => {
+    const stale = {
+      ...ready(opencodeCatalog),
+      applicable: true,
+      thinkingLevel: "medium",
+      governingModelId: "opencode/deepseek-v4-flash-free",
+    }
+    expect(blocksThinkingLevelSave(stale)).toBe(true)
+    expect(thinkingLevelSaveBlockReason(stale)).toMatch(
+      /not advertised by the governing Agent Model/,
+    )
+    expect(blocksThinkingLevelSave({ ...stale, thinkingLevel: "high" })).toBe(
+      false,
+    )
+    expect(
+      thinkingLevelSaveBlockReason({ ...stale, thinkingLevel: "high" }),
+    ).toBeNull()
+    expect(blocksThinkingLevelSave({ ...stale, thinkingLevel: "" })).toBe(false)
+    expect(blocksThinkingLevelSave({ ...stale, applicable: false })).toBe(false)
+    expect(
+      blocksThinkingLevelSave({
+        ...ready(opencodeCatalog),
+        applicable: true,
+        thinkingLevel: "high",
+        governingModelId: "opencode/gpt-5",
+      }),
+    ).toBe(true)
+    expect(
+      blocksThinkingLevelSave({
+        ...ready(opencodeCatalog),
+        applicable: true,
+        thinkingLevel: "",
+        governingModelId: "opencode/gpt-5",
+      }),
+    ).toBe(false)
+  })
+
+  test("empty Thinking Level labels match runtime fallback semantics", () => {
+    expect(
+      emptyThinkingLevelOptionLabel({
+        explicitModel: true,
+        fallsBackToBuild: false,
+      }),
+    ).toBe("Model default")
+    expect(
+      emptyThinkingLevelOptionLabel({
+        explicitModel: false,
+        inheritedLabel: "high",
+        fallsBackToBuild: false,
+      }),
+    ).toBe("Harness default (high)")
+    expect(
+      emptyThinkingLevelOptionLabel({
+        explicitModel: false,
+        fallsBackToBuild: true,
+      }),
+    ).toBe("Same as build effort (thinking)")
+    expect(
+      emptyThinkingLevelOptionLabel({
+        explicitModel: false,
+        inheritedLabel: "max",
+        fallsBackToBuild: true,
+      }),
+    ).toBe("Harness default (max)")
   })
 })
 

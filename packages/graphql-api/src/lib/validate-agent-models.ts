@@ -5,15 +5,22 @@ import {
   getBuiltInAgentBackend,
   isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
+import {
+  type AgentModelSettingsSource,
+  canonicalOptionalSetting,
+  findCatalogEntry,
+  thinkingLevelNotAdvertisedMessage,
+  validateCatalogSelection,
+} from "@ready-for-agent/work-item-lifecycle"
 
 /**
- * Server-side Agent Model catalog enforcement (issue #838).
+ * Server-side Agent Model catalog enforcement (issues #838 / #1073).
  *
  * Settings is catalog-only, but a direct GraphQL request must not be able to
- * store an arbitrary model string that would only fail later when the Agent
- * Backend CLI is spawned. Both config and repository mutations validate every
- * explicit model against the catalog of the backend the mutation is about to
- * make effective.
+ * store an arbitrary model string or an unsupported Thinking Level that would
+ * only fail later when the Agent Backend CLI is spawned. Both config and
+ * repository mutations validate the next resolved selections against the
+ * catalog of the backend the mutation is about to make effective.
  *
  * Model fields stay nullable strings in the schema (no static enum): the
  * catalog is discovered at runtime and differs per backend and provider mode.
@@ -22,8 +29,18 @@ import {
 /** Model fields carried by Harness Config and Repository settings. */
 export type AgentModelField = "defaultModel" | "reviewModel"
 
+type ThinkingLevelField = "defaultThinkingLevel" | "reviewThinkingLevel"
+
+export type SettingsCatalogField = AgentModelField | ThinkingLevelField
+
 type ValidationCatalog =
-  | { readonly _tag: "ready"; readonly modelIds: readonly string[] }
+  | {
+      readonly _tag: "ready"
+      readonly models: ReadonlyArray<{
+        readonly id: string
+        readonly thinkingLevels: ReadonlyArray<string>
+      }>
+    }
   | { readonly _tag: "unusable"; readonly reason: string | null }
 
 const backendLabel = (backendId: string): string =>
@@ -54,18 +71,12 @@ const resolveValidationCatalog = (
     const status = yield* active.getBackendStatus(id)
     if (status !== null) {
       return status.kind === "ready"
-        ? ({
-            _tag: "ready",
-            modelIds: status.models.map((model) => model.id),
-          } as const)
+        ? ({ _tag: "ready", models: status.models } as const)
         : ({ _tag: "unusable", reason: status.reason } as const)
     }
     const preview = yield* active.preview(id, inspectInput)
     return preview.kind === "ready"
-      ? ({
-          _tag: "ready",
-          modelIds: preview.models.map((model) => model.id),
-        } as const)
+      ? ({ _tag: "ready", models: preview.models } as const)
       : ({ _tag: "unusable", reason: preview.reason } as const)
   })
 
@@ -73,15 +84,105 @@ const explicitModels = (
   models: Partial<Record<AgentModelField, string | null | undefined>>,
 ): ReadonlyArray<readonly [AgentModelField, string]> =>
   (["defaultModel", "reviewModel"] as const).flatMap((field) => {
-    const value = models[field]?.trim() ?? ""
-    return value.length === 0 ? [] : [[field, value] as const]
+    const value = canonicalOptionalSetting(models[field])
+    return value === null ? [] : [[field, value] as const]
   })
 
+type ApplicableThinkingLevel = {
+  readonly field: ThinkingLevelField
+  readonly role: "Build" | "Review"
+  readonly model: string
+  readonly thinkingLevel: string
+}
+
 /**
- * Reject explicit Agent Models that the next backend's current catalog does not
- * offer. Empty and omitted values carry no assertion about a model and are left
- * alone — Harness Config's own "build model required" rule and Repository
- * inheritance both keep working.
+ * Thinking Levels that contribute to the next resolved build/review selection.
+ * Dormant Repository levels (Harness still governs that role) are omitted so
+ * they can be preserved without blocking an unrelated save.
+ */
+const applicableThinkingLevels = (input: {
+  readonly scope: "harness" | "repository"
+  readonly submitted: AgentModelSettingsSource
+  readonly harness: AgentModelSettingsSource
+}): readonly ApplicableThinkingLevel[] => {
+  const submittedBuild = canonicalOptionalSetting(input.submitted.defaultModel)
+  const submittedReview = canonicalOptionalSetting(input.submitted.reviewModel)
+  const submittedBuildLevel = canonicalOptionalSetting(
+    input.submitted.defaultThinkingLevel,
+  )
+  const submittedReviewLevel = canonicalOptionalSetting(
+    input.submitted.reviewThinkingLevel,
+  )
+  const harnessBuild = canonicalOptionalSetting(input.harness.defaultModel)
+  const harnessReview = canonicalOptionalSetting(input.harness.reviewModel)
+  const applicable: ApplicableThinkingLevel[] = []
+
+  if (input.scope === "harness") {
+    if (submittedBuild !== null && submittedBuildLevel !== null) {
+      applicable.push({
+        field: "defaultThinkingLevel",
+        role: "Build",
+        model: submittedBuild,
+        thinkingLevel: submittedBuildLevel,
+      })
+    }
+    const reviewModel = submittedReview ?? submittedBuild
+    if (reviewModel !== null && submittedReviewLevel !== null) {
+      applicable.push({
+        field: "reviewThinkingLevel",
+        role: "Review",
+        model: reviewModel,
+        thinkingLevel: submittedReviewLevel,
+      })
+    }
+    return applicable
+  }
+
+  if (submittedBuild !== null && submittedBuildLevel !== null) {
+    applicable.push({
+      field: "defaultThinkingLevel",
+      role: "Build",
+      model: submittedBuild,
+      thinkingLevel: submittedBuildLevel,
+    })
+  }
+  if (submittedReview !== null && submittedReviewLevel !== null) {
+    applicable.push({
+      field: "reviewThinkingLevel",
+      role: "Review",
+      model: submittedReview,
+      thinkingLevel: submittedReviewLevel,
+    })
+  } else if (
+    submittedReview === null &&
+    harnessReview === null &&
+    submittedReviewLevel !== null
+  ) {
+    const resolvedBuild = submittedBuild ?? harnessBuild
+    if (resolvedBuild !== null) {
+      applicable.push({
+        field: "reviewThinkingLevel",
+        role: "Review",
+        model: resolvedBuild,
+        thinkingLevel: submittedReviewLevel,
+      })
+    }
+  }
+  return applicable
+}
+
+const settingsCorrection =
+  "Choose an advertised level or clear the field to use the applicable fallback or backend/model default."
+
+/**
+ * Reject explicit Agent Models and applicable Thinking Levels that the next
+ * backend's current catalog does not offer. Empty and omitted values carry no
+ * assertion about a model and are left alone — Harness Config's own "build
+ * model required" rule and Repository inheritance both keep working.
+ *
+ * Dormant Repository Thinking Levels are not rejected. An unrelated Repository
+ * save with no explicit catalog assertion and no applicable Thinking Level
+ * does not inspect or Preview solely for validation.
  */
 export const validateAgentModelsAgainstCatalog = <E>(input: {
   /** Next selected backend (config) / next Effective backend (repository). */
@@ -91,13 +192,20 @@ export const validateAgentModelsAgainstCatalog = <E>(input: {
     readonly timeout: "30 seconds"
   }
   readonly models: Partial<Record<AgentModelField, string | null | undefined>>
-  readonly onInvalid: (field: AgentModelField, message: string) => E
+  readonly thinking?: {
+    readonly scope: "harness" | "repository"
+    readonly submitted: AgentModelSettingsSource
+    readonly harness: AgentModelSettingsSource
+  }
+  readonly onInvalid: (field: SettingsCatalogField, message: string) => E
 }): Effect.Effect<void, E, ActiveAgentBackend> =>
   Effect.gen(function* () {
     const requested = explicitModels(input.models)
-    if (requested.length === 0) {
-      // Nothing explicit to validate — never inspect or Preview just to save
-      // unrelated settings.
+    const thinkingChecks =
+      input.thinking === undefined
+        ? []
+        : applicableThinkingLevels(input.thinking)
+    if (requested.length === 0 && thinkingChecks.length === 0) {
       return
     }
     const catalog = yield* resolveValidationCatalog(
@@ -106,7 +214,10 @@ export const validateAgentModelsAgainstCatalog = <E>(input: {
     )
     const label = backendLabel(input.backendId)
     if (catalog._tag === "unusable") {
-      const [field] = requested[0]
+      const field = requested[0]?.[0] ?? thinkingChecks[0]?.field
+      if (field === undefined) {
+        return
+      }
       const detail = catalog.reason === null ? "" : `: ${catalog.reason}`
       return yield* Effect.fail(
         input.onInvalid(
@@ -116,11 +227,40 @@ export const validateAgentModelsAgainstCatalog = <E>(input: {
       )
     }
     for (const [field, value] of requested) {
-      if (!catalog.modelIds.includes(value)) {
+      if (findCatalogEntry(catalog.models, value) === undefined) {
         return yield* Effect.fail(
           input.onInvalid(
             field,
             `Agent Model "${value}" is not in the current ${label} Agent Model catalog. Choose a model the Agent Backend currently offers.`,
+          ),
+        )
+      }
+    }
+    for (const check of thinkingChecks) {
+      const result = validateCatalogSelection({
+        catalogEntry: findCatalogEntry(catalog.models, check.model),
+        thinkingLevel: check.thinkingLevel,
+      })
+      if (result._tag === "model_absent") {
+        return yield* Effect.fail(
+          input.onInvalid(
+            check.field,
+            `Agent Model "${check.model}" is not in the current ${label} Agent Model catalog. Recheck Agent Backend, then choose a model it currently offers.`,
+          ),
+        )
+      }
+      if (result._tag === "thinking_level_absent") {
+        return yield* Effect.fail(
+          input.onInvalid(
+            check.field,
+            thinkingLevelNotAdvertisedMessage({
+              role: check.role,
+              thinkingLevel: result.thinkingLevel,
+              model: result.model.id,
+              backendLabel: label,
+              advertised: result.model.thinkingLevels,
+              guidance: settingsCorrection,
+            }),
           ),
         )
       }
