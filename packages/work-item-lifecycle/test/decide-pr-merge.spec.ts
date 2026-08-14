@@ -74,6 +74,17 @@ describe("parseDecidePrMergeResult", () => {
     expect(parseDecidePrMergeResult("no result line")).toBeNull()
   })
 
+  it("accepts a needs-human reason wrapped in one pair of placeholder brackets", () => {
+    expect(
+      parseDecidePrMergeResult(
+        "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <Touches auth secrets>",
+      ),
+    ).toEqual({
+      _tag: "needs_human",
+      reason: "Touches auth secrets",
+    })
+  })
+
   it("rejects conflicting or non-final result lines", () => {
     expect(
       parseDecidePrMergeResult(

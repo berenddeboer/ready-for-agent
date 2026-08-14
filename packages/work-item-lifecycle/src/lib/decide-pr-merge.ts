@@ -9,6 +9,7 @@ import {
 } from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
+import { unwrapSentinelArgument } from "./unwrap-sentinel-argument.js"
 
 export class DecidePrMergeContextError extends Schema.TaggedErrorClass<DecidePrMergeContextError>()(
   "DecidePrMergeContextError",
@@ -82,8 +83,11 @@ export const parseDecidePrMergeResult = (
   const needsHuman = finalLine.match(
     /^READY_FOR_AGENT_RESULT:\s*NEEDS_HUMAN\s*:\s*(.+)$/i,
   )
-  if (needsHuman?.[1] !== undefined && needsHuman[1].trim() !== "") {
-    return { _tag: "needs_human", reason: needsHuman[1].trim().slice(0, 500) }
+  if (needsHuman?.[1] !== undefined) {
+    const reason = unwrapSentinelArgument(needsHuman[1])
+    if (reason !== "") {
+      return { _tag: "needs_human", reason: reason.slice(0, 500) }
+    }
   }
   return null
 }

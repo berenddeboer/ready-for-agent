@@ -11,6 +11,7 @@ import {
 } from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
+import { unwrapSentinelArgument } from "./unwrap-sentinel-argument.js"
 
 export class ResolvePrMergeConflictContextError extends Schema.TaggedErrorClass<ResolvePrMergeConflictContextError>()(
   "ResolvePrMergeConflictContextError",
@@ -53,9 +54,11 @@ const parseResult = (
   const needsHuman = finalLine.match(
     /^READY_FOR_AGENT_RESULT:\s*NEEDS_HUMAN\s*:\s*(.+)$/i,
   )
-  return needsHuman?.[1] === undefined || needsHuman[1].trim() === ""
-    ? null
-    : { reason: needsHuman[1].trim().slice(0, 500) }
+  if (needsHuman?.[1] === undefined) {
+    return null
+  }
+  const reason = unwrapSentinelArgument(needsHuman[1])
+  return reason === "" ? null : { reason: reason.slice(0, 500) }
 }
 
 const hasResultLine = (output: string): boolean =>
