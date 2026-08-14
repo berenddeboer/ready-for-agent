@@ -410,6 +410,26 @@ describe("Codex AgentBackend adapter (Agent Turns)", () => {
     )
   })
 
+  it("classifies a turn.failed credential rejection as terminal_auth_error", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"type":"thread.started","thread_id":"auth-thread"}'`,
+        `printf '%s\\n' '{"type":"turn.failed","error":{"message":"ExpiredToken: token has expired"}}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.classification).toBe("terminal_auth_error")
+          expect(error.message).toBe("ExpiredToken: token has expired")
+        }
+      },
+    )
+  })
+
   it("maps turn.failed to exit failure with observed session", async () => {
     await withExecutable(
       [

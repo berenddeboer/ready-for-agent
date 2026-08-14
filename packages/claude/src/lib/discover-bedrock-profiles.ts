@@ -7,7 +7,11 @@ import {
   ListInferenceProfilesCommand,
 } from "@aws-sdk/client-bedrock"
 import { Duration, Effect } from "effect"
-import type { AgentModel } from "@ready-for-agent/agent-backend"
+import {
+  type AgentModel,
+  classifyProviderCredentialText,
+  scrubProviderCredentialSecrets,
+} from "@ready-for-agent/agent-backend"
 import {
   CLAUDE_THINKING_LEVELS,
   type ClaudeBedrockDiscoveryResult,
@@ -83,36 +87,7 @@ export const EMPTY_BEDROCK_CATALOG_WARNING = `No active Anthropic Bedrock infere
  * Strip access keys, session tokens, bearer tokens, and other credential-like
  * payloads from operator-facing discovery warnings (issue #822).
  */
-export const scrubBedrockDiscoverySecrets = (text: string): string => {
-  let scrubbed = text
-  // IAM access key ids (long-term AKIA… and temporary ASIA…).
-  scrubbed = scrubbed.replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[redacted]")
-  // Env-style, property-style, and JSON-ish secret field assignments.
-  scrubbed = scrubbed.replace(
-    /\b(?:AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AWS_BEARER_TOKEN_BEDROCK|AWS_ACCESS_KEY_ID|aws_secret_access_key|aws_session_token|aws_access_key_id|secretAccessKey|SecretAccessKey|accessKeyId|AccessKeyId|sessionToken|SessionToken|security.?token)\b\s*[=:]\s*"?[^"\s,}]+"?/gi,
-    (match) => {
-      const keyMatch = match.match(/^([^=:]+)/)
-      const key = (keyMatch?.[1] ?? "secret").trim()
-      const separator = match.includes("=") ? "=" : ":"
-      return `${key}${separator}[redacted]`
-    },
-  )
-  // JSON `"secretAccessKey": "…"` / `"accessKeyId":"…"` forms.
-  scrubbed = scrubbed.replace(
-    /"(?:secretAccessKey|SecretAccessKey|accessKeyId|AccessKeyId|sessionToken|SessionToken|aws_secret_access_key|aws_session_token|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AWS_ACCESS_KEY_ID)"\s*:\s*"[^"]*"/gi,
-    (match) => {
-      const keyMatch = match.match(/^"([^"]+)"/)
-      const key = keyMatch?.[1] ?? "secret"
-      return `"${key}":"[redacted]"`
-    },
-  )
-  // Authorization / bearer headers.
-  scrubbed = scrubbed.replace(
-    /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
-    "Bearer [redacted]",
-  )
-  return scrubbed
-}
+export const scrubBedrockDiscoverySecrets = scrubProviderCredentialSecrets
 
 export type ResolveBedrockRegionOptions = {
   /**
@@ -435,21 +410,7 @@ export const formatBedrockDiscoveryFailure = (error: unknown): string => {
       "AWS named profile is unresolved or unavailable to the harness process (check AWS_PROFILE and shared config)",
     )
   }
-  if (
-    combined.includes("expiredtoken") ||
-    combined.includes("expired token") ||
-    combined.includes("token has expired") ||
-    combined.includes("could not load credentials") ||
-    combined.includes("credentials not found") ||
-    combined.includes("unable to locate credentials") ||
-    combined.includes("could not load credentials from any providers") ||
-    combined.includes("security token") ||
-    combined.includes("invalidclienttokenid") ||
-    combined.includes("unrecognizedclient") ||
-    combined.includes("invalididentitytoken") ||
-    combined.includes("sso session") ||
-    combined.includes("token is expired")
-  ) {
+  if (classifyProviderCredentialText(combined) !== undefined) {
     return discoveryWarning(
       "AWS credentials are missing, expired, or invalid for the harness process",
     )

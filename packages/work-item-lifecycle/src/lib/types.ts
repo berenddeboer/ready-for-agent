@@ -375,6 +375,12 @@ export const STEP_RUN_REASON = {
   waitingForAgentTurn: "waiting_for_agent_turn",
   /** Agent-dependent step blocked because Active Agent Backend is unavailable. */
   agentBackendUnavailable: "agent_backend_unavailable",
+  /**
+   * Agent Turn failed because the backend provider rejected credentials
+   * (missing, expired, or invalid). Distinct from handler_failed so the
+   * outage is queryable (issue #1058).
+   */
+  agentBackendAuthRejected: "agent_backend_auth_rejected",
   /** Agent-dependent step blocked because no build Agent Model is configured. */
   buildModelNotConfigured: "build_model_not_configured",
   /**

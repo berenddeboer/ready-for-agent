@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { classifyProviderCredentialText } from "./classify-credential-error.js"
 import { sanitizeAgentBackendExitMessage } from "./sanitize-exit-message.js"
 
 const AgentBackendProviderSchema = Schema.Struct({
@@ -83,13 +84,17 @@ export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendE
       props.message === undefined
         ? undefined
         : sanitizeAgentBackendExitMessage(props.message)
+    const classifiedFromText =
+      props.classification === undefined && props.message !== undefined
+        ? classifyProviderCredentialText(props.message)
+        : undefined
+    const classification =
+      props.classification ?? classifiedFromText?.classification
     return new AgentBackendExitError({
       exitCode: props.exitCode,
       cwd: props.cwd,
       ...(props.sessionId !== undefined ? { sessionId: props.sessionId } : {}),
-      ...(props.classification !== undefined
-        ? { classification: props.classification }
-        : {}),
+      ...(classification !== undefined ? { classification } : {}),
       ...(sanitized !== undefined && sanitized.length > 0
         ? { message: sanitized }
         : {}),
@@ -172,6 +177,38 @@ export const findAgentBackendNotInstalledError = (
   while (current !== undefined && current !== null && !seen.has(current)) {
     seen.add(current)
     if (isAgentBackendNotInstalledError(current)) {
+      return current
+    }
+    if (typeof current === "object" && "cause" in current) {
+      current = Reflect.get(current, "cause")
+      continue
+    }
+    break
+  }
+  return undefined
+}
+
+const isAgentBackendExitError = (
+  value: unknown,
+): value is AgentBackendExitError =>
+  typeof value === "object" &&
+  value !== null &&
+  "_tag" in value &&
+  value._tag === "AgentBackendExitError"
+
+/**
+ * Walk a nested `cause` / `_tag` chain for AgentBackendExitError. Step
+ * handlers wrap the spawn error, so `instanceof` on the top-level failure
+ * is not enough.
+ */
+export const findAgentBackendExitError = (
+  cause: unknown,
+): AgentBackendExitError | undefined => {
+  const seen = new Set<unknown>()
+  let current: unknown = cause
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current)
+    if (isAgentBackendExitError(current)) {
       return current
     }
     if (typeof current === "object" && "cause" in current) {

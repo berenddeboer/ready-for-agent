@@ -1,5 +1,9 @@
 import type { Duration, Effect } from "effect"
-import type { AgentModel } from "@ready-for-agent/agent-backend"
+import {
+  type AgentModel,
+  CLAUDE_BEDROCK_CREDENTIAL_REMEDIATION,
+  CLAUDE_FIRST_PARTY_AUTH_REMEDIATION,
+} from "@ready-for-agent/agent-backend"
 
 /**
  * Injectable Bedrock catalog discovery result (issue #820).
@@ -40,8 +44,7 @@ export interface ClaudeLayerOptions {
  * Actionable readiness-failure copy when `claude auth status` reports no auth.
  * Operators may use Claude.ai OAuth (`claude auth login`) or an API key.
  */
-export const CLAUDE_UNAUTHENTICATED_MESSAGE =
-  "Claude Code is not authenticated. Run `claude auth login` (or set `ANTHROPIC_API_KEY`), then Recheck Agent Backend."
+export const CLAUDE_UNAUTHENTICATED_MESSAGE = `Claude Code is not authenticated. ${CLAUDE_FIRST_PARTY_AUTH_REMEDIATION}`
 
 /**
  * Actionable readiness-failure copy when Claude reports Amazon Bedrock as the
@@ -49,8 +52,7 @@ export const CLAUDE_UNAUTHENTICATED_MESSAGE =
  * Primary action is AWS credentials/region — this path already implies Bedrock
  * mode — not first-party login (issue #802 / epic #799).
  */
-export const CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE =
-  "Claude Code Amazon Bedrock is not ready. Ensure valid AWS credentials and region are available to the harness process (with CLAUDE_CODE_USE_BEDROCK=1), then Recheck Agent Backend."
+export const CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE = `Claude Code Amazon Bedrock is not ready. ${CLAUDE_BEDROCK_CREDENTIAL_REMEDIATION}`
 
 /** Official Thinking Levels for Claude Code v1 (ADR 0047). No `ultracode`. */
 export const CLAUDE_THINKING_LEVELS = [
