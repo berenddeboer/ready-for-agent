@@ -148,6 +148,7 @@ const workItem = {
   waitingSince: null,
   waitingForBlockers: false,
   mergeMode: "ordinary",
+  autoMergeOverride: null,
   holdsWorkerSlot: true,
   pauseBeforeStep: null,
   worktreePath: null,
@@ -4492,7 +4493,7 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        implementWith: (repositoryId, issueNumber, profile) => {
+        implementWith: (repositoryId, issueNumber, profile, options) => {
           expect(repositoryId).toBe(repository.id)
           expect(issueNumber).toBe(issue.issueNumber)
           expect(profile).toEqual({
@@ -4503,7 +4504,12 @@ describe("GraphQL API", () => {
             reviewModel: null,
             reviewThinkingLevel: null,
           })
-          return Effect.succeed(profiled)
+          expect(options).toBeUndefined()
+          return Effect.succeed({
+            ...profiled,
+            autoMergeOverride: null,
+            pauseBeforeStep: null,
+          })
         },
       },
     )
@@ -4528,6 +4534,8 @@ describe("GraphQL API", () => {
               reviewModel
               reviewThinkingLevel
             }
+            autoMergeOverride
+            pauseBeforeStep
           }
         }`,
         variables: {
@@ -4554,6 +4562,140 @@ describe("GraphQL API", () => {
             reviewModel: "build-model",
             reviewThinkingLevel: "high",
           },
+          autoMergeOverride: null,
+          pauseBeforeStep: null,
+        },
+      },
+    })
+  })
+
+  test("implementWith forwards concrete options for both boolean values", async () => {
+    const profiled = {
+      ...workItem,
+      executionProfile: {
+        agentBackend: "opencode",
+        build: { model: "build-model", thinkingLevel: null },
+        review: { kind: "same_as_build" as const },
+      },
+      autoMergeOverride: true,
+      pauseBeforeStep: "commit",
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementWith: (_repositoryId, _issueNumber, _profile, options) => {
+          expect(options).toEqual({
+            autoMerge: true,
+            implementLocally: true,
+          })
+          return Effect.succeed(profiled)
+        },
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementWith(
+          $repositoryId: ID!
+          $issueNumber: Int!
+          $profile: ExplicitWorkItemExecutionProfileInput!
+          $options: ImplementWithOptionsInput
+        ) {
+          implementWith(
+            repositoryId: $repositoryId
+            issueNumber: $issueNumber
+            profile: $profile
+            options: $options
+          ) {
+            autoMergeOverride
+            pauseBeforeStep
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+          profile: {
+            agentBackendId: "opencode",
+            buildModel: "build-model",
+            reviewSameAsBuild: true,
+          },
+          options: { autoMerge: true, implementLocally: true },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        implementWith: {
+          autoMergeOverride: true,
+          pauseBeforeStep: "COMMIT",
+        },
+      },
+    })
+  })
+
+  test("implementWith projects a false Auto-merge override without a pause target", async () => {
+    const profiled = {
+      ...workItem,
+      executionProfile: {
+        agentBackend: "opencode",
+        build: { model: "build-model", thinkingLevel: null },
+        review: { kind: "same_as_build" as const },
+      },
+      autoMergeOverride: false,
+      pauseBeforeStep: null,
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementWith: (_repositoryId, _issueNumber, _profile, options) => {
+          expect(options).toEqual({
+            autoMerge: false,
+            implementLocally: false,
+          })
+          return Effect.succeed(profiled)
+        },
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementWith(
+          $repositoryId: ID!
+          $issueNumber: Int!
+          $profile: ExplicitWorkItemExecutionProfileInput!
+          $options: ImplementWithOptionsInput
+        ) {
+          implementWith(
+            repositoryId: $repositoryId
+            issueNumber: $issueNumber
+            profile: $profile
+            options: $options
+          ) {
+            autoMergeOverride
+            pauseBeforeStep
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+          profile: {
+            agentBackendId: "opencode",
+            buildModel: "build-model",
+            reviewSameAsBuild: true,
+          },
+          options: { autoMerge: false, implementLocally: false },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        implementWith: {
+          autoMergeOverride: false,
+          pauseBeforeStep: null,
         },
       },
     })

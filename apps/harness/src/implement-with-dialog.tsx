@@ -20,7 +20,7 @@ import {
 import { Banner } from "./banner.js"
 import {
   type ExecutionProfileDraft,
-  type ImplementWithProfileInput,
+  type ImplementWithSubmitInput,
   executionProfileInputFromDraft,
   implementWithCatalogBlockReason,
   reconcileExecutionProfileDraft,
@@ -48,9 +48,10 @@ export type ImplementWithDialogProps = {
   readonly initialDraft: ExecutionProfileDraft
   readonly catalog: ImplementWithCatalog
   readonly prefsError?: string | null
+  readonly initialAutoMerge: boolean
   readonly submitPending: boolean
   readonly submitError: string | null
-  readonly onSubmit: (profile: ImplementWithProfileInput) => void
+  readonly onSubmit: (input: ImplementWithSubmitInput) => void
   readonly onBackendChange: (backendId: string) => void
   readonly onCancel: () => void
 }
@@ -126,6 +127,7 @@ export function ImplementWithDialog({
   initialDraft,
   catalog,
   prefsError = null,
+  initialAutoMerge,
   submitPending,
   submitError,
   onSubmit,
@@ -139,6 +141,8 @@ export function ImplementWithDialog({
       models: catalog.models,
     }),
   )
+  const [autoMerge, setAutoMerge] = useState(initialAutoMerge)
+  const [implementLocally, setImplementLocally] = useState(false)
   const titleId = `implement-with-title-${issueNumber}`
   const backendLabel =
     backends.find((backend) => backend.id === backendId)?.label ?? backendId
@@ -257,12 +261,16 @@ export function ImplementWithDialog({
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (implementDisabled) return
-    onSubmit(
-      executionProfileInputFromDraft({
+    onSubmit({
+      profile: executionProfileInputFromDraft({
         agentBackendId: backendId,
         draft,
       }),
-    )
+      options: {
+        autoMerge,
+        implementLocally,
+      },
+    })
   }
 
   return (
@@ -526,6 +534,51 @@ export function ImplementWithDialog({
                 </select>
               </label>
             )}
+          </section>
+
+          <section
+            className={ui.dialogSection}
+            aria-labelledby="implement-with-options"
+          >
+            <div className={ui.dialogSectionHead}>
+              <h3 id="implement-with-options" className={ui.dialogSectionTitle}>
+                Options
+              </h3>
+              <span className={ui.dialogSectionMeta}>This Work Item</span>
+            </div>
+            <label className={ui.dialogCheck}>
+              <input
+                type="checkbox"
+                className={ui.dialogCheckInput}
+                name="autoMerge"
+                checked={autoMerge}
+                disabled={submitPending}
+                onChange={(event) => setAutoMerge(event.target.checked)}
+              />
+              Auto-merge
+              <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+                Permit risk-assessed Auto-merge for this Work Item. Unchecked
+                requires a human merge even if Repository Auto-merge later
+                changes.
+              </span>
+            </label>
+            <label className={ui.dialogCheck}>
+              <input
+                type="checkbox"
+                className={ui.dialogCheckInput}
+                name="implementLocally"
+                checked={implementLocally}
+                disabled={submitPending}
+                onChange={(event) => setImplementLocally(event.target.checked)}
+              />
+              Implement locally
+              <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+                Pause after Review so you can inspect the worktree. Agent Turns
+                and dependency installation keep their current capabilities.
+                Start continues to Commit and PR creation. A No-Change Outcome
+                pauses before Close Issue.
+              </span>
+            </label>
           </section>
 
           {submitError !== null && (

@@ -30,6 +30,34 @@ export type DecidePrMergeResult =
   | { readonly _tag: "clanker_merge" }
   | { readonly _tag: "needs_human"; readonly reason: string }
 
+export const AUTO_MERGE_DISABLED_FOR_WORK_ITEM =
+  "Auto-merge is disabled for this Work Item"
+export const AUTO_MERGE_DISABLED_FOR_REPOSITORY =
+  "Auto-merge is disabled for this repository"
+
+/**
+ * Resolve whether Decide PR Merge may ask a merge-risk Agent Turn.
+ * A concrete Work Item Auto-merge override wins over the live Repository
+ * setting. A false override must not spawn an Agent Turn.
+ */
+export const resolveDecidePrMergeAutoMerge = (input: {
+  readonly repositoryAutoMerge: boolean
+  readonly workItemAutoMergeOverride: boolean | null | undefined
+}):
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly reason: string } => {
+  if (input.workItemAutoMergeOverride === false) {
+    return { allowed: false, reason: AUTO_MERGE_DISABLED_FOR_WORK_ITEM }
+  }
+  if (input.workItemAutoMergeOverride === true) {
+    return { allowed: true }
+  }
+  if (!input.repositoryAutoMerge) {
+    return { allowed: false, reason: AUTO_MERGE_DISABLED_FOR_REPOSITORY }
+  }
+  return { allowed: true }
+}
+
 const resolveContext = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     if (context.worktreePath === null || context.worktreePath.trim() === "") {
@@ -101,10 +129,14 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, worktreePath, sessionId } =
       yield* resolveContext(context)
-    if (!repository.autoMerge) {
+    const autoMerge = resolveDecidePrMergeAutoMerge({
+      repositoryAutoMerge: repository.autoMerge,
+      workItemAutoMergeOverride: context.autoMergeOverride,
+    })
+    if (!autoMerge.allowed) {
       return {
         _tag: "needs_human" as const,
-        reason: "Auto-merge is disabled for this repository",
+        reason: autoMerge.reason,
       }
     }
     const auth = yield* resolveAgentTurnForgeAuth(repository).pipe(

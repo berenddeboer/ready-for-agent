@@ -193,6 +193,24 @@ input ExplicitWorkItemExecutionProfileInput {
   reviewThinkingLevel: String
 }
 
+"""
+Implement With options, separate from the Explicit Work Item Execution Profile.
+Omission keeps repository-inherited Auto-merge and the remote path. The Harness
+dialog always submits both concrete checkbox values.
+"""
+input ImplementWithOptionsInput {
+  """
+  Concrete Work Item Auto-merge override. True permits risk-assessed Auto-merge
+  for this Work Item; false requires human merge. Distinct from Merge Mode Always.
+  """
+  autoMerge: Boolean!
+  """
+  When true, run through Review then pause before Commit (or Close Issue for a
+  No-Change Outcome) so the operator can inspect the worktree.
+  """
+  implementLocally: Boolean!
+}
+
 type AgentBackendInfo {
   id: String!
   label: String!
@@ -727,6 +745,17 @@ type WorkItem {
   Null for ordinary settings-resolved Work Items.
   """
   executionProfile: WorkItemExecutionProfile
+  """
+  Work Item Auto-merge override. Null follows the live Repository Auto-merge
+  setting. True permits risk-assessed Auto-merge; false requires human merge.
+  Distinct from Merge Mode Always.
+  """
+  autoMergeOverride: Boolean
+  """
+  When set, successful advancement into this Lifecycle Step pauses the Work
+  Item so the operator can inspect local work.
+  """
+  pauseBeforeStep: WorkItemState
   state: WorkItemState!
   stateLabel: String!
   status: WorkItemStatus!
@@ -860,6 +889,7 @@ type Mutation {
     repositoryId: ID!
     issueNumber: Int!
     profile: ExplicitWorkItemExecutionProfileInput!
+    options: ImplementWithOptionsInput
   ): WorkItem!
   """
   Create a Work Item that runs local steps through Review, then pauses before Commit.

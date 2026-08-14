@@ -44,7 +44,7 @@ import { Banner } from "./banner.js"
 import { repositoryCardCollapseId, useCardCollapsed } from "./card-collapse.js"
 import { CardCollapseToggle } from "./card-collapse-toggle.js"
 import { Copy } from "./copy.js"
-import type { ImplementWithProfileInput } from "./execution-profile-draft.js"
+import type { ImplementWithSubmitInput } from "./execution-profile-draft.js"
 import { ExecutionProfileSummary } from "./execution-profile-summary.js"
 import { forgeChangeRequestShort } from "./forge-change-request.js"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
@@ -290,6 +290,9 @@ export type WorkItem = {
     reviewModel: string
     reviewThinkingLevel: string | null
   } | null
+  mergeMode?: "ORDINARY" | "ALWAYS"
+  autoMergeOverride?: boolean | null
+  pauseBeforeStep?: WorkItemState | null
   state: WorkItemState
   stateLabel: string
   status: WorkItemStatus
@@ -337,6 +340,8 @@ const workItemFields = {
     reviewThinkingLevel: true,
   },
   mergeMode: true,
+  autoMergeOverride: true,
+  pauseBeforeStep: true,
   state: true,
   stateLabel: true,
   status: true,
@@ -3033,13 +3038,14 @@ function RepositoryIssueRow({
     onSuccess: onImplementSuccess,
   })
   const implementWith = useMutation({
-    mutationFn: async (profile: ImplementWithProfileInput) => {
+    mutationFn: async (input: ImplementWithSubmitInput) => {
       const result = await graphql.mutation({
         implementWith: {
           __args: {
             repositoryId: issue.repositoryId,
             issueNumber: issue.issueNumber,
-            profile,
+            profile: input.profile,
+            options: input.options,
           },
           ...workItemFields,
         },
@@ -3246,6 +3252,7 @@ function RepositoryIssueRow({
             reviewModel: repository.reviewModel,
             reviewThinkingLevel: repository.reviewThinkingLevel,
           }}
+          initialAutoMerge={repository.autoMerge}
           submitPending={implementWith.isPending}
           submitError={
             implementWith.isError
@@ -3256,7 +3263,7 @@ function RepositoryIssueRow({
                 })
               : null
           }
-          onSubmit={(profile) => implementWith.mutate(profile)}
+          onSubmit={(input) => implementWith.mutate(input)}
           onCancel={() => {
             if (!implementWith.isPending) {
               setImplementWithOpen(false)

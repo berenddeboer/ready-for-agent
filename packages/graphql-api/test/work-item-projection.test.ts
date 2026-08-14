@@ -40,6 +40,7 @@ const baseWorkItem = {
   waitingSince: null,
   waitingForBlockers: false,
   mergeMode: "ordinary",
+  autoMergeOverride: null,
   holdsWorkerSlot: true,
   pauseBeforeStep: null,
   worktreePath: null,

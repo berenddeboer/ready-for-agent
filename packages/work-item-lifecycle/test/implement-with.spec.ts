@@ -783,7 +783,272 @@ describe("implementWith", () => {
           build: { model: "build-model", thinkingLevel: "high" },
           review: { kind: "same_as_build" },
         })
+        expect(waiter.autoMergeOverride).toBeNull()
+        expect(waiter.pauseBeforeStep).toBeNull()
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
+  it("omitted options keep repository-inherited Auto-merge and the remote path", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-omit-options.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 20)
+        const created = yield* lifecycle.implementWith(
+          repo.id,
+          20,
+          sameAsBuildProfile,
+        )
+        expect(created.autoMergeOverride).toBeNull()
+        expect(created.pauseBeforeStep).toBeNull()
+        const reloaded = yield* lifecycle.getWorkItem(created.id)
+        expect(reloaded.autoMergeOverride).toBeNull()
+        expect(reloaded.pauseBeforeStep).toBeNull()
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
+  it("persists a concrete Auto-merge override that can disagree with the Repository setting", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-override.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* db.updateRepositorySettings({
+          repositoryId: repo.id,
+          paused: true,
+          defaultModel: null,
+          defaultThinkingLevel: null,
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          autoMerge: true,
+          includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 21)
+        const created = yield* lifecycle.implementWith(
+          repo.id,
+          21,
+          sameAsBuildProfile,
+          { autoMerge: false, implementLocally: false },
+        )
+        expect(created.autoMergeOverride).toBe(false)
+        expect(created.mergeMode).toBe("ordinary")
+        expect(created.pauseBeforeStep).toBeNull()
+        const reloaded = yield* lifecycle.getWorkItem(created.id)
+        expect(reloaded.autoMergeOverride).toBe(false)
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
+  it("keeps a checked Auto-merge override after Repository Auto-merge is disabled", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-override-true.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* db.updateRepositorySettings({
+          repositoryId: repo.id,
+          paused: true,
+          defaultModel: null,
+          defaultThinkingLevel: null,
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          autoMerge: false,
+          includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 22)
+        const created = yield* lifecycle.implementWith(
+          repo.id,
+          22,
+          sameAsBuildProfile,
+          { autoMerge: true, implementLocally: false },
+        )
+        yield* db.updateRepositorySettings({
+          repositoryId: repo.id,
+          paused: true,
+          defaultModel: null,
+          defaultThinkingLevel: null,
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          autoMerge: false,
+          includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
+        })
+        const reloaded = yield* lifecycle.getWorkItem(created.id)
+        expect(reloaded.autoMergeOverride).toBe(true)
+        expect(reloaded.executionProfile).toEqual(created.executionProfile)
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
+  it("runs Implement With plus Implement locally through Review then pauses before Commit", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-local.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 23)
+        const created = yield* lifecycle.implementWith(
+          repo.id,
+          23,
+          explicitReviewProfile,
+          { autoMerge: true, implementLocally: true },
+        )
+        expect(created.executionProfile).not.toBeNull()
+        expect(created.autoMergeOverride).toBe(true)
+        expect(created.pauseBeforeStep).toBe("commit")
+        let stepRunId = created.stepRuns[0]!.id
+        let paused = created
+        for (const expected of [
+          "install_dependencies",
+          "implement",
+          "assess_changes",
+          "pre_commit",
+          "review",
+          "commit",
+        ] as const) {
+          const result = yield* lifecycle.runStep(stepRunId)
+          expect(result._tag).toBe("processed")
+          if (result._tag !== "processed") return
+          expect(result.workItem.state).toBe(expected)
+          if (expected === "commit") {
+            expect(result.workItem.paused).toBe(true)
+            expect(result.workItem.pauseBeforeStep).toBe("commit")
+            expect(
+              result.workItem.stepRuns.every((run) => run.status !== "queued"),
+            ).toBe(true)
+            expect(
+              result.workItem.stepRuns.some((run) => run.step === "commit"),
+            ).toBe(false)
+            paused = result.workItem
+          } else {
+            const next = result.workItem.stepRuns.find(
+              (run) => run.status === "queued",
+            )
+            expect(next).toBeDefined()
+            stepRunId = next!.id
+          }
+        }
+        const started = yield* lifecycle.start(paused.id)
+        expect(started.paused).toBe(false)
+        expect(started.state).toBe("commit")
+        expect(started.executionProfile).toEqual(created.executionProfile)
+        expect(started.autoMergeOverride).toBe(true)
+        expect(started.stepRuns.at(-1)).toMatchObject({
+          step: "commit",
+          status: "queued",
+        })
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
+  it("pauses a local No-Change Outcome before Close Issue and resumes with the same policy", async () => {
+    const noChangeSteps: LifecycleStepsShape = {
+      ...successfulSteps,
+      assessChanges: () =>
+        Effect.succeed({
+          _tag: "no_changes",
+          completionSummary: "Completed without repository changes",
+        }),
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-local-no-change.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 24)
+        const created = yield* lifecycle.implementWith(
+          repo.id,
+          24,
+          sameAsBuildProfile,
+          { autoMerge: false, implementLocally: true },
+        )
+        const afterCreate = yield* advanceToQueued(
+          lifecycle,
+          created.stepRuns[0]!.id,
+          "install_dependencies",
+        )
+        const afterInstall = yield* advanceToQueued(
+          lifecycle,
+          afterCreate!.id,
+          "implement",
+        )
+        const afterImplement = yield* advanceToQueued(
+          lifecycle,
+          afterInstall!.id,
+          "assess_changes",
+        )
+        const afterAssess = yield* lifecycle.runStep(afterImplement!.id)
+        expect(afterAssess._tag).toBe("processed")
+        if (afterAssess._tag !== "processed") return
+        expect(afterAssess.workItem.state).toBe("close_issue")
+        expect(afterAssess.workItem.paused).toBe(true)
+        expect(afterAssess.workItem.pauseBeforeStep).toBe("close_issue")
+        expect(
+          afterAssess.workItem.stepRuns.some(
+            (run) => run.step === "close_issue",
+          ),
+        ).toBe(false)
+        const started = yield* lifecycle.start(afterAssess.workItem.id)
+        expect(started.paused).toBe(false)
+        expect(started.state).toBe("close_issue")
+        expect(started.executionProfile).toEqual(created.executionProfile)
+        expect(started.autoMergeOverride).toBe(false)
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer(), noChangeSteps))),
     )
   })
 })

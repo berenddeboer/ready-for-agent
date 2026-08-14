@@ -34,6 +34,27 @@ export type ImplementWithProfileInput = {
   readonly reviewThinkingLevel: string | null
 }
 
+/**
+ * Separate Implement With options. Omission keeps repository-inherited
+ * Auto-merge and the remote path. Concrete values persist a Work Item
+ * Auto-merge override and optional local inspection pause.
+ */
+export type ImplementWithOptionsInput = {
+  readonly autoMerge?: boolean
+  readonly implementLocally?: boolean
+}
+
+export const decodeImplementWithOptions = (
+  options?: ImplementWithOptionsInput,
+): {
+  readonly autoMergeOverride: boolean | null
+  readonly implementLocally: boolean
+} => ({
+  autoMergeOverride:
+    options?.autoMerge === undefined ? null : options.autoMerge,
+  implementLocally: options?.implementLocally === true,
+})
+
 const trimmedOrNull = (value: string | null | undefined): string | null => {
   if (value === null || value === undefined) return null
   const trimmed = value.trim()

@@ -95,7 +95,9 @@ import {
 } from "./errors.js"
 import {
   type ExplicitWorkItemExecutionProfile,
+  type ImplementWithOptionsInput,
   type ImplementWithProfileInput,
+  decodeImplementWithOptions,
   decodeImplementWithProfile,
   resolveExecutionProfileSelection,
   validateExecutionProfileCatalog,
@@ -389,6 +391,7 @@ type WorkItemRow = {
   readonly waiting_since: number | null
   readonly waiting_for_blockers: boolean | number
   readonly merge_mode: string | null
+  readonly auto_merge_override: boolean | number | null
   readonly holds_worker_slot: boolean | number
   readonly pause_before_step: OperationalLifecycleStep | null
   readonly worktree_path: string | null
@@ -617,6 +620,10 @@ const toWorkItemRecord = (
       : new Date(row.waiting_since),
   waitingForBlockers: Boolean(row.waiting_for_blockers),
   mergeMode: decodeMergeMode(row.merge_mode),
+  autoMergeOverride:
+    row.auto_merge_override === null || row.auto_merge_override === undefined
+      ? null
+      : Boolean(row.auto_merge_override),
   holdsWorkerSlot: Boolean(row.holds_worker_slot),
   pauseBeforeStep: row.pause_before_step,
   worktreePath: row.worktree_path,
@@ -640,6 +647,7 @@ const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, issue_number, issue_title, 
                    execution_profile_review_model,
                    execution_profile_review_thinking_level,
                    state, state_ready_at, paused, waiting_since, waiting_for_blockers, merge_mode,
+                   auto_merge_override,
                    holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary,
                    publication_title, publication_body, session_id,
@@ -938,6 +946,7 @@ export interface WorkItemLifecycleShape {
     repositoryId: string,
     issueNumber: number,
     profile: ImplementWithProfileInput,
+    options?: ImplementWithOptionsInput,
   ) => Effect.Effect<WorkItemRecord, ImplementWithError>
   readonly implementLocally: (
     repositoryId: string,
@@ -4293,6 +4302,11 @@ export const makeWorkItemLifecycleLive = (
                 publicationTitle: workItem.publication_title,
                 publicationBody: workItem.publication_body,
                 sessionId: workItem.session_id,
+                autoMergeOverride:
+                  workItem.auto_merge_override === null ||
+                  workItem.auto_merge_override === undefined
+                    ? null
+                    : Boolean(workItem.auto_merge_override),
                 maxDuration,
               }
 
@@ -6341,6 +6355,7 @@ export const makeWorkItemLifecycleLive = (
           readonly pauseBeforeStep: OperationalLifecycleStep | null
           readonly mergeMode?: MergeMode
           readonly executionProfile?: ExplicitWorkItemExecutionProfile
+          readonly autoMergeOverride?: boolean | null
         },
       ): Effect.Effect<WorkItemRecord, ImplementWithError> =>
         Effect.gen(function* () {
@@ -6539,7 +6554,8 @@ export const makeWorkItemLifecycleLive = (
                         `INSERT INTO work_item (
                  id, repository_id, issue_number, agent_backend,
                   issue_title, state, state_ready_at, paused,
-                  waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
+                  waiting_since, waiting_for_blockers, merge_mode, auto_merge_override,
+                  holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message,
                   execution_profile_present, execution_profile_build_model,
@@ -6548,7 +6564,7 @@ export const makeWorkItemLifecycleLive = (
                   execution_profile_review_model,
                   execution_profile_review_thinking_level,
                   created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, 1, ?, ?, ?, ?, ?, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 1, ?, ?, ?, ?, ?, ?, ?)`,
                         [
                           workItemId,
                           repositoryId,
@@ -6559,6 +6575,13 @@ export const makeWorkItemLifecycleLive = (
                           now,
                           admit ? null : now,
                           mergeMode,
+                          options.autoMergeOverride === undefined
+                            ? null
+                            : options.autoMergeOverride === null
+                              ? null
+                              : options.autoMergeOverride
+                                ? 1
+                                : 0,
                           admit ? 1 : 0,
                           options.pauseBeforeStep,
                           explicitProfile.build.model,
@@ -6677,14 +6700,17 @@ export const makeWorkItemLifecycleLive = (
           repositoryId: string,
           issueNumber: number,
           profileInput: ImplementWithProfileInput,
+          optionsInput?: ImplementWithOptionsInput,
         ) {
           const decoded = decodeImplementWithProfile(profileInput)
           if (decoded instanceof InvalidExecutionProfileError) {
             return yield* decoded
           }
+          const options = decodeImplementWithOptions(optionsInput)
           return yield* createWorkItem(repositoryId, issueNumber, {
-            pauseBeforeStep: null,
+            pauseBeforeStep: options.implementLocally ? "commit" : null,
             executionProfile: decoded,
+            autoMergeOverride: options.autoMergeOverride,
           })
         },
       )

@@ -1,5 +1,6 @@
 import { InvalidExecutionProfileError } from "../src/lib/errors.js"
 import {
+  decodeImplementWithOptions,
   decodeImplementWithProfile,
   resolveExecutionProfileSelection,
   validateExecutionProfileCatalog,
@@ -94,6 +95,40 @@ describe("decodeImplementWithProfile", () => {
     })
     expect(error).toBeInstanceOf(InvalidExecutionProfileError)
     expect(error).toMatchObject({ field: "reviewModel" })
+  })
+})
+
+describe("decodeImplementWithOptions", () => {
+  it("treats omitted options as repository-inherited remote behavior", () => {
+    expect(decodeImplementWithOptions()).toEqual({
+      autoMergeOverride: null,
+      implementLocally: false,
+    })
+    expect(decodeImplementWithOptions({})).toEqual({
+      autoMergeOverride: null,
+      implementLocally: false,
+    })
+  })
+
+  it("persists concrete Auto-merge values and the local inspection pause", () => {
+    expect(
+      decodeImplementWithOptions({
+        autoMerge: true,
+        implementLocally: true,
+      }),
+    ).toEqual({
+      autoMergeOverride: true,
+      implementLocally: true,
+    })
+    expect(
+      decodeImplementWithOptions({
+        autoMerge: false,
+        implementLocally: false,
+      }),
+    ).toEqual({
+      autoMergeOverride: false,
+      implementLocally: false,
+    })
   })
 })
 
