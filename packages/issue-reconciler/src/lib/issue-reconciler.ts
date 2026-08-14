@@ -20,7 +20,26 @@ import {
   type GitLabRequestError,
   GitLabService,
 } from "@ready-for-agent/gitlab-service"
-import { evaluateRelevantIssue } from "@ready-for-agent/lifecycle-model"
+import {
+  classifyActiveClosingPullRequests,
+  competingPullRequestIdentity,
+  evaluateRelevantIssue,
+  workItemBranchName,
+} from "@ready-for-agent/lifecycle-model"
+
+export const CompetingPullRequestIdentity = Schema.Struct({
+  repository: Schema.String,
+  number: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+})
+export type CompetingPullRequestIdentity =
+  typeof CompetingPullRequestIdentity.Type
+
+export const CompetingIssueClosingPullRequestObservation = Schema.Struct({
+  issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+  identities: Schema.Array(CompetingPullRequestIdentity),
+})
+export type CompetingIssueClosingPullRequestObservation =
+  typeof CompetingIssueClosingPullRequestObservation.Type
 
 export const ReconciliationSummary = Schema.Struct({
   fetched: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -28,6 +47,9 @@ export const ReconciliationSummary = Schema.Struct({
   updated: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
   deleted: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
   unchanged: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  competingObservations: Schema.Array(
+    CompetingIssueClosingPullRequestObservation,
+  ),
 })
 export type ReconciliationSummary = typeof ReconciliationSummary.Type
 
@@ -117,9 +139,6 @@ export const IssueReconcilerLive = Layer.effect(
         projectPath: repository.projectPath,
       }
       const localIssues = yield* db.listIssues(repository.id)
-      const workItemPullRequests = yield* db.listWorkItemPullRequests(
-        repository.id,
-      )
       const { authorScope, remoteIssues } =
         repository.forge === "gitlab"
           ? {
@@ -151,6 +170,11 @@ export const IssueReconcilerLive = Layer.effect(
                   } as const),
             }
       const repositoryName = repository.projectPath.toLowerCase()
+      const workItemPullRequests = yield* db.listWorkItemPullRequests(
+        repository.id,
+      )
+      const unfinishedCreatePrWorkItems =
+        yield* db.listUnfinishedCreatePrWorkItems(repository.id)
 
       const localByNumber = new Map(
         localIssues.map((issue) => [issue.issueNumber, issue]),
@@ -166,19 +190,69 @@ export const IssueReconcilerLive = Layer.effect(
           numbers,
         )
       }
+      const pendingSelfByIssue = new Map<
+        number,
+        {
+          readonly branch: string
+          readonly sourceRepository: string
+        }[]
+      >()
+      for (const workItem of unfinishedCreatePrWorkItems) {
+        const pending = pendingSelfByIssue.get(workItem.issueNumber) ?? []
+        pending.push({
+          branch: workItemBranchName({
+            projectPath: repository.projectPath,
+            issueNumber: workItem.issueNumber,
+            workItemId: workItem.workItemId,
+          }),
+          sourceRepository: repository.projectPath,
+        })
+        pendingSelfByIssue.set(workItem.issueNumber, pending)
+      }
+      const competingObservations: CompetingIssueClosingPullRequestObservation[] =
+        []
       const remoteByNumber = new Map(
         remoteIssues
-          .filter(
-            (issue) =>
-              evaluateRelevantIssue(issue, {
-                forge: repository.forge,
-                repositoryName,
-                workItemPullRequestNumbers:
-                  workItemPullRequestsByIssue.get(issue.number) ?? new Set(),
-                authorScope,
-              })._tag === "match",
-          )
+          .filter((issue) => {
+            const context = {
+              forge: repository.forge,
+              repositoryName,
+              workItemPullRequestNumbers:
+                workItemPullRequestsByIssue.get(issue.number) ?? new Set(),
+              pendingSelfOwnership: pendingSelfByIssue.get(issue.number) ?? [],
+              authorScope,
+            }
+            const classification = classifyActiveClosingPullRequests(
+              issue,
+              context,
+            )
+            if (classification.competing.length > 0) {
+              const identities = [
+                ...new Map(
+                  classification.competing.map((pullRequest) => [
+                    competingPullRequestIdentity(pullRequest),
+                    {
+                      repository: pullRequest.repository,
+                      number: pullRequest.number,
+                    },
+                  ]),
+                ).values(),
+              ].sort((left, right) =>
+                competingPullRequestIdentity(left).localeCompare(
+                  competingPullRequestIdentity(right),
+                ),
+              )
+              competingObservations.push({
+                issueNumber: issue.number,
+                identities,
+              })
+            }
+            return evaluateRelevantIssue(issue, context)._tag === "match"
+          })
           .map((issue) => [issue.number, issue]),
+      )
+      competingObservations.sort(
+        (left, right) => left.issueNumber - right.issueNumber,
       )
       const authoritativeIssues = [...remoteByNumber.values()]
       const upserts = authoritativeIssues
@@ -204,6 +278,7 @@ export const IssueReconcilerLive = Layer.effect(
         updated: 0,
         deleted: 0,
         unchanged: authoritativeIssues.length - upserts.length,
+        competingObservations,
       }
 
       const mutationError = (

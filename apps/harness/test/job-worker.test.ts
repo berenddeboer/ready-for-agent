@@ -327,6 +327,7 @@ const queueLayer = (
       findWorkItemBySessionId: unused,
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
+      stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
       admitWaitingWorkItems: Effect.succeed(0),
       releaseWaitingForBlockers: () => Effect.succeed(0),
     }),
@@ -682,6 +683,7 @@ describe("Job worker", () => {
                     updated: 0,
                     deleted: 0,
                     unchanged: 0,
+                    competingObservations: [],
                   }),
                 ),
             }),
@@ -894,6 +896,7 @@ describe("Job worker", () => {
                   updated: 0,
                   deleted: 0,
                   unchanged: 0,
+                  competingObservations: [],
                 }
               }
               return yield* new DatabaseError({
@@ -958,6 +961,7 @@ describe("Job worker", () => {
               updated: 0,
               deleted: 0,
               unchanged: 0,
+              competingObservations: [],
             }
           }),
       } satisfies IssueReconcilerShape)
@@ -1220,6 +1224,7 @@ describe("Job worker", () => {
               updated: 0,
               deleted: 0,
               unchanged: 0,
+              competingObservations: [],
             }
           }),
       } satisfies IssueReconcilerShape)
@@ -1272,6 +1277,7 @@ describe("Job worker", () => {
               updated: 0,
               deleted: 0,
               unchanged: 0,
+              competingObservations: [],
             }
           }),
       } satisfies IssueReconcilerShape)
@@ -1372,6 +1378,7 @@ describe("Job worker", () => {
                   updated: 0,
                   deleted: 0,
                   unchanged: 0,
+                  competingObservations: [],
                 }),
             } satisfies IssueReconcilerShape),
             keymaxxerLayer(),
@@ -1427,6 +1434,7 @@ describe("Job worker", () => {
                 updated: 0,
                 deleted: 0,
                 unchanged: 0,
+                competingObservations: [],
               }),
           }),
           keymaxxerLayer(),
@@ -1604,6 +1612,7 @@ describe("Job worker", () => {
                     updated: 0,
                     deleted: 0,
                     unchanged: 0,
+                    competingObservations: [],
                   }
                 }),
             }),
@@ -1663,6 +1672,7 @@ describe("Job worker", () => {
                 updated: 0,
                 deleted: 0,
                 unchanged: 0,
+                competingObservations: [],
               }),
           }),
           keymaxxerLayer(),
@@ -1813,6 +1823,7 @@ describe("Job worker", () => {
                   updated: 0,
                   deleted: 0,
                   unchanged: 0,
+                  competingObservations: [],
                 })
               },
             }),
@@ -2021,6 +2032,7 @@ describe("Job worker", () => {
                   updated: 0,
                   deleted: 0,
                   unchanged: 0,
+                  competingObservations: [],
                 }),
             }),
             keymaxxerLayer(),
@@ -2069,6 +2081,7 @@ describe("Job worker", () => {
                   updated: 0,
                   deleted: 0,
                   unchanged: 0,
+                  competingObservations: [],
                 }
               }),
           }),
@@ -2122,6 +2135,7 @@ describe("Job worker", () => {
                   updated: 0,
                   deleted: 0,
                   unchanged: 0,
+                  competingObservations: [],
                 }
               }),
           }),
@@ -2176,6 +2190,7 @@ describe("Job worker", () => {
                 updated: 0,
                 deleted: 0,
                 unchanged: 0,
+                competingObservations: [],
               }
             }),
         } satisfies IssueReconcilerShape)
@@ -2220,6 +2235,7 @@ describe("Job worker", () => {
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
           continueAfterHumanPrOutcome: unused,
+          stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
         })
@@ -2461,6 +2477,7 @@ describe("Job worker", () => {
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
           continueAfterHumanPrOutcome: unused,
+          stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
         })
@@ -2538,6 +2555,7 @@ describe("Job worker", () => {
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
           continueAfterHumanPrOutcome: unused,
+          stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
         })
@@ -2639,6 +2657,7 @@ describe("Job worker", () => {
                 updated: 0,
                 deleted: 0,
                 unchanged: 0,
+                competingObservations: [],
               }
             }),
         } satisfies IssueReconcilerShape)
@@ -2683,6 +2702,7 @@ describe("Job worker", () => {
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
           continueAfterHumanPrOutcome: unused,
+          stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
         })
@@ -2885,6 +2905,7 @@ describe("Job worker", () => {
         findWorkItemBySessionId: unused,
         countCommittedPullRequests: () => Effect.succeed(0),
         continueAfterHumanPrOutcome: unused,
+        stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
         admitWaitingWorkItems: Effect.succeed(0),
         releaseWaitingForBlockers: () => Effect.succeed(0),
       })
@@ -2935,6 +2956,7 @@ describe("Job worker", () => {
                   updated: 0,
                   deleted: 0,
                   unchanged: 0,
+                  competingObservations: [],
                 }),
             }),
             keymaxxer,
@@ -2963,6 +2985,7 @@ describe("Job worker", () => {
                 updated: 0,
                 deleted: 0,
                 unchanged: 0,
+                competingObservations: [],
               }
             }),
         } satisfies IssueReconcilerShape)
@@ -3007,6 +3030,7 @@ describe("Job worker", () => {
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
           continueAfterHumanPrOutcome: unused,
+          stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
         })

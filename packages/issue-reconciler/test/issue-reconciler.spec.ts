@@ -89,6 +89,10 @@ const localIssue = (
 interface DbFixtureOptions {
   readonly issues: readonly IssueRecord[]
   readonly workItemPullRequests?: readonly WorkItemPullRequest[]
+  readonly unfinishedCreatePrWorkItems?: readonly {
+    readonly workItemId: string
+    readonly issueNumber: number
+  }[]
   readonly failStoreNumber?: number
   readonly listError?: DatabaseError
   readonly markError?: DatabaseError
@@ -108,6 +112,8 @@ const makeDbFixture = (options: DbFixtureOptions) => {
     },
     listWorkItemPullRequests: () =>
       Effect.succeed(options.workItemPullRequests ?? []),
+    listUnfinishedCreatePrWorkItems: () =>
+      Effect.succeed(options.unfinishedCreatePrWorkItems ?? []),
     storeIssue: (input) => {
       actions.push(`store:${input.issueNumber}`)
       if (input.issueNumber === options.failStoreNumber) {
@@ -356,6 +362,16 @@ describe("IssueReconciler", () => {
           updated: 0,
           deleted: 0,
           unchanged: 0,
+          competingObservations: [
+            {
+              issueNumber: 2,
+              identities: [{ repository: "project/oauth_client", number: 102 }],
+            },
+            {
+              issueNumber: 6,
+              identities: [{ repository: "project/oauth_client", number: 106 }],
+            },
+          ],
         })
         expect(db.stored.map(({ issueNumber }) => issueNumber)).toEqual([
           1, 3, 4, 5,
@@ -455,6 +471,7 @@ describe("IssueReconciler", () => {
           updated: 1,
           deleted: 1,
           unchanged: 1,
+          competingObservations: [],
         })
         expect(db.actions).toEqual([
           "list",
@@ -639,6 +656,7 @@ describe("IssueReconciler", () => {
           updated: 0,
           deleted: 4,
           unchanged: 0,
+          competingObservations: [],
         })
         expect(
           db.stored
@@ -754,6 +772,20 @@ describe("IssueReconciler", () => {
           updated: 0,
           deleted: 2,
           unchanged: 5,
+          competingObservations: [
+            {
+              issueNumber: 3,
+              identities: [{ repository: "acme/widgets", number: 300 }],
+            },
+            {
+              issueNumber: 4,
+              identities: [{ repository: "acme/widgets", number: 404 }],
+            },
+            {
+              issueNumber: 5,
+              identities: [{ repository: "other/widgets", number: 202 }],
+            },
+          ],
         })
         expect(db.stored.map((issue) => issue.issueNumber)).toEqual([
           1, 2, 3, 6, 7,
@@ -826,6 +858,16 @@ describe("IssueReconciler", () => {
           updated: 3,
           deleted: 0,
           unchanged: 0,
+          competingObservations: [
+            {
+              issueNumber: 1015,
+              identities: [{ repository: "acme/widgets", number: 901 }],
+            },
+            {
+              issueNumber: 1016,
+              identities: [{ repository: "acme/widgets", number: 902 }],
+            },
+          ],
         })
         expect(
           db.stored
@@ -904,6 +946,7 @@ describe("IssueReconciler", () => {
             updated: 1,
             deleted: 0,
             unchanged: 0,
+            competingObservations: [],
           })
         }
         expect(db.actions).toEqual([
@@ -941,6 +984,7 @@ describe("IssueReconciler", () => {
             updated: 0,
             deleted: 1,
             unchanged: 0,
+            competingObservations: [],
           })
           expect(error.cause).toBe(markError)
         }
@@ -982,6 +1026,7 @@ describe("IssueReconciler", () => {
           updated: 0,
           deleted: 1,
           unchanged: 1,
+          competingObservations: [],
         })
         expect(
           db.stored.map((issue) => ({
@@ -1046,6 +1091,7 @@ describe("IssueReconciler", () => {
           updated: 0,
           deleted: 0,
           unchanged: 0,
+          competingObservations: [],
         })
         expect(db.stored.map((issue) => issue.issueNumber).sort()).toEqual([
           1, 2,
@@ -1107,6 +1153,96 @@ describe("IssueReconciler", () => {
         identityError,
         operatorLogin: "op",
       }),
+    )
+  })
+
+  it("treats a Create PR branch match as pending self-ownership, not competition", () => {
+    const db = makeDbFixture({
+      issues: [localIssue(1)],
+      unfinishedCreatePrWorkItems: [
+        { workItemId: "wi-create", issueNumber: 1 },
+      ],
+    })
+    const github = makeGitHubLayer(
+      [
+        remoteIssue(1, {
+          closingPullRequests: [
+            {
+              number: 501,
+              repository: "acme/widgets",
+              state: "OPEN",
+              isDraft: false,
+              sourceBranch: "rfa/acme-widgets/1/wi-create",
+              sourceRepository: "acme/widgets",
+            },
+          ],
+        }),
+      ],
+      db.actions,
+    )
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(repository)
+
+        expect(summary.deleted).toBe(0)
+        expect(summary.competingObservations).toEqual([])
+        expect(db.stored.map((issue) => issue.issueNumber)).toEqual([1])
+      }),
+      db.layer,
+      github,
+    )
+  })
+
+  it("still reports a fork with the same branch as competing during Create PR", () => {
+    const db = makeDbFixture({
+      issues: [localIssue(1)],
+      unfinishedCreatePrWorkItems: [
+        { workItemId: "wi-create", issueNumber: 1 },
+      ],
+    })
+    const github = makeGitHubLayer(
+      [
+        remoteIssue(1, {
+          closingPullRequests: [
+            {
+              number: 501,
+              repository: "acme/widgets",
+              state: "OPEN",
+              isDraft: false,
+              sourceBranch: "rfa/acme-widgets/1/wi-create",
+              sourceRepository: "acme/widgets",
+            },
+            {
+              number: 502,
+              repository: "acme/widgets",
+              state: "OPEN",
+              isDraft: false,
+              sourceBranch: "rfa/acme-widgets/1/wi-create",
+              sourceRepository: "alice/widgets",
+            },
+          ],
+        }),
+      ],
+      db.actions,
+    )
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(repository)
+
+        expect(summary.competingObservations).toEqual([
+          {
+            issueNumber: 1,
+            identities: [{ repository: "acme/widgets", number: 502 }],
+          },
+        ])
+        expect(db.stored.map((issue) => issue.issueNumber)).toEqual([1])
+      }),
+      db.layer,
+      github,
     )
   })
 })

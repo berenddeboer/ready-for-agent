@@ -88,23 +88,48 @@ const outfile = join(
 )
 mkdirSync(dirname(outfile), { recursive: true })
 
-const target = bunCompileTarget(platformKey)
-const args = [
-  "build",
-  "--compile",
-  `--target=${target}`,
-  `--outfile=${outfile}`,
-  "--conditions=@ready-for-agent/source",
-  entrypoint,
-]
+const compileWithTarget = (target: string) => {
+  const args = [
+    "build",
+    "--compile",
+    `--target=${target}`,
+    `--outfile=${outfile}`,
+    "--conditions=@ready-for-agent/source",
+    entrypoint,
+  ]
+  console.log(`Compiling ${platformKey} (${target}) → ${outfile}`)
+  return Bun.spawnSync(["bun", ...args], {
+    cwd: workspaceRoot,
+    stdout: "inherit",
+    stderr: "pipe",
+  })
+}
 
-console.log(`Compiling ${platformKey} → ${outfile}`)
-const result = Bun.spawnSync(["bun", ...args], {
-  cwd: workspaceRoot,
-  stdio: ["inherit", "inherit", "inherit"],
-})
+const writeSpawnStderr = (result: ReturnType<typeof Bun.spawnSync>) => {
+  const stderr = result.stderr
+  if (stderr instanceof Uint8Array && stderr.byteLength > 0) {
+    process.stderr.write(stderr)
+  }
+}
+
+const preferredTarget = bunCompileTarget(platformKey)
+let result = compileWithTarget(preferredTarget)
+if (result.exitCode !== 0 && preferredTarget === "bun-linux-x64-baseline") {
+  const stderrText =
+    result.stderr instanceof Uint8Array
+      ? new TextDecoder().decode(result.stderr)
+      : ""
+  if (stderrText.includes("is not available for download")) {
+    writeSpawnStderr(result)
+    console.warn(
+      `Preferred target ${preferredTarget} is not available; retrying bun-linux-x64`,
+    )
+    result = compileWithTarget("bun-linux-x64")
+  }
+}
 
 if (result.exitCode !== 0) {
+  writeSpawnStderr(result)
   process.exit(result.exitCode ?? 1)
 }
 

@@ -166,6 +166,12 @@ export const WorkItemPullRequest = Schema.Struct({
 })
 export type WorkItemPullRequest = typeof WorkItemPullRequest.Type
 
+export const UnfinishedCreatePrWorkItem = Schema.Struct({
+  workItemId: Schema.String,
+  issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+})
+export type UnfinishedCreatePrWorkItem = typeof UnfinishedCreatePrWorkItem.Type
+
 /** Wire shape of `repository` SELECT rows (snake_case columns). */
 export const RepositorySqlRow = Schema.Struct({
   id: RepositoryId,
@@ -280,6 +286,18 @@ export const WorkItemPullRequestSqlRow = Schema.Struct({
   }),
 )
 export type WorkItemPullRequestSqlRow = typeof WorkItemPullRequestSqlRow.Type
+
+export const UnfinishedCreatePrWorkItemSqlRow = Schema.Struct({
+  workItemId: Schema.String,
+  issueNumber: Schema.Int,
+}).pipe(
+  Schema.encodeKeys({
+    workItemId: "id",
+    issueNumber: "issue_number",
+  }),
+)
+export type UnfinishedCreatePrWorkItemSqlRow =
+  typeof UnfinishedCreatePrWorkItemSqlRow.Type
 
 export const RunningStepSqlRow = Schema.Struct({
   stepRunId: Schema.String,

@@ -3577,6 +3577,8 @@ describe("GitHubService live implementation", () => {
         repository: "acme/widgets",
         state: "OPEN",
         isDraft: true,
+        sourceBranch: null,
+        sourceRepository: null,
       },
     ])
     expect(requests).toHaveLength(2)
@@ -3641,6 +3643,8 @@ describe("GitHubService live implementation", () => {
           merged: true,
           isDraft: true,
           repository: { nameWithOwner: true },
+          headRefName: true,
+          headRepository: { nameWithOwner: true },
         },
         pageInfo: { endCursor: true, hasNextPage: true },
       },
@@ -3815,12 +3819,16 @@ describe("GitHubService live implementation", () => {
         repository: "acme/widgets",
         state: "MERGED",
         isDraft: false,
+        sourceBranch: null,
+        sourceRepository: null,
       },
       {
         number: 20,
         repository: "acme/widgets",
         state: "CLOSED",
         isDraft: false,
+        sourceBranch: null,
+        sourceRepository: null,
       },
     ])
     const continuation = requests[1] as {
@@ -3843,6 +3851,68 @@ describe("GitHubService live implementation", () => {
       after: "pull-request-page-2",
       includeClosedPrs: true,
     })
+  })
+
+  it("maps Issue-closing PR source branch and fork repository identity", async () => {
+    const client = {
+      query: async () => ({
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 7,
+                title: "Has a fork PR",
+                body: "Body",
+                url: "https://github.com/acme/widgets/issues/7",
+                createdAt: "2026-07-07T12:00:00Z",
+                state: "OPEN",
+                author: { login: "alice" },
+                parent: null,
+                subIssuesSummary: { total: 0 },
+                subIssues: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+                blockedBy: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+                closedByPullRequestsReferences: {
+                  nodes: [
+                    {
+                      number: 88,
+                      state: "OPEN",
+                      merged: false,
+                      isDraft: false,
+                      repository: { nameWithOwner: "acme/widgets" },
+                      headRefName: "rfa/acme-widgets/7/wi-1",
+                      headRepository: { nameWithOwner: "alice/widgets" },
+                    },
+                  ],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            ],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+      }),
+    } as GitHubGraphqlClient
+
+    const result = await Effect.runPromise(
+      makeGitHubService(client).listReadyIssues(repository),
+    )
+
+    expect(result[0]?.closingPullRequests).toEqual([
+      {
+        number: 88,
+        repository: "acme/widgets",
+        state: "OPEN",
+        isDraft: false,
+        sourceBranch: "rfa/acme-widgets/7/wi-1",
+        sourceRepository: "alice/widgets",
+      },
+    ])
   })
 
   it("marks an entire hierarchy unsupported when an unlabeled child has a child", async () => {

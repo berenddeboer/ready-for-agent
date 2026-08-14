@@ -30,21 +30,52 @@ export interface RelevantIssuePredicateShape {
   } | null
   readonly hasChildren: boolean
   readonly hierarchySupported: boolean
-  readonly closingPullRequests: readonly {
-    readonly number: number
-    readonly repository: string
-    readonly state: "OPEN" | "MERGED" | "CLOSED"
-    readonly isDraft: boolean
-  }[]
+  readonly closingPullRequests: readonly ClosingPullRequestPredicateShape[]
+}
+
+export interface ClosingPullRequestPredicateShape {
+  readonly number: number
+  readonly repository: string
+  readonly state: "OPEN" | "MERGED" | "CLOSED"
+  readonly isDraft: boolean
+  readonly sourceBranch?: string | null
+  readonly sourceRepository?: string | null
+}
+
+export interface PendingSelfOwnership {
+  readonly branch: string
+  readonly sourceRepository: string
 }
 
 export interface RelevantIssuePredicateContext {
   readonly forge: string
   readonly repositoryName: string
   readonly workItemPullRequestNumbers: ReadonlySet<number>
+  readonly pendingSelfOwnership?: readonly PendingSelfOwnership[]
   readonly authorScope:
     | { readonly includeAll: true }
     | { readonly includeAll: false; readonly operatorLogin: string }
+}
+
+export type ClosingPullRequestClassificationKind =
+  | "exact_owned"
+  | "pending_self"
+  | "competing"
+  | "deferred"
+
+export interface ClassifiedClosingPullRequest {
+  readonly number: number
+  readonly repository: string
+  readonly kind: ClosingPullRequestClassificationKind
+}
+
+export interface ClosingPullRequestClassification {
+  readonly active: readonly ClassifiedClosingPullRequest[]
+  readonly exactOwned: readonly ClassifiedClosingPullRequest[]
+  readonly pendingSelf: readonly ClassifiedClosingPullRequest[]
+  readonly competing: readonly ClassifiedClosingPullRequest[]
+  readonly deferred: readonly ClassifiedClosingPullRequest[]
+  readonly satisfiesClosingPullRequestCondition: boolean
 }
 
 export type LifecyclePredicateFailure =
@@ -239,7 +270,7 @@ export const evaluateActionableIssue = (
 }
 
 const activeClosingPullRequest = (
-  pullRequest: RelevantIssuePredicateShape["closingPullRequests"][number],
+  pullRequest: ClosingPullRequestPredicateShape,
   forge: string,
   issueState: string,
 ): boolean => {
@@ -247,6 +278,120 @@ const activeClosingPullRequest = (
     return forge === "gitlab" || !pullRequest.isDraft
   }
   return pullRequest.state === "MERGED" && issueState !== "OPEN"
+}
+
+const sameIdentity = (left: string, right: string): boolean =>
+  left.toLowerCase() === right.toLowerCase()
+
+const sourceIdentity = (
+  pullRequest: ClosingPullRequestPredicateShape,
+): { readonly branch: string; readonly repository: string } | null => {
+  const branch = pullRequest.sourceBranch?.trim() ?? ""
+  const repository = pullRequest.sourceRepository?.trim() ?? ""
+  if (branch === "" || repository === "") {
+    return null
+  }
+  return { branch, repository }
+}
+
+const classifyActiveClosingPullRequest = (
+  pullRequest: ClosingPullRequestPredicateShape,
+  context: RelevantIssuePredicateContext,
+): ClassifiedClosingPullRequest => {
+  if (
+    pullRequest.repository.toLowerCase() === context.repositoryName &&
+    context.workItemPullRequestNumbers.has(pullRequest.number)
+  ) {
+    return {
+      number: pullRequest.number,
+      repository: pullRequest.repository,
+      kind: "exact_owned",
+    }
+  }
+
+  const pending = context.pendingSelfOwnership ?? []
+  if (pending.length > 0) {
+    const source = sourceIdentity(pullRequest)
+    if (source === null) {
+      return {
+        number: pullRequest.number,
+        repository: pullRequest.repository,
+        kind: "deferred",
+      }
+    }
+    const isPendingSelf = pending.some(
+      (candidate) =>
+        candidate.branch === source.branch &&
+        sameIdentity(candidate.sourceRepository, source.repository),
+    )
+    return {
+      number: pullRequest.number,
+      repository: pullRequest.repository,
+      kind: isPendingSelf ? "pending_self" : "competing",
+    }
+  }
+
+  return {
+    number: pullRequest.number,
+    repository: pullRequest.repository,
+    kind: "competing",
+  }
+}
+
+export const classifyActiveClosingPullRequests = (
+  issue: Pick<RelevantIssuePredicateShape, "state" | "closingPullRequests">,
+  context: RelevantIssuePredicateContext,
+): ClosingPullRequestClassification => {
+  const active = issue.closingPullRequests
+    .filter((pullRequest) =>
+      activeClosingPullRequest(pullRequest, context.forge, issue.state),
+    )
+    .map((pullRequest) =>
+      classifyActiveClosingPullRequest(pullRequest, context),
+    )
+  const exactOwned = active.filter((item) => item.kind === "exact_owned")
+  const pendingSelf = active.filter((item) => item.kind === "pending_self")
+  const competing = active.filter((item) => item.kind === "competing")
+  const deferred = active.filter((item) => item.kind === "deferred")
+  return {
+    active,
+    exactOwned,
+    pendingSelf,
+    competing,
+    deferred,
+    satisfiesClosingPullRequestCondition:
+      active.length === 0 ||
+      exactOwned.length > 0 ||
+      pendingSelf.length > 0 ||
+      deferred.length > 0,
+  }
+}
+
+export const competingPullRequestIdentity = (
+  pullRequest: Pick<ClassifiedClosingPullRequest, "repository" | "number">,
+): string => `${pullRequest.repository}#${pullRequest.number}`
+
+export interface CompetingIssueClosingPullRequestObservation {
+  readonly issueNumber: number
+  readonly identities: readonly {
+    readonly repository: string
+    readonly number: number
+  }[]
+}
+
+export const formatCompetingIssueClosingPullRequestMessage = (
+  identities: readonly string[],
+): string => {
+  const unique = [...new Set(identities)].sort((left, right) =>
+    left.localeCompare(right),
+  )
+  if (unique.length === 0) {
+    return "Open Issue-closing PR is not owned by this Work Item. Autonomous work stopped; review that PR, then Reset this Work Item to discard the local attempt."
+  }
+  if (unique.length === 1) {
+    return `Open Issue-closing PR ${unique[0]} is not owned by this Work Item. Autonomous work stopped; review that PR, then Reset this Work Item to discard the local attempt.`
+  }
+  return `Open Issue-closing PRs ${unique.join(", ")} are not owned by this Work Item. Autonomous work stopped; review those PRs, then Reset this Work Item to discard the local attempt.`
 }
 
 export const evaluateRelevantIssue = (
@@ -283,17 +428,9 @@ export const evaluateRelevantIssue = (
     }
   }
 
-  const activeClosingPullRequests = issue.closingPullRequests.filter(
-    (pullRequest) =>
-      activeClosingPullRequest(pullRequest, context.forge, issue.state),
-  )
+  const classification = classifyActiveClosingPullRequests(issue, context)
   const satisfiesClosingPullRequestCondition =
-    activeClosingPullRequests.length === 0 ||
-    activeClosingPullRequests.some(
-      (pullRequest) =>
-        pullRequest.repository.toLowerCase() === context.repositoryName &&
-        context.workItemPullRequestNumbers.has(pullRequest.number),
-    )
+    classification.satisfiesClosingPullRequestCondition
   const isIssueAuthorIncluded =
     context.authorScope.includeAll ||
     (issue.author !== null &&
@@ -313,7 +450,7 @@ export const evaluateRelevantIssue = (
     return hierarchyFailure
   }
   if (
-    activeClosingPullRequests.length > 0 &&
+    classification.active.length > 0 &&
     !satisfiesClosingPullRequestCondition
   ) {
     return { _tag: "issue_closing_pull_request_unowned" }

@@ -341,6 +341,7 @@ const makeRuntime = (
     findWorkItemBySessionId: unused,
     countCommittedPullRequests: unused,
     continueAfterHumanPrOutcome: unused,
+    stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
     admitWaitingWorkItems: Effect.succeed(0),
     releaseWaitingForBlockers: () => Effect.succeed(0),
     ...lifecycleOverrides,

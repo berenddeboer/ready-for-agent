@@ -169,6 +169,8 @@ type PullRequest {
   isDraft: Boolean!
   createdAt: DateTime!
   headRefOid: String!
+  headRefName: String!
+  headRepository: Repository
   baseRefName: String!
   mergeable: MergeableState!
   statusCheckRollup: StatusCheckRollup

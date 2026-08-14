@@ -30,6 +30,8 @@ import {
   RepositorySqlRow,
   RunningStepSqlRow,
   type StoreIssueInput,
+  UnfinishedCreatePrWorkItem,
+  UnfinishedCreatePrWorkItemSqlRow,
   type UpdateConfigInput,
   type UpdateRepositorySettingsInput,
   WorkItemPullRequest,
@@ -239,6 +241,11 @@ const decodeIssueDependencyRows = (rows: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.Array(IssueDependencySqlRow))(rows).pipe(
     Effect.mapError(toSchemaDatabaseError),
   )
+const decodeUnfinishedCreatePrWorkItemRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(UnfinishedCreatePrWorkItemSqlRow))(
+    rows,
+  ).pipe(Effect.mapError(toSchemaDatabaseError))
+
 const decodeWorkItemPullRequestRows = (rows: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.Array(WorkItemPullRequestSqlRow))(
     rows,
@@ -412,6 +419,12 @@ export interface DbServiceShape {
     repositoryId: string,
   ) => Effect.Effect<
     readonly WorkItemPullRequest[],
+    RepositoryNotFoundError | DatabaseError
+  >
+  readonly listUnfinishedCreatePrWorkItems: (
+    repositoryId: string,
+  ) => Effect.Effect<
+    readonly UnfinishedCreatePrWorkItem[],
     RepositoryNotFoundError | DatabaseError
   >
   /**
@@ -1701,6 +1714,30 @@ export const DbServiceLive = Layer.effect(
       )
     })
 
+    const listUnfinishedCreatePrWorkItems = Effect.fn(
+      "DbService.listUnfinishedCreatePrWorkItems",
+    )(function* (repositoryId: string) {
+      yield* ensureRepositoryExists(repositoryId)
+      const rows = yield* sql
+        .unsafe(
+          `SELECT id, issue_number
+             FROM work_item
+             WHERE repository_id = ?
+               AND state = 'create_pr'
+             ORDER BY issue_number ASC, id ASC`,
+          [repositoryId],
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+
+      const decoded = yield* decodeUnfinishedCreatePrWorkItemRows(rows)
+      return decoded.map((row) =>
+        UnfinishedCreatePrWorkItem.make({
+          workItemId: row.workItemId,
+          issueNumber: row.issueNumber,
+        }),
+      )
+    })
+
     const deleteIssue = Effect.fn("DbService.deleteIssue")(function* (
       repositoryId: string,
       issueNumber: number,
@@ -1778,6 +1815,7 @@ export const DbServiceLive = Layer.effect(
       storeIssue,
       listIssues,
       listWorkItemPullRequests,
+      listUnfinishedCreatePrWorkItems,
       deleteIssue,
       markIssuesReconciled,
     })
