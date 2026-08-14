@@ -153,6 +153,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "assess_changes",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
+  },
+  {
+    from: "assess_changes",
     to: "pre_commit",
     guard: "changes_detected",
     reasonCode: "native",
@@ -180,6 +186,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "close_issue",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
   },
   {
     from: "commit",
@@ -212,6 +224,12 @@ export const LIFECYCLE_TRANSITIONS = [
     reasonCode: "pr_merged",
   },
   {
+    from: "commit",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
+  },
+  {
     from: "create_pr",
     to: "abandoned",
     guard: "operator_abandon",
@@ -234,6 +252,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "create_pr",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
   },
   {
     from: "create_pr",
@@ -278,6 +302,12 @@ export const LIFECYCLE_TRANSITIONS = [
     reasonCode: "pr_merged",
   },
   {
+    from: "create_worktree",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
+  },
+  {
     from: "decide_pr_merge",
     to: "abandoned",
     guard: "operator_abandon",
@@ -320,6 +350,12 @@ export const LIFECYCLE_TRANSITIONS = [
     reasonCode: "handler_failed",
   },
   {
+    from: "decide_pr_merge",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
+  },
+  {
     from: "failed",
     to: "watch_pr_status_checks",
     guard: "retry_unresolved_status_checks",
@@ -350,6 +386,12 @@ export const LIFECYCLE_TRANSITIONS = [
     reasonCode: "pr_merged",
   },
   {
+    from: "implement",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
+  },
+  {
     from: "install_dependencies",
     to: "abandoned",
     guard: "operator_abandon",
@@ -372,6 +414,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "install_dependencies",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
   },
   {
     from: "investigate_pr_status_checks",
@@ -402,6 +450,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "needs_human",
     guard: "handoff_needs_human",
     reasonCode: "handler_failed",
+  },
+  {
+    from: "investigate_pr_status_checks",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
   },
   {
     from: "investigate_pr_status_checks",
@@ -478,6 +532,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "mark_pr_ready_for_review",
     to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
+  },
+  {
+    from: "mark_pr_ready_for_review",
+    to: "needs_human",
     guard: "reobserved_closed_pull_request",
     reasonCode: "handler_failed",
   },
@@ -543,6 +603,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "merge_pr",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
+  },
+  {
+    from: "merge_pr",
     to: "watch_pr_status_checks",
     guard: "merge_revalidation_within_limit",
     reasonCode: "merge_revalidation",
@@ -603,6 +669,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "pre_commit",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
+  },
+  {
+    from: "pre_commit",
     to: "review",
     guard: "step_succeeded",
     reasonCode: "native",
@@ -636,6 +708,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "needs_human",
     guard: "conflict_needs_human",
     reasonCode: "handler_failed",
+  },
+  {
+    from: "resolve_pr_merge_conflict",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
   },
   {
     from: "resolve_pr_merge_conflict",
@@ -684,6 +762,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "review",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
   },
   {
     from: "review",
@@ -768,6 +852,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "needs_human",
     guard: "pull_request_closed",
     reasonCode: "handler_failed",
+  },
+  {
+    from: "watch_pr_status_checks",
+    to: "needs_human",
+    guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
   },
   {
     from: "watch_pr_status_checks",

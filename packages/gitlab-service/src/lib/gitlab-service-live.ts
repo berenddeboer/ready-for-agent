@@ -52,6 +52,7 @@ const RequiredString = Schema.String.pipe(
   ),
 )
 const ProjectSchema = Schema.Struct({
+  id: Schema.optional(PositiveInt),
   path_with_namespace: RequiredString,
   default_branch: Schema.optional(Schema.NullOr(Schema.String)),
   /** Canonical web/API host lives here; SSH remotes may use a different host. */
@@ -136,6 +137,8 @@ const MergeRequestSchema = Schema.Struct({
   state: Schema.Literals(["opened", "merged", "closed"]),
   draft: Schema.Boolean,
   description: Schema.NullOr(Schema.String),
+  source_branch: Schema.optional(Schema.NullOr(Schema.String)),
+  source_project_id: Schema.optional(Schema.NullOr(PositiveInt)),
 })
 const OpenMergeRequestSchema = Schema.Struct({
   iid: PositiveInt,
@@ -555,10 +558,25 @@ const mergeRequestState = (
 ): "OPEN" | "MERGED" | "CLOSED" =>
   state === "opened" ? "OPEN" : state === "merged" ? "MERGED" : "CLOSED"
 
+const sourceRepositoryIdentity = (
+  repository: GitLabRepository,
+  mergeRequest: GitLabMergeRequest,
+  projectId: number | undefined,
+): string | null => {
+  if (mergeRequest.source_project_id == null) {
+    return null
+  }
+  if (projectId !== undefined && mergeRequest.source_project_id === projectId) {
+    return repository.projectPath
+  }
+  return `gitlab-project:${mergeRequest.source_project_id}`
+}
+
 const mapIssue = (
   repository: GitLabRepository,
   issue: GitLabIssue,
   mergeRequests: readonly GitLabMergeRequest[],
+  projectId: number | undefined,
 ): GitLabReadyLabeledIssue => {
   const body = issue.description ?? ""
   const createdAt = new Date(issue.created_at)
@@ -585,12 +603,21 @@ const mapIssue = (
       .filter((mergeRequest) =>
         closingIssueNumbers(mergeRequest.description ?? "").has(issue.iid),
       )
-      .map((mergeRequest) => ({
-        number: mergeRequest.iid,
-        repository: repository.projectPath,
-        state: mergeRequestState(mergeRequest.state),
-        isDraft: mergeRequest.draft,
-      })),
+      .map((mergeRequest) => {
+        const sourceBranch = mergeRequest.source_branch?.trim() ?? ""
+        return {
+          number: mergeRequest.iid,
+          repository: repository.projectPath,
+          state: mergeRequestState(mergeRequest.state),
+          isDraft: mergeRequest.draft,
+          sourceBranch: sourceBranch === "" ? null : sourceBranch,
+          sourceRepository: sourceRepositoryIdentity(
+            repository,
+            mergeRequest,
+            projectId,
+          ),
+        }
+      }),
   }
 }
 
@@ -870,18 +897,24 @@ export const makeGitLabService = (options: {
                 `${project}/merge_requests?scope=all&state=all`,
                 `Failed to list merge requests for ${repository.projectPath}`,
               ),
+              requestUnknown(
+                repository,
+                project,
+                `Failed to resolve GitLab project metadata for ${repository.projectPath}`,
+              ),
             ],
-            { concurrency: 2 },
+            { concurrency: 3 },
           ).pipe(
-            Effect.map(([issues, mergeRequests]) => {
+            Effect.map(([issues, mergeRequests, projectMeta]) => {
               const decodedIssues = decode(Schema.Array(IssueSchema), issues)
               const decodedMergeRequests = decode(
                 Schema.Array(MergeRequestSchema),
                 mergeRequests,
               )
+              const projectId = decode(ProjectSchema, projectMeta).id
               return decodedIssues
                 .map((issue) =>
-                  mapIssue(repository, issue, decodedMergeRequests),
+                  mapIssue(repository, issue, decodedMergeRequests, projectId),
                 )
                 .sort((left, right) => left.number - right.number)
             }),

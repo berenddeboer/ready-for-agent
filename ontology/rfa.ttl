@@ -579,6 +579,23 @@ rfa:MergeRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; r
 rfa:CloseIssueRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
 rfa:NeedsHumanRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
 
+# Refresh may stop pre-cleanup operational work when a competing Issue-closing PR appears.
+rfa:CreateWorktreeRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:InstallDependenciesRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:ImplementRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:AssessChangesRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:PreCommitRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:PreCommit ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:ReviewRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:CommitRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:CreatePrRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:ResolveRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:ResolvePrMergeConflict ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:InvestigateRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:MarkReadyRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:DecideRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:MergeRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+rfa:CloseIssueRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
+
 rfa:Complete
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:TerminalWorkItemState ;

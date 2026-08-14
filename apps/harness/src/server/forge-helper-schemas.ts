@@ -95,6 +95,8 @@ const SerializedIssue = Schema.Struct({
       repository: RequiredString,
       state: Schema.Literals(["OPEN", "MERGED", "CLOSED"]),
       isDraft: Schema.Boolean,
+      sourceBranch: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      sourceRepository: Schema.optionalKey(Schema.NullOr(Schema.String)),
     }),
   ),
 })

@@ -24,7 +24,7 @@ import {
 import {
   type DatabaseError,
   DbService,
-  type RepositoryNotFoundError,
+  RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
 import {
   GitHubService,
@@ -39,11 +39,14 @@ import {
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
+  type CompetingIssueClosingPullRequestObservation,
   OperationalLifecycleStep as OperationalLifecycleStepSchema,
   type WorkItemPredicateShape,
+  competingPullRequestIdentity,
   evaluateActionableIssue,
   evaluateImplementableIssue,
   evaluateUnfinishedWorkItem,
+  formatCompetingIssueClosingPullRequestMessage,
   isAgentDependentLifecycleStep,
 } from "@ready-for-agent/lifecycle-model"
 import {
@@ -919,6 +922,22 @@ export interface WorkItemLifecycleShape {
     workItemId: string,
     outcome: HumanPrOutcome,
   ) => Effect.Effect<WorkItemRecord, ContinueAfterHumanPrOutcomeError>
+  /**
+   * Stop eligible unfinished Work Items after Refresh observes competing
+   * Issue-closing PRs. Interrupts running work, cancels queued Step Runs,
+   * clears holds, and parks each Work Item at Needs Human.
+   */
+  readonly stopForCompetingIssueClosingPullRequests: (
+    repositoryId: string,
+    observations: readonly CompetingIssueClosingPullRequestObservation[],
+  ) => Effect.Effect<
+    number,
+    | WorkItemLifecycleDatabaseError
+    | EnqueueError
+    | InvalidQueueNameError
+    | DatabaseError
+    | RepositoryNotFoundError
+  >
   /** Admit FIFO waiters up to the current maxConcurrentWorkItems bound. */
   readonly admitWaitingWorkItems: Effect.Effect<
     number,
@@ -1042,6 +1061,8 @@ export const makeWorkItemLifecycleLive = (
       const resettingWorkItems = new Set<string>()
       /** Work Items being advanced to local cleanup because their PR merged. */
       const mergeSupersedingWorkItems = new Set<string>()
+      /** Work Items being parked because Refresh observed a competing PR. */
+      const competingPrStoppingWorkItems = new Set<string>()
 
       if (!queue.queueInTransaction) {
         return yield* new NonTransactionalQueueError({
@@ -3889,6 +3910,7 @@ export const makeWorkItemLifecycleLive = (
             if (
               resettingWorkItems.has(workItem.id) ||
               mergeSupersedingWorkItems.has(workItem.id) ||
+              competingPrStoppingWorkItems.has(workItem.id) ||
               activeStepExecutions.has(stepRunId)
             ) {
               return false
@@ -5447,6 +5469,302 @@ export const makeWorkItemLifecycleLive = (
         )
       })
 
+      const stopOneWorkItemForCompetingPrs = (
+        workItemId: string,
+        observation: CompetingIssueClosingPullRequestObservation,
+      ) =>
+        Effect.gen(function* () {
+          const workItem = yield* loadWorkItemRow(workItemId)
+          if (!workItem) {
+            return false
+          }
+          if (
+            workItem.state === "complete" ||
+            workItem.state === "failed" ||
+            workItem.state === "abandoned" ||
+            workItem.state === "needs_human" ||
+            workItem.state === "local_cleanup"
+          ) {
+            return false
+          }
+
+          yield* Effect.sync(() => competingPrStoppingWorkItems.add(workItemId))
+
+          return yield* Effect.gen(function* () {
+            const supersedingStepRuns = (yield* sql
+              .unsafe(
+                `SELECT id, status, queue_job_id FROM step_run
+                 WHERE work_item_id = ?
+                   AND status IN ('queued', 'running')`,
+                [workItemId],
+              )
+              .pipe(Effect.mapError(toDatabaseError))) as readonly {
+              readonly id: string
+              readonly status: string
+              readonly queue_job_id: string | null
+            }[]
+
+            const activeExecutions = [...activeStepExecutions.values()].filter(
+              (execution) => execution.workItemId === workItemId,
+            )
+            yield* Effect.forEach(
+              activeExecutions,
+              ({ cancel }) => Deferred.succeed(cancel, undefined),
+              { discard: true },
+            )
+            yield* Effect.forEach(
+              activeExecutions,
+              ({ finished }) => Deferred.await(finished),
+              { discard: true },
+            )
+
+            const now = yield* Clock.currentTimeMillis
+            const message = formatCompetingIssueClosingPullRequestMessage(
+              observation.identities.map(competingPullRequestIdentity),
+            )
+
+            const applied = yield* sql
+              .withTransaction(
+                Effect.gen(function* () {
+                  const current = yield* loadWorkItemRow(workItemId)
+                  if (!current) {
+                    return false
+                  }
+                  if (
+                    current.state === "complete" ||
+                    current.state === "failed" ||
+                    current.state === "abandoned" ||
+                    current.state === "needs_human" ||
+                    current.state === "local_cleanup"
+                  ) {
+                    return false
+                  }
+
+                  for (const active of supersedingStepRuns) {
+                    yield* sql.unsafe(
+                      `UPDATE step_run
+                     SET status = CASE
+                           WHEN status IN ('queued', 'cancelled') THEN 'cancelled'
+                           ELSE 'interrupted'
+                         END,
+                         finished_at = COALESCE(finished_at, ?),
+                         reason_code = ?,
+                         reason_message = CASE
+                           WHEN status IN ('queued', 'cancelled')
+                             THEN ?
+                           ELSE ?
+                         END,
+                         updated_at = ?
+                     WHERE id = ?
+                       AND status IN (
+                         'queued',
+                         'running',
+                         'interrupted',
+                         'cancelled'
+                       )`,
+                      [
+                        now,
+                        STEP_RUN_REASON.native,
+                        "A competing Issue-closing PR was observed before the Step Run started",
+                        "A competing Issue-closing PR was observed; Step Run interrupted",
+                        now,
+                        active.id,
+                      ],
+                    )
+                    if (active.queue_job_id !== null) {
+                      yield* queue
+                        .acknowledge(active.queue_job_id)
+                        .pipe(
+                          Effect.catchTag(
+                            "JobNotFoundError",
+                            () => Effect.void,
+                          ),
+                        )
+                    }
+                  }
+
+                  yield* sql.unsafe(
+                    `UPDATE step_run
+                   SET status = 'interrupted',
+                       finished_at = COALESCE(finished_at, ?),
+                       reason_code = ?,
+                       reason_message = ?,
+                       updated_at = ?
+                   WHERE work_item_id = ? AND status = 'running'`,
+                    [
+                      now,
+                      STEP_RUN_REASON.native,
+                      "A competing Issue-closing PR was observed; Step Run interrupted",
+                      now,
+                      workItemId,
+                    ],
+                  )
+                  const lateQueued = (yield* sql.unsafe(
+                    `UPDATE step_run
+                   SET status = 'cancelled',
+                       finished_at = ?,
+                       reason_code = ?,
+                       reason_message = ?,
+                       updated_at = ?
+                   WHERE work_item_id = ? AND status = 'queued'
+                   RETURNING queue_job_id`,
+                    [
+                      now,
+                      STEP_RUN_REASON.native,
+                      "A competing Issue-closing PR was observed before the Step Run started",
+                      now,
+                      workItemId,
+                    ],
+                  )) as readonly { readonly queue_job_id: string | null }[]
+                  for (const cancelled of lateQueued) {
+                    if (cancelled.queue_job_id !== null) {
+                      yield* queue
+                        .acknowledge(cancelled.queue_job_id)
+                        .pipe(
+                          Effect.catchTag(
+                            "JobNotFoundError",
+                            () => Effect.void,
+                          ),
+                        )
+                    }
+                  }
+
+                  const updated = (yield* sql.unsafe(
+                    `UPDATE work_item
+                   SET state = 'needs_human',
+                       state_ready_at = ?,
+                       paused = 0,
+                       pause_before_step = NULL,
+                       waiting_since = NULL,
+                       waiting_for_blockers = 0,
+                       holds_worker_slot = 0,
+                       failure_code = ?,
+                       failure_message = ?,
+                       updated_at = ?
+                   WHERE id = ?
+                     AND state NOT IN (
+                       'complete',
+                       'failed',
+                       'abandoned',
+                       'needs_human',
+                       'local_cleanup'
+                     )
+                   RETURNING id`,
+                    [
+                      now,
+                      "issue_closing_pull_request_unowned",
+                      message,
+                      now,
+                      workItemId,
+                    ],
+                  )) as readonly { readonly id: string }[]
+
+                  return updated[0] !== undefined
+                }).pipe((mutation) =>
+                  applyLifecycleTransition(
+                    workItemId,
+                    "needs_human",
+                    mutation,
+                    (didApply) => didApply === true,
+                  ),
+                ),
+              )
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new WorkItemLifecycleDatabaseError({
+                      message: `Failed to stop Work Item ${workItemId} for a competing Issue-closing PR: ${String(error)}`,
+                      cause: error,
+                    }),
+                ),
+              )
+
+            return applied
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() =>
+                competingPrStoppingWorkItems.delete(workItemId),
+              ),
+            ),
+          )
+        })
+
+      const stopForCompetingIssueClosingPullRequests = Effect.fn(
+        "WorkItemLifecycle.stopForCompetingIssueClosingPullRequests",
+      )(function* (
+        repositoryId: string,
+        observations: readonly CompetingIssueClosingPullRequestObservation[],
+      ) {
+        const repositories = yield* db.listRepositories
+        if (
+          !repositories.some((repository) => repository.id === repositoryId)
+        ) {
+          return yield* new RepositoryNotFoundError({ repositoryId })
+        }
+        if (observations.length === 0) {
+          return 0
+        }
+
+        const byIssue = new Map(
+          observations.map((observation) => [
+            observation.issueNumber,
+            observation,
+          ]),
+        )
+        const issueNumbers = [...byIssue.keys()]
+        const placeholders = issueNumbers.map(() => "?").join(", ")
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT id, issue_number FROM work_item
+             WHERE repository_id = ?
+               AND issue_number IN (${placeholders})
+               AND state NOT IN (
+                 'complete',
+                 'failed',
+                 'abandoned',
+                 'needs_human',
+                 'local_cleanup'
+               )
+             ORDER BY issue_number ASC, id ASC`,
+            [repositoryId, ...issueNumbers],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly id: string
+          readonly issue_number: number
+        }[]
+
+        let stopped = 0
+        for (const row of rows) {
+          const observation = byIssue.get(row.issue_number)
+          if (
+            observation === undefined ||
+            observation.identities.length === 0
+          ) {
+            continue
+          }
+          const applied = yield* stopOneWorkItemForCompetingPrs(
+            row.id,
+            observation,
+          )
+          if (applied) {
+            stopped += 1
+          }
+        }
+
+        if (stopped > 0) {
+          yield* notifyWorkItemsChanged(repositoryId)
+          yield* admitWaitingWorkItems.pipe(
+            Effect.catch((error) =>
+              Effect.logError(
+                "Failed to admit waiters after competing PR stop",
+                { error: String(error) },
+              ),
+            ),
+          )
+        }
+        return stopped
+      })
+
       const reset = Effect.fn("WorkItemLifecycle.reset")(function* (
         workItemId: string,
       ) {
@@ -6604,6 +6922,7 @@ export const makeWorkItemLifecycleLive = (
         findWorkItemBySessionId,
         countCommittedPullRequests,
         continueAfterHumanPrOutcome,
+        stopForCompetingIssueClosingPullRequests,
         admitWaitingWorkItems,
         releaseWaitingForBlockers,
       })

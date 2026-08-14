@@ -69,6 +69,7 @@ export const stubDbService = (
   storeIssue: unused,
   listIssues: unused,
   listWorkItemPullRequests: unused,
+  listUnfinishedCreatePrWorkItems: unused,
   deleteIssue: unused,
   markIssuesReconciled: unused,
   ...overrides,

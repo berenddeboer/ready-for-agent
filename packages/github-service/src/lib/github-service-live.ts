@@ -476,6 +476,8 @@ const ClosingPullRequestSchema = Schema.Struct({
   state: Schema.Unknown,
   merged: Schema.Unknown,
   repository: GitHubRepositoryNameSchema,
+  headRefName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  headRepository: Schema.optionalKey(Schema.NullOr(GitHubRepositoryNameSchema)),
 })
 const ReadyLabeledIssueFieldsSchema = Schema.Struct({
   number: PositiveInt,
@@ -779,6 +781,8 @@ interface GitHubApiPullRequestReference {
   readonly merged: unknown
   readonly isDraft: unknown
   readonly repository: GitHubApiRepositoryReference
+  readonly headRefName?: unknown
+  readonly headRepository?: GitHubApiRepositoryReference | null
 }
 
 interface GitHubApiPullRequestConnection {
@@ -883,11 +887,14 @@ const mapClosingPullRequestPage = (
     .filter((pullRequest) => pullRequest !== null)
     .map((pullRequest) => {
       const decoded = decodeSync(ClosingPullRequestSchema, pullRequest)
+      const sourceBranch = decoded.headRefName?.trim() ?? ""
       return {
         number: decoded.number,
         repository: decoded.repository.nameWithOwner,
         state: toClosingPullRequestState(decoded.state, decoded.merged),
         isDraft: decoded.isDraft,
+        sourceBranch: sourceBranch === "" ? null : sourceBranch,
+        sourceRepository: decoded.headRepository?.nameWithOwner ?? null,
       }
     })
 
@@ -2444,6 +2451,8 @@ const makeGitHubApiService = (
                           merged: true,
                           isDraft: true,
                           repository: { nameWithOwner: true },
+                          headRefName: true,
+                          headRepository: { nameWithOwner: true },
                         },
                         pageInfo: { endCursor: true, hasNextPage: true },
                       },
@@ -2581,6 +2590,8 @@ const makeGitHubApiService = (
                             merged: true,
                             isDraft: true,
                             repository: { nameWithOwner: true },
+                            headRefName: true,
+                            headRepository: { nameWithOwner: true },
                           },
                           pageInfo: { endCursor: true, hasNextPage: true },
                         },

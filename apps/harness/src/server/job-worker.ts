@@ -14,11 +14,9 @@ import {
 import {
   DbService,
   RepositoryId,
-  RepositoryNotFoundError,
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
 import {
-  type GitHubOperationOrigin,
   isGitHubThrottledError,
   logErrorAnnotations,
 } from "@ready-for-agent/github-service"
@@ -34,15 +32,14 @@ import {
   repairPollingSchedules,
   sampleIssuePollingDelay,
 } from "@ready-for-agent/graphql-api"
-import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { QueueService } from "@ready-for-agent/queue-service"
 import {
   WorkItemLifecycle,
   WorkItemStepJob,
   WorkItemWakeJob,
-  syncNeedsHumanMergeHandoffs,
 } from "@ready-for-agent/work-item-lifecycle"
+import { refreshRepository } from "./repository-refresh.js"
 
 /** Work Item lifecycle queue (unchanged). */
 export const JOBS_QUEUE = "jobs"
@@ -166,34 +163,6 @@ const runPollingAutoHeal = Effect.fn("JobWorker.runPollingAutoHeal")(function* (
     credentialedRepositoryIds,
     sampleDelay,
   })
-})
-
-const refreshRepository = Effect.fn("JobWorker.refreshRepository")(function* ({
-  repositoryId,
-  githubOperationOrigin,
-}: {
-  readonly repositoryId: RepositoryId
-  readonly githubOperationOrigin: GitHubOperationOrigin
-}) {
-  const db = yield* DbService
-  const reconciler = yield* IssueReconciler
-  const repositories = yield* db.listRepositories
-  const repository = repositories.find(({ id }) => id === repositoryId)
-
-  if (repository === undefined) {
-    return yield* new RepositoryNotFoundError({ repositoryId })
-  }
-
-  const lifecycle = yield* WorkItemLifecycle
-  const summary = yield* reconciler.reconcile(repository, {
-    githubOperation: { origin: githubOperationOrigin },
-  })
-  yield* syncNeedsHumanMergeHandoffs(repositoryId)
-  // Issue store is current: lift or fail Waiting for blockers Work Items.
-  // Lifecycle owns Work Item mutations; reconciler only updates Issues.
-  yield* lifecycle.releaseWaitingForBlockers(repositoryId)
-  yield* db.notifyIssuesChanged(repositoryId)
-  return summary
 })
 
 export interface JobWorkerOptions {

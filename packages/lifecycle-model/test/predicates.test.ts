@@ -2,11 +2,13 @@ import {
   type RelevantIssuePredicateContext,
   type RelevantIssuePredicateShape,
   type WorkItemPredicateShape,
+  classifyActiveClosingPullRequests,
   evaluateActionableIssue,
   evaluateImplementableIssue,
   evaluateLeafIssue,
   evaluateRelevantIssue,
   evaluateUnfinishedWorkItem,
+  formatCompetingIssueClosingPullRequestMessage,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -320,5 +322,146 @@ describe("shared lifecycle predicates", () => {
         }),
       ),
     ).toEqual({ _tag: "match" })
+  })
+
+  it("classifies exact owned, pending self, competing, and deferred closing PRs", () => {
+    const owned = classifyActiveClosingPullRequests(
+      relevantIssue({
+        closingPullRequests: [
+          {
+            number: 9,
+            repository: "owner/repository",
+            state: "OPEN",
+            isDraft: false,
+          },
+        ],
+      }),
+      relevantContext({ workItemPullRequestNumbers: new Set([9]) }),
+    )
+    expect(owned.exactOwned).toEqual([
+      { number: 9, repository: "owner/repository", kind: "exact_owned" },
+    ])
+    expect(owned.competing).toEqual([])
+    expect(owned.satisfiesClosingPullRequestCondition).toBe(true)
+
+    const pending = classifyActiveClosingPullRequests(
+      relevantIssue({
+        closingPullRequests: [
+          {
+            number: 44,
+            repository: "owner/repository",
+            state: "OPEN",
+            isDraft: false,
+            sourceBranch: "rfa/owner-repository/1/wi-1",
+            sourceRepository: "owner/repository",
+          },
+        ],
+      }),
+      relevantContext({
+        pendingSelfOwnership: [
+          {
+            branch: "rfa/owner-repository/1/wi-1",
+            sourceRepository: "owner/repository",
+          },
+        ],
+      }),
+    )
+    expect(pending.pendingSelf.map((item) => item.kind)).toEqual([
+      "pending_self",
+    ])
+    expect(pending.satisfiesClosingPullRequestCondition).toBe(true)
+
+    const fork = classifyActiveClosingPullRequests(
+      relevantIssue({
+        closingPullRequests: [
+          {
+            number: 44,
+            repository: "owner/repository",
+            state: "OPEN",
+            isDraft: false,
+            sourceBranch: "rfa/owner-repository/1/wi-1",
+            sourceRepository: "other/fork",
+          },
+        ],
+      }),
+      relevantContext({
+        pendingSelfOwnership: [
+          {
+            branch: "rfa/owner-repository/1/wi-1",
+            sourceRepository: "owner/repository",
+          },
+        ],
+      }),
+    )
+    expect(fork.competing.map((item) => item.kind)).toEqual(["competing"])
+    expect(fork.satisfiesClosingPullRequestCondition).toBe(false)
+
+    const deferred = classifyActiveClosingPullRequests(
+      relevantIssue({
+        closingPullRequests: [
+          {
+            number: 44,
+            repository: "owner/repository",
+            state: "OPEN",
+            isDraft: false,
+          },
+        ],
+      }),
+      relevantContext({
+        pendingSelfOwnership: [
+          {
+            branch: "rfa/owner-repository/1/wi-1",
+            sourceRepository: "owner/repository",
+          },
+        ],
+      }),
+    )
+    expect(deferred.deferred.map((item) => item.kind)).toEqual(["deferred"])
+    expect(deferred.satisfiesClosingPullRequestCondition).toBe(true)
+  })
+
+  it("keeps an Issue Relevant when a competing PR exists next to an owned PR", () => {
+    const issue = relevantIssue({
+      closingPullRequests: [
+        {
+          number: 9,
+          repository: "owner/repository",
+          state: "OPEN",
+          isDraft: false,
+        },
+        {
+          number: 12,
+          repository: "owner/repository",
+          state: "OPEN",
+          isDraft: false,
+          sourceBranch: "someone-else",
+          sourceRepository: "owner/repository",
+        },
+      ],
+    })
+    const context = relevantContext({
+      workItemPullRequestNumbers: new Set([9]),
+    })
+    expect(evaluateRelevantIssue(issue, context)).toEqual({ _tag: "match" })
+    expect(classifyActiveClosingPullRequests(issue, context).competing).toEqual(
+      [{ number: 12, repository: "owner/repository", kind: "competing" }],
+    )
+  })
+
+  it("names competing PR identities deterministically", () => {
+    expect(
+      formatCompetingIssueClosingPullRequestMessage([
+        "owner/repository#12",
+        "acme/widgets#3",
+        "owner/repository#12",
+      ]),
+    ).toBe(
+      "Open Issue-closing PRs acme/widgets#3, owner/repository#12 are not owned by this Work Item. Autonomous work stopped; review those PRs, then Reset this Work Item to discard the local attempt.",
+    )
+    expect(
+      formatCompetingIssueClosingPullRequestMessage(["owner/repository#123"]),
+    ).toBe(
+      "Open Issue-closing PR owner/repository#123 is not owned by this Work Item. Autonomous work stopped; review that PR, then Reset this Work Item to discard the local attempt.",
+    )
   })
 })
