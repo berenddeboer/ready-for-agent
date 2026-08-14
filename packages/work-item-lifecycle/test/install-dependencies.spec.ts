@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
 import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { extractCauseChain } from "@ready-for-agent/github-service"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   InstallDependenciesFallbackError,
@@ -441,7 +442,11 @@ describe("installDependencies fallback failure", () => {
               AgentBackend.of({
                 startTurn: () =>
                   Effect.fail(
-                    new AgentBackendExitError({ exitCode: 2, cwd: root }),
+                    new AgentBackendExitError({
+                      exitCode: 2,
+                      cwd: root,
+                      message: "npm install failed: EACCES",
+                    }),
                   ),
                 continueTurn: () =>
                   Effect.succeed({ sessionId: "unused", assistantText: "" }),
@@ -457,6 +462,17 @@ describe("installDependencies fallback failure", () => {
         ),
       )
       expect(error).toBeInstanceOf(InstallDependenciesFallbackError)
+      expect(extractCauseChain(error)).toEqual([
+        {
+          name: "InstallDependenciesFallbackError",
+          message: "OpenCode fallback failed to install dependencies",
+        },
+        {
+          name: "AgentBackendExitError",
+          code: "2",
+          message: "npm install failed: EACCES",
+        },
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }

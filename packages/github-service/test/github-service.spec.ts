@@ -4233,6 +4233,16 @@ describe("user-facing error formatting", () => {
     expect(formatUserFacingError(colored, "fallback")).toBe("boom happened")
   })
 
+  it("redacts token-shaped secrets from user-facing text", () => {
+    const secret = "ghp_this_must_never_appear_in_user_facing_text"
+    expect(sanitizeUserFacingText(`auth failed with ${secret}`)).not.toContain(
+      secret,
+    )
+    expect(sanitizeUserFacingText(`auth failed with ${secret}`)).toContain(
+      "[redacted]",
+    )
+  })
+
   it("prefers Error.message over inspect dumps", () => {
     const error = new GitHubRequestError({
       message: "Failed to get pull request check status for acme/widgets",
@@ -4304,6 +4314,22 @@ describe("error cause chain", () => {
     expect(extractErrorCode(timeout)).toBe("TIMEOUT")
     expect(extractCauseChain(timeout)).toEqual([
       { name: "TimeoutError", code: "TIMEOUT" },
+    ])
+  })
+
+  it("derives a cause-chain code from exitCode when code is absent", () => {
+    const exitFailure = Object.assign(new Error("model overloaded"), {
+      name: "AgentBackendExitError",
+      _tag: "AgentBackendExitError",
+      exitCode: 1,
+    })
+    expect(extractErrorCode(exitFailure)).toBe("1")
+    expect(extractCauseChain(exitFailure)).toEqual([
+      {
+        name: "AgentBackendExitError",
+        code: "1",
+        message: "model overloaded",
+      },
     ])
   })
 

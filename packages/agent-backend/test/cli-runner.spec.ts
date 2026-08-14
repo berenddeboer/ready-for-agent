@@ -52,6 +52,7 @@ const parseSimpleLine = (line: string) => {
       errorClassification?:
         | "retryable_provider_error"
         | "length_limit_truncation"
+      errorMessage?: string
     }
     return {
       ...(typeof parsed.sessionID === "string"
@@ -60,6 +61,9 @@ const parseSimpleLine = (line: string) => {
       ...(typeof parsed.text === "string" ? { text: parsed.text } : {}),
       ...(parsed.errorClassification !== undefined
         ? { errorClassification: parsed.errorClassification }
+        : {}),
+      ...(typeof parsed.errorMessage === "string"
+        ? { errorMessage: parsed.errorMessage }
         : {}),
     }
   } catch {
@@ -147,6 +151,34 @@ describe("runCliCapture", () => {
         }),
       )
     })
+  })
+
+  it("populates AgentBackendExitError from captured CLI output", async () => {
+    await withExecutable(
+      ["echo 'permission denied: cannot write cache'", "exit 3"].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.exitCode).toBe(3)
+          expect(error.message).toContain(
+            "permission denied: cannot write cache",
+          )
+        }
+      },
+    )
   })
 
   it("returns stdout when allowNonZeroExit is set", async () => {
@@ -298,6 +330,39 @@ describe("runCliTurn", () => {
             cwd: process.cwd(),
             sessionId: "ses_retry",
             classification: "retryable_provider_error",
+          }),
+        )
+      },
+    )
+  })
+
+  it("carries an observed error message on a non-zero exit", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"sessionID":"ses_reason","errorMessage":"model overloaded"}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              parseLine: parseSimpleLine,
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toEqual(
+          new AgentBackendExitError({
+            exitCode: 1,
+            cwd: process.cwd(),
+            sessionId: "ses_reason",
+            message: "model overloaded",
           }),
         )
       },

@@ -99,11 +99,10 @@ export class Codex {
             })
           }
           if (status.kind === "failed") {
-            // Non-zero without auth markers: not unauthenticated. Surface
-            // exit code + probe text so Recheck/Unavailable copy stays useful
-            // (ExitError has no message for formatInspectFailure).
-            return yield* new AgentBackendConfigError({
-              message: `Codex Build readiness probe failed (codex login status exit ${status.exitCode}): ${clipProbeOutput(statusOutput)}`,
+            return yield* new AgentBackendExitError({
+              exitCode: status.exitCode,
+              cwd: input.cwd,
+              message: `Codex Build readiness probe failed (exit ${status.exitCode}): ${clipProbeOutput(statusOutput)}`,
             })
           }
           if (status.kind === "malformed") {
@@ -183,6 +182,8 @@ export class Codex {
                     ...(stream.threadId !== undefined
                       ? { sessionId: stream.threadId }
                       : {}),
+                    errorMessage:
+                      stream.turnFailedMessage ?? "Codex turn.failed",
                   }
                 }
                 if (stream.turnCompleted && isSuccessfulCodexTurn(stream)) {
@@ -214,9 +215,6 @@ export class Codex {
               )
             }
             if (stream.turnFailed) {
-              // ExitError has no message field (shared contract); keep the
-              // stream-extracted reason in logs so harness diagnostics are not
-              // a bare exit 1.
               yield* Effect.logWarning("Codex Build turn.failed", {
                 sessionId: stream.threadId ?? input.sessionId,
                 message: stream.turnFailedMessage ?? "Codex turn.failed",
@@ -224,6 +222,7 @@ export class Codex {
               return yield* new AgentBackendExitError({
                 exitCode: 1,
                 cwd: input.cwd,
+                message: stream.turnFailedMessage ?? "Codex turn.failed",
                 ...(stream.threadId !== undefined
                   ? { sessionId: stream.threadId }
                   : input.sessionId !== undefined

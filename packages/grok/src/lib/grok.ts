@@ -166,10 +166,13 @@ export class Grok {
                   stream = foldGrokStreamLine(stream, line)
 
                   if (stream.errorMessage !== undefined) {
-                    return {}
+                    return { errorMessage: stream.errorMessage }
                   }
                   if (stream.maxTurnsReached) {
-                    return {}
+                    return {
+                      errorMessage:
+                        "Grok Build reached the maximum number of turns",
+                    }
                   }
                   if (stream.endSeen && isSuccessfulGrokEnd(stream)) {
                     const endSessionId = stream.endSessionId ?? input.sessionId
@@ -194,6 +197,7 @@ export class Grok {
                   exitCode: 1,
                   cwd: input.cwd,
                   sessionId: input.sessionId,
+                  message: stream.errorMessage,
                 })
               }
               if (stream.maxTurnsReached) {
@@ -201,6 +205,7 @@ export class Grok {
                   exitCode: 1,
                   cwd: input.cwd,
                   sessionId: input.sessionId,
+                  message: "Grok Build reached the maximum number of turns",
                 })
               }
               if (!stream.endSeen || !isSuccessfulGrokEnd(stream)) {

@@ -59,7 +59,9 @@ const linkFromValue = (value: unknown): CauseChainLink | null => {
   // Effect TimeoutError has no numeric/string code field; treat the tag as the
   // machine-readable discriminator so logs and Step Runs can group timeouts.
   const code =
-    readCode(record.code) ?? (name === "TimeoutError" ? "TIMEOUT" : undefined)
+    readCode(record.code) ??
+    readCode(record.exitCode) ??
+    (name === "TimeoutError" ? "TIMEOUT" : undefined)
   const rawMessage = readString(record.message)
   const message =
     rawMessage === undefined
