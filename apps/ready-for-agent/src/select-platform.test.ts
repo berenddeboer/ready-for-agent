@@ -7,6 +7,7 @@ import {
   SUPPORTED_PLATFORM_KEYS,
   WINDOWS_BINARY_RELATIVE_PATH,
   binaryRelativePathFor,
+  binarySpawnFailureMessage,
   bunCompileTarget,
   selectPlatformPackage,
   unsupportedPlatformMessage,
@@ -141,8 +142,8 @@ describe("selectPlatformPackage", () => {
     )
   })
 
-  test("bun compile targets map 1:1 for supported platforms", () => {
-    expect(bunCompileTarget("linux-x64")).toBe("bun-linux-x64")
+  test("bun compile targets map supported platforms", () => {
+    expect(bunCompileTarget("linux-x64")).toBe("bun-linux-x64-baseline")
     expect(bunCompileTarget("linux-arm64")).toBe("bun-linux-arm64")
     expect(bunCompileTarget("darwin-x64")).toBe("bun-darwin-x64")
     expect(bunCompileTarget("darwin-arm64")).toBe("bun-darwin-arm64")
@@ -150,9 +151,48 @@ describe("selectPlatformPackage", () => {
     expect(bunCompileTarget("win32-arm64")).toBe("bun-windows-arm64")
   })
 
+  test("binarySpawnFailureMessage names SIGILL and the linux-x64 baseline target", () => {
+    const message = binarySpawnFailureMessage({
+      error: undefined,
+      signal: "SIGILL",
+      status: null,
+    })
+    expect(message).toContain("SIGILL")
+    expect(message).toContain("bun-linux-x64-baseline")
+    expect(message).toContain("Haswell")
+  })
+
+  test("binarySpawnFailureMessage prefers spawn error text over signal", () => {
+    expect(
+      binarySpawnFailureMessage({
+        error: new Error("spawn EACCES"),
+        signal: null,
+        status: null,
+      }),
+    ).toBe("spawn EACCES")
+  })
+
+  test("binarySpawnFailureMessage is silent on a normal exit", () => {
+    expect(
+      binarySpawnFailureMessage({
+        error: undefined,
+        signal: null,
+        status: 2,
+      }),
+    ).toBeUndefined()
+    expect(
+      binarySpawnFailureMessage({
+        error: undefined,
+        signal: "SIGTERM",
+        status: null,
+      }),
+    ).toBeUndefined()
+  })
+
   test("launcher bin imports the shared select-platform pure seam", () => {
     expect(launcherSource).toContain('from "./select-platform.js"')
     expect(launcherSource).toContain("selectPlatformPackage")
+    expect(launcherSource).toContain("binarySpawnFailureMessage")
     for (const name of Object.values(PLATFORM_PACKAGE_NAMES)) {
       expect(Object.values(PLATFORM_PACKAGE_NAMES)).toContain(name)
     }

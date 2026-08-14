@@ -132,7 +132,7 @@ export const unsupportedPlatformMessage = (platform, arch) => {
 export const bunCompileTarget = (platformKey) => {
   switch (platformKey) {
     case "linux-x64":
-      return "bun-linux-x64"
+      return "bun-linux-x64-baseline"
     case "linux-arm64":
       return "bun-linux-arm64"
     case "darwin-x64":
@@ -148,4 +148,31 @@ export const bunCompileTarget = (platformKey) => {
       return _exhaustive
     }
   }
+}
+
+/**
+ * Operator-facing error when the compiled binary dies before the Harness
+ * starts. SIGILL is the published-binary failure on pre-Haswell x64 CPUs.
+ *
+ * @param {{
+ *   error?: Error | null
+ *   signal?: NodeJS.Signals | string | null
+ *   status?: number | null
+ * }} result
+ * @returns {string | undefined}
+ */
+export const binarySpawnFailureMessage = (result) => {
+  if (result.error !== undefined && result.error !== null) {
+    return result.error.message
+  }
+  if (result.signal === "SIGILL") {
+    return (
+      "The ready-for-agent platform binary died with SIGILL (illegal instruction). " +
+      "This CPU lacks AVX2/BMI2 (Haswell, 2013+). Linux x64 releases are compiled " +
+      "with bun-linux-x64-baseline for pre-Haswell hosts. Reinstall " +
+      "ready-for-agent@latest, or in a monorepo checkout run: bunx nx run " +
+      "ready-for-agent:compile"
+    )
+  }
+  return undefined
 }
