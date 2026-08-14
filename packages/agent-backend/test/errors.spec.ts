@@ -1,4 +1,5 @@
 import { AgentBackendExitError } from "../src/lib/errors.js"
+import { sanitizeAgentBackendStderrTail } from "../src/lib/sanitize-exit-message.js"
 import { describe, expect, it } from "bun:test"
 
 describe("AgentBackendExitError message", () => {
@@ -34,5 +35,19 @@ describe("AgentBackendExitError message", () => {
     expect(error.message).not.toContain(secret)
     expect(error.message).not.toMatch(/ghp_[A-Za-z0-9]+/)
     expect(error.message).toContain("[redacted]")
+  })
+})
+
+describe("sanitizeAgentBackendStderrTail", () => {
+  it("redacts a token that straddles the message-length cut", () => {
+    const secret = "ghp_this_must_never_appear_in_exit_message"
+    const text = `${"0".repeat(100)} ${secret} ${"1".repeat(470)}`
+    const tail = sanitizeAgentBackendStderrTail(text)
+    expect(tail).toBeDefined()
+    expect(tail).toContain("[redacted]")
+    expect(tail).not.toContain(secret)
+    expect(tail).not.toMatch(/ghp_[A-Za-z0-9_]+/)
+    expect(tail?.includes("this_must_never")).toBe(false)
+    expect(tail?.length).toBeLessThanOrEqual(500)
   })
 })

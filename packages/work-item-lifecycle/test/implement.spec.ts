@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Fiber, Layer } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
 import {
   type ActiveAgentBackend,
@@ -11,9 +12,12 @@ import {
   AgentBackendSessionIdMissingError,
   AgentBackendTimeoutError,
   type StartInput,
+  runCliTurn,
+  sanitizeInheritedEnvironment,
 } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
+import { extractCauseChain } from "@ready-for-agent/github-service"
 import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
@@ -560,6 +564,64 @@ describe("implement", () => {
       )
       expect(error).toBeInstanceOf(ImplementOpenCodeError)
       expect((error as ImplementOpenCodeError).worktreePath).toBe(root)
+    }))
+
+  it("surfaces a stderr-only Agent Turn failure in the cause chain", () =>
+    withTemp(async (root) => {
+      const binary = join(root, "fake-cli")
+      await writeFile(
+        binary,
+        "#!/bin/sh\nprintf 'Error: Token has expired and refresh failed\\n' >&2\nexit 1\n",
+      )
+      await chmod(binary, 0o700)
+
+      const error = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          return yield* implement(
+            baseContext(root, { repositoryId: repository.id }),
+          )
+        }).pipe(Effect.flip),
+        Layer.effect(
+          AgentBackend,
+          Effect.gen(function* () {
+            const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+            return AgentBackend.of({
+              startTurn: (input) =>
+                runCliTurn({
+                  spawner,
+                  backend: { id: "opencode", label: "OpenCode" },
+                  binary,
+                  args: [],
+                  cwd: input.cwd,
+                  env: sanitizeInheritedEnvironment(),
+                  timeout: Duration.seconds(5),
+                  parseLine: () => ({}),
+                }),
+              continueTurn: () =>
+                Effect.succeed({ sessionId: "unused", assistantText: "" }),
+              inspect: () =>
+                Effect.succeed({
+                  backend: { id: "opencode" as const, label: "OpenCode" },
+                  models: [],
+                }),
+            })
+          }),
+        ).pipe(Layer.provide(PlatformLayer)),
+      )
+
+      expect(error).toBeInstanceOf(ImplementOpenCodeError)
+      expect(extractCauseChain(error)).toEqual([
+        {
+          name: "ImplementOpenCodeError",
+          message: "OpenCode failed to implement the Work Item issue",
+        },
+        {
+          name: "AgentBackendExitError",
+          code: "1",
+          message: "Error: Token has expired and refresh failed",
+        },
+      ])
     }))
 
   it("maps OpenCode timeout failure", () =>

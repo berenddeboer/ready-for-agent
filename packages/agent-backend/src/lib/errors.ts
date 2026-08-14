@@ -71,8 +71,8 @@ export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendE
      * Best available human-readable reason. Optionality is transitional,
      * not a design preference: a messageless exit error is the defect this
      * field exists to remove. Flip to required in #1066 once every caller
-     * supplies a reason (blocked on stderr capture for the shared CLI turn
-     * runner).
+     * supplies a reason, including silent non-zero exits with no parsed
+     * reason and no stderr tail.
      */
     message: Schema.optionalKey(Schema.String),
   },
