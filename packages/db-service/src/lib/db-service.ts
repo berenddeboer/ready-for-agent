@@ -177,11 +177,25 @@ const normalizeOptionalConfigSetting = (
 }
 
 /**
- * Unfinished Work Items block backend changes (includes Needs Human, paused,
- * Waiting for Worker Slot). Terminal complete/failed/abandoned do not.
+ * Unfinished Work Items include Needs Human, paused, and Waiting for Worker
+ * Slot. Terminal complete/failed/abandoned do not.
  */
 const isUnfinishedStateSql = (column = "state") =>
   `${column} NOT IN ('complete', 'failed', 'abandoned')`
+
+/**
+ * Backend-change gates count only unfinished ordinary Work Items. An Explicit
+ * Work Item Execution Profile is immutable, so those Work Items do not block
+ * Repository or Harness default backend changes.
+ */
+const isSettingsResolvedUnfinishedSql = (tableAlias?: string) => {
+  const stateColumn = tableAlias === undefined ? "state" : `${tableAlias}.state`
+  const profileColumn =
+    tableAlias === undefined
+      ? "execution_profile_present"
+      : `${tableAlias}.execution_profile_present`
+  return `${isUnfinishedStateSql(stateColumn)} AND ${profileColumn} = 0`
+}
 
 /**
  * Normalize a Repository Agent Backend override. Empty/whitespace → null
@@ -340,16 +354,18 @@ export interface DbServiceShape {
    */
   readonly countUnfinishedWorkItems: Effect.Effect<number, DatabaseError>
   /**
-   * Unfinished Work Items on Repositories that inherit the harness default
-   * (override is null). Blocks changing Config.selectedAgentBackend when > 0.
+   * Unfinished ordinary Work Items on Repositories that inherit the harness
+   * default (override is null). Explicit-profile Work Items are excluded.
+   * Blocks changing Config.selectedAgentBackend when > 0.
    */
   readonly countBlockingUnfinishedForGlobalDefault: Effect.Effect<
     number,
     DatabaseError
   >
   /**
-   * Unfinished Work Items on one Repository. Blocks changing that Repository's
-   * Agent Backend override when > 0.
+   * Unfinished ordinary Work Items on one Repository. Explicit-profile Work
+   * Items are excluded. Blocks changing that Repository's Agent Backend
+   * override when > 0.
    */
   readonly countBlockingUnfinishedForRepository: (
     repositoryId: string,
@@ -560,8 +576,8 @@ export const DbServiceLive = Layer.effect(
       }).pipe(Effect.withSpan("DbService.countUnfinishedWorkItems"))
 
     /**
-     * Unfinished Work Items on Repositories that inherit the harness default
-     * (override is null). These alone block changing the global default.
+     * Unfinished ordinary Work Items on Repositories that inherit the harness
+     * default (override is null). Explicit-profile Work Items do not block.
      */
     const countBlockingUnfinishedForGlobalDefault: Effect.Effect<
       number,
@@ -572,7 +588,7 @@ export const DbServiceLive = Layer.effect(
           `SELECT COUNT(*) AS count
              FROM work_item wi
              INNER JOIN repository r ON r.id = wi.repository_id
-             WHERE ${isUnfinishedStateSql("wi.state")}
+             WHERE ${isSettingsResolvedUnfinishedSql("wi")}
                AND r.selected_agent_backend IS NULL`,
         )
         .pipe(Effect.mapError(toDatabaseError))) as readonly {
@@ -584,7 +600,8 @@ export const DbServiceLive = Layer.effect(
     )
 
     /**
-     * Unfinished Work Items on one Repository (blocks that repo's override change).
+     * Unfinished ordinary Work Items on one Repository (blocks that repo's
+     * override change). Explicit-profile Work Items do not block.
      */
     const countBlockingUnfinishedForRepository = (
       repositoryId: string,
@@ -594,7 +611,7 @@ export const DbServiceLive = Layer.effect(
           .unsafe(
             `SELECT COUNT(*) AS count FROM work_item
              WHERE repository_id = ?
-               AND ${isUnfinishedStateSql()}`,
+               AND ${isSettingsResolvedUnfinishedSql()}`,
             [repositoryId],
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly {
@@ -837,8 +854,8 @@ export const DbServiceLive = Layer.effect(
             const changing =
               selectedAgentBackend !== latest.selectedAgentBackend
             if (changing) {
-              // Gate on inheriting repos only. Explicit-override WIP does not
-              // block the harness default change.
+              // Gate on ordinary inheriting WIP only. Explicit-override WIP
+              // and explicit-profile Work Items do not block this change.
               const count = yield* countBlockingUnfinishedForGlobalDefault
               if (count > 0) {
                 return yield* new AgentBackendChangeBlockedError({

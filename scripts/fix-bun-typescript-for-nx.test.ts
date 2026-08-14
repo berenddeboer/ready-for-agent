@@ -36,6 +36,7 @@ describe("fix-bun-typescript-for-nx", () => {
   it("runs from the pre-commit Nx steps so typescript-sync sees classic TypeScript", () => {
     const hk = readFileSync(join(workspaceRoot, "hk.pkl"), "utf8")
     const shim = "node scripts/fix-bun-typescript-for-nx.mjs"
-    expect(hk.split(shim).length - 1).toBe(2)
+    // bun-lockfile (prepare is skipped), nx-lint-fix, and nx-affected.
+    expect(hk.split(shim).length - 1).toBe(3)
   })
 })

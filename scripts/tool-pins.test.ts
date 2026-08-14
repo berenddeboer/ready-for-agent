@@ -62,6 +62,11 @@ describe("contributor environment pins", () => {
     )
   })
 
+  it("re-applies the nested TypeScript shim after the lockfile-only hook step", () => {
+    expect(hkPkl).toContain("scripts/fix-bun-typescript-for-nx.mjs")
+    expect(hkPkl).toContain("export NX_DAEMON=false")
+  })
+
   it("declares bootstrap as bun install and setup-e2e as Harness Playwright Chromium", () => {
     const bootstrap = tomlTable(miseToml, "tasks.bootstrap")
     expect(bootstrap).toBeDefined()

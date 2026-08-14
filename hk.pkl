@@ -20,7 +20,12 @@ esac
       }
       ["bun-lockfile"] {
         depends = "descriptive-branch"
-        check = "bun install --frozen-lockfile --lockfile-only --silent --minimum-release-age 0"
+        // lockfile-only does not run prepare, so re-apply the nested TypeScript
+        // shim that Nx needs (readConfigFile + lib/version.cjs).
+        check = #"""
+bun install --frozen-lockfile --lockfile-only --silent --minimum-release-age 0
+node scripts/fix-bun-typescript-for-nx.mjs
+"""#
       }
       ["biome-json"] {
         depends = "bun-lockfile"
@@ -38,7 +43,9 @@ esac
         fix = #"""
 node scripts/fix-bun-typescript-for-nx.mjs
 unset $(git rev-parse --local-env-vars)
-for v in $(printenv | cut -d= -f1 | grep '^NX_'); do unset "$v"; done
+for v in $(printenv | cut -d= -f1 | grep '^NX_' || true); do unset "$v"; done
+export NX_DAEMON=false
+export NX_WORKSPACE_ROOT="$(git rev-parse --show-toplevel)"
 bunx nx affected -t lint --fix --batch --excludeTaskDependencies
 """#
       }
@@ -47,7 +54,9 @@ bunx nx affected -t lint --fix --batch --excludeTaskDependencies
         check = #"""
 node scripts/fix-bun-typescript-for-nx.mjs
 unset $(git rev-parse --local-env-vars)
-for v in $(printenv | cut -d= -f1 | grep '^NX_'); do unset "$v"; done
+for v in $(printenv | cut -d= -f1 | grep '^NX_' || true); do unset "$v"; done
+export NX_DAEMON=false
+export NX_WORKSPACE_ROOT="$(git rev-parse --show-toplevel)"
 bunx nx affected -t lint,typecheck,test --batch
 """#
       }

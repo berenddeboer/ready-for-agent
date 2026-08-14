@@ -18,6 +18,10 @@ describe("Harness settings Agent Backend change", () => {
     expect(source).toContain("harnessModelPrefs")
     expect(source).toContain("blockingUnfinishedWorkItemCount")
     expect(source).toContain("backendChangeBlocked")
+    expect(source).toContain(
+      "on Repositories inheriting the harness default — finish or abandon them before changing the default Agent Backend.",
+    )
+    expect(source).toContain("unfinished fleet-wide.")
     expect(source).toContain("Activates immediately on Save")
     expect(source).not.toContain("Cleared — choose after restart")
     expect(source).not.toContain("Takes effect after restart")
