@@ -132,7 +132,7 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
     )
   })
 
-  it("maps non-zero login status without auth markers to config error with probe text", async () => {
+  it("maps non-zero login status without auth markers to exit failure with probe text", async () => {
     await withExecutable(
       [
         'case " $* " in *" login status "*) ;; *) exit 20 ;; esac',
@@ -141,11 +141,10 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
       ].join("\n"),
       async (binary) => {
         const error = await Effect.runPromise(inspect(binary).pipe(Effect.flip))
-        expect(error).toBeInstanceOf(AgentBackendConfigError)
-        if (error instanceof AgentBackendConfigError) {
-          expect(error.message).toContain("exit 7")
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.exitCode).toBe(7)
           expect(error.message).toContain("internal crash")
-          expect(error.message).not.toBe(CODEX_UNAUTHENTICATED_MESSAGE)
         }
       },
     )
@@ -397,6 +396,7 @@ describe("Codex AgentBackend adapter (Agent Turns)", () => {
       [
         `printf '%s\\n' '{"type":"thread.started","thread_id":"fail-thread"}'`,
         `printf '%s\\n' '{"type":"turn.failed","error":{"message":"boom"}}'`,
+        "exit 1",
       ].join("\n"),
       async (binary) => {
         const error = await Effect.runPromise(
@@ -405,6 +405,7 @@ describe("Codex AgentBackend adapter (Agent Turns)", () => {
         expect(error).toBeInstanceOf(AgentBackendExitError)
         if (error instanceof AgentBackendExitError) {
           expect(error.exitCode).toBe(1)
+          expect(error.message).toBe("boom")
           expect(error.sessionId).toBe("fail-thread")
         }
       },

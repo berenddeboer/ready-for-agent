@@ -838,6 +838,7 @@ describe("Claude AgentBackend adapter (Agent Turns)", () => {
       [
         captureSessionScript,
         `printf '%s\\n' "{\\"type\\":\\"result\\",\\"subtype\\":\\"error\\",\\"session_id\\":\\"$sid\\",\\"is_error\\":true,\\"error\\":\\"boom\\"}"`,
+        "exit 1",
       ].join("\n"),
       async (binary) => {
         const error = await Effect.runPromise(
@@ -846,6 +847,7 @@ describe("Claude AgentBackend adapter (Agent Turns)", () => {
         expect(error).toBeInstanceOf(AgentBackendExitError)
         if (error instanceof AgentBackendExitError) {
           expect(error.exitCode).toBe(1)
+          expect(error.message).toBe("boom")
           expect(error.sessionId).toMatch(
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
           )

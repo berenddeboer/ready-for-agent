@@ -705,7 +705,7 @@ exit 1
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
             continueTurn: () =>
               Effect.fail(
-                new AgentBackendExitError({ exitCode: 2, cwd: root }),
+                AgentBackendExitError.new({ exitCode: 2, cwd: root }),
               ),
             inspect: () =>
               Effect.succeed({

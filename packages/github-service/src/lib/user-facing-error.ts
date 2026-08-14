@@ -26,6 +26,9 @@ const extractMessageFromInspectDump = (text: string): string | undefined => {
   return undefined
 }
 
+const TOKEN_SHAPED_RE =
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b|\bglpat-[A-Za-z0-9_-]{20,}\b|\bsk-ant-[A-Za-z0-9_-]{16,}\b|\bsk-[A-Za-z0-9]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi
+
 export const sanitizeUserFacingText = (
   text: string,
   maxLength?: number,
@@ -35,6 +38,7 @@ export const sanitizeUserFacingText = (
   if (extracted !== undefined) {
     cleaned = extracted.trim()
   }
+  cleaned = cleaned.replace(TOKEN_SHAPED_RE, "[redacted]")
   if (maxLength !== undefined) {
     cleaned = cleaned.slice(0, maxLength)
   }

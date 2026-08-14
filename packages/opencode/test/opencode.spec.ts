@@ -188,7 +188,7 @@ describe("Opencode AgentBackend adapter", () => {
           startTurn(binary, "2 seconds").pipe(Effect.flip),
         )
         expect(error).toEqual(
-          new AgentBackendExitError({
+          AgentBackendExitError.new({
             exitCode: 7,
             cwd: process.cwd(),
             sessionId: "ses_failed",
@@ -210,7 +210,7 @@ describe("Opencode AgentBackend adapter", () => {
           startTurn(binary, "2 seconds").pipe(Effect.flip),
         )
         expect(error).toEqual(
-          new AgentBackendExitError({
+          AgentBackendExitError.new({
             exitCode: 1,
             cwd: process.cwd(),
             sessionId: "ses_retry",
@@ -233,7 +233,7 @@ describe("Opencode AgentBackend adapter", () => {
           startTurn(binary, "2 seconds").pipe(Effect.flip),
         )
         expect(error).toEqual(
-          new AgentBackendExitError({
+          AgentBackendExitError.new({
             exitCode: 1,
             cwd: process.cwd(),
             sessionId: "ses_length",
@@ -256,7 +256,7 @@ describe("Opencode AgentBackend adapter", () => {
           startTurn(binary, "2 seconds").pipe(Effect.flip),
         )
         expect(error).toEqual(
-          new AgentBackendExitError({
+          AgentBackendExitError.new({
             exitCode: 1,
             cwd: process.cwd(),
             sessionId: "ses_auth",
@@ -279,7 +279,7 @@ describe("Opencode AgentBackend adapter", () => {
           startTurn(binary, "2 seconds").pipe(Effect.flip),
         )
         expect(error).toEqual(
-          new AgentBackendExitError({
+          AgentBackendExitError.new({
             exitCode: 1,
             cwd: process.cwd(),
             sessionId: "ses_unknown",

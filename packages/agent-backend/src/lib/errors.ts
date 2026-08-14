@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { sanitizeAgentBackendExitMessage } from "./sanitize-exit-message.js"
 
 const AgentBackendProviderSchema = Schema.Struct({
   id: Schema.String,
@@ -40,6 +41,18 @@ export class AgentBackendConfigError extends Schema.TaggedErrorClass<AgentBacken
   },
 ) {}
 
+type AgentBackendExitErrorProps = {
+  readonly exitCode: number
+  readonly cwd: string
+  readonly sessionId?: string
+  readonly classification?: AgentBackendErrorClassification
+  /**
+   * Best available human-readable reason. Optional is transitional — a
+   * messageless exit error is not a legitimate constructed value. See #1066.
+   */
+  readonly message?: string
+}
+
 export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendExitError>()(
   "AgentBackendExitError",
   {
@@ -54,8 +67,35 @@ export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendE
      * behavior) or an unrecognized error payload.
      */
     classification: Schema.optionalKey(AgentBackendErrorClassification),
+    /**
+     * Best available human-readable reason. Optionality is transitional,
+     * not a design preference: a messageless exit error is the defect this
+     * field exists to remove. Flip to required in #1066 once every caller
+     * supplies a reason (blocked on stderr capture for the shared CLI turn
+     * runner).
+     */
+    message: Schema.optionalKey(Schema.String),
   },
-) {}
+) {
+  /** Sanitize the operator-visible reason before the Schema constructor. */
+  static new(props: AgentBackendExitErrorProps): AgentBackendExitError {
+    const sanitized =
+      props.message === undefined
+        ? undefined
+        : sanitizeAgentBackendExitMessage(props.message)
+    return new AgentBackendExitError({
+      exitCode: props.exitCode,
+      cwd: props.cwd,
+      ...(props.sessionId !== undefined ? { sessionId: props.sessionId } : {}),
+      ...(props.classification !== undefined
+        ? { classification: props.classification }
+        : {}),
+      ...(sanitized !== undefined && sanitized.length > 0
+        ? { message: sanitized }
+        : {}),
+    })
+  }
+}
 
 export class AgentBackendTimeoutError extends Schema.TaggedErrorClass<AgentBackendTimeoutError>()(
   "AgentBackendTimeoutError",

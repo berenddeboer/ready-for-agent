@@ -248,6 +248,8 @@ export class Claude {
                 if (stream.resultSeen && stream.isError) {
                   return {
                     sessionId: stream.sessionId ?? input.sessionId,
+                    errorMessage:
+                      stream.errorMessage ?? "Claude Code turn failed",
                   }
                 }
                 if (stream.resultSeen && isSuccessfulClaudeTurn(stream)) {
@@ -276,10 +278,11 @@ export class Claude {
                 sessionId: input.sessionId,
                 message: stream.errorMessage ?? "Claude Code turn failed",
               })
-              return yield* new AgentBackendExitError({
+              return yield* AgentBackendExitError.new({
                 exitCode: 1,
                 cwd: input.cwd,
                 sessionId: input.sessionId,
+                message: stream.errorMessage ?? "Claude Code turn failed",
               })
             }
             if (!stream.resultSeen || !isSuccessfulClaudeTurn(stream)) {

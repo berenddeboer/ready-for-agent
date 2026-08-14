@@ -343,18 +343,44 @@ describe("Grok AgentBackend adapter", () => {
     )
   })
 
-  it("maps max-turn exhaustion to exit failure", async () => {
+  it("maps stream error events to exit failure with the reported reason", async () => {
     await withExecutable(
       [
         captureSessionScript,
-        `printf '%s\\n' '{"type":"max_turns_reached"}'`,
-        `printf '%s\\n' "{\\"type\\":\\"end\\",\\"stopReason\\":\\"MaxTurns\\",\\"sessionId\\":\\"$sid\\"}"`,
+        `printf '%s\\n' '{"type":"error","message":"auth failed"}'`,
+        `printf '%s\\n' "{\\"type\\":\\"end\\",\\"stopReason\\":\\"EndTurn\\",\\"sessionId\\":\\"$sid\\"}"`,
+        "exit 1",
       ].join("\n"),
       async (binary) => {
         const error = await Effect.runPromise(
           startTurn(binary, "2 seconds").pipe(Effect.flip),
         )
         expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.exitCode).toBe(1)
+          expect(error.message).toBe("auth failed")
+        }
+      },
+    )
+  })
+
+  it("maps max-turn exhaustion to exit failure", async () => {
+    await withExecutable(
+      [
+        captureSessionScript,
+        `printf '%s\\n' '{"type":"max_turns_reached"}'`,
+        `printf '%s\\n' "{\\"type\\":\\"end\\",\\"stopReason\\":\\"MaxTurns\\",\\"sessionId\\":\\"$sid\\"}"`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.exitCode).toBe(1)
+          expect(error.message).toContain("maximum number of turns")
+        }
       },
     )
   })

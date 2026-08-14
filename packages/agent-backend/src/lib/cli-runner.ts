@@ -25,6 +25,16 @@ import type { AgentBackendDescriptor, OnSessionId } from "./types.js"
 /** Graceful terminate then force-kill bound for the Agent Turn process tree. */
 export const DEFAULT_FORCE_KILL_AFTER = Duration.seconds(2)
 
+const capturedCliOutputMessage = (
+  stdout: string,
+  stderr: string,
+): string | undefined => {
+  const parts = [stdout, stderr]
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+  return parts.length > 0 ? parts.join("\n") : undefined
+}
+
 /**
  * Window from spawn to the first stdout output of an Agent Turn. A CLI that
  * crashes or hangs before emitting anything otherwise burns the whole turn
@@ -56,6 +66,13 @@ export type CliLineEvent = {
    * on to exit non-zero.
    */
   readonly errorClassification?: AgentBackendErrorClassification
+  /**
+   * Human-readable reason already parsed from the stream (e.g. Claude
+   * `is_error`, Codex `turn.failed`). Sticky like classification: once
+   * observed, it becomes AgentBackendExitError.message on a non-zero exit
+   * so the adapter does not have to run after the CLI dies.
+   */
+  readonly errorMessage?: string
 }
 
 export type RunCliCaptureInput = {
@@ -240,9 +257,11 @@ export const runCliCapture = (
     )
 
     if (result.exitCode !== 0 && input.allowNonZeroExit !== true) {
-      return yield* new AgentBackendExitError({
+      const message = capturedCliOutputMessage(result.stdout, result.stderr)
+      return yield* AgentBackendExitError.new({
         exitCode: result.exitCode,
         cwd: input.cwd,
+        ...(message !== undefined ? { message } : {}),
       })
     }
 
@@ -345,6 +364,7 @@ export const runCliTurn = (
               assistantText: string
               finalized: boolean
               errorClassification?: AgentBackendErrorClassification
+              errorMessage?: string
             } => ({
               assistantText: "",
               finalized: false,
@@ -359,6 +379,7 @@ export const runCliTurn = (
                 const sessionId = event.sessionId ?? acc.sessionId
                 const errorClassification =
                   event.errorClassification ?? acc.errorClassification
+                const errorMessage = event.errorMessage ?? acc.errorMessage
                 if (event.sessionId !== undefined) {
                   yield* Ref.set(seenSessionId, event.sessionId)
                   const alreadyNotified = yield* Ref.getAndSet(
@@ -400,6 +421,7 @@ export const runCliTurn = (
                     ...(errorClassification !== undefined
                       ? { errorClassification }
                       : {}),
+                    ...(errorMessage !== undefined ? { errorMessage } : {}),
                   }
                 }
 
@@ -415,6 +437,7 @@ export const runCliTurn = (
                   ...(errorClassification !== undefined
                     ? { errorClassification }
                     : {}),
+                  ...(errorMessage !== undefined ? { errorMessage } : {}),
                 }
               }),
           ),
@@ -435,6 +458,7 @@ export const runCliTurn = (
           assistantText: output.assistantText,
           finalized: output.finalized,
           errorClassification: output.errorClassification,
+          errorMessage: output.errorMessage,
         }
       }),
     ).pipe(
@@ -461,12 +485,15 @@ export const runCliTurn = (
       const exitCode = Number(result.exitOutcome.success)
       if (exitCode !== 0) {
         const sessionId = result.sessionId ?? knownSessionId
-        return yield* new AgentBackendExitError({
+        return yield* AgentBackendExitError.new({
           exitCode,
           cwd: input.cwd,
           ...(sessionId !== undefined ? { sessionId } : {}),
           ...(result.errorClassification !== undefined
             ? { classification: result.errorClassification }
+            : {}),
+          ...(result.errorMessage !== undefined
+            ? { message: result.errorMessage }
             : {}),
         })
       }

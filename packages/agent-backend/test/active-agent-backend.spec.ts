@@ -5,6 +5,7 @@ import {
   ActiveAgentBackendLive,
   AgentBackend,
   AgentBackendConfigError,
+  AgentBackendExitError,
   type AgentBackendId,
   type AgentTurnResult,
   type ResolveAgentBackendRuntime,
@@ -488,6 +489,53 @@ describe("ActiveAgentBackend multi-backend registry", () => {
         const statuses = yield* active.listStatuses
         expect(statuses.map((s) => s.backend.id)).toEqual(["opencode"])
         expect(statuses[0]?.models[0]?.id).toBe("opencode/live")
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
+  it("surfaces an inspect exit failure's own message as the Unavailable reason", async () => {
+    const resolveRuntime: ResolveAgentBackendRuntime = (backendId) => {
+      const reg = registration(backendId)
+      return Effect.succeed({
+        registration: reg,
+        adapter: {
+          inspect: () =>
+            Effect.fail(
+              AgentBackendExitError.new({
+                exitCode: 7,
+                cwd: "/tmp",
+                message: "internal crash in login status",
+              }),
+            ),
+          startTurn: () => Effect.succeed(turnResult(`${backendId}-start`)),
+          continueTurn: () =>
+            Effect.succeed(turnResult(`${backendId}-continue`)),
+        },
+        telemetry: {
+          getSession: (sessionId: string) =>
+            Effect.succeed(
+              unsupportedSessionTelemetry(sessionId, reg.descriptor),
+            ),
+        },
+      })
+    }
+
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const status = yield* active.recheck(AGENT_BACKEND_IDS.opencode, {
+          cwd: "/tmp",
+        })
+        expect(status.kind).toBe("unavailable")
+        expect(status.reason).toBe("internal crash in login status")
+        expect(status.reason).not.toBe(
+          "Agent Backend inspection failed (AgentBackendExitError)",
+        )
       }).pipe(Effect.provide(layer)),
     )
   })
