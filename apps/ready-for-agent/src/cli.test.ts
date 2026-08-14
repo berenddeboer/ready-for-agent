@@ -1446,19 +1446,36 @@ describe("operator binary jump command", () => {
         const expected = {
           opencode: {
             executable: "/usr/bin/opencode",
-            arguments: [worktree, "--session", sessionId],
+            arguments: [worktree, "--session", sessionId, "--auto"],
           },
           grok: {
             executable: "/usr/bin/grok",
-            arguments: ["--cwd", worktree, "--resume", sessionId],
+            arguments: [
+              "--cwd",
+              worktree,
+              "--resume",
+              sessionId,
+              "--permission-mode",
+              "bypassPermissions",
+            ],
           },
           codex: {
             executable: "/usr/bin/codex",
-            arguments: ["resume", "-C", worktree, sessionId],
+            arguments: [
+              "resume",
+              "--dangerously-bypass-approvals-and-sandbox",
+              "-C",
+              worktree,
+              sessionId,
+            ],
           },
           claude: {
             executable: "/usr/bin/claude",
-            arguments: ["--resume", sessionId],
+            arguments: [
+              "--resume",
+              sessionId,
+              "--dangerously-skip-permissions",
+            ],
           },
         } as const
 
@@ -1516,6 +1533,7 @@ describe("operator binary jump command", () => {
         process.cwd(),
         "--session",
         sessionId,
+        "--auto",
       ])
     }),
   )
@@ -1543,7 +1561,12 @@ describe("operator binary jump command", () => {
     sessionId,
     workingDirectory: "/tmp/rfa-jump-worktree",
     agentExecutable: "/usr/bin/opencode",
-    agentArguments: ["/tmp/rfa-jump-worktree", "--session", sessionId],
+    agentArguments: [
+      "/tmp/rfa-jump-worktree",
+      "--session",
+      sessionId,
+      "--auto",
+    ],
     backendId: "opencode",
   } as const
 
@@ -1882,7 +1905,11 @@ describe("operator binary jump command", () => {
           ...jumpInput,
           backendId: "claude",
           agentExecutable: "/usr/bin/claude",
-          agentArguments: ["--resume", sessionId],
+          agentArguments: [
+            "--resume",
+            sessionId,
+            "--dangerously-skip-permissions",
+          ],
         })
         const created = tmux.invocations.find((args) =>
           args.includes("new-window"),

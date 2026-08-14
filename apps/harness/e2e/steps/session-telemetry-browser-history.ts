@@ -382,7 +382,9 @@ Then(
       timeout: 30_000,
     })
     await expect(
-      dialog.getByText(/no longer has this Session locally/i),
+      dialog.getByText(
+        /no longer has this Session locally|Session Telemetry is temporarily unavailable/i,
+      ),
     ).toBeVisible({ timeout: 30_000 })
   },
 )

@@ -1,6 +1,13 @@
 import { type ChildProcess, spawn } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { homedir, tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { selectPlatformPackage } from "../bin/select-platform.js"
@@ -31,6 +38,38 @@ const binaryPath = hostSelection.ok
   : ""
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
+ * Workspace-pinned Bun from mise.toml. Do not call `mise which`: pre-commit
+ * often has an untrusted mise.toml and then falls back to a PATH canary that
+ * cannot download bun-linux-x64-baseline.
+ */
+const workspaceBun = (): string => {
+  let text = ""
+  try {
+    text = readFileSync(join(workspaceRoot, "mise.toml"), "utf8")
+  } catch {
+    return process.execPath
+  }
+  const version = /^bun\s*=\s*"([^"]+)"/m.exec(text)?.[1]
+  if (version === undefined || version.length === 0) {
+    return process.execPath
+  }
+  const dataDirs = [
+    process.env.MISE_DATA_DIR,
+    join(homedir(), ".local/share/mise"),
+  ]
+  for (const dataDir of dataDirs) {
+    if (dataDir === undefined || dataDir.length === 0) {
+      continue
+    }
+    const candidate = join(dataDir, "installs", "bun", version, "bin", "bun")
+    if (existsSync(candidate)) {
+      return candidate
+    }
+  }
+  return process.execPath
+}
 
 const waitForHttp = async (
   url: string,
@@ -96,7 +135,7 @@ describe("compiled host binary ambient-auth smoke", () => {
     // `ready-for-agent:test` already depends on generate-embed / graphql generate.
     const compile = Bun.spawnSync(
       [
-        "bun",
+        workspaceBun(),
         "--conditions",
         "@ready-for-agent/source",
         join(appRoot, "scripts/compile-platform-binary.ts"),

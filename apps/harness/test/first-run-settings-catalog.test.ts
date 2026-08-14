@@ -1,5 +1,6 @@
 import {
   preferredFirstRunBackendIds,
+  resolveClaudePreviewCatalog,
   resolveDefaultBuildModelFromCatalog,
 } from "../e2e/support/first-run-settings.ts"
 import { describe, expect, test } from "bun:test"
@@ -45,6 +46,22 @@ describe("resolveDefaultBuildModelFromCatalog", () => {
         models: [{ id: "" }],
       }),
     ).toEqual({ kind: "empty-catalog" })
+  })
+})
+
+describe("resolveClaudePreviewCatalog", () => {
+  test("picks the first Claude preview model when the selected catalog is empty", () => {
+    expect(
+      resolveClaudePreviewCatalog({
+        models: [{ id: "haiku" }, { id: "sonnet" }],
+      }),
+    ).toEqual({ kind: "configure", modelId: "haiku" })
+  })
+
+  test("reports empty when the Claude preview also has no models", () => {
+    expect(resolveClaudePreviewCatalog({ models: [] })).toEqual({
+      kind: "empty-catalog",
+    })
   })
 })
 

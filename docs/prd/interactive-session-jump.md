@@ -35,16 +35,18 @@ This is an Interactive Session Continuation, not an Agent Turn or Lifecycle Step
 
 ## Interactive Backend Commands
 
-The agent process uses the exact, non-forking interactive continuation supported by the captured Agent Backend, anchored to the working directory:
+The agent process uses the exact, non-forking interactive continuation supported by the captured Agent Backend, anchored to the working directory, with that backend's native full permission-bypass mode so tool use does not wait for approval prompts:
 
 ```text
-opencode <dir> --session <session-id>
-grok --cwd <dir> --resume <session-id>
-codex resume -C <dir> <session-id>
-claude --resume <session-id>            # child cwd is <dir>
+opencode <dir> --session <session-id> --auto
+grok --cwd <dir> --resume <session-id> --permission-mode bypassPermissions
+codex resume --dangerously-bypass-approvals-and-sandbox -C <dir> <session-id>
+claude --resume <session-id> --dangerously-skip-permissions            # child cwd is <dir>
 ```
 
 Where `<dir>` is the persisted worktree when it exists, otherwise the CLI process's current directory.
+
+These flags apply only to the launched Interactive Session Continuation. Jump does not write user, Repository, Harness Config, or Agent Backend configuration. Codex uses `--dangerously-bypass-approvals-and-sandbox` (approvals and sandbox together), not a sandbox-only or approval-only override.
 
 These are interactive commands. Existing headless Agent Turn argument builders are not the contract for Jump.
 

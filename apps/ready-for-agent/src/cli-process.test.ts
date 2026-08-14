@@ -1383,6 +1383,7 @@ if (args[0] === "split-window" && args.includes("-P")) {
           worktree,
           "--session",
           jumpSessionId,
+          "--auto",
         ],
         ["set-option", "-w", "-t", "@1", "@rfa-session-id", jumpSessionId],
         ["set-option", "-p", "-t", "%1", "@rfa-agent", "1"],
@@ -1433,6 +1434,7 @@ if (args[0] === "split-window" && args.includes("-P")) {
         claude,
         "--resume",
         jumpSessionId,
+        "--dangerously-skip-permissions",
       ])
       expect(invocations).toContainEqual([
         "split-window",
@@ -1451,8 +1453,27 @@ if (args[0] === "split-window" && args.includes("-P")) {
     const worktree = join(tempRoot, "backend-wt")
     mkdirSync(worktree)
     for (const [backendId, expectedTail] of [
-      ["grok", ["--cwd", worktree, "--resume", jumpSessionId]],
-      ["codex", ["resume", "-C", worktree, jumpSessionId]],
+      [
+        "grok",
+        [
+          "--cwd",
+          worktree,
+          "--resume",
+          jumpSessionId,
+          "--permission-mode",
+          "bypassPermissions",
+        ],
+      ],
+      [
+        "codex",
+        [
+          "resume",
+          "--dangerously-bypass-approvals-and-sandbox",
+          "-C",
+          worktree,
+          jumpSessionId,
+        ],
+      ],
     ] as const) {
       writeFileSync(tmuxLog, "")
       const graphql = await startJumpGraphqlServer({
@@ -1550,6 +1571,7 @@ if (args[0] === "split-window" && args.includes("-P")) {
         worktree,
         "--session",
         jumpSessionId,
+        "--auto",
       ])
       expect(invocations).toContainEqual([
         "set-option",
