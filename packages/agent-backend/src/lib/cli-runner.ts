@@ -18,6 +18,7 @@ import {
   AgentBackendSessionIdMissingError,
   AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
+  formatSilentAgentBackendExitMessage,
 } from "./errors.js"
 import { killProcessTree } from "./kill-process-tree.js"
 import { sanitizeAgentBackendStderrTail } from "./sanitize-exit-message.js"
@@ -249,11 +250,16 @@ export const runCliCapture = (
     )
 
     if (result.exitCode !== 0 && input.allowNonZeroExit !== true) {
-      const message = capturedCliOutputMessage(result.stdout, result.stderr)
+      const message =
+        capturedCliOutputMessage(result.stdout, result.stderr) ??
+        formatSilentAgentBackendExitMessage({
+          backendLabel: input.backend.label,
+          exitCode: result.exitCode,
+        })
       return yield* AgentBackendExitError.new({
         exitCode: result.exitCode,
         cwd: input.cwd,
-        ...(message !== undefined ? { message } : {}),
+        message,
       })
     }
 
@@ -487,15 +493,19 @@ export const runCliTurn = (
         const sessionId = result.sessionId ?? knownSessionId
         const message =
           result.errorMessage ??
-          sanitizeAgentBackendStderrTail(result.stderrTail)
+          sanitizeAgentBackendStderrTail(result.stderrTail) ??
+          formatSilentAgentBackendExitMessage({
+            backendLabel: input.backend.label,
+            exitCode,
+          })
         return yield* AgentBackendExitError.new({
           exitCode,
           cwd: input.cwd,
+          message,
           ...(sessionId !== undefined ? { sessionId } : {}),
           ...(result.errorClassification !== undefined
             ? { classification: result.errorClassification }
             : {}),
-          ...(message !== undefined ? { message } : {}),
         })
       }
     }

@@ -465,6 +465,7 @@ describe("Codex AgentBackend adapter (Agent Turns)", () => {
         expect(error).toBeInstanceOf(AgentBackendExitError)
         if (error instanceof AgentBackendExitError) {
           expect(error.exitCode).toBe(7)
+          expect(error.message).toBe("Codex Build failed with exit code 7")
           expect(error.sessionId).toBe("exit-thread")
         }
       },

@@ -130,7 +130,7 @@ describe("runCliCapture", () => {
     )
   })
 
-  it("maps nonzero exit to AgentBackendExitError", async () => {
+  it("maps a silent nonzero readiness probe to AgentBackendExitError with a backend fallback", async () => {
     await withExecutable("exit 9", async (binary) => {
       const error = await Effect.runPromise(
         withSpawner((spawner) =>
@@ -149,6 +149,7 @@ describe("runCliCapture", () => {
         AgentBackendExitError.new({
           exitCode: 9,
           cwd: process.cwd(),
+          message: "Claude Code failed with exit code 9",
         }),
       )
     })
@@ -491,6 +492,7 @@ describe("runCliTurn", () => {
             cwd: process.cwd(),
             sessionId: "ses_retry",
             classification: "retryable_provider_error",
+            message: "Claude Code failed with exit code 1",
           }),
         )
       },
@@ -553,6 +555,7 @@ describe("runCliTurn", () => {
             exitCode: 1,
             cwd: process.cwd(),
             sessionId: "ses_plain",
+            message: "Claude Code failed with exit code 1",
           }),
         )
       },
@@ -871,7 +874,7 @@ describe("runCliTurn", () => {
     })
   })
 
-  it("reports the exit code when a silent CLI exits before the startup window", async () => {
+  it("reports a backend fallback when a silent CLI exits before the startup window", async () => {
     await withExecutable("exit 7", async (binary) => {
       const error = await Effect.runPromise(
         withSpawner((spawner) =>
@@ -889,7 +892,11 @@ describe("runCliTurn", () => {
         ),
       )
       expect(error).toEqual(
-        AgentBackendExitError.new({ exitCode: 7, cwd: process.cwd() }),
+        AgentBackendExitError.new({
+          exitCode: 7,
+          cwd: process.cwd(),
+          message: "Claude Code failed with exit code 7",
+        }),
       )
     })
   })

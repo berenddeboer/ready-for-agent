@@ -192,6 +192,7 @@ describe("Opencode AgentBackend adapter", () => {
             exitCode: 7,
             cwd: process.cwd(),
             sessionId: "ses_failed",
+            message: "OpenCode failed with exit code 7",
           }),
         )
       },
@@ -215,6 +216,7 @@ describe("Opencode AgentBackend adapter", () => {
             cwd: process.cwd(),
             sessionId: "ses_retry",
             classification: "retryable_provider_error",
+            message: "OpenCode failed with exit code 1",
           }),
         )
       },
@@ -238,6 +240,7 @@ describe("Opencode AgentBackend adapter", () => {
             cwd: process.cwd(),
             sessionId: "ses_length",
             classification: "length_limit_truncation",
+            message: "OpenCode failed with exit code 1",
           }),
         )
       },
@@ -261,6 +264,7 @@ describe("Opencode AgentBackend adapter", () => {
             cwd: process.cwd(),
             sessionId: "ses_auth",
             classification: "terminal_auth_error",
+            message: "OpenCode failed with exit code 1",
           }),
         )
       },
@@ -283,6 +287,7 @@ describe("Opencode AgentBackend adapter", () => {
             exitCode: 1,
             cwd: process.cwd(),
             sessionId: "ses_unknown",
+            message: "OpenCode failed with exit code 1",
           }),
         )
       },

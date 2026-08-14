@@ -1419,6 +1419,7 @@ describe("PR status check steps", () => {
                     AgentBackendExitError.new({
                       exitCode: 1,
                       cwd: "/tmp/worktree",
+                      message: "Grok Build failed with exit code 1",
                     }),
                   ),
                 inspect: () =>

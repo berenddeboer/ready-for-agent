@@ -42,16 +42,21 @@ export class AgentBackendConfigError extends Schema.TaggedErrorClass<AgentBacken
   },
 ) {}
 
+const SILENT_AGENT_BACKEND_LABEL = "Agent Backend"
+
+/** Stable reason when a non-zero exit has no parsed adapter text or stderr. */
+export const formatSilentAgentBackendExitMessage = (input: {
+  readonly backendLabel: string
+  readonly exitCode: number
+}): string => `${input.backendLabel} failed with exit code ${input.exitCode}`
+
 type AgentBackendExitErrorProps = {
   readonly exitCode: number
   readonly cwd: string
   readonly sessionId?: string
   readonly classification?: AgentBackendErrorClassification
-  /**
-   * Best available human-readable reason. Optional is transitional — a
-   * messageless exit error is not a legitimate constructed value. See #1066.
-   */
-  readonly message?: string
+  /** Best available human-readable reason. Always non-empty after `.new()`. */
+  readonly message: string
 }
 
 export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendExitError>()(
@@ -68,24 +73,15 @@ export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendE
      * behavior) or an unrecognized error payload.
      */
     classification: Schema.optionalKey(AgentBackendErrorClassification),
-    /**
-     * Best available human-readable reason. Optionality is transitional,
-     * not a design preference: a messageless exit error is the defect this
-     * field exists to remove. Flip to required in #1066 once every caller
-     * supplies a reason, including silent non-zero exits with no parsed
-     * reason and no stderr tail.
-     */
-    message: Schema.optionalKey(Schema.String),
+    /** Best available human-readable reason. Never empty after construction. */
+    message: Schema.String,
   },
 ) {
   /** Sanitize the operator-visible reason before the Schema constructor. */
   static new(props: AgentBackendExitErrorProps): AgentBackendExitError {
-    const sanitized =
-      props.message === undefined
-        ? undefined
-        : sanitizeAgentBackendExitMessage(props.message)
+    const sanitized = sanitizeAgentBackendExitMessage(props.message)
     const classifiedFromText =
-      props.classification === undefined && props.message !== undefined
+      props.classification === undefined
         ? classifyProviderCredentialText(props.message)
         : undefined
     const classification =
@@ -95,9 +91,13 @@ export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendE
       cwd: props.cwd,
       ...(props.sessionId !== undefined ? { sessionId: props.sessionId } : {}),
       ...(classification !== undefined ? { classification } : {}),
-      ...(sanitized !== undefined && sanitized.length > 0
-        ? { message: sanitized }
-        : {}),
+      message:
+        sanitized.length > 0
+          ? sanitized
+          : formatSilentAgentBackendExitMessage({
+              backendLabel: SILENT_AGENT_BACKEND_LABEL,
+              exitCode: props.exitCode,
+            }),
     })
   }
 }

@@ -226,6 +226,7 @@ describe("Grok AgentBackend adapter", () => {
         expect(error).toBeInstanceOf(AgentBackendExitError)
         if (error instanceof AgentBackendExitError) {
           expect(error.exitCode).toBe(7)
+          expect(error.message).toBe("Grok Build failed with exit code 7")
           expect(error.sessionId).toMatch(
             /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
           )

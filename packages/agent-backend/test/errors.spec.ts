@@ -1,4 +1,7 @@
-import { AgentBackendExitError } from "../src/lib/errors.js"
+import {
+  AgentBackendExitError,
+  formatSilentAgentBackendExitMessage,
+} from "../src/lib/errors.js"
 import { sanitizeAgentBackendStderrTail } from "../src/lib/sanitize-exit-message.js"
 import { describe, expect, it } from "bun:test"
 
@@ -10,6 +13,25 @@ describe("AgentBackendExitError message", () => {
       message: "Claude Code turn failed: permission denied",
     })
     expect(error.message).toBe("Claude Code turn failed: permission denied")
+  })
+
+  it("formats a silent-exit fallback that names the backend and exit code", () => {
+    expect(
+      formatSilentAgentBackendExitMessage({
+        backendLabel: "OpenCode",
+        exitCode: 7,
+      }),
+    ).toBe("OpenCode failed with exit code 7")
+  })
+
+  it("replaces a message that sanitizes to empty with a silent-exit fallback", () => {
+    const error = AgentBackendExitError.new({
+      exitCode: 3,
+      cwd: "/tmp",
+      message: "   ",
+    })
+    expect(error.message).toBe("Agent Backend failed with exit code 3")
+    expect(error.message.length).toBeGreaterThan(0)
   })
 
   it("strips ANSI escapes and bounds length", () => {
