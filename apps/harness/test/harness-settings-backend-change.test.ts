@@ -75,6 +75,7 @@ describe("Harness settings Agent Backend change", () => {
     expect(source).toContain("configurationMode: true")
     expect(source).toContain("claudeBedrockStrict")
     expect(source).toContain("blocksAgentModelSave")
+    expect(source).toContain("blocksThinkingLevelSave")
     expect(source).toContain("buildModelBlockReason")
     // Models from status/preview catalogs remain selectable (profile IDs/ARNs).
     expect(source).toContain(

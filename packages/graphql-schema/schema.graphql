@@ -389,8 +389,19 @@ type Config {
   """
   selectedAgentBackend: String!
   defaultModel: String
+  """
+  Optional Harness build Thinking Level. Null uses the build Agent Model's
+  backend default. A non-null value must be advertised by that model's current
+  catalog entry.
+  """
   defaultThinkingLevel: String
   reviewModel: String
+  """
+  Optional Harness review Thinking Level. With an explicit review model, null
+  uses that model's backend default. Without a distinct review model, null
+  falls back to the Harness build Thinking Level, then the backend/model
+  default. A non-null value must be advertised by the governing review model.
+  """
   reviewThinkingLevel: String
   maxConcurrentAgentTurns: Int!
   maxConcurrentWorkItems: Int!
@@ -452,8 +463,23 @@ type Repository {
   """
   effectiveAgentBackend: String!
   defaultModel: String
+  """
+  Optional Repository build Thinking Level. With an explicit Repository build
+  model, null uses that model's backend default. Without a Repository build
+  model this value is dormant: the complete Harness build selection applies.
+  A non-null applicable value must be advertised by the governing model.
+  """
   defaultThinkingLevel: String
   reviewModel: String
+  """
+  Optional Repository review Thinking Level. With an explicit Repository
+  review model, null uses that model's backend default. Without a Repository
+  review model, an explicit Harness review selection takes precedence and this
+  value is dormant. With no distinct review model at either scope, null uses
+  the Harness review Thinking Level, then the resolved build Thinking Level,
+  then the backend/model default. A non-null applicable value must be
+  advertised by the governing model.
+  """
   reviewThinkingLevel: String
   autoMerge: Boolean!
   includeAllIssueAuthors: Boolean!
@@ -773,8 +799,16 @@ input UpdateConfigInput {
   (empty is allowed, same as first-run).
   """
   defaultModel: String
+  """
+  Optional. Must be advertised by the governing build Agent Model when set.
+  Whitespace is stored as null (backend/model default).
+  """
   defaultThinkingLevel: String
   reviewModel: String
+  """
+  Optional. Must be advertised by the governing review Agent Model when set.
+  Whitespace is stored as null.
+  """
   reviewThinkingLevel: String
   maxConcurrentAgentTurns: Int!
   maxConcurrentWorkItems: Int!
@@ -792,8 +826,17 @@ input UpdateRepositorySettingsInput {
   """
   selectedAgentBackend: String
   defaultModel: String
+  """
+  Optional. Applicable only when this write also supplies an explicit
+  Repository build model. Otherwise this value is dormant and preserved.
+  """
   defaultThinkingLevel: String
   reviewModel: String
+  """
+  Optional. Applicable when this write supplies an explicit Repository review
+  model, or when neither scope has a distinct review model. Dormant values
+  are preserved rather than deleted.
+  """
   reviewThinkingLevel: String
   autoMerge: Boolean!
   includeAllIssueAuthors: Boolean!

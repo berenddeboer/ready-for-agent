@@ -97,7 +97,6 @@ import {
   type ExplicitWorkItemExecutionProfile,
   type ImplementWithProfileInput,
   decodeImplementWithProfile,
-  explicitProfileThinkingLevelViolation,
   resolveExecutionProfileSelection,
   validateExecutionProfileCatalog,
 } from "./execution-profile.js"
@@ -113,8 +112,8 @@ import {
 } from "./pre-commit-errors.js"
 import {
   type AgentModelSelection,
-  agentModelCatalogViolation,
   resolveAgentModelsForBackend,
+  resolvedSelectionCatalogViolation,
 } from "./resolve-agent-models.js"
 import {
   formatAcceptedReviewSummary,
@@ -4256,30 +4255,23 @@ export const makeWorkItemLifecycleLive = (
                 const violation =
                   catalogStatus === null || catalogStatus.kind !== "ready"
                     ? null
-                    : (agentModelCatalogViolation({
+                    : resolvedSelectionCatalogViolation({
                         backendLabel: catalogStatus.backend.label,
-                        catalogModelIds: catalogStatus.models.map(
-                          (model) => model.id,
-                        ),
+                        catalog: catalogStatus.models,
                         selection,
                         includeReviewModel: stepRun.step === "review",
                         explicitProfile: explicitProfile !== null,
-                      }) ??
-                      (explicitProfile === null
-                        ? null
-                        : explicitProfileThinkingLevelViolation({
-                            backendLabel: catalogStatus.backend.label,
-                            catalog: catalogStatus.models,
-                            selection,
-                            includeReviewModel: stepRun.step === "review",
-                          })))
+                      })
                 if (violation !== null) {
                   const failed = yield* completeFailedStep({
                     stepRun: afterStart,
                     workItem,
-                    reasonCode: STEP_RUN_REASON.agentModelNotInCatalog,
-                    reasonMessage: violation,
-                    cause: Cause.fail(violation),
+                    reasonCode:
+                      violation.kind === "thinking_level"
+                        ? STEP_RUN_REASON.thinkingLevelNotInCatalog
+                        : STEP_RUN_REASON.agentModelNotInCatalog,
+                    reasonMessage: violation.message,
+                    cause: Cause.fail(violation.message),
                   })
                   return { _tag: "processed" as const, workItem: failed }
                 }
@@ -6503,17 +6495,15 @@ export const makeWorkItemLifecycleLive = (
                 const captureStatus =
                   yield* activeAgentBackend.getBackendStatus(captureBackendId)
                 if (captureStatus !== null && captureStatus.kind === "ready") {
-                  const violation = agentModelCatalogViolation({
+                  const violation = resolvedSelectionCatalogViolation({
                     backendLabel: captureStatus.backend.label,
-                    catalogModelIds: captureStatus.models.map(
-                      (model) => model.id,
-                    ),
+                    catalog: captureStatus.models,
                     selection: capturedSelection,
                     includeReviewModel: true,
                   })
                   if (violation !== null) {
                     return yield* new BuildModelNotConfiguredError({
-                      message: violation,
+                      message: violation.message,
                     })
                   }
                 }

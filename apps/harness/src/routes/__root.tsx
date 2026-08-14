@@ -34,6 +34,8 @@ import {
   CLAUDE_AGENT_BACKEND_ID,
   agentModelSaveBlockReason,
   blocksAgentModelSave,
+  blocksThinkingLevelSave,
+  emptyThinkingLevelOptionLabel,
   formatUnavailableVariantLabel,
   formatVariantLabel,
   isClaudeBedrockConfigurationMode,
@@ -1146,6 +1148,24 @@ function SettingsChrome() {
     modelId: reviewModel,
     requireSelection: false,
   })
+  const buildThinkingSaveInput = {
+    ...catalogState,
+    applicable: defaultModel.length > 0,
+    thinkingLevel: defaultThinkingLevel,
+    governingModelId: defaultModel,
+  }
+  const reviewThinkingSaveInput = {
+    ...catalogState,
+    applicable: reviewThinkingLevelSourceModel.length > 0,
+    thinkingLevel: reviewThinkingLevel,
+    governingModelId: reviewThinkingLevelSourceModel,
+  }
+  const blockSaveForBuildThinking = blocksThinkingLevelSave(
+    buildThinkingSaveInput,
+  )
+  const blockSaveForReviewThinking = blocksThinkingLevelSave(
+    reviewThinkingSaveInput,
+  )
   const modelSelectDisabled =
     modelsDisabled ||
     catalogLoading ||
@@ -1164,7 +1184,9 @@ function SettingsChrome() {
     (backendChangeBlocked && backendChanging) ||
     (backendChanging && previewError !== null) ||
     blockSaveForBuildModel ||
-    blockSaveForReviewModel
+    blockSaveForReviewModel ||
+    blockSaveForBuildThinking ||
+    blockSaveForReviewThinking
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1628,7 +1650,7 @@ function SettingsChrome() {
                     }}
                   />
 
-                  {defaultModel.length > 0 && buildEffortSourceUnavailable ? (
+                  {defaultModel.length > 0 && buildEffortSourceUnavailable && (
                     <Banner
                       className={ui.bannerCompact}
                       tone="alarm"
@@ -1639,47 +1661,41 @@ function SettingsChrome() {
                       model is not in the Agent Model catalog. Choose another
                       build model.
                     </Banner>
-                  ) : defaultModel.length > 0 && buildVariants.length === 0 ? (
-                    <p className={ui.dialogNote}>
-                      Build effort (thinking) is unavailable — this model has no
-                      effort (thinking) options.
-                    </p>
-                  ) : (
-                    <label className={ui.dialogField}>
-                      Build effort (thinking)
-                      <select
-                        className={ui.dialogInput}
-                        name="defaultThinkingLevel"
-                        value={defaultThinkingLevel}
-                        onChange={(event) =>
-                          setDefaultVariant(event.target.value)
-                        }
-                        disabled={modelsDisabled || defaultModel.length === 0}
-                      >
-                        <option value="">
-                          {buildVariants.length === 0
-                            ? "Model default (no effort (thinking) options)"
-                            : "Model default"}
-                        </option>
-                        {hasCustomBuildVariant && (
-                          <option value={defaultThinkingLevel}>
-                            {formatUnavailableVariantLabel(
-                              defaultThinkingLevel,
-                            )}
-                          </option>
-                        )}
-                        {buildVariants.map((variant) => (
-                          <option key={variant} value={variant}>
-                            {formatVariantLabel(variant)}
-                          </option>
-                        ))}
-                      </select>
-                      <span className={ui.dialogFieldHint}>
-                        Optional effort (thinking) for this model. Options come
-                        from the selected model.
-                      </span>
-                    </label>
                   )}
+                  <label className={ui.dialogField}>
+                    Build effort (thinking)
+                    <select
+                      className={ui.dialogInput}
+                      name="defaultThinkingLevel"
+                      value={defaultThinkingLevel}
+                      onChange={(event) =>
+                        setDefaultVariant(event.target.value)
+                      }
+                      disabled={modelsDisabled || defaultModel.length === 0}
+                    >
+                      <option value="">
+                        {emptyThinkingLevelOptionLabel({
+                          explicitModel: true,
+                          fallsBackToBuild: false,
+                        })}
+                      </option>
+                      {hasCustomBuildVariant && (
+                        <option value={defaultThinkingLevel}>
+                          {formatUnavailableVariantLabel(defaultThinkingLevel)}
+                        </option>
+                      )}
+                      {buildVariants.map((variant) => (
+                        <option key={variant} value={variant}>
+                          {formatVariantLabel(variant)}
+                        </option>
+                      ))}
+                    </select>
+                    <span className={ui.dialogFieldHint}>
+                      Optional effort (thinking) for this model. Empty uses the
+                      backend/model default. Options come from the selected
+                      model.
+                    </span>
+                  </label>
 
                   <AgentModelSelect
                     className={cx(ui.dialogField, ui.dialogFieldMono)}
@@ -1712,55 +1728,53 @@ function SettingsChrome() {
                   />
 
                   {reviewThinkingLevelSourceModel.length > 0 &&
-                  reviewEffortSourceUnavailable ? (
-                    <Banner
-                      className={ui.bannerCompact}
-                      tone="alarm"
-                      tag="Model"
-                      role="alert"
-                    >
-                      Review effort (thinking) is unavailable — the selected
-                      model is not in the Agent Model catalog. Choose another
-                      model or use the build model.
-                    </Banner>
-                  ) : reviewThinkingLevelSourceModel.length > 0 &&
-                    reviewThinkingLevels.length === 0 ? (
-                    <p className={ui.dialogNote}>
-                      Review effort (thinking) is unavailable — this model has
-                      no effort (thinking) options.
-                    </p>
-                  ) : (
-                    <label className={ui.dialogField}>
-                      Review effort (thinking)
-                      <select
-                        className={ui.dialogInput}
-                        name="reviewThinkingLevel"
-                        value={reviewThinkingLevel}
-                        onChange={(event) =>
-                          setReviewVariant(event.target.value)
-                        }
-                        disabled={
-                          modelsDisabled ||
-                          reviewThinkingLevelSourceModel.length === 0 ||
-                          reviewThinkingLevels.length === 0
-                        }
+                    reviewEffortSourceUnavailable && (
+                      <Banner
+                        className={ui.bannerCompact}
+                        tone="alarm"
+                        tag="Model"
+                        role="alert"
                       >
-                        <option value="">
-                          Same as build effort (thinking)
+                        Review effort (thinking) is unavailable — the selected
+                        model is not in the Agent Model catalog. Choose another
+                        model or use the build model.
+                      </Banner>
+                    )}
+                  <label className={ui.dialogField}>
+                    Review effort (thinking)
+                    <select
+                      className={ui.dialogInput}
+                      name="reviewThinkingLevel"
+                      value={reviewThinkingLevel}
+                      onChange={(event) => setReviewVariant(event.target.value)}
+                      disabled={
+                        modelsDisabled ||
+                        reviewThinkingLevelSourceModel.length === 0
+                      }
+                    >
+                      <option value="">
+                        {emptyThinkingLevelOptionLabel({
+                          explicitModel: reviewModel.length > 0,
+                          fallsBackToBuild: reviewModel.length === 0,
+                        })}
+                      </option>
+                      {hasCustomReviewVariant && (
+                        <option value={reviewThinkingLevel}>
+                          {formatUnavailableVariantLabel(reviewThinkingLevel)}
                         </option>
-                        {hasCustomReviewVariant && (
-                          <option value={reviewThinkingLevel}>
-                            {formatUnavailableVariantLabel(reviewThinkingLevel)}
-                          </option>
-                        )}
-                        {reviewThinkingLevels.map((variant) => (
-                          <option key={`review-${variant}`} value={variant}>
-                            {formatVariantLabel(variant)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
+                      )}
+                      {reviewThinkingLevels.map((variant) => (
+                        <option key={`review-${variant}`} value={variant}>
+                          {formatVariantLabel(variant)}
+                        </option>
+                      ))}
+                    </select>
+                    <span className={ui.dialogFieldHint}>
+                      {reviewModel.length > 0
+                        ? "Optional effort (thinking) for the review model. Empty uses that model's backend default."
+                        : "Optional review effort (thinking). Empty uses the build Thinking Level, then the backend/model default."}
+                    </span>
+                  </label>
                 </section>
 
                 <section

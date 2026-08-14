@@ -30,8 +30,11 @@ import {
   agentModelCatalogNotice,
   agentModelSaveBlockReason,
   blocksAgentModelSave,
+  blocksThinkingLevelSave,
+  emptyThinkingLevelOptionLabel,
   formatUnavailableVariantLabel,
   formatVariantLabel,
+  governingReviewModelId,
   isClaudeBedrockConfigurationMode,
   isUnavailableCatalogModel,
   reconcileVariantForModel,
@@ -1417,14 +1420,11 @@ function RepositoryCard({
     : ""
   const buildVariantSourceModel =
     defaultModel.length > 0 ? defaultModel : harnessBuildForSource
-  const reviewThinkingLevelSourceModel =
-    reviewModel.length > 0
-      ? reviewModel
-      : defaultModel.length > 0
-        ? defaultModel
-        : harnessReviewForSource.length > 0
-          ? harnessReviewForSource
-          : harnessBuildForSource
+  const reviewThinkingLevelSourceModel = governingReviewModelId({
+    reviewModel,
+    harnessReviewModel: harnessReviewForSource,
+    resolvedBuildModel: buildVariantSourceModel,
+  })
   const buildVariants = thinkingLevelsForModel(
     catalogModels,
     buildVariantSourceModel,
@@ -1505,6 +1505,24 @@ function RepositoryCard({
     modelId: reviewModel,
     requireSelection: false,
   })
+  const buildThinkingApplicable = defaultModel.length > 0
+  const reviewThinkingApplicable =
+    reviewModel.length > 0 ||
+    (reviewModel.length === 0 &&
+      harnessReviewForSource.length === 0 &&
+      buildVariantSourceModel.length > 0)
+  const blockSaveForBuildThinking = blocksThinkingLevelSave({
+    ...catalogState,
+    applicable: buildThinkingApplicable,
+    thinkingLevel: defaultThinkingLevel,
+    governingModelId: buildVariantSourceModel,
+  })
+  const blockSaveForReviewThinking = blocksThinkingLevelSave({
+    ...catalogState,
+    applicable: reviewThinkingApplicable,
+    thinkingLevel: reviewThinkingLevel,
+    governingModelId: reviewThinkingLevelSourceModel,
+  })
   const catalogUnusable =
     catalogLoading ||
     catalogFailed ||
@@ -1550,7 +1568,9 @@ function RepositoryCard({
       !catalogReadyForModelValidation) ||
     (backendDraftChanging && usesPreviewCatalog && previewError !== null) ||
     blockSaveForBuildModel ||
-    blockSaveForReviewModel
+    blockSaveForReviewModel ||
+    blockSaveForBuildThinking ||
+    blockSaveForReviewThinking
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -2234,13 +2254,14 @@ function RepositoryCard({
                       setDefaultVariant((current) =>
                         reconcileVariantForModel(current, nextVariants),
                       )
-                      if (reviewModel.length === 0) {
+                      if (
+                        reviewModel.length === 0 &&
+                        harnessReviewForSource.length === 0
+                      ) {
                         const reviewSource =
                           nextModel.length > 0
                             ? nextModel
-                            : harnessReviewForSource.length > 0
-                              ? harnessReviewForSource
-                              : harnessBuildForSource
+                            : harnessBuildForSource
                         setReviewVariant((current) =>
                           reconcileVariantForModel(
                             current,
@@ -2251,57 +2272,53 @@ function RepositoryCard({
                     }}
                   />
                   {buildVariantSourceModel.length > 0 &&
-                  buildVariantSourceUnavailable ? (
-                    <Banner
-                      className={ui.bannerCompact}
-                      tone="alarm"
-                      tag="Error"
-                      role="alert"
-                    >
-                      Build effort (thinking) override is unavailable — the
-                      selected model is not in the Agent Model catalog. Use
-                      harness default or pick another model.
-                    </Banner>
-                  ) : buildVariantSourceModel.length > 0 &&
-                    buildVariants.length === 0 ? (
-                    <p className={ui.dialogNote}>
-                      Build effort (thinking) override is unavailable — this
-                      model has no effort (thinking) options. Use harness
-                      default or pick another model.
-                    </p>
-                  ) : (
-                    <label className={ui.dialogField}>
-                      Build effort (thinking)
-                      <select
-                        className={ui.dialogInput}
-                        value={defaultThinkingLevel}
-                        onChange={(event) =>
-                          setDefaultVariant(event.target.value)
-                        }
-                        disabled={
-                          modelsDisabled ||
-                          (buildVariantSourceModel.length > 0 &&
-                            buildVariants.length === 0)
-                        }
+                    buildVariantSourceUnavailable && (
+                      <Banner
+                        className={ui.bannerCompact}
+                        tone="alarm"
+                        tag="Error"
+                        role="alert"
                       >
-                        <option value="">
-                          Harness default ({harnessDefaultVariant})
+                        Build effort (thinking) override is unavailable — the
+                        selected model is not in the Agent Model catalog. Use
+                        harness default or pick another model.
+                      </Banner>
+                    )}
+                  <label className={ui.dialogField}>
+                    Build effort (thinking)
+                    <select
+                      className={ui.dialogInput}
+                      name="defaultThinkingLevel"
+                      value={defaultThinkingLevel}
+                      onChange={(event) =>
+                        setDefaultVariant(event.target.value)
+                      }
+                      disabled={modelsDisabled}
+                    >
+                      <option value="">
+                        {emptyThinkingLevelOptionLabel({
+                          explicitModel: defaultModel.length > 0,
+                          inheritedLabel: harnessDefaultVariant,
+                          fallsBackToBuild: false,
+                        })}
+                      </option>
+                      {hasCustomBuildVariant && (
+                        <option value={defaultThinkingLevel}>
+                          {formatUnavailableVariantLabel(defaultThinkingLevel)}
                         </option>
-                        {hasCustomBuildVariant && (
-                          <option value={defaultThinkingLevel}>
-                            {formatUnavailableVariantLabel(
-                              defaultThinkingLevel,
-                            )}
-                          </option>
-                        )}
-                        {buildVariants.map((variant) => (
-                          <option key={variant} value={variant}>
-                            {formatVariantLabel(variant)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
+                      )}
+                      {buildVariants.map((variant) => (
+                        <option key={variant} value={variant}>
+                          {formatVariantLabel(variant)}
+                        </option>
+                      ))}
+                    </select>
+                    <span className={ui.dialogFieldHint}>
+                      {defaultModel.length > 0
+                        ? "Empty uses this model's backend default."
+                        : "Empty inherits the complete Harness build selection. This override is dormant until a Repository build model is set."}
+                    </span>
+                  </label>
                   <AgentModelSelect
                     label="Review model"
                     name="reviewModel"
@@ -2317,14 +2334,11 @@ function RepositoryCard({
                     hint={null}
                     onChange={(nextModel) => {
                       setReviewModel(nextModel)
-                      const sourceModel =
-                        nextModel.length > 0
-                          ? nextModel
-                          : defaultModel.length > 0
-                            ? defaultModel
-                            : harnessReviewForSource.length > 0
-                              ? harnessReviewForSource
-                              : harnessBuildForSource
+                      const sourceModel = governingReviewModelId({
+                        reviewModel: nextModel,
+                        harnessReviewModel: harnessReviewForSource,
+                        resolvedBuildModel: buildVariantSourceModel,
+                      })
                       setReviewVariant((current) =>
                         reconcileVariantForModel(
                           current,
@@ -2334,55 +2348,62 @@ function RepositoryCard({
                     }}
                   />
                   {reviewThinkingLevelSourceModel.length > 0 &&
-                  reviewThinkingLevelSourceUnavailable ? (
-                    <Banner
-                      className={ui.bannerCompact}
-                      tone="alarm"
-                      tag="Error"
-                      role="alert"
-                    >
-                      Review effort (thinking) override is unavailable — the
-                      selected model is not in the Agent Model catalog. Use
-                      harness default or pick another model.
-                    </Banner>
-                  ) : reviewThinkingLevelSourceModel.length > 0 &&
-                    reviewThinkingLevels.length === 0 ? (
-                    <p className={ui.dialogNote}>
-                      Review effort (thinking) override is unavailable — this
-                      model has no effort (thinking) options. Use harness
-                      default or pick another model.
-                    </p>
-                  ) : (
-                    <label className={ui.dialogField}>
-                      Review effort (thinking)
-                      <select
-                        className={ui.dialogInput}
-                        value={reviewThinkingLevel}
-                        onChange={(event) =>
-                          setReviewVariant(event.target.value)
-                        }
-                        disabled={
-                          modelsDisabled ||
-                          (reviewThinkingLevelSourceModel.length > 0 &&
-                            reviewThinkingLevels.length === 0)
-                        }
+                    reviewThinkingLevelSourceUnavailable && (
+                      <Banner
+                        className={ui.bannerCompact}
+                        tone="alarm"
+                        tag="Error"
+                        role="alert"
                       >
-                        <option value="">
-                          Harness default ({harnessReviewVariant})
+                        Review effort (thinking) override is unavailable — the
+                        selected model is not in the Agent Model catalog. Use
+                        harness default or pick another model.
+                      </Banner>
+                    )}
+                  <label className={ui.dialogField}>
+                    Review effort (thinking)
+                    <select
+                      className={ui.dialogInput}
+                      name="reviewThinkingLevel"
+                      value={reviewThinkingLevel}
+                      onChange={(event) => setReviewVariant(event.target.value)}
+                      disabled={modelsDisabled}
+                    >
+                      <option value="">
+                        {emptyThinkingLevelOptionLabel({
+                          explicitModel: reviewModel.length > 0,
+                          inheritedLabel:
+                            reviewModel.length === 0 &&
+                            harnessReviewForSource.length === 0
+                              ? harnessPrefsForDraft !== null
+                                ? (harnessPrefsForDraft.reviewThinkingLevel ??
+                                  "")
+                                : (config.data?.reviewThinkingLevel ?? "")
+                              : harnessReviewVariant,
+                          fallsBackToBuild:
+                            reviewModel.length === 0 &&
+                            harnessReviewForSource.length === 0,
+                        })}
+                      </option>
+                      {hasCustomReviewVariant && (
+                        <option value={reviewThinkingLevel}>
+                          {formatUnavailableVariantLabel(reviewThinkingLevel)}
                         </option>
-                        {hasCustomReviewVariant && (
-                          <option value={reviewThinkingLevel}>
-                            {formatUnavailableVariantLabel(reviewThinkingLevel)}
-                          </option>
-                        )}
-                        {reviewThinkingLevels.map((variant) => (
-                          <option key={`review-${variant}`} value={variant}>
-                            {formatVariantLabel(variant)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
+                      )}
+                      {reviewThinkingLevels.map((variant) => (
+                        <option key={`review-${variant}`} value={variant}>
+                          {formatVariantLabel(variant)}
+                        </option>
+                      ))}
+                    </select>
+                    <span className={ui.dialogFieldHint}>
+                      {reviewModel.length > 0
+                        ? "Empty uses this review model's backend default."
+                        : harnessReviewForSource.length > 0
+                          ? "Empty inherits the complete Harness review selection. This override is dormant while Harness review is in effect."
+                          : "Empty uses the Harness review Thinking Level, then the resolved build Thinking Level, then the backend/model default."}
+                    </span>
+                  </label>
                 </>
               )}
             </section>

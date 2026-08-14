@@ -278,6 +278,7 @@ rfa:PrMergedReason a rfa:StepRunReason ; skos:notation "pr_merged" .
 rfa:AbandonedReason a rfa:StepRunReason ; skos:notation "abandoned" .
 rfa:PrStatusChecksUnresolvedReason a rfa:StepRunReason ; skos:notation "pr_status_checks_unresolved" .
 rfa:GitHubThrottledReason a rfa:StepRunReason ; skos:notation "github_throttled" .
+rfa:ThinkingLevelNotInCatalogReason a rfa:StepRunReason ; skos:notation "thinking_level_not_in_catalog" .
 
 rfa:CreateWorktree
   a owl:Class, owl:NamedIndividual, skos:Concept,

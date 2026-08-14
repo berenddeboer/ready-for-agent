@@ -11,8 +11,8 @@ import {
 import {
   AgentBackendUnavailableError,
   BuildModelNotConfiguredError,
-  agentModelCatalogViolation,
   resolveAgentModelsForBackend,
+  resolvedSelectionCatalogViolation,
 } from "@ready-for-agent/work-item-lifecycle"
 
 /**
@@ -80,15 +80,15 @@ export const preflightRepositoryIntake = (
         const captureStatus =
           yield* activeAgentBackend.getBackendStatus(captureBackendId)
         if (captureStatus !== null && captureStatus.kind === "ready") {
-          const violation = agentModelCatalogViolation({
+          const violation = resolvedSelectionCatalogViolation({
             backendLabel: captureStatus.backend.label,
-            catalogModelIds: captureStatus.models.map((model) => model.id),
+            catalog: captureStatus.models,
             selection,
             includeReviewModel: true,
           })
           if (violation !== null) {
             return yield* new BuildModelNotConfiguredError({
-              message: violation,
+              message: violation.message,
             })
           }
         }

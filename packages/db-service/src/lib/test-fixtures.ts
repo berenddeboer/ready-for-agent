@@ -42,7 +42,7 @@ export const stubDbService = (
   getConfig: Effect.succeed({
     selectedAgentBackend: "opencode",
     defaultModel: "opencode/deepseek-v4-flash-free",
-    defaultThinkingLevel: "low",
+    defaultThinkingLevel: "high",
     reviewModel: null,
     reviewThinkingLevel: null,
     maxConcurrentAgentTurns: 2,
@@ -51,7 +51,7 @@ export const stubDbService = (
   getBackendModelPrefs: () =>
     Effect.succeed({
       defaultModel: "opencode/deepseek-v4-flash-free",
-      defaultThinkingLevel: "low",
+      defaultThinkingLevel: "high",
       reviewModel: null,
       reviewThinkingLevel: null,
     }),

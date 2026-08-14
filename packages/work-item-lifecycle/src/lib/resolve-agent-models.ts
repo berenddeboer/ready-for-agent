@@ -10,6 +10,11 @@ import {
   DbService,
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
+import {
+  findCatalogEntry,
+  thinkingLevelNotAdvertisedMessage,
+  validateCatalogSelection,
+} from "./catalog-selection.js"
 import { BuildModelNotConfiguredError } from "./errors.js"
 
 /** Resolved build and review Agent Model selection for one Agent Turn. */
@@ -173,6 +178,93 @@ export const agentModelCatalogViolation = (input: {
       return input.explicitProfile === true
         ? `${role} Agent Model "${model}" is not in the current ${input.backendLabel} Agent Model catalog. The Explicit Work Item Execution Profile cannot substitute another model. Reset this Work Item and create a new attempt with a current catalog choice.`
         : `${role} Agent Model "${model}" is not in the current ${input.backendLabel} Agent Model catalog. Choose a model the Agent Backend currently offers in Settings, then start this work again.`
+    }
+  }
+  return null
+}
+
+export type CatalogAdmissionViolation = {
+  readonly kind: "model" | "thinking_level"
+  readonly message: string
+}
+
+const ordinaryThinkingLevelGuidance =
+  "Choose an advertised level or clear the field in Settings to use the backend/model default, then start this work again."
+
+/**
+ * Reject a resolved model/Thinking-Level pair that the current Ready catalog
+ * does not advertise (issues #838 / #1073). An empty catalog still carries no
+ * membership information and does not gate ordinary work.
+ */
+export const resolvedSelectionCatalogViolation = (input: {
+  readonly backendLabel: string
+  readonly catalog: ReadonlyArray<{
+    readonly id: string
+    readonly thinkingLevels: ReadonlyArray<string>
+  }>
+  readonly selection: AgentModelSelection
+  readonly includeReviewModel: boolean
+  readonly explicitProfile?: boolean
+}): CatalogAdmissionViolation | null => {
+  if (input.catalog.length === 0) {
+    return null
+  }
+  const modelMessage = agentModelCatalogViolation({
+    backendLabel: input.backendLabel,
+    catalogModelIds: input.catalog.map((model) => model.id),
+    selection: input.selection,
+    includeReviewModel: input.includeReviewModel,
+    explicitProfile: input.explicitProfile,
+  })
+  if (modelMessage !== null) {
+    return { kind: "model", message: modelMessage }
+  }
+  const checked: ReadonlyArray<
+    readonly [role: string, model: string, thinkingLevel: string | null]
+  > = [
+    ["Build", input.selection.model, input.selection.thinkingLevel],
+    ...(input.includeReviewModel
+      ? ([
+          [
+            "Review",
+            input.selection.reviewModel,
+            input.selection.reviewThinkingLevel,
+          ],
+        ] as const)
+      : []),
+  ]
+  for (const [role, model, thinkingLevel] of checked) {
+    const result = validateCatalogSelection({
+      catalogEntry: findCatalogEntry(input.catalog, model),
+      thinkingLevel,
+    })
+    if (result._tag !== "thinking_level_absent") {
+      continue
+    }
+    if (input.explicitProfile === true) {
+      return {
+        kind: "thinking_level",
+        message: thinkingLevelNotAdvertisedMessage({
+          role,
+          thinkingLevel: result.thinkingLevel,
+          model: result.model.id,
+          backendLabel: input.backendLabel,
+          advertised: result.model.thinkingLevels,
+          guidance:
+            "The Explicit Work Item Execution Profile cannot substitute another effort. Reset this Work Item and create a new attempt with a current catalog choice.",
+        }),
+      }
+    }
+    return {
+      kind: "thinking_level",
+      message: thinkingLevelNotAdvertisedMessage({
+        role,
+        thinkingLevel: result.thinkingLevel,
+        model: result.model.id,
+        backendLabel: input.backendLabel,
+        advertised: result.model.thinkingLevels,
+        guidance: ordinaryThinkingLevelGuidance,
+      }),
     }
   }
   return null

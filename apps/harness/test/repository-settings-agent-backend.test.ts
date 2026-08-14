@@ -76,6 +76,8 @@ describe("Repository settings Agent Backend override", () => {
     expect(source).toContain("configurationMode: true")
     expect(source).toContain("claudeBedrockStrict")
     expect(source).toContain("blocksAgentModelSave")
+    expect(source).toContain("blocksThinkingLevelSave")
+    expect(source).toContain("governingReviewModelId")
     expect(source).toContain("buildModelBlockReason")
     expect(source).toContain("No Bedrock profiles available")
     expect(source).toContain("discovered Bedrock inference profile")

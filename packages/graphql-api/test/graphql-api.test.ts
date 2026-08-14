@@ -76,7 +76,7 @@ const repository = makeRepositoryRecord({
 const config = {
   selectedAgentBackend: "opencode",
   defaultModel: "opencode/deepseek-v4-flash-free",
-  defaultThinkingLevel: "low",
+  defaultThinkingLevel: "high",
   reviewModel: null as string | null,
   reviewThinkingLevel: null as string | null,
   maxConcurrentAgentTurns: 2,
@@ -1859,6 +1859,658 @@ describe("GraphQL API", () => {
     })
     expect(previewCalls).toEqual([])
     await clearingRuntime.dispose()
+  })
+
+  test("updateConfig rejects a Thinking Level the build model does not advertise", async () => {
+    const updateCalls: unknown[] = []
+    const syncCalls: string[][] = []
+    const strictRuntime = makeRuntime(
+      {
+        updateConfig: (input) => {
+          updateCalls.push(input)
+          return Effect.succeed({
+            selectedAgentBackend: input.selectedAgentBackend,
+            defaultModel: input.defaultModel,
+            defaultThinkingLevel: input.defaultThinkingLevel,
+            reviewModel: input.reviewModel,
+            reviewThinkingLevel: input.reviewThinkingLevel,
+            maxConcurrentAgentTurns: input.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: input.maxConcurrentWorkItems,
+          })
+        },
+      },
+      {},
+      {},
+      {},
+      {
+        setSelectedOrInUse: (backendIds) => {
+          syncCalls.push([...backendIds])
+          return Effect.succeed(
+            backendIds.map((id) => readyRuntimeStatus(defaultModels, id)),
+          )
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(strictRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: "medium",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    const payload = (await response.json()) as {
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string; field?: string }
+      }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_CONFIG_INPUT",
+      field: "defaultThinkingLevel",
+    })
+    expect(payload.errors?.[0]?.message).toContain("medium")
+    expect(payload.errors?.[0]?.message).toContain(
+      "opencode/deepseek-v4-flash-free",
+    )
+    expect(payload.errors?.[0]?.message).toContain("OpenCode")
+    expect(payload.errors?.[0]?.message).toContain("high, max")
+    expect(payload.errors?.[0]?.message).toContain("clear the field")
+    expect(updateCalls).toEqual([])
+    expect(syncCalls).toEqual([])
+    await strictRuntime.dispose()
+  })
+
+  test("updateConfig rejects a review Thinking Level for an explicit review model", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { reviewThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: "high",
+            reviewModel: "opencode/deepseek-v4-flash-free",
+            reviewThinkingLevel: "low",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    const payload = (await response.json()) as {
+      errors?: ReadonlyArray<{ extensions?: { code?: string; field?: string } }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_CONFIG_INPUT",
+      field: "reviewThinkingLevel",
+    })
+  })
+
+  test("updateConfig validates review Thinking Level against the build model when review has no distinct model", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { reviewThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: "medium",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    const payload = (await response.json()) as {
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string; field?: string }
+      }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_CONFIG_INPUT",
+      field: "reviewThinkingLevel",
+    })
+    expect(payload.errors?.[0]?.message).toContain(
+      "opencode/deepseek-v4-flash-free",
+    )
+  })
+
+  test("updateConfig accepts an advertised Thinking Level, null, and whitespace", async () => {
+    const accepted = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultThinkingLevel reviewThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: "   ",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await accepted.json()).toEqual({
+      data: {
+        updateConfig: {
+          defaultThinkingLevel: "high",
+          reviewThinkingLevel: "   ",
+        },
+      },
+    })
+  })
+
+  test("updateConfig rejects every non-null Thinking Level when the model offers none", async () => {
+    const emptyLevelsRuntime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        getBackendStatus: () =>
+          Effect.succeed(
+            readyRuntimeStatus([
+              { id: "opencode/gpt-5", thinkingLevels: [] },
+              {
+                id: "opencode/deepseek-v4-flash-free",
+                thinkingLevels: ["high", "max"],
+              },
+            ]),
+          ),
+      },
+    )
+    const rejected = await createGraphqlApi(emptyLevelsRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "opencode/gpt-5",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    const rejectedPayload = (await rejected.json()) as {
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string; field?: string }
+      }>
+    }
+    expect(rejectedPayload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_CONFIG_INPUT",
+      field: "defaultThinkingLevel",
+    })
+    expect(rejectedPayload.errors?.[0]?.message).toContain(
+      "offers no Thinking Levels",
+    )
+
+    const accepted = await createGraphqlApi(emptyLevelsRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "opencode/gpt-5",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await accepted.json()).toEqual({
+      data: { updateConfig: { defaultThinkingLevel: null } },
+    })
+    await emptyLevelsRuntime.dispose()
+  })
+
+  test("updateConfig validates Thinking Levels through Agent Backend Preview", async () => {
+    const previewCalls: string[] = []
+    const previewRuntime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        getBackendStatus: () => Effect.succeed(null),
+        preview: (backendId) => {
+          previewCalls.push(backendId)
+          return Effect.succeed({
+            backend: { id: backendId, label: "Grok" },
+            kind: "ready" as const,
+            reason: null,
+            models: [
+              { id: "grok-code-fast-1", thinkingLevels: ["low", "high"] },
+            ],
+            provider: null,
+            warnings: [],
+          })
+        },
+      },
+    )
+    const rejected = await createGraphqlApi(previewRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code-fast-1",
+            defaultThinkingLevel: "max",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    const payload = (await rejected.json()) as {
+      errors?: ReadonlyArray<{ extensions?: { code?: string; field?: string } }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_CONFIG_INPUT",
+      field: "defaultThinkingLevel",
+    })
+    expect(previewCalls).toEqual(["grok"])
+    await previewRuntime.dispose()
+  })
+
+  test("updateRepositorySettings rejects an applicable Thinking Level and preserves a dormant one", async () => {
+    const settingsCalls: unknown[] = []
+    const repoRuntime = makeRuntime({
+      getBackendModelPrefs: () =>
+        Effect.succeed({
+          defaultModel: "anthropic/claude-sonnet-4-5",
+          defaultThinkingLevel: "high",
+          reviewModel: "anthropic/claude-sonnet-4-5",
+          reviewThinkingLevel: "high",
+        }),
+      updateRepositorySettings: (input) => {
+        settingsCalls.push(input)
+        return Effect.succeed({
+          ...repository,
+          paused: input.paused,
+          selectedAgentBackend:
+            input.selectedAgentBackend === undefined
+              ? repository.selectedAgentBackend
+              : input.selectedAgentBackend,
+          defaultModel: input.defaultModel,
+          defaultThinkingLevel: input.defaultThinkingLevel,
+          reviewModel: input.reviewModel,
+          reviewThinkingLevel: input.reviewThinkingLevel,
+          autoMerge: input.autoMerge,
+          includeAllIssueAuthors: input.includeAllIssueAuthors,
+          waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
+        })
+      },
+    })
+    const save = (input: {
+      defaultModel: string | null
+      defaultThinkingLevel: string | null
+      reviewModel: string | null
+      reviewThinkingLevel: string | null
+    }) =>
+      createGraphqlApi(repoRuntime).fetch(
+        graphqlRequest({
+          query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+            updateRepositorySettings(input: $input) {
+              defaultThinkingLevel
+              reviewThinkingLevel
+            }
+          }`,
+          variables: {
+            input: {
+              repositoryId: repository.id,
+              paused: false,
+              selectedAgentBackend: null,
+              autoMerge: true,
+              includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: false,
+              ...input,
+            },
+          },
+        }),
+      )
+
+    const rejected = (await (
+      await save({
+        defaultModel: "opencode/deepseek-v4-flash-free",
+        defaultThinkingLevel: "medium",
+        reviewModel: null,
+        reviewThinkingLevel: "medium",
+      })
+    ).json()) as {
+      errors?: ReadonlyArray<{ extensions?: { code?: string; field?: string } }>
+    }
+    expect(rejected.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_REPOSITORY_SETTINGS",
+      field: "defaultThinkingLevel",
+    })
+    expect(settingsCalls).toEqual([])
+
+    const dormant = await save({
+      defaultModel: null,
+      defaultThinkingLevel: "medium",
+      reviewModel: null,
+      reviewThinkingLevel: "medium",
+    })
+    expect(await dormant.json()).toEqual({
+      data: {
+        updateRepositorySettings: {
+          defaultThinkingLevel: "medium",
+          reviewThinkingLevel: "medium",
+        },
+      },
+    })
+    expect(settingsCalls).toHaveLength(1)
+    await repoRuntime.dispose()
+  })
+
+  test("updateRepositorySettings validates review Thinking Level against harness review then resolved build", async () => {
+    const harnessReviewRuntime = makeRuntime({
+      getBackendModelPrefs: () =>
+        Effect.succeed({
+          defaultModel: "anthropic/claude-sonnet-4-5",
+          defaultThinkingLevel: "high",
+          reviewModel: "opencode/deepseek-v4-flash-free",
+          reviewThinkingLevel: "high",
+        }),
+    })
+    const inheritedReviewRejected = await createGraphqlApi(
+      harnessReviewRuntime,
+    ).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { reviewThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            selectedAgentBackend: null,
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: "medium",
+            autoMerge: true,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: false,
+          },
+        },
+      }),
+    )
+    expect(await inheritedReviewRejected.json()).toEqual({
+      data: { updateRepositorySettings: { reviewThinkingLevel: "medium" } },
+    })
+    await harnessReviewRuntime.dispose()
+
+    const buildFallbackRuntime = makeRuntime({
+      getBackendModelPrefs: () =>
+        Effect.succeed({
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "high",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+        }),
+    })
+    const buildFallback = await createGraphqlApi(buildFallbackRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { reviewThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            selectedAgentBackend: null,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: "medium",
+            autoMerge: true,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: false,
+          },
+        },
+      }),
+    )
+    const buildFallbackPayload = (await buildFallback.json()) as {
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string; field?: string }
+      }>
+    }
+    expect(buildFallbackPayload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_REPOSITORY_SETTINGS",
+      field: "reviewThinkingLevel",
+    })
+    expect(buildFallbackPayload.errors?.[0]?.message).toContain(
+      "opencode/deepseek-v4-flash-free",
+    )
+    await buildFallbackRuntime.dispose()
+  })
+
+  test("updateRepositorySettings rejects applicable review Thinking Level when the inherited build model is absent from the catalog", async () => {
+    const settingsCalls: unknown[] = []
+    const missingGovernorRuntime = makeRuntime({
+      getBackendModelPrefs: () =>
+        Effect.succeed({
+          defaultModel: "us.anthropic.claude-sonnet-4-6",
+          defaultThinkingLevel: "high",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+        }),
+      updateRepositorySettings: (input) => {
+        settingsCalls.push(input)
+        return Effect.succeed({
+          ...repository,
+          paused: input.paused,
+          selectedAgentBackend:
+            input.selectedAgentBackend === undefined
+              ? repository.selectedAgentBackend
+              : input.selectedAgentBackend,
+          defaultModel: input.defaultModel,
+          defaultThinkingLevel: input.defaultThinkingLevel,
+          reviewModel: input.reviewModel,
+          reviewThinkingLevel: input.reviewThinkingLevel,
+          autoMerge: input.autoMerge,
+          includeAllIssueAuthors: input.includeAllIssueAuthors,
+          waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
+        })
+      },
+    })
+    const response = await createGraphqlApi(missingGovernorRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { reviewThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            selectedAgentBackend: null,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: "medium",
+            autoMerge: true,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: false,
+          },
+        },
+      }),
+    )
+    const payload = (await response.json()) as {
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string; field?: string }
+      }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_REPOSITORY_SETTINGS",
+      field: "reviewThinkingLevel",
+    })
+    expect(payload.errors?.[0]?.message).toContain(
+      "us.anthropic.claude-sonnet-4-6",
+    )
+    expect(settingsCalls).toEqual([])
+    await missingGovernorRuntime.dispose()
+  })
+
+  test("updateRepositorySettings rejects applicable review Thinking Level when the Ready catalog is empty", async () => {
+    const settingsCalls: unknown[] = []
+    const emptyCatalogRuntime = makeRuntime(
+      {
+        getBackendModelPrefs: () =>
+          Effect.succeed({
+            defaultModel: "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          }),
+        updateRepositorySettings: (input) => {
+          settingsCalls.push(input)
+          return Effect.succeed({
+            ...repository,
+            paused: input.paused,
+            selectedAgentBackend:
+              input.selectedAgentBackend === undefined
+                ? repository.selectedAgentBackend
+                : input.selectedAgentBackend,
+            defaultModel: input.defaultModel,
+            defaultThinkingLevel: input.defaultThinkingLevel,
+            reviewModel: input.reviewModel,
+            reviewThinkingLevel: input.reviewThinkingLevel,
+            autoMerge: input.autoMerge,
+            includeAllIssueAuthors: input.includeAllIssueAuthors,
+            waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
+          })
+        },
+      },
+      {},
+      {},
+      {},
+      {
+        getBackendStatus: () => Effect.succeed(readyRuntimeStatus([])),
+      },
+    )
+    const response = await createGraphqlApi(emptyCatalogRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { reviewThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            selectedAgentBackend: null,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: "medium",
+            autoMerge: true,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: false,
+          },
+        },
+      }),
+    )
+    const payload = (await response.json()) as {
+      errors?: ReadonlyArray<{ extensions?: { code?: string; field?: string } }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_REPOSITORY_SETTINGS",
+      field: "reviewThinkingLevel",
+    })
+    expect(settingsCalls).toEqual([])
+    await emptyCatalogRuntime.dispose()
+  })
+
+  test("updateRepositorySettings cannot persist an applicable Thinking Level when the catalog is unavailable", async () => {
+    const unavailableRuntime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        getBackendStatus: () =>
+          Effect.succeed({
+            ...readyRuntimeStatus(),
+            kind: "unavailable" as const,
+            reason: "opencode CLI is not installed",
+            models: [],
+          }),
+      },
+    )
+    const response = await createGraphqlApi(unavailableRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { defaultThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            selectedAgentBackend: null,
+            defaultModel: "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: true,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: false,
+          },
+        },
+      }),
+    )
+    const payload = (await response.json()) as {
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string; field?: string }
+      }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_REPOSITORY_SETTINGS",
+      field: "defaultModel",
+    })
+    expect(payload.errors?.[0]?.message).toContain("catalog is unavailable")
+    await unavailableRuntime.dispose()
   })
 
   test("updateRepositorySettings enforces the next Effective backend catalog", async () => {
