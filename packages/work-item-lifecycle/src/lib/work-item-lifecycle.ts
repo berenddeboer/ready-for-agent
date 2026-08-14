@@ -5670,13 +5670,12 @@ export const makeWorkItemLifecycleLive = (
                 ),
               )
               .pipe(
-                Effect.catch((error) =>
-                  Effect.fail(
+                Effect.mapError(
+                  (error) =>
                     new WorkItemLifecycleDatabaseError({
                       message: `Failed to stop Work Item ${workItemId} for a competing Issue-closing PR: ${String(error)}`,
                       cause: error,
                     }),
-                  ),
                 ),
               )
 
