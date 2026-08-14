@@ -4,6 +4,10 @@
 type Query {
   health: Boolean!
   """
+  Product version of the running Harness (same string as CLI --version).
+  """
+  version: String!
+  """
   Suggested CLI to add a local repository from the blank-slate empty state.
   Uses `ready-for-agent` when that binary is on PATH; otherwise `npx ready-for-agent`.
   """

@@ -486,6 +486,34 @@ describe("GraphQL API", () => {
     runtime = makeRuntime()
   })
 
+  test("reports the injected product version on Query.version", async () => {
+    const response = await createGraphqlApi(runtime, {
+      version: "0.18.0",
+    }).fetch(
+      graphqlRequest({
+        query: "{ version }",
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: { version: "0.18.0" },
+    })
+  })
+
+  test("defaults Query.version to the placeholder product version", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: "{ version }",
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: { version: "0.0.0" },
+    })
+  })
+
   test("serves GraphQL through the supplied runtime", async () => {
     const response = await createGraphqlApi(runtime).fetch(
       addRepositoryRequest(),

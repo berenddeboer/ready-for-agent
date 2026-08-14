@@ -1,11 +1,25 @@
+import { READY_FOR_AGENT_VERSION } from "./generated/version.ts"
+
 /** Default Harness UI / GraphQL loopback origin (port 6056). */
 export const DEFAULT_HARNESS_BASE_URL = "http://127.0.0.1:6056"
 
 /** Single-line start remedy for unreachable-Harness failures. */
 export const HARNESS_START_HINT = "Start it with: ready-for-agent start"
 
+/** Single-line restart remedy when the running Harness is older than this CLI. */
+export const HARNESS_RESTART_UPGRADE_HINT =
+  "Restart the Harness to upgrade: ready-for-agent start"
+
 /** CLI-owned code when the GraphQL transport cannot reach the Harness. */
 export const HARNESS_UNREACHABLE_CODE = "HARNESS_UNREACHABLE"
+
+/**
+ * CLI-owned code when the Harness GraphQL schema is missing a field this CLI
+ * requires — typically a newer CLI against an older still-running Harness.
+ */
+export const HARNESS_VERSION_MISMATCH_CODE = "HARNESS_VERSION_MISMATCH"
+
+const GRAPHQL_VALIDATION_FAILED_CODE = "GRAPHQL_VALIDATION_FAILED"
 
 /**
  * Fallback when a GraphQL response has no usable `extensions.code`.
@@ -123,6 +137,10 @@ export const isGraphqlUnreachable = (cause: unknown): boolean => {
 export type FormatGraphqlRequestFailureOptions = {
   /** Configured GraphQL URL; used to print the Harness origin when unreachable. */
   readonly graphqlUrl?: string
+  /** This CLI's product version (`0.22.0` or `v0.22.0`). */
+  readonly cliVersion?: string
+  /** Running Harness product version, when the CLI could read one. */
+  readonly harnessVersion?: string
 }
 
 /** Structured GraphQL/transport failure for the CLI JSON error seam. */
@@ -137,10 +155,88 @@ const graphqlErrorCode = (cause: GenqlErrorLike): string => {
   return typeof code === "string" && code.length > 0 ? code : GRAPHQL_ERROR_CODE
 }
 
+/** GraphQL fields this CLI queries or mutates against the Harness. */
+const CLI_REQUIRED_GRAPHQL_FIELDS = {
+  addRepository: "add",
+  intakeCandidates: "candidates",
+  startRepositoryIntake: "intake",
+  kanbanStatus: "status",
+  workItemBySessionId: "jump",
+} as const
+
+type CliRequiredGraphqlField = keyof typeof CLI_REQUIRED_GRAPHQL_FIELDS
+
+const isCliRequiredGraphqlField = (
+  field: string,
+): field is CliRequiredGraphqlField =>
+  Object.hasOwn(CLI_REQUIRED_GRAPHQL_FIELDS, field)
+
+const missingGraphqlFieldName = (message: string): string | undefined => {
+  const match = /Cannot query field "([^"]+)"/.exec(message)
+  const field = match?.[1]
+  return field !== undefined && field.length > 0 ? field : undefined
+}
+
+const productVersionLabel = (version: string): string => {
+  const trimmed = version.trim()
+  if (trimmed.length === 0) {
+    return "v0.0.0"
+  }
+  return trimmed.startsWith("v") ? trimmed : `v${trimmed}`
+}
+
+export const harnessVersionMismatchMessage = (options: {
+  readonly cliVersion: string
+  readonly harnessVersion?: string
+  readonly harnessBaseUrl: string
+  readonly command: string
+}): string => {
+  const cliLabel = productVersionLabel(options.cliVersion)
+  const command = `\`${options.command}\``
+  if (
+    options.harnessVersion !== undefined &&
+    options.harnessVersion.trim().length > 0
+  ) {
+    const harnessLabel = productVersionLabel(options.harnessVersion)
+    return `This CLI is ${cliLabel} but the Harness on ${options.harnessBaseUrl} is ${harnessLabel}, which does not support ${command}. ${HARNESS_RESTART_UPGRADE_HINT}`
+  }
+  return `This CLI is ${cliLabel} but the Harness on ${options.harnessBaseUrl} does not support ${command}. ${HARNESS_RESTART_UPGRADE_HINT}`
+}
+
+const versionMismatchFromMissingField = (
+  cause: GenqlErrorLike,
+  options?: FormatGraphqlRequestFailureOptions,
+): GraphqlFailureInfo | undefined => {
+  const message =
+    cause.message.length > 0 ? cause.message : "GraphQL request failed"
+  const field = missingGraphqlFieldName(message)
+  if (field === undefined || !isCliRequiredGraphqlField(field)) {
+    return undefined
+  }
+  const code = graphqlErrorCode(cause)
+  if (code !== GRAPHQL_VALIDATION_FAILED_CODE && code !== GRAPHQL_ERROR_CODE) {
+    return undefined
+  }
+  const harnessBaseUrl =
+    options?.graphqlUrl === undefined
+      ? DEFAULT_HARNESS_BASE_URL
+      : harnessBaseUrlFromGraphqlUrl(options.graphqlUrl)
+  return {
+    code: HARNESS_VERSION_MISMATCH_CODE,
+    message: harnessVersionMismatchMessage({
+      cliVersion: options?.cliVersion ?? READY_FOR_AGENT_VERSION,
+      harnessVersion: options?.harnessVersion,
+      harnessBaseUrl,
+      command: CLI_REQUIRED_GRAPHQL_FIELDS[field],
+    }),
+  }
+}
+
 /**
  * Map a GraphQL client failure to a stable code + operator-facing message.
  * Unreachable transport uses the CLI-owned `HARNESS_UNREACHABLE` code.
  * HTML (or other non-JSON) at the configured URL uses `GRAPHQL_URL_NOT_ENDPOINT`.
+ * A missing field this CLI requires uses `HARNESS_VERSION_MISMATCH`.
  * Domain failures retain Harness `extensions.code` from GenqlError.
  */
 export const describeGraphqlFailure = (
@@ -166,6 +262,10 @@ export const describeGraphqlFailure = (
   }
 
   if (isGenqlErrorLike(cause)) {
+    const versionMismatch = versionMismatchFromMissingField(cause, options)
+    if (versionMismatch !== undefined) {
+      return versionMismatch
+    }
     return {
       code: graphqlErrorCode(cause),
       message:

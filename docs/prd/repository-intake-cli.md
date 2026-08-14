@@ -339,7 +339,7 @@ A command-level failure writes exactly one versioned JSON document to stderr and
 }
 ```
 
-Harness domain failures retain their GraphQL `extensions.code`. CLI-owned failures use stable codes such as `HARNESS_UNREACHABLE`, `REPOSITORY_NOT_FOUND`, and `REPOSITORY_AMBIGUOUS`. Numeric exit codes remain intentionally small: `0` success, `1` executed-command failure, and the CLI framework's normal usage exit for invalid arguments.
+Harness domain failures retain their GraphQL `extensions.code`. CLI-owned failures use stable codes such as `HARNESS_UNREACHABLE`, `HARNESS_VERSION_MISMATCH`, `REPOSITORY_NOT_FOUND`, and `REPOSITORY_AMBIGUOUS`. A missing GraphQL field the CLI requires is `HARNESS_VERSION_MISMATCH` (newer CLI against an older running Harness), not a raw `GRAPHQL_VALIDATION_FAILED`. Numeric exit codes remain intentionally small: `0` success, `1` executed-command failure, and the CLI framework's normal usage exit for invalid arguments.
 
 The existing finite `add` command moves to the same envelope and returns canonical Repository identity plus `localPath` and `isBare`. This is an intentional output-format change; no text compatibility mode is added.
 

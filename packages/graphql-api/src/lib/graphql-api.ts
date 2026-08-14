@@ -413,6 +413,11 @@ export const createGraphqlApi = <R>(
      * does not depend on the host shell.
      */
     readonly environment?: Readonly<Record<string, string | undefined>>
+    /**
+     * Product version reported by `Query.version`. Defaults to `0.0.0` when
+     * the host does not inject a build-time version.
+     */
+    readonly version?: string
   } = {},
 ) => {
   const agentBackendCwd =
@@ -422,6 +427,7 @@ export const createGraphqlApi = <R>(
     options.keymaxxerMetadataTimeout ?? DEFAULT_KEYMAXXER_METADATA_TIMEOUT
   const environment =
     options.environment ?? (process.env as Record<string, string | undefined>)
+  const harnessVersion = options.version ?? "0.0.0"
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
 
   /**
@@ -476,6 +482,7 @@ export const createGraphqlApi = <R>(
       resolvers: {
         Query: {
           health: () => true,
+          version: () => harnessVersion,
           addRepositoryCommand: () =>
             resolveAddRepositoryCommand(commandExists),
           directoryPickerAvailable: async (

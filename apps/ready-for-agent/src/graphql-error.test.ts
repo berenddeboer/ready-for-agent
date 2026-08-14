@@ -4,12 +4,15 @@ import {
   GRAPHQL_ERROR_CODE,
   GRAPHQL_URL_NOT_ENDPOINT_CODE,
   GraphqlUrlNotEndpointError,
+  HARNESS_RESTART_UPGRADE_HINT,
   HARNESS_START_HINT,
   HARNESS_UNREACHABLE_CODE,
+  HARNESS_VERSION_MISMATCH_CODE,
   describeGraphqlFailure,
   formatGraphqlRequestFailure,
   harnessBaseUrlFromGraphqlUrl,
   harnessNotRunningMessage,
+  harnessVersionMismatchMessage,
   isGraphqlUnreachable,
 } from "./graphql-error.ts"
 import { describe, expect, test } from "bun:test"
@@ -130,6 +133,105 @@ describe("graphql unreachable detection", () => {
     )
     expect(harnessBaseUrlFromGraphqlUrl("http://127.0.0.1:7000/graphql/")).toBe(
       "http://127.0.0.1:7000",
+    )
+  })
+
+  test("maps a missing intakeCandidates field to HARNESS_VERSION_MISMATCH", () => {
+    const cause = new GenqlError(
+      [
+        {
+          message: 'Cannot query field "intakeCandidates" on type "Query".',
+          extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+        },
+      ],
+      null,
+    )
+    expect(
+      describeGraphqlFailure(cause, {
+        graphqlUrl: "http://127.0.0.1:6056/graphql",
+        cliVersion: "0.22.0",
+        harnessVersion: "0.18.0",
+      }),
+    ).toEqual({
+      code: HARNESS_VERSION_MISMATCH_CODE,
+      message:
+        "This CLI is v0.22.0 but the Harness on http://127.0.0.1:6056 is v0.18.0, which does not support `candidates`. Restart the Harness to upgrade: ready-for-agent start",
+    })
+  })
+
+  test("maps a missing kanbanStatus field without a known Harness version", () => {
+    const cause = new GenqlError(
+      [
+        {
+          message: 'Cannot query field "kanbanStatus" on type "Query".',
+          extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+        },
+      ],
+      null,
+    )
+    expect(
+      describeGraphqlFailure(cause, {
+        graphqlUrl: "http://127.0.0.1:6056/graphql",
+        cliVersion: "0.22.0",
+      }),
+    ).toEqual({
+      code: HARNESS_VERSION_MISMATCH_CODE,
+      message:
+        "This CLI is v0.22.0 but the Harness on http://127.0.0.1:6056 does not support `status`. Restart the Harness to upgrade: ready-for-agent start",
+    })
+    expect(describeGraphqlFailure(cause).message).toContain(
+      HARNESS_RESTART_UPGRADE_HINT,
+    )
+  })
+
+  test("maps a missing startRepositoryIntake field to the intake command", () => {
+    const cause = new GenqlError(
+      [
+        {
+          message:
+            'Cannot query field "startRepositoryIntake" on type "Mutation".',
+          extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+        },
+      ],
+      null,
+    )
+    expect(
+      describeGraphqlFailure(cause, {
+        graphqlUrl: "http://127.0.0.1:7000/graphql",
+        cliVersion: "0.22.0",
+        harnessVersion: "0.18.0",
+      }).message,
+    ).toBe(
+      "This CLI is v0.22.0 but the Harness on http://127.0.0.1:7000 is v0.18.0, which does not support `intake`. Restart the Harness to upgrade: ready-for-agent start",
+    )
+  })
+
+  test("leaves other GraphQL validation failures unchanged", () => {
+    const cause = new GenqlError(
+      [
+        {
+          message: 'Unknown argument "repository" on field "Query.health".',
+          extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+        },
+      ],
+      null,
+    )
+    expect(describeGraphqlFailure(cause)).toEqual({
+      code: "GRAPHQL_VALIDATION_FAILED",
+      message: 'Unknown argument "repository" on field "Query.health".',
+    })
+  })
+
+  test("harnessVersionMismatchMessage uses the product v-prefix once", () => {
+    expect(
+      harnessVersionMismatchMessage({
+        cliVersion: "v0.22.0",
+        harnessVersion: "v0.18.0",
+        harnessBaseUrl: "http://127.0.0.1:6056",
+        command: "candidates",
+      }),
+    ).toBe(
+      "This CLI is v0.22.0 but the Harness on http://127.0.0.1:6056 is v0.18.0, which does not support `candidates`. Restart the Harness to upgrade: ready-for-agent start",
     )
   })
 })

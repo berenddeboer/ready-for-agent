@@ -48,6 +48,7 @@ import {
   WorkItemLifecycleLive,
 } from "@ready-for-agent/work-item-lifecycle"
 import type { ApplicationRequestContext } from "../application-request-context.js"
+import { READY_FOR_AGENT_VERSION } from "../generated/version.js"
 import { ambientGitHubLayer } from "./ambient-github-layer.js"
 import { ambientGitLabLayer } from "./ambient-gitlab-layer.js"
 import {
@@ -342,6 +343,7 @@ export const createApplication = async (
     context: {
       graphqlApi: createGraphqlApi(runtime, {
         agentBackendCwd: toolCwd,
+        version: READY_FOR_AGENT_VERSION,
       }),
     },
     dispose: runtime.dispose,
