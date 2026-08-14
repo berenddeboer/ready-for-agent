@@ -8,7 +8,6 @@ import {
 } from "./agent-cli-not-found.js"
 import {
   collectChildStderrTail,
-  collectChildStdout,
   collectChildStdoutAndStderr,
 } from "./collect-child-stdout.js"
 import {
@@ -30,12 +29,13 @@ export const DEFAULT_FORCE_KILL_AFTER = Duration.seconds(2)
 const capturedCliOutputMessage = (
   stdout: string,
   stderr: string,
-): string | undefined => {
-  const parts = [stdout, stderr]
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-  return parts.length > 0 ? parts.join("\n") : undefined
-}
+): string | undefined =>
+  sanitizeAgentBackendStderrTail(
+    [stdout, stderr]
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0)
+      .join("\n"),
+  )
 
 /**
  * Window from spawn to the first stdout output of an Agent Turn. A CLI that
@@ -94,9 +94,8 @@ export type RunCliCaptureInput = {
    */
   readonly allowNonZeroExit?: boolean
   /**
-   * When true, pipe and capture stderr (returned as `stderr`). Default ignores
-   * stderr so Agent Turn noise does not fill memory. Readiness probes that
-   * print status on stderr (Codex `login status`) must opt in.
+   * Accepted for callers that previously opted into stderr capture. Readiness
+   * probes always pipe and retain a bounded stderr tail; this flag is ignored.
    */
   readonly captureStderr?: boolean
 }
@@ -202,7 +201,7 @@ const terminateCliTree = (
   )
 
 /**
- * Run a CLI once, capture full stdout (and optionally stderr), map non-zero
+ * Run a CLI once, capture full stdout and a bounded stderr tail, map non-zero
  * exit and timeout to generic Agent Backend errors.
  */
 export const runCliCapture = (
@@ -222,11 +221,10 @@ export const runCliCapture = (
     const spawner = input.spawner
     const timeoutMs = Duration.toMillis(input.timeout)
     const forceKillAfter = input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER
-    const captureStderr = input.captureStderr === true
     const command = ChildProcess.make(
       input.binary,
       [...input.args],
-      commandOptions(input),
+      commandOptions({ ...input, captureStderr: true }),
     )
 
     const result = yield* Effect.scoped(
@@ -239,15 +237,7 @@ export const runCliCapture = (
         yield* Effect.addFinalizer(() =>
           terminateCliTree(handle, forceKillAfter),
         )
-        if (captureStderr) {
-          return yield* collectChildStdoutAndStderr(handle)
-        }
-        const captured = yield* collectChildStdout(handle)
-        return {
-          exitCode: captured.exitCode,
-          stdout: captured.stdout,
-          stderr: "",
-        }
+        return yield* collectChildStdoutAndStderr(handle)
       }),
     ).pipe(
       Effect.timeout(input.timeout),

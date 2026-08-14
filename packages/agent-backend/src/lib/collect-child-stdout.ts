@@ -3,27 +3,6 @@ import type { PlatformError } from "effect/PlatformError"
 import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
 
 /**
- * Drain stdout to EOF, then read exit code.
- *
- * Collecting stdout before relying on process exit avoids races where scope
- * finalization or pipe teardown can clip large catalogs near OS pipe capacity.
- */
-export const collectChildStdout = (
-  handle: ChildProcessHandle,
-): Effect.Effect<
-  { readonly exitCode: number; readonly stdout: string },
-  PlatformError
-> =>
-  Effect.gen(function* () {
-    const stdout = yield* Stream.decodeText(handle.stdout).pipe(Stream.mkString)
-    const exitCode = yield* handle.exitCode
-    return {
-      exitCode: Number(exitCode),
-      stdout,
-    }
-  })
-
-/**
  * Memory bound for an Agent Turn stderr fold. Only this many characters
  * are retained; older output is dropped. Matches the Install Dependencies
  * diagnostic tail so a chatty CLI cannot grow unbounded.
@@ -59,11 +38,13 @@ export const collectChildStderrTail = (
   )
 
 /**
- * Drain stdout and stderr concurrently to EOF, then read exit code.
+ * Drain full stdout and a bounded stderr tail concurrently, then read exit.
  *
  * Concurrent drain avoids pipe-buffer deadlock when both streams produce
- * output. Used by readiness probes whose CLIs print status on stderr
- * (e.g. `codex login status`).
+ * output. Stdout is collected to EOF before relying on process exit so a
+ * large catalog cannot be clipped by pipe teardown. Stderr is folded to the
+ * same 4000-character tail as Agent Turns so a chatty probe cannot grow
+ * unbounded. Used by every readiness probe.
  */
 export const collectChildStdoutAndStderr = (
   handle: ChildProcessHandle,
@@ -79,7 +60,7 @@ export const collectChildStdoutAndStderr = (
     const [stdout, stderr] = yield* Effect.all(
       [
         Stream.decodeText(handle.stdout).pipe(Stream.mkString),
-        Stream.decodeText(handle.stderr).pipe(Stream.mkString),
+        collectChildStderrTail(handle),
       ],
       { concurrency: 2 },
     )

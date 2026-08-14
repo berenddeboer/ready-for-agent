@@ -252,6 +252,33 @@ describe("Grok AgentBackend adapter", () => {
     )
   })
 
+  it("surfaces a stderr-only readiness failure as the inspect exit reason", async () => {
+    await withExecutable(
+      [
+        "printf 'Error: Configuration is invalid at /home/vscode/.config/grok/config.json\\n' >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          Effect.gen(function* () {
+            const backend = yield* AgentBackend
+            return yield* backend.inspect({
+              cwd: process.cwd(),
+              timeout: "2 seconds",
+            })
+          }).pipe(Effect.provide(provide(binary)), Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.exitCode).toBe(1)
+          expect(error.message).toContain(
+            "Configuration is invalid at /home/vscode/.config/grok/config.json",
+          )
+        }
+      },
+    )
+  })
+
   it("fails inspect when unauthenticated even if exit is zero", async () => {
     await withExecutable(
       [
