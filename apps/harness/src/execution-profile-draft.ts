@@ -92,7 +92,7 @@ export type ImplementWithProfileInput = {
 }
 
 /** GraphQL `implementWith` options. The dialog always submits both values. */
-export type ImplementWithOptionsInput = {
+type ImplementWithOptionsInput = {
   readonly autoMerge: boolean
   readonly implementLocally: boolean
 }
