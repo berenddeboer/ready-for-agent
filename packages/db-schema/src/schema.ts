@@ -237,6 +237,18 @@ export const workItem = snakeCase.table(
     pullRequestNumber: integer(),
     /** Active Agent Backend captured at Work Item creation (provenance). */
     agentBackend: text().notNull().default("opencode"),
+    /**
+     * Whether this Work Item has an Explicit Work Item Execution Profile.
+     * Existing and ordinary Work Items stay 0 (settings-resolved models).
+     */
+    executionProfilePresent: integer({ mode: "boolean" })
+      .notNull()
+      .default(false),
+    executionProfileBuildModel: text(),
+    executionProfileBuildThinkingLevel: text(),
+    executionProfileReviewSameAsBuild: integer({ mode: "boolean" }),
+    executionProfileReviewModel: text(),
+    executionProfileReviewThinkingLevel: text(),
     state: text({ enum: WORK_ITEM_STATES }).notNull(),
     stateReadyAt: integer({ mode: "number" }).notNull(),
     paused: integer({ mode: "boolean" }).notNull().default(false),

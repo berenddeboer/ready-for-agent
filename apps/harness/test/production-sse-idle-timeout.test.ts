@@ -366,6 +366,7 @@ describe("production GraphQL SSE idle timeout", () => {
           local_cleanup: Duration.minutes(5),
         },
         implementNow: unused,
+        implementWith: unused,
         implementLocally: unused,
         implementAllWithAutoMerge: unused,
         queue: unused,

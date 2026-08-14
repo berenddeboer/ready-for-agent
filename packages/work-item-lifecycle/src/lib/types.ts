@@ -8,6 +8,7 @@ import {
   TerminalWorkItemState,
   WorkItemState,
 } from "@ready-for-agent/lifecycle-model"
+import type { ExplicitWorkItemExecutionProfile } from "./execution-profile.js"
 import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
   COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE,
@@ -15,6 +16,11 @@ import {
   JOBS_COMPLETED_WINDOW_MS,
 } from "./jobs-completed-window.js"
 
+export type {
+  ExecutionProfileReviewSelection,
+  ExplicitWorkItemExecutionProfile,
+  ImplementWithProfileInput,
+} from "./execution-profile.js"
 export {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
   COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE,
@@ -114,6 +120,11 @@ export interface WorkItemRecord {
    * authority for Agent Turns and model resolution for the Work Item lifetime.
    */
   readonly agentBackend: string
+  /**
+   * Immutable Explicit Work Item Execution Profile when created through
+   * Implement With. Null for ordinary settings-resolved Work Items.
+   */
+  readonly executionProfile: ExplicitWorkItemExecutionProfile | null
   readonly state: WorkItemState
   readonly stateReadyAt: Date
   readonly paused: boolean
