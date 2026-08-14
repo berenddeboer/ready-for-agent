@@ -26,7 +26,7 @@ import {
 } from "./execution-profile-draft.js"
 import { cx, ui } from "./ui.js"
 
-export type ImplementWithCatalog = {
+type ImplementWithCatalog = {
   readonly loading: boolean
   readonly failed: boolean
   readonly error: string | null
