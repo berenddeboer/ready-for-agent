@@ -132,6 +132,25 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
     )
   })
 
+  it("prefers parsed unauthenticated copy over extra stderr noise", async () => {
+    await withExecutable(
+      [
+        'case " $* " in *" login status "*) ;; *) exit 20 ;; esac',
+        "echo 'Not logged in' 1>&2",
+        "echo 'raw stderr should lose' 1>&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(inspect(binary).pipe(Effect.flip))
+        expect(error).toBeInstanceOf(AgentBackendConfigError)
+        if (error instanceof AgentBackendConfigError) {
+          expect(error.message).toBe(CODEX_UNAUTHENTICATED_MESSAGE)
+          expect(error.message).not.toContain("raw stderr should lose")
+        }
+      },
+    )
+  })
+
   it("maps non-zero login status without auth markers to exit failure with probe text", async () => {
     await withExecutable(
       [

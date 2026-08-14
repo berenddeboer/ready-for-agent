@@ -852,6 +852,47 @@ describe("Opencode AgentBackend adapter", () => {
     }
   })
 
+  it("surfaces a stderr-only readiness failure as the inspect exit reason", async () => {
+    await withExecutable(
+      [
+        'if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then',
+        "  printf 'Error: Configuration is invalid at /home/vscode/.config/opencode/opencode.jsonc\\n' >&2",
+        "  printf '↳ Expected object | undefined, got [ … ] skills\\n' >&2",
+        "  exit 1",
+        "fi",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          Effect.gen(function* () {
+            const backend = yield* AgentBackend
+            return yield* backend.inspect({
+              cwd: process.cwd(),
+              timeout: "2 seconds",
+            })
+          }).pipe(
+            Effect.provide(
+              Opencode.layer({
+                binary,
+                keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+              }).pipe(Layer.provide(BunServices.layer)),
+            ),
+            Effect.flip,
+          ),
+        )
+
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.exitCode).toBe(1)
+          expect(error.message).toContain(
+            "Configuration is invalid at /home/vscode/.config/opencode/opencode.jsonc",
+          )
+          expect(error.message).toContain("skills")
+        }
+      },
+    )
+  })
+
   it("fails when verbose models stdout is truncated mid-object", async () => {
     await withExecutable(
       [

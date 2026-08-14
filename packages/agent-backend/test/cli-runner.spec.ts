@@ -231,6 +231,166 @@ describe("runCliCapture", () => {
       },
     )
   })
+
+  it("puts a stderr-only inspection failure on AgentBackendExitError", async () => {
+    await withExecutable(
+      [
+        "printf 'Error: Configuration is invalid at /home/vscode/.config/opencode/opencode.jsonc\\n' >&2",
+        "printf '↳ Expected object | undefined, got [ … ] skills\\n' >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toEqual(
+          AgentBackendExitError.new({
+            exitCode: 1,
+            cwd: process.cwd(),
+            message:
+              "Error: Configuration is invalid at /home/vscode/.config/opencode/opencode.jsonc\n↳ Expected object | undefined, got [ … ] skills",
+          }),
+        )
+      },
+    )
+  })
+
+  it("bounds retained inspection stderr when a chatty probe is allowed to exit non-zero", async () => {
+    await withExecutable(
+      [
+        "printf 'prefix-marker' >&2",
+        "printf '%05000d' 0 >&2",
+        "printf 'tail-marker' >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(5),
+              allowNonZeroExit: true,
+            }),
+          ),
+        )
+        expect(result.exitCode).toBe(1)
+        expect(result.stderr).toContain("tail-marker")
+        expect(result.stderr).not.toContain("prefix-marker")
+        expect(result.stderr.length).toBeLessThanOrEqual(4_000)
+      },
+    )
+  })
+
+  it("completes an inspection that floods stderr and keeps the diagnostic tail", async () => {
+    await withExecutable(
+      [
+        "printf 'prefix-marker' >&2",
+        "printf '%05000d' 0 >&2",
+        "printf 'tail-marker' >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(5),
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.message).toContain("tail-marker")
+          expect(error.message).not.toContain("prefix-marker")
+          expect(error.message.length).toBeLessThanOrEqual(500)
+        }
+      },
+    )
+  })
+
+  it("sanitizes inspection stderr before it becomes the exit message", async () => {
+    const secret = "ghp_this_must_never_appear_in_exit_message"
+    const esc = String.fromCharCode(0x1b)
+    await withExecutable(
+      [
+        `printf '${esc}[31mconfig invalid with ${secret}${esc}[0m\\n' >&2`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.message).not.toContain(secret)
+          expect(error.message).not.toMatch(/ghp_[A-Za-z0-9]+/)
+          expect(error.message).toContain("[redacted]")
+          expect(error.message.includes(`${esc}[`)).toBe(false)
+          expect(error.message).toContain("config invalid")
+        }
+      },
+    )
+  })
+
+  it("keeps a large stdout catalog complete while draining stderr", async () => {
+    await withExecutable(
+      [
+        "printf '%070000d' 0",
+        "printf 'end-of-catalog'",
+        "printf 'noise' >&2",
+        "exit 0",
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              backend: TEST_BACKEND,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(5),
+            }),
+          ),
+        )
+        expect(result.exitCode).toBe(0)
+        expect(result.stdout.length).toBe(70_000 + "end-of-catalog".length)
+        expect(result.stdout.endsWith("end-of-catalog")).toBe(true)
+        expect(result.stderr).toContain("noise")
+      },
+    )
+  })
 })
 
 describe("runCliTurn", () => {

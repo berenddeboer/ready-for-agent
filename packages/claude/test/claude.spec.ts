@@ -436,6 +436,25 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
     )
   })
 
+  it("prefers parsed unauthenticated copy over raw stderr noise", async () => {
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        "printf '%s\\n' '{\"loggedIn\":false}'",
+        "printf 'raw stderr should lose\\n' >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(inspect(binary).pipe(Effect.flip))
+        expect(error).toBeInstanceOf(AgentBackendConfigError)
+        if (error instanceof AgentBackendConfigError) {
+          expect(error.message).toBe(CLAUDE_UNAUTHENTICATED_MESSAGE)
+          expect(error.message).not.toContain("raw stderr should lose")
+        }
+      },
+    )
+  })
+
   it("keeps first-party loggedIn false on the login/API-key path (not Bedrock)", async () => {
     await withExecutable(
       [
