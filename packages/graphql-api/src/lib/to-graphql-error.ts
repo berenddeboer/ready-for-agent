@@ -182,6 +182,31 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         `Work Item ${error.workItemId} cannot be retried: ${error.reason}`,
         "RETRY_NOT_ELIGIBLE",
       )
+    case "InvalidRetrySelectorError":
+      return gql(
+        error.message ??
+          "Exactly one of issueNumber, workItemId, or allRetryable=true is required",
+        "INVALID_RETRY_SELECTOR",
+        { reason: error.reason },
+      )
+    case "WorkItemNotInRepositoryError":
+      return gql(
+        `Work Item ${error.workItemId} does not belong to repository ${error.repositoryId}`,
+        "WORK_ITEM_NOT_IN_REPOSITORY",
+        {
+          workItemId: error.workItemId,
+          repositoryId: error.repositoryId,
+        },
+      )
+    case "NoUnfinishedWorkItemError":
+      return gql(
+        `Issue #${error.issueNumber} has no unfinished Work Item in repository ${error.repositoryId}`,
+        "NO_UNFINISHED_WORK_ITEM",
+        {
+          repositoryId: error.repositoryId,
+          issueNumber: error.issueNumber,
+        },
+      )
     case "RepositoryCredentialError":
       return gql(
         error.message ?? "Repository credential error",

@@ -53,6 +53,56 @@ describe("toGraphQLError", () => {
     })
   })
 
+  test("maps InvalidRetrySelectorError to INVALID_RETRY_SELECTOR", () => {
+    const error = {
+      _tag: "InvalidRetrySelectorError" as const,
+      reason: "exactly_one_selector",
+      message:
+        "Exactly one of issueNumber, workItemId, or allRetryable=true is required",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toContain("Exactly one")
+    expect(gqlError.extensions).toMatchObject({
+      code: "INVALID_RETRY_SELECTOR",
+      reason: "exactly_one_selector",
+    })
+  })
+
+  test("maps WorkItemNotInRepositoryError to WORK_ITEM_NOT_IN_REPOSITORY", () => {
+    const error = {
+      _tag: "WorkItemNotInRepositoryError" as const,
+      workItemId: "wi-1",
+      repositoryId: "repo-1",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toContain("wi-1")
+    expect(gqlError.extensions).toMatchObject({
+      code: "WORK_ITEM_NOT_IN_REPOSITORY",
+      workItemId: "wi-1",
+      repositoryId: "repo-1",
+    })
+  })
+
+  test("maps NoUnfinishedWorkItemError to NO_UNFINISHED_WORK_ITEM", () => {
+    const error = {
+      _tag: "NoUnfinishedWorkItemError" as const,
+      repositoryId: "repo-1",
+      issueNumber: 9,
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toContain("#9")
+    expect(gqlError.extensions).toMatchObject({
+      code: "NO_UNFINISHED_WORK_ITEM",
+      issueNumber: 9,
+    })
+  })
+
   test("maps SessionIdAmbiguousError to SESSION_AMBIGUOUS", () => {
     const error = {
       _tag: "SessionIdAmbiguousError" as const,

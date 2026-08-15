@@ -184,6 +184,27 @@ describe("graphql unreachable detection", () => {
     )
   })
 
+  test("maps a missing retryWorkItems field to the retry command", () => {
+    const cause = new GenqlError(
+      [
+        {
+          message: 'Cannot query field "retryWorkItems" on type "Mutation".',
+          extensions: { code: "GRAPHQL_VALIDATION_FAILED" },
+        },
+      ],
+      null,
+    )
+    expect(
+      describeGraphqlFailure(cause, {
+        graphqlUrl: "http://127.0.0.1:7000/graphql",
+        cliVersion: "0.22.0",
+        harnessVersion: "0.18.0",
+      }).message,
+    ).toBe(
+      "This CLI is v0.22.0 but the Harness on http://127.0.0.1:7000 is v0.18.0, which does not support `retry`. Restart the Harness to upgrade: ready-for-agent start",
+    )
+  })
+
   test("maps a missing startRepositoryIntake field to the intake command", () => {
     const cause = new GenqlError(
       [

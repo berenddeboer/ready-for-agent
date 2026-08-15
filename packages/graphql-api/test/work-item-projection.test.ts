@@ -119,6 +119,39 @@ describe("Postponed Step Run projection", () => {
       "Waiting for GitHub until 2026-08-07T12:00:00.000Z",
     )
     expect(workItemCanRetry(postponed)).toBe(false)
+    expect(
+      workItemCanRetry(
+        workItemWith({
+          state: "implement",
+          paused: false,
+          waitingSince: null,
+          waitingForBlockers: false,
+          stepRuns: [{ ...baseStepRun, status: "failed" }],
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      workItemCanRetry(
+        workItemWith({
+          state: "needs_human",
+          stepRuns: [{ ...baseStepRun, step: "review", status: "succeeded" }],
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      workItemCanRetry(
+        workItemWith({
+          state: "failed",
+          failureCode: "handler_failed",
+        }),
+      ),
+    ).toBe(false)
+    expect(workItemCanRetry(workItemWith({ paused: true }))).toBe(false)
+    expect(
+      workItemCanRetry(
+        workItemWith({ waitingSince: new Date("2026-07-14T08:05:00.000Z") }),
+      ),
+    ).toBe(false)
     expect(lifecycleLabels(postponed)).toEqual([
       {
         phase: "GITHUB_STATUS_CHECKS",

@@ -12,7 +12,12 @@ export const CLI_SCHEMA_VERSION = 1 as const
  * Finite operator commands that emit one versioned JSON document.
  * Long-running `start` is intentionally excluded.
  */
-export type FiniteCommandName = "add" | "candidates" | "intake" | "status"
+export type FiniteCommandName =
+  | "add"
+  | "candidates"
+  | "intake"
+  | "retry"
+  | "status"
 
 /** Canonical Repository identity shared across finite CLI JSON documents. */
 export type CanonicalRepositoryIdentity = {
@@ -79,6 +84,51 @@ export type IntakeSuccessDocument = {
   readonly repository: CanonicalRepositoryIdentity
   readonly issuesReconciledAt: string | null
   readonly results: readonly IntakeIssueResult[]
+}
+
+type RetryWorkItemRef = {
+  readonly id: string
+  readonly state: string
+  readonly status: string
+}
+
+type RetryRetriedResult = {
+  readonly issueNumber: number
+  readonly outcome: "RETRIED"
+  readonly workItem: RetryWorkItemRef
+}
+
+type RetrySkippedResult = {
+  readonly issueNumber: number
+  readonly outcome: "SKIPPED"
+  readonly workItem: RetryWorkItemRef
+  readonly reason: {
+    readonly code: string
+    readonly message: string
+  }
+}
+
+type RetryFailedResult = {
+  readonly issueNumber: number
+  readonly outcome: "FAILED"
+  readonly workItem: RetryWorkItemRef
+  readonly error: {
+    readonly code: string
+    readonly message: string
+  }
+}
+
+/** Discriminated per-item Retry outcome for CLI JSON. */
+export type RetryWorkItemResult =
+  | RetryRetriedResult
+  | RetrySkippedResult
+  | RetryFailedResult
+
+export type RetrySuccessDocument = {
+  readonly schemaVersion: typeof CLI_SCHEMA_VERSION
+  readonly command: "retry"
+  readonly repository: CanonicalRepositoryIdentity
+  readonly results: readonly RetryWorkItemResult[]
 }
 
 export type StatusLaneId =
@@ -212,6 +262,21 @@ export const intakeHasFailedResults = (
   results: readonly IntakeIssueResult[],
 ): boolean => results.some((result) => result.outcome === "FAILED")
 
+export const buildRetrySuccessDocument = (input: {
+  readonly repository: CanonicalRepositoryIdentity
+  readonly results: readonly RetryWorkItemResult[]
+}): RetrySuccessDocument => ({
+  schemaVersion: CLI_SCHEMA_VERSION,
+  command: "retry",
+  repository: input.repository,
+  results: input.results,
+})
+
+/** True when any per-item Retry failure is present (CLI exits nonzero). */
+export const retryHasFailedResults = (
+  results: readonly RetryWorkItemResult[],
+): boolean => results.some((result) => result.outcome === "FAILED")
+
 export const toCanonicalRepositoryIdentity = (repository: {
   readonly id: string
   readonly forge: string
@@ -251,6 +316,7 @@ const FiniteCommandNameSchema = Schema.Literals([
   "add",
   "candidates",
   "intake",
+  "retry",
   "status",
 ])
 

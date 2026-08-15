@@ -74,6 +74,7 @@ import {
 } from "./repository-credentials.js"
 import { startRepositoryIntake } from "./repository-intake.js"
 import { preflightRepositoryIntake } from "./repository-intake-preflight.js"
+import { retryWorkItems } from "./repository-retry.js"
 import { toGraphQLError } from "./to-graphql-error.js"
 import { validateAgentModelsAgainstCatalog } from "./validate-agent-models.js"
 import {
@@ -335,6 +336,15 @@ type ImplementWithArgs = ImplementNowArgs & {
 
 type WorkItemArgs = {
   workItemId: string
+}
+
+type RetryWorkItemsArgs = {
+  repositoryId: string
+  selector: {
+    issueNumber?: number | null
+    workItemId?: string | null
+    allRetryable?: boolean | null
+  }
 }
 
 type ResetWorkItemArgs = WorkItemArgs
@@ -2061,6 +2071,17 @@ export const createGraphqlApi = <R>(
             runGraphql(
               startRepositoryIntake(args.repositoryId).pipe(
                 Effect.withSpan("graphql-api.startRepositoryIntake"),
+              ),
+              context,
+            ),
+          retryWorkItems: async (
+            _parent: unknown,
+            args: RetryWorkItemsArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              retryWorkItems(args.repositoryId, args.selector).pipe(
+                Effect.withSpan("graphql-api.retryWorkItems"),
               ),
               context,
             ),

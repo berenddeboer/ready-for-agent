@@ -4,6 +4,7 @@ import {
   type CanonicalRepositoryIdentity,
   type IntakeCandidateAction,
   type IntakeIssueResult,
+  type RetryWorkItemResult,
   type StatusLane,
   type StatusLaneId,
   type StatusStepRunReason,
@@ -91,6 +92,21 @@ export type RepositoryIntakeResult = {
     readonly issuesReconciledAt: string | null
   }
   readonly results: readonly IntakeIssueResult[]
+}
+
+export type RetryWorkItemsSelector =
+  | { readonly issueNumber: number }
+  | { readonly workItemId: string }
+  | { readonly allRetryable: true }
+
+export type RetryWorkItemsResult = {
+  readonly repository: {
+    readonly id: string
+    readonly forge: string
+    readonly forgeHost: string
+    readonly projectPath: string
+  }
+  readonly results: readonly RetryWorkItemResult[]
 }
 
 export type KanbanStatusResult = {
@@ -249,6 +265,10 @@ export class GraphqlApi extends Context.Service<
     readonly startRepositoryIntake: (
       repositoryId: string,
     ) => Effect.Effect<RepositoryIntakeResult, GraphqlRequestFailed>
+    readonly retryWorkItems: (
+      repositoryId: string,
+      selector: RetryWorkItemsSelector,
+    ) => Effect.Effect<RetryWorkItemsResult, GraphqlRequestFailed>
     readonly kanbanStatus: (
       repositoryId: string | null,
     ) => Effect.Effect<KanbanStatusResult, GraphqlRequestFailed>
@@ -560,6 +580,159 @@ export class GraphqlApi extends Context.Service<
         })
       })
 
+      const retryWorkItems = Effect.fn("GraphqlApi.retryWorkItems")(function* (
+        repositoryId: string,
+        selector: RetryWorkItemsSelector,
+      ) {
+        return yield* Effect.tryPromise({
+          try: () =>
+            executeGraphql(async () => {
+              const result = await client.mutation({
+                retryWorkItems: {
+                  __args: { repositoryId, selector },
+                  repository: {
+                    id: true,
+                    forge: true,
+                    forgeHost: true,
+                    projectPath: true,
+                  },
+                  results: {
+                    on_RetryWorkItemsRetried: {
+                      __typename: true,
+                      issueNumber: true,
+                      workItem: {
+                        id: true,
+                        state: true,
+                        status: true,
+                      },
+                    },
+                    on_RetryWorkItemsSkipped: {
+                      __typename: true,
+                      issueNumber: true,
+                      workItem: {
+                        id: true,
+                        state: true,
+                        status: true,
+                      },
+                      reason: {
+                        code: true,
+                        message: true,
+                      },
+                    },
+                    on_RetryWorkItemsFailed: {
+                      __typename: true,
+                      issueNumber: true,
+                      workItem: {
+                        id: true,
+                        state: true,
+                        status: true,
+                      },
+                      error: {
+                        code: true,
+                        message: true,
+                      },
+                    },
+                  },
+                },
+              })
+              const payload = result.retryWorkItems
+              if (!payload) {
+                throw new Error("retryWorkItems returned null")
+              }
+              const results: RetryWorkItemResult[] = []
+              for (const entry of payload.results ?? []) {
+                if (
+                  entry !== null &&
+                  typeof entry === "object" &&
+                  "__typename" in entry &&
+                  entry.__typename === "RetryWorkItemsRetried" &&
+                  "workItem" in entry &&
+                  entry.workItem !== null &&
+                  entry.workItem !== undefined
+                ) {
+                  results.push({
+                    issueNumber: entry.issueNumber,
+                    outcome: "RETRIED",
+                    workItem: {
+                      id: entry.workItem.id,
+                      state: entry.workItem.state,
+                      status: entry.workItem.status,
+                    },
+                  })
+                  continue
+                }
+                if (
+                  entry !== null &&
+                  typeof entry === "object" &&
+                  "__typename" in entry &&
+                  entry.__typename === "RetryWorkItemsSkipped" &&
+                  "reason" in entry &&
+                  entry.reason !== null &&
+                  entry.reason !== undefined &&
+                  "workItem" in entry &&
+                  entry.workItem !== null &&
+                  entry.workItem !== undefined
+                ) {
+                  results.push({
+                    issueNumber: entry.issueNumber,
+                    outcome: "SKIPPED",
+                    workItem: {
+                      id: entry.workItem.id,
+                      state: entry.workItem.state,
+                      status: entry.workItem.status,
+                    },
+                    reason: {
+                      code: entry.reason.code,
+                      message: entry.reason.message,
+                    },
+                  })
+                  continue
+                }
+                if (
+                  entry !== null &&
+                  typeof entry === "object" &&
+                  "__typename" in entry &&
+                  entry.__typename === "RetryWorkItemsFailed" &&
+                  "error" in entry &&
+                  entry.error !== null &&
+                  entry.error !== undefined &&
+                  "workItem" in entry &&
+                  entry.workItem !== null &&
+                  entry.workItem !== undefined
+                ) {
+                  results.push({
+                    issueNumber: entry.issueNumber,
+                    outcome: "FAILED",
+                    workItem: {
+                      id: entry.workItem.id,
+                      state: entry.workItem.state,
+                      status: entry.workItem.status,
+                    },
+                    error: {
+                      code: entry.error.code,
+                      message: entry.error.message,
+                    },
+                  })
+                  continue
+                }
+                throw new Error(
+                  "retryWorkItems returned an unexpected result shape",
+                )
+              }
+              return {
+                repository: {
+                  id: payload.repository.id,
+                  forge: payload.repository.forge,
+                  forgeHost: payload.repository.forgeHost,
+                  projectPath: payload.repository.projectPath,
+                },
+                results,
+              }
+            }),
+          catch: mapFailure,
+        })
+      })
+
       const kanbanStatus = Effect.fn("GraphqlApi.kanbanStatus")(function* (
         repositoryId: string | null,
       ) {
@@ -672,6 +845,7 @@ export class GraphqlApi extends Context.Service<
         listRepositories,
         intakeCandidates,
         startRepositoryIntake,
+        retryWorkItems,
         kanbanStatus,
         workItemBySessionId,
       }

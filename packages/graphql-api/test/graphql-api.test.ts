@@ -48,8 +48,10 @@ import {
 } from "@ready-for-agent/queue-service"
 import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
+  ActiveStepRunExistsError,
   InvalidExecutionProfileError,
   IssueNotFoundError,
+  RetryNotEligibleError,
   STEP_RUN_REASON,
   SessionIdAmbiguousError,
   SessionIdNotFoundError,
@@ -8793,6 +8795,538 @@ describe("GraphQL API", () => {
       },
     })
     expect(receivedWorkItemId).toBe(workItem.id)
+  })
+
+  test("retryWorkItems rejects selector validation failures", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RetryWorkItems($repositoryId: ID!, $selector: RetryWorkItemsSelector!) {
+          retryWorkItems(repositoryId: $repositoryId, selector: $selector) {
+            results { __typename }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          selector: { issueNumber: 7, allRetryable: true },
+        },
+      }),
+    )
+
+    const body = (await response.json()) as {
+      errors: Array<{ message: string; extensions: { code: string } }>
+    }
+    expect(body.errors).toHaveLength(1)
+    expect(body.errors[0]?.extensions.code).toBe("INVALID_RETRY_SELECTOR")
+  })
+
+  test("retryWorkItems empty all-retryable snapshot succeeds without calling retry", async () => {
+    let retryCalls = 0
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed([
+            {
+              ...workItem,
+              paused: true,
+              stepRuns: [
+                {
+                  ...workItem.stepRuns[0]!,
+                  status: "failed",
+                  finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+                },
+              ],
+            } as WorkItemRecord,
+          ]),
+        retry: () =>
+          Effect.sync(() => {
+            retryCalls += 1
+            return workItem
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RetryAll($repositoryId: ID!) {
+          retryWorkItems(repositoryId: $repositoryId, selector: { allRetryable: true }) {
+            repository { id }
+            results { __typename }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        retryWorkItems: {
+          repository: { id: repository.id },
+          results: [],
+        },
+      },
+    })
+    expect(retryCalls).toBe(0)
+  })
+
+  test("retryWorkItems retries failed and interrupted Step Runs and retryable Needs Human", async () => {
+    const failed = {
+      ...workItem,
+      id: "wi-failed",
+      issueNumber: 10,
+      state: "implement",
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          status: "failed",
+          finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+        },
+      ],
+    } as WorkItemRecord
+    const interrupted = {
+      ...workItem,
+      id: "wi-interrupted",
+      issueNumber: 11,
+      state: "commit",
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          step: "commit",
+          status: "interrupted",
+          finishedAt: new Date("2026-07-14T08:06:00.000Z"),
+        },
+      ],
+    } as WorkItemRecord
+    const needsHuman = {
+      ...workItem,
+      id: "wi-nh",
+      issueNumber: 12,
+      state: "needs_human",
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          step: "review",
+          status: "succeeded",
+          finishedAt: new Date("2026-07-14T08:07:00.000Z"),
+        },
+      ],
+    } as WorkItemRecord
+    const callOrder: string[] = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed([needsHuman, interrupted, failed]),
+        retry: (workItemId) =>
+          Effect.sync(() => {
+            callOrder.push(workItemId)
+            const source =
+              workItemId === failed.id
+                ? failed
+                : workItemId === interrupted.id
+                  ? interrupted
+                  : needsHuman
+            return {
+              ...source,
+              state: source.state === "needs_human" ? "review" : source.state,
+              stepRuns: [
+                ...source.stepRuns,
+                {
+                  ...source.stepRuns[0]!,
+                  id: `${workItemId}-retry`,
+                  status: "queued",
+                  finishedAt: null,
+                },
+              ],
+            } as WorkItemRecord
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RetryAll($repositoryId: ID!) {
+          retryWorkItems(repositoryId: $repositoryId, selector: { allRetryable: true }) {
+            results {
+              __typename
+              ... on RetryWorkItemsRetried {
+                issueNumber
+                workItem { id state status }
+              }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(callOrder).toEqual([failed.id, interrupted.id, needsHuman.id])
+    expect(await response.json()).toEqual({
+      data: {
+        retryWorkItems: {
+          results: [
+            {
+              __typename: "RetryWorkItemsRetried",
+              issueNumber: 10,
+              workItem: {
+                id: failed.id,
+                state: "IMPLEMENT",
+                status: "QUEUED",
+              },
+            },
+            {
+              __typename: "RetryWorkItemsRetried",
+              issueNumber: 11,
+              workItem: {
+                id: interrupted.id,
+                state: "COMMIT",
+                status: "QUEUED",
+              },
+            },
+            {
+              __typename: "RetryWorkItemsRetried",
+              issueNumber: 12,
+              workItem: {
+                id: needsHuman.id,
+                state: "REVIEW",
+                status: "QUEUED",
+              },
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("retryWorkItems treats Worker Slot exhaustion as a successful Retry", async () => {
+    const waiting = {
+      ...workItem,
+      waitingSince: new Date("2026-07-14T08:05:00.000Z"),
+      holdsWorkerSlot: false,
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          status: "failed",
+          finishedAt: new Date("2026-07-14T08:04:00.000Z"),
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([waiting]),
+        retry: () => Effect.succeed(waiting),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RetryIssue($repositoryId: ID!) {
+          retryWorkItems(repositoryId: $repositoryId, selector: { issueNumber: 42 }) {
+            results {
+              __typename
+              ... on RetryWorkItemsRetried {
+                workItem { id status }
+              }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        retryWorkItems: {
+          results: [
+            {
+              __typename: "RetryWorkItemsRetried",
+              workItem: {
+                id: waiting.id,
+                status: "WAITING_FOR_WORKER_SLOT",
+              },
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("retryWorkItems continues after ineligible races and concurrent Retry", async () => {
+    const first = {
+      ...workItem,
+      id: "wi-first",
+      issueNumber: 10,
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          status: "failed",
+          finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+        },
+      ],
+    } as WorkItemRecord
+    const second = {
+      ...first,
+      id: "wi-second",
+      issueNumber: 11,
+    }
+    const third = {
+      ...first,
+      id: "wi-third",
+      issueNumber: 12,
+    }
+    const retried = {
+      ...third,
+      stepRuns: [
+        ...third.stepRuns,
+        {
+          ...third.stepRuns[0]!,
+          id: "srun-retried",
+          status: "queued",
+          finishedAt: null,
+        },
+      ],
+    } as WorkItemRecord
+    const callOrder: string[] = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed([first, second, third]),
+        retry: (workItemId) =>
+          Effect.gen(function* () {
+            callOrder.push(workItemId)
+            if (workItemId === first.id) {
+              return yield* new RetryNotEligibleError({
+                workItemId,
+                reason: "paused",
+              })
+            }
+            if (workItemId === second.id) {
+              return yield* new ActiveStepRunExistsError({
+                workItemId,
+                stepRunId: "srun-active",
+                status: "running",
+              })
+            }
+            return retried
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RetryAll($repositoryId: ID!) {
+          retryWorkItems(repositoryId: $repositoryId, selector: { allRetryable: true }) {
+            results {
+              __typename
+              ... on RetryWorkItemsRetried {
+                issueNumber
+                workItem { id }
+              }
+              ... on RetryWorkItemsSkipped {
+                issueNumber
+                reason { code }
+              }
+              ... on RetryWorkItemsFailed {
+                issueNumber
+                error { code }
+              }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(callOrder).toEqual([first.id, second.id, third.id])
+    expect(await response.json()).toEqual({
+      data: {
+        retryWorkItems: {
+          results: [
+            {
+              __typename: "RetryWorkItemsSkipped",
+              issueNumber: 10,
+              reason: { code: "RETRY_NOT_ELIGIBLE" },
+            },
+            {
+              __typename: "RetryWorkItemsFailed",
+              issueNumber: 11,
+              error: { code: "ACTIVE_STEP_RUN_EXISTS" },
+            },
+            {
+              __typename: "RetryWorkItemsRetried",
+              issueNumber: 12,
+              workItem: { id: third.id },
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("retryWorkItems verifies a Work Item belongs to the selected Repository", async () => {
+    const foreign = {
+      ...workItem,
+      repositoryId: "repo-other",
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () => Effect.succeed(foreign),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RetryOne($repositoryId: ID!, $workItemId: ID!) {
+          retryWorkItems(
+            repositoryId: $repositoryId
+            selector: { workItemId: $workItemId }
+          ) {
+            results { __typename }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          workItemId: foreign.id,
+        },
+      }),
+    )
+
+    const body = (await response.json()) as {
+      errors: Array<{ extensions: { code: string } }>
+    }
+    expect(body.errors[0]?.extensions.code).toBe("WORK_ITEM_NOT_IN_REPOSITORY")
+  })
+
+  test("retryWorkItems rejects an Issue with no unfinished Work Item", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () =>
+          Effect.succeed([
+            {
+              ...workItem,
+              state: "complete",
+              stepRuns: [
+                {
+                  ...workItem.stepRuns[0]!,
+                  status: "succeeded",
+                  finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+                },
+              ],
+            } as WorkItemRecord,
+          ]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RetryIssue($repositoryId: ID!) {
+          retryWorkItems(repositoryId: $repositoryId, selector: { issueNumber: 42 }) {
+            results { __typename }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    const body = (await response.json()) as {
+      errors: Array<{ extensions: { code: string } }>
+    }
+    expect(body.errors[0]?.extensions.code).toBe("NO_UNFINISHED_WORK_ITEM")
+  })
+
+  test("retryWorkItems stops on operation-level failure after earlier success", async () => {
+    const first = {
+      ...workItem,
+      id: "wi-first",
+      issueNumber: 10,
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          status: "failed",
+          finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+        },
+      ],
+    } as WorkItemRecord
+    const second = {
+      ...first,
+      id: "wi-second",
+      issueNumber: 11,
+    }
+    const retried = {
+      ...first,
+      stepRuns: [
+        ...first.stepRuns,
+        {
+          ...first.stepRuns[0]!,
+          id: "srun-retried",
+          status: "queued",
+          finishedAt: null,
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([first, second]),
+        retry: (workItemId) =>
+          workItemId === first.id
+            ? Effect.succeed(retried)
+            : Effect.fail(
+                new EnqueueError({
+                  queue: "work-item-steps",
+                  message: "queue infrastructure failed",
+                }),
+              ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RetryAll($repositoryId: ID!) {
+          retryWorkItems(repositoryId: $repositoryId, selector: { allRetryable: true }) {
+            results { __typename }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "queue infrastructure failed",
+          extensions: expect.objectContaining({
+            code: "ENQUEUE_ERROR",
+          }),
+        }),
+      ],
+    })
   })
 
   test("accepts a Refresh Job for a Paused Repository without reconciling", async () => {
