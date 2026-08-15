@@ -129,23 +129,71 @@ export const executionProfileInputFromDraft = (input: {
   }
 }
 
+type PreviewCatalogSnapshot = {
+  readonly kind: string
+  readonly models: readonly AgentModelOption[]
+}
+
+/** First READY catalog accepted for one Agent Backend in one dialog session. */
+export type ImplementWithCatalogPin = {
+  readonly models: readonly AgentModelOption[]
+}
+
 /**
- * READY preview catalogs stay usable even when a later refetch fails (React
- * Query keeps the last successful data). Only an explicit non-READY inspect
- * or a failure with no cached READY catalog is empty/failed.
+ * Remember the first READY preview for this backend. Later previews — failed,
+ * empty, Unavailable, or READY with a different list — do not replace it.
+ */
+export const nextImplementWithCatalogPin = (input: {
+  readonly pin: ImplementWithCatalogPin | undefined
+  readonly preview: PreviewCatalogSnapshot | undefined
+}): ImplementWithCatalogPin | undefined => {
+  if (input.pin !== undefined) {
+    return input.pin
+  }
+  if (input.preview?.kind === "READY") {
+    return { models: input.preview.models }
+  }
+  return undefined
+}
+
+/**
+ * Withhold leftover query cache from a new dialog session until this observer
+ * has fetched. An in-session pin may still see cached preview while a
+ * backend switch-back refetches.
+ */
+export const implementWithSessionPreview = (input: {
+  readonly pin: ImplementWithCatalogPin | undefined
+  readonly preview: PreviewCatalogSnapshot | undefined
+  readonly fetchedAfterMount: boolean
+  readonly previewFailed: boolean
+}): {
+  readonly preview: PreviewCatalogSnapshot | undefined
+  readonly previewFailed: boolean
+} => {
+  if (input.pin !== undefined || input.fetchedAfterMount) {
+    return {
+      preview: input.preview,
+      previewFailed: input.previewFailed,
+    }
+  }
+  return { preview: undefined, previewFailed: false }
+}
+
+/**
+ * If a pin exists it is the catalog. Otherwise a READY preview is usable and
+ * any other settled preview is empty/failed.
  */
 export const usablePreviewCatalog = (input: {
-  readonly preview:
-    | {
-        readonly kind: string
-        readonly models: readonly AgentModelOption[]
-      }
-    | undefined
+  readonly preview: PreviewCatalogSnapshot | undefined
   readonly previewFailed: boolean
+  readonly pin?: ImplementWithCatalogPin
 }): {
   readonly models: readonly AgentModelOption[] | undefined
   readonly failed: boolean
 } => {
+  if (input.pin !== undefined) {
+    return { models: input.pin.models, failed: false }
+  }
   if (input.preview?.kind === "READY") {
     return { models: input.preview.models, failed: false }
   }

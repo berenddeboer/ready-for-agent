@@ -1,10 +1,13 @@
 import { useQuery } from "@tanstack/react-query"
-import { type ReactNode, useState } from "react"
+import { type ReactNode, useRef, useState } from "react"
 import type { AgentModelOption } from "./agent-model-settings.js"
 import {
   type ExecutionProfileDraft,
   type ExecutionProfilePrefSource,
+  type ImplementWithCatalogPin,
   type ImplementWithSubmitInput,
+  implementWithSessionPreview,
+  nextImplementWithCatalogPin,
   resolveExecutionProfileDraft,
   usablePreviewCatalog,
 } from "./execution-profile-draft.js"
@@ -58,6 +61,9 @@ export function ImplementWithIssueDialog({
   onCancel,
 }: ImplementWithIssueDialogProps): ReactNode {
   const [backendId, setBackendId] = useState(initialBackendId)
+  const catalogPinsRef = useRef<
+    Readonly<Record<string, ImplementWithCatalogPin>>
+  >({})
   const agentBackends = useQuery(agentBackendsQuery)
   const harnessPrefs = useQuery({
     queryKey: ["implement-with", "harness-prefs", backendId] as const,
@@ -96,6 +102,11 @@ export function ImplementWithIssueDialog({
   })
   const preview = useQuery({
     queryKey: ["implement-with", "preview", backendId] as const,
+    staleTime: 0,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchInterval: false,
     queryFn: async () => {
       const result = await graphql.query({
         previewAgentBackend: {
@@ -133,9 +144,30 @@ export function ImplementWithIssueDialog({
             }),
           ),
         }
-  const usableCatalog = usablePreviewCatalog({
+  const existingPin = catalogPinsRef.current[backendId]
+  const sessionPreview = implementWithSessionPreview({
+    pin: existingPin,
     preview: mappedPreview,
+    fetchedAfterMount: preview.isFetchedAfterMount,
     previewFailed: preview.isError,
+  })
+  const catalogPin = nextImplementWithCatalogPin({
+    pin: existingPin,
+    preview: sessionPreview.preview,
+  })
+  if (
+    catalogPin !== undefined &&
+    catalogPinsRef.current[backendId] === undefined
+  ) {
+    catalogPinsRef.current = {
+      ...catalogPinsRef.current,
+      [backendId]: catalogPin,
+    }
+  }
+  const usableCatalog = usablePreviewCatalog({
+    preview: sessionPreview.preview,
+    previewFailed: sessionPreview.previewFailed,
+    pin: catalogPin,
   })
   const catalogFailed = usableCatalog.failed
   const catalogError = catalogFailed
@@ -146,7 +178,7 @@ export function ImplementWithIssueDialog({
       : (preview.data?.reason ?? "Could not load the Agent Model catalog.")
     : null
   const catalog = {
-    loading: preview.isPending && usableCatalog.models === undefined,
+    loading: usableCatalog.models === undefined && !catalogFailed,
     failed: catalogFailed,
     error: catalogError,
     models: usableCatalog.models,
