@@ -6,10 +6,12 @@ import {
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
   buildIntakeSuccessDocument,
+  buildRetrySuccessDocument,
   buildStatusSuccessDocument,
   encodeCompactJson,
   intakeHasFailedResults,
   localGitErrorCode,
+  retryHasFailedResults,
   toCanonicalRepositoryIdentity,
 } from "./cli-json.ts"
 import { interactiveResumeCommand } from "./interactive-resume.ts"
@@ -76,6 +78,26 @@ const projectPathFlag = Flag.string("project-path").pipe(
     "Correct the forge project path inferred from the repository remote",
   ),
   Flag.optional,
+)
+
+const retryIssueFlag = Flag.integer("issue").pipe(
+  Flag.withDescription(
+    "Retry the current unfinished Work Item for this Issue number",
+  ),
+  Flag.optional,
+)
+
+const retryWorkItemFlag = Flag.string("work-item").pipe(
+  Flag.withDescription(
+    "Retry this Work Item after verifying it belongs to the selected Repository",
+  ),
+  Flag.optional,
+)
+
+const retryAllRetryableFlag = Flag.boolean("all-retryable").pipe(
+  Flag.withDescription(
+    "Retry every currently retryable Work Item in the Repository (Harness-owned canRetry)",
+  ),
 )
 
 const startHarnessWorkflow = Effect.fn("Cli.startHarness")(function* (
@@ -274,6 +296,67 @@ const intakeWorkflow = Effect.fn("Cli.intake")(function* (
   })
 })
 
+const retryWorkflow = Effect.fn("Cli.retry")(function* (
+  repositoryArgument: string,
+  selector: {
+    readonly issue: number | undefined
+    readonly workItem: string | undefined
+    readonly allRetryable: boolean
+  },
+) {
+  const selectedCount =
+    Number(selector.issue !== undefined) +
+    Number(selector.workItem !== undefined) +
+    Number(selector.allRetryable)
+  if (selectedCount !== 1) {
+    return yield* new FiniteCommandFailed({
+      command: "retry",
+      code: "INVALID_RETRY_SELECTOR",
+      message:
+        "Exactly one of --issue, --work-item, or --all-retryable is required",
+    })
+  }
+
+  const graphqlApi = yield* GraphqlApi
+  const repositories = yield* graphqlApi.listRepositories.pipe(
+    Effect.mapError((error) => toFiniteCommandFailed("retry", error)),
+  )
+
+  const resolved = resolveRepositoryIdentity(repositoryArgument, repositories)
+  if (resolved._tag !== "matched") {
+    return yield* repositoryIdentityCommandFailed("retry", resolved)
+  }
+
+  const graphqlSelector =
+    selector.issue !== undefined
+      ? { issueNumber: selector.issue }
+      : selector.workItem !== undefined
+        ? { workItemId: selector.workItem }
+        : { allRetryable: true as const }
+
+  const result = yield* graphqlApi
+    .retryWorkItems(resolved.repository.id, graphqlSelector)
+    .pipe(Effect.mapError((error) => toFiniteCommandFailed("retry", error)))
+
+  yield* Console.log(
+    encodeCompactJson(
+      buildRetrySuccessDocument({
+        repository: {
+          id: result.repository.id,
+          forge: result.repository.forge,
+          forgeHost: result.repository.forgeHost,
+          projectPath: result.repository.projectPath,
+        },
+        results: result.results,
+      }),
+    ),
+  )
+
+  yield* Effect.sync(() => {
+    process.exitCode = retryHasFailedResults(result.results) ? 1 : 0
+  })
+})
+
 const statusWorkflow = Effect.fn("Cli.status")(function* (
   repositoryArgument: string | undefined,
 ) {
@@ -431,6 +514,26 @@ const intakeCommand = Command.make(
   ),
 )
 
+const retryCommand = Command.make(
+  "retry",
+  {
+    repository: repositoryIdentityArg,
+    issue: retryIssueFlag,
+    workItem: retryWorkItemFlag,
+    allRetryable: retryAllRetryableFlag,
+  },
+  ({ repository, issue, workItem, allRetryable }) =>
+    retryWorkflow(repository, {
+      issue: Option.getOrUndefined(issue),
+      workItem: Option.getOrUndefined(workItem),
+      allRetryable,
+    }),
+).pipe(
+  Command.withDescription(
+    "Retry one Work Item, the unfinished Work Item for one Issue, or every currently retryable Work Item as versioned JSON",
+  ),
+)
+
 const statusCommand = Command.make(
   "status",
   { repository: optionalRepositoryIdentityArg },
@@ -458,13 +561,14 @@ export const cli = Command.make(
     startHarnessWorkflow(noOpen, Option.getOrUndefined(host)),
 ).pipe(
   Command.withDescription(
-    "Ready for Agent operator binary (start Harness, add repositories, intake, Kanban status, jump)",
+    "Ready for Agent operator binary (start Harness, add repositories, intake, retry, Kanban status, jump)",
   ),
   Command.withSubcommands([
     startCommand,
     addCommand,
     candidatesCommand,
     intakeCommand,
+    retryCommand,
     statusCommand,
     jumpCommand,
   ]),

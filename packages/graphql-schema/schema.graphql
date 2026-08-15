@@ -644,6 +644,81 @@ type RepositoryIntakeResult {
   results: [RepositoryIntakeIssueResult!]!
 }
 
+"""
+Exactly one of issueNumber, workItemId, or allRetryable=true must be set.
+"""
+input RetryWorkItemsSelector {
+  """
+  Retry the current unfinished Work Item for this Issue number.
+  """
+  issueNumber: Int
+  """
+  Retry this Work Item after verifying it belongs to the selected Repository.
+  """
+  workItemId: ID
+  """
+  Retry every Work Item currently selected by the Harness-owned canRetry
+  predicate. Must be true to select this mode; false is treated as unset.
+  """
+  allRetryable: Boolean
+}
+
+"""
+Stable per-item Retry skip or failure. Operation-level failures (repository
+disappearance, selector validation, infrastructure, cancellation, unexpected
+defects) are GraphQL errors and stop processing instead of appearing here.
+"""
+type RetryWorkItemsError {
+  code: String!
+  message: String!
+}
+
+"""
+Successful Retry of one Work Item through ordinary Work Item Retry, including
+Worker Slot re-admission (which may leave the item Waiting for Worker Slot).
+"""
+type RetryWorkItemsRetried {
+  issueNumber: Int!
+  workItem: WorkItem!
+}
+
+"""
+The target was selected but is no longer eligible (ineligible race, paused,
+or a latest Step Run that does not permit Retry). Processing continues.
+"""
+type RetryWorkItemsSkipped {
+  issueNumber: Int!
+  workItem: WorkItem!
+  reason: RetryWorkItemsError!
+}
+
+"""
+Per-item Retry conflict that does not stop later targets, such as a concurrent
+active Step Run. Earlier successful retries are preserved.
+"""
+type RetryWorkItemsFailed {
+  issueNumber: Int!
+  workItem: WorkItem!
+  error: RetryWorkItemsError!
+}
+
+"""
+Per-item Retry outcome. Retried, skipped, and failed fields cannot coexist.
+"""
+union RetryWorkItemsItemResult =
+  | RetryWorkItemsRetried
+  | RetryWorkItemsSkipped
+  | RetryWorkItemsFailed
+
+"""
+Best-effort sequential Retry result. Snapshots targets at mutation time from
+the selector; does not accept a client-built Work Item list.
+"""
+type RetryWorkItemsResult {
+  repository: Repository!
+  results: [RetryWorkItemsItemResult!]!
+}
+
 enum WorkItemState {
   ASSESS_CHANGES
   CLOSE_ISSUE
@@ -944,6 +1019,20 @@ type Mutation {
   bypasses preflight.
   """
   startRepositoryIntake(repositoryId: ID!): RepositoryIntakeResult!
+  """
+  Synchronous best-effort Retry: resolve one Issue's unfinished Work Item,
+  one Work Item in this Repository, or every currently retryable Work Item
+  (Harness-owned canRetry). Process accepted targets sequentially through
+  ordinary Work Item Retry. Ineligible races become per-item skipped
+  results; concurrent active-run conflicts become per-item failed results;
+  infrastructure, cancellation, and unexpected defects stop as GraphQL
+  errors while preserving earlier retries. Empty --all-retryable selection
+  is a successful no-op.
+  """
+  retryWorkItems(
+    repositoryId: ID!
+    selector: RetryWorkItemsSelector!
+  ): RetryWorkItemsResult!
   retryWorkItem(workItemId: ID!): WorkItem!
   pauseWorkItem(workItemId: ID!): WorkItem!
   startWorkItem(workItemId: ID!): WorkItem!

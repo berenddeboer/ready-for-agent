@@ -24,6 +24,7 @@ import {
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
   buildIntakeSuccessDocument,
+  buildRetrySuccessDocument,
   buildStatusSuccessDocument,
 } from "./cli-json.ts"
 import { READY_FOR_AGENT_VERSION } from "./generated/version.ts"
@@ -946,6 +947,294 @@ describe("operator binary finite-command process contract", () => {
           ],
         }),
       )
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("retry complete success emits JSON on stdout and exits 0", async () => {
+    const seenBodies: string[] = []
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        seenBodies.push(body)
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({
+            data: {
+              retryWorkItems: {
+                repository: {
+                  id: "repo-process-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                },
+                results: [
+                  {
+                    __typename: "RetryWorkItemsRetried",
+                    issueNumber: 7,
+                    workItem: {
+                      id: "wi-7",
+                      state: "IMPLEMENT",
+                      status: "QUEUED",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["retry", "GitHub.com/Owner/Repo", "--all-retryable"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(0)
+      expect(result.stderr.trim()).toBe("")
+      expect(seenBodies.some((body) => body.includes("retryWorkItems"))).toBe(
+        true,
+      )
+      expect(parseExactlyOneJsonDocument(result.stdout)).toEqual(
+        buildRetrySuccessDocument({
+          repository: {
+            id: "repo-process-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          results: [
+            {
+              issueNumber: 7,
+              outcome: "RETRIED",
+              workItem: {
+                id: "wi-7",
+                state: "IMPLEMENT",
+                status: "QUEUED",
+              },
+            },
+          ],
+        }),
+      )
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("retry partial failure emits result JSON on stdout and exits 1", async () => {
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({
+            data: {
+              retryWorkItems: {
+                repository: {
+                  id: "repo-process-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                },
+                results: [
+                  {
+                    __typename: "RetryWorkItemsRetried",
+                    issueNumber: 7,
+                    workItem: {
+                      id: "wi-7",
+                      state: "IMPLEMENT",
+                      status: "QUEUED",
+                    },
+                  },
+                  {
+                    __typename: "RetryWorkItemsFailed",
+                    issueNumber: 9,
+                    workItem: {
+                      id: "wi-9",
+                      state: "IMPLEMENT",
+                      status: "FAILED",
+                    },
+                    error: {
+                      code: "ACTIVE_STEP_RUN_EXISTS",
+                      message: "Work Item wi-9 already has an active Step Run",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["retry", "github.com/owner/repo", "--work-item", "wi-9"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stderr.trim()).toBe("")
+      expect(parseExactlyOneJsonDocument(result.stdout)).toEqual(
+        buildRetrySuccessDocument({
+          repository: {
+            id: "repo-process-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          results: [
+            {
+              issueNumber: 7,
+              outcome: "RETRIED",
+              workItem: {
+                id: "wi-7",
+                state: "IMPLEMENT",
+                status: "QUEUED",
+              },
+            },
+            {
+              issueNumber: 9,
+              outcome: "FAILED",
+              workItem: {
+                id: "wi-9",
+                state: "IMPLEMENT",
+                status: "FAILED",
+              },
+              error: {
+                code: "ACTIVE_STEP_RUN_EXISTS",
+                message: "Work Item wi-9 already has an active Step Run",
+              },
+            },
+          ],
+        }),
+      )
+    } finally {
+      await closeServer(server)
+    }
+  })
+
+  test("retry GraphQL operation failure preserves extensions.code on stderr", async () => {
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("repositories")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                repositories: [
+                  {
+                    id: "repo-process-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ],
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({
+            data: null,
+            errors: [
+              {
+                message:
+                  "Work Item wi-9 does not belong to repository repo-process-1",
+                extensions: { code: "WORK_ITEM_NOT_IN_REPOSITORY" },
+              },
+            ],
+          }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["retry", "github.com/owner/repo", "--work-item", "wi-9"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(1)
+      expect(result.stdout.trim()).toBe("")
+      expect(parseExactlyOneJsonDocument(result.stderr)).toEqual({
+        schemaVersion: CLI_SCHEMA_VERSION,
+        command: "retry",
+        error: {
+          code: "WORK_ITEM_NOT_IN_REPOSITORY",
+          message:
+            "Work Item wi-9 does not belong to repository repo-process-1",
+        },
+      })
     } finally {
       await closeServer(server)
     }

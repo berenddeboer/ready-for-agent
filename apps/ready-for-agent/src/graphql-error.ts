@@ -160,6 +160,7 @@ const CLI_REQUIRED_GRAPHQL_FIELDS = {
   addRepository: "add",
   intakeCandidates: "candidates",
   startRepositoryIntake: "intake",
+  retryWorkItems: "retry",
   kanbanStatus: "status",
   workItemBySessionId: "jump",
 } as const

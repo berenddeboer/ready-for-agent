@@ -5,10 +5,12 @@ import {
   buildCandidatesSuccessDocument,
   buildCommandErrorDocument,
   buildIntakeSuccessDocument,
+  buildRetrySuccessDocument,
   buildStatusSuccessDocument,
   encodeCompactJson,
   intakeHasFailedResults,
   localGitErrorCode,
+  retryHasFailedResults,
 } from "./cli-json.ts"
 import { describe, expect, test } from "bun:test"
 
@@ -174,6 +176,75 @@ describe("finite CLI JSON contract", () => {
     expect(intakeHasFailedResults(doc.results)).toBe(true)
     expect(encodeCompactJson(doc)).toContain('"outcome":"CREATED"')
     expect(encodeCompactJson(doc)).toContain('"outcome":"FAILED"')
+  })
+
+  test("retry success document discriminates RETRIED, SKIPPED, and FAILED", () => {
+    const doc = buildRetrySuccessDocument({
+      repository: {
+        id: "repo-1",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "owner/repo",
+      },
+      results: [
+        {
+          issueNumber: 7,
+          outcome: "RETRIED",
+          workItem: {
+            id: "wi-7",
+            state: "IMPLEMENT",
+            status: "QUEUED",
+          },
+        },
+        {
+          issueNumber: 8,
+          outcome: "SKIPPED",
+          workItem: {
+            id: "wi-8",
+            state: "IMPLEMENT",
+            status: "FAILED",
+          },
+          reason: {
+            code: "RETRY_NOT_ELIGIBLE",
+            message: "Work Item wi-8 cannot be retried: paused",
+          },
+        },
+        {
+          issueNumber: 9,
+          outcome: "FAILED",
+          workItem: {
+            id: "wi-9",
+            state: "IMPLEMENT",
+            status: "FAILED",
+          },
+          error: {
+            code: "ACTIVE_STEP_RUN_EXISTS",
+            message: "Work Item wi-9 already has an active Step Run",
+          },
+        },
+      ],
+    })
+    expect(doc.command).toBe("retry")
+    expect(doc.schemaVersion).toBe(1)
+    expect(retryHasFailedResults(doc.results)).toBe(true)
+    expect(encodeCompactJson(doc)).toContain('"outcome":"RETRIED"')
+    expect(encodeCompactJson(doc)).toContain('"outcome":"SKIPPED"')
+    expect(encodeCompactJson(doc)).toContain('"outcome":"FAILED"')
+    expect(
+      retryHasFailedResults([
+        {
+          issueNumber: 7,
+          outcome: "RETRIED",
+          workItem: { id: "wi-7", state: "IMPLEMENT", status: "QUEUED" },
+        },
+        {
+          issueNumber: 8,
+          outcome: "SKIPPED",
+          workItem: { id: "wi-8", state: "IMPLEMENT", status: "FAILED" },
+          reason: { code: "RETRY_NOT_ELIGIBLE", message: "paused" },
+        },
+      ]),
+    ).toBe(false)
   })
 
   test("command-level error document is versioned and nested under error", () => {

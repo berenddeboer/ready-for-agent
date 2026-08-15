@@ -16,6 +16,7 @@ import {
   buildAddSuccessDocument,
   buildCandidatesSuccessDocument,
   buildIntakeSuccessDocument,
+  buildRetrySuccessDocument,
   buildStatusSuccessDocument,
   encodeCompactJson,
 } from "./cli-json.ts"
@@ -51,6 +52,7 @@ const unusedGraphql = {
   intakeCandidates: () => Effect.die("intakeCandidates should not run"),
   startRepositoryIntake: () =>
     Effect.die("startRepositoryIntake should not run"),
+  retryWorkItems: () => Effect.die("retryWorkItems should not run"),
   kanbanStatus: () => Effect.die("kanbanStatus should not run"),
   workItemBySessionId: () => Effect.die("workItemBySessionId should not run"),
 } as const
@@ -920,6 +922,445 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
+  it.live("retry all-retryable emits versioned JSON and keeps exit 0", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      const previousExitCode = process.exitCode
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      process.exitCode = undefined
+
+      try {
+        let requested: { repositoryId: string; selector: unknown } | undefined
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "Owner/Repo",
+                },
+              ]),
+              retryWorkItems: (repositoryId, selector) =>
+                Effect.sync(() => {
+                  requested = { repositoryId, selector }
+                  return {
+                    repository: {
+                      id: "repo-1",
+                      forge: "github",
+                      forgeHost: "github.com",
+                      projectPath: "Owner/Repo",
+                    },
+                    results: [
+                      {
+                        issueNumber: 7,
+                        outcome: "RETRIED" as const,
+                        workItem: {
+                          id: "wi-7",
+                          state: "IMPLEMENT",
+                          status: "QUEUED",
+                        },
+                      },
+                    ],
+                  }
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(
+          ["retry", "GitHub.com/owner/repo", "--all-retryable"],
+          layer,
+        )
+
+        expect(requested).toEqual({
+          repositoryId: "repo-1",
+          selector: { allRetryable: true },
+        })
+        expect(logs).toHaveLength(1)
+        expect(logs[0]).toBe(
+          encodeCompactJson(
+            buildRetrySuccessDocument({
+              repository: {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "Owner/Repo",
+              },
+              results: [
+                {
+                  issueNumber: 7,
+                  outcome: "RETRIED",
+                  workItem: {
+                    id: "wi-7",
+                    state: "IMPLEMENT",
+                    status: "QUEUED",
+                  },
+                },
+              ],
+            }),
+          ),
+        )
+        expect(process.exitCode).toBe(0)
+      } finally {
+        console.log = originalLog
+        process.exitCode = previousExitCode
+      }
+    }),
+  )
+
+  it.live("retry --issue targets that Issue's unfinished Work Item", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      const previousExitCode = process.exitCode
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      process.exitCode = undefined
+
+      try {
+        let requested: { repositoryId: string; selector: unknown } | undefined
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                },
+              ]),
+              retryWorkItems: (repositoryId, selector) =>
+                Effect.sync(() => {
+                  requested = { repositoryId, selector }
+                  return {
+                    repository: {
+                      id: "repo-1",
+                      forge: "github",
+                      forgeHost: "github.com",
+                      projectPath: "owner/repo",
+                    },
+                    results: [
+                      {
+                        issueNumber: 42,
+                        outcome: "SKIPPED" as const,
+                        workItem: {
+                          id: "wi-42",
+                          state: "IMPLEMENT",
+                          status: "FAILED",
+                        },
+                        reason: {
+                          code: "RETRY_NOT_ELIGIBLE",
+                          message: "Work Item wi-42 cannot be retried: paused",
+                        },
+                      },
+                    ],
+                  }
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(
+          ["retry", "github.com/owner/repo", "--issue", "42"],
+          layer,
+        )
+
+        expect(requested).toEqual({
+          repositoryId: "repo-1",
+          selector: { issueNumber: 42 },
+        })
+        expect(JSON.parse(logs[0] ?? "")).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "retry",
+          repository: {
+            id: "repo-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          results: [
+            {
+              issueNumber: 42,
+              outcome: "SKIPPED",
+              workItem: {
+                id: "wi-42",
+                state: "IMPLEMENT",
+                status: "FAILED",
+              },
+              reason: {
+                code: "RETRY_NOT_ELIGIBLE",
+                message: "Work Item wi-42 cannot be retried: paused",
+              },
+            },
+          ],
+        })
+        expect(process.exitCode).toBe(0)
+      } finally {
+        console.log = originalLog
+        process.exitCode = previousExitCode
+      }
+    }),
+  )
+
+  it.live("retry partial failure writes stdout and sets exitCode 1", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      const previousExitCode = process.exitCode
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      process.exitCode = undefined
+
+      try {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                },
+              ]),
+              retryWorkItems: () =>
+                Effect.succeed({
+                  repository: {
+                    id: "repo-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                  results: [
+                    {
+                      issueNumber: 7,
+                      outcome: "RETRIED" as const,
+                      workItem: {
+                        id: "wi-7",
+                        state: "IMPLEMENT",
+                        status: "QUEUED",
+                      },
+                    },
+                    {
+                      issueNumber: 9,
+                      outcome: "FAILED" as const,
+                      workItem: {
+                        id: "wi-9",
+                        state: "IMPLEMENT",
+                        status: "FAILED",
+                      },
+                      error: {
+                        code: "ACTIVE_STEP_RUN_EXISTS",
+                        message:
+                          "Work Item wi-9 already has an active Step Run",
+                      },
+                    },
+                  ],
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(
+          ["retry", "github.com/owner/repo", "--all-retryable"],
+          layer,
+        )
+
+        expect(JSON.parse(logs[0] ?? "")).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "retry",
+          repository: {
+            id: "repo-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          results: [
+            {
+              issueNumber: 7,
+              outcome: "RETRIED",
+              workItem: {
+                id: "wi-7",
+                state: "IMPLEMENT",
+                status: "QUEUED",
+              },
+            },
+            {
+              issueNumber: 9,
+              outcome: "FAILED",
+              workItem: {
+                id: "wi-9",
+                state: "IMPLEMENT",
+                status: "FAILED",
+              },
+              error: {
+                code: "ACTIVE_STEP_RUN_EXISTS",
+                message: "Work Item wi-9 already has an active Step Run",
+              },
+            },
+          ],
+        })
+        expect(process.exitCode).toBe(1)
+      } finally {
+        console.log = originalLog
+        process.exitCode = previousExitCode
+      }
+    }),
+  )
+
+  it.live("retry empty results succeed without partial exit", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      const previousExitCode = process.exitCode
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      process.exitCode = undefined
+
+      try {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "owner/repo",
+                },
+              ]),
+              retryWorkItems: () =>
+                Effect.succeed({
+                  repository: {
+                    id: "repo-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                  results: [],
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(
+          ["retry", "github.com/owner/repo", "--all-retryable"],
+          layer,
+        )
+
+        expect(JSON.parse(logs[0] ?? "")).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "retry",
+          repository: {
+            id: "repo-1",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "owner/repo",
+          },
+          results: [],
+        })
+        expect(process.exitCode).toBe(0)
+      } finally {
+        console.log = originalLog
+        process.exitCode = previousExitCode
+      }
+    }),
+  )
+
+  it.live("retry requires exactly one selector", () =>
+    Effect.gen(function* () {
+      const layer = mockStart.pipe(
+        Layer.provideMerge(mockLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            ...unusedGraphql,
+          }),
+        ),
+      )
+
+      const result = yield* runOperator(
+        ["retry", "github.com/owner/repo"],
+        layer,
+      ).pipe(Effect.flip)
+
+      expect(result).toBeInstanceOf(FiniteCommandFailed)
+      if (result instanceof FiniteCommandFailed) {
+        expect(result.document).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "retry",
+          error: {
+            code: "INVALID_RETRY_SELECTOR",
+            message:
+              "Exactly one of --issue, --work-item, or --all-retryable is required",
+          },
+        })
+      }
+    }),
+  )
+
+  it.live("retry preserves GraphQL operation-level error codes", () =>
+    Effect.gen(function* () {
+      const layer = mockStart.pipe(
+        Layer.provideMerge(mockLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            ...unusedGraphql,
+            listRepositories: Effect.succeed([
+              {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "owner/repo",
+              },
+            ]),
+            retryWorkItems: () =>
+              Effect.fail(
+                new GraphqlRequestFailed({
+                  code: "WORK_ITEM_NOT_IN_REPOSITORY",
+                  message:
+                    "Work Item wi-9 does not belong to repository repo-1",
+                }),
+              ),
+          }),
+        ),
+      )
+
+      const result = yield* runOperator(
+        ["retry", "github.com/owner/repo", "--work-item", "wi-9"],
+        layer,
+      ).pipe(Effect.flip)
+
+      expect(result).toBeInstanceOf(FiniteCommandFailed)
+      if (result instanceof FiniteCommandFailed) {
+        expect(result.document).toEqual({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "retry",
+          error: {
+            code: "WORK_ITEM_NOT_IN_REPOSITORY",
+            message: "Work Item wi-9 does not belong to repository repo-1",
+          },
+        })
+      }
+    }),
+  )
+
   it.live("intake preserves GraphQL operation-level error codes", () =>
     Effect.gen(function* () {
       const layer = mockStart.pipe(
@@ -1093,7 +1534,7 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
-  it("binary help lists start, add, candidates, intake, status, jump, --no-open, and --host", () => {
+  it("binary help lists start, add, candidates, intake, retry, status, jump, --no-open, and --host", () => {
     const result = spawnSync(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", "--help"],
@@ -1109,11 +1550,37 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("add")
     expect(output).toContain("candidates")
     expect(output).toContain("intake")
+    expect(output).toContain("retry")
     expect(output).toContain("status")
     expect(output).toContain("jump")
     expect(output).not.toContain("remove-github-token")
     expect(output).toContain("no-open")
     expect(output).toContain("host")
+  })
+
+  it("retry help lists exclusive selectors and is a finite write command", () => {
+    const result = spawnSync(
+      "bun",
+      [
+        "--conditions",
+        "@ready-for-agent/source",
+        "src/main.ts",
+        "retry",
+        "--help",
+      ],
+      {
+        cwd: packageRoot,
+        encoding: "utf8",
+      },
+    )
+
+    const output = `${result.stdout}\n${result.stderr}`
+    expect(result.status).toBe(0)
+    expect(output).toContain("retry")
+    expect(output).toContain("issue")
+    expect(output).toContain("work-item")
+    expect(output).toContain("all-retryable")
+    expect(output).toContain("versioned JSON")
   })
 
   it.live(
