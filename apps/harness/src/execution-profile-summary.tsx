@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import { formatVariantLabel } from "./agent-model-settings.js"
-import { ui } from "./ui.js"
+import { cx, ui } from "./ui.js"
 
 export type WorkItemExecutionProfileView = {
   readonly backend: { readonly id: string; readonly label: string }
@@ -42,7 +42,7 @@ export function ExecutionProfileSummary({
         thinkingLevel: profile.reviewThinkingLevel,
       })
   return (
-    <div className={className} data-execution-profile>
+    <div className={cx("min-w-0 max-w-full", className)} data-execution-profile>
       <p className={ui.jobTicketRuntimeLine}>
         Explicit Work Item Execution Profile
       </p>
