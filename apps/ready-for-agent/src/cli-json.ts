@@ -89,14 +89,14 @@ export type StatusLaneId =
   | "ATTENTION"
   | "MERGED"
 
-export type StatusCauseChainLink = {
+type StatusCauseChainLink = {
   readonly name?: string
   readonly code?: string
   readonly message?: string
 }
 
 /** Bounded sanitized cause chain from the latest Step Run reason_detail. */
-export type StatusStepRunReasonDetail = {
+type StatusStepRunReasonDetail = {
   readonly causeChain: readonly StatusCauseChainLink[]
   readonly code?: string
 }
