@@ -72,6 +72,7 @@ import {
 import {
   type LifecycleLabelChip,
   type LifecyclePipelineLaneId,
+  PIPELINE_LANES,
   type PipelineLaneId,
   lifecycleFocusLaneFor,
   lifecycleLaneForPhase,
@@ -773,6 +774,28 @@ function RepositorySettingsNotFoundDialog({
         </button>
       </div>
     </dialog>
+  )
+}
+
+/**
+ * Decorative six-lane top rail for Repository cards. Order and colors come
+ * straight from `PIPELINE_LANES` (canonical Pipeline lane assembly) so the
+ * rail cannot drift; lane fills are theme-invariant hex values that match the
+ * `--lane-*` CSS tokens. Purely ornamental — hidden from assistive technology.
+ */
+function RepoCardRail() {
+  return (
+    <div className={ui.repoCardRail} aria-hidden="true">
+      {PIPELINE_LANES.map((lane) => (
+        <span
+          key={lane.id}
+          className={ui.repoCardRailSegment}
+          style={{ backgroundColor: lane.color }}
+        />
+      ))}
+      <span className={cx(ui.repoCardRailRivet, ui.repoCardRailRivetL)} />
+      <span className={cx(ui.repoCardRailRivet, ui.repoCardRailRivetR)} />
+    </div>
   )
 }
 
@@ -1823,944 +1846,967 @@ function RepositoryCard({
 
   return (
     <article className={ui.repoCard}>
-      <div className={ui.repoCardHead}>
-        <h2 className={ui.repoCardTitle}>
-          <a
-            className={ui.repoCardLink}
-            href={`https://${repository.forgeHost}/${repository.projectPath}`}
-          >
-            {repositoryLabel}
-          </a>
-          <span
-            className={ui.repoCardPrCount}
-            title={pullRequestCountLabel}
-            aria-busy={pullRequestCountLoading ? true : undefined}
-          >
-            <span className="sr-only">{pullRequestCountLabel}</span>
-            <span aria-hidden="true">{pullRequestCountDisplay}</span>
-          </span>
-        </h2>
-        <div className={ui.repoCardControls}>
-          <CardCollapseToggle
-            collapsed={repositoryCollapsed}
-            onToggle={toggleRepositoryCollapsed}
-            controlsId={repositoryBodyId}
-            label={repositoryLabel}
-          />
-          <button
-            type="button"
-            className={pauseButtonClassName}
-            disabled={pausePending}
-            onClick={() =>
-              repository.paused
-                ? unpauseRepository.mutate()
-                : pauseRepository.mutate()
-            }
-            aria-label={pausePending ? `${pauseLabel} in progress` : pauseLabel}
-            title={
-              pauseFailed
-                ? `Could not ${pauseLabel.toLowerCase()}. Try again.`
-                : pauseLabel
-            }
-          >
-            {pausePending ? (
-              <svg
-                aria-hidden="true"
-                className="animate-spin motion-reduce:animate-none"
-                viewBox="0 0 24 24"
-                fill="none"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="9"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                />
-                <path
-                  className="opacity-75"
-                  d="M12 3a9 9 0 0 1 9 9"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                />
-              </svg>
-            ) : repository.paused ? (
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
-                <path d="m8 5 11 7-11 7V5Z" />
-              </svg>
-            ) : (
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="5" width="4" height="14" rx="1" />
-                <rect x="14" y="5" width="4" height="14" rx="1" />
-              </svg>
-            )}
-          </button>
-          <span className="relative" data-repo-menu={repository.id}>
+      <RepoCardRail />
+      <div className={ui.repoCardInner}>
+        <div className={ui.repoCardHead}>
+          <h2 className={ui.repoCardTitle}>
+            <a
+              className={ui.repoCardLink}
+              href={`https://${repository.forgeHost}/${repository.projectPath}`}
+            >
+              {repositoryLabel}
+            </a>
+            <span
+              className={ui.repoCardPrCount}
+              title={pullRequestCountLabel}
+              aria-busy={pullRequestCountLoading ? true : undefined}
+            >
+              <span className="sr-only">{pullRequestCountLabel}</span>
+              <span aria-hidden="true">{pullRequestCountDisplay}</span>
+            </span>
+          </h2>
+          <div className={ui.repoCardControls}>
+            <CardCollapseToggle
+              collapsed={repositoryCollapsed}
+              onToggle={toggleRepositoryCollapsed}
+              controlsId={repositoryBodyId}
+              label={repositoryLabel}
+            />
             <button
               type="button"
-              className={ui.iconBtn}
-              aria-label={`Actions for ${repository.projectPath}`}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((open) => !open)}
+              className={pauseButtonClassName}
+              disabled={pausePending}
+              onClick={() =>
+                repository.paused
+                  ? unpauseRepository.mutate()
+                  : pauseRepository.mutate()
+              }
+              aria-label={
+                pausePending ? `${pauseLabel} in progress` : pauseLabel
+              }
+              title={
+                pauseFailed
+                  ? `Could not ${pauseLabel.toLowerCase()}. Try again.`
+                  : pauseLabel
+              }
             >
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="5" r="1.75" />
-                <circle cx="12" cy="12" r="1.75" />
-                <circle cx="12" cy="19" r="1.75" />
-              </svg>
+              {pausePending ? (
+                <svg
+                  aria-hidden="true"
+                  className="animate-spin motion-reduce:animate-none"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="9"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                  />
+                  <path
+                    className="opacity-75"
+                    d="M12 3a9 9 0 0 1 9 9"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              ) : repository.paused ? (
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="m8 5 11 7-11 7V5Z" />
+                </svg>
+              ) : (
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="5" width="4" height="14" rx="1" />
+                  <rect x="14" y="5" width="4" height="14" rx="1" />
+                </svg>
+              )}
             </button>
-            {menuOpen && (
-              <div role="menu" className={cx(ui.menuPanel, "min-w-40")}>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={ui.menuItem}
-                  onClick={() => {
-                    setMenuOpen(false)
-                    openSettings()
-                  }}
-                >
-                  Settings
-                </button>
-                <hr className={ui.menuSep} />
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={cx(ui.menuItem, ui.menuItemDestructive)}
-                  disabled={removeRepository.isPending}
-                  onClick={() => {
-                    setMenuOpen(false)
-                    confirmRemoval()
-                  }}
-                >
-                  {removeRepository.isPending ? "Removing..." : "Remove"}
-                </button>
-              </div>
-            )}
-          </span>
-        </div>
-      </div>
-      <dialog
-        ref={settingsDialogRef}
-        className={ui.dialogPanel}
-        aria-labelledby={`repo-settings-title-${repository.id}`}
-        onCancel={(event) => {
-          if (updateSettings.isPending) event.preventDefault()
-        }}
-        onClose={() => {
-          // Escape (or other user dismiss) closes the native dialog first; keep
-          // URL + dialog synchronized, including during pending open navigate.
-          if (dismissingRouteRef.current) {
-            dismissingRouteRef.current = false
-            return
-          }
-          dismissSettings()
-        }}
-      >
-        <form onSubmit={saveSettings}>
-          <div className={ui.dialogHeader}>
-            <p className={ui.dialogKicker}>Repository settings</p>
-            <h2
-              id={`repo-settings-title-${repository.id}`}
-              className={cx(ui.dialogTitle, ui.dialogTitlePath)}
-            >
-              {repository.projectPath}
-            </h2>
-            <p className={ui.dialogLede}>
-              Overrides apply on the next Agent Turn. Empty model fields use
-              harness defaults for this Repository&apos;s effective Agent
-              Backend.
-            </p>
+            <span className="relative" data-repo-menu={repository.id}>
+              <button
+                type="button"
+                className={ui.iconBtn}
+                aria-label={`Actions for ${repository.projectPath}`}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((open) => !open)}
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="12" cy="5" r="1.75" />
+                  <circle cx="12" cy="12" r="1.75" />
+                  <circle cx="12" cy="19" r="1.75" />
+                </svg>
+              </button>
+              {menuOpen && (
+                <div role="menu" className={cx(ui.menuPanel, "min-w-40")}>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={ui.menuItem}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      openSettings()
+                    }}
+                  >
+                    Settings
+                  </button>
+                  <hr className={ui.menuSep} />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={cx(ui.menuItem, ui.menuItemDestructive)}
+                    disabled={removeRepository.isPending}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      confirmRemoval()
+                    }}
+                  >
+                    {removeRepository.isPending ? "Removing..." : "Remove"}
+                  </button>
+                </div>
+              )}
+            </span>
           </div>
-          <div className={ui.dialogBodySectioned}>
-            <section
-              className={ui.dialogSection}
-              aria-labelledby={`repo-sec-identity-${repository.id}`}
-            >
-              <div className={ui.dialogSectionHead}>
-                <h3
-                  id={`repo-sec-identity-${repository.id}`}
-                  className={ui.dialogSectionTitle}
-                >
-                  Forge identity
-                </h3>
-                <span className={ui.dialogSectionMeta}>Path</span>
-              </div>
-              <label className={ui.dialogField}>
-                Forge:
-                <select
-                  className={ui.dialogInput}
-                  value={forge}
-                  onChange={(event) =>
-                    setForge(event.target.value as "github" | "gitlab")
-                  }
-                >
-                  <option value="github">GitHub</option>
-                  <option value="gitlab">GitLab</option>
-                </select>
-              </label>
-              <label className={ui.dialogField}>
-                Forge host:
-                <input
-                  className={cx(ui.dialogInput, ui.dialogInputMono)}
-                  required
-                  value={forgeHost}
-                  onChange={(event) => setForgeHost(event.target.value)}
-                />
-              </label>
-              <label className={ui.dialogField}>
-                Project path:
-                <input
-                  className={cx(ui.dialogInput, ui.dialogInputMono)}
-                  required
-                  value={projectPath}
-                  onChange={(event) => setProjectPath(event.target.value)}
-                />
-              </label>
-              <span className={ui.dialogFieldHint}>
-                GitLab identities are verified before Save. Identity changes are
-                blocked after this Repository has any Work Item.
-              </span>
-            </section>
+        </div>
+        <dialog
+          ref={settingsDialogRef}
+          className={ui.dialogPanel}
+          aria-labelledby={`repo-settings-title-${repository.id}`}
+          onCancel={(event) => {
+            if (updateSettings.isPending) event.preventDefault()
+          }}
+          onClose={() => {
+            // Escape (or other user dismiss) closes the native dialog first; keep
+            // URL + dialog synchronized, including during pending open navigate.
+            if (dismissingRouteRef.current) {
+              dismissingRouteRef.current = false
+              return
+            }
+            dismissSettings()
+          }}
+        >
+          <form onSubmit={saveSettings}>
+            <div className={ui.dialogHeader}>
+              <p className={ui.dialogKicker}>Repository settings</p>
+              <h2
+                id={`repo-settings-title-${repository.id}`}
+                className={cx(ui.dialogTitle, ui.dialogTitlePath)}
+              >
+                {repository.projectPath}
+              </h2>
+              <p className={ui.dialogLede}>
+                Overrides apply on the next Agent Turn. Empty model fields use
+                harness defaults for this Repository&apos;s effective Agent
+                Backend.
+              </p>
+            </div>
+            <div className={ui.dialogBodySectioned}>
+              <section
+                className={ui.dialogSection}
+                aria-labelledby={`repo-sec-identity-${repository.id}`}
+              >
+                <div className={ui.dialogSectionHead}>
+                  <h3
+                    id={`repo-sec-identity-${repository.id}`}
+                    className={ui.dialogSectionTitle}
+                  >
+                    Forge identity
+                  </h3>
+                  <span className={ui.dialogSectionMeta}>Path</span>
+                </div>
+                <label className={ui.dialogField}>
+                  Forge:
+                  <select
+                    className={ui.dialogInput}
+                    value={forge}
+                    onChange={(event) =>
+                      setForge(event.target.value as "github" | "gitlab")
+                    }
+                  >
+                    <option value="github">GitHub</option>
+                    <option value="gitlab">GitLab</option>
+                  </select>
+                </label>
+                <label className={ui.dialogField}>
+                  Forge host:
+                  <input
+                    className={cx(ui.dialogInput, ui.dialogInputMono)}
+                    required
+                    value={forgeHost}
+                    onChange={(event) => setForgeHost(event.target.value)}
+                  />
+                </label>
+                <label className={ui.dialogField}>
+                  Project path:
+                  <input
+                    className={cx(ui.dialogInput, ui.dialogInputMono)}
+                    required
+                    value={projectPath}
+                    onChange={(event) => setProjectPath(event.target.value)}
+                  />
+                </label>
+                <span className={ui.dialogFieldHint}>
+                  GitLab identities are verified before Save. Identity changes
+                  are blocked after this Repository has any Work Item.
+                </span>
+              </section>
 
-            <section
-              className={ui.dialogSection}
-              aria-labelledby={`repo-sec-options-${repository.id}`}
-            >
-              <div className={ui.dialogSectionHead}>
-                <h3
-                  id={`repo-sec-options-${repository.id}`}
-                  className={ui.dialogSectionTitle}
-                >
-                  Options
-                </h3>
-                <span className={ui.dialogSectionMeta}>Repo preferences</span>
-              </div>
-              <label className={ui.dialogCheck}>
-                <input
-                  type="checkbox"
-                  className={ui.dialogCheckInput}
-                  checked={paused}
-                  onChange={(event) => setPaused(event.target.checked)}
-                />
-                Paused
-                <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
-                  Skip autonomous work selection
-                </span>
-              </label>
-              <label className={ui.dialogCheck}>
-                <input
-                  type="checkbox"
-                  className={ui.dialogCheckInput}
-                  checked={autoMerge}
-                  onChange={(event) => setAutoMerge(event.target.checked)}
-                />
-                Auto-merge
-                <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
-                  Allow clanker merge when risk is low
-                </span>
-              </label>
-              <label className={ui.dialogCheck}>
-                <input
-                  type="checkbox"
-                  className={ui.dialogCheckInput}
-                  checked={includeAllIssueAuthors}
-                  onChange={(event) =>
-                    setIncludeAllIssueAuthors(event.target.checked)
-                  }
-                />
-                Include all Issue Authors
-                <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
-                  Relevant Issues from every author after Refresh
-                </span>
-              </label>
-              <label className={ui.dialogField}>
-                <span className="flex items-center gap-3">
+              <section
+                className={ui.dialogSection}
+                aria-labelledby={`repo-sec-options-${repository.id}`}
+              >
+                <div className={ui.dialogSectionHead}>
+                  <h3
+                    id={`repo-sec-options-${repository.id}`}
+                    className={ui.dialogSectionTitle}
+                  >
+                    Options
+                  </h3>
+                  <span className={ui.dialogSectionMeta}>Repo preferences</span>
+                </div>
+                <label className={ui.dialogCheck}>
                   <input
                     type="checkbox"
                     className={ui.dialogCheckInput}
-                    checked={waitForReadyForReviewChecks}
+                    checked={paused}
+                    onChange={(event) => setPaused(event.target.checked)}
+                  />
+                  Paused
+                  <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+                    Skip autonomous work selection
+                  </span>
+                </label>
+                <label className={ui.dialogCheck}>
+                  <input
+                    type="checkbox"
+                    className={ui.dialogCheckInput}
+                    checked={autoMerge}
+                    onChange={(event) => setAutoMerge(event.target.checked)}
+                  />
+                  Auto-merge
+                  <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+                    Allow clanker merge when risk is low
+                  </span>
+                </label>
+                <label className={ui.dialogCheck}>
+                  <input
+                    type="checkbox"
+                    className={ui.dialogCheckInput}
+                    checked={includeAllIssueAuthors}
                     onChange={(event) =>
-                      setWaitForReadyForReviewChecks(event.target.checked)
+                      setIncludeAllIssueAuthors(event.target.checked)
                     }
                   />
-                  Wait for checks to start after ready for review
-                </span>
-                <span className={ui.dialogFieldHint}>
-                  Wait up to 90 seconds for workflows that start after a PR is
-                  marked ready for review. If this repository has no such
-                  workflows, turn off this setting to skip the wait.
-                </span>
-              </label>
-            </section>
+                  Include all Issue Authors
+                  <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+                    Relevant Issues from every author after Refresh
+                  </span>
+                </label>
+                <label className={ui.dialogField}>
+                  <span className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      className={ui.dialogCheckInput}
+                      checked={waitForReadyForReviewChecks}
+                      onChange={(event) =>
+                        setWaitForReadyForReviewChecks(event.target.checked)
+                      }
+                    />
+                    Wait for checks to start after ready for review
+                  </span>
+                  <span className={ui.dialogFieldHint}>
+                    Wait up to 90 seconds for workflows that start after a PR is
+                    marked ready for review. If this repository has no such
+                    workflows, turn off this setting to skip the wait.
+                  </span>
+                </label>
+              </section>
 
-            <section
-              className={ui.dialogSection}
-              aria-labelledby={`repo-sec-agent-${repository.id}`}
-            >
-              <div className={ui.dialogSectionHead}>
-                <h3
-                  id={`repo-sec-agent-${repository.id}`}
-                  className={ui.dialogSectionTitle}
-                >
-                  Agent backend
-                </h3>
-                <span className={ui.dialogSectionMeta}>Override</span>
-              </div>
-              <label className={ui.dialogField}>
-                Agent Backend
-                <select
-                  className={ui.dialogInput}
-                  name="selectedAgentBackend"
-                  value={selectedAgentBackend ?? HARNESS_DEFAULT_BACKEND_VALUE}
-                  disabled={
-                    backendChangeBlocked ||
-                    updateSettings.isPending ||
-                    agentBackends.isPending
-                  }
-                  onChange={(event) => {
-                    applyAgentBackendSelection(event.target.value)
-                  }}
-                >
-                  <option value={HARNESS_DEFAULT_BACKEND_VALUE}>
-                    Harness default ({harnessDefaultBackendLabel})
-                  </option>
-                  {selectedAgentBackend !== null &&
-                    !(agentBackends.data ?? []).some(
-                      (backend) => backend.id === selectedAgentBackend,
-                    ) && (
-                      <option value={selectedAgentBackend}>
-                        {selectedAgentBackend}
-                      </option>
-                    )}
-                  {(agentBackends.data ?? []).map((backend) => (
-                    <option key={backend.id} value={backend.id}>
-                      {backend.label}
-                    </option>
-                  ))}
-                </select>
-                <span className={ui.dialogFieldHint}>
-                  {backendChangeBlocked
-                    ? `${repository.blockingUnfinishedWorkItemCount} unfinished Work Item${
-                        repository.blockingUnfinishedWorkItemCount === 1
-                          ? ""
-                          : "s"
-                      } on this Repository — finish or abandon them before changing Agent Backend.`
-                    : "Harness default inherits the global selection. Override activates on Save when the effective backend changes. Model fields in this dialog are stashed per backend while open; empty means inherit harness for that effective backend."}
-                </span>
-              </label>
-
-              {usesPreviewCatalog && !previewPending && (
-                <div className={ui.dialogStatusLabel}>
-                  <p className="m-0">
-                    {formatAgentBackendStatusLabel({
-                      backendLabel:
-                        (agentBackends.data ?? []).find(
-                          (backend) => backend.id === draftEffective,
-                        )?.label ?? draftEffective,
-                      kind: previewError !== null ? "UNAVAILABLE" : "READY",
-                      provider: previewProvider,
-                      // Reason text is on the Banner below when preview fails.
-                    })}
-                  </p>
-                  {previewError === null && (
-                    <AgentBackendWarnings warnings={previewWarnings} />
-                  )}
+              <section
+                className={ui.dialogSection}
+                aria-labelledby={`repo-sec-agent-${repository.id}`}
+              >
+                <div className={ui.dialogSectionHead}>
+                  <h3
+                    id={`repo-sec-agent-${repository.id}`}
+                    className={ui.dialogSectionTitle}
+                  >
+                    Agent backend
+                  </h3>
+                  <span className={ui.dialogSectionMeta}>Override</span>
                 </div>
-              )}
-
-              {agentBackends.isError && (
-                <Banner
-                  className={ui.bannerCompact}
-                  tone="alarm"
-                  tag="Error"
-                  role="alert"
-                >
-                  Agent Backends list could not be loaded. You can still inherit
-                  the harness default; override options may be incomplete.
-                </Banner>
-              )}
-
-              {usesPreviewCatalog && previewError !== null && (
-                <Banner
-                  className={ui.bannerCompact}
-                  tone="alarm"
-                  tag="Error"
-                  role="alert"
-                >
-                  Preview failed: {previewError}. Model fields stay disabled
-                  until preview succeeds.
-                  {backendDraftChanging
-                    ? " Changing the effective backend cannot be saved until preview succeeds."
-                    : " Non-model settings can still be saved."}
-                </Banner>
-              )}
-            </section>
-
-            <section
-              className={ui.dialogSection}
-              aria-labelledby={`repo-sec-models-${repository.id}`}
-            >
-              <div className={ui.dialogSectionHead}>
-                <h3
-                  id={`repo-sec-models-${repository.id}`}
-                  className={ui.dialogSectionTitle}
-                >
-                  Models
-                </h3>
-                <span className={ui.dialogSectionMeta}>Build · Review</span>
-              </div>
-
-              {modelsLoading ? (
-                <p className={ui.dialogLoading}>Loading models...</p>
-              ) : !usesPreviewCatalog && models.isError ? (
-                <Banner
-                  className={ui.bannerCompact}
-                  tone="alarm"
-                  tag="Error"
-                  role="alert"
-                >
-                  Models could not be loaded.
-                </Banner>
-              ) : (
-                <>
-                  <AgentModelSelect
-                    label="Build model"
-                    name="defaultModel"
-                    value={defaultModel}
-                    models={catalogModels}
-                    catalogLoading={catalogLoading}
-                    allowClear
-                    required={false}
-                    disabled={modelSelectDisabled}
-                    placeholder={`Harness default (${harnessDefaultModel})`}
-                    emptyCatalogLabel={
-                      claudeBedrockStrict
-                        ? "No Bedrock profiles available"
-                        : "No Agent Models available"
+                <label className={ui.dialogField}>
+                  Agent Backend
+                  <select
+                    className={ui.dialogInput}
+                    name="selectedAgentBackend"
+                    value={
+                      selectedAgentBackend ?? HARNESS_DEFAULT_BACKEND_VALUE
                     }
-                    blockReason={buildModelBlockReason}
-                    hint={
-                      claudeBedrockStrict
-                        ? "Empty inherits harness default. Otherwise choose a discovered Bedrock inference profile."
-                        : "Empty inherits harness default. Otherwise choose a model from the catalog."
+                    disabled={
+                      backendChangeBlocked ||
+                      updateSettings.isPending ||
+                      agentBackends.isPending
                     }
-                    onChange={(nextModel) => {
-                      setDefaultModel(nextModel)
-                      const sourceModel =
-                        nextModel.length > 0 ? nextModel : harnessBuildForSource
-                      const nextVariants = thinkingLevelsForModel(
-                        catalogModels,
-                        sourceModel,
-                      )
-                      setDefaultVariant((current) =>
-                        reconcileVariantForModel(current, nextVariants),
-                      )
-                      if (
-                        reviewModel.length === 0 &&
-                        harnessReviewForSource.length === 0
-                      ) {
-                        const reviewSource =
+                    onChange={(event) => {
+                      applyAgentBackendSelection(event.target.value)
+                    }}
+                  >
+                    <option value={HARNESS_DEFAULT_BACKEND_VALUE}>
+                      Harness default ({harnessDefaultBackendLabel})
+                    </option>
+                    {selectedAgentBackend !== null &&
+                      !(agentBackends.data ?? []).some(
+                        (backend) => backend.id === selectedAgentBackend,
+                      ) && (
+                        <option value={selectedAgentBackend}>
+                          {selectedAgentBackend}
+                        </option>
+                      )}
+                    {(agentBackends.data ?? []).map((backend) => (
+                      <option key={backend.id} value={backend.id}>
+                        {backend.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className={ui.dialogFieldHint}>
+                    {backendChangeBlocked
+                      ? `${repository.blockingUnfinishedWorkItemCount} unfinished Work Item${
+                          repository.blockingUnfinishedWorkItemCount === 1
+                            ? ""
+                            : "s"
+                        } on this Repository — finish or abandon them before changing Agent Backend.`
+                      : "Harness default inherits the global selection. Override activates on Save when the effective backend changes. Model fields in this dialog are stashed per backend while open; empty means inherit harness for that effective backend."}
+                  </span>
+                </label>
+
+                {usesPreviewCatalog && !previewPending && (
+                  <div className={ui.dialogStatusLabel}>
+                    <p className="m-0">
+                      {formatAgentBackendStatusLabel({
+                        backendLabel:
+                          (agentBackends.data ?? []).find(
+                            (backend) => backend.id === draftEffective,
+                          )?.label ?? draftEffective,
+                        kind: previewError !== null ? "UNAVAILABLE" : "READY",
+                        provider: previewProvider,
+                        // Reason text is on the Banner below when preview fails.
+                      })}
+                    </p>
+                    {previewError === null && (
+                      <AgentBackendWarnings warnings={previewWarnings} />
+                    )}
+                  </div>
+                )}
+
+                {agentBackends.isError && (
+                  <Banner
+                    className={ui.bannerCompact}
+                    tone="alarm"
+                    tag="Error"
+                    role="alert"
+                  >
+                    Agent Backends list could not be loaded. You can still
+                    inherit the harness default; override options may be
+                    incomplete.
+                  </Banner>
+                )}
+
+                {usesPreviewCatalog && previewError !== null && (
+                  <Banner
+                    className={ui.bannerCompact}
+                    tone="alarm"
+                    tag="Error"
+                    role="alert"
+                  >
+                    Preview failed: {previewError}. Model fields stay disabled
+                    until preview succeeds.
+                    {backendDraftChanging
+                      ? " Changing the effective backend cannot be saved until preview succeeds."
+                      : " Non-model settings can still be saved."}
+                  </Banner>
+                )}
+              </section>
+
+              <section
+                className={ui.dialogSection}
+                aria-labelledby={`repo-sec-models-${repository.id}`}
+              >
+                <div className={ui.dialogSectionHead}>
+                  <h3
+                    id={`repo-sec-models-${repository.id}`}
+                    className={ui.dialogSectionTitle}
+                  >
+                    Models
+                  </h3>
+                  <span className={ui.dialogSectionMeta}>Build · Review</span>
+                </div>
+
+                {modelsLoading ? (
+                  <p className={ui.dialogLoading}>Loading models...</p>
+                ) : !usesPreviewCatalog && models.isError ? (
+                  <Banner
+                    className={ui.bannerCompact}
+                    tone="alarm"
+                    tag="Error"
+                    role="alert"
+                  >
+                    Models could not be loaded.
+                  </Banner>
+                ) : (
+                  <>
+                    <AgentModelSelect
+                      label="Build model"
+                      name="defaultModel"
+                      value={defaultModel}
+                      models={catalogModels}
+                      catalogLoading={catalogLoading}
+                      allowClear
+                      required={false}
+                      disabled={modelSelectDisabled}
+                      placeholder={`Harness default (${harnessDefaultModel})`}
+                      emptyCatalogLabel={
+                        claudeBedrockStrict
+                          ? "No Bedrock profiles available"
+                          : "No Agent Models available"
+                      }
+                      blockReason={buildModelBlockReason}
+                      hint={
+                        claudeBedrockStrict
+                          ? "Empty inherits harness default. Otherwise choose a discovered Bedrock inference profile."
+                          : "Empty inherits harness default. Otherwise choose a model from the catalog."
+                      }
+                      onChange={(nextModel) => {
+                        setDefaultModel(nextModel)
+                        const sourceModel =
                           nextModel.length > 0
                             ? nextModel
                             : harnessBuildForSource
+                        const nextVariants = thinkingLevelsForModel(
+                          catalogModels,
+                          sourceModel,
+                        )
+                        setDefaultVariant((current) =>
+                          reconcileVariantForModel(current, nextVariants),
+                        )
+                        if (
+                          reviewModel.length === 0 &&
+                          harnessReviewForSource.length === 0
+                        ) {
+                          const reviewSource =
+                            nextModel.length > 0
+                              ? nextModel
+                              : harnessBuildForSource
+                          setReviewVariant((current) =>
+                            reconcileVariantForModel(
+                              current,
+                              thinkingLevelsForModel(
+                                catalogModels,
+                                reviewSource,
+                              ),
+                            ),
+                          )
+                        }
+                      }}
+                    />
+                    {buildVariantSourceModel.length > 0 &&
+                      buildVariantSourceUnavailable && (
+                        <Banner
+                          className={ui.bannerCompact}
+                          tone="alarm"
+                          tag="Error"
+                          role="alert"
+                        >
+                          Build effort (thinking) override is unavailable — the
+                          selected model is not in the Agent Model catalog. Use
+                          harness default or pick another model.
+                        </Banner>
+                      )}
+                    <label className={ui.dialogField}>
+                      Build effort (thinking)
+                      <select
+                        className={ui.dialogInput}
+                        name="defaultThinkingLevel"
+                        value={defaultThinkingLevel}
+                        onChange={(event) =>
+                          setDefaultVariant(event.target.value)
+                        }
+                        disabled={modelsDisabled}
+                      >
+                        <option value="">
+                          {emptyThinkingLevelOptionLabel({
+                            explicitModel: defaultModel.length > 0,
+                            inheritedLabel: harnessDefaultVariant,
+                            fallsBackToBuild: false,
+                          })}
+                        </option>
+                        {hasCustomBuildVariant && (
+                          <option value={defaultThinkingLevel}>
+                            {formatUnavailableVariantLabel(
+                              defaultThinkingLevel,
+                            )}
+                          </option>
+                        )}
+                        {buildVariants.map((variant) => (
+                          <option key={variant} value={variant}>
+                            {formatVariantLabel(variant)}
+                          </option>
+                        ))}
+                      </select>
+                      <span className={ui.dialogFieldHint}>
+                        {defaultModel.length > 0
+                          ? "Empty uses this model's backend default."
+                          : "Empty inherits the complete Harness build selection. This override is dormant until a Repository build model is set."}
+                      </span>
+                    </label>
+                    <AgentModelSelect
+                      label="Review model"
+                      name="reviewModel"
+                      value={reviewModel}
+                      models={catalogModels}
+                      catalogLoading={catalogLoading}
+                      allowClear
+                      required={false}
+                      disabled={modelSelectDisabled}
+                      placeholder={`Harness default (${harnessReviewModel})`}
+                      emptyCatalogLabel={`Harness default (${harnessReviewModel})`}
+                      blockReason={reviewModelBlockReason}
+                      hint={null}
+                      onChange={(nextModel) => {
+                        setReviewModel(nextModel)
+                        const sourceModel = governingReviewModelId({
+                          reviewModel: nextModel,
+                          harnessReviewModel: harnessReviewForSource,
+                          resolvedBuildModel: buildVariantSourceModel,
+                        })
                         setReviewVariant((current) =>
                           reconcileVariantForModel(
                             current,
-                            thinkingLevelsForModel(catalogModels, reviewSource),
+                            thinkingLevelsForModel(catalogModels, sourceModel),
                           ),
                         )
-                      }
-                    }}
-                  />
-                  {buildVariantSourceModel.length > 0 &&
-                    buildVariantSourceUnavailable && (
-                      <Banner
-                        className={ui.bannerCompact}
-                        tone="alarm"
-                        tag="Error"
-                        role="alert"
-                      >
-                        Build effort (thinking) override is unavailable — the
-                        selected model is not in the Agent Model catalog. Use
-                        harness default or pick another model.
-                      </Banner>
-                    )}
-                  <label className={ui.dialogField}>
-                    Build effort (thinking)
-                    <select
-                      className={ui.dialogInput}
-                      name="defaultThinkingLevel"
-                      value={defaultThinkingLevel}
-                      onChange={(event) =>
-                        setDefaultVariant(event.target.value)
-                      }
-                      disabled={modelsDisabled}
-                    >
-                      <option value="">
-                        {emptyThinkingLevelOptionLabel({
-                          explicitModel: defaultModel.length > 0,
-                          inheritedLabel: harnessDefaultVariant,
-                          fallsBackToBuild: false,
-                        })}
-                      </option>
-                      {hasCustomBuildVariant && (
-                        <option value={defaultThinkingLevel}>
-                          {formatUnavailableVariantLabel(defaultThinkingLevel)}
-                        </option>
+                      }}
+                    />
+                    {reviewThinkingLevelSourceModel.length > 0 &&
+                      reviewThinkingLevelSourceUnavailable && (
+                        <Banner
+                          className={ui.bannerCompact}
+                          tone="alarm"
+                          tag="Error"
+                          role="alert"
+                        >
+                          Review effort (thinking) override is unavailable — the
+                          selected model is not in the Agent Model catalog. Use
+                          harness default or pick another model.
+                        </Banner>
                       )}
-                      {buildVariants.map((variant) => (
-                        <option key={variant} value={variant}>
-                          {formatVariantLabel(variant)}
-                        </option>
-                      ))}
-                    </select>
-                    <span className={ui.dialogFieldHint}>
-                      {defaultModel.length > 0
-                        ? "Empty uses this model's backend default."
-                        : "Empty inherits the complete Harness build selection. This override is dormant until a Repository build model is set."}
-                    </span>
-                  </label>
-                  <AgentModelSelect
-                    label="Review model"
-                    name="reviewModel"
-                    value={reviewModel}
-                    models={catalogModels}
-                    catalogLoading={catalogLoading}
-                    allowClear
-                    required={false}
-                    disabled={modelSelectDisabled}
-                    placeholder={`Harness default (${harnessReviewModel})`}
-                    emptyCatalogLabel={`Harness default (${harnessReviewModel})`}
-                    blockReason={reviewModelBlockReason}
-                    hint={null}
-                    onChange={(nextModel) => {
-                      setReviewModel(nextModel)
-                      const sourceModel = governingReviewModelId({
-                        reviewModel: nextModel,
-                        harnessReviewModel: harnessReviewForSource,
-                        resolvedBuildModel: buildVariantSourceModel,
-                      })
-                      setReviewVariant((current) =>
-                        reconcileVariantForModel(
-                          current,
-                          thinkingLevelsForModel(catalogModels, sourceModel),
-                        ),
-                      )
-                    }}
-                  />
-                  {reviewThinkingLevelSourceModel.length > 0 &&
-                    reviewThinkingLevelSourceUnavailable && (
-                      <Banner
-                        className={ui.bannerCompact}
-                        tone="alarm"
-                        tag="Error"
-                        role="alert"
+                    <label className={ui.dialogField}>
+                      Review effort (thinking)
+                      <select
+                        className={ui.dialogInput}
+                        name="reviewThinkingLevel"
+                        value={reviewThinkingLevel}
+                        onChange={(event) =>
+                          setReviewVariant(event.target.value)
+                        }
+                        disabled={modelsDisabled}
                       >
-                        Review effort (thinking) override is unavailable — the
-                        selected model is not in the Agent Model catalog. Use
-                        harness default or pick another model.
-                      </Banner>
-                    )}
-                  <label className={ui.dialogField}>
-                    Review effort (thinking)
-                    <select
-                      className={ui.dialogInput}
-                      name="reviewThinkingLevel"
-                      value={reviewThinkingLevel}
-                      onChange={(event) => setReviewVariant(event.target.value)}
-                      disabled={modelsDisabled}
-                    >
-                      <option value="">
-                        {emptyThinkingLevelOptionLabel({
-                          explicitModel: reviewModel.length > 0,
-                          inheritedLabel:
-                            reviewModel.length === 0 &&
-                            harnessReviewForSource.length === 0
-                              ? harnessPrefsForDraft !== null
-                                ? (harnessPrefsForDraft.reviewThinkingLevel ??
-                                  "")
-                                : (config.data?.reviewThinkingLevel ?? "")
-                              : harnessReviewVariant,
-                          fallsBackToBuild:
-                            reviewModel.length === 0 &&
-                            harnessReviewForSource.length === 0,
-                        })}
-                      </option>
-                      {hasCustomReviewVariant && (
-                        <option value={reviewThinkingLevel}>
-                          {formatUnavailableVariantLabel(reviewThinkingLevel)}
+                        <option value="">
+                          {emptyThinkingLevelOptionLabel({
+                            explicitModel: reviewModel.length > 0,
+                            inheritedLabel:
+                              reviewModel.length === 0 &&
+                              harnessReviewForSource.length === 0
+                                ? harnessPrefsForDraft !== null
+                                  ? (harnessPrefsForDraft.reviewThinkingLevel ??
+                                    "")
+                                  : (config.data?.reviewThinkingLevel ?? "")
+                                : harnessReviewVariant,
+                            fallsBackToBuild:
+                              reviewModel.length === 0 &&
+                              harnessReviewForSource.length === 0,
+                          })}
                         </option>
-                      )}
-                      {reviewThinkingLevels.map((variant) => (
-                        <option key={`review-${variant}`} value={variant}>
-                          {formatVariantLabel(variant)}
-                        </option>
-                      ))}
-                    </select>
-                    <span className={ui.dialogFieldHint}>
-                      {reviewModel.length > 0
-                        ? "Empty uses this review model's backend default."
-                        : harnessReviewForSource.length > 0
-                          ? "Empty inherits the complete Harness review selection. This override is dormant while Harness review is in effect."
-                          : "Empty uses the Harness review Thinking Level, then the resolved build Thinking Level, then the backend/model default."}
-                    </span>
-                  </label>
-                </>
-              )}
-            </section>
-
-            {updateSettings.isError && (
-              <Banner
-                className={ui.bannerCompact}
-                tone="alarm"
-                tag="Error"
-                role="alert"
-              >
-                {updateSettings.error instanceof Error
-                  ? updateSettings.error.message
-                  : "Settings could not be saved. Try again."}
-              </Banner>
-            )}
-          </div>
-          <div className={ui.dialogFooter}>
-            <button
-              type="button"
-              className={ui.plateMini}
-              onClick={() => dismissSettings()}
-              disabled={updateSettings.isPending}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className={ui.platePrimary}
-              aria-busy={updateSettings.isPending || undefined}
-              disabled={repositorySettingsSaveBlocked}
-            >
-              {updateSettings.isPending ? "Saving…" : "Save"}
-            </button>
-          </div>
-        </form>
-      </dialog>
-      {!repositoryCollapsed && (
-        <div id={repositoryBodyId}>
-          <dl className={ui.repoMeta}>
-            <div className={ui.repoMetaRow}>
-              <dt>Path</dt>
-              <dd title={repository.localPath}>{repository.localPath}</dd>
-            </div>
-            <div className={ui.repoMetaRow}>
-              <dt>Checkout</dt>
-              <dd>{repository.isBare ? "Bare repository" : "Working tree"}</dd>
-            </div>
-            <div className={ui.repoMetaRow}>
-              <dt>Agent Backend</dt>
-              <dd>
-                {repository.selectedAgentBackend === null
-                  ? `Harness default (${repository.effectiveAgentBackend})`
-                  : repository.effectiveAgentBackend}
-              </dd>
-            </div>
-            <div className={ui.repoMetaRow}>
-              <dt>Include all Issue Authors</dt>
-              <dd>
-                {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
-              </dd>
-            </div>
-            <div className={ui.repoMetaRow}>
-              <dt>Build model</dt>
-              <dd>
-                {repository.defaultModel ??
-                  (repository.selectedAgentBackend === null
-                    ? `Harness default (${
-                        config.data?.defaultModel ?? "not configured"
-                      })`
-                    : "Harness default")}
-                {" · "}
-                {repository.defaultThinkingLevel ??
-                  (repository.selectedAgentBackend === null
-                    ? `Harness default (${
-                        config.data?.defaultThinkingLevel ?? "not configured"
-                      })`
-                    : "Harness default")}
-              </dd>
-            </div>
-            <div className={ui.repoMetaRow}>
-              <dt>Review model</dt>
-              <dd>
-                {repository.reviewModel ??
-                  (repository.selectedAgentBackend === null
-                    ? `Harness default (${
-                        config.data?.reviewModel ??
-                        `Build (${
-                          repository.defaultModel ??
-                          config.data?.defaultModel ??
-                          "not configured"
-                        })`
-                      })`
-                    : "Harness default")}
-                {" · "}
-                {repository.reviewThinkingLevel ??
-                  (repository.selectedAgentBackend === null
-                    ? `Harness default (${
-                        config.data?.reviewThinkingLevel ??
-                        `Build (${
-                          repository.defaultThinkingLevel ??
-                          config.data?.defaultThinkingLevel ??
-                          "not configured"
-                        })`
-                      })`
-                    : "Harness default")}
-              </dd>
-            </div>
-            <div className={ui.repoMetaRow}>
-              <dt>Wait for ready checks</dt>
-              <dd>
-                {repository.waitForReadyForReviewChecks
-                  ? "Enabled"
-                  : "Disabled"}
-              </dd>
-            </div>
-            <div className={ui.repoMetaRow}>
-              <dt>Auto-merge</dt>
-              <dd>{repository.autoMerge ? "Enabled" : "Disabled"}</dd>
-            </div>
-          </dl>
-          {!repository.credential.configured &&
-            repository.forge === "github" && (
-              <Banner
-                className="mt-5"
-                tone="alarm"
-                tag="Attention"
-                role={addGitHubToken.isError ? "alert" : "status"}
-                action={
-                  githubTokenCreated ? (
-                    <button
-                      type="button"
-                      className={ui.platePrimary}
-                      disabled={addGitHubToken.isPending}
-                      aria-busy={addGitHubToken.isPending || undefined}
-                      onClick={() => addGitHubToken.mutate()}
-                    >
-                      {addGitHubToken.isPending
-                        ? "Waiting for Keymaxxer"
-                        : "Store in Keymaxxer"}
-                    </button>
-                  ) : (
-                    <a
-                      className={ui.platePrimary}
-                      href={repository.credential.githubTokenCreationUrl}
-                      onClick={() => setGithubTokenCreated(true)}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Create GitHub token
-                    </a>
-                  )
-                }
-              >
-                <p className="m-0 font-semibold">GitHub token required</p>
-                {githubTokenCreated ? (
-                  <p className="m-0 mt-1">
-                    Store the generated token as{" "}
-                    <code className={ui.guidanceCode}>
-                      {repository.credential.githubTokenSecretName}
-                    </code>{" "}
-                    in Keymaxxer. Already-created tokens are not upgraded
-                    automatically — edit the token on GitHub or recreate it,
-                    then store the replacement.
-                  </p>
-                ) : (
-                  <p className="m-0 mt-1">
-                    Create a fine-grained token, choose{" "}
-                    <strong>Only select repositories</strong>, select{" "}
-                    <code className={ui.guidanceCode}>
-                      {repository.projectPath.split("/").at(-1)}
-                    </code>
-                    , and allow <strong>Actions: Read and write</strong>{" "}
-                    (required for workflow reruns and CI logs). Already-created
-                    tokens are not upgraded automatically — edit or recreate
-                    them if Actions is still read-only.
-                  </p>
+                        {hasCustomReviewVariant && (
+                          <option value={reviewThinkingLevel}>
+                            {formatUnavailableVariantLabel(reviewThinkingLevel)}
+                          </option>
+                        )}
+                        {reviewThinkingLevels.map((variant) => (
+                          <option key={`review-${variant}`} value={variant}>
+                            {formatVariantLabel(variant)}
+                          </option>
+                        ))}
+                      </select>
+                      <span className={ui.dialogFieldHint}>
+                        {reviewModel.length > 0
+                          ? "Empty uses this review model's backend default."
+                          : harnessReviewForSource.length > 0
+                            ? "Empty inherits the complete Harness review selection. This override is dormant while Harness review is in effect."
+                            : "Empty uses the Harness review Thinking Level, then the resolved build Thinking Level, then the backend/model default."}
+                      </span>
+                    </label>
+                  </>
                 )}
-                {addGitHubToken.isError ? (
-                  <p className="m-0 mt-1">
-                    Keymaxxer setup was cancelled or failed.
-                  </p>
-                ) : null}
-              </Banner>
-            )}
-          {!repository.credential.configured &&
-            repository.forge === "gitlab" && (
-              <Banner
-                className="mt-5"
-                tone="alarm"
-                tag="Attention"
-                role={addGitLabToken.isError ? "alert" : "status"}
-                action={
-                  gitlabTokenCreated ? (
-                    <button
-                      type="button"
-                      className={ui.platePrimary}
-                      disabled={addGitLabToken.isPending}
-                      aria-busy={addGitLabToken.isPending || undefined}
-                      onClick={() => addGitLabToken.mutate()}
-                    >
-                      {addGitLabToken.isPending
-                        ? "Waiting for Keymaxxer"
-                        : "Store in Keymaxxer"}
-                    </button>
-                  ) : (
-                    <a
-                      className={ui.platePrimary}
-                      href={repository.credential.githubTokenCreationUrl}
-                      onClick={() => setGitlabTokenCreated(true)}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Create GitLab token
-                    </a>
-                  )
-                }
+              </section>
+
+              {updateSettings.isError && (
+                <Banner
+                  className={ui.bannerCompact}
+                  tone="alarm"
+                  tag="Error"
+                  role="alert"
+                >
+                  {updateSettings.error instanceof Error
+                    ? updateSettings.error.message
+                    : "Settings could not be saved. Try again."}
+                </Banner>
+              )}
+            </div>
+            <div className={ui.dialogFooter}>
+              <button
+                type="button"
+                className={ui.plateMini}
+                onClick={() => dismissSettings()}
+                disabled={updateSettings.isPending}
               >
-                <p className="m-0 font-semibold">
-                  GitLab authentication required
-                </p>
-                <p className="m-0 mt-1">
-                  {gitlabTokenCreated ? (
-                    <>
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={ui.platePrimary}
+                aria-busy={updateSettings.isPending || undefined}
+                disabled={repositorySettingsSaveBlocked}
+              >
+                {updateSettings.isPending ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </form>
+        </dialog>
+        {!repositoryCollapsed && (
+          <div id={repositoryBodyId}>
+            <dl className={ui.repoMeta}>
+              <div className={ui.repoMetaRow}>
+                <dt>Path</dt>
+                <dd title={repository.localPath}>{repository.localPath}</dd>
+              </div>
+              <div className={ui.repoMetaRow}>
+                <dt>Checkout</dt>
+                <dd>
+                  {repository.isBare ? "Bare repository" : "Working tree"}
+                </dd>
+              </div>
+              <div className={ui.repoMetaRow}>
+                <dt>Agent Backend</dt>
+                <dd>
+                  {repository.selectedAgentBackend === null
+                    ? `Harness default (${repository.effectiveAgentBackend})`
+                    : repository.effectiveAgentBackend}
+                </dd>
+              </div>
+              <div className={ui.repoMetaRow}>
+                <dt>Include all Issue Authors</dt>
+                <dd>
+                  {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
+                </dd>
+              </div>
+              <div className={ui.repoMetaRow}>
+                <dt>Build model</dt>
+                <dd>
+                  {repository.defaultModel ??
+                    (repository.selectedAgentBackend === null
+                      ? `Harness default (${
+                          config.data?.defaultModel ?? "not configured"
+                        })`
+                      : "Harness default")}
+                  {" · "}
+                  {repository.defaultThinkingLevel ??
+                    (repository.selectedAgentBackend === null
+                      ? `Harness default (${
+                          config.data?.defaultThinkingLevel ?? "not configured"
+                        })`
+                      : "Harness default")}
+                </dd>
+              </div>
+              <div className={ui.repoMetaRow}>
+                <dt>Review model</dt>
+                <dd>
+                  {repository.reviewModel ??
+                    (repository.selectedAgentBackend === null
+                      ? `Harness default (${
+                          config.data?.reviewModel ??
+                          `Build (${
+                            repository.defaultModel ??
+                            config.data?.defaultModel ??
+                            "not configured"
+                          })`
+                        })`
+                      : "Harness default")}
+                  {" · "}
+                  {repository.reviewThinkingLevel ??
+                    (repository.selectedAgentBackend === null
+                      ? `Harness default (${
+                          config.data?.reviewThinkingLevel ??
+                          `Build (${
+                            repository.defaultThinkingLevel ??
+                            config.data?.defaultThinkingLevel ??
+                            "not configured"
+                          })`
+                        })`
+                      : "Harness default")}
+                </dd>
+              </div>
+              <div className={ui.repoMetaRow}>
+                <dt>Wait for ready checks</dt>
+                <dd>
+                  {repository.waitForReadyForReviewChecks
+                    ? "Enabled"
+                    : "Disabled"}
+                </dd>
+              </div>
+              <div className={ui.repoMetaRow}>
+                <dt>Auto-merge</dt>
+                <dd>{repository.autoMerge ? "Enabled" : "Disabled"}</dd>
+              </div>
+            </dl>
+            {!repository.credential.configured &&
+              repository.forge === "github" && (
+                <Banner
+                  className="mt-5"
+                  tone="alarm"
+                  tag="Attention"
+                  role={addGitHubToken.isError ? "alert" : "status"}
+                  action={
+                    githubTokenCreated ? (
+                      <button
+                        type="button"
+                        className={ui.platePrimary}
+                        disabled={addGitHubToken.isPending}
+                        aria-busy={addGitHubToken.isPending || undefined}
+                        onClick={() => addGitHubToken.mutate()}
+                      >
+                        {addGitHubToken.isPending
+                          ? "Waiting for Keymaxxer"
+                          : "Store in Keymaxxer"}
+                      </button>
+                    ) : (
+                      <a
+                        className={ui.platePrimary}
+                        href={repository.credential.githubTokenCreationUrl}
+                        onClick={() => setGithubTokenCreated(true)}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Create GitHub token
+                      </a>
+                    )
+                  }
+                >
+                  <p className="m-0 font-semibold">GitHub token required</p>
+                  {githubTokenCreated ? (
+                    <p className="m-0 mt-1">
                       Store the generated token as{" "}
                       <code className={ui.guidanceCode}>
                         {repository.credential.githubTokenSecretName}
                       </code>{" "}
-                      in Keymaxxer when available (provider{" "}
-                      <code className={ui.guidanceCode}>gitlab</code>, account{" "}
-                      <code className={ui.guidanceCode}>
-                        {repository.forgeHost}/{repository.projectPath}
-                      </code>
-                      ). Or set ambient auth without Keymaxxer:{" "}
-                    </>
+                      in Keymaxxer. Already-created tokens are not upgraded
+                      automatically — edit the token on GitHub or recreate it,
+                      then store the replacement.
+                    </p>
                   ) : (
-                    <>
-                      Create a personal access token on this GitLab instance
-                      with API access for{" "}
+                    <p className="m-0 mt-1">
+                      Create a fine-grained token, choose{" "}
+                      <strong>Only select repositories</strong>, select{" "}
                       <code className={ui.guidanceCode}>
-                        {repository.projectPath}
+                        {repository.projectPath.split("/").at(-1)}
                       </code>
-                      . Store it in Keymaxxer when available, or set ambient
-                      auth:{" "}
-                    </>
+                      , and allow <strong>Actions: Read and write</strong>{" "}
+                      (required for workflow reruns and CI logs).
+                      Already-created tokens are not upgraded automatically —
+                      edit or recreate them if Actions is still read-only.
+                    </p>
                   )}
-                  <code className={ui.guidanceCode}>GITLAB_TOKEN</code> or{" "}
-                  <code className={ui.guidanceCode}>
-                    glab auth login --hostname {repository.forgeHost}
-                  </code>{" "}
-                  before starting the Harness.
-                </p>
-                {addGitLabToken.isError ? (
-                  <p className="m-0 mt-1">
-                    Keymaxxer setup was cancelled or failed. Use ambient{" "}
-                    <code className={ui.guidanceCode}>GITLAB_TOKEN</code> or{" "}
-                    <code className={ui.guidanceCode}>glab auth login</code> and
-                    restart the Harness if Keymaxxer is unavailable.
-                  </p>
-                ) : null}
-              </Banner>
-            )}
-          <div className={ui.repoIssues}>
-            <div className={ui.repoIssuesHead}>
-              <h3 className={ui.repoIssuesKicker}>
-                {hasNoRelevantIssues ? "No relevant issues" : "Relevant issues"}
-              </h3>
-              <button
-                type="button"
-                className={ui.iconBtn}
-                disabled={refreshingIssues || !repository.credential.configured}
-                onClick={() => refreshIssues.mutate()}
-                aria-label={
-                  refreshingIssues ? "Refreshing issues" : "Refresh issues"
-                }
-                title={
-                  repository.credential.configured
-                    ? "Refresh issues"
-                    : repository.forge === "gitlab"
-                      ? "Authenticate GitLab before refreshing issues"
-                      : "Add a GitHub token before refreshing issues"
-                }
-              >
-                <svg
-                  aria-hidden="true"
-                  className={
-                    refreshingIssues
-                      ? "animate-spin motion-reduce:animate-none"
-                      : undefined
+                  {addGitHubToken.isError ? (
+                    <p className="m-0 mt-1">
+                      Keymaxxer setup was cancelled or failed.
+                    </p>
+                  ) : null}
+                </Banner>
+              )}
+            {!repository.credential.configured &&
+              repository.forge === "gitlab" && (
+                <Banner
+                  className="mt-5"
+                  tone="alarm"
+                  tag="Attention"
+                  role={addGitLabToken.isError ? "alert" : "status"}
+                  action={
+                    gitlabTokenCreated ? (
+                      <button
+                        type="button"
+                        className={ui.platePrimary}
+                        disabled={addGitLabToken.isPending}
+                        aria-busy={addGitLabToken.isPending || undefined}
+                        onClick={() => addGitLabToken.mutate()}
+                      >
+                        {addGitLabToken.isPending
+                          ? "Waiting for Keymaxxer"
+                          : "Store in Keymaxxer"}
+                      </button>
+                    ) : (
+                      <a
+                        className={ui.platePrimary}
+                        href={repository.credential.githubTokenCreationUrl}
+                        onClick={() => setGitlabTokenCreated(true)}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Create GitLab token
+                      </a>
+                    )
                   }
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
                 >
-                  <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5" />
-                  <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
-                </svg>
-              </button>
+                  <p className="m-0 font-semibold">
+                    GitLab authentication required
+                  </p>
+                  <p className="m-0 mt-1">
+                    {gitlabTokenCreated ? (
+                      <>
+                        Store the generated token as{" "}
+                        <code className={ui.guidanceCode}>
+                          {repository.credential.githubTokenSecretName}
+                        </code>{" "}
+                        in Keymaxxer when available (provider{" "}
+                        <code className={ui.guidanceCode}>gitlab</code>, account{" "}
+                        <code className={ui.guidanceCode}>
+                          {repository.forgeHost}/{repository.projectPath}
+                        </code>
+                        ). Or set ambient auth without Keymaxxer:{" "}
+                      </>
+                    ) : (
+                      <>
+                        Create a personal access token on this GitLab instance
+                        with API access for{" "}
+                        <code className={ui.guidanceCode}>
+                          {repository.projectPath}
+                        </code>
+                        . Store it in Keymaxxer when available, or set ambient
+                        auth:{" "}
+                      </>
+                    )}
+                    <code className={ui.guidanceCode}>GITLAB_TOKEN</code> or{" "}
+                    <code className={ui.guidanceCode}>
+                      glab auth login --hostname {repository.forgeHost}
+                    </code>{" "}
+                    before starting the Harness.
+                  </p>
+                  {addGitLabToken.isError ? (
+                    <p className="m-0 mt-1">
+                      Keymaxxer setup was cancelled or failed. Use ambient{" "}
+                      <code className={ui.guidanceCode}>GITLAB_TOKEN</code> or{" "}
+                      <code className={ui.guidanceCode}>glab auth login</code>{" "}
+                      and restart the Harness if Keymaxxer is unavailable.
+                    </p>
+                  ) : null}
+                </Banner>
+              )}
+            <div className={ui.repoIssues}>
+              <div className={ui.repoIssuesHead}>
+                <h3 className={ui.repoIssuesKicker}>
+                  {hasNoRelevantIssues
+                    ? "No relevant issues"
+                    : "Relevant issues"}
+                </h3>
+                <button
+                  type="button"
+                  className={ui.iconBtn}
+                  disabled={
+                    refreshingIssues || !repository.credential.configured
+                  }
+                  onClick={() => refreshIssues.mutate()}
+                  aria-label={
+                    refreshingIssues ? "Refreshing issues" : "Refresh issues"
+                  }
+                  title={
+                    repository.credential.configured
+                      ? "Refresh issues"
+                      : repository.forge === "gitlab"
+                        ? "Authenticate GitLab before refreshing issues"
+                        : "Add a GitHub token before refreshing issues"
+                  }
+                >
+                  <svg
+                    aria-hidden="true"
+                    className={
+                      refreshingIssues
+                        ? "animate-spin motion-reduce:animate-none"
+                        : undefined
+                    }
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5" />
+                    <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
+                  </svg>
+                </button>
+              </div>
+              {refreshIssues.isError && (
+                <Banner
+                  className={cx(ui.bannerCompact, "mb-2")}
+                  tone="alarm"
+                  tag="Error"
+                  role="alert"
+                >
+                  Failed to refresh issues.
+                </Banner>
+              )}
+              {repository.issuesReconciledAt === null ? (
+                <p className={ui.repoIssuesUnrefreshed}>Not refreshed yet.</p>
+              ) : (
+                <>
+                  {issuesProjectionStale && (
+                    <Banner
+                      className={cx(ui.bannerCompact, "mb-2")}
+                      tone="guidance"
+                      tag="Stale"
+                      role="status"
+                    >
+                      {formatLastRefreshedAgo(
+                        repository.issuesReconciledAt,
+                        nowMs,
+                      )}
+                      . Issues may be out of date.
+                    </Banner>
+                  )}
+                  <Suspense fallback={<RepositoryIssuesSkeleton />}>
+                    <RepositoryIssues
+                      repository={repository}
+                      workItems={workItems}
+                      workItemsLoading={workItemsLoading}
+                    />
+                  </Suspense>
+                </>
+              )}
             </div>
-            {refreshIssues.isError && (
+            {removeRepository.isError && (
               <Banner
-                className={cx(ui.bannerCompact, "mb-2")}
+                className={cx(ui.bannerCompact, "mt-3")}
                 tone="alarm"
                 tag="Error"
                 role="alert"
               >
-                Failed to refresh issues.
+                Could not remove repository. Please try again.
               </Banner>
             )}
-            {repository.issuesReconciledAt === null ? (
-              <p className={ui.repoIssuesUnrefreshed}>Not refreshed yet.</p>
-            ) : (
-              <>
-                {issuesProjectionStale && (
-                  <Banner
-                    className={cx(ui.bannerCompact, "mb-2")}
-                    tone="guidance"
-                    tag="Stale"
-                    role="status"
-                  >
-                    {formatLastRefreshedAgo(
-                      repository.issuesReconciledAt,
-                      nowMs,
-                    )}
-                    . Issues may be out of date.
-                  </Banner>
-                )}
-                <Suspense fallback={<RepositoryIssuesSkeleton />}>
-                  <RepositoryIssues
-                    repository={repository}
-                    workItems={workItems}
-                    workItemsLoading={workItemsLoading}
-                  />
-                </Suspense>
-              </>
-            )}
           </div>
-          {removeRepository.isError && (
-            <Banner
-              className={cx(ui.bannerCompact, "mt-3")}
-              tone="alarm"
-              tag="Error"
-              role="alert"
-            >
-              Could not remove repository. Please try again.
-            </Banner>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </article>
   )
 }
@@ -3912,9 +3958,12 @@ export function RepositoryCardsSkeleton() {
     >
       {[0, 1].map((item) => (
         <div className={ui.repoCardSkeleton} key={item}>
-          <span className={cx(ui.skeleton, "h-[0.85rem]", "w-[35%]")} />
-          <span className={cx(ui.skeleton, "h-[1.6rem]", "w-[65%]")} />
-          <span className={cx(ui.skeleton, "h-[0.85rem]", "w-[90%]")} />
+          <RepoCardRail />
+          <div className={ui.repoCardSkeletonInner}>
+            <span className={cx(ui.skeleton, "h-[0.85rem]", "w-[35%]")} />
+            <span className={cx(ui.skeleton, "h-[1.6rem]", "w-[65%]")} />
+            <span className={cx(ui.skeleton, "h-[0.85rem]", "w-[90%]")} />
+          </div>
         </div>
       ))}
     </section>

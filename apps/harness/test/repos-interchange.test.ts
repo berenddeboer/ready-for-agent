@@ -29,7 +29,7 @@ const sliceBetweenMarkers = (
  * Structural + design-token contract tests; no behavior changes.
  */
 describe("Interchange phase 4: repos page + blank slate", () => {
-  test("repo cards use 1.5px ticket shell, display title, mono PR count, icon controls", () => {
+  test("repo cards use a forged frame, display title, mono PR count, icon controls", () => {
     const source = homeSource()
     // Card chrome only (settings dialog stays on Ledger until phase 5).
     const head = sliceBetweenMarkers(
@@ -52,11 +52,45 @@ describe("Interchange phase 4: repos page + blank slate", () => {
 
     const ui = uiSource()
     expect(ui).toContain("repoCard:")
-    expect(ui).toMatch(/repoCard:[\s\S]*?border-\[1\.5px\]/)
-    expect(ui).toMatch(/repoCard:[\s\S]*?border-ink/)
+    // Shared forged frame shell carries the hard ink border + dark casing.
+    expect(ui).toContain(
+      '"relative min-w-0 border-2 border-ink bg-[#252827] p-[3px]"',
+    )
+    const cardFrame = sliceBetweenMarkers(ui, "repoCard: cx(", "repoCardInner:")
+    expect(cardFrame).toContain("repoCardFrameShell")
+    expect(cardFrame).toContain("repoCardFrameCasing")
+    expect(cardFrame).not.toContain("border-[1.5px]")
+    expect(ui).toContain("repoCardInner:")
     expect(ui).toContain("repoCardTitle:")
     expect(ui).toMatch(/repoCardTitle:[\s\S]*?text-\[1\.06rem\]/)
     expect(ui).toMatch(/repoCardLink:[\s\S]*?hover:decoration-signal/)
+  })
+
+  test("repo card uses a Pipeline-style forged frame and six-lane top rail", () => {
+    const source = homeSource()
+    const head = sliceBetweenMarkers(
+      source,
+      "className={ui.repoCard}",
+      "<dialog",
+    )
+    // One decorative rail per populated card, above the body panel.
+    expect(head).toContain("<RepoCardRail />")
+    expect(head).toContain("className={ui.repoCardInner}")
+    // Rail reuses canonical lane order/colors (no drift from Pipeline).
+    expect(source).toContain("PIPELINE_LANES")
+    expect(source).toContain('from "./pipeline-lanes.js"')
+
+    const ui = uiSource()
+    expect(ui).toContain("repoCardInner:")
+    expect(ui).toMatch(/repoCardInner:[\s\S]*?bg-panel/)
+    expect(ui).toContain("repoCardRail:")
+    expect(ui).toContain("repoCardRailSegment:")
+    expect(ui).toMatch(/repoCardRail:[\s\S]*?flex/)
+    expect(ui).toMatch(/repoCardRailSegment:[\s\S]*?flex-1/)
+    // Forged frame: dark metal casing via the shared shell, no 1.5px border.
+    const frame = sliceBetweenMarkers(ui, "repoCard: cx(", "repoCardInner:")
+    expect(frame).toContain("repoCardFrameShell")
+    expect(frame).not.toContain("border-[1.5px]")
   })
 
   test("meta table is hairline two-column mono dt/dd with harness-default annotations", () => {
@@ -242,11 +276,12 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     )
     expect(card).toContain("const hasNoRelevantIssues =")
     expect(card).toContain("relevantIssues?.length === 0")
+    expect(card).toContain("<h3 className={ui.repoIssuesKicker}>")
+    expect(card).toContain("{hasNoRelevantIssues")
+    expect(card).toContain('? "No relevant issues"')
+    expect(card).toContain(': "Relevant issues"}')
     expect(card).toContain(
-      '<h3 className={ui.repoIssuesKicker}>\n                {hasNoRelevantIssues ? "No relevant issues" : "Relevant issues"}',
-    )
-    expect(card).toContain(
-      'aria-label={\n                  refreshingIssues ? "Refreshing issues" : "Refresh issues"',
+      'refreshingIssues ? "Refreshing issues" : "Refresh issues"',
     )
     expect(card).toContain("ui.repoIssuesUnrefreshed")
     // Stale projection caption (#951): guidance banner when issuesReconciledAt is old.
@@ -485,5 +520,69 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).toMatch(/blankSlateFieldControl:[\s\S]*?flex-1/)
     expect(ui).toMatch(/blankSlateFieldControl:[\s\S]*?border-\[1\.5px\]/)
     expect(ui).toContain("platePrimary:")
+  })
+
+  test("every repo card carries one decorative six-lane top rail", () => {
+    const source = homeSource()
+    // One rail rendered per populated card, before the body panel, hidden
+    // from assistive technology and carrying no focusable/heading content.
+    const card = sliceBetweenMarkers(
+      source,
+      "function RepositoryCard(",
+      "function RepositoryIssues(",
+    )
+    expect(card).toContain("<RepoCardRail />")
+    expect(card.indexOf("<RepoCardRail />")).toBeLessThan(
+      card.indexOf("<div className={ui.repoCardInner}>"),
+    )
+    // Rail is decorative: aria-hidden, no headings, no labels, no buttons.
+    const rail = sliceBetweenMarkers(
+      source,
+      "function RepoCardRail() {",
+      "function RepositoryCard(",
+    )
+    expect(rail).toContain('aria-hidden="true"')
+    expect(rail).toContain("PIPELINE_LANES.map")
+    expect(rail).toContain("style={{ backgroundColor: lane.color }}")
+    expect(rail).not.toContain("<h1")
+    expect(rail).not.toContain("<h2")
+    expect(rail).not.toContain("<button")
+    expect(rail).not.toContain("aria-label")
+
+    const ui = uiSource()
+    expect(ui).toContain("repoCardRail:")
+    expect(ui).toContain("repoCardRailSegment:")
+    expect(ui).toMatch(/repoCardRail:[\s\S]*?flex/)
+    expect(ui).toMatch(/repoCardRailSegment:[\s\S]*?flex-1/)
+    // Casing is #252827, distinct from Merged's #151515 fill, so the final
+    // segment stays visible (Pipeline's complete-sheet contrast).
+    expect(ui).toMatch(/repoCardRail:[\s\S]*?bg-\[#252827\]/)
+    // Segments are equal-width; lane fill is external (PIPELINE_LANES), so the
+    // recipe must not hard-code a lane color.
+    const segment = sliceBetweenMarkers(
+      ui,
+      "repoCardRailSegment: cx(",
+      "repoCardRailRivet",
+    )
+    expect(segment).not.toContain("bg-lane-")
+    expect(segment).not.toContain("backgroundColor")
+  })
+
+  test("repo card skeleton mirrors the forged frame and rail geometry", () => {
+    const source = homeSource()
+    // RepositoryCardsSkeleton is the last declaration in the file.
+    const skeleton = source.slice(
+      source.indexOf("export function RepositoryCardsSkeleton("),
+    )
+    expect(skeleton).toContain("ui.repoCardSkeleton")
+    expect(skeleton).toContain("<RepoCardRail />")
+    expect(skeleton).toContain("ui.repoCardSkeletonInner")
+
+    const ui = uiSource()
+    expect(ui).toContain("repoCardSkeleton:")
+    expect(ui).toMatch(/repoCardSkeleton:[\s\S]*?repoCardFrameShell/)
+    expect(ui).toMatch(/repoCardSkeleton:[\s\S]*?repoCardFrameCasing/)
+    expect(ui).toContain("repoCardSkeletonInner:")
+    expect(ui).toMatch(/repoCardSkeletonInner:[\s\S]*?bg-panel/)
   })
 })

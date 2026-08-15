@@ -218,9 +218,10 @@ prototypes.)
 ### 2.7 Borders, radius, shadows
 
 - **2px solid `var(--ink`)**: nameboards, banners, stats slab, tabs, primary
-  plates, queue-intake plate, dialog panels, menu panels.
-- **1.5px solid `var(--ink`)**: cards (tickets, archive rows, repo cards),
-  chips, legs, stamps, secondary buttons, fields.
+  plates, queue-intake plate, dialog panels, menu panels, repo cards (forged
+  frame with dark metal casing — see §4.6).
+- **1.5px solid `var(--ink`)**: cards (tickets, archive rows), chips, legs,
+  stamps, secondary buttons, fields.
 - **1px / hairline**: dividers on dark slabs (`rgb(255 255 255 / 0.14–0.22)`),
   `--line-soft` / `--line-ghost` separators, filter buttons.
 - **Radius: none.** The only circles are roundels and nav dots
@@ -448,11 +449,18 @@ not pure white, not brushed metal. No radius, no offset shadow.
 Repo cards and issue rows adopt the ticket language — the page has no
 prototype, so this spec governs:
 
-- **Repo card**: 1.5px ink-bordered card. Light mode: slight brushed-metal
-  fill (soft plate gradient, not flat white on paper). Dark mode: `--panel`.
-  Header: display-600 projectPath link (hover signal-underline) + mono
-  open-PR count; controls: collapse chevron, pause/start icon button, kebab
-  menu (§5.6).
+- **Repo card**: a Pipeline-style forged frame — 2px ink border around a dark
+  metal casing (`ui.repoCard`) holding a theme-aware body panel
+  (`ui.repoCardInner`: brushed-metal fill in light, `--panel` in dark). A
+  compact six-lane **top rail** (`ui.repoCardRail`) spans the full card width
+  beneath the frame, split into six equal beveled segments in canonical
+  Pipeline order (Queue → Build → Review → PR → Attention → Merged) whose
+  fills are drawn from `PIPELINE_LANES`. Two restrained steel end rivets cap
+  the rail. The rail is a decorative ornament — `aria-hidden`, no labels or
+  headings — and stays visible when the card is collapsed. Header: display-600
+  projectPath link (hover signal-underline) +
+  mono open-PR count; controls: collapse chevron, pause/start icon button,
+  kebab menu (§5.6).
 - **Meta table**: hairline top/bottom borders, two columns — mono uppercase
   dt labels, mono values with inherit annotations ("Harness default (x)").
 - **Credential banners**: standard banner pattern (§4.8), attention tag —
