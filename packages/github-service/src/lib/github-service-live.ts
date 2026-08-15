@@ -296,6 +296,41 @@ const isGitHubStatusCheckState = (
   state === "EXPECTED" ||
   state === "PENDING"
 
+type MergeCheckRollupVerdict =
+  | { readonly _tag: "ok" }
+  | { readonly _tag: "invalid"; readonly message: string }
+  | { readonly _tag: "missing_successful_checks" }
+  | { readonly _tag: "checks_not_green" }
+
+/**
+ * Harness-initiated merge requires a non-empty successful aggregate.
+ * A null rollup or EXPECTED context is not green.
+ */
+const classifyMergeCheckRollup = (
+  rollup: { readonly state: unknown } | null | undefined,
+  context: string,
+): MergeCheckRollupVerdict => {
+  if (rollup === undefined) {
+    return {
+      _tag: "invalid",
+      message: `GitHub omitted the check rollup for ${context}`,
+    }
+  }
+  if (rollup === null || rollup.state === "EXPECTED") {
+    return { _tag: "missing_successful_checks" }
+  }
+  if (!isGitHubStatusCheckState(rollup.state)) {
+    return {
+      _tag: "invalid",
+      message: `GitHub returned an invalid check rollup for ${context}`,
+    }
+  }
+  if (rollup.state !== "SUCCESS") {
+    return { _tag: "checks_not_green" }
+  }
+  return { _tag: "ok" }
+}
+
 const isMergeGraphqlRejection = (error: GenqlError): boolean => {
   const message = error.message.toLowerCase()
   return (
@@ -1978,23 +2013,23 @@ const makeGitHubApiService = (
           message: `GitHub returned an invalid pull request head for ${repository.owner}/${repository.name}:${headRefName}`,
         })
       }
-      if (pullRequest.statusCheckRollup === undefined) {
+      const preMergeChecks = classifyMergeCheckRollup(
+        pullRequest.statusCheckRollup,
+        `${repository.owner}/${repository.name}:${headRefName}`,
+      )
+      if (preMergeChecks._tag === "invalid") {
         return yield* new GitHubRequestError({
-          message: `GitHub omitted the check rollup for ${repository.owner}/${repository.name}:${headRefName}`,
+          message: preMergeChecks.message,
         })
       }
-      if (
-        pullRequest.statusCheckRollup !== null &&
-        !isGitHubStatusCheckState(pullRequest.statusCheckRollup.state)
-      ) {
-        return yield* new GitHubRequestError({
-          message: `GitHub returned an invalid check rollup for ${repository.owner}/${repository.name}:${headRefName}`,
-        })
+      if (preMergeChecks._tag === "missing_successful_checks") {
+        return {
+          _tag: "needs_human",
+          reason: "missing_successful_checks",
+          message: `No successful status checks were reported for ${repository.owner}/${repository.name}:${headRefName}`,
+        } as const
       }
-      if (
-        pullRequest.statusCheckRollup !== null &&
-        pullRequest.statusCheckRollup.state !== "SUCCESS"
-      ) {
+      if (preMergeChecks._tag === "checks_not_green") {
         return {
           _tag: "revalidation",
           reason: "checks_not_green",
@@ -2115,23 +2150,23 @@ const makeGitHubApiService = (
           message: `Pull request head changed while merging ${repository.owner}/${repository.name}:${headRefName}`,
         } as const
       }
-      if (mergedPullRequest.statusCheckRollup === undefined) {
+      const postMergeChecks = classifyMergeCheckRollup(
+        mergedPullRequest.statusCheckRollup,
+        `${repository.owner}/${repository.name}:${headRefName}`,
+      )
+      if (postMergeChecks._tag === "invalid") {
         return yield* new GitHubRequestError({
-          message: `GitHub omitted the check rollup after merge for ${repository.owner}/${repository.name}:${headRefName}`,
+          message: postMergeChecks.message,
         })
       }
-      if (
-        mergedPullRequest.statusCheckRollup !== null &&
-        !isGitHubStatusCheckState(mergedPullRequest.statusCheckRollup.state)
-      ) {
-        return yield* new GitHubRequestError({
-          message: `GitHub returned an invalid check rollup after merge for ${repository.owner}/${repository.name}:${headRefName}`,
-        })
+      if (postMergeChecks._tag === "missing_successful_checks") {
+        return {
+          _tag: "needs_human",
+          reason: "missing_successful_checks",
+          message: `No successful status checks were reported while merging ${repository.owner}/${repository.name}:${headRefName}`,
+        } as const
       }
-      if (
-        mergedPullRequest.statusCheckRollup !== null &&
-        mergedPullRequest.statusCheckRollup.state !== "SUCCESS"
-      ) {
+      if (postMergeChecks._tag === "checks_not_green") {
         return {
           _tag: "revalidation",
           reason: "checks_not_green",

@@ -148,7 +148,10 @@ export type MergePullRequestResult =
     }
   | {
       readonly _tag: "needs_human"
-      readonly reason: "closed_unmerged" | "merge_rejected"
+      readonly reason:
+        | "closed_unmerged"
+        | "merge_rejected"
+        | "missing_successful_checks"
       readonly message: string
     }
 

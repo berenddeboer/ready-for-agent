@@ -603,6 +603,32 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
     })
   })
 
+  test("missing-check Needs Human handoff is retryable", () => {
+    const missingChecks = workItemWith({
+      state: "needs_human",
+      failureCode: "needs_human",
+      failureMessage:
+        "No status checks were reported for this pull request by the check-start deadline.",
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "watch_pr_status_checks",
+          status: "succeeded",
+          reasonCode: "missing_successful_checks",
+          reasonMessage:
+            "No status checks were reported for this pull request by the check-start deadline.",
+        },
+      ],
+    })
+    expect(workItemCanRetry(missingChecks)).toBe(true)
+    expect(workItemLatestStepRunReason(missingChecks)).toEqual({
+      code: "missing_successful_checks",
+      message:
+        "No status checks were reported for this pull request by the check-start deadline.",
+      detail: null,
+    })
+  })
+
   test("unavailable persisted detail stays null without inventing a cause chain", () => {
     expect(workItemCanRetry(interruptedWithoutDetail)).toBe(true)
     expect(workItemLatestStepRunReason(interruptedWithoutDetail)).toEqual({

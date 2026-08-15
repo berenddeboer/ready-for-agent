@@ -1570,20 +1570,25 @@ export const makeGitLabService = (options: {
 
         /**
          * Job-level pipeline rollup for merge pre-checks. Matches Watch so
-         * allow_failure failures and manual/canceled/skipped jobs do not block
-         * merge, while hard-fail and still-running pipelines revalidate.
-         * A tip-aligned head_pipeline whose SHA is not the MR tip is treated as
-         * not green so a concurrent push cannot merge an untested head under a
-         * stale success (same tip-freshness rule as Watch pending). Merged-
-         * results pipelines are excluded from that SHA rule.
+         * allow_failure failures are not hard-fail, while still-running and
+         * hard-fail pipelines revalidate. An absent head pipeline or a
+         * no_checks aggregate (including skipped-only / ignore-only jobs) is
+         * not green and yields missing_successful_checks. A tip-aligned
+         * head_pipeline whose SHA is not the MR tip is treated as not green so
+         * a concurrent push cannot merge an untested head under a stale
+         * success (same tip-freshness rule as Watch pending). Merged-results
+         * pipelines are excluded from that SHA rule.
          */
         const pipelineBlockingReason = (
           mergeRequest: MergeRequestCheck,
-        ): Effect.Effect<"checks_not_green" | null, GitLabServiceError> =>
+        ): Effect.Effect<
+          "checks_not_green" | "missing_successful_checks" | null,
+          GitLabServiceError
+        > =>
           Effect.gen(function* () {
             const headPipeline = mergeRequest.head_pipeline
             if (headPipeline === null || headPipeline === undefined) {
-              return null
+              return "missing_successful_checks" as const
             }
             if (isStaleHeadPipelineForTip(mergeRequest)) {
               return "checks_not_green" as const
@@ -1629,6 +1634,9 @@ export const makeGitLabService = (options: {
             }
             if (aggregate === "pending" || aggregate === "failed") {
               return "checks_not_green" as const
+            }
+            if (aggregate === "no_checks") {
+              return "missing_successful_checks" as const
             }
             return null
           })
@@ -1681,6 +1689,13 @@ export const makeGitLabService = (options: {
               })
             }
             const pipelineBlock = yield* pipelineBlockingReason(mergeRequest)
+            if (pipelineBlock === "missing_successful_checks") {
+              return {
+                _tag: "needs_human" as const,
+                reason: "missing_successful_checks" as const,
+                message: `No successful pipeline jobs were reported for ${repository.projectPath}:${headRefName}`,
+              }
+            }
             if (pipelineBlock === "checks_not_green") {
               return {
                 _tag: "revalidation" as const,
@@ -1823,6 +1838,13 @@ export const makeGitLabService = (options: {
           }
         }
         const pipelineBlock = yield* pipelineBlockingReason(refreshed)
+        if (pipelineBlock === "missing_successful_checks") {
+          return {
+            _tag: "needs_human" as const,
+            reason: "missing_successful_checks" as const,
+            message: `No successful pipeline jobs were reported while merging ${repository.projectPath}:${headRefName}`,
+          }
+        }
         if (pipelineBlock === "checks_not_green") {
           return {
             _tag: "revalidation" as const,

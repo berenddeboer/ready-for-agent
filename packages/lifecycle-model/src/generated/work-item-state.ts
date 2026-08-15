@@ -526,8 +526,14 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "mark_pr_ready_for_review",
     to: "merge_pr",
-    guard: "settled_non_failing_always_merge_mode",
+    guard: "settled_non_failing_successful_always_merge_mode",
     reasonCode: "native",
+  },
+  {
+    from: "mark_pr_ready_for_review",
+    to: "needs_human",
+    guard: "autonomous_merge_without_successful_checks",
+    reasonCode: "missing_successful_checks",
   },
   {
     from: "mark_pr_ready_for_review",
@@ -592,6 +598,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "merge_pr",
     to: "needs_human",
+    guard: "autonomous_merge_without_successful_checks",
+    reasonCode: "missing_successful_checks",
+  },
+  {
+    from: "merge_pr",
+    to: "needs_human",
     guard: "merge_needs_human",
     reasonCode: "handler_failed",
   },
@@ -648,6 +660,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "watch_pr_status_checks",
     guard: "refresh_observed_merge_conflict_cleared",
     reasonCode: "native",
+  },
+  {
+    from: "needs_human",
+    to: "watch_pr_status_checks",
+    guard: "retry_missing_successful_checks",
+    reasonCode: "missing_successful_checks",
   },
   {
     from: "pre_commit",
@@ -838,14 +856,20 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "watch_pr_status_checks",
     to: "merge_pr",
-    guard: "fallback_ready_always_merge_mode",
+    guard: "fallback_ready_successful_always_merge_mode",
     reasonCode: "native",
   },
   {
     from: "watch_pr_status_checks",
     to: "merge_pr",
-    guard: "settled_ready_always_merge_mode",
+    guard: "settled_ready_successful_always_merge_mode",
     reasonCode: "native",
+  },
+  {
+    from: "watch_pr_status_checks",
+    to: "needs_human",
+    guard: "autonomous_merge_without_successful_checks",
+    reasonCode: "missing_successful_checks",
   },
   {
     from: "watch_pr_status_checks",
