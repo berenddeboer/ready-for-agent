@@ -118,11 +118,34 @@ type RetryFailedResult = {
   }
 }
 
+type RetryLimitReachedResult = {
+  readonly issueNumber: number
+  readonly outcome: "LIMIT_REACHED"
+  readonly workItem: RetryWorkItemRef
+  readonly reason: {
+    readonly code: string
+    readonly message: string
+  }
+}
+
+type RetryDeferredResult = {
+  readonly issueNumber: number
+  readonly outcome: "DEFERRED"
+  readonly workItem: RetryWorkItemRef
+  readonly reason: {
+    readonly code: string
+    readonly message: string
+  }
+  readonly retryAt: string
+}
+
 /** Discriminated per-item Retry outcome for CLI JSON. */
 export type RetryWorkItemResult =
   | RetryRetriedResult
   | RetrySkippedResult
   | RetryFailedResult
+  | RetryLimitReachedResult
+  | RetryDeferredResult
 
 export type RetrySuccessDocument = {
   readonly schemaVersion: typeof CLI_SCHEMA_VERSION
@@ -159,6 +182,7 @@ export type StatusStepRunReason = {
   readonly code: string | null
   readonly message: string | null
   readonly detail: StatusStepRunReasonDetail | null
+  readonly retryAt: string | null
 }
 
 export type StatusWorkItemRow = {
@@ -275,7 +299,11 @@ export const buildRetrySuccessDocument = (input: {
 /** True when any per-item Retry failure is present (CLI exits nonzero). */
 export const retryHasFailedResults = (
   results: readonly RetryWorkItemResult[],
-): boolean => results.some((result) => result.outcome === "FAILED")
+): boolean =>
+  results.some(
+    (result) =>
+      result.outcome === "FAILED" || result.outcome === "LIMIT_REACHED",
+  )
 
 export const toCanonicalRepositoryIdentity = (repository: {
   readonly id: string

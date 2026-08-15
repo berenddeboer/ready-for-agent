@@ -4342,6 +4342,19 @@ describe("error cause chain", () => {
     expect(buildReasonDetail(null)).toBeNull()
   })
 
+  it("persists a trustworthy provider retryAt on the Step Run reason", () => {
+    const retryAt = "2026-08-15T13:00:00.000Z"
+    const error = {
+      _tag: "AgentBackendExitError",
+      classification: "retryable_provider_error",
+      retryAt: Date.parse(retryAt),
+      message: "rate limited",
+    }
+    const detail = buildReasonDetail(error)
+    expect(detail?.retryAt).toBe(retryAt)
+    expect(parseReasonDetail(serializeReasonDetail(detail))).toEqual(detail)
+  })
+
   it("maps Effect TimeoutError to code TIMEOUT", () => {
     const timeout = Object.assign(new Error(), {
       name: "TimeoutError",

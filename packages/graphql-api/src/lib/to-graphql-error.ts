@@ -23,6 +23,8 @@ type TaggedError = {
   readonly scope?: string
   readonly retryAt?: number
   readonly sessionId?: string
+  readonly used?: number
+  readonly max?: number
 }
 
 const isTaggedError = (error: unknown): error is TaggedError =>
@@ -181,6 +183,27 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
       return gql(
         `Work Item ${error.workItemId} cannot be retried: ${error.reason}`,
         "RETRY_NOT_ELIGIBLE",
+      )
+    case "AutonomousRetryLimitReachedError":
+      return gql(
+        `Autonomous Retry Budget exhausted for Work Item ${error.workItemId}`,
+        "LIMIT_REACHED",
+        { used: error.used, max: error.max },
+      )
+    case "AutonomousRetryDeferredError":
+      return gql(
+        `Autonomous Retry deferred until ${
+          typeof error.retryAt === "number"
+            ? new Date(error.retryAt).toISOString()
+            : "the provider retry time"
+        }`,
+        "DEFERRED",
+        { retryAt: error.retryAt },
+      )
+    case "InvalidAutonomousRetryLimitError":
+      return gql(
+        error.message ?? "maxAutonomousRetries must be a non-negative integer",
+        "INVALID_RETRY_SELECTOR",
       )
     case "InvalidRetrySelectorError":
       return gql(

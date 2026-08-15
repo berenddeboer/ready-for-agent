@@ -1,4 +1,7 @@
-import type { AgentBackendErrorClassification } from "@ready-for-agent/agent-backend"
+import {
+  type AgentBackendErrorClassification,
+  extractProviderRetryAt,
+} from "@ready-for-agent/agent-backend"
 
 /**
  * Error names OpenCode's `error` stream event carries when a provider call
@@ -86,9 +89,7 @@ const classifyStepFinishEvent = (
  * a `step_finish` part with `reason: "length"` (output truncated by a limit
  * while the turn otherwise completed the step).
  */
-export const parseErrorClassificationFromLine = (
-  line: string,
-): AgentBackendErrorClassification | undefined => {
+const parseErrorEvent = (line: string): Record<string, unknown> | undefined => {
   const trimmed = line.trim()
   if (trimmed.length === 0) {
     return undefined
@@ -104,14 +105,46 @@ export const parseErrorClassificationFromLine = (
   if (typeof event !== "object" || event === null || !("type" in event)) {
     return undefined
   }
+  return event as Record<string, unknown>
+}
+
+export const parseErrorClassificationFromLine = (
+  line: string,
+): AgentBackendErrorClassification | undefined => {
+  const event = parseErrorEvent(line)
+  if (event === undefined) {
+    return undefined
+  }
 
   if (event.type === "error") {
-    return classifyErrorEvent(event as Record<string, unknown>)
+    return classifyErrorEvent(event)
   }
 
   if (event.type === "step_finish") {
-    return classifyStepFinishEvent(event as Record<string, unknown>)
+    return classifyStepFinishEvent(event)
   }
 
   return undefined
+}
+
+/**
+ * Trustworthy machine-readable retry instant from an OpenCode error event.
+ * Only returned for quota/rate-limit (`retryable_provider_error`) payloads.
+ */
+export const parseProviderRetryAtFromLine = (
+  line: string,
+  now: number = Date.now(),
+): number | undefined => {
+  const event = parseErrorEvent(line)
+  if (event === undefined || event.type !== "error") {
+    return undefined
+  }
+  if (classifyErrorEvent(event) !== "retryable_provider_error") {
+    return undefined
+  }
+  const error = event.error
+  if (typeof error !== "object" || error === null) {
+    return undefined
+  }
+  return extractProviderRetryAt({ data: error, now })
 }

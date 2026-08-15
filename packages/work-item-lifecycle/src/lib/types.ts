@@ -52,6 +52,8 @@ export type StepRunId = typeof StepRunId.Type
 
 export const makeStepRunId = (): StepRunId => StepRunId.make(`srun-${ulid()}`)
 
+export const makeAutonomousRetryId = (): string => `artry-${ulid()}`
+
 export const StepRunStatus = Schema.Literals([
   "queued",
   "running",
@@ -480,6 +482,17 @@ export const MISSING_SUCCESSFUL_CHECKS_REASON_EXPECTED = `A required GitHub stat
 
 /** Operator-facing reason when merge revalidation finds no successful checks. */
 export const MISSING_SUCCESSFUL_CHECKS_REASON = `No successful status checks were reported for this pull request. ${AUTONOMOUS_MERGE_CHECK_REQUIREMENT}`
+
+/** Default Autonomous Retry Budget: 3 accepted retries at the current step. */
+export const DEFAULT_AUTONOMOUS_RETRY_LIMIT = 3
+
+export type AutonomousRetryPolicy = {
+  readonly maxRetries: number
+}
+
+export type RetryOptions = {
+  readonly autonomous?: AutonomousRetryPolicy
+}
 
 export type WorkItemLifecycleConfig = {
   readonly maxDurations?: LifecycleMaxDurations

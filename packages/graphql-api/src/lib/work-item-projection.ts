@@ -276,6 +276,7 @@ export type WorkItemLatestStepRunReason = {
   readonly code: string | null
   readonly message: string | null
   readonly detail: StepRunReasonDetail | null
+  readonly retryAt: string | null
 }
 
 export const workItemLatestStepRunReason = (
@@ -285,10 +286,12 @@ export const workItemLatestStepRunReason = (
   if (latest === undefined) {
     return null
   }
+  const detail = parseReasonDetail(latest.reasonDetail)
   return {
     code: latest.reasonCode,
     message: latest.reasonMessage,
-    detail: parseReasonDetail(latest.reasonDetail),
+    detail,
+    retryAt: detail?.retryAt ?? null,
   }
 }
 

@@ -14,6 +14,11 @@ export type CauseChainLink = {
 export type StepRunReasonDetail = {
   readonly causeChain: readonly CauseChainLink[]
   readonly code?: string
+  /**
+   * Trustworthy provider retry instant as ISO-8601, when the Agent Backend
+   * adapter extracted one from a quota or rate-limit failure.
+   */
+  readonly retryAt?: string
 }
 
 const DEFAULT_MAX_DEPTH = 8
@@ -28,6 +33,18 @@ const readString = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : undefined
+}
+
+const readRetryAtIso = (value: unknown): string | undefined => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString()
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString()
+  }
+  return undefined
 }
 
 const readCode = (value: unknown): string | undefined => {
@@ -92,6 +109,23 @@ const nextCause = (value: unknown): unknown => {
   return undefined
 }
 
+const extractRetryAtIso = (error: unknown): string | undefined => {
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current)
+    const record = asRecord(current)
+    if (record !== null && "retryAt" in record) {
+      const retryAt = readRetryAtIso(record.retryAt)
+      if (retryAt !== undefined) {
+        return retryAt
+      }
+    }
+    current = nextCause(current)
+  }
+  return undefined
+}
+
 /**
  * Flatten nested `cause` / AggregateError chains into structured links.
  * Does not produce a formatted blob — each link keeps `name` / `code` / `message`.
@@ -138,12 +172,14 @@ export const buildReasonDetail = (
 ): StepRunReasonDetail | null => {
   const causeChain = extractCauseChain(error)
   const code = extractErrorCode(error)
-  if (causeChain.length === 0 && code === undefined) {
+  const retryAt = extractRetryAtIso(error)
+  if (causeChain.length === 0 && code === undefined && retryAt === undefined) {
     return null
   }
   return {
     causeChain,
     ...(code !== undefined ? { code } : {}),
+    ...(retryAt !== undefined ? { retryAt } : {}),
   }
 }
 
@@ -183,12 +219,14 @@ export const parseReasonDetail = (
   }
 
   const code = readCode(record.code)
-  if (causeChain.length === 0 && code === undefined) {
+  const retryAt = readRetryAtIso(record.retryAt)
+  if (causeChain.length === 0 && code === undefined && retryAt === undefined) {
     return null
   }
   return {
     causeChain,
     ...(code !== undefined ? { code } : {}),
+    ...(retryAt !== undefined ? { retryAt } : {}),
   }
 }
 

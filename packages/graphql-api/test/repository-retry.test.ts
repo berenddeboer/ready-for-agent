@@ -1,6 +1,8 @@
 import { EnqueueError } from "@ready-for-agent/queue-service"
 import {
   ActiveStepRunExistsError,
+  AutonomousRetryDeferredError,
+  AutonomousRetryLimitReachedError,
   RetryNotEligibleError,
   type WorkItemRecord,
   WorkItemTerminalError,
@@ -10,6 +12,7 @@ import {
   NoUnfinishedWorkItemError,
   WorkItemNotInRepositoryError,
   isItemLocalRetryError,
+  parseMaxAutonomousRetries,
   parseRetryWorkItemsSelector,
   snapshotRetryTargets,
   toRetryItemError,
@@ -66,6 +69,24 @@ const baseWorkItem = {
 const workItemWith = (overrides: Partial<WorkItemRecord>): WorkItemRecord => ({
   ...baseWorkItem,
   ...overrides,
+})
+
+describe("parseMaxAutonomousRetries", () => {
+  test("defaults to 3 and accepts a non-negative override", () => {
+    expect(parseMaxAutonomousRetries(undefined)).toBe(3)
+    expect(parseMaxAutonomousRetries(null)).toBe(3)
+    expect(parseMaxAutonomousRetries(0)).toBe(0)
+    expect(parseMaxAutonomousRetries(5)).toBe(5)
+  })
+
+  test("rejects a negative or non-integer override", () => {
+    expect(parseMaxAutonomousRetries(-1)).toBeInstanceOf(
+      InvalidRetrySelectorError,
+    )
+    expect(parseMaxAutonomousRetries(1.5)).toBeInstanceOf(
+      InvalidRetrySelectorError,
+    )
+  })
 })
 
 describe("parseRetryWorkItemsSelector", () => {
@@ -308,6 +329,15 @@ describe("item-local Retry errors", () => {
         status: "running",
       }),
       { _tag: "WorkItemNotFoundError" as const, workItemId: "wi-1" },
+      new AutonomousRetryLimitReachedError({
+        workItemId: "wi-1",
+        used: 3,
+        max: 3,
+      }),
+      new AutonomousRetryDeferredError({
+        workItemId: "wi-1",
+        retryAt: Date.parse("2026-08-15T13:00:00.000Z"),
+      }),
     ]
     for (const error of cases) {
       expect(isItemLocalRetryError(error)).toBe(true)

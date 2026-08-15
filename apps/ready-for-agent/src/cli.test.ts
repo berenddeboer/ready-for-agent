@@ -1015,6 +1015,88 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
+  it.live(
+    "retry all-retryable sends --max-autonomous-retries and treats LIMIT_REACHED as nonzero",
+    () =>
+      Effect.gen(function* () {
+        const logs: string[] = []
+        const originalLog = console.log
+        const previousExitCode = process.exitCode
+        console.log = (...args: unknown[]) => {
+          logs.push(args.map(String).join(" "))
+        }
+        process.exitCode = undefined
+
+        try {
+          let maxAutonomousRetries: number | undefined
+          const layer = mockStart.pipe(
+            Layer.provideMerge(mockLocalGit),
+            Layer.provideMerge(
+              Layer.succeed(GraphqlApi, {
+                ...unusedGraphql,
+                listRepositories: Effect.succeed([
+                  {
+                    id: "repo-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ]),
+                retryWorkItems: (_repositoryId, _selector, maxRetries) =>
+                  Effect.sync(() => {
+                    maxAutonomousRetries = maxRetries
+                    return {
+                      repository: {
+                        id: "repo-1",
+                        forge: "github",
+                        forgeHost: "github.com",
+                        projectPath: "owner/repo",
+                      },
+                      results: [
+                        {
+                          issueNumber: 7,
+                          outcome: "LIMIT_REACHED" as const,
+                          workItem: {
+                            id: "wi-7",
+                            state: "IMPLEMENT",
+                            status: "FAILED",
+                          },
+                          reason: {
+                            code: "LIMIT_REACHED",
+                            message: "Autonomous Retry Budget exhausted (3/3)",
+                          },
+                        },
+                      ],
+                    }
+                  }),
+              }),
+            ),
+          )
+
+          yield* runOperator(
+            [
+              "retry",
+              "github.com/owner/repo",
+              "--all-retryable",
+              "--max-autonomous-retries",
+              "2",
+            ],
+            layer,
+          )
+
+          expect(maxAutonomousRetries).toBe(2)
+          expect(JSON.parse(logs[0] ?? "")).toMatchObject({
+            command: "retry",
+            results: [{ outcome: "LIMIT_REACHED", issueNumber: 7 }],
+          })
+          expect(process.exitCode).toBe(1)
+        } finally {
+          console.log = originalLog
+          process.exitCode = previousExitCode
+        }
+      }),
+  )
+
   it.live("retry --issue targets that Issue's unfinished Work Item", () =>
     Effect.gen(function* () {
       const logs: string[] = []
@@ -1533,6 +1615,7 @@ describe("operator binary CLI seam", () => {
             latestStepRunReason: {
               code: "handler_failed",
               message: "Claude Code failed to implement the Work Item issue",
+              retryAt: null,
               detail: {
                 code: "ENOENT",
                 causeChain: [
@@ -1564,6 +1647,7 @@ describe("operator binary CLI seam", () => {
               code: "issue_not_open",
               message: "Issue is not open",
               detail: null,
+              retryAt: null,
             },
             pullRequestNumber: null,
             createdAt: "2026-08-12T10:00:00.000Z",
@@ -1585,6 +1669,7 @@ describe("operator binary CLI seam", () => {
               code: "review_accepted",
               message: "Human must review findings",
               detail: null,
+              retryAt: null,
             },
             pullRequestNumber: null,
             createdAt: "2026-08-12T10:00:00.000Z",
@@ -1608,6 +1693,7 @@ describe("operator binary CLI seam", () => {
               message:
                 "Lifecycle Step was interrupted before an outcome could be established",
               detail: null,
+              retryAt: null,
             },
             pullRequestNumber: null,
             createdAt: "2026-08-12T10:00:00.000Z",
@@ -1821,6 +1907,7 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("issue")
     expect(output).toContain("work-item")
     expect(output).toContain("all-retryable")
+    expect(output).toContain("max-autonomous-retries")
     expect(output).toContain("versioned JSON")
   })
 

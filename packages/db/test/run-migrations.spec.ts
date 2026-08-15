@@ -219,6 +219,7 @@ describe("runMigrations", () => {
           { name: "20260812120000_automated_review_rerun_signature" },
           { name: "20260814120000_work_item_execution_profile" },
           { name: "20260815120000_work_item_auto_merge_override" },
+          { name: "20260815180000_autonomous_retry_budget" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -251,6 +252,31 @@ describe("runMigrations", () => {
         expect(names.has("execution_profile_present")).toBe(true)
         expect(names.has("execution_profile_build_model")).toBe(true)
         expect(names.has("execution_profile_review_same_as_build")).toBe(true)
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("adds Autonomous Retry Budget table and pending-wait flag", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* runMigrations(defaultMigrationsFolder)
+        const columns = (yield* sql.unsafe(
+          `PRAGMA table_info(work_item)`,
+        )) as readonly {
+          readonly name: string
+          readonly notnull: number
+          readonly dflt_value: string | null
+        }[]
+        const pending = columns.find(
+          (column) => column.name === "pending_autonomous_retry",
+        )
+        expect(pending).toBeDefined()
+        expect(pending?.notnull).toBe(1)
+        const tables = (yield* sql.unsafe(
+          `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'autonomous_retry'`,
+        )) as readonly { readonly name: string }[]
+        expect(tables).toEqual([{ name: "autonomous_retry" }])
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

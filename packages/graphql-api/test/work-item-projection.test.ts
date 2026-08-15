@@ -566,6 +566,7 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
     expect(workItemLatestStepRunReason(implementFailedWithDetail)).toEqual({
       code: "handler_failed",
       message: "Claude Code failed to implement the Work Item issue",
+      retryAt: null,
       detail: {
         causeChain: [
           {
@@ -590,6 +591,7 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
       code: "issue_not_open",
       message: "Issue is not open",
       detail: null,
+      retryAt: null,
     })
   })
 
@@ -600,6 +602,7 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
       code: "review_accepted",
       message: "Human must review findings",
       detail: null,
+      retryAt: null,
     })
   })
 
@@ -626,6 +629,7 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
       message:
         "No status checks were reported for this pull request by the check-start deadline.",
       detail: null,
+      retryAt: null,
     })
   })
 
@@ -636,6 +640,7 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
       message:
         "Lifecycle Step was interrupted before an outcome could be established",
       detail: null,
+      retryAt: null,
     })
   })
 
@@ -643,5 +648,45 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
     expect(
       workItemLatestStepRunReason(workItemWith({ stepRuns: [] })),
     ).toBeNull()
+  })
+
+  test("exposes a persisted provider hold on latestStepRunReason without clearing canRetry", () => {
+    const retryAt = "2026-08-15T13:00:00.000Z"
+    const held = workItemWith({
+      state: "implement",
+      stepRuns: [
+        {
+          ...baseStepRun,
+          status: "failed",
+          reasonCode: "handler_failed",
+          reasonMessage: "rate limited",
+          reasonDetail: JSON.stringify({
+            causeChain: [{ message: "Too Many Requests" }],
+            retryAt,
+          }),
+        },
+        {
+          ...baseStepRun,
+          id: "srun-01J00000000000000000000001",
+          status: "failed",
+          reasonCode: "handler_failed",
+          reasonMessage: "rate limited again",
+          reasonDetail: JSON.stringify({
+            causeChain: [{ message: "Too Many Requests" }],
+            retryAt,
+          }),
+        },
+      ],
+    })
+    expect(workItemCanRetry(held)).toBe(true)
+    expect(workItemLatestStepRunReason(held)).toEqual({
+      code: "handler_failed",
+      message: "rate limited again",
+      retryAt,
+      detail: {
+        causeChain: [{ message: "Too Many Requests" }],
+        retryAt,
+      },
+    })
   })
 })

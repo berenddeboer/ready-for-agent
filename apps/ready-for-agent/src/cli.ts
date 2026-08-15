@@ -100,6 +100,13 @@ const retryAllRetryableFlag = Flag.boolean("all-retryable").pipe(
   ),
 )
 
+const maxAutonomousRetriesFlag = Flag.integer("max-autonomous-retries").pipe(
+  Flag.withDescription(
+    "Maximum accepted Autonomous Retry execution attempts per Work Item at its current Lifecycle Step (default 3; --all-retryable only)",
+  ),
+  Flag.optional,
+)
+
 const startHarnessWorkflow = Effect.fn("Cli.startHarness")(function* (
   noOpen: boolean,
   host: string | undefined,
@@ -302,6 +309,7 @@ const retryWorkflow = Effect.fn("Cli.retry")(function* (
     readonly issue: number | undefined
     readonly workItem: string | undefined
     readonly allRetryable: boolean
+    readonly maxAutonomousRetries: number | undefined
   },
 ) {
   const selectedCount =
@@ -314,6 +322,18 @@ const retryWorkflow = Effect.fn("Cli.retry")(function* (
       code: "INVALID_RETRY_SELECTOR",
       message:
         "Exactly one of --issue, --work-item, or --all-retryable is required",
+    })
+  }
+
+  if (
+    selector.maxAutonomousRetries !== undefined &&
+    (!Number.isInteger(selector.maxAutonomousRetries) ||
+      selector.maxAutonomousRetries < 0)
+  ) {
+    return yield* new FiniteCommandFailed({
+      command: "retry",
+      code: "INVALID_RETRY_SELECTOR",
+      message: "--max-autonomous-retries must be a non-negative integer",
     })
   }
 
@@ -335,7 +355,11 @@ const retryWorkflow = Effect.fn("Cli.retry")(function* (
         : { allRetryable: true as const }
 
   const result = yield* graphqlApi
-    .retryWorkItems(resolved.repository.id, graphqlSelector)
+    .retryWorkItems(
+      resolved.repository.id,
+      graphqlSelector,
+      selector.allRetryable ? (selector.maxAutonomousRetries ?? 3) : undefined,
+    )
     .pipe(Effect.mapError((error) => toFiniteCommandFailed("retry", error)))
 
   yield* Console.log(
@@ -521,12 +545,14 @@ const retryCommand = Command.make(
     issue: retryIssueFlag,
     workItem: retryWorkItemFlag,
     allRetryable: retryAllRetryableFlag,
+    maxAutonomousRetries: maxAutonomousRetriesFlag,
   },
-  ({ repository, issue, workItem, allRetryable }) =>
+  ({ repository, issue, workItem, allRetryable, maxAutonomousRetries }) =>
     retryWorkflow(repository, {
       issue: Option.getOrUndefined(issue),
       workItem: Option.getOrUndefined(workItem),
       allRetryable,
+      maxAutonomousRetries: Option.getOrUndefined(maxAutonomousRetries),
     }),
 ).pipe(
   Command.withDescription(

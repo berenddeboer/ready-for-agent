@@ -277,6 +277,13 @@ export const workItem = snakeCase.table(
      */
     autoMergeOverride: integer({ mode: "boolean" }),
     /**
+     * Set when an Autonomous Retry was accepted but only entered Waiting for
+     * Worker Slot. The next durably created Step Run consumes a budget permit.
+     */
+    pendingAutonomousRetry: integer({ mode: "boolean" })
+      .notNull()
+      .default(false),
+    /**
      * Whether this Work Item currently occupies a Worker Slot (Admitted).
      */
     holdsWorkerSlot: integer({ mode: "boolean" }).notNull().default(false),
@@ -449,6 +456,38 @@ export const prStatusCheck = snakeCase.table(
       t.handledAt,
     ),
     index("pr_status_check_handled_by_step_run_idx").on(t.handledByStepRunId),
+  ],
+)
+
+/**
+ * Durable Autonomous Retry Budget permits for one Work Item at one
+ * Lifecycle Step. The initial Step Run is free; each reserved row is one
+ * accepted Autonomous Retry whose Step Run was durably created.
+ * See xplain: type autonomous retry "artry"
+ */
+export const autonomousRetry = snakeCase.table(
+  "autonomous_retry",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `artry-${ulid()}`),
+    workItemId: text()
+      .notNull()
+      .references(() => workItem.id, { onDelete: "cascade" }),
+    lifecycleStep: text({ enum: OPERATIONAL_LIFECYCLE_STEPS }).notNull(),
+    /**
+     * `reserved` counts against the budget once the matching Step Run exists.
+     */
+    status: text({ enum: ["reserved"] }).notNull(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    index("autonomous_retry_budget_idx").on(t.workItemId, t.lifecycleStep),
   ],
 )
 

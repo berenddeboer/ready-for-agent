@@ -55,6 +55,11 @@ type AgentBackendExitErrorProps = {
   readonly cwd: string
   readonly sessionId?: string
   readonly classification?: AgentBackendErrorClassification
+  /**
+   * Trustworthy machine-readable provider retry instant (epoch ms), when the
+   * adapter extracted one from a quota or rate-limit failure.
+   */
+  readonly retryAt?: number
   /** Best available human-readable reason. Always non-empty after `.new()`. */
   readonly message: string
 }
@@ -73,6 +78,11 @@ export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendE
      * behavior) or an unrecognized error payload.
      */
     classification: Schema.optionalKey(AgentBackendErrorClassification),
+    /**
+     * Epoch-ms retry instant extracted from a trustworthy provider payload.
+     * Absent when the adapter had no machine-readable retry time.
+     */
+    retryAt: Schema.optionalKey(Schema.Finite),
     /** Best available human-readable reason. Never empty after construction. */
     message: Schema.String,
   },
@@ -86,11 +96,16 @@ export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendE
         : undefined
     const classification =
       props.classification ?? classifiedFromText?.classification
+    const retryAt =
+      typeof props.retryAt === "number" && Number.isFinite(props.retryAt)
+        ? props.retryAt
+        : undefined
     return new AgentBackendExitError({
       exitCode: props.exitCode,
       cwd: props.cwd,
       ...(props.sessionId !== undefined ? { sessionId: props.sessionId } : {}),
       ...(classification !== undefined ? { classification } : {}),
+      ...(retryAt !== undefined ? { retryAt } : {}),
       message:
         sanitized.length > 0
           ? sanitized

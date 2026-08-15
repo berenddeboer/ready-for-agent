@@ -99,6 +99,18 @@ describe("AgentBackendExitError message", () => {
     })
     expect(error.classification).toBe("retryable_provider_error")
   })
+
+  it("keeps a trustworthy provider retryAt", () => {
+    const retryAt = Date.parse("2026-08-15T13:00:00.000Z")
+    const error = AgentBackendExitError.new({
+      exitCode: 1,
+      cwd: "/tmp",
+      classification: "retryable_provider_error",
+      retryAt,
+      message: "Too Many Requests",
+    })
+    expect(error.retryAt).toBe(retryAt)
+  })
 })
 
 describe("sanitizeAgentBackendStderrTail", () => {

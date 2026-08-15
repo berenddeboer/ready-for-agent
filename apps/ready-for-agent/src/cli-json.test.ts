@@ -121,6 +121,7 @@ describe("finite CLI JSON contract", () => {
               latestStepRunReason: {
                 code: "handler_failed",
                 message: "Claude Code failed to implement the Work Item issue",
+                retryAt: "2026-08-15T13:00:00.000Z",
                 detail: {
                   code: "ENOENT",
                   causeChain: [
@@ -158,6 +159,7 @@ describe("finite CLI JSON contract", () => {
                 code: "issue_not_open",
                 message: "Issue is not open",
                 detail: null,
+                retryAt: null,
               },
               pullRequestNumber: null,
               createdAt: "2026-08-12T10:00:00.000Z",
@@ -184,6 +186,7 @@ describe("finite CLI JSON contract", () => {
                 code: "review_accepted",
                 message: "Human must review findings",
                 detail: null,
+                retryAt: null,
               },
               pullRequestNumber: null,
               createdAt: "2026-08-12T10:00:00.000Z",
@@ -212,6 +215,7 @@ describe("finite CLI JSON contract", () => {
                 message:
                   "Lifecycle Step was interrupted before an outcome could be established",
                 detail: null,
+                retryAt: null,
               },
               pullRequestNumber: null,
               createdAt: "2026-08-12T10:00:00.000Z",
@@ -240,11 +244,17 @@ describe("finite CLI JSON contract", () => {
       ["wi-unavailable-detail", true, "IMPLEMENT", "INTERRUPTED"],
     ])
     expect(rows[0]?.latestStepRunReason?.detail?.code).toBe("ENOENT")
+    expect(rows[0]?.latestStepRunReason?.retryAt).toBe(
+      "2026-08-15T13:00:00.000Z",
+    )
     expect(rows[1]?.latestStepRunReason?.detail).toBeNull()
     expect(rows[3]?.latestStepRunReason?.detail).toBeNull()
     expect(encodeCompactJson(doc)).toContain('"schemaVersion":1')
     expect(encodeCompactJson(doc)).toContain('"canRetry":true')
     expect(encodeCompactJson(doc)).toContain('"latestStepRunReason"')
+    expect(encodeCompactJson(doc)).toContain(
+      '"retryAt":"2026-08-15T13:00:00.000Z"',
+    )
   })
 
   test("candidates success document includes issuesReconciledAt and actions", () => {
@@ -337,7 +347,7 @@ describe("finite CLI JSON contract", () => {
     expect(encodeCompactJson(doc)).toContain('"outcome":"FAILED"')
   })
 
-  test("retry success document discriminates RETRIED, SKIPPED, and FAILED", () => {
+  test("retry success document discriminates RETRIED, SKIPPED, FAILED, LIMIT_REACHED, and DEFERRED", () => {
     const doc = buildRetrySuccessDocument({
       repository: {
         id: "repo-1",
@@ -381,6 +391,33 @@ describe("finite CLI JSON contract", () => {
             message: "Work Item wi-9 already has an active Step Run",
           },
         },
+        {
+          issueNumber: 10,
+          outcome: "LIMIT_REACHED",
+          workItem: {
+            id: "wi-10",
+            state: "IMPLEMENT",
+            status: "FAILED",
+          },
+          reason: {
+            code: "LIMIT_REACHED",
+            message: "Autonomous Retry Budget exhausted (3/3)",
+          },
+        },
+        {
+          issueNumber: 11,
+          outcome: "DEFERRED",
+          workItem: {
+            id: "wi-11",
+            state: "IMPLEMENT",
+            status: "FAILED",
+          },
+          reason: {
+            code: "DEFERRED",
+            message: "Provider hold until 2026-08-15T13:00:00.000Z",
+          },
+          retryAt: "2026-08-15T13:00:00.000Z",
+        },
       ],
     })
     expect(doc.command).toBe("retry")
@@ -389,6 +426,29 @@ describe("finite CLI JSON contract", () => {
     expect(encodeCompactJson(doc)).toContain('"outcome":"RETRIED"')
     expect(encodeCompactJson(doc)).toContain('"outcome":"SKIPPED"')
     expect(encodeCompactJson(doc)).toContain('"outcome":"FAILED"')
+    expect(encodeCompactJson(doc)).toContain('"outcome":"LIMIT_REACHED"')
+    expect(encodeCompactJson(doc)).toContain('"outcome":"DEFERRED"')
+    expect(
+      retryHasFailedResults([
+        {
+          issueNumber: 11,
+          outcome: "DEFERRED",
+          workItem: { id: "wi-11", state: "IMPLEMENT", status: "FAILED" },
+          reason: { code: "DEFERRED", message: "held" },
+          retryAt: "2026-08-15T13:00:00.000Z",
+        },
+      ]),
+    ).toBe(false)
+    expect(
+      retryHasFailedResults([
+        {
+          issueNumber: 10,
+          outcome: "LIMIT_REACHED",
+          workItem: { id: "wi-10", state: "IMPLEMENT", status: "FAILED" },
+          reason: { code: "LIMIT_REACHED", message: "exhausted" },
+        },
+      ]),
+    ).toBe(true)
     expect(
       retryHasFailedResults([
         {

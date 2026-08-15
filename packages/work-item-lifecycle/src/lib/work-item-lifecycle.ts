@@ -38,6 +38,7 @@ import {
   formatUserFacingError,
   isGitHubThrottledError,
   logErrorAnnotations,
+  parseReasonDetail,
   sanitizeUserFacingText,
   serializeReasonDetail,
 } from "@ready-for-agent/github-service"
@@ -70,8 +71,11 @@ import {
   AbandonCleanupError,
   ActiveStepRunExistsError,
   AgentBackendUnavailableError,
+  AutonomousRetryDeferredError,
+  AutonomousRetryLimitReachedError,
   BuildModelNotConfiguredError,
   ImplementAllWithAutoMergeNotEligibleError,
+  InvalidAutonomousRetryLimitError,
   InvalidExecutionProfileError,
   IssueBlockedError,
   IssueNotBlockedError,
@@ -134,6 +138,7 @@ import {
   MISSING_SUCCESSFUL_CHECKS_REASON_NO_CHECKS,
   type MergeMode,
   type OperationalLifecycleStep,
+  type RetryOptions,
   STEP_RUN_REASON,
   type StepRunId,
   type StepRunReasonCode,
@@ -148,6 +153,7 @@ import {
   WorkItemWakeJob,
   isRetryableFailedWorkItem,
   isTerminalWorkItemState,
+  makeAutonomousRetryId,
   makeStepRunId,
   makeWorkItemId,
 } from "./types.js"
@@ -396,6 +402,7 @@ type WorkItemRow = {
   readonly waiting_for_blockers: boolean | number
   readonly merge_mode: string | null
   readonly auto_merge_override: boolean | number | null
+  readonly pending_autonomous_retry?: boolean | number | null
   readonly holds_worker_slot: boolean | number
   readonly pause_before_step: OperationalLifecycleStep | null
   readonly worktree_path: string | null
@@ -695,6 +702,7 @@ const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, issue_number, issue_title, 
                    execution_profile_review_thinking_level,
                    state, state_ready_at, paused, waiting_since, waiting_for_blockers, merge_mode,
                    auto_merge_override,
+                   pending_autonomous_retry,
                    holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary,
                    publication_title, publication_body, session_id,
@@ -893,6 +901,9 @@ export type RetryError =
   | WorkItemTerminalError
   | ActiveStepRunExistsError
   | RetryNotEligibleError
+  | AutonomousRetryLimitReachedError
+  | AutonomousRetryDeferredError
+  | InvalidAutonomousRetryLimitError
   | WorkItemLifecycleDatabaseError
   | EnqueueError
   | InvalidQueueNameError
@@ -1033,6 +1044,7 @@ export interface WorkItemLifecycleShape {
   }) => Effect.Effect<WakePostponedStepResult, RunStepError>
   readonly retry: (
     workItemId: string,
+    options?: RetryOptions,
   ) => Effect.Effect<WorkItemRecord, RetryError>
   readonly pause: (
     workItemId: string,
@@ -1711,6 +1723,90 @@ export const makeWorkItemLifecycleLive = (
             .pipe(Effect.mapError(toDatabaseError))
         })
 
+      const countAutonomousRetryPermits = (
+        workItemId: string,
+        step: OperationalLifecycleStep,
+      ): Effect.Effect<number, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT COUNT(*) AS count FROM autonomous_retry
+               WHERE work_item_id = ? AND lifecycle_step = ?`,
+              [workItemId, step],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly count: number
+          }[]
+          return Number(rows[0]?.count ?? 0)
+        })
+
+      const insertAutonomousRetryPermit = (
+        workItemId: string,
+        step: OperationalLifecycleStep,
+        now: number,
+      ): Effect.Effect<void, WorkItemLifecycleDatabaseError> =>
+        sql
+          .unsafe(
+            `INSERT INTO autonomous_retry (
+               id, work_item_id, lifecycle_step, status, created_at, updated_at
+             ) VALUES (?, ?, ?, 'reserved', ?, ?)`,
+            [makeAutonomousRetryId(), workItemId, step, now, now],
+          )
+          .pipe(Effect.asVoid, Effect.mapError(toDatabaseError))
+
+      const setPendingAutonomousRetry = (
+        workItemId: string,
+        pending: boolean,
+        now: number,
+      ): Effect.Effect<void, WorkItemLifecycleDatabaseError> =>
+        sql
+          .unsafe(
+            `UPDATE work_item
+             SET pending_autonomous_retry = ?, updated_at = ?
+             WHERE id = ?`,
+            [pending ? 1 : 0, now, workItemId],
+          )
+          .pipe(Effect.asVoid, Effect.mapError(toDatabaseError))
+
+      const isPendingAutonomousRetry = (
+        workItemId: string,
+      ): Effect.Effect<boolean, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT pending_autonomous_retry FROM work_item WHERE id = ?`,
+              [workItemId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly pending_autonomous_retry: boolean | number | null
+          }[]
+          return Boolean(rows[0]?.pending_autonomous_retry)
+        })
+
+      const consumeAutonomousRetryIfPending = (
+        workItemId: string,
+        step: OperationalLifecycleStep,
+        now: number,
+      ): Effect.Effect<void, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          if (!(yield* isPendingAutonomousRetry(workItemId))) {
+            return
+          }
+          yield* insertAutonomousRetryPermit(workItemId, step, now)
+          yield* setPendingAutonomousRetry(workItemId, false, now)
+        })
+
+      const providerHoldRetryAtMs = (
+        reasonDetail: string | null,
+      ): number | null => {
+        const retryAt = parseReasonDetail(reasonDetail)?.retryAt
+        if (retryAt === undefined) {
+          return null
+        }
+        const parsed = Date.parse(retryAt)
+        return Number.isNaN(parsed) ? null : parsed
+      }
+
       /**
        * Try to claim a free Worker Slot for this Work Item (must run in a txn).
        * Returns true if admitted (or already holding), false if marked waiting.
@@ -1834,6 +1930,11 @@ export const makeWorkItemLifecycleLive = (
                     return true
                   }
                   yield* enqueueStepRunForWorkItem(waiter.id, pendingStep, now)
+                  yield* consumeAutonomousRetryIfPending(
+                    waiter.id,
+                    pendingStep,
+                    now,
+                  )
                   return true
                 }),
               )
@@ -6221,6 +6322,7 @@ export const makeWorkItemLifecycleLive = (
 
       const retry = Effect.fn("WorkItemLifecycle.retry")(function* (
         workItemId: string,
+        options?: RetryOptions,
       ) {
         const workItem = yield* loadWorkItemRow(workItemId)
         if (!workItem) {
@@ -6338,6 +6440,27 @@ export const makeWorkItemLifecycleLive = (
           }
         }
 
+        const autonomous = options?.autonomous
+        if (autonomous !== undefined) {
+          if (
+            !Number.isInteger(autonomous.maxRetries) ||
+            autonomous.maxRetries < 0
+          ) {
+            return yield* new InvalidAutonomousRetryLimitError({
+              maxRetries: autonomous.maxRetries,
+              message: "maxAutonomousRetries must be a non-negative integer",
+            })
+          }
+          const hold = providerHoldRetryAtMs(latest?.reason_detail ?? null)
+          const holdNow = yield* Clock.currentTimeMillis
+          if (hold !== null && hold > holdNow) {
+            return yield* new AutonomousRetryDeferredError({
+              workItemId,
+              retryAt: hold,
+            })
+          }
+        }
+
         const now = yield* Clock.currentTimeMillis
 
         yield* sql
@@ -6382,12 +6505,39 @@ export const makeWorkItemLifecycleLive = (
                 )
               }
 
+              if (autonomous !== undefined) {
+                const used = yield* countAutonomousRetryPermits(
+                  workItemId,
+                  pendingStep,
+                )
+                if (used >= autonomous.maxRetries) {
+                  return yield* new AutonomousRetryLimitReachedError({
+                    workItemId,
+                    used,
+                    max: autonomous.maxRetries,
+                  })
+                }
+              }
+
               const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
               if (!acquired) {
+                if (autonomous !== undefined) {
+                  yield* setPendingAutonomousRetry(workItemId, true, now)
+                }
                 return
               }
 
               yield* enqueueStepRunForWorkItem(workItemId, pendingStep, now)
+              if (autonomous !== undefined) {
+                yield* insertAutonomousRetryPermit(workItemId, pendingStep, now)
+                yield* setPendingAutonomousRetry(workItemId, false, now)
+              } else {
+                yield* consumeAutonomousRetryIfPending(
+                  workItemId,
+                  pendingStep,
+                  now,
+                )
+              }
 
               yield* sql.unsafe(
                 `UPDATE work_item
@@ -6415,6 +6565,9 @@ export const makeWorkItemLifecycleLive = (
                 return Effect.fail(error)
               }
               if (error instanceof InvalidQueueNameError) {
+                return Effect.fail(error)
+              }
+              if (error instanceof AutonomousRetryLimitReachedError) {
                 return Effect.fail(error)
               }
               if (
