@@ -2672,7 +2672,7 @@ rfa:PostponedStepRun
 rfa:Retry
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Retry"@en ;
-  skos:definition "An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds or from an unparseable unchanged apply-findings verdict is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. A Needs Human outcome from a missing successful status-check aggregate on an autonomous merge path is also retryable: Retry clears the handoff reason and returns to Watch PR Status Checks in the existing Implement Session, worktree, branch, and PR. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. Retry is unavailable for a Postponed Step Run and while a Work Item is paused; the operator must Start first."@en ;
+  skos:definition "An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds or from an unparseable unchanged apply-findings verdict is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. A Needs Human outcome from a missing successful status-check aggregate on an autonomous merge path is also retryable: Retry clears the handoff reason and returns to Watch PR Status Checks in the existing Implement Session, worktree, branch, and PR. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. Retry is unavailable for a Postponed Step Run and while a Work Item is paused; the operator must Start first. Unattended `--all-retryable` Retry is an Autonomous Retry and is bounded by the Autonomous Retry Budget; explicit single-Issue, single-Work-Item, and UI Retry are not."@en ;
   skos:hiddenLabel "Queue redelivery"@en, "resume"@en .
 
 [
@@ -2689,6 +2689,72 @@ rfa:Retry
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "resume"@en ;
   rfa:avoidanceRationale "CONTEXT.md prefers Retry for this concept."@en ;
+] .
+
+rfa:AutonomousRetry
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Autonomous Retry"@en ;
+  skos:definition "A Retry requested through unattended `--all-retryable` (or the equivalent Harness-owned bulk operation). Distinct from explicit single-Issue, single-Work-Item, and UI Retry."@en ;
+  skos:hiddenLabel "Automatic Retry"@en, "unattended Retry"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AutonomousRetry ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Automatic Retry"@en ;
+  rfa:avoidanceRationale "this is policy around the Retry primitive, not a second automatic Retry implementation"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AutonomousRetry ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "unattended Retry"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Autonomous Retry for this concept."@en ;
+] .
+
+rfa:AutonomousRetryBudget
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Autonomous Retry Budget"@en ;
+  skos:definition "A durable, Harness-enforced limit on accepted Autonomous Retry execution attempts for one Work Item at its current Lifecycle Step. The default is 3. The initial Step Run is not an Autonomous Retry. The budget resets only after the Work Item successfully advances to another Lifecycle Step. Exhaustion reports LIMIT_REACHED without changing ordinary canRetry."@en ;
+  skos:hiddenLabel "max-attempts"@en, "client-side retry count"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AutonomousRetryBudget ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "max-attempts"@en ;
+  rfa:avoidanceRationale "that name is ambiguous with initial Step Runs and Worker Slot waits"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AutonomousRetryBudget ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "client-side retry count"@en ;
+  rfa:avoidanceRationale "the limit check and reservation are atomic in the running Harness"@en ;
+] .
+
+rfa:ProviderHold
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Provider Hold"@en ;
+  skos:definition "A future retry time extracted from a trustworthy machine-readable Agent Backend quota or rate-limit failure and persisted on the latest Step Run reason. While the hold is in the future, Autonomous Retry reports DEFERRED and consumes no Autonomous Retry Budget."@en ;
+  skos:hiddenLabel "guessed wake time"@en, "transcript-inferred retry"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderHold ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "guessed wake time"@en ;
+  rfa:avoidanceRationale "missing or untrusted retry-time data does not invent a hold"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderHold ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "transcript-inferred retry"@en ;
+  rfa:avoidanceRationale "extraction happens at the Agent Backend adapter seam, not by parsing transcripts"@en ;
 ] .
 
 rfa:PauseWorkItem

@@ -700,12 +700,39 @@ type RetryWorkItemsFailed {
 }
 
 """
-Per-item Retry outcome. Retried, skipped, and failed fields cannot coexist.
+Autonomous Retry Budget exhausted for this Work Item at its current
+Lifecycle Step. No Step Run is created. Ordinary canRetry is unchanged.
+"""
+type RetryWorkItemsLimitReached {
+  issueNumber: Int!
+  workItem: WorkItem!
+  reason: RetryWorkItemsError!
+}
+
+"""
+A structured future provider retry time is still in effect. No Step Run is
+created and no Autonomous Retry Budget permit is consumed.
+"""
+type RetryWorkItemsDeferred {
+  issueNumber: Int!
+  workItem: WorkItem!
+  reason: RetryWorkItemsError!
+  """
+  ISO-8601 instant after which Autonomous Retry may proceed.
+  """
+  retryAt: String!
+}
+
+"""
+Per-item Retry outcome. Retried, skipped, failed, limit-reached, and deferred
+fields cannot coexist.
 """
 union RetryWorkItemsItemResult =
   | RetryWorkItemsRetried
   | RetryWorkItemsSkipped
   | RetryWorkItemsFailed
+  | RetryWorkItemsLimitReached
+  | RetryWorkItemsDeferred
 
 """
 Best-effort sequential Retry result. Snapshots targets at mutation time from
@@ -819,6 +846,11 @@ type StepRunReason {
   Bounded sanitized cause chain from reason_detail. Null when unavailable.
   """
   detail: StepRunReasonDetail
+  """
+  ISO-8601 provider retry instant persisted on the latest Step Run reason.
+  Null when no trustworthy retry time was captured.
+  """
+  retryAt: String
 }
 
 type WorkItem {
@@ -1026,15 +1058,24 @@ type Mutation {
   Synchronous best-effort Retry: resolve one Issue's unfinished Work Item,
   one Work Item in this Repository, or every currently retryable Work Item
   (Harness-owned canRetry). Process accepted targets sequentially through
-  ordinary Work Item Retry. Ineligible races become per-item skipped
-  results; concurrent active-run conflicts become per-item failed results;
-  infrastructure, cancellation, and unexpected defects stop as GraphQL
-  errors while preserving earlier retries. Empty --all-retryable selection
-  is a successful no-op.
+  ordinary Work Item Retry. --all-retryable applies the Autonomous Retry
+  Budget (default 3, override with maxAutonomousRetries). Ineligible races
+  become per-item skipped results; concurrent active-run conflicts become
+  per-item failed results; budget exhaustion is LIMIT_REACHED; a future
+  provider hold is DEFERRED. Infrastructure, cancellation, and unexpected
+  defects stop as GraphQL errors while preserving earlier retries. Empty
+  --all-retryable selection is a successful no-op.
   """
   retryWorkItems(
     repositoryId: ID!
     selector: RetryWorkItemsSelector!
+    """
+    Maximum accepted Autonomous Retry execution attempts per Work Item at
+    its current Lifecycle Step. Used only with allRetryable. Default 3.
+    Must be a non-negative integer. Explicit issue/work-item Retry ignores
+    this budget.
+    """
+    maxAutonomousRetries: Int
   ): RetryWorkItemsResult!
   retryWorkItem(workItemId: ID!): WorkItem!
   pauseWorkItem(workItemId: ID!): WorkItem!

@@ -21,7 +21,10 @@ import {
 } from "./opencode-db-path.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseCommandTaskResultFromLine } from "./parse-command-task-result.js"
-import { parseErrorClassificationFromLine } from "./parse-error-classification.js"
+import {
+  parseErrorClassificationFromLine,
+  parseProviderRetryAtFromLine,
+} from "./parse-error-classification.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
 import { parseVerboseModelsOutputDetailed } from "./parse-verbose-models.js"
 import { observeOpencodeStartupActivity } from "./startup-activity.js"
@@ -184,6 +187,7 @@ export class Opencode {
             parseLine: (line) => {
               const sessionId = parseSessionIdFromLine(line)
               const errorClassification = parseErrorClassificationFromLine(line)
+              const retryAt = parseProviderRetryAtFromLine(line)
               if (commandName !== undefined) {
                 const commandText = parseCommandTaskResultFromLine(
                   line,
@@ -195,6 +199,7 @@ export class Opencode {
                     ...(errorClassification !== undefined
                       ? { errorClassification }
                       : {}),
+                    ...(retryAt !== undefined ? { retryAt } : {}),
                     finalizeText: commandText,
                   }
                 }
@@ -204,6 +209,7 @@ export class Opencode {
                 ...(errorClassification !== undefined
                   ? { errorClassification }
                   : {}),
+                ...(retryAt !== undefined ? { retryAt } : {}),
                 text: parseAssistantTextFromLine(line),
               }
             },

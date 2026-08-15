@@ -1486,6 +1486,7 @@ describe("operator binary finite-command process contract", () => {
           latestStepRunReason: {
             code: "handler_failed",
             message: "Claude Code failed to implement the Work Item issue",
+            retryAt: null,
             detail: {
               code: "ENOENT",
               causeChain: [
@@ -1519,6 +1520,7 @@ describe("operator binary finite-command process contract", () => {
             code: "issue_not_open",
             message: "Issue is not open",
             detail: null,
+            retryAt: null,
           },
           pullRequestNumber: null,
           createdAt: "2026-08-12T10:00:00.000Z",
@@ -1542,6 +1544,7 @@ describe("operator binary finite-command process contract", () => {
             code: "review_accepted",
             message: "Human must review findings",
             detail: null,
+            retryAt: null,
           },
           pullRequestNumber: null,
           createdAt: "2026-08-12T10:00:00.000Z",
@@ -1567,6 +1570,7 @@ describe("operator binary finite-command process contract", () => {
             message:
               "Lifecycle Step was interrupted before an outcome could be established",
             detail: null,
+            retryAt: null,
           },
           pullRequestNumber: null,
           createdAt: "2026-08-12T10:00:00.000Z",

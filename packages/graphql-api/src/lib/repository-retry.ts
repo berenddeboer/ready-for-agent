@@ -7,6 +7,9 @@ import {
 import { evaluateUnfinishedWorkItem } from "@ready-for-agent/lifecycle-model"
 import {
   type ActiveStepRunExistsError,
+  type AutonomousRetryDeferredError,
+  type AutonomousRetryLimitReachedError,
+  DEFAULT_AUTONOMOUS_RETRY_LIMIT,
   type RetryNotEligibleError,
   WorkItemLifecycle,
   type WorkItemRecord,
@@ -50,6 +53,19 @@ export type RetryWorkItemsItemResult =
       readonly issueNumber: number
       readonly workItem: WorkItemRecord
       readonly error: RetryWorkItemsItemError
+    }
+  | {
+      readonly __typename: "RetryWorkItemsLimitReached"
+      readonly issueNumber: number
+      readonly workItem: WorkItemRecord
+      readonly reason: RetryWorkItemsItemError
+    }
+  | {
+      readonly __typename: "RetryWorkItemsDeferred"
+      readonly issueNumber: number
+      readonly workItem: WorkItemRecord
+      readonly reason: RetryWorkItemsItemError
+      readonly retryAt: string
     }
 
 export type RetryWorkItemsResult = {
@@ -214,6 +230,8 @@ type ItemLocalRetryTag =
   | "WorkItemTerminalError"
   | "ActiveStepRunExistsError"
   | "WorkItemNotFoundError"
+  | "AutonomousRetryLimitReachedError"
+  | "AutonomousRetryDeferredError"
 
 /**
  * Per-item Retry races continue the sequence. Infrastructure and unexpected
@@ -225,6 +243,8 @@ export const isItemLocalRetryError = (
   | RetryNotEligibleError
   | WorkItemTerminalError
   | ActiveStepRunExistsError
+  | AutonomousRetryLimitReachedError
+  | AutonomousRetryDeferredError
   | { readonly _tag: "WorkItemNotFoundError" } => {
   if (!isTagged(error)) {
     return false
@@ -234,6 +254,8 @@ export const isItemLocalRetryError = (
     case "WorkItemTerminalError":
     case "ActiveStepRunExistsError":
     case "WorkItemNotFoundError":
+    case "AutonomousRetryLimitReachedError":
+    case "AutonomousRetryDeferredError":
       return true
     default:
       return false
@@ -273,9 +295,25 @@ const isSkippedRetryError = (error: unknown): boolean => {
  * Ineligible races and concurrent active-run conflicts become result data;
  * infrastructure and unexpected defects fail the Effect.
  */
+export const parseMaxAutonomousRetries = (
+  value: number | null | undefined,
+): number | InvalidRetrySelectorError => {
+  if (value === null || value === undefined) {
+    return DEFAULT_AUTONOMOUS_RETRY_LIMIT
+  }
+  if (!Number.isInteger(value) || value < 0) {
+    return new InvalidRetrySelectorError({
+      reason: "invalid_max_autonomous_retries",
+      message: "maxAutonomousRetries must be a non-negative integer",
+    })
+  }
+  return value
+}
+
 export const retryWorkItems = (
   repositoryId: string,
   selectorInput: RetryWorkItemsSelectorInput,
+  maxAutonomousRetriesInput?: number | null,
 ): Effect.Effect<
   RetryWorkItemsResult,
   | RepositoryNotFoundError
@@ -299,6 +337,13 @@ export const retryWorkItems = (
     const selector = parseRetryWorkItemsSelector(selectorInput)
     if (selector instanceof InvalidRetrySelectorError) {
       return yield* selector
+    }
+
+    const maxAutonomousRetries = parseMaxAutonomousRetries(
+      maxAutonomousRetriesInput,
+    )
+    if (maxAutonomousRetries instanceof InvalidRetrySelectorError) {
+      return yield* maxAutonomousRetries
     }
 
     const workItems =
@@ -334,8 +379,15 @@ export const retryWorkItems = (
 
     const results: RetryWorkItemsItemResult[] = []
 
+    const retryOptions =
+      selector.kind === "all-retryable"
+        ? { autonomous: { maxRetries: maxAutonomousRetries } }
+        : undefined
+
     for (const target of snapshot) {
-      const outcome = yield* Effect.result(lifecycle.retry(target.id))
+      const outcome = yield* Effect.result(
+        lifecycle.retry(target.id, retryOptions),
+      )
       if (Result.isSuccess(outcome)) {
         results.push({
           __typename: "RetryWorkItemsRetried",
@@ -347,6 +399,40 @@ export const retryWorkItems = (
 
       const failure = outcome.failure
       if (isItemLocalRetryError(failure)) {
+        if (
+          isTagged(failure) &&
+          failure._tag === "AutonomousRetryLimitReachedError"
+        ) {
+          results.push({
+            __typename: "RetryWorkItemsLimitReached",
+            issueNumber: target.issueNumber,
+            workItem: target,
+            reason: {
+              code: "LIMIT_REACHED",
+              message: `Autonomous Retry Budget exhausted (${String(failure.used)}/${String(failure.max)}) for Work Item ${target.id}`,
+            },
+          })
+          continue
+        }
+        if (
+          isTagged(failure) &&
+          failure._tag === "AutonomousRetryDeferredError" &&
+          typeof failure.retryAt === "number" &&
+          Number.isFinite(failure.retryAt)
+        ) {
+          const retryAt = new Date(failure.retryAt).toISOString()
+          results.push({
+            __typename: "RetryWorkItemsDeferred",
+            issueNumber: target.issueNumber,
+            workItem: target,
+            reason: {
+              code: "DEFERRED",
+              message: `Provider hold until ${retryAt}`,
+            },
+            retryAt,
+          })
+          continue
+        }
         const mapped = toRetryItemError(failure)
         if (isSkippedRetryError(failure)) {
           results.push({

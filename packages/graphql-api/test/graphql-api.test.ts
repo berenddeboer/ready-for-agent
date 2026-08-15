@@ -49,6 +49,8 @@ import {
 import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
   ActiveStepRunExistsError,
+  AutonomousRetryDeferredError,
+  AutonomousRetryLimitReachedError,
   InvalidExecutionProfileError,
   IssueNotFoundError,
   RetryNotEligibleError,
@@ -9170,6 +9172,107 @@ describe("GraphQL API", () => {
               __typename: "RetryWorkItemsRetried",
               issueNumber: 12,
               workItem: { id: third.id },
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("retryWorkItems all-retryable reports LIMIT_REACHED and DEFERRED without retrying past policy", async () => {
+    const limited = {
+      ...workItem,
+      id: "wi-limited",
+      issueNumber: 10,
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          status: "failed",
+          finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+        },
+      ],
+    } as WorkItemRecord
+    const deferred = {
+      ...limited,
+      id: "wi-deferred",
+      issueNumber: 11,
+    }
+    const retryAt = Date.parse("2026-08-15T13:00:00.000Z")
+    const seen: Array<{ id: string; autonomous?: number }> = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([limited, deferred]),
+        retry: (workItemId, options) =>
+          Effect.gen(function* () {
+            seen.push({
+              id: workItemId,
+              autonomous: options?.autonomous?.maxRetries,
+            })
+            if (workItemId === limited.id) {
+              return yield* new AutonomousRetryLimitReachedError({
+                workItemId,
+                used: 3,
+                max: 3,
+              })
+            }
+            return yield* new AutonomousRetryDeferredError({
+              workItemId,
+              retryAt,
+            })
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RetryAll($repositoryId: ID!) {
+          retryWorkItems(
+            repositoryId: $repositoryId
+            selector: { allRetryable: true }
+            maxAutonomousRetries: 3
+          ) {
+            results {
+              __typename
+              ... on RetryWorkItemsLimitReached {
+                issueNumber
+                reason { code }
+                workItem { canRetry }
+              }
+              ... on RetryWorkItemsDeferred {
+                issueNumber
+                retryAt
+                reason { code }
+              }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(seen).toEqual([
+      { id: limited.id, autonomous: 3 },
+      { id: deferred.id, autonomous: 3 },
+    ])
+    expect(await response.json()).toEqual({
+      data: {
+        retryWorkItems: {
+          results: [
+            {
+              __typename: "RetryWorkItemsLimitReached",
+              issueNumber: 10,
+              reason: { code: "LIMIT_REACHED" },
+              workItem: { canRetry: true },
+            },
+            {
+              __typename: "RetryWorkItemsDeferred",
+              issueNumber: 11,
+              retryAt: "2026-08-15T13:00:00.000Z",
+              reason: { code: "DEFERRED" },
             },
           ],
         },

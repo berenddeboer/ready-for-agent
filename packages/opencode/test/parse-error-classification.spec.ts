@@ -1,5 +1,10 @@
-import { parseErrorClassificationFromLine } from "../src/lib/parse-error-classification.js"
+import {
+  parseErrorClassificationFromLine,
+  parseProviderRetryAtFromLine,
+} from "../src/lib/parse-error-classification.js"
 import { describe, expect, it } from "bun:test"
+
+const NOW = Date.parse("2026-08-15T12:00:00.000Z")
 
 describe("parseErrorClassificationFromLine", () => {
   it("classifies a retryable APIError as retryable_provider_error", () => {
@@ -133,6 +138,57 @@ describe("parseErrorClassificationFromLine", () => {
     expect(
       parseErrorClassificationFromLine(
         JSON.stringify({ type: "text", part: { type: "text", text: "hi" } }),
+      ),
+    ).toBeUndefined()
+  })
+})
+
+describe("parseProviderRetryAtFromLine", () => {
+  it("extracts retry-after seconds from a retryable APIError", () => {
+    const line = JSON.stringify({
+      type: "error",
+      error: {
+        name: "APIError",
+        data: {
+          message: "Too Many Requests",
+          statusCode: 429,
+          headers: { "retry-after": "60" },
+        },
+      },
+    })
+    expect(parseProviderRetryAtFromLine(line, NOW)).toBe(NOW + 60_000)
+  })
+
+  it("does not invent a wake time from prose or a non-retryable error", () => {
+    expect(
+      parseProviderRetryAtFromLine(
+        JSON.stringify({
+          type: "error",
+          error: {
+            name: "APIError",
+            data: {
+              message: "rate limited, retry in an hour",
+              statusCode: 429,
+            },
+          },
+        }),
+        NOW,
+      ),
+    ).toBeUndefined()
+    expect(
+      parseProviderRetryAtFromLine(
+        JSON.stringify({
+          type: "error",
+          error: {
+            name: "APIError",
+            data: {
+              message: "Invalid request",
+              statusCode: 400,
+              retryAfter: 30,
+            },
+          },
+        }),
+        NOW,
       ),
     ).toBeUndefined()
   })

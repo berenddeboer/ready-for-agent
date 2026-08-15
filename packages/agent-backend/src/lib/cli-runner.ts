@@ -76,6 +76,12 @@ export type CliLineEvent = {
    * so the adapter does not have to run after the CLI dies.
    */
   readonly errorMessage?: string
+  /**
+   * Trustworthy machine-readable provider retry instant (epoch ms). Sticky
+   * like classification: rides on AgentBackendExitError for quota/rate-limit
+   * failures. Never inferred from assistant prose.
+   */
+  readonly retryAt?: number
 }
 
 export type RunCliCaptureInput = {
@@ -363,6 +369,7 @@ export const runCliTurn = (
               finalized: boolean
               errorClassification?: AgentBackendErrorClassification
               errorMessage?: string
+              retryAt?: number
             } => ({
               assistantText: "",
               finalized: false,
@@ -378,6 +385,7 @@ export const runCliTurn = (
                 const errorClassification =
                   event.errorClassification ?? acc.errorClassification
                 const errorMessage = event.errorMessage ?? acc.errorMessage
+                const retryAt = event.retryAt ?? acc.retryAt
                 if (event.sessionId !== undefined) {
                   yield* Ref.set(seenSessionId, event.sessionId)
                   const alreadyNotified = yield* Ref.getAndSet(
@@ -420,6 +428,7 @@ export const runCliTurn = (
                       ? { errorClassification }
                       : {}),
                     ...(errorMessage !== undefined ? { errorMessage } : {}),
+                    ...(retryAt !== undefined ? { retryAt } : {}),
                   }
                 }
 
@@ -436,6 +445,7 @@ export const runCliTurn = (
                     ? { errorClassification }
                     : {}),
                   ...(errorMessage !== undefined ? { errorMessage } : {}),
+                  ...(retryAt !== undefined ? { retryAt } : {}),
                 }
               }),
           ),
@@ -464,6 +474,7 @@ export const runCliTurn = (
           finalized: output.finalized,
           errorClassification: output.errorClassification,
           errorMessage: output.errorMessage,
+          retryAt: output.retryAt,
           stderrTail,
         }
       }),
@@ -506,6 +517,7 @@ export const runCliTurn = (
           ...(result.errorClassification !== undefined
             ? { classification: result.errorClassification }
             : {}),
+          ...(result.retryAt !== undefined ? { retryAt: result.retryAt } : {}),
         })
       }
     }

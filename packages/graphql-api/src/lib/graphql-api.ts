@@ -345,6 +345,7 @@ type RetryWorkItemsArgs = {
     workItemId?: string | null
     allRetryable?: boolean | null
   }
+  maxAutonomousRetries?: number | null
 }
 
 type ResetWorkItemArgs = WorkItemArgs
@@ -2080,9 +2081,11 @@ export const createGraphqlApi = <R>(
             context: GraphqlRequestContext,
           ) =>
             runGraphql(
-              retryWorkItems(args.repositoryId, args.selector).pipe(
-                Effect.withSpan("graphql-api.retryWorkItems"),
-              ),
+              retryWorkItems(
+                args.repositoryId,
+                args.selector,
+                args.maxAutonomousRetries,
+              ).pipe(Effect.withSpan("graphql-api.retryWorkItems")),
               context,
             ),
           retryWorkItem: async (

@@ -146,6 +146,7 @@ type GraphqlCauseChainLink = {
 type GraphqlStepRunReason = {
   readonly code?: string | null
   readonly message?: string | null
+  readonly retryAt?: string | null
   readonly detail?: {
     readonly code?: string | null
     readonly causeChain?: readonly GraphqlCauseChainLink[] | null
@@ -192,6 +193,7 @@ const toStatusStepRunReason = (
             causeChain: (detail.causeChain ?? []).map(toStatusCauseChainLink),
             ...(detail.code != null ? { code: detail.code } : {}),
           },
+    retryAt: reason.retryAt ?? null,
   }
 }
 
@@ -268,6 +270,7 @@ export class GraphqlApi extends Context.Service<
     readonly retryWorkItems: (
       repositoryId: string,
       selector: RetryWorkItemsSelector,
+      maxAutonomousRetries?: number,
     ) => Effect.Effect<RetryWorkItemsResult, GraphqlRequestFailed>
     readonly kanbanStatus: (
       repositoryId: string | null,
@@ -583,13 +586,24 @@ export class GraphqlApi extends Context.Service<
       const retryWorkItems = Effect.fn("GraphqlApi.retryWorkItems")(function* (
         repositoryId: string,
         selector: RetryWorkItemsSelector,
+        maxAutonomousRetries?: number,
       ) {
         return yield* Effect.tryPromise({
           try: () =>
             executeGraphql(async () => {
+              const allRetryable =
+                "allRetryable" in selector && selector.allRetryable === true
               const result = await client.mutation({
                 retryWorkItems: {
-                  __args: { repositoryId, selector },
+                  __args: {
+                    repositoryId,
+                    selector,
+                    ...(allRetryable
+                      ? {
+                          maxAutonomousRetries: maxAutonomousRetries ?? 3,
+                        }
+                      : {}),
+                  },
                   repository: {
                     id: true,
                     forge: true,
@@ -631,6 +645,33 @@ export class GraphqlApi extends Context.Service<
                         code: true,
                         message: true,
                       },
+                    },
+                    on_RetryWorkItemsLimitReached: {
+                      __typename: true,
+                      issueNumber: true,
+                      workItem: {
+                        id: true,
+                        state: true,
+                        status: true,
+                      },
+                      reason: {
+                        code: true,
+                        message: true,
+                      },
+                    },
+                    on_RetryWorkItemsDeferred: {
+                      __typename: true,
+                      issueNumber: true,
+                      workItem: {
+                        id: true,
+                        state: true,
+                        status: true,
+                      },
+                      reason: {
+                        code: true,
+                        message: true,
+                      },
+                      retryAt: true,
                     },
                   },
                 },
@@ -715,6 +756,63 @@ export class GraphqlApi extends Context.Service<
                   })
                   continue
                 }
+                if (
+                  entry !== null &&
+                  typeof entry === "object" &&
+                  "__typename" in entry &&
+                  entry.__typename === "RetryWorkItemsLimitReached" &&
+                  "reason" in entry &&
+                  entry.reason !== null &&
+                  entry.reason !== undefined &&
+                  "workItem" in entry &&
+                  entry.workItem !== null &&
+                  entry.workItem !== undefined
+                ) {
+                  results.push({
+                    issueNumber: entry.issueNumber,
+                    outcome: "LIMIT_REACHED",
+                    workItem: {
+                      id: entry.workItem.id,
+                      state: entry.workItem.state,
+                      status: entry.workItem.status,
+                    },
+                    reason: {
+                      code: entry.reason.code,
+                      message: entry.reason.message,
+                    },
+                  })
+                  continue
+                }
+                if (
+                  entry !== null &&
+                  typeof entry === "object" &&
+                  "__typename" in entry &&
+                  entry.__typename === "RetryWorkItemsDeferred" &&
+                  "reason" in entry &&
+                  entry.reason !== null &&
+                  entry.reason !== undefined &&
+                  "retryAt" in entry &&
+                  typeof entry.retryAt === "string" &&
+                  "workItem" in entry &&
+                  entry.workItem !== null &&
+                  entry.workItem !== undefined
+                ) {
+                  results.push({
+                    issueNumber: entry.issueNumber,
+                    outcome: "DEFERRED",
+                    workItem: {
+                      id: entry.workItem.id,
+                      state: entry.workItem.state,
+                      status: entry.workItem.status,
+                    },
+                    reason: {
+                      code: entry.reason.code,
+                      message: entry.reason.message,
+                    },
+                    retryAt: entry.retryAt,
+                  })
+                  continue
+                }
                 throw new Error(
                   "retryWorkItems returned an unexpected result shape",
                 )
@@ -771,6 +869,7 @@ export class GraphqlApi extends Context.Service<
                         latestStepRunReason: {
                           code: true,
                           message: true,
+                          retryAt: true,
                           detail: {
                             code: true,
                             causeChain: {

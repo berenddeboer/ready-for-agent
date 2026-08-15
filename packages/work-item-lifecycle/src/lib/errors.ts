@@ -195,6 +195,33 @@ export class RetryNotEligibleError extends Schema.TaggedErrorClass<RetryNotEligi
   },
 ) {}
 
+/** Autonomous Retry Budget exhausted for this Work Item at its current step. */
+export class AutonomousRetryLimitReachedError extends Schema.TaggedErrorClass<AutonomousRetryLimitReachedError>()(
+  "AutonomousRetryLimitReachedError",
+  {
+    workItemId: Schema.String,
+    used: Schema.Finite,
+    max: Schema.Finite,
+  },
+) {}
+
+/** Structured provider retry time has not elapsed; consume no budget. */
+export class AutonomousRetryDeferredError extends Schema.TaggedErrorClass<AutonomousRetryDeferredError>()(
+  "AutonomousRetryDeferredError",
+  {
+    workItemId: Schema.String,
+    retryAt: Schema.Finite,
+  },
+) {}
+
+export class InvalidAutonomousRetryLimitError extends Schema.TaggedErrorClass<InvalidAutonomousRetryLimitError>()(
+  "InvalidAutonomousRetryLimitError",
+  {
+    maxRetries: Schema.Finite,
+    message: Schema.String,
+  },
+) {}
+
 export class WorkItemHasRunningStepError extends Schema.TaggedErrorClass<WorkItemHasRunningStepError>()(
   "WorkItemHasRunningStepError",
   {
