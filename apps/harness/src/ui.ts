@@ -40,6 +40,17 @@ const laneSwitchRivets = plateMiniRivets
 const cardMetalLight =
   "in-[html[data-theme=light]]:bg-[linear-gradient(165deg,rgb(255_255_255/0.72)_0%,rgb(255_255_255/0.18)_42%,transparent_68%),linear-gradient(180deg,#f0f2f0_0%,#e3e7e4_55%,#dfe4e1_100%)]"
 
+/**
+ * Forged repo-card frame shell: hard ink border around a dark metal casing.
+ * Shared verbatim by the populated card and its skeleton so the two cannot
+ * drift. Full static strings so Tailwind can scan them.
+ */
+const repoCardFrameShell =
+  "relative min-w-0 border-2 border-ink bg-[#252827] p-[3px]"
+
+const repoCardFrameCasing =
+  "[background-image:linear-gradient(90deg,#111413,#4c524f_48%,#151817)]"
+
 const mastScrollworkStroke =
   "[fill:none] [stroke-linecap:round] [stroke-linejoin:round]"
 
@@ -1141,13 +1152,56 @@ export const ui = {
   repoCards: "grid grid-cols-1 gap-6",
 
   /**
-   * Repo card. Dark-friendly solid panel; light theme adds brushed metal
-   * via `in-[html[data-theme=light]]:` arbitrary variant (shared with archiveRow).
+   * Forged repo-card frame: strong ink border + dark metal casing so every
+   * Repository reads as a Pipeline assembly rather than a thinly outlined
+   * neutral panel (§4.6). The dark casing shows through the small padding and
+   * around the six-color top rail; the body panel sits inside `repoCardInner`.
    */
   repoCard: cx(
-    "relative min-w-0 border-[1.5px] border-ink bg-panel px-[1.1rem] pt-4 pb-[1.15rem]",
+    repoCardFrameShell,
+    repoCardFrameCasing,
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.28),inset_0_-2px_2px_#000]",
+  ),
+
+  /**
+   * Body panel inside the forged frame: theme-aware fill (brushed metal in
+   * light, solid `--panel` in dark) with an inset edge for depth.
+   */
+  repoCardInner: cx(
+    "relative min-w-0 border border-black/50 bg-panel px-[1.1rem] pt-4 pb-[1.15rem]",
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.2),inset_0_-2px_3px_rgb(0_0_0/0.18)]",
     cardMetalLight,
   ),
+
+  /**
+   * Compact six-lane forged rail across the top of a repository card. The
+   * casing uses the same `#252827` forged-metal tone as the lane headers so
+   * the Merged segment's `#151515` fill stays distinguishable against its
+   * surround (the exact contrast Pipeline's `complete` sheet relies on). The
+   * hard `gap` separators and inset bevel keep each segment crisp; lane colors
+   * are supplied inline from `PIPELINE_LANES` (not here) so order and color
+   * cannot drift from the Pipeline lane assembly.
+   */
+  repoCardRail: cx(
+    "relative flex h-[0.55rem] gap-[2px] bg-[#252827] p-[2px]",
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.3),inset_0_-2px_2px_rgb(0_0_0/0.8)]",
+  ),
+
+  /** One equal rail segment — lane fill applied inline; this is bevel only. */
+  repoCardRailSegment: cx(
+    "relative min-w-0 flex-1",
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.42),inset_1px_0_0_rgb(255_255_255/0.14),inset_0_-2px_2px_rgb(0_0_0/0.5)]",
+  ),
+
+  /** Restrained steel rivet at each end of the top rail. */
+  repoCardRailRivet: cx(
+    "pointer-events-none absolute top-[0.14rem] z-[3] h-[0.24rem] w-[0.24rem] rounded-full",
+    "[background-image:radial-gradient(circle_at_32%_28%,#fff_0_6%,transparent_8%),radial-gradient(circle_at_36%_28%,#f5f8f6_0_18%,#aeb5b1_40%,#555c59_62%,#222625_80%,#9fa6a2_94%,#333735_100%)]",
+    "shadow-[0_0_0_1px_rgb(0_0_0/0.85)]",
+  ),
+
+  repoCardRailRivetL: "left-[0.3rem]",
+  repoCardRailRivetR: "right-[0.3rem]",
 
   repoCardHead:
     "flex flex-wrap items-start justify-between gap-x-4 gap-y-[0.6rem]",
@@ -1351,8 +1405,14 @@ export const ui = {
   /** guidance-code inside blank-slate (tighter padding, larger type) */
   blankSlateGuidanceCode: "mt-3 px-[0.7rem] py-[0.45rem] text-[0.82rem]",
 
-  repoCardSkeleton:
-    "grid gap-3 border-[1.5px] border-line-ghost bg-panel px-[1.1rem] py-4",
+  /**
+   * Skeleton mirrors the forged frame + top rail geometry so cards do not
+   * jump when the projection resolves (rail rendered by the skeleton markup).
+   */
+  repoCardSkeleton: cx(repoCardFrameShell, repoCardFrameCasing),
+
+  repoCardSkeletonInner:
+    "grid gap-3 bg-panel px-[1.1rem] py-4 border border-black/50",
 } as const satisfies Record<string, string>
 
 /*
