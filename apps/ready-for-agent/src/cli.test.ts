@@ -1062,6 +1062,247 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
+  it.live(
+    "status carries Harness-owned canRetry and latest Step Run reason",
+    () =>
+      Effect.gen(function* () {
+        const logs: string[] = []
+        const originalLog = console.log
+        console.log = (...args: unknown[]) => {
+          logs.push(args.map(String).join(" "))
+        }
+        const repository = {
+          id: "repo-1",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "owner/repo",
+        }
+        const attentionRows = [
+          {
+            repository,
+            id: "wi-retryable-failed",
+            issueNumber: 10,
+            issueTitle: "Retryable implement failure",
+            state: "IMPLEMENT",
+            status: "FAILED",
+            statusMessage:
+              "Claude Code failed to implement the Work Item issue",
+            paused: false,
+            canRetry: true,
+            latestStepRunReason: {
+              code: "handler_failed",
+              message: "Claude Code failed to implement the Work Item issue",
+              detail: {
+                code: "ENOENT",
+                causeChain: [
+                  {
+                    name: "Error",
+                    code: "ENOENT",
+                    message: 'ENOENT: Executable not found in $PATH: "claude"',
+                  },
+                ],
+              },
+            },
+            pullRequestNumber: null,
+            createdAt: "2026-08-12T10:00:00.000Z",
+            updatedAt: "2026-08-12T10:00:00.000Z",
+            stateReadyAt: "2026-08-12T10:00:00.000Z",
+            postponedUntil: null,
+          },
+          {
+            repository,
+            id: "wi-terminal-failed",
+            issueNumber: 11,
+            issueTitle: "Terminal close failure",
+            state: "FAILED",
+            status: "FAILED",
+            statusMessage: "Issue is not open",
+            paused: false,
+            canRetry: false,
+            latestStepRunReason: {
+              code: "issue_not_open",
+              message: "Issue is not open",
+              detail: null,
+            },
+            pullRequestNumber: null,
+            createdAt: "2026-08-12T10:00:00.000Z",
+            updatedAt: "2026-08-12T10:00:00.000Z",
+            stateReadyAt: "2026-08-12T10:00:00.000Z",
+            postponedUntil: null,
+          },
+          {
+            repository,
+            id: "wi-retryable-needs-human",
+            issueNumber: 12,
+            issueTitle: "Retryable review handoff",
+            state: "NEEDS_HUMAN",
+            status: "NEEDS_HUMAN",
+            statusMessage: "Human must review findings",
+            paused: false,
+            canRetry: true,
+            latestStepRunReason: {
+              code: "review_accepted",
+              message: "Human must review findings",
+              detail: null,
+            },
+            pullRequestNumber: null,
+            createdAt: "2026-08-12T10:00:00.000Z",
+            updatedAt: "2026-08-12T10:00:00.000Z",
+            stateReadyAt: "2026-08-12T10:00:00.000Z",
+            postponedUntil: null,
+          },
+          {
+            repository,
+            id: "wi-unavailable-detail",
+            issueNumber: 13,
+            issueTitle: "Interrupted without detail",
+            state: "IMPLEMENT",
+            status: "INTERRUPTED",
+            statusMessage:
+              "Lifecycle Step was interrupted before an outcome could be established",
+            paused: false,
+            canRetry: true,
+            latestStepRunReason: {
+              code: "interrupted",
+              message:
+                "Lifecycle Step was interrupted before an outcome could be established",
+              detail: null,
+            },
+            pullRequestNumber: null,
+            createdAt: "2026-08-12T10:00:00.000Z",
+            updatedAt: "2026-08-12T10:00:00.000Z",
+            stateReadyAt: "2026-08-12T10:00:00.000Z",
+            postponedUntil: null,
+          },
+        ] as const
+        try {
+          const layer = mockStart.pipe(
+            Layer.provideMerge(mockLocalGit),
+            Layer.provideMerge(
+              Layer.succeed(GraphqlApi, {
+                ...unusedGraphql,
+                kanbanStatus: (repositoryId) => {
+                  expect(repositoryId).toBeNull()
+                  return Effect.succeed({
+                    repository: null,
+                    lanes: [
+                      {
+                        id: "QUEUE" as const,
+                        label: "Queue",
+                        count: 0,
+                        workItems: [],
+                      },
+                      {
+                        id: "BUILD" as const,
+                        label: "Build",
+                        count: 0,
+                        workItems: [],
+                      },
+                      {
+                        id: "REVIEW" as const,
+                        label: "Review",
+                        count: 0,
+                        workItems: [],
+                      },
+                      {
+                        id: "PR" as const,
+                        label: "PR",
+                        count: 0,
+                        workItems: [],
+                      },
+                      {
+                        id: "ATTENTION" as const,
+                        label: "Attention",
+                        count: attentionRows.length,
+                        workItems: attentionRows,
+                      },
+                      {
+                        id: "MERGED" as const,
+                        label: "Merged",
+                        count: 0,
+                        workItems: [],
+                      },
+                    ],
+                  })
+                },
+              }),
+            ),
+          )
+
+          yield* runOperator(["status"], layer)
+
+          expect(logs).toHaveLength(1)
+          const document = JSON.parse(logs[0]!) as {
+            schemaVersion: number
+            command: string
+            lanes: readonly {
+              id: string
+              workItems: readonly {
+                id: string
+                canRetry: boolean
+                state: string
+                status: string
+                latestStepRunReason: {
+                  code: string | null
+                  detail: { code?: string } | null
+                } | null
+              }[]
+            }[]
+          }
+          expect(document.schemaVersion).toBe(CLI_SCHEMA_VERSION)
+          expect(document.command).toBe("status")
+          const rows =
+            document.lanes.find((lane) => lane.id === "ATTENTION")?.workItems ??
+            []
+          expect(
+            rows.map((row) => [
+              row.id,
+              row.canRetry,
+              row.state,
+              row.status,
+              row.latestStepRunReason?.code,
+              row.latestStepRunReason?.detail?.code ?? null,
+            ]),
+          ).toEqual([
+            [
+              "wi-retryable-failed",
+              true,
+              "IMPLEMENT",
+              "FAILED",
+              "handler_failed",
+              "ENOENT",
+            ],
+            [
+              "wi-terminal-failed",
+              false,
+              "FAILED",
+              "FAILED",
+              "issue_not_open",
+              null,
+            ],
+            [
+              "wi-retryable-needs-human",
+              true,
+              "NEEDS_HUMAN",
+              "NEEDS_HUMAN",
+              "review_accepted",
+              null,
+            ],
+            [
+              "wi-unavailable-detail",
+              true,
+              "IMPLEMENT",
+              "INTERRUPTED",
+              "interrupted",
+              null,
+            ],
+          ])
+        } finally {
+          console.log = originalLog
+        }
+      }),
+  )
+
   it.live("status fails with REPOSITORY_NOT_FOUND for unknown selector", () =>
     Effect.gen(function* () {
       const layer = mockStart.pipe(

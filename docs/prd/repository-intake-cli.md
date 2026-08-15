@@ -310,6 +310,8 @@ The CLI exits `0` only when every result is created or when the result list is e
           "status": "WAITING_FOR_BLOCKERS",
           "statusMessage": "Waiting for blocking Issues",
           "paused": false,
+          "canRetry": false,
+          "latestStepRunReason": null,
           "pullRequestNumber": null,
           "createdAt": "2026-08-12T10:00:00.000Z",
           "updatedAt": "2026-08-12T10:00:00.000Z",
@@ -322,7 +324,7 @@ The CLI exits `0` only when every result is created or when the result list is e
 }
 ```
 
-All six lanes are always present in fixed order, including lanes with `count: 0` and an empty `workItems` array. A Repository-scoped invocation returns that Repository object instead of `null`.
+All six lanes are always present in fixed order, including lanes with `count: 0` and an empty `workItems` array. A Repository-scoped invocation returns that Repository object instead of `null`. Every Work Item row includes authoritative Harness-owned `canRetry`. Stopped items expose `latestStepRunReason` with a stable machine `code`, operator-facing `message`, and bounded sanitized `detail` cause chain when persisted. These fields are additive on `schemaVersion` 1. The CLI does not infer eligibility from lane or status strings and does not inspect Agent Backend transcripts.
 
 ### Command-Level Errors
 

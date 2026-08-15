@@ -6,6 +6,7 @@ import {
   type IntakeIssueResult,
   type StatusLane,
   type StatusLaneId,
+  type StatusStepRunReason,
   type StatusWorkItemRow,
   toCanonicalRepositoryIdentity,
 } from "../cli-json.ts"
@@ -120,6 +121,64 @@ const isStatusLaneId = (value: string): value is StatusLaneId => {
   }
 }
 
+type GraphqlCauseChainLink = {
+  readonly name?: string | null
+  readonly code?: string | null
+  readonly message?: string | null
+}
+
+type GraphqlStepRunReason = {
+  readonly code?: string | null
+  readonly message?: string | null
+  readonly detail?: {
+    readonly code?: string | null
+    readonly causeChain?: readonly GraphqlCauseChainLink[] | null
+  } | null
+}
+
+type GraphqlStatusWorkItem = {
+  readonly id: string
+  readonly issueNumber: number
+  readonly issueTitle: string | null
+  readonly state: string
+  readonly status: string
+  readonly statusMessage: string | null
+  readonly paused: boolean
+  readonly canRetry: boolean
+  readonly latestStepRunReason?: GraphqlStepRunReason | null
+  readonly pullRequestNumber: number | null
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly stateReadyAt: string
+  readonly postponedUntil: string | null
+}
+
+const toStatusCauseChainLink = (link: GraphqlCauseChainLink) => ({
+  ...(link.name != null ? { name: link.name } : {}),
+  ...(link.code != null ? { code: link.code } : {}),
+  ...(link.message != null ? { message: link.message } : {}),
+})
+
+const toStatusStepRunReason = (
+  reason: GraphqlStepRunReason | null | undefined,
+): StatusStepRunReason | null => {
+  if (reason === null || reason === undefined) {
+    return null
+  }
+  const detail = reason.detail
+  return {
+    code: reason.code ?? null,
+    message: reason.message ?? null,
+    detail:
+      detail === null || detail === undefined
+        ? null
+        : {
+            causeChain: (detail.causeChain ?? []).map(toStatusCauseChainLink),
+            ...(detail.code != null ? { code: detail.code } : {}),
+          },
+  }
+}
+
 const toStatusWorkItemRow = (row: {
   readonly repository: {
     readonly id: string
@@ -127,20 +186,7 @@ const toStatusWorkItemRow = (row: {
     readonly forgeHost: string
     readonly projectPath: string
   }
-  readonly workItem: {
-    readonly id: string
-    readonly issueNumber: number
-    readonly issueTitle: string | null
-    readonly state: string
-    readonly status: string
-    readonly statusMessage: string | null
-    readonly paused: boolean
-    readonly pullRequestNumber: number | null
-    readonly createdAt: string
-    readonly updatedAt: string
-    readonly stateReadyAt: string
-    readonly postponedUntil: string | null
-  }
+  readonly workItem: GraphqlStatusWorkItem
 }): StatusWorkItemRow => ({
   repository: toCanonicalRepositoryIdentity(row.repository),
   id: row.workItem.id,
@@ -150,6 +196,8 @@ const toStatusWorkItemRow = (row: {
   status: row.workItem.status,
   statusMessage: row.workItem.statusMessage,
   paused: row.workItem.paused,
+  canRetry: row.workItem.canRetry,
+  latestStepRunReason: toStatusStepRunReason(row.workItem.latestStepRunReason),
   pullRequestNumber: row.workItem.pullRequestNumber,
   createdAt: row.workItem.createdAt,
   updatedAt: row.workItem.updatedAt,
@@ -169,20 +217,7 @@ const toStatusLanes = (
         readonly forgeHost: string
         readonly projectPath: string
       }
-      readonly workItem: {
-        readonly id: string
-        readonly issueNumber: number
-        readonly issueTitle: string | null
-        readonly state: string
-        readonly status: string
-        readonly statusMessage: string | null
-        readonly paused: boolean
-        readonly pullRequestNumber: number | null
-        readonly createdAt: string
-        readonly updatedAt: string
-        readonly stateReadyAt: string
-        readonly postponedUntil: string | null
-      }
+      readonly workItem: GraphqlStatusWorkItem
     }[]
   }[],
 ): readonly StatusLane[] =>
@@ -559,6 +594,19 @@ export class GraphqlApi extends Context.Service<
                         status: true,
                         statusMessage: true,
                         paused: true,
+                        canRetry: true,
+                        latestStepRunReason: {
+                          code: true,
+                          message: true,
+                          detail: {
+                            code: true,
+                            causeChain: {
+                              name: true,
+                              code: true,
+                              message: true,
+                            },
+                          },
+                        },
                         pullRequestNumber: true,
                         createdAt: true,
                         updatedAt: true,

@@ -1175,6 +1175,206 @@ describe("operator binary finite-command process contract", () => {
     }
   })
 
+  test("status keeps schemaVersion 1 and carries canRetry plus latest Step Run reason", async () => {
+    const repository = {
+      id: "repo-process-1",
+      forge: "github",
+      forgeHost: "github.com",
+      projectPath: "owner/repo",
+    }
+    const graphqlWorkItems = [
+      {
+        repository,
+        workItem: {
+          id: "wi-retryable-failed",
+          issueNumber: 10,
+          issueTitle: "Retryable implement failure",
+          state: "IMPLEMENT",
+          status: "FAILED",
+          statusMessage: "Claude Code failed to implement the Work Item issue",
+          paused: false,
+          canRetry: true,
+          latestStepRunReason: {
+            code: "handler_failed",
+            message: "Claude Code failed to implement the Work Item issue",
+            detail: {
+              code: "ENOENT",
+              causeChain: [
+                {
+                  name: "Error",
+                  code: "ENOENT",
+                  message: 'ENOENT: Executable not found in $PATH: "claude"',
+                },
+              ],
+            },
+          },
+          pullRequestNumber: null,
+          createdAt: "2026-08-12T10:00:00.000Z",
+          updatedAt: "2026-08-12T10:00:00.000Z",
+          stateReadyAt: "2026-08-12T10:00:00.000Z",
+          postponedUntil: null,
+        },
+      },
+      {
+        repository,
+        workItem: {
+          id: "wi-terminal-failed",
+          issueNumber: 11,
+          issueTitle: "Terminal close failure",
+          state: "FAILED",
+          status: "FAILED",
+          statusMessage: "Issue is not open",
+          paused: false,
+          canRetry: false,
+          latestStepRunReason: {
+            code: "issue_not_open",
+            message: "Issue is not open",
+            detail: null,
+          },
+          pullRequestNumber: null,
+          createdAt: "2026-08-12T10:00:00.000Z",
+          updatedAt: "2026-08-12T10:00:00.000Z",
+          stateReadyAt: "2026-08-12T10:00:00.000Z",
+          postponedUntil: null,
+        },
+      },
+      {
+        repository,
+        workItem: {
+          id: "wi-retryable-needs-human",
+          issueNumber: 12,
+          issueTitle: "Retryable review handoff",
+          state: "NEEDS_HUMAN",
+          status: "NEEDS_HUMAN",
+          statusMessage: "Human must review findings",
+          paused: false,
+          canRetry: true,
+          latestStepRunReason: {
+            code: "review_accepted",
+            message: "Human must review findings",
+            detail: null,
+          },
+          pullRequestNumber: null,
+          createdAt: "2026-08-12T10:00:00.000Z",
+          updatedAt: "2026-08-12T10:00:00.000Z",
+          stateReadyAt: "2026-08-12T10:00:00.000Z",
+          postponedUntil: null,
+        },
+      },
+      {
+        repository,
+        workItem: {
+          id: "wi-unavailable-detail",
+          issueNumber: 13,
+          issueTitle: "Interrupted without detail",
+          state: "IMPLEMENT",
+          status: "INTERRUPTED",
+          statusMessage:
+            "Lifecycle Step was interrupted before an outcome could be established",
+          paused: false,
+          canRetry: true,
+          latestStepRunReason: {
+            code: "interrupted",
+            message:
+              "Lifecycle Step was interrupted before an outcome could be established",
+            detail: null,
+          },
+          pullRequestNumber: null,
+          createdAt: "2026-08-12T10:00:00.000Z",
+          updatedAt: "2026-08-12T10:00:00.000Z",
+          stateReadyAt: "2026-08-12T10:00:00.000Z",
+          postponedUntil: null,
+        },
+      },
+    ]
+    const graphqlLanes = [
+      { id: "QUEUE", label: "Queue", count: 0, workItems: [] },
+      { id: "BUILD", label: "Build", count: 0, workItems: [] },
+      { id: "REVIEW", label: "Review", count: 0, workItems: [] },
+      { id: "PR", label: "PR", count: 0, workItems: [] },
+      {
+        id: "ATTENTION",
+        label: "Attention",
+        count: graphqlWorkItems.length,
+        workItems: graphqlWorkItems,
+      },
+      { id: "MERGED", label: "Merged", count: 0, workItems: [] },
+    ]
+    const seenBodies: string[] = []
+    const server = createServer((req, res) => {
+      if (req.method !== "POST") {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      const chunks: Buffer[] = []
+      req.on("data", (chunk: Buffer) => {
+        chunks.push(chunk)
+      })
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8")
+        seenBodies.push(body)
+        res.writeHead(200, { "content-type": "application/json" })
+        if (body.includes("kanbanStatus")) {
+          res.end(
+            JSON.stringify({
+              data: {
+                kanbanStatus: {
+                  repository: null,
+                  lanes: graphqlLanes,
+                },
+              },
+            }),
+          )
+          return
+        }
+        res.end(
+          JSON.stringify({ data: null, errors: [{ message: "unexpected" }] }),
+        )
+      })
+    })
+
+    try {
+      const port = await listen(server)
+      const result = await runCli(
+        ["status"],
+        `http://127.0.0.1:${port}/graphql`,
+      )
+
+      expect(result.status).toBe(0)
+      expect(result.stderr.trim()).toBe("")
+      expect(seenBodies.some((body) => body.includes("canRetry"))).toBe(true)
+      expect(
+        seenBodies.some((body) => body.includes("latestStepRunReason")),
+      ).toBe(true)
+      const document = parseExactlyOneJsonDocument(result.stdout)
+      expect(document).toEqual(
+        buildStatusSuccessDocument({
+          repository: null,
+          lanes: graphqlLanes.map((lane) => ({
+            id: lane.id as
+              | "QUEUE"
+              | "BUILD"
+              | "REVIEW"
+              | "PR"
+              | "ATTENTION"
+              | "MERGED",
+            label: lane.label,
+            count: lane.count,
+            workItems: lane.workItems.map((row) => ({
+              repository: row.repository,
+              ...row.workItem,
+            })),
+          })),
+        }),
+      )
+      expect(document).toMatchObject({ schemaVersion: CLI_SCHEMA_VERSION })
+      expect(CLI_SCHEMA_VERSION).toBe(1)
+    } finally {
+      await closeServer(server)
+    }
+  })
+
   test("status against unreachable GraphQL emits JSON error on stderr only", async () => {
     const result = await runCli(["status"], "http://127.0.0.1:1/graphql")
 

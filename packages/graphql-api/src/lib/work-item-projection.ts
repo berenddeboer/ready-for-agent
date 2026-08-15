@@ -269,6 +269,30 @@ export const workItemLatestStepRunDetail = (
   parseReasonDetail(latestStepRun(workItem)?.reasonDetail)
 
 /**
+ * Persisted latest Step Run reason for operators. Null when the Work Item
+ * has no Step Run yet. `detail` is null when no sanitized cause chain exists.
+ */
+export type WorkItemLatestStepRunReason = {
+  readonly code: string | null
+  readonly message: string | null
+  readonly detail: StepRunReasonDetail | null
+}
+
+export const workItemLatestStepRunReason = (
+  workItem: WorkItemRecord,
+): WorkItemLatestStepRunReason | null => {
+  const latest = latestStepRun(workItem)
+  if (latest === undefined) {
+    return null
+  }
+  return {
+    code: latest.reasonCode,
+    message: latest.reasonMessage,
+    detail: parseReasonDetail(latest.reasonDetail),
+  }
+}
+
+/**
  * Cumulative wall-clock execution time for a phase across every attempt in
  * the same Work Item. Prior failed, timed-out, and Needs Human attempts stay
  * included so retries and continues do not reset the displayed timer.
