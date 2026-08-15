@@ -2299,6 +2299,10 @@ export const makeWorkItemLifecycleLive = (
                   result.completion === "native"
                     ? STEP_RUN_REASON.native
                     : STEP_RUN_REASON.agentFallback,
+                stepRunNote:
+                  result.publicationCopySource === "harness_fallback"
+                    ? "Harness publication-copy fallback"
+                    : undefined,
               })),
             )
           case "create_pr":

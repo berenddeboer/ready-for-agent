@@ -37,6 +37,7 @@ import {
   CreatePrWorktreeContextMissingError,
   buildDeterministicPullRequestBody,
   buildDeterministicPullRequestTitle,
+  buildHarnessPublicationFallbackCopy,
   createPr,
   makeWorkItemId,
   stubActiveAgentBackendLayer,
@@ -493,6 +494,42 @@ describe("createPr", () => {
       expect(reconciledCopy).toEqual({
         title: "feat: ship widgets",
         body: "Ships widgets for the dashboard.\n\nCloses #2039",
+      })
+    }))
+
+  it("uses persisted harness fallback publication copy as the PR title and body", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      const fallback = buildHarnessPublicationFallbackCopy({
+        issueNumber: 2039,
+        issueTitle: "Add widgets endpoint",
+        workItemId,
+      })
+      let reconciled: { title: string; body: string } | null = null
+      const result = await run(
+        createPr(
+          baseContext(root, {
+            workItemId,
+            issueNumber: 2039,
+            publicationTitle: fallback.title,
+            publicationBody: fallback.body,
+          }),
+        ),
+        {
+          github: stubGitHub({
+            findOpenPullRequestNumber: () => Effect.succeed(321),
+            updateOpenDraftPullRequestCopy: (_repository, _branch, input) => {
+              reconciled = input
+              return Effect.succeed(321)
+            },
+          }),
+        },
+      )
+      expect(result.publicationTitle).toBe(fallback.title)
+      expect(result.publicationBody).toBe(fallback.body)
+      expect(reconciled).toEqual({
+        title: fallback.title,
+        body: fallback.body,
       })
     }))
 

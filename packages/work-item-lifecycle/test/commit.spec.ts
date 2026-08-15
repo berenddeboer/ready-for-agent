@@ -16,10 +16,10 @@ import {
   CommitInvalidWorktreeContextError,
   CommitOpenCodeError,
   CommitPostconditionError,
-  CommitPublicationCopyError,
   CommitSessionContextMissingError,
   CommitStartingCommitMissingError,
   CommitWorktreeContextMissingError,
+  buildHarnessPublicationFallbackCopy,
   commit,
   formatPublicationCommitMessage,
   makeWorkItemId,
@@ -180,11 +180,6 @@ describe("publication copy parsing", () => {
   it("rejects blank, generic, or missing results", () => {
     expect(parsePublicationCopyResult("no marker")).toBeNull()
     expect(
-      parsePublicationCopyResult(
-        `${publicationResultLine("t", "b")}\n${publicationResultLine("t2", "b2")}`,
-      ),
-    ).toBeNull()
-    expect(
       normalizePublicationCopy(
         {
           title: "  ",
@@ -202,6 +197,56 @@ describe("publication copy parsing", () => {
         1,
       ),
     ).toBeNull()
+  })
+
+  it("accepts the last valid PUBLICATION_COPY marker after trailing prose or malformed candidates", () => {
+    const parsed = parsePublicationCopyResult(
+      [
+        publicationResultLine("bad", ""),
+        publicationResultLine(
+          "feat: widgets",
+          "Adds the widgets endpoint used by the dashboard.",
+        ),
+        "trailing prose after the marker",
+      ].join("\n"),
+    )
+    expect(parsed).toEqual({
+      title: "feat: widgets",
+      body: "Adds the widgets endpoint used by the dashboard.",
+    })
+  })
+
+  it("accepts a PUBLICATION_COPY marker wrapped in inline code", () => {
+    const parsed = parsePublicationCopyResult(
+      `\`${publicationResultLine("feat: widgets", "Adds the widgets endpoint used by the dashboard.")}\``,
+    )
+    expect(parsed).toEqual({
+      title: "feat: widgets",
+      body: "Adds the widgets endpoint used by the dashboard.",
+    })
+  })
+
+  it("does not treat PASS or surrounding prose as publication copy", () => {
+    expect(
+      parsePublicationCopyResult("`READY_FOR_AGENT_RESULT: PASS`"),
+    ).toBeNull()
+    expect(
+      parsePublicationCopyResult(
+        'Here is some JSON {"title":"x","body":"y"} without a marker',
+      ),
+    ).toBeNull()
+  })
+
+  it("builds deterministic harness fallback copy from the Issue identity", () => {
+    const copy = buildHarnessPublicationFallbackCopy({
+      issueNumber: 12,
+      issueTitle: null,
+      workItemId: "wi-01TESTFALLBACKCOPY00000000",
+    })
+    expect(copy.title).toBe("Implement issue #12")
+    expect(copy.body).toContain("wi-01TESTFALLBACKCOPY00000000")
+    expect(copy.body.endsWith("Closes #12")).toBe(true)
+    expect(copy.body.match(/Closes #12/g)?.length).toBe(1)
   })
 
   it("formats commit message from title and body", () => {
@@ -363,32 +408,149 @@ describe("commit", () => {
       expect(message).toContain("Closes #42")
     }))
 
-  it("retries generation once on malformed copy then fails without placeholder fallback", () =>
+  it("retries generation once on malformed copy then commits harness fallback copy", () =>
     withTempRepo(async (root, startingOid) => {
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      const workItemId = makeWorkItemId()
       let calls = 0
-      const error = await run(
+      const result = await run(
         commit(
           baseContext(root, {
+            workItemId,
             startingCommitOid: startingOid,
             issueNumber: 9,
+            issueTitle: "Ship the widgets",
           }),
-        ).pipe(Effect.flip),
+        ),
         stubOpencode({
           continueTurn: () => {
             calls += 1
             return Effect.succeed({
               sessionId: "ses_implement_session",
-              assistantText: "not a valid result",
+              assistantText:
+                calls === 1
+                  ? "not a valid result"
+                  : "`READY_FOR_AGENT_RESULT: PASS`",
             })
           },
         }),
       )
-      expect(error).toBeInstanceOf(CommitPublicationCopyError)
+      const expected = buildHarnessPublicationFallbackCopy({
+        issueNumber: 9,
+        issueTitle: "Ship the widgets",
+        workItemId,
+      })
       expect(calls).toBe(2)
+      expect(result.completion).toBe("native")
+      expect(result.publicationCopySource).toBe("harness_fallback")
+      expect(result.publicationTitle).toBe("Ship the widgets")
+      expect(result.publicationBody).toBe(expected.body)
+      expect(result.publicationBody).toContain(`Work Item ${workItemId}`)
+      expect(result.publicationBody).toContain("Closes #9")
       expect(
         await git(root, ["rev-list", "--count", `${startingOid}..HEAD`]),
-      ).toBe("0")
+      ).toBe("1")
+      const message = await git(root, ["log", "-1", "--pretty=%B"])
+      expect(message.startsWith("Ship the widgets")).toBe(true)
+      expect(message).toContain("Harness publication-copy fallback")
+    }))
+
+  it("reuses persisted harness fallback copy without a generation turn", () =>
+    withTempRepo(async (root, startingOid) => {
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      const workItemId = makeWorkItemId()
+      const fallback = buildHarnessPublicationFallbackCopy({
+        issueNumber: 91,
+        issueTitle: "Add widgets endpoint",
+        workItemId,
+      })
+      let continued = 0
+      const result = await run(
+        commit(
+          baseContext(root, {
+            workItemId,
+            startingCommitOid: startingOid,
+            publicationTitle: fallback.title,
+            publicationBody: fallback.body,
+          }),
+        ),
+        stubOpencode({
+          continueTurn: () => {
+            continued += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "",
+            })
+          },
+        }),
+      )
+      expect(continued).toBe(0)
+      expect(result.publicationCopySource).toBe("harness_fallback")
+      expect(result.publicationTitle).toBe(fallback.title)
+      expect(result.publicationBody).toBe(fallback.body)
+      const message = await git(root, ["log", "-1", "--pretty=%B"])
+      expect(message).toContain("Harness publication-copy fallback")
+    }))
+
+  it("still sends harness fallback copy to agent repair when commit-msg policy rejects it", () =>
+    withTempRepo(async (root, startingOid) => {
+      const hooks = join(root, ".git", "hooks")
+      await mkdir(hooks, { recursive: true })
+      const hookPath = join(hooks, "commit-msg")
+      await writeFile(
+        hookPath,
+        `#!/bin/sh
+if ! grep -q '^feat:' "$1"; then
+  echo "commitlint: subject must start with feat:" >&2
+  exit 1
+fi
+`,
+      )
+      await chmod(hookPath, 0o755)
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      const workItemId = makeWorkItemId()
+      const fallback = buildHarnessPublicationFallbackCopy({
+        issueNumber: 2039,
+        issueTitle: "Add widgets without conventional prefix",
+        workItemId,
+      })
+      let repairPrompt = ""
+      const result = await run(
+        commit(
+          baseContext(root, {
+            workItemId,
+            startingCommitOid: startingOid,
+            sessionId: "ses_from_implement",
+            issueNumber: 2039,
+            publicationTitle: fallback.title,
+            publicationBody: fallback.body,
+          }),
+        ),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.gen(function* () {
+              repairPrompt = input.prompt
+              yield* Effect.tryPromise({
+                try: async () => {
+                  await git(root, ["add", "feature.ts"])
+                  await git(root, [
+                    "commit",
+                    "--no-verify",
+                    "-m",
+                    "feat: add widgets\n\nPolicy-fixed body\n\nCloses #2039",
+                  ])
+                },
+                catch: (cause) => cause as Error,
+              })
+              return { sessionId: input.sessionId, assistantText: "" }
+            }).pipe(Effect.orDie),
+        }),
+      )
+      expect(result.completion).toBe("agent_fallback")
+      expect(repairPrompt).toContain("commitlint")
+      expect(repairPrompt).toContain(fallback.title)
+      expect(repairPrompt).toContain("Harness publication-copy fallback")
+      expect(result.publicationTitle).toBe("feat: add widgets")
     }))
 
   it("native commit leaves untracked harness artifacts uncommitted", () =>

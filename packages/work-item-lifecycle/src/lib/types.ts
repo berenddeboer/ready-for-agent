@@ -158,13 +158,13 @@ export interface WorkItemRecord {
   /** Durable No-Change Outcome completion summary (Markdown). */
   readonly completionSummary: string | null
   /**
-   * Canonical agent-authored publication title for Commit subject and PR title.
-   * Null until Commit generates or seeds it.
+   * Canonical publication title for Commit subject and PR title.
+   * Null until Commit generates, seeds, or falls back to harness copy.
    */
   readonly publicationTitle: string | null
   /**
-   * Canonical agent-authored publication body for Commit body and PR body.
-   * Null until Commit generates or seeds it.
+   * Canonical publication body for Commit body and PR body.
+   * Null until Commit generates, seeds, or falls back to harness copy.
    */
   readonly publicationBody: string | null
   readonly sessionId: string | null
