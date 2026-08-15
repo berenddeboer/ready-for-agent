@@ -46,4 +46,28 @@ describe("ExecutionProfileSummary", () => {
     expect(html).toContain("Review Same as build")
     expect(html).not.toContain("Review grok-code")
   })
+
+  test("root wrapper constrains width with shrink/min-width and preserves caller className", () => {
+    const html = renderToStaticMarkup(
+      <ExecutionProfileSummary
+        className="mt-[0.25rem]"
+        profile={{
+          backend: {
+            id: "opencode",
+            label: "OpenCode",
+          },
+          buildModel:
+            "anthropic/claude-sonnet-4-20250514/qualified-very-long-provider-model-identifier",
+          buildThinkingLevel: "extended",
+          reviewSameAsBuild: false,
+          reviewModel:
+            "openai/gpt-5.1/qualified-very-long-provider-model-identifier",
+          reviewThinkingLevel: "extended",
+        }}
+      />,
+    )
+    expect(html).toMatch(
+      /<div class="min-w-0 max-w-full mt-\[0\.25rem\]" data-execution-profile/,
+    )
+  })
 })
