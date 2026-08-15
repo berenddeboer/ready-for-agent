@@ -23,6 +23,7 @@ import {
   REVIEW_FIX_LIMIT_REASON,
   REVIEW_HIGH_UNCHANGED_REASON,
   REVIEW_PRE_COMMIT_MESSAGE,
+  REVIEW_UNPARSEABLE_APPLY_REASON,
   REVIEW_UNRESOLVED_HIGH_REASON,
   ReviewInvalidWorktreeContextError,
   ReviewOpenCodeError,
@@ -238,6 +239,17 @@ describe("parseReviewResult", () => {
       ),
     ).toBeNull()
     expect(parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_FIXED")).toBeNull()
+    expect(parseReviewResult("`READY_FOR_AGENT_RESULT: PASS`")).toBeNull()
+    expect(parseReviewResult("READY_FOR_AGENT_RESULT: PASS")).toBeNull()
+  })
+
+  it("accepts a known reviewing marker wrapped in inline code", () => {
+    expect(parseReviewResult("`READY_FOR_AGENT_RESULT: REVIEW_CLEAN`")).toEqual(
+      { _tag: "clean" },
+    )
+    expect(
+      parseReviewResult("`READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high`"),
+    ).toEqual({ _tag: "has_findings", severity: "high" })
   })
 })
 
@@ -347,6 +359,14 @@ describe("parseApplyReviewResult", () => {
         "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
       ),
     ).toBeNull()
+    expect(parseApplyReviewResult("`READY_FOR_AGENT_RESULT: PASS`")).toBeNull()
+    expect(parseApplyReviewResult("READY_FOR_AGENT_RESULT: PASS")).toBeNull()
+  })
+
+  it("accepts a known apply marker wrapped in inline code", () => {
+    expect(
+      parseApplyReviewResult("`READY_FOR_AGENT_RESULT: REVIEW_FIXED`"),
+    ).toEqual({ _tag: "fixed" })
   })
 
   it("bounds deferred and cleared reasons", () => {
@@ -1884,36 +1904,47 @@ describe("review", () => {
       expect((error as ReviewResultError).message).toContain(
         "did not report a valid READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high>",
       )
+      expect((error as ReviewResultError).message).toContain(
+        "missing result line",
+      )
       expect((error as ReviewResultError).message).not.toContain("(got ")
     }))
 
-  it("quotes the emitted result line when the reviewing verdict is invalid", () =>
+  it("repairs a malformed reviewing marker once then quotes it if still invalid", () =>
     withTemp(async (root) => {
+      const prompts: string[] = []
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
         stubOpencode({
-          continueTurn: () =>
-            Effect.succeed({
+          continueTurn: (input) => {
+            prompts.push(input.prompt)
+            return Effect.succeed({
               sessionId: "ses_implement_session",
               assistantText:
                 "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
-            }),
+            })
+          },
         }),
       )
+      expect(prompts).toHaveLength(2)
+      expect(prompts[1]).toContain("Do not review again")
       expect(error).toBeInstanceOf(ReviewResultError)
+      expect((error as ReviewResultError).message).toContain("invalid argument")
       expect((error as ReviewResultError).message).toContain(
         'got "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>"',
       )
     }))
 
-  it("fails when apply-path READY_FOR_AGENT_RESULT is missing or ambiguous", () =>
+  it("repairs a missing apply marker once and Needs Human when the worktree is unchanged", () =>
     withTemp(async (root) => {
       let turn = 0
-      const error = await run(
-        review(baseContext(root)).pipe(Effect.flip),
+      const prompts: string[] = []
+      const outcome = await run(
+        review(baseContext(root)),
         stubOpencode({
-          continueTurn: () => {
+          continueTurn: (input) => {
             turn += 1
+            prompts.push(input.prompt)
             return Effect.succeed({
               sessionId: "ses_implement_session",
               assistantText:
@@ -1924,16 +1955,27 @@ describe("review", () => {
           },
         }),
       )
-      expect(error).toBeInstanceOf(ReviewResultError)
-      expect((error as ReviewResultError).message).toContain("REVIEW_FIXED")
-      expect((error as ReviewResultError).message).not.toContain("(got ")
+      expect(prompts).toHaveLength(3)
+      expect(prompts[2]).toContain(
+        "The apply pass immediately above is complete",
+      )
+      expect(outcome).toMatchObject({
+        _tag: "needs_human",
+      })
+      expect((outcome as { reason: string }).reason).toContain(
+        REVIEW_UNPARSEABLE_APPLY_REASON,
+      )
+      expect((outcome as { reason: string }).reason).toContain(
+        "missing result line",
+      )
+      expect((outcome as { reason: string }).reason).not.toContain("low")
     }))
 
-  it("quotes the emitted result line when the apply-path verdict is invalid", () =>
+  it("quotes the unknown apply result after one repair turn without inventing severity", () =>
     withTemp(async (root) => {
       let turn = 0
-      const error = await run(
-        review(baseContext(root)).pipe(Effect.flip),
+      const outcome = await run(
+        review(baseContext(root)),
         stubOpencode({
           continueTurn: () => {
             turn += 1
@@ -1941,15 +1983,19 @@ describe("review", () => {
               sessionId: "ses_implement_session",
               assistantText:
                 turn === 1
-                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low"
-                  : "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <low|medium>: leftover nits",
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high"
+                  : "`READY_FOR_AGENT_RESULT: PASS`",
             })
           },
         }),
       )
-      expect(error).toBeInstanceOf(ReviewResultError)
-      expect((error as ReviewResultError).message).toContain(
-        'got "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <low|medium>: leftover nits"',
+      expect(outcome._tag).toBe("needs_human")
+      expect((outcome as { reason: string }).reason).toContain("unknown result")
+      expect((outcome as { reason: string }).reason).toContain(
+        'got "READY_FOR_AGENT_RESULT: PASS"',
+      )
+      expect((outcome as { reason: string }).reason).not.toContain(
+        "REVIEW_HAS_FINDINGS: low",
       )
     }))
 
@@ -1995,6 +2041,171 @@ describe("review", () => {
         }),
       )
       expect(outcome).toEqual({ _tag: "clean" })
+    }))
+
+  it("repairs a markdown-wrapped PASS after a changed apply then runs Pre-Commit and re-review", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      const prompts: string[] = []
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.gen(function* () {
+              prompts.push(input.prompt)
+              if (isReviewingTurn(input)) {
+                return {
+                  sessionId: "ses_implement_session",
+                  assistantText:
+                    prompts.filter(
+                      (prompt) => prompt === buildReviewingPrompt(),
+                    ).length === 1
+                      ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
+                      : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+                }
+              }
+              if (input.prompt.includes("The apply pass immediately above")) {
+                return {
+                  sessionId: "ses_implement_session",
+                  assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+                }
+              }
+              yield* Effect.tryPromise({
+                try: () =>
+                  writeFile(join(root, "fixed.ts"), "export const n = 1\n"),
+                catch: (cause) => cause as Error,
+              })
+              return {
+                sessionId: "ses_implement_session",
+                assistantText: "`READY_FOR_AGENT_RESULT: PASS`",
+              }
+            }).pipe(Effect.orDie),
+        }),
+      )
+
+      expect(result).toEqual({ _tag: "clean" })
+      expect(
+        prompts.some((prompt) => prompt.includes("Interpret those findings")),
+      ).toBe(true)
+      expect(
+        prompts.some((prompt) =>
+          prompt.includes("The apply pass immediately above is complete"),
+        ),
+      ).toBe(true)
+      expect(
+        prompts.filter((prompt) => prompt === buildReviewingPrompt()),
+      ).toHaveLength(2)
+    }))
+
+  it("revalidates a changed apply whose repair stays malformed", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      const prompts: string[] = []
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.gen(function* () {
+              prompts.push(input.prompt)
+              if (isReviewingTurn(input)) {
+                return {
+                  sessionId: "ses_implement_session",
+                  assistantText:
+                    prompts.filter(
+                      (prompt) => prompt === buildReviewingPrompt(),
+                    ).length === 1
+                      ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
+                      : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+                }
+              }
+              if (input.prompt.includes("Interpret those findings")) {
+                yield* Effect.tryPromise({
+                  try: () =>
+                    writeFile(join(root, "fixed.ts"), "export const n = 1\n"),
+                  catch: (cause) => cause as Error,
+                })
+              }
+              return {
+                sessionId: "ses_implement_session",
+                assistantText: "READY_FOR_AGENT_RESULT: PASS",
+              }
+            }).pipe(Effect.orDie),
+        }),
+      )
+
+      expect(result).toEqual({ _tag: "clean" })
+      expect(
+        prompts.filter((prompt) =>
+          prompt.includes("The apply pass immediately above is complete"),
+        ),
+      ).toHaveLength(1)
+      expect(
+        prompts.filter((prompt) => prompt === buildReviewingPrompt()),
+      ).toHaveLength(2)
+    }))
+
+  it("revalidates an apply that edits an already-dirty tracked worktree when the verdict stays unparseable", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "impl.ts"), "export const n = 0\n")
+      const runGit = async (...args: string[]) => {
+        const proc = Bun.spawn(["git", "-c", "commit.gpgsign=false", ...args], {
+          cwd: root,
+          stdout: "ignore",
+          stderr: "pipe",
+        })
+        const exitCode = await proc.exited
+        if (exitCode !== 0) {
+          const stderr = await new Response(proc.stderr).text()
+          throw new Error(`git ${args.join(" ")} failed: ${stderr}`)
+        }
+      }
+      await runGit("add", "impl.ts")
+      await runGit("commit", "--no-verify", "-m", "impl")
+      await writeFile(join(root, "impl.ts"), "export const n = 1\n")
+
+      const prompts: string[] = []
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.gen(function* () {
+              prompts.push(input.prompt)
+              if (isReviewingTurn(input)) {
+                return {
+                  sessionId: "ses_implement_session",
+                  assistantText:
+                    prompts.filter(
+                      (prompt) => prompt === buildReviewingPrompt(),
+                    ).length === 1
+                      ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
+                      : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+                }
+              }
+              if (input.prompt.includes("Interpret those findings")) {
+                yield* Effect.tryPromise({
+                  try: () =>
+                    writeFile(join(root, "impl.ts"), "export const n = 2\n"),
+                  catch: (cause) => cause as Error,
+                })
+              }
+              return {
+                sessionId: "ses_implement_session",
+                assistantText: "READY_FOR_AGENT_RESULT: PASS",
+              }
+            }).pipe(Effect.orDie),
+        }),
+      )
+
+      expect(result).toEqual({ _tag: "clean" })
+      expect(
+        prompts.filter((prompt) =>
+          prompt.includes("The apply pass immediately above is complete"),
+        ),
+      ).toHaveLength(1)
+      expect(
+        prompts.filter((prompt) => prompt === buildReviewingPrompt()),
+      ).toHaveLength(2)
     }))
 
   it("maps OpenCode exit failure", () =>

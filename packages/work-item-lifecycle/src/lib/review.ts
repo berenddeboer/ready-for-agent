@@ -1,4 +1,5 @@
-import { Effect, FileSystem } from "effect"
+import { Effect, FileSystem, Stream } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
 import {
   AgentBackend,
@@ -9,6 +10,11 @@ import { DbService } from "@ready-for-agent/db-service"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { preCommit } from "./pre-commit.js"
+import {
+  classifyUnparsedResult,
+  formatResultLineFailure,
+  lastValidResult,
+} from "./result-line.js"
 import {
   ReviewInvalidWorktreeContextError,
   ReviewOpenCodeError,
@@ -53,6 +59,13 @@ export const REVIEW_FIX_LIMIT_REASON = `Review fix limit reached (${MAX_REVIEW_F
 /** Needs Human when high-severity findings remain unresolved after apply. */
 export const REVIEW_UNRESOLVED_HIGH_REASON =
   "Unresolved high-severity Review Findings require human attention."
+
+/**
+ * Needs Human when apply-findings made no worktree changes and the outcome
+ * remains unknowable after one verdict-repair turn.
+ */
+export const REVIEW_UNPARSEABLE_APPLY_REASON =
+  "Apply-findings outcome was unparseable after one verdict-repair turn; inspect the worktree or address remaining findings, then Retry."
 
 /**
  * Needs Human when the builder leaves an original high-severity review
@@ -149,7 +162,7 @@ export const buildReviewingPrompt = () =>
     "using the highest Review Severity among the findings.",
   ].join("\n")
 
-const buildReviewVerdictPrompt = () =>
+export const buildReviewVerdictPrompt = () =>
   [
     "The reviewing pass immediately above has completed.",
     "Do not review again, edit files, or add explanatory prose.",
@@ -181,6 +194,19 @@ const buildApplyFindingsPrompt = (severity: ReviewSeverity) =>
     "when high-severity findings remain unresolved or disputed without a fix.",
   ].join("\n")
 
+export const buildApplyFindingsVerdictPrompt = () =>
+  [
+    "The apply pass immediately above is complete.",
+    "Do not review again, edit files, use tools, or change the worktree.",
+    "Report only the machine-readable apply outcome for that already-completed pass.",
+    "End your final response with exactly one of:",
+    "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+    "READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: <low|medium>: <short reason>",
+    "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <low|medium>: <short reason>",
+    "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: <short reason>",
+    "READY_FOR_AGENT_RESULT: REVIEW_UNRESOLVED_HIGH: <short reason>",
+  ].join("\n")
+
 export const buildRerunAssessmentPrompt = () =>
   [
     "A prior build-model pass applied low-severity Review Findings, then nested Pre-Commit ran in this Session.",
@@ -195,40 +221,17 @@ export const buildRerunAssessmentPrompt = () =>
     "when a full reviewing pass is required.",
   ].join("\n")
 
-const candidateResultLines = (output: string): string[] =>
-  output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => /^READY_FOR_AGENT_RESULT:/i.test(line))
+const REVIEWING_RESULT_NAMES = new Set(["REVIEW_CLEAN", "REVIEW_HAS_FINDINGS"])
 
-/**
- * Try each candidate READY_FOR_AGENT_RESULT line (in order) against
- * `tryParseLine` and keep the last one that parses to a valid, known
- * marker. Explanatory prose around or between candidates, and earlier
- * candidates that don't parse (or are superseded by a later valid one),
- * are ignored. Returns null only when no candidate parses.
- */
-const lastValidResult = <T>(
-  output: string,
-  tryParseLine: (line: string) => T | null,
-): T | null => {
-  let result: T | null = null
-  for (const line of candidateResultLines(output)) {
-    const parsed = tryParseLine(line)
-    if (parsed !== null) {
-      result = parsed
-    }
-  }
-  return result
-}
+const APPLY_RESULT_NAMES = new Set([
+  "REVIEW_FIXED",
+  "REVIEW_FIXED_AND_DEFERRED",
+  "REVIEW_DEFERRED",
+  "REVIEW_CLEARED",
+  "REVIEW_UNRESOLVED_HIGH",
+])
 
-const hasResultLine = (output: string): boolean =>
-  candidateResultLines(output).length > 0
-
-const quotedResultLineSuffix = (output: string): string => {
-  const last = candidateResultLines(output).at(-1)
-  return last === undefined ? "" : ` (got ${JSON.stringify(last)})`
-}
+const HARNESS_ARTIFACT_PATHSPEC = ":(exclude).ready-for-agent"
 
 const parseSeverity = (raw: string): ReviewSeverity | null => {
   const value = unwrapSentinelArgument(raw).toLowerCase()
@@ -384,6 +387,70 @@ export const parseRerunAssessmentResult = (
 ): RerunAssessmentResult | null =>
   lastValidResult(output, tryParseRerunAssessmentLine)
 
+const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const command = ChildProcess.make("git", args, {
+      cwd,
+      stdin: "ignore",
+    })
+
+    return yield* Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* spawner.spawn(command)
+        const [exitCode, stdout, stderr] = yield* Effect.all(
+          [
+            handle.exitCode,
+            Stream.decodeText(handle.stdout).pipe(Stream.mkString),
+            Stream.decodeText(handle.stderr).pipe(Stream.mkString),
+          ],
+          { concurrency: 3 },
+        )
+        return {
+          exitCode: Number(exitCode),
+          stdout,
+          stderr,
+        }
+      }),
+    )
+  })
+
+const worktreeFingerprint = (worktreePath: string) =>
+  Effect.gen(function* () {
+    const status = yield* runGitInWorktree(worktreePath, [
+      "status",
+      "--porcelain",
+      "--",
+      ".",
+      HARNESS_ARTIFACT_PATHSPEC,
+    ])
+    if (status.exitCode !== 0) {
+      return null
+    }
+    const diff = yield* runGitInWorktree(worktreePath, [
+      "diff",
+      "HEAD",
+      "--",
+      ".",
+      HARNESS_ARTIFACT_PATHSPEC,
+    ])
+    // Plain `git diff` exits 0 with a patch. `--exit-code` / `--quiet` and
+    // some configs exit 1 when a diff exists. Both are usable snapshots.
+    if (diff.exitCode !== 0 && diff.exitCode !== 1) {
+      return null
+    }
+    const head = yield* runGitInWorktree(worktreePath, ["rev-parse", "HEAD"])
+    if (head.exitCode !== 0) {
+      return null
+    }
+    return [status.stdout, diff.stdout, head.stdout.trim()].join("\n")
+  }).pipe(Effect.orElseSucceed(() => null))
+
+const applyChangedWorktree = (
+  before: string | null,
+  after: string | null,
+): boolean => before !== null && after !== null && before !== after
+
 const resolveWorktreePath = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = context.worktreePath
@@ -492,7 +559,10 @@ const markAssessingRerunPhase = markReviewPhase(
  * (low severity) or a mandatory full reviewing pass (medium/high). Continues the
  * Implement OpenCode Session. Reviewing uses the review model/variant; applying
  * findings, nested Pre-Commit fix turns, and rerun assessments use the build
- * model/variant. Nested Pre-Commit failures fail the Review Step Run (retryable),
+ * model/variant. A missing or malformed reviewing/apply marker gets one
+ * no-tools verdict-repair turn. An unparseable apply that changed the worktree
+ * counts as a Review Fix Round and revalidates; an unparseable unchanged apply
+ * is Needs Human. Nested Pre-Commit failures fail the Review Step Run (retryable),
  * same spirit as standalone Pre-Commit. At most {@link MAX_REVIEW_FIX_ROUNDS}
  * changed apply rounds; assessment and reviewing turns do not independently
  * consume rounds. Further findings without clean/deferred/cleared/accepted
@@ -537,7 +607,9 @@ export const review = (context: LifecycleStepContext) =>
 
       let reviewingOutput = reviewing.assistantText
       let reviewingParsed = parseReviewResult(reviewingOutput)
-      if (reviewingParsed === null && !hasResultLine(reviewingOutput)) {
+      let reviewingCorrectionUsed = false
+      if (reviewingParsed === null) {
+        reviewingCorrectionUsed = true
         const verdict = yield* agentBackend
           .continueTurn({
             sessionId,
@@ -567,9 +639,23 @@ export const review = (context: LifecycleStepContext) =>
       }
 
       if (reviewingParsed === null) {
+        const failure = classifyUnparsedResult(
+          reviewingOutput,
+          REVIEWING_RESULT_NAMES,
+        )
+        yield* Effect.logInfo("Review reviewing verdict unparseable", {
+          workItemId: context.workItemId,
+          agentBackend: context.agentBackend,
+          model: context.reviewModel,
+          boundary: "reviewing",
+          correctionTurnUsed: reviewingCorrectionUsed,
+          fallbackPath: "none",
+          failureKind: failure.kind,
+          lastCandidate: failure.lastCandidate,
+        })
         return yield* new ReviewResultError({
           workItemId: context.workItemId,
-          message: `${agentBackendLabel(context.agentBackend)} did not report a valid READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high>${quotedResultLineSuffix(reviewingOutput)}`,
+          message: `${agentBackendLabel(context.agentBackend)} did not report a valid READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high> (${formatResultLineFailure(failure.kind, failure.lastCandidate)})`,
         })
       }
 
@@ -587,6 +673,8 @@ export const review = (context: LifecycleStepContext) =>
       }
 
       yield* markApplyingFindingsPhase
+
+      const fingerprintBefore = yield* worktreeFingerprint(worktreePath)
 
       const applying = yield* agentBackend
         .continueTurn({
@@ -613,12 +701,78 @@ export const review = (context: LifecycleStepContext) =>
           ),
         )
 
-      const applyParsed = parseApplyReviewResult(applying.assistantText)
+      const fingerprintAfter = yield* worktreeFingerprint(worktreePath)
+      const worktreeChanged = applyChangedWorktree(
+        fingerprintBefore,
+        fingerprintAfter,
+      )
+
+      let applyOutput = applying.assistantText
+      let applyParsed = parseApplyReviewResult(applyOutput)
+      let applyCorrectionUsed = false
       if (applyParsed === null) {
-        return yield* new ReviewResultError({
-          workItemId: context.workItemId,
-          message: `${agentBackendLabel(context.agentBackend)} did not report a valid READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_FIXED_AND_DEFERRED: <low|medium>: <reason>, REVIEW_DEFERRED: <low|medium>: <reason>, REVIEW_CLEARED: <reason>, or REVIEW_UNRESOLVED_HIGH: <reason>${quotedResultLineSuffix(applying.assistantText)}`,
-        })
+        applyCorrectionUsed = true
+        const repair = yield* agentBackend
+          .continueTurn({
+            sessionId,
+            prompt: buildApplyFindingsVerdictPrompt(),
+            cwd: worktreePath,
+            model: context.model,
+            thinkingLevel: context.thinkingLevel,
+            timeout,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ReviewOpenCodeError({
+                  message: reviewAgentFailureMessage(
+                    agentBackendLabel(context.agentBackend),
+                    "to report the apply-findings verdict",
+                    cause,
+                  ),
+                  worktreePath,
+                  sessionId,
+                  cause,
+                }),
+            ),
+          )
+        applyOutput = repair.assistantText
+        applyParsed = parseApplyReviewResult(applyOutput)
+      }
+
+      if (applyParsed === null) {
+        const failure = classifyUnparsedResult(applyOutput, APPLY_RESULT_NAMES)
+        const fallbackPath = worktreeChanged ? "revalidate" : "needs_human"
+        yield* Effect.logInfo(
+          "Review apply-findings verdict unparseable; using conservative fallback",
+          {
+            workItemId: context.workItemId,
+            agentBackend: context.agentBackend,
+            model: context.model,
+            boundary: "apply_findings",
+            correctionTurnUsed: applyCorrectionUsed,
+            fallbackPath,
+            worktreeChanged,
+            failureKind: failure.kind,
+            lastCandidate: failure.lastCandidate,
+          },
+        )
+        if (!worktreeChanged) {
+          const detail = formatResultLineFailure(
+            failure.kind,
+            failure.lastCandidate,
+          )
+          return {
+            _tag: "needs_human" as const,
+            reason: `${REVIEW_UNPARSEABLE_APPLY_REASON} ${detail}.`,
+          }
+        }
+        // Changed worktree with unknowable outcome: count a Fix Round and
+        // revalidate via Pre-Commit plus a fresh reviewing pass.
+        fixRoundsUsed += 1
+        yield* markReviewPreCommitPhase
+        yield* preCommit(context)
+        continue
       }
 
       if (applyParsed._tag === "unresolved_high") {

@@ -15,15 +15,24 @@ import {
 } from "./commit-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
+  PUBLICATION_COPY_SOURCE,
   type PublicationCopy,
+  type PublicationCopySource,
   buildCommitFallbackPromptWithCopy,
+  buildHarnessPublicationFallbackCopy,
   buildPublicationCopyFormatCorrectionPrompt,
   buildPublicationCopyPrompt,
   formatPublicationCommitMessage,
+  inspectPublicationCopyResult,
+  isHarnessPublicationFallbackCopy,
   normalizePublicationCopy,
   parsePublicationCopyResult,
   publicationCopyFromCommitMessage,
 } from "./publication-copy.js"
+import {
+  classifyUnparsedResult,
+  formatResultLineFailure,
+} from "./result-line.js"
 import {
   COMMIT_COPY_GENERATION_MESSAGE,
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
@@ -38,6 +47,7 @@ export type CommitResult = {
   readonly completion: LifecycleStepCompletion
   readonly publicationTitle: string
   readonly publicationBody: string
+  readonly publicationCopySource?: PublicationCopySource
 }
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
@@ -295,6 +305,13 @@ const parseAndNormalize = (
   return normalizePublicationCopy(parsed, issueNumber)
 }
 
+const publicationCopySourceOf = (
+  copy: PublicationCopy,
+): PublicationCopySource =>
+  isHarnessPublicationFallbackCopy(copy)
+    ? PUBLICATION_COPY_SOURCE.harnessFallback
+    : PUBLICATION_COPY_SOURCE.agent
+
 const generatePublicationCopy = (
   context: LifecycleStepContext,
   worktreePath: string,
@@ -328,7 +345,10 @@ const generatePublicationCopy = (
       )
 
     let copy = parseAndNormalize(first.assistantText, context.issueNumber)
+    let lastOutput = first.assistantText
+    let correctionUsed = false
     if (copy === null) {
+      correctionUsed = true
       const correction = yield* agentBackend
         .continueTurn({
           sessionId,
@@ -351,17 +371,43 @@ const generatePublicationCopy = (
               }),
           ),
         )
+      lastOutput = correction.assistantText
       copy = parseAndNormalize(correction.assistantText, context.issueNumber)
     }
 
     if (copy === null) {
-      return yield* new CommitPublicationCopyError({
+      const inspection = inspectPublicationCopyResult(lastOutput)
+      const failure =
+        inspection.failure ??
+        classifyUnparsedResult(lastOutput, new Set(["PUBLICATION_COPY"]), {
+          payloadName: "PUBLICATION_COPY",
+        })
+      copy = buildHarnessPublicationFallbackCopy({
+        issueNumber: context.issueNumber,
+        issueTitle: context.issueTitle,
         workItemId: context.workItemId,
-        message: `${agentBackendLabel(context.agentBackend)} did not report valid publication copy (unique final READY_FOR_AGENT_RESULT: PUBLICATION_COPY with nonblank title and substantive body). Did not fall back to Issue-title placeholder copy.`,
       })
+      yield* Effect.logInfo("Commit using harness publication-copy fallback", {
+        workItemId: context.workItemId,
+        agentBackend: context.agentBackend,
+        model: context.model,
+        boundary: "publication_copy",
+        correctionTurnUsed: correctionUsed,
+        fallbackPath: "harness_publication_copy",
+        failureKind: failure.kind,
+        lastCandidate: failure.lastCandidate,
+        diagnostic: formatResultLineFailure(
+          failure.kind,
+          failure.lastCandidate,
+        ),
+      })
+      return {
+        copy,
+        source: PUBLICATION_COPY_SOURCE.harnessFallback,
+      } as const
     }
 
-    return copy
+    return { copy, source: PUBLICATION_COPY_SOURCE.agent } as const
   })
 
 const resolvePublicationCopy = (
@@ -386,7 +432,7 @@ const resolvePublicationCopy = (
         if (existingTitle !== seeded.title || existingBody !== seeded.body) {
           yield* persistPublicationCopy(context.workItemId, seeded)
         }
-        return seeded
+        return { copy: seeded, source: publicationCopySourceOf(seeded) }
       }
       // HEAD unreadable/empty: fall through to persisted fields if present.
     }
@@ -394,16 +440,15 @@ const resolvePublicationCopy = (
     const existingTitle = context.publicationTitle?.trim() ?? ""
     const existingBody = context.publicationBody?.trim() ?? ""
     if (existingTitle !== "" && existingBody !== "") {
-      const normalized = normalizePublicationCopy(
-        { title: existingTitle, body: existingBody },
-        context.issueNumber,
-      )
+      const stored = { title: existingTitle, body: existingBody }
+      const normalized = normalizePublicationCopy(stored, context.issueNumber)
       // Already-persisted copy is trusted even if slightly over bounds after deploy;
-      // re-normalize when possible, otherwise reuse as stored.
-      if (normalized !== null) {
-        return normalized
-      }
-      return { title: existingTitle, body: existingBody }
+      // re-normalize when possible, otherwise reuse as stored. Harness fallback
+      // copy is stored as-is (its body is not agent-substantive).
+      const copy = isHarnessPublicationFallbackCopy(stored)
+        ? stored
+        : (normalized ?? stored)
+      return { copy, source: publicationCopySourceOf(copy) }
     }
 
     if (options.postconditionAlreadyMet) {
@@ -420,7 +465,7 @@ const resolvePublicationCopy = (
       worktreePath,
       sessionId,
     )
-    yield* persistPublicationCopy(context.workItemId, generated)
+    yield* persistPublicationCopy(context.workItemId, generated.copy)
     return generated
   })
 
@@ -590,19 +635,23 @@ const askAgentToRepairCommit = (
 const toResult = (
   completion: LifecycleStepCompletion,
   copy: PublicationCopy,
+  source: PublicationCopySource,
 ): CommitResult => ({
   completion,
   publicationTitle: copy.title,
   publicationBody: copy.body,
+  publicationCopySource: source,
 })
 
 /**
  * Production Commit Lifecycle Step.
  *
  * Generates shared publication copy (or reuses/seeds persisted copy), then
- * attempts a harness-owned native git commit. Continues the Implement Session
- * only when the native attempt does not establish the postcondition (repair
- * fallback). Success requires a commit after the Work Item starting OID with
+ * attempts a harness-owned native git commit. After one bounded format-correction
+ * turn, malformed publication copy falls back to harness-owned Issue-identity
+ * copy rather than failing Commit. Continues the Implement Session only when
+ * the native attempt does not establish the postcondition (repair fallback).
+ * Success requires a commit after the Work Item starting OID with
  * implementation changes committed.
  */
 export const commit = (context: LifecycleStepContext) =>
@@ -618,15 +667,16 @@ export const commit = (context: LifecycleStepContext) =>
     // Operator Retry / indeterminate prior attempt: re-check before mutating.
     // Still ensure canonical publication copy exists (seed from commit if needed).
     if (alreadyCommitted) {
-      const copy = yield* resolvePublicationCopy(context, worktreePath, {
+      const resolved = yield* resolvePublicationCopy(context, worktreePath, {
         postconditionAlreadyMet: true,
       })
-      return toResult("native", copy)
+      return toResult("native", resolved.copy, resolved.source)
     }
 
-    const copy = yield* resolvePublicationCopy(context, worktreePath, {
+    const resolved = yield* resolvePublicationCopy(context, worktreePath, {
       postconditionAlreadyMet: false,
     })
+    const copy = resolved.copy
     const message = formatPublicationCommitMessage(copy)
     const native = yield* attemptNativeCommit(worktreePath, message)
 
@@ -639,7 +689,7 @@ export const commit = (context: LifecycleStepContext) =>
         worktreePath,
         copy,
       )
-      return toResult("native", aligned)
+      return toResult("native", aligned, publicationCopySourceOf(aligned))
     }
 
     const gitState = yield* collectGitStateDiagnostics(worktreePath)
@@ -665,7 +715,11 @@ export const commit = (context: LifecycleStepContext) =>
         worktreePath,
         copy,
       )
-      return toResult("agent_fallback", finalCopy)
+      return toResult(
+        "agent_fallback",
+        finalCopy,
+        publicationCopySourceOf(finalCopy),
+      )
     }
 
     const afterFallback = yield* collectGitStateDiagnostics(worktreePath)

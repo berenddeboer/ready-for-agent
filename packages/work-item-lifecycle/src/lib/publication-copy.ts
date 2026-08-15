@@ -3,6 +3,10 @@
  * agent-authored title/body used identically for git commit and draft PR.
  */
 
+import {
+  classifyUnparsedResult,
+  normalizeResultCandidateLine,
+} from "./result-line.js"
 import { promptUserContentSection } from "./sanitize-prompt-user-content.js"
 
 /** GitHub pull request title limit. */
@@ -22,6 +26,8 @@ export type PublicationCopy = {
 const RESULT_LINE =
   /^READY_FOR_AGENT_RESULT:\s*PUBLICATION_COPY(?:\s+(\{[\s\S]*\}))?\s*$/i
 
+const PUBLICATION_COPY_NAMES = new Set(["PUBLICATION_COPY"])
+
 /**
  * Closing-reference patterns that the harness normalizes to a single
  * `Closes #<n>` line (issue keywords GitHub recognizes).
@@ -33,49 +39,9 @@ const CLOSING_REFERENCE_LINE =
 const GENERIC_PLACEHOLDER_BODY =
   /^Automated draft pull request for GitHub issue #\d+\.?$/i
 
-/**
- * Parse a unique final READY_FOR_AGENT_RESULT: PUBLICATION_COPY line with JSON
- * payload `{"title":"...","body":"..."}`. Accepts the JSON on the result line
- * or as the sole non-empty content immediately before the result line.
- * Returns null for missing, blank, malformed, duplicate, or ambiguous results.
- */
-export const parsePublicationCopyResult = (
-  output: string,
+const decodePublicationCopyJson = (
+  jsonText: string,
 ): PublicationCopy | null => {
-  const lines = output.split("\n").map((line) => line.trimEnd())
-  const nonEmptyLines = lines
-    .map((line) => line.trim())
-    .filter((line) => line !== "")
-  const resultLines = nonEmptyLines.filter((line) =>
-    /^READY_FOR_AGENT_RESULT:\s*PUBLICATION_COPY\b/i.test(line),
-  )
-  const finalLine = nonEmptyLines.at(-1)
-
-  if (
-    resultLines.length !== 1 ||
-    finalLine === undefined ||
-    finalLine !== resultLines[0]
-  ) {
-    return null
-  }
-
-  const match = RESULT_LINE.exec(finalLine)
-  if (match === null) {
-    return null
-  }
-
-  let jsonText = match[1]?.trim() ?? ""
-  if (jsonText === "") {
-    // Allow a JSON object as the only preceding content (possibly fenced).
-    const preceding = nonEmptyLines.slice(0, -1)
-    if (preceding.length === 0) {
-      return null
-    }
-    const joined = preceding.join("\n").trim()
-    const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(joined)
-    jsonText = (fenced?.[1] ?? joined).trim()
-  }
-
   let parsed: unknown
   try {
     parsed = JSON.parse(jsonText) as unknown
@@ -100,6 +66,90 @@ export const parsePublicationCopyResult = (
   }
 
   return { title, body }
+}
+
+const attachedJsonBeforeCandidate = (
+  rawLines: readonly string[],
+  candidateIndex: number,
+): string | null => {
+  const attached: string[] = []
+  for (let i = candidateIndex - 1; i >= 0; i -= 1) {
+    const normalized = normalizeResultCandidateLine(rawLines[i] ?? "")
+    if (normalized === "") {
+      continue
+    }
+    if (/^READY_FOR_AGENT_RESULT:/i.test(normalized)) {
+      break
+    }
+    attached.unshift(rawLines[i] ?? "")
+  }
+  if (attached.length === 0) {
+    return null
+  }
+  const joined = attached.join("\n").trim()
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(joined)
+  return (fenced?.[1] ?? joined).trim()
+}
+
+const tryParsePublicationCopyLine = (
+  line: string,
+  attachedJson: string | null,
+): PublicationCopy | null => {
+  const match = RESULT_LINE.exec(line)
+  if (match === null) {
+    return null
+  }
+
+  let jsonText = match[1]?.trim() ?? ""
+  if (jsonText === "") {
+    if (attachedJson === null || attachedJson === "") {
+      return null
+    }
+    jsonText = attachedJson
+  }
+
+  return decodePublicationCopyJson(jsonText)
+}
+
+/**
+ * Parse the last valid READY_FOR_AGENT_RESULT: PUBLICATION_COPY marker with
+ * JSON payload `{"title":"...","body":"..."}`. Accepts the JSON on the result
+ * line or as the sole attached content immediately before that candidate.
+ * Trailing prose and earlier malformed candidates are ignored. Returns null
+ * when no candidate parses as a known PUBLICATION_COPY payload.
+ */
+export const parsePublicationCopyResult = (
+  output: string,
+): PublicationCopy | null => {
+  const rawLines = output.split("\n")
+  let result: PublicationCopy | null = null
+  for (const [index, raw] of rawLines.entries()) {
+    const line = normalizeResultCandidateLine(raw)
+    if (!/^READY_FOR_AGENT_RESULT:\s*PUBLICATION_COPY\b/i.test(line)) {
+      continue
+    }
+    const parsed = tryParsePublicationCopyLine(
+      line,
+      attachedJsonBeforeCandidate(rawLines, index),
+    )
+    if (parsed !== null) {
+      result = parsed
+    }
+  }
+  return result
+}
+
+export const inspectPublicationCopyResult = (output: string) => {
+  const parsed = parsePublicationCopyResult(output)
+  if (parsed !== null) {
+    return { parsed, failure: null } as const
+  }
+  return {
+    parsed: null,
+    failure: classifyUnparsedResult(output, PUBLICATION_COPY_NAMES, {
+      payloadName: "PUBLICATION_COPY",
+    }),
+  } as const
 }
 
 const stripClosingReferences = (body: string, issueNumber: number): string => {
@@ -156,6 +206,40 @@ export const normalizePublicationCopy = (
 /** Build the full commit message from canonical publication copy. */
 export const formatPublicationCommitMessage = (copy: PublicationCopy): string =>
   `${copy.title}\n\n${copy.body}`
+
+export const PUBLICATION_COPY_SOURCE = {
+  agent: "agent",
+  harnessFallback: "harness_fallback",
+} as const
+
+export type PublicationCopySource =
+  (typeof PUBLICATION_COPY_SOURCE)[keyof typeof PUBLICATION_COPY_SOURCE]
+
+const HARNESS_FALLBACK_BODY_PREFIX = "Harness publication-copy fallback"
+
+export const isHarnessPublicationFallbackCopy = (
+  copy: PublicationCopy,
+): boolean => copy.body.startsWith(HARNESS_FALLBACK_BODY_PREFIX)
+
+/** Harness-owned copy when both publication-copy Agent Turns fail. */
+export const buildHarnessPublicationFallbackCopy = (input: {
+  readonly issueNumber: number
+  readonly issueTitle: string | null
+  readonly workItemId: string
+}): PublicationCopy => {
+  const trimmedTitle = (input.issueTitle ?? "").replace(/\s+/g, " ").trim()
+  const title =
+    trimmedTitle === ""
+      ? `Implement issue #${input.issueNumber}`
+      : trimmedTitle.slice(0, PUBLICATION_TITLE_MAX_LENGTH)
+  const body = [
+    `${HARNESS_FALLBACK_BODY_PREFIX} for Work Item ${input.workItemId}.`,
+    "The agent did not emit valid publication copy. Review the linked Issue and this commit diff.",
+    "",
+    `Closes #${input.issueNumber}`,
+  ].join("\n")
+  return { title, body }
+}
 
 /**
  * Parse a native git commit message (`%B`) into title + body for seeding

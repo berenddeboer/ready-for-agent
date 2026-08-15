@@ -295,13 +295,14 @@ export const workItem = snakeCase.table(
      */
     completionSummary: text(),
     /**
-     * Canonical agent-authored publication title for git commit subject and PR title.
-     * Null until Commit generates or seeds it from an existing commit.
+     * Canonical publication title for git commit subject and PR title.
+     * Null until Commit generates, seeds, or falls back to harness copy.
      */
     publicationTitle: text(),
     /**
-     * Canonical agent-authored publication body (Markdown) for git commit body and PR body.
-     * Includes a normalized `Closes #<issue>` reference. Null until Commit generates or seeds it.
+     * Canonical publication body (Markdown) for git commit body and PR body.
+     * Includes a normalized `Closes #<issue>` reference. Null until Commit
+     * generates, seeds, or falls back to harness copy.
      */
     publicationBody: text(),
     sessionId: text(),
