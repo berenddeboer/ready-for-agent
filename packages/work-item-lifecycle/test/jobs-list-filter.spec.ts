@@ -78,7 +78,7 @@ describe("Jobs list membership", () => {
     expect(isJobsWorkingWorkItem(retryable)).toBe(true)
   })
 
-  it("treats Investigate and Review Needs Human handoffs as retryable", () => {
+  it("treats Investigate, Review, and missing-check Needs Human handoffs as retryable", () => {
     expect(
       isRetryableNeedsHumanWorkItem(
         item(
@@ -94,6 +94,21 @@ describe("Jobs list membership", () => {
       isRetryableNeedsHumanWorkItem(
         item("needs_human", 1, "succeeded", null, "review"),
       ),
+    ).toBe(true)
+    expect(
+      isRetryableNeedsHumanWorkItem({
+        state: "needs_human",
+        failureCode: null,
+        createdAt: new Date(1),
+        stateReadyAt: new Date(1),
+        stepRuns: [
+          {
+            status: "succeeded",
+            step: "watch_pr_status_checks",
+            reasonCode: "missing_successful_checks",
+          },
+        ],
+      }),
     ).toBe(true)
     expect(
       isRetryableNeedsHumanWorkItem(

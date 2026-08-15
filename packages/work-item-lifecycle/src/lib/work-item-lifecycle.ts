@@ -65,6 +65,7 @@ import {
   CurrentStepRun,
 } from "./agent-turn-limiter.js"
 import { CloseIssueEligibilityError } from "./close-issue-errors.js"
+import { resolveDecidePrMergeAutoMerge } from "./decide-pr-merge.js"
 import {
   AbandonCleanupError,
   ActiveStepRunExistsError,
@@ -128,6 +129,9 @@ import {
   COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE,
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
+  MISSING_SUCCESSFUL_CHECKS_REASON,
+  MISSING_SUCCESSFUL_CHECKS_REASON_EXPECTED,
+  MISSING_SUCCESSFUL_CHECKS_REASON_NO_CHECKS,
   type MergeMode,
   type OperationalLifecycleStep,
   STEP_RUN_REASON,
@@ -457,6 +461,49 @@ const nextStateAfterReadyForMerge = (
   mergeMode: string | null | undefined,
 ): "decide_pr_merge" | "merge_pr" =>
   decodeMergeMode(mergeMode) === "always" ? "merge_pr" : "decide_pr_merge"
+
+const isMissingSuccessfulCheckStatus = (tag: string): boolean =>
+  tag === "no_checks" || tag === "expected"
+
+const decodeWorkItemAutoMergeOverride = (
+  value: boolean | number | null | undefined,
+): boolean | null =>
+  value === null || value === undefined ? null : Boolean(value)
+
+/**
+ * True when the Work Item would take a harness-initiated merge path:
+ * Merge Mode Always, a true Work Item override, or live Repository Auto-merge
+ * with no false override.
+ */
+const isAutonomousMergePath = (input: {
+  readonly mergeMode: string | null | undefined
+  readonly repositoryAutoMerge: boolean
+  readonly workItemAutoMergeOverride: boolean | number | null | undefined
+}): boolean => {
+  if (decodeMergeMode(input.mergeMode) === "always") {
+    return true
+  }
+  return resolveDecidePrMergeAutoMerge({
+    repositoryAutoMerge: input.repositoryAutoMerge,
+    workItemAutoMergeOverride: decodeWorkItemAutoMergeOverride(
+      input.workItemAutoMergeOverride,
+    ),
+  }).allowed
+}
+
+const missingSuccessfulChecksReason = (statusTag: string): string =>
+  statusTag === "expected"
+    ? MISSING_SUCCESSFUL_CHECKS_REASON_EXPECTED
+    : MISSING_SUCCESSFUL_CHECKS_REASON_NO_CHECKS
+
+const missingSuccessfulChecksHandoff = (statusTag: string) =>
+  ({
+    stepRunReasonCode: STEP_RUN_REASON.missingSuccessfulChecks,
+    transition: {
+      nextState: "needs_human" as const,
+      reason: missingSuccessfulChecksReason(statusTag),
+    },
+  }) as const
 
 type StepRunRow = {
   readonly id: string
@@ -2189,6 +2236,24 @@ export const makeWorkItemLifecycleLive = (
           return decodeWaitForReadyForReviewChecks(rows[0]?.wait_for_ready)
         })
 
+      /**
+       * Live Repository Auto-merge policy. Missing row → false (non-autonomous).
+       */
+      const loadRepositoryAutoMerge = (
+        repositoryId: string,
+      ): Effect.Effect<boolean, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(`SELECT auto_merge FROM repository WHERE id = ?`, [
+              repositoryId,
+            ])
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly auto_merge: number | boolean | null
+          }[]
+          const value = rows[0]?.auto_merge
+          return value === 1 || value === true
+        })
+
       const runHandler = (
         step: OperationalLifecycleStep,
         context: LifecycleStepContext,
@@ -2330,6 +2395,14 @@ export const makeWorkItemLifecycleLive = (
                     yield* loadWaitForReadyForReviewChecks(
                       workItem.repository_id,
                     )
+                  const repositoryAutoMerge = yield* loadRepositoryAutoMerge(
+                    workItem.repository_id,
+                  )
+                  const autonomousMerge = isAutonomousMergePath({
+                    mergeMode: workItem.merge_mode,
+                    repositoryAutoMerge,
+                    workItemAutoMergeOverride: workItem.auto_merge_override,
+                  })
                   const rawHeadSha =
                     "headSha" in status ? (status.headSha ?? null) : null
                   const headSha =
@@ -2547,6 +2620,12 @@ export const makeWorkItemLifecycleLive = (
                     }
                     // Known draft→ready with opt-out: reuse settled draft evidence.
                     if (skipReadyPhaseStartupWait) {
+                      if (
+                        autonomousMerge &&
+                        isMissingSuccessfulCheckStatus(status._tag)
+                      ) {
+                        return missingSuccessfulChecksHandoff(status._tag)
+                      }
                       return {
                         transition: {
                           nextState: nextStateAfterReadyForMerge(
@@ -2564,6 +2643,12 @@ export const makeWorkItemLifecycleLive = (
                           delay: requeueDelay,
                         },
                       }
+                    }
+                    if (
+                      autonomousMerge &&
+                      isMissingSuccessfulCheckStatus(status._tag)
+                    ) {
+                      return missingSuccessfulChecksHandoff(status._tag)
                     }
                     return {
                       transition: {
@@ -2642,6 +2727,14 @@ export const makeWorkItemLifecycleLive = (
                     yield* loadWaitForReadyForReviewChecks(
                       workItem.repository_id,
                     )
+                  const repositoryAutoMerge = yield* loadRepositoryAutoMerge(
+                    workItem.repository_id,
+                  )
+                  const autonomousMerge = isAutonomousMergePath({
+                    mergeMode: workItem.merge_mode,
+                    repositoryAutoMerge,
+                    workItemAutoMergeOverride: workItem.auto_merge_override,
+                  })
 
                   if (waitForReadyForReviewChecks) {
                     return {
@@ -2686,6 +2779,15 @@ export const makeWorkItemLifecycleLive = (
                     }
                   }
                   if (isSettledNonFailingPrStatus(status._tag)) {
+                    if (
+                      autonomousMerge &&
+                      isMissingSuccessfulCheckStatus(status._tag)
+                    ) {
+                      return {
+                        checkStartLastObservedIsDraft: 0 as const,
+                        ...missingSuccessfulChecksHandoff(status._tag),
+                      }
+                    }
                     return {
                       checkStartLastObservedIsDraft: 0 as const,
                       transition: {
@@ -2736,6 +2838,16 @@ export const makeWorkItemLifecycleLive = (
                     return {}
                   }
                   if (result._tag === "needs_human") {
+                    if (result.reason === "missing_successful_checks") {
+                      return {
+                        stepRunReasonCode:
+                          STEP_RUN_REASON.missingSuccessfulChecks,
+                        transition: {
+                          nextState: "needs_human" as const,
+                          reason: MISSING_SUCCESSFUL_CHECKS_REASON,
+                        },
+                      }
+                    }
                     return {
                       transition: {
                         nextState: "needs_human" as const,
@@ -6138,8 +6250,14 @@ export const makeWorkItemLifecycleLive = (
           workItem.state === "needs_human" &&
           latest?.step === "review" &&
           latest.status === "succeeded"
+        const retryableMissingSuccessfulChecksNeedsHuman =
+          workItem.state === "needs_human" &&
+          latest?.status === "succeeded" &&
+          latest.reason_code === STEP_RUN_REASON.missingSuccessfulChecks
         const retryableNeedsHumanHandoff =
-          retryableInvestigateNeedsHuman || retryableReviewFixLimitNeedsHuman
+          retryableInvestigateNeedsHuman ||
+          retryableReviewFixLimitNeedsHuman ||
+          retryableMissingSuccessfulChecksNeedsHuman
 
         if (
           isTerminalWorkItemState(workItem.state) &&
@@ -6166,7 +6284,9 @@ export const makeWorkItemLifecycleLive = (
               ? "investigate_pr_status_checks"
               : retryableReviewFixLimitNeedsHuman
                 ? "review"
-                : (workItem.state as OperationalLifecycleStep)
+                : retryableMissingSuccessfulChecksNeedsHuman
+                  ? "watch_pr_status_checks"
+                  : (workItem.state as OperationalLifecycleStep)
 
         const activeRows = (yield* sql
           .unsafe(

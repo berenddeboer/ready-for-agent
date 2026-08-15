@@ -276,7 +276,9 @@ export const isRetryableNeedsHumanWorkItem = (
   const latest = item.stepRuns.at(-1)
   return (
     latest?.status === "succeeded" &&
-    (latest.step === "investigate_pr_status_checks" || latest.step === "review")
+    (latest.step === "investigate_pr_status_checks" ||
+      latest.step === "review" ||
+      latest.reasonCode === STEP_RUN_REASON.missingSuccessfulChecks)
   )
 }
 
@@ -402,6 +404,11 @@ export const STEP_RUN_REASON = {
    * (issue #1073). Rejected before the backend CLI is spawned.
    */
   thinkingLevelNotInCatalog: "thinking_level_not_in_catalog",
+  /**
+   * Autonomous merge stopped because the Forge reported no successful
+   * status-check aggregate (`no_checks` or GitHub EXPECTED) by the deadline.
+   */
+  missingSuccessfulChecks: "missing_successful_checks",
   /** Mid-run: Review is running the reviewing OpenCode pass. */
   reviewReviewing: "review_reviewing",
   /** Mid-run: Review is applying findings with the build model. */
@@ -461,6 +468,18 @@ export const STEP_RUN_REASON = {
 
 export type StepRunReasonCode =
   (typeof STEP_RUN_REASON)[keyof typeof STEP_RUN_REASON]
+
+const AUTONOMOUS_MERGE_CHECK_REQUIREMENT =
+  "Autonomous merge requires at least one successful external check. Configure or run a check, then Retry checks; otherwise review and merge the pull request manually."
+
+/** Operator-facing reason when no checks were reported by the deadline. */
+export const MISSING_SUCCESSFUL_CHECKS_REASON_NO_CHECKS = `No status checks were reported for this pull request by the check-start deadline. ${AUTONOMOUS_MERGE_CHECK_REQUIREMENT}`
+
+/** Operator-facing reason when a required GitHub context stayed EXPECTED. */
+export const MISSING_SUCCESSFUL_CHECKS_REASON_EXPECTED = `A required GitHub status context remained EXPECTED for this pull request by the check-start deadline. ${AUTONOMOUS_MERGE_CHECK_REQUIREMENT}`
+
+/** Operator-facing reason when merge revalidation finds no successful checks. */
+export const MISSING_SUCCESSFUL_CHECKS_REASON = `No successful status checks were reported for this pull request. ${AUTONOMOUS_MERGE_CHECK_REQUIREMENT}`
 
 export type WorkItemLifecycleConfig = {
   readonly maxDurations?: LifecycleMaxDurations

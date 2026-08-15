@@ -2597,6 +2597,42 @@ describe("GitHubService live implementation", () => {
   })
 
   it.each([
+    ["an absent check rollup", null],
+    ["an EXPECTED required context", { state: "EXPECTED" }],
+  ] as const)(
+    "returns a missing-check Needs Human outcome for %s",
+    async (_description, statusCheckRollup) => {
+      const service = makeGitHubService({
+        query: () =>
+          Promise.resolve({
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    id: "PR_kwDOOpen",
+                    state: "OPEN",
+                    merged: false,
+                    headRefOid: "abc123",
+                    mergeable: "MERGEABLE",
+                    statusCheckRollup,
+                  },
+                ],
+              },
+            },
+          }) as never,
+      })
+
+      const result = await Effect.runPromise(
+        service.mergePullRequest(repository, "branch"),
+      )
+      expect(result).toMatchObject({
+        _tag: "needs_human",
+        reason: "missing_successful_checks",
+      })
+    },
+  )
+
+  it.each([
     ["non-green checks", "MERGEABLE", "FAILURE", "checks_not_green"],
     ["a conflict", "CONFLICTING", "SUCCESS", "mergeability_changed"],
     ["unknown mergeability", "UNKNOWN", "SUCCESS", "mergeability_changed"],

@@ -183,7 +183,11 @@ export const SerializedMergePullRequestResult = Schema.Union([
     message: RequiredString,
   }),
   Schema.TaggedStruct("needs_human", {
-    reason: Schema.Literals(["closed_unmerged", "merge_rejected"]),
+    reason: Schema.Literals([
+      "closed_unmerged",
+      "merge_rejected",
+      "missing_successful_checks",
+    ]),
     message: RequiredString,
   }),
 ])
