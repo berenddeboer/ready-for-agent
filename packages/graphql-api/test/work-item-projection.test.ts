@@ -5,6 +5,7 @@ import {
   statusLabel,
   workItemCanRetry,
   workItemLatestStepRunDetail,
+  workItemLatestStepRunReason,
   workItemPostponedUntil,
   workItemStatus,
   workItemStatusMessage,
@@ -448,5 +449,140 @@ describe("workItemLatestStepRunDetail", () => {
       ],
       code: "ENOENT",
     })
+  })
+})
+
+describe("operator Retry eligibility and latest Step Run reason", () => {
+  const implementFailedWithDetail = workItemWith({
+    state: "implement",
+    stepRuns: [
+      {
+        ...baseStepRun,
+        step: "implement",
+        status: "failed",
+        reasonCode: "handler_failed",
+        reasonMessage: "Claude Code failed to implement the Work Item issue",
+        reasonDetail: JSON.stringify({
+          causeChain: [
+            {
+              name: "ImplementOpenCodeError",
+              message: "Claude Code failed to implement the Work Item issue",
+            },
+            {
+              name: "Error",
+              code: "ENOENT",
+              message: 'ENOENT: Executable not found in $PATH: "claude"',
+            },
+          ],
+          code: "ENOENT",
+        }),
+      },
+    ],
+  })
+
+  const terminalIssueNotOpen = workItemWith({
+    state: "failed",
+    failureCode: "issue_not_open",
+    failureMessage: "Issue is not open",
+    stepRuns: [
+      {
+        ...baseStepRun,
+        step: "close_issue",
+        status: "failed",
+        reasonCode: "issue_not_open",
+        reasonMessage: "Issue is not open",
+        reasonDetail: null,
+      },
+    ],
+  })
+
+  const retryableNeedsHuman = workItemWith({
+    state: "needs_human",
+    failureCode: "needs_human",
+    failureMessage: "Human must review findings",
+    stepRuns: [
+      {
+        ...baseStepRun,
+        step: "review",
+        status: "succeeded",
+        reasonCode: "review_accepted",
+        reasonMessage: "Human must review findings",
+        reasonDetail: null,
+      },
+    ],
+  })
+
+  const interruptedWithoutDetail = workItemWith({
+    state: "implement",
+    stepRuns: [
+      {
+        ...baseStepRun,
+        step: "implement",
+        status: "interrupted",
+        reasonCode: "interrupted",
+        reasonMessage:
+          "Lifecycle Step was interrupted before an outcome could be established",
+        reasonDetail: null,
+      },
+    ],
+  })
+
+  test("retryable failed Step Run keeps canRetry and structured reason with detail", () => {
+    expect(workItemCanRetry(implementFailedWithDetail)).toBe(true)
+    expect(workItemStatus(implementFailedWithDetail)).toBe("failed")
+    expect(workItemLatestStepRunReason(implementFailedWithDetail)).toEqual({
+      code: "handler_failed",
+      message: "Claude Code failed to implement the Work Item issue",
+      detail: {
+        causeChain: [
+          {
+            name: "ImplementOpenCodeError",
+            message: "Claude Code failed to implement the Work Item issue",
+          },
+          {
+            name: "Error",
+            code: "ENOENT",
+            message: 'ENOENT: Executable not found in $PATH: "claude"',
+          },
+        ],
+        code: "ENOENT",
+      },
+    })
+  })
+
+  test("non-retryable terminal failure stays distinguishable from a retryable Step Run", () => {
+    expect(workItemCanRetry(terminalIssueNotOpen)).toBe(false)
+    expect(workItemStatus(terminalIssueNotOpen)).toBe("failed")
+    expect(workItemLatestStepRunReason(terminalIssueNotOpen)).toEqual({
+      code: "issue_not_open",
+      message: "Issue is not open",
+      detail: null,
+    })
+  })
+
+  test("retryable Needs Human handoff exposes canRetry and the latest Step Run reason", () => {
+    expect(workItemCanRetry(retryableNeedsHuman)).toBe(true)
+    expect(workItemStatus(retryableNeedsHuman)).toBe("needs_human")
+    expect(workItemLatestStepRunReason(retryableNeedsHuman)).toEqual({
+      code: "review_accepted",
+      message: "Human must review findings",
+      detail: null,
+    })
+  })
+
+  test("unavailable persisted detail stays null without inventing a cause chain", () => {
+    expect(workItemCanRetry(interruptedWithoutDetail)).toBe(true)
+    expect(workItemLatestStepRunReason(interruptedWithoutDetail)).toEqual({
+      code: "interrupted",
+      message:
+        "Lifecycle Step was interrupted before an outcome could be established",
+      detail: null,
+    })
+  })
+
+  test("returns null latest Step Run reason when no Step Run exists", () => {
+    expect(
+      workItemLatestStepRunReason(workItemWith({ stepRuns: [] })),
+    ).toBeNull()
   })
 })

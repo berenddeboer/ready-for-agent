@@ -6142,6 +6142,202 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("projects canRetry and latestStepRunReason for retryable, terminal, Needs Human, and missing detail", async () => {
+    const retryableFailed = {
+      ...workItem,
+      id: "wi-retryable-failed",
+      state: "implement",
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          id: "srun-retryable-failed",
+          workItemId: "wi-retryable-failed",
+          step: "implement",
+          status: "failed",
+          finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+          reasonCode: STEP_RUN_REASON.handlerFailed,
+          reasonMessage: "OpenCode failed to implement the Work Item issue",
+          reasonDetail: JSON.stringify({
+            causeChain: [
+              {
+                name: "Error",
+                code: "ENOENT",
+                message: 'ENOENT: Executable not found in $PATH: "claude"',
+              },
+            ],
+            code: "ENOENT",
+          }),
+        },
+      ],
+    } as WorkItemRecord
+    const terminalFailed = {
+      ...workItem,
+      id: "wi-terminal-failed",
+      state: "failed",
+      failureCode: "issue_not_open",
+      failureMessage: "Issue is not open",
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          id: "srun-terminal-failed",
+          workItemId: "wi-terminal-failed",
+          step: "close_issue",
+          status: "failed",
+          finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+          reasonCode: "issue_not_open",
+          reasonMessage: "Issue is not open",
+          reasonDetail: null,
+        },
+      ],
+    } as WorkItemRecord
+    const retryableNeedsHuman = {
+      ...workItem,
+      id: "wi-retryable-needs-human",
+      state: "needs_human",
+      failureCode: "needs_human",
+      failureMessage: "Human must review findings",
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          id: "srun-retryable-needs-human",
+          workItemId: "wi-retryable-needs-human",
+          step: "review",
+          status: "succeeded",
+          finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+          reasonCode: STEP_RUN_REASON.reviewAccepted,
+          reasonMessage: "Human must review findings",
+          reasonDetail: null,
+        },
+      ],
+    } as WorkItemRecord
+    const unavailableDetail = {
+      ...workItem,
+      id: "wi-unavailable-detail",
+      state: "implement",
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          id: "srun-unavailable-detail",
+          workItemId: "wi-unavailable-detail",
+          step: "implement",
+          status: "interrupted",
+          finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+          reasonCode: STEP_RUN_REASON.interrupted,
+          reasonMessage:
+            "Lifecycle Step was interrupted before an outcome could be established",
+          reasonDetail: null,
+        },
+      ],
+    } as WorkItemRecord
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () =>
+          Effect.succeed([
+            retryableFailed,
+            terminalFailed,
+            retryableNeedsHuman,
+            unavailableDetail,
+          ]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            id
+            state
+            status
+            canRetry
+            isTerminal
+            latestStepRunReason {
+              code
+              message
+              detail {
+                code
+                causeChain { name code message }
+              }
+            }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            id: "wi-retryable-failed",
+            state: "IMPLEMENT",
+            status: "FAILED",
+            canRetry: true,
+            isTerminal: false,
+            latestStepRunReason: {
+              code: "handler_failed",
+              message: "OpenCode failed to implement the Work Item issue",
+              detail: {
+                code: "ENOENT",
+                causeChain: [
+                  {
+                    name: "Error",
+                    code: "ENOENT",
+                    message: 'ENOENT: Executable not found in $PATH: "claude"',
+                  },
+                ],
+              },
+            },
+          },
+          {
+            id: "wi-terminal-failed",
+            state: "FAILED",
+            status: "FAILED",
+            canRetry: false,
+            isTerminal: true,
+            latestStepRunReason: {
+              code: "issue_not_open",
+              message: "Issue is not open",
+              detail: null,
+            },
+          },
+          {
+            id: "wi-retryable-needs-human",
+            state: "NEEDS_HUMAN",
+            status: "NEEDS_HUMAN",
+            canRetry: true,
+            isTerminal: true,
+            latestStepRunReason: {
+              code: "review_accepted",
+              message: "Human must review findings",
+              detail: null,
+            },
+          },
+          {
+            id: "wi-unavailable-detail",
+            state: "IMPLEMENT",
+            status: "INTERRUPTED",
+            canRetry: true,
+            isTerminal: false,
+            latestStepRunReason: {
+              code: "interrupted",
+              message:
+                "Lifecycle Step was interrupted before an outcome could be established",
+              detail: null,
+            },
+          },
+        ],
+      },
+    })
+  })
+
   test("keeps failed Review reasonMessage as statusMessage", async () => {
     const baseRun = workItem.stepRuns[0]!
     const failedReview = {

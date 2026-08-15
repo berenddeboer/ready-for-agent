@@ -83,6 +83,7 @@ import {
   workItemCanRetry,
   workItemIsTerminal,
   workItemLatestStepRunDetail,
+  workItemLatestStepRunReason,
   workItemPostponedUntil,
   workItemStateLabel,
   workItemStatus,
@@ -1192,6 +1193,8 @@ export const createGraphqlApi = <R>(
           },
           latestStepRunDetail: (workItem: WorkItemRecord) =>
             workItemLatestStepRunDetail(workItem),
+          latestStepRunReason: (workItem: WorkItemRecord) =>
+            workItemLatestStepRunReason(workItem),
           postponedUntil: (workItem: WorkItemRecord) =>
             workItemPostponedUntil(workItem)?.toISOString() ?? null,
           paused: (workItem: WorkItemRecord) => workItem.paused,

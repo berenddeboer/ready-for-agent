@@ -748,6 +748,26 @@ type StepRunReasonDetail {
   code: String
 }
 
+"""
+Structured latest Step Run reason for operators. Null when the Work Item has
+no Step Run yet. Individual fields may be null when that part was not
+persisted. Messages and cause-chain text are already sanitized.
+"""
+type StepRunReason {
+  """
+  Stable machine-readable Step Run reason code (for example handler_failed).
+  """
+  code: String
+  """
+  Operator-facing reason message persisted on the latest Step Run.
+  """
+  message: String
+  """
+  Bounded sanitized cause chain from reason_detail. Null when unavailable.
+  """
+  detail: StepRunReasonDetail
+}
+
 type WorkItem {
   id: ID!
   repositoryId: ID!
@@ -789,6 +809,11 @@ type WorkItem {
   already sanitized at write time and re-sanitized on read.
   """
   latestStepRunDetail: StepRunReasonDetail
+  """
+  Persisted latest Step Run reason: machine code, operator message, and
+  bounded sanitized detail when available. Null when there is no Step Run.
+  """
+  latestStepRunReason: StepRunReason
   """
   Retry deadline on the latest Postponed Step Run. Null unless the Work Item
   is Waiting for GitHub.

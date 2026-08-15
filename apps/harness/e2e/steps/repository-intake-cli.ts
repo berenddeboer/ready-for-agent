@@ -278,6 +278,12 @@ Then("status JSON includes the sentinel Work Item", async ({ world }) => {
         id: string
         issueNumber: number
         issueTitle: string | null
+        canRetry: boolean
+        latestStepRunReason: {
+          code: string | null
+          message: string | null
+          detail: unknown
+        } | null
       }>
     }>
   }
@@ -288,6 +294,11 @@ Then("status JSON includes the sentinel Work Item", async ({ world }) => {
     (row) => row.issueNumber === GITHUB_SENTINEL_ISSUE_NUMBER,
   )
   expect(sentinelRow).toBeDefined()
+  expect(typeof sentinelRow?.canRetry).toBe("boolean")
+  expect(
+    sentinelRow?.latestStepRunReason === null ||
+      typeof sentinelRow?.latestStepRunReason === "object",
+  ).toBe(true)
   const expectedId = world.intakeCreatedWorkItemId as string | undefined
   if (expectedId !== undefined) {
     expect(sentinelRow?.id).toBe(expectedId)

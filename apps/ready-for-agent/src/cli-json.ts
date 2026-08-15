@@ -1,6 +1,11 @@
 import { Runtime, Schema } from "effect"
 
-/** CLI-owned envelope version for finite operator commands. */
+/**
+ * CLI-owned envelope version for finite operator commands.
+ *
+ * Additive fields on existing documents stay on version 1. A version bump
+ * is reserved for removing or renaming fields or changing document shape.
+ */
 export const CLI_SCHEMA_VERSION = 1 as const
 
 /**
@@ -84,6 +89,28 @@ export type StatusLaneId =
   | "ATTENTION"
   | "MERGED"
 
+type StatusCauseChainLink = {
+  readonly name?: string
+  readonly code?: string
+  readonly message?: string
+}
+
+/** Bounded sanitized cause chain from the latest Step Run reason_detail. */
+type StatusStepRunReasonDetail = {
+  readonly causeChain: readonly StatusCauseChainLink[]
+  readonly code?: string
+}
+
+/**
+ * Harness-owned latest Step Run reason. Null when the Work Item has no
+ * Step Run. `detail` is null when no sanitized cause chain was persisted.
+ */
+export type StatusStepRunReason = {
+  readonly code: string | null
+  readonly message: string | null
+  readonly detail: StatusStepRunReasonDetail | null
+}
+
 export type StatusWorkItemRow = {
   readonly repository: CanonicalRepositoryIdentity
   readonly id: string
@@ -93,6 +120,8 @@ export type StatusWorkItemRow = {
   readonly status: string
   readonly statusMessage: string | null
   readonly paused: boolean
+  readonly canRetry: boolean
+  readonly latestStepRunReason: StatusStepRunReason | null
   readonly pullRequestNumber: number | null
   readonly createdAt: string
   readonly updatedAt: string

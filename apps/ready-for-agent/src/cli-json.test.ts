@@ -62,6 +62,8 @@ describe("finite CLI JSON contract", () => {
               status: "WAITING_FOR_BLOCKERS",
               statusMessage: "Waiting for blocking Issues",
               paused: false,
+              canRetry: false,
+              latestStepRunReason: null,
               pullRequestNumber: null,
               createdAt: "2026-08-12T10:00:00.000Z",
               updatedAt: "2026-08-12T10:00:00.000Z",
@@ -82,8 +84,165 @@ describe("finite CLI JSON contract", () => {
     expect(doc.repository).toBeNull()
     expect(doc.lanes).toHaveLength(6)
     expect(doc.lanes[0]?.workItems[0]?.pullRequestNumber).toBeNull()
+    expect(doc.lanes[0]?.workItems[0]?.canRetry).toBe(false)
+    expect(doc.lanes[0]?.workItems[0]?.latestStepRunReason).toBeNull()
     expect(encodeCompactJson(doc)).toContain('"command":"status"')
     expect(encodeCompactJson(doc)).toContain('"pullRequestNumber":null')
+    expect(encodeCompactJson(doc)).toContain('"canRetry":false')
+  })
+
+  test("status rows carry canRetry and latest Step Run reason additively on schemaVersion 1", () => {
+    const doc = buildStatusSuccessDocument({
+      repository: null,
+      lanes: [
+        {
+          id: "ATTENTION",
+          label: "Attention",
+          count: 4,
+          workItems: [
+            {
+              repository: {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "owner/repo",
+              },
+              id: "wi-retryable-failed",
+              issueNumber: 10,
+              issueTitle: "Retryable implement failure",
+              state: "IMPLEMENT",
+              status: "FAILED",
+              statusMessage:
+                "Claude Code failed to implement the Work Item issue",
+              paused: false,
+              canRetry: true,
+              latestStepRunReason: {
+                code: "handler_failed",
+                message: "Claude Code failed to implement the Work Item issue",
+                detail: {
+                  code: "ENOENT",
+                  causeChain: [
+                    {
+                      name: "Error",
+                      code: "ENOENT",
+                      message:
+                        'ENOENT: Executable not found in $PATH: "claude"',
+                    },
+                  ],
+                },
+              },
+              pullRequestNumber: null,
+              createdAt: "2026-08-12T10:00:00.000Z",
+              updatedAt: "2026-08-12T10:00:00.000Z",
+              stateReadyAt: "2026-08-12T10:00:00.000Z",
+              postponedUntil: null,
+            },
+            {
+              repository: {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "owner/repo",
+              },
+              id: "wi-terminal-failed",
+              issueNumber: 11,
+              issueTitle: "Terminal close failure",
+              state: "FAILED",
+              status: "FAILED",
+              statusMessage: "Issue is not open",
+              paused: false,
+              canRetry: false,
+              latestStepRunReason: {
+                code: "issue_not_open",
+                message: "Issue is not open",
+                detail: null,
+              },
+              pullRequestNumber: null,
+              createdAt: "2026-08-12T10:00:00.000Z",
+              updatedAt: "2026-08-12T10:00:00.000Z",
+              stateReadyAt: "2026-08-12T10:00:00.000Z",
+              postponedUntil: null,
+            },
+            {
+              repository: {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "owner/repo",
+              },
+              id: "wi-retryable-needs-human",
+              issueNumber: 12,
+              issueTitle: "Retryable review handoff",
+              state: "NEEDS_HUMAN",
+              status: "NEEDS_HUMAN",
+              statusMessage: "Human must review findings",
+              paused: false,
+              canRetry: true,
+              latestStepRunReason: {
+                code: "review_accepted",
+                message: "Human must review findings",
+                detail: null,
+              },
+              pullRequestNumber: null,
+              createdAt: "2026-08-12T10:00:00.000Z",
+              updatedAt: "2026-08-12T10:00:00.000Z",
+              stateReadyAt: "2026-08-12T10:00:00.000Z",
+              postponedUntil: null,
+            },
+            {
+              repository: {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "owner/repo",
+              },
+              id: "wi-unavailable-detail",
+              issueNumber: 13,
+              issueTitle: "Interrupted without detail",
+              state: "IMPLEMENT",
+              status: "INTERRUPTED",
+              statusMessage:
+                "Lifecycle Step was interrupted before an outcome could be established",
+              paused: false,
+              canRetry: true,
+              latestStepRunReason: {
+                code: "interrupted",
+                message:
+                  "Lifecycle Step was interrupted before an outcome could be established",
+                detail: null,
+              },
+              pullRequestNumber: null,
+              createdAt: "2026-08-12T10:00:00.000Z",
+              updatedAt: "2026-08-12T10:00:00.000Z",
+              stateReadyAt: "2026-08-12T10:00:00.000Z",
+              postponedUntil: null,
+            },
+          ],
+        },
+        { id: "QUEUE", label: "Queue", count: 0, workItems: [] },
+        { id: "BUILD", label: "Build", count: 0, workItems: [] },
+        { id: "REVIEW", label: "Review", count: 0, workItems: [] },
+        { id: "PR", label: "PR", count: 0, workItems: [] },
+        { id: "MERGED", label: "Merged", count: 0, workItems: [] },
+      ],
+    })
+
+    expect(doc.schemaVersion).toBe(1)
+    const rows = doc.lanes[0]?.workItems ?? []
+    expect(
+      rows.map((row) => [row.id, row.canRetry, row.state, row.status]),
+    ).toEqual([
+      ["wi-retryable-failed", true, "IMPLEMENT", "FAILED"],
+      ["wi-terminal-failed", false, "FAILED", "FAILED"],
+      ["wi-retryable-needs-human", true, "NEEDS_HUMAN", "NEEDS_HUMAN"],
+      ["wi-unavailable-detail", true, "IMPLEMENT", "INTERRUPTED"],
+    ])
+    expect(rows[0]?.latestStepRunReason?.detail?.code).toBe("ENOENT")
+    expect(rows[1]?.latestStepRunReason?.detail).toBeNull()
+    expect(rows[3]?.latestStepRunReason?.detail).toBeNull()
+    expect(encodeCompactJson(doc)).toContain('"schemaVersion":1')
+    expect(encodeCompactJson(doc)).toContain('"canRetry":true')
+    expect(encodeCompactJson(doc)).toContain('"latestStepRunReason"')
   })
 
   test("candidates success document includes issuesReconciledAt and actions", () => {
