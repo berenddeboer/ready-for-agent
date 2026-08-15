@@ -1,8 +1,14 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { Window } from "happy-dom"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { ImplementWithSubmitInput } from "../src/execution-profile-draft.js"
+import {
+  type ImplementWithSubmitInput,
+  nextImplementWithCatalogPin,
+  usablePreviewCatalog,
+} from "../src/execution-profile-draft.js"
 import {
   ImplementWithDialog,
   type ImplementWithDialogProps,
@@ -240,6 +246,174 @@ describe("ImplementWithDialog copy and catalog", () => {
     expect(html).toMatch(/type="submit"[^>]*disabled/)
     expect(html).not.toContain("Recheck")
     expect(html).not.toContain('href="/settings"')
+  })
+
+  test("a later different READY list keeps Implement enabled and membership banners down", () => {
+    const firstReady = {
+      kind: "READY",
+      models: catalogModels,
+    }
+    const pin = nextImplementWithCatalogPin({
+      pin: undefined,
+      preview: firstReady,
+    })
+    const usable = usablePreviewCatalog({
+      preview: {
+        kind: "READY",
+        models: [{ id: "other-provider-id", thinkingLevels: [] }],
+      },
+      previewFailed: false,
+      pin,
+    })
+    const html = renderToStaticMarkup(
+      <ImplementWithDialog
+        {...baseProps}
+        catalog={{
+          loading: false,
+          failed: usable.failed,
+          error: null,
+          models: usable.models,
+          warnings: [],
+        }}
+      />,
+    )
+    expect(html).not.toContain(
+      "The selected model is not in the current Agent Model catalog",
+    )
+    expect(html).not.toContain(
+      "Build effort (thinking) is unavailable — the selected model is",
+    )
+    expect(html).toContain('name="buildThinkingLevel"')
+    expect(html).toContain('value="high"')
+    expect(html).toContain(">Same as build</option>")
+    expect(html).not.toMatch(/type="submit"[^>]*\sdisabled=/)
+    expect(html).toMatch(/name="autoMerge"/)
+    expect(html).toMatch(/name="implementLocally"/)
+    expect(html).not.toMatch(/name="autoMerge"[^>]*checked/)
+    expect(html).not.toMatch(/name="implementLocally"[^>]*checked/)
+  })
+
+  test("an explicit review model from the first READY catalog stays valid after a later list", () => {
+    const firstReady = {
+      kind: "READY",
+      models: catalogModels,
+    }
+    const pin = nextImplementWithCatalogPin({
+      pin: undefined,
+      preview: firstReady,
+    })
+    const usable = usablePreviewCatalog({
+      preview: { kind: "UNAVAILABLE", models: [] },
+      previewFailed: false,
+      pin,
+    })
+    const html = renderToStaticMarkup(
+      <ImplementWithDialog
+        {...baseProps}
+        initialDraft={{
+          buildModel: "sonnet",
+          buildThinkingLevel: "high",
+          reviewSameAsBuild: false,
+          reviewModel: "haiku",
+          reviewThinkingLevel: "low",
+        }}
+        catalog={{
+          loading: false,
+          failed: usable.failed,
+          error: null,
+          models: usable.models,
+          warnings: [],
+        }}
+      />,
+    )
+    expect(html).not.toContain(
+      "The selected model is not in the current Agent Model catalog",
+    )
+    expect(html).not.toContain(
+      "Review effort (thinking) is unavailable — the selected model is",
+    )
+    expect(html).toContain('name="reviewThinkingLevel"')
+    expect(html).toContain('value="low"')
+    expect(html).not.toMatch(/type="submit"[^>]*\sdisabled=/)
+  })
+
+  test("a model never in the first READY catalog stays unavailable after pinning", () => {
+    const firstReady = {
+      kind: "READY",
+      models: catalogModels,
+    }
+    const pin = nextImplementWithCatalogPin({
+      pin: undefined,
+      preview: firstReady,
+    })
+    const usable = usablePreviewCatalog({
+      preview: {
+        kind: "READY",
+        models: [
+          ...catalogModels,
+          { id: "ghost", thinkingLevels: ["low"], name: "Ghost" },
+        ],
+      },
+      previewFailed: false,
+      pin,
+    })
+    const html = renderToStaticMarkup(
+      <ImplementWithDialog
+        {...baseProps}
+        initialDraft={{
+          buildModel: "ghost",
+          buildThinkingLevel: "low",
+          reviewSameAsBuild: true,
+        }}
+        catalog={{
+          loading: false,
+          failed: usable.failed,
+          error: null,
+          models: usable.models,
+          warnings: [],
+        }}
+      />,
+    )
+    expect(html).toContain(
+      "The selected model is not in the current Agent Model catalog. Choose a listed model.",
+    )
+    expect(html).toMatch(/type="submit"[^>]*disabled/)
+  })
+
+  test("a blank required build model stays blank when a catalog is pinned", () => {
+    const firstReady = {
+      kind: "READY",
+      models: catalogModels,
+    }
+    const pin = nextImplementWithCatalogPin({
+      pin: undefined,
+      preview: firstReady,
+    })
+    const usable = usablePreviewCatalog({
+      preview: firstReady,
+      previewFailed: false,
+      pin,
+    })
+    const html = renderToStaticMarkup(
+      <ImplementWithDialog
+        {...baseProps}
+        initialDraft={{
+          buildModel: "",
+          buildThinkingLevel: "",
+          reviewSameAsBuild: true,
+        }}
+        catalog={{
+          loading: false,
+          failed: usable.failed,
+          error: null,
+          models: usable.models,
+          warnings: [],
+        }}
+      />,
+    )
+    expect(html).toContain(">Select a build model</option>")
+    expect(html).toContain("Select a model from the Agent Model catalog.")
+    expect(html).toMatch(/type="submit"[^>]*disabled/)
   })
 
   test("an empty catalog cannot be submitted and explains why", () => {
@@ -602,6 +776,56 @@ describe("ImplementWithDialog interaction", () => {
     expect(second).not.toMatch(/name="implementLocally"[^>]*checked/)
   })
 
+  test("catalog pinning does not reset Auto-merge or Implement locally", () => {
+    const firstReady = {
+      kind: "READY",
+      models: catalogModels,
+    }
+    const pin = nextImplementWithCatalogPin({
+      pin: undefined,
+      preview: firstReady,
+    })
+    const replaced = usablePreviewCatalog({
+      preview: {
+        kind: "READY",
+        models: [{ id: "other-provider-id", thinkingLevels: [] }],
+      },
+      previewFailed: false,
+      pin,
+    })
+    const { node, rerender } = render({ initialAutoMerge: true })
+    const implementLocally = node.querySelector(
+      'input[name="implementLocally"]',
+    ) as HTMLInputElement
+    flushSync(() => {
+      toggleCheckbox(implementLocally, true)
+    })
+    rerender({
+      catalog: {
+        loading: false,
+        failed: replaced.failed,
+        error: null,
+        models: replaced.models,
+        warnings: [],
+      },
+    })
+    expect(
+      (node.querySelector('input[name="autoMerge"]') as HTMLInputElement)
+        .checked,
+    ).toBe(true)
+    expect(
+      (node.querySelector('input[name="implementLocally"]') as HTMLInputElement)
+        .checked,
+    ).toBe(true)
+    const implement = [...node.querySelectorAll("button")].find(
+      (button) => button.textContent === "Implement",
+    )
+    expect(implement?.disabled).toBe(false)
+    expect(node.textContent).not.toContain(
+      "The selected model is not in the current Agent Model catalog",
+    )
+  })
+
   test("a failed backend does not disable switching to another shipped backend", () => {
     const { node, backendChanges } = render({
       catalog: {
@@ -619,5 +843,28 @@ describe("ImplementWithDialog interaction", () => {
       fire(backend, "change")
     })
     expect(backendChanges).toEqual(["claude"])
+  })
+})
+
+describe("Implement With preview query contract", () => {
+  test("does not refetch the preview on focus, reconnect, or an interval", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../src/implement-with-issue-dialog.tsx"),
+      "utf8",
+    )
+    const previewStart = source.indexOf(
+      'queryKey: ["implement-with", "preview"',
+    )
+    expect(previewStart).toBeGreaterThan(-1)
+    const preview = source.slice(
+      previewStart,
+      source.indexOf("return result.previewAgentBackend", previewStart),
+    )
+    expect(preview).toContain("refetchOnWindowFocus: false")
+    expect(preview).toContain("refetchOnReconnect: false")
+    expect(preview).toContain("refetchInterval: false")
+    expect(preview).toContain("gcTime: 0")
+    expect(source).toContain("implementWithSessionPreview")
+    expect(source).toContain("isFetchedAfterMount")
   })
 })
