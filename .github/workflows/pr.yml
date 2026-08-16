@@ -46,7 +46,8 @@ jobs:
       - name: Install Usage CLI
         run: |
           set -euo pipefail
-          VERSION=5.1.0
+          VERSION="$(sed -n 's/^usage = "\([^"]*\)"/\1/p' mise.toml)"
+          test -n "${VERSION}"
           curl -fsSL "https://github.com/jdx/usage/releases/download/v${VERSION}/usage-x86_64-unknown-linux-musl.tar.gz" \
             | tar -xz -C /tmp
           sudo install -m 0755 /tmp/usage /usr/local/bin/usage
@@ -86,7 +87,7 @@ jobs:
       - uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
 
       - name: Quality gates
-        run: bun nx affected -t lint knip test typecheck
+        run: bun nx affected -t lint knip test typecheck check-usage
 
       # Production SSE idle-timeout (~13s) is excluded from harness:test so the
       # default suite can run with Bun --parallel. Keep the real heartbeat gate.

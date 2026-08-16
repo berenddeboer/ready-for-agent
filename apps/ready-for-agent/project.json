@@ -139,6 +139,61 @@
       ],
       "cache": true
     },
+    "check-usage-parity": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["generate-embed"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions=@ready-for-agent/source test --timeout=15000 src/cli-usage-parity.test.ts"
+      },
+      "inputs": [
+        "default",
+        "{projectRoot}/ready-for-agent.usage.kdl",
+        "{projectRoot}/src/cli-usage-parity.test.ts",
+        "{workspaceRoot}/scripts/run-pinned-usage.sh",
+        "{workspaceRoot}/mise.toml"
+      ],
+      "cache": true
+    },
+    "check-usage-completions": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["generate-embed"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions=@ready-for-agent/source test --timeout=15000 src/generate-usage-completions.test.ts"
+      },
+      "inputs": [
+        "default",
+        "{projectRoot}/scripts/generate-usage-completions.ts",
+        "{projectRoot}/src/generate-usage-completions.test.ts",
+        "{workspaceRoot}/scripts/run-pinned-usage.sh",
+        "{workspaceRoot}/mise.toml",
+        "{workspaceRoot}/README.md",
+        "{workspaceRoot}/CONTRIBUTING.md"
+      ],
+      "cache": true
+    },
+    "check-usage": {
+      "executor": "nx:noop",
+      "dependsOn": [
+        "lint-usage",
+        "check-usage-docs",
+        "check-usage-parity",
+        "check-usage-completions"
+      ],
+      "inputs": [
+        "{projectRoot}/ready-for-agent.usage.kdl",
+        "{projectRoot}/scripts/update-usage-docs.ts",
+        "{projectRoot}/scripts/generate-usage-completions.ts",
+        "{projectRoot}/src/cli-usage-parity.test.ts",
+        "{projectRoot}/src/generate-usage-completions.test.ts",
+        "{workspaceRoot}/scripts/run-pinned-usage.sh",
+        "{workspaceRoot}/mise.toml",
+        "{workspaceRoot}/README.md",
+        "{workspaceRoot}/CONTRIBUTING.md"
+      ],
+      "cache": true
+    },
     "generate-usage-completions": {
       "executor": "nx:run-commands",
       "options": {
@@ -159,7 +214,12 @@
         "cwd": "{projectRoot}",
         "command": "bash scripts/run-unit-tests.sh"
       },
-      "inputs": ["default", "^production", "{workspaceRoot}/README.md"],
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/README.md",
+        "{workspaceRoot}/CONTRIBUTING.md"
+      ],
       "cache": true,
       "dependsOn": [
         {
@@ -167,8 +227,7 @@
           "target": "generate"
         },
         "generate-embed",
-        "lint-usage",
-        "check-usage-docs"
+        "check-usage"
       ]
     },
     "packed-install-smoke": {

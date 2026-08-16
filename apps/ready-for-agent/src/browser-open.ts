@@ -159,10 +159,8 @@ export const openBrowserWhenReady = (
     // post-readiness AbortSignal check). Parks on Effect Clock so a closing
     // scope can cancel launch, and tests can assert with TestClock + interrupt.
     yield* Effect.sleep("1 millis")
-    try {
+    yield* Effect.try(() => {
       launch(platform, url)
-    } catch {
-      // Opener failure is best-effort.
-    }
+    }).pipe(Effect.ignore)
   }).pipe(Effect.ignore)
 }

@@ -49,7 +49,8 @@ jobs:
       - name: Install Usage CLI
         run: |
           set -euo pipefail
-          VERSION=5.1.0
+          VERSION="$(sed -n 's/^usage = "\([^"]*\)"/\1/p' mise.toml)"
+          test -n "${VERSION}"
           curl -fsSL "https://github.com/jdx/usage/releases/download/v${VERSION}/usage-x86_64-unknown-linux-musl.tar.gz" \
             | tar -xz -C /tmp
           sudo install -m 0755 /tmp/usage /usr/local/bin/usage
@@ -98,9 +99,9 @@ jobs:
       - name: Quality gates
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            bun nx run-many -t lint knip test typecheck
+            bun nx run-many -t lint knip test typecheck check-usage
           else
-            bun nx affected -t lint knip test typecheck
+            bun nx affected -t lint knip test typecheck check-usage
           fi
 
       # Production SSE idle-timeout (~13s) is excluded from harness:test so the

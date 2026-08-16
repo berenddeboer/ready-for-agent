@@ -27,11 +27,7 @@ Also needed to run or test the harness:
 
 [mise](https://mise.jdx.dev/) 2026.7.0 or later installs the pinned Bun, hk,
 and Usage (5.1.0) versions, then workspace dependencies (which apply the
-existing Git hooks). Usage lints the operator CLI contract:
-
-```bash
-bunx nx run ready-for-agent:lint-usage
-```
+existing Git hooks).
 
 ```bash
 git clone git@github.com:berenddeboer/ready-for-agent.git
@@ -69,6 +65,19 @@ Optional browser/e2e setup:
 (cd apps/harness && bunx playwright install --with-deps chromium)
 ```
 
+## Operator CLI Usage contract
+
+The CI Usage quality gate is one command:
+
+```bash
+bunx nx run ready-for-agent:check-usage
+```
+
+That target lints the KDL contract, compares the public Effect CLI
+inventory, checks generated README drift without rewriting the worktree,
+and verifies Usage completion behavior. It is the same gate pull-request
+and main-branch quality workflows run when `ready-for-agent` is affected.
+
 ## Operator CLI command reference
 
 The public README command reference is generated from the Usage contract
@@ -87,7 +96,7 @@ the checked-in section without rewriting the worktree:
 bunx nx run ready-for-agent:check-usage-docs
 ```
 
-`bunx nx run ready-for-agent:test` runs that check (and `lint-usage`) first.
+`bunx nx run ready-for-agent:test` runs `check-usage` first.
 
 ## Usage shell completions
 
