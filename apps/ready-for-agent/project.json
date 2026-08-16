@@ -108,13 +108,44 @@
       ],
       "cache": true
     },
+    "update-usage-docs": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source scripts/update-usage-docs.ts"
+      },
+      "inputs": [
+        "{projectRoot}/ready-for-agent.usage.kdl",
+        "{projectRoot}/scripts/update-usage-docs.ts",
+        "{workspaceRoot}/scripts/run-pinned-usage.sh",
+        "{workspaceRoot}/mise.toml",
+        "{workspaceRoot}/README.md"
+      ],
+      "outputs": ["{workspaceRoot}/README.md"],
+      "cache": false
+    },
+    "check-usage-docs": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source scripts/update-usage-docs.ts --check"
+      },
+      "inputs": [
+        "{projectRoot}/ready-for-agent.usage.kdl",
+        "{projectRoot}/scripts/update-usage-docs.ts",
+        "{workspaceRoot}/scripts/run-pinned-usage.sh",
+        "{workspaceRoot}/mise.toml",
+        "{workspaceRoot}/README.md"
+      ],
+      "cache": true
+    },
     "test": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
         "command": "bash scripts/run-unit-tests.sh"
       },
-      "inputs": ["default", "^production"],
+      "inputs": ["default", "^production", "{workspaceRoot}/README.md"],
       "cache": true,
       "dependsOn": [
         {
@@ -122,7 +153,8 @@
           "target": "generate"
         },
         "generate-embed",
-        "lint-usage"
+        "lint-usage",
+        "check-usage-docs"
       ]
     },
     "packed-install-smoke": {
