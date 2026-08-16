@@ -1,3 +1,8 @@
+declare module "*.kdl" {
+  const content: string
+  export default content
+}
+
 declare module "*.html" {
   const path: string
   export default path
