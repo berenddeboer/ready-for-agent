@@ -225,6 +225,52 @@ describe("compiled host binary ambient-auth smoke", () => {
     expect(haystack.includes("Install AWS CLI")).toBe(false)
   })
 
+  test("emits the embedded Usage contract without starting the Harness", () => {
+    const usageSpec = readFileSync(
+      join(appRoot, "ready-for-agent.usage.kdl"),
+      "utf8",
+    )
+    const env: NodeJS.ProcessEnv = {
+      HOME: process.env.HOME,
+      PATH: restrictedBin,
+      PORT: String(port),
+      SQLITE_DATABASE_PATH: databasePath,
+      KEYMAXXER_ENABLED: "false",
+      NO_BROWSER: "1",
+    }
+
+    const usage = Bun.spawnSync([binaryPath, "--usage"], {
+      cwd: runCwd,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(usage.exitCode).toBe(0)
+    expect(new TextDecoder().decode(usage.stderr)).toBe("")
+    expect(new TextDecoder().decode(usage.stdout)).toBe(usageSpec)
+    expect(existsSync(databasePath)).toBe(false)
+
+    const help = Bun.spawnSync([binaryPath, "--help"], {
+      cwd: runCwd,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(help.exitCode).toBe(0)
+    expect(new TextDecoder().decode(help.stdout)).not.toContain("--usage")
+
+    const completions = Bun.spawnSync([binaryPath, "--completions", "bash"], {
+      cwd: runCwd,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(completions.exitCode).toBe(0)
+    expect(new TextDecoder().decode(completions.stdout)).not.toContain(
+      "--usage",
+    )
+  })
+
   test("starts UI, assets, GraphQL, migrates, restarts, reports version, shuts down", async () => {
     const env: NodeJS.ProcessEnv = {
       HOME: process.env.HOME,

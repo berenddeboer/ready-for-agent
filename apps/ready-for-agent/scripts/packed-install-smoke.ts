@@ -437,8 +437,8 @@ try {
     KEYMAXXER_ENTRYPOINT: "",
   }
 
-  // Assert product PATH cannot resolve bun/nx/keymaxxer.
-  for (const forbidden of ["bun", "nx", "keymaxxer"] as const) {
+  // Assert product PATH cannot resolve bun/nx/keymaxxer/usage.
+  for (const forbidden of ["bun", "nx", "keymaxxer", "usage"] as const) {
     const which = spawnSync(
       "bash",
       ["-lc", `command -v ${forbidden} || true`],
@@ -473,6 +473,32 @@ try {
     )
   }
   log(`version ok: ${versionText}`)
+
+  log("checking --usage via installed command")
+  const usageSpec = readFileSync(
+    join(appRoot, "ready-for-agent.usage.kdl"),
+    "utf8",
+  )
+  const usageResult = spawnSync(installedBin, ["--usage"], {
+    cwd: runCwd,
+    env: productEnv,
+    encoding: "utf8",
+  })
+  stdoutLog += usageResult.stdout ?? ""
+  stderrLog += usageResult.stderr ?? ""
+  if (usageResult.status !== 0) {
+    fail(`--usage failed: ${usageResult.stderr ?? usageResult.stdout ?? ""}`)
+  }
+  if (usageResult.stderr !== "") {
+    fail(`--usage wrote to stderr: ${usageResult.stderr}`)
+  }
+  if (usageResult.stdout !== usageSpec) {
+    fail("--usage stdout did not match the checked-in Usage KDL contract")
+  }
+  if (existsSync(databasePath)) {
+    fail("--usage must not create the Harness database")
+  }
+  log("usage contract ok")
 
   const port = productEnv.PORT as string
   const base = `http://127.0.0.1:${port}`
