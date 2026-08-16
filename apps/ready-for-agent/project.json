@@ -95,6 +95,19 @@
       ],
       "cache": false
     },
+    "lint-usage": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "bash scripts/run-pinned-usage.sh lint --warnings-as-errors apps/ready-for-agent/ready-for-agent.usage.kdl"
+      },
+      "inputs": [
+        "{projectRoot}/ready-for-agent.usage.kdl",
+        "{workspaceRoot}/scripts/run-pinned-usage.sh",
+        "{workspaceRoot}/mise.toml"
+      ],
+      "cache": true
+    },
     "test": {
       "executor": "nx:run-commands",
       "options": {
@@ -108,7 +121,8 @@
           "projects": ["graphql-client"],
           "target": "generate"
         },
-        "generate-embed"
+        "generate-embed",
+        "lint-usage"
       ]
     },
     "packed-install-smoke": {

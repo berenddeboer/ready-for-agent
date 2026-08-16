@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process"
 import { readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "bun:test"
@@ -46,11 +47,12 @@ describe("contributor environment pins", () => {
   const miseToml = readWorkspace("mise.toml")
   const hkPkl = readWorkspace("hk.pkl")
 
-  it("declares a concrete Bun pin in mise.toml without machine-global bootstrap packages", () => {
+  it("declares concrete Bun, hk, and Usage pins in mise.toml without machine-global bootstrap packages", () => {
     const bunVersion = quotedAssignment(miseToml, "bun")
     expect(bunVersion).toMatch(/^\d+\.\d+\.\d+$/)
     expect(quotedAssignment(miseToml, "min_version")).toBe("2026.7.0")
     expect(quotedAssignment(miseToml, "hk")).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(quotedAssignment(miseToml, "usage")).toBe("5.1.0")
     expect(miseToml).not.toContain("[bootstrap.packages]")
   })
 
@@ -102,6 +104,32 @@ describe("contributor environment pins", () => {
       expect(block).toMatch(
         new RegExp(`bun-version:\\s*["']?${bunVersion}["']?`),
       )
+    }
+  })
+
+  it("installs the mise.toml Usage pin in quality-gate workflows", () => {
+    const usageVersion = quotedAssignment(miseToml, "usage")
+    expect(usageVersion).toBe("5.1.0")
+    const wrapper = spawnSync(
+      "bash",
+      [join(workspaceRoot, "scripts", "run-pinned-usage.sh"), "--version"],
+      { encoding: "utf8" },
+    )
+    expect(wrapper.status, wrapper.stderr).toBe(0)
+    expect(wrapper.stdout.trim()).toBe(`usage-cli ${usageVersion}`)
+
+    const qualityGateFiles = [
+      ".github/workflows/pr.yml",
+      ".github/workflows/ci-cd.yml",
+    ] as const
+    for (const relativePath of qualityGateFiles) {
+      const contents = readWorkspace(relativePath)
+      expect(contents, relativePath).toContain(`VERSION=${usageVersion}`)
+      expect(contents, relativePath).toContain("jdx/usage/releases/download/v")
+      expect(contents, relativePath).toContain(
+        "usage-x86_64-unknown-linux-musl.tar.gz",
+      )
+      expect(contents, relativePath).not.toMatch(/usage-cli@latest/i)
     }
   })
 })

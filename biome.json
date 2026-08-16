@@ -16,7 +16,8 @@
       "!!**/generated",
       "!!**/routeTree.gen.ts",
       "!!**/drizzle",
-      "!!**/prototypes/**"
+      "!!**/prototypes/**",
+      "!!**/*.kdl"
     ]
   },
   "formatter": {
