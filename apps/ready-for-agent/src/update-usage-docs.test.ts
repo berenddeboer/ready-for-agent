@@ -314,7 +314,7 @@ describe("operator CLI command-reference documentation", () => {
     expect(JSON.stringify(check?.inputs ?? [])).toContain("run-pinned-usage.sh")
 
     expect(project.targets.test?.dependsOn).toEqual(
-      expect.arrayContaining(["lint-usage", "check-usage-docs"]),
+      expect.arrayContaining(["check-usage"]),
     )
   })
 })

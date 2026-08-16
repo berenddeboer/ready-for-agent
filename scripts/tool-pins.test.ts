@@ -124,12 +124,48 @@ describe("contributor environment pins", () => {
     ] as const
     for (const relativePath of qualityGateFiles) {
       const contents = readWorkspace(relativePath)
-      expect(contents, relativePath).toContain(`VERSION=${usageVersion}`)
+      expect(contents, relativePath).toContain("Install Usage CLI")
+      expect(contents, relativePath).toContain(
+        'sed -n \'s/^usage = "\\([^"]*\\)"/\\1/p\' mise.toml',
+      )
       expect(contents, relativePath).toContain("jdx/usage/releases/download/v")
       expect(contents, relativePath).toContain(
         "usage-x86_64-unknown-linux-musl.tar.gz",
       )
       expect(contents, relativePath).not.toMatch(/usage-cli@latest/i)
+      expect(contents, relativePath).not.toMatch(/VERSION=5\.1\.0/)
     }
+  })
+
+  it("invokes check-usage from PR and main quality-gate commands", () => {
+    const pr = readWorkspace(".github/workflows/pr.yml")
+    const cicd = readWorkspace(".github/workflows/ci-cd.yml")
+    expect(pr).toMatch(
+      /bun nx affected -t lint knip test typecheck check-usage/,
+    )
+    expect(cicd).toMatch(
+      /bun nx affected -t lint knip test typecheck check-usage/,
+    )
+    expect(cicd).toMatch(
+      /bun nx run-many -t lint knip test typecheck check-usage/,
+    )
+  })
+
+  it("installs Usage only in quality-gate jobs that run Usage-dependent targets", () => {
+    const pr = readWorkspace(".github/workflows/pr.yml")
+    const cicd = readWorkspace(".github/workflows/ci-cd.yml")
+    const overnight = readWorkspace(
+      ".github/workflows/overnight-install-smoke.yml",
+    )
+
+    expect(pr.match(/name: Install Usage CLI/g)?.length).toBe(1)
+    expect(cicd.match(/name: Install Usage CLI/g)?.length).toBe(1)
+    expect(overnight).not.toContain("Install Usage CLI")
+    expect(overnight).not.toContain("jdx/usage/releases")
+
+    const packedInstallJob = cicd.slice(cicd.indexOf("packed-install:"))
+    expect(packedInstallJob).toContain("packed-install-smoke")
+    expect(packedInstallJob).not.toContain("Install Usage CLI")
+    expect(packedInstallJob).not.toContain("jdx/usage/releases")
   })
 })
