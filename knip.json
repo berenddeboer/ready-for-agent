@@ -7,7 +7,7 @@
     "nx",
     "tslib"
   ],
-  "ignoreBinaries": ["skills", "pgrep", "ps"],
+  "ignoreBinaries": ["skills", "pgrep", "ps", "usage"],
   "ignoreFiles": [".opencode/plugin/**"],
   "workspaces": {
     ".": {

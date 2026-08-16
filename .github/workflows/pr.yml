@@ -43,6 +43,16 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      - name: Install Usage CLI
+        run: |
+          set -euo pipefail
+          VERSION=5.1.0
+          curl -fsSL "https://github.com/jdx/usage/releases/download/v${VERSION}/usage-x86_64-unknown-linux-musl.tar.gz" \
+            | tar -xz -C /tmp
+          sudo install -m 0755 /tmp/usage /usr/local/bin/usage
+          usage --version
+          usage --version | grep -F "${VERSION}"
+
       # Required when affected packages run OpenCode integration tests.
       # Resolve the release via authenticated GitHub API then pin the installer
       # --version flag: bare `opencode.ai/install` hits unauthenticated

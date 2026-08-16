@@ -25,8 +25,13 @@ Also needed to run or test the harness:
 
 ## Install with mise
 
-[mise](https://mise.jdx.dev/) 2026.7.0 or later installs the pinned Bun and hk
-versions, then workspace dependencies (which apply the existing Git hooks).
+[mise](https://mise.jdx.dev/) 2026.7.0 or later installs the pinned Bun, hk,
+and Usage (5.1.0) versions, then workspace dependencies (which apply the
+existing Git hooks). Usage lints the operator CLI contract:
+
+```bash
+bunx nx run ready-for-agent:lint-usage
+```
 
 ```bash
 git clone git@github.com:berenddeboer/ready-for-agent.git
@@ -45,7 +50,8 @@ mise run setup-e2e
 ## Install without mise
 
 Install the Bun version pinned in [`mise.toml`](mise.toml) from
-[bun.sh](https://bun.sh/). Then:
+[bun.sh](https://bun.sh/). Operator CLI contract checks also need Usage
+`5.1.0` on `PATH`. Then:
 
 ```bash
 git clone git@github.com:berenddeboer/ready-for-agent.git

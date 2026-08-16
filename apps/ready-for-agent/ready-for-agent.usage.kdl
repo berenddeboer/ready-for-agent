@@ -1,0 +1,93 @@
+// Public operator CLI contract. Effect remains the runtime parser.
+// Usage 5.1.0 has no spec-level effect key; the default root invocation
+// is write, matching `start`.
+min_usage_version "5.1.0"
+name "Ready for Agent"
+bin "ready-for-agent"
+license "MIT"
+repository "https://github.com/berenddeboer/ready-for-agent"
+about "Ready for Agent operator binary (start Harness, add repositories, intake, retry, Kanban status, jump). Default invocation is write (same as start)."
+long_about #"""
+Default invocation (`ready-for-agent`) starts the Harness. It is classified write, matching `start`.
+
+Environment variables (documented here; runtime precedence and semantics are unchanged):
+
+NO_BROWSER
+  When set to a non-empty value other than 0, false, no, or off, the default start does not open a browser. The --no-open flag also disables the browser independently of this variable.
+
+HOST
+  Listen host for the default start and `start`. The --host flag wins when given. Bare --host binds all IPv4 interfaces (0.0.0.0).
+
+READY_FOR_AGENT_GRAPHQL_URL
+  GraphQL endpoint for finite commands (add, candidates, intake, retry, status, jump). Defaults to http://127.0.0.1:6056/graphql. Does not start the Harness.
+"""#
+
+flag "-h --help" help="Show help information" global=#true
+flag "-v --version" help="Show version information" global=#true
+flag "--completions <shell>" help="Print shell completion script" global=#true {
+  choices "bash" "zsh" "fish" "sh"
+}
+flag "--log-level <level>" help="Sets the minimum log level" global=#true {
+  choices "all" "trace" "debug" "info" "warn" "warning" "error" "fatal" "none"
+}
+
+// Exact root metadata switch. Hidden from docs and completions. Not an Effect flag.
+flag "--usage" hide=#true help="Reserved hidden Usage metadata switch; not an Effect-parsed flag"
+
+flag "--no-open" help="Do not open the default browser after a successful start (also: NO_BROWSER)"
+flag "--host [addr]" help="Listen host (default 127.0.0.1). Bare --host binds all interfaces (0.0.0.0); --host <addr> binds that address. Env: HOST (flag wins)" env="HOST"
+
+example "ready-for-agent" header="Default start" help="Start the Harness and open the UI"
+example "ready-for-agent start --no-open" header="Start without a browser" help="Start the Harness without opening the default browser"
+example "ready-for-agent add /path/to/local/repo" header="Add a Repository" help="Inspect a local clone and add it to the running Harness"
+example "ready-for-agent candidates github.com/owner/repo" header="Repository host/path selector" help="List Intake Candidates using a forge-host/project-path selector"
+example "ready-for-agent candidates github.com://owner/repo" header="Repository host://path selector" help="List Intake Candidates using a forge-host://project-path selector"
+example "ready-for-agent candidates owner/repo" header="Repository project-path selector" help="List Intake Candidates using a unique project path"
+example "ready-for-agent candidates repo" header="Repository final-segment selector" help="List Intake Candidates using a unique final project-path segment"
+example "ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd" header="Session continuation" help="Continue a Work Item Session by opaque backend Session ID"
+
+cmd "start" help="Start the full Harness (UI + backend); opens the browser unless --no-open / NO_BROWSER" effect="write" {
+  flag "--no-open" help="Do not open the default browser after a successful start (also: NO_BROWSER)"
+  flag "--host [addr]" help="Listen host (default 127.0.0.1). Bare --host binds all interfaces (0.0.0.0); --host <addr> binds that address. Env: HOST (flag wins)" env="HOST"
+  example "ready-for-agent start" header="Start" help="Start the Harness and open the UI"
+  example "ready-for-agent start --host" header="Start on all interfaces" help="Bind 0.0.0.0 instead of loopback"
+}
+
+cmd "add" help="Inspect and add a local repository; inferred GitLab identity can be corrected with flags" effect="write" {
+  arg "<path>" help="Path to a local git repository"
+  complete "path" type="dir"
+  flag "--forge-host <host>" help="Correct the forge host inferred from the repository remote"
+  flag "--project-path <project-path>" help="Correct the forge project path inferred from the repository remote"
+  example "ready-for-agent add /path/to/local/repo" header="Add" help="Add a local git repository"
+  example "ready-for-agent add --forge-host git.drupalcode.org --project-path project/oauth_client /path/to/local/repo" header="Correct inferred identity" help="Override the guessed GitLab host and project path"
+}
+
+cmd "candidates" help="List current Intake Candidates for one Repository as versioned JSON" effect="read" {
+  arg "<repository>" help="Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)"
+  example "ready-for-agent candidates github.com/owner/repo" header="Candidates" help="List Intake Candidates for one Repository"
+}
+
+cmd "intake" help="Start every current Intake Candidate for one Repository as versioned JSON" effect="write" {
+  arg "<repository>" help="Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)"
+  example "ready-for-agent intake github.com/owner/repo" header="Intake" help="Start every current Intake Candidate for one Repository"
+}
+
+cmd "retry" help="Retry one Work Item, the unfinished Work Item for one Issue, or every currently retryable Work Item as versioned JSON" effect="write" {
+  arg "<repository>" help="Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)"
+  flag "--issue <number>" help="Retry the current unfinished Work Item for this Issue number"
+  flag "--work-item <id>" help="Retry this Work Item after verifying it belongs to the selected Repository"
+  flag "--all-retryable" help="Retry every currently retryable Work Item in the Repository (Harness-owned canRetry)"
+  flag "--max-autonomous-retries <count>" help="Maximum accepted Autonomous Retry execution attempts per Work Item at its current Lifecycle Step (default 3; --all-retryable only)"
+  example "ready-for-agent retry github.com/owner/repo --all-retryable" header="Retry all retryable" help="Retry every currently retryable Work Item in the Repository"
+}
+
+cmd "status" help="Print the current six-lane Kanban status as versioned JSON (optional repository selector)" effect="read" {
+  arg "[repository]" help="Optional repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)"
+  example "ready-for-agent status" header="Status" help="Print Kanban status for every configured Repository"
+  example "ready-for-agent status github.com/owner/repo" header="Scoped status" help="Print Kanban status for one Repository"
+}
+
+cmd "jump" help="Continue a Work Item Session (Interactive Session Continuation)" effect="destructive" {
+  arg "<session-id>" help="Opaque backend Session ID to continue"
+  example "ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd" header="Jump" help="Continue the Work Item Session in the current terminal or tmux"
+}
