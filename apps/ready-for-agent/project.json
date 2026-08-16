@@ -139,6 +139,20 @@
       ],
       "cache": true
     },
+    "generate-usage-completions": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source scripts/generate-usage-completions.ts {args.shell}",
+        "args": "--shell=bash"
+      },
+      "inputs": [
+        "{projectRoot}/scripts/generate-usage-completions.ts",
+        "{workspaceRoot}/scripts/run-pinned-usage.sh",
+        "{workspaceRoot}/mise.toml"
+      ],
+      "cache": false
+    },
     "test": {
       "executor": "nx:run-commands",
       "options": {

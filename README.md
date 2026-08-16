@@ -610,6 +610,52 @@ ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd
 ```
 <!-- usage:end -->
 
+## Shell completions
+
+`ready-for-agent --completions` prints a standalone completion script
+for Bash, Zsh, Fish, or `sh`. That path does not require Usage:
+
+```bash
+ready-for-agent --completions bash
+ready-for-agent --completions zsh
+ready-for-agent --completions fish
+ready-for-agent --completions sh
+```
+
+Operators who install [Usage](https://usage.jdx.dev/) can generate
+richer completions for Bash, Zsh, Fish, Nushell, and PowerShell from
+`ready-for-agent --usage`. **Usage v5.1.0 is a runtime dependency** of
+those generated scripts — they call `usage complete-word` when you
+press Tab. The scripts are generated on demand and are not shipped in
+the npm packages.
+
+```bash
+# Bash (requires bash-completion)
+usage generate completion bash ready-for-agent \
+  --usage-cmd "ready-for-agent --usage" \
+  > ~/.local/share/bash-completion/completions/ready-for-agent
+
+# Zsh
+usage generate completion zsh ready-for-agent \
+  --usage-cmd "ready-for-agent --usage" \
+  > ~/.zsh/completions/_ready-for-agent
+
+# Fish
+usage generate completion fish ready-for-agent \
+  --usage-cmd "ready-for-agent --usage" \
+  > ~/.config/fish/completions/ready-for-agent.fish
+
+# Nushell
+usage generate completion nu ready-for-agent \
+  --usage-cmd "ready-for-agent --usage" \
+  > ~/.config/nushell/autoload/ready-for-agent.nu
+
+# PowerShell
+usage generate completion powershell ready-for-agent \
+  --usage-cmd "ready-for-agent --usage" \
+  > ready-for-agent.ps1
+```
+
 ## Troubleshooting
 
 ### Startup fails with "Required host tools are missing from PATH"

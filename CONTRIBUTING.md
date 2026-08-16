@@ -89,6 +89,27 @@ bunx nx run ready-for-agent:check-usage-docs
 
 `bunx nx run ready-for-agent:test` runs that check (and `lint-usage`) first.
 
+## Usage shell completions
+
+Operators who install Usage can generate richer completions from
+`ready-for-agent --usage`. The Nx target prints an on-demand script for
+one Usage-supported shell (bash, zsh, fish, nu, powershell). Generation
+embeds `ready-for-agent --usage` as the spec command; it does not read
+the source-tree KDL path. **Usage v5.1.0 is a runtime dependency** of
+the generated scripts.
+
+```bash
+bunx nx run ready-for-agent:generate-usage-completions --args="--shell=bash"
+bunx nx run ready-for-agent:generate-usage-completions --args="--shell=zsh"
+bunx nx run ready-for-agent:generate-usage-completions --args="--shell=fish"
+bunx nx run ready-for-agent:generate-usage-completions --args="--shell=nu"
+bunx nx run ready-for-agent:generate-usage-completions --args="--shell=powershell"
+```
+
+Do not check the generated scripts into the repository or ship them in
+platform packages. Users who do not install Usage keep
+`ready-for-agent --completions`.
+
 ## Running the harness
 
 ```bash
