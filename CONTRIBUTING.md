@@ -69,6 +69,26 @@ Optional browser/e2e setup:
 (cd apps/harness && bunx playwright install --with-deps chromium)
 ```
 
+## Operator CLI command reference
+
+The public README command reference is generated from the Usage contract
+in `apps/ready-for-agent/ready-for-agent.usage.kdl` with the pinned Usage
+CLI (`5.1.0`). After changing that contract, refresh only the managed
+README section:
+
+```bash
+bunx nx run ready-for-agent:update-usage-docs
+```
+
+Ordinary validation generates into temporary storage and byte-compares
+the checked-in section without rewriting the worktree:
+
+```bash
+bunx nx run ready-for-agent:check-usage-docs
+```
+
+`bunx nx run ready-for-agent:test` runs that check (and `lint-usage`) first.
+
 ## Running the harness
 
 ```bash
