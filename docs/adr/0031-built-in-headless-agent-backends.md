@@ -1,5 +1,7 @@
 # Built-in headless Agent Backends
 
+Status: accepted (Grok Agent Turns superseded by ADR 0056; other backends unchanged)
+
 Ready for Agent supports coding agents through a built-in `@ready-for-agent/agent-backend` contract with separate OpenCode and Grok Build adapter packages. The shared package owns CLI process lifecycle, sanitized environment, timeout, process-tree cancellation, and normalized errors; adapters own binary arguments, environment additions, atomic readiness/model inspection, and structured-output decoding. This deliberately supports shipped headless CLI adapters rather than ACP, SDK, runtime plugin, or operator-defined command integrations.
 
 A compatible Agent Backend must:
