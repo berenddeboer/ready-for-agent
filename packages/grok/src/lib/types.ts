@@ -3,6 +3,8 @@ import type { Duration } from "effect"
 export interface GrokLayerOptions {
   readonly binary?: string
   readonly defaultTimeout?: Duration.Input
+  readonly startupTimeout?: Duration.Input
+  readonly forceKillAfter?: Duration.Input
 }
 
 /** Installed CLI effort values advertised on every catalog model when global. */

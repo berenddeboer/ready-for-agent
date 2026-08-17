@@ -15,6 +15,7 @@ export const FAKE_ACP_ENV = {
   resumeFail: "FAKE_ACP_RESUME_FAIL",
   loadFail: "FAKE_ACP_LOAD_FAIL",
   promptDelayMs: "FAKE_ACP_PROMPT_DELAY_MS",
+  exitBeforePrompt: "FAKE_ACP_EXIT_BEFORE_PROMPT",
 } as const
 
 const defaultAssistantText = "hello from fake agent"
@@ -169,6 +170,9 @@ class FakeAcpAgent {
     client: acp.AgentContext,
   ): Promise<acp.PromptResponse> {
     this.requireAuth()
+    if (envFlag(FAKE_ACP_ENV.exitBeforePrompt)) {
+      process.exit(1)
+    }
     const session = this.sessions.get(params.sessionId)
     if (session === undefined) {
       throw acp.RequestError.invalidParams(
