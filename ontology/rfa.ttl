@@ -280,6 +280,7 @@ rfa:PrStatusChecksUnresolvedReason a rfa:StepRunReason ; skos:notation "pr_statu
 rfa:GitHubThrottledReason a rfa:StepRunReason ; skos:notation "github_throttled" .
 rfa:ThinkingLevelNotInCatalogReason a rfa:StepRunReason ; skos:notation "thinking_level_not_in_catalog" .
 rfa:MissingSuccessfulChecksReason a rfa:StepRunReason ; skos:notation "missing_successful_checks" .
+rfa:PausedReason a rfa:StepRunReason ; skos:notation "paused" .
 
 rfa:CreateWorktree
   a owl:Class, owl:NamedIndividual, skos:Concept,
@@ -640,6 +641,9 @@ rfa:Abandoned
 
 rfa:Paused
   owl:disjointWith rfa:PauseWorkItem .
+
+rfa:InterruptWorkItem
+  owl:disjointWith rfa:PauseWorkItem, rfa:Reset .
 
 rfa:WaitingForBlockers
   owl:disjointWith rfa:AdmittedWorkItem .

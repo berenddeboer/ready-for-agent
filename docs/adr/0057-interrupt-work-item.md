@@ -1,0 +1,3 @@
+# Interrupt Work Item is Pause-then-kill, not Reset
+
+Pause Work Item still does not interrupt a running Step Run (it drains). Reset already kills, but it also deletes the Work Item. Operators needed a third request: after Pause, a second action that stops the in-flight Step Run, keeps worktree and Session, clears Pause, and resumes via Retry. That request is Interrupt Work Item. Autonomous Retry must not restart a Step Run interrupted with reason paused. Rejected alternatives: making Pause itself a hard stop (loses the drain); overloading pauseWorkItem (breaks Pause idempotency); treating this as Reset without delete (glossary would lie).

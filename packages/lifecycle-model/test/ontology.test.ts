@@ -563,6 +563,11 @@ describe("full vocabulary semantic distinctions", () => {
     expectDisjoint(term("Paused"), term("PauseWorkItem"))
   })
 
+  it("keeps Interrupt Work Item distinct from Pause Work Item and Reset", () => {
+    expectDisjoint(term("InterruptWorkItem"), term("PauseWorkItem"))
+    expectDisjoint(term("InterruptWorkItem"), term("Reset"))
+  })
+
   it("keeps Waiting for blockers distinct from Admitted Work Item", () => {
     expectDisjoint(term("WaitingForBlockers"), term("AdmittedWorkItem"))
   })
