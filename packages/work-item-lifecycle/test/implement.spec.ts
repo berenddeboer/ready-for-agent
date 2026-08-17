@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
@@ -171,6 +171,17 @@ const withTemp = async (assert: (root: string) => Promise<void>) => {
   }
 }
 
+const expectedAttachmentDirectory = (workItemId: string): string =>
+  `${tmpdir().replace(/[/\\]+$/, "")}/ready-for-agent/pr-attachments/${workItemId}`
+
+const expectVisualEvidencePrompt = (prompt: string, workItemId: string) => {
+  expect(prompt).toContain(expectedAttachmentDirectory(workItemId))
+  expect(prompt).toContain("genuine before-shot")
+  expect(prompt).toContain("before any")
+  expect(prompt).toContain("after/production")
+  expect(prompt).toMatch(/[Dd]o not open or edit a pull request/)
+}
+
 const seedRepository = (
   localPath: string,
   identity: {
@@ -228,6 +239,7 @@ describe("implement", () => {
 
   it("starts OpenCode with exact issue identity, worktree, model, and variant when no prior session", () =>
     withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
       let started: {
         prompt: string
         cwd: string
@@ -242,6 +254,7 @@ describe("implement", () => {
           const repository = yield* seedRepository(root)
           return yield* implement(
             baseContext(root, {
+              workItemId,
               repositoryId: repository.id,
               issueNumber: 80,
               issueTitle: null,
@@ -282,11 +295,27 @@ describe("implement", () => {
       expect(started!.prompt).toContain("Inspect the current GitHub Issue")
       expect(started!.prompt).toContain("run appropriate verification")
       expect(started!.prompt).toContain("Do not merely propose a plan")
+      expectVisualEvidencePrompt(started!.prompt, workItemId)
       expect(continued).toBe(false)
+    }))
+
+  it("does not write attachment files into the target worktree", () =>
+    withTemp(async (root) => {
+      const before = await readdir(root)
+      await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          return yield* implement(
+            baseContext(root, { repositoryId: repository.id }),
+          )
+        }),
+      )
+      expect(await readdir(root)).toEqual(before)
     }))
 
   it("starts a GitLab Implement turn with glab credential guidance and no curl or gh guidance", () =>
     withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
       let prompt = ""
       const sessionId = await run(
         Effect.gen(function* () {
@@ -297,6 +326,7 @@ describe("implement", () => {
           })
           return yield* implement(
             baseContext(root, {
+              workItemId,
               repositoryId: repository.id,
               issueNumber: 3601642,
             }),
@@ -325,6 +355,7 @@ describe("implement", () => {
       expect(prompt).not.toContain("curl")
       expect(prompt).not.toMatch(/\bgh\b/i)
       expect(prompt).not.toContain("GitHub")
+      expectVisualEvidencePrompt(prompt, workItemId)
     }))
 
   it("uses the Repository-scoped Keymaxxer credential for a GitLab Implement turn", () =>
@@ -440,6 +471,7 @@ describe("implement", () => {
 
   it("continues the prior OpenCode Session when session_id is set (retry after interrupt)", () =>
     withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
       let continued: {
         sessionId: string
         prompt: string
@@ -455,6 +487,7 @@ describe("implement", () => {
           const repository = yield* seedRepository(root)
           return yield* implement(
             baseContext(root, {
+              workItemId,
               repositoryId: repository.id,
               issueNumber: 80,
               issueTitle: null,
@@ -498,6 +531,7 @@ describe("implement", () => {
       expect(continued!.prompt).toContain("acme/widgets#80")
       expect(continued!.prompt).toContain("interrupted or failed")
       expect(continued!.prompt).toContain("partial work")
+      expectVisualEvidencePrompt(continued!.prompt, workItemId)
     }))
 
   it("continues after a failed Build when session_id exists", () =>
