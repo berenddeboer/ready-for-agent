@@ -40,6 +40,9 @@
       "path": "./packages/agent-backend"
     },
     {
+      "path": "./packages/acp-client"
+    },
+    {
       "path": "./packages/opencode"
     },
     {
