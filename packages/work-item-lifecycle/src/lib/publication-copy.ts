@@ -3,6 +3,7 @@
  * agent-authored title/body used identically for git commit and draft PR.
  */
 
+import { basename, extname, isAbsolute, relative, resolve } from "node:path"
 import {
   classifyUnparsedResult,
   normalizeResultCandidateLine,
@@ -241,6 +242,152 @@ export const buildHarnessPublicationFallbackCopy = (input: {
   return { title, body }
 }
 
+const ATTACHMENT_IMAGE_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+}
+
+export type AttachmentImageCandidate = {
+  readonly filePath: string
+  readonly name: string
+  readonly contentType: string
+}
+
+const MARKDOWN_IMAGE =
+  /!\[(?:[^\]]*)\]\(\s*(<[^>\n]+>|[^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g
+
+const stripAngleBrackets = (destination: string): string => {
+  const trimmed = destination.trim()
+  if (trimmed.startsWith("<") && trimmed.endsWith(">") && trimmed.length >= 2) {
+    return trimmed.slice(1, -1).trim()
+  }
+  return trimmed
+}
+
+const decodeDestination = (destination: string): string => {
+  const stripped = stripAngleBrackets(destination)
+  if (stripped === "") {
+    return ""
+  }
+  try {
+    return decodeURIComponent(stripped)
+  } catch {
+    return stripped
+  }
+}
+
+const pathFromFileUrl = (destination: string): string | null => {
+  if (!destination.startsWith("file:")) {
+    return null
+  }
+  try {
+    return new URL(destination).pathname
+  } catch {
+    return destination.replace(/^file:\/\//, "")
+  }
+}
+
+const isRemoteDestination = (destination: string): boolean =>
+  /^[a-z][a-z0-9+.-]*:/i.test(destination) && !destination.startsWith("file:")
+
+const isInsideDirectory = (filePath: string, directory: string): boolean => {
+  const relativePath = relative(directory, filePath)
+  return (
+    relativePath !== "" &&
+    !relativePath.startsWith("..") &&
+    !isAbsolute(relativePath)
+  )
+}
+
+/** Destinations of markdown images in publication-copy body text, raw. */
+export const listMarkdownImageDestinations = (
+  body: string,
+): readonly string[] => {
+  const destinations: string[] = []
+  const pattern = new RegExp(MARKDOWN_IMAGE.source, MARKDOWN_IMAGE.flags)
+  for (const match of body.matchAll(pattern)) {
+    const destination = match[1]
+    if (destination !== undefined && destination !== "") {
+      destinations.push(destination)
+    }
+  }
+  return destinations
+}
+
+/**
+ * Resolve a markdown image destination to an in-directory png/jpeg/gif/webp
+ * file. Returns null for remotes, other types, or any path that escapes the
+ * Work Item attachment directory.
+ */
+export const resolveAttachmentImageCandidate = (input: {
+  readonly destination: string
+  readonly attachmentDirectory: string
+}): AttachmentImageCandidate | null => {
+  const decoded = decodeDestination(input.destination)
+  if (decoded === "") {
+    return null
+  }
+  const asFileUrl = pathFromFileUrl(decoded)
+  const localPath = asFileUrl ?? (isRemoteDestination(decoded) ? null : decoded)
+  if (localPath === null || localPath === "") {
+    return null
+  }
+
+  const attachmentRoot = resolve(input.attachmentDirectory)
+  const resolved = isAbsolute(localPath)
+    ? resolve(localPath)
+    : resolve(attachmentRoot, localPath)
+  if (!isInsideDirectory(resolved, attachmentRoot)) {
+    return null
+  }
+
+  const contentType =
+    ATTACHMENT_IMAGE_CONTENT_TYPES[extname(resolved).toLowerCase()]
+  if (contentType === undefined) {
+    return null
+  }
+  return {
+    filePath: resolved,
+    name: basename(resolved),
+    contentType,
+  }
+}
+
+/** Replace markdown image destinations whose raw text is a map key. */
+export const replaceMarkdownImageDestinations = (
+  body: string,
+  replacements: ReadonlyMap<string, string>,
+): string => {
+  if (replacements.size === 0) {
+    return body
+  }
+  const pattern = new RegExp(MARKDOWN_IMAGE.source, MARKDOWN_IMAGE.flags)
+  return body.replace(pattern, (match, destination: string) => {
+    const replacement = replacements.get(destination)
+    if (replacement === undefined) {
+      return match
+    }
+    const destIntro = match.indexOf("](")
+    if (destIntro === -1) {
+      return match
+    }
+    const afterOpen = match.slice(destIntro + 2)
+    const leadingWhitespace = /^\s*/.exec(afterOpen)?.[0] ?? ""
+    const destAt = destIntro + 2 + leadingWhitespace.length
+    if (match.slice(destAt, destAt + destination.length) !== destination) {
+      return match
+    }
+    return (
+      match.slice(0, destAt) +
+      replacement +
+      match.slice(destAt + destination.length)
+    )
+  })
+}
+
 /**
  * Parse a native git commit message (`%B`) into title + body for seeding
  * in-flight Work Items that committed before publication fields existed.
@@ -285,30 +432,38 @@ export const publicationCopyFromCommitMessage = (
   }
 }
 
-export const buildPublicationCopyPrompt = (issueNumber: number): string =>
+export const buildPublicationCopyPrompt = (input: {
+  readonly issueNumber: number
+  readonly attachmentDirectory: string
+}): string =>
   [
     "Author shared publication copy for this Work Item's git commit and draft pull request.",
     "Use the completed implementation, Review remediation, and verification already present in this Session.",
     "Write copy only. Do not edit files, stage, commit, push, open or edit pull requests, or run mutating git commands.",
+    `Work Item attachment directory: ${input.attachmentDirectory}`,
+    "You may embed markdown images that point at files in that directory. Do not invent other local paths.",
     "Produce:",
     "- title: a concise title describing the actual net change; follow this repository's conventions (for example Conventional Commits when the repo uses them).",
     "- body: useful reviewer-facing Markdown explaining why the change was needed, what changed, and meaningful verification or limitations.",
     "Do not use the Issue title alone as the publication title.",
     'Do not write a generic body such as "Automated draft pull request for GitHub issue #N".',
-    `You may mention issue #${issueNumber}; the harness will ensure the body ends with exactly one Closes #${issueNumber} reference.`,
+    `You may mention issue #${input.issueNumber}; the harness will ensure the body ends with exactly one Closes #${input.issueNumber} reference.`,
     "End your final response with exactly one machine-readable result line. Prefer putting the JSON on that line:",
     `READY_FOR_AGENT_RESULT: PUBLICATION_COPY {"title":"...","body":"..."}`,
     "The body value must be a JSON string (use \\n for newlines). The result line must be the final non-empty line.",
   ].join("\n")
 
-export const buildPublicationCopyFormatCorrectionPrompt = (
-  issueNumber: number,
-): string =>
+export const buildPublicationCopyFormatCorrectionPrompt = (input: {
+  readonly issueNumber: number
+  readonly attachmentDirectory: string
+}): string =>
   [
     "Your previous response did not report a unique final READY_FOR_AGENT_RESULT: PUBLICATION_COPY with valid JSON title and body.",
     "Reply with copy only — do not edit files, stage, commit, push, or create a pull request.",
+    `Work Item attachment directory: ${input.attachmentDirectory}`,
+    "You may embed markdown images that point at files in that directory.",
     `End with exactly one final line of the form: READY_FOR_AGENT_RESULT: PUBLICATION_COPY {"title":"...","body":"..."}`,
-    `Include a substantive title and body for the completed work on issue #${issueNumber}.`,
+    `Include a substantive title and body for the completed work on issue #${input.issueNumber}.`,
   ].join("\n")
 
 export const buildCreatePrFallbackPromptWithCopy = (input: {
