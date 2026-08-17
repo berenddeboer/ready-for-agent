@@ -20,6 +20,7 @@ import {
 } from "./implement-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
+import { workItemAttachmentDirectory } from "./work-item-attachment-directory.js"
 
 const persistSessionIdMidRun = (
   workItemId: string,
@@ -123,9 +124,18 @@ const gitLabAccessGuidance = (
     "GitLab Issue or API access",
   )
 
+const visualEvidencePromptLines = (workItemId: string): readonly string[] => {
+  const attachmentDirectory = workItemAttachmentDirectory({ workItemId })
+  return [
+    `Work Item attachment directory: ${attachmentDirectory}`,
+    "If the Issue asks for visual PR evidence, capture a genuine before-shot before any repository change, then after/production into that directory. Do not open or edit a pull request to attach images.",
+  ]
+}
+
 const buildImplementPrompt = (
   repository: AgentTurnForgeRepository,
   issueNumber: number,
+  workItemId: string,
   gitLabAuth: AgentTurnForgeAuth,
 ) =>
   repository.forge === "github"
@@ -134,6 +144,7 @@ const buildImplementPrompt = (
         "Inspect the current GitHub Issue and this Repository's agent/project instructions.",
         "Make the implementation in this worktree and run appropriate verification.",
         "Do not merely propose a plan; complete the implementation work for that exact issue.",
+        ...visualEvidencePromptLines(workItemId),
       ].join("\n")
     : [
         `Implement GitLab issue ${repository.projectPath}#${issueNumber} on ${repository.forgeHost}.`,
@@ -141,11 +152,13 @@ const buildImplementPrompt = (
         gitLabAccessGuidance(repository, gitLabAuth),
         "Make the implementation in this worktree and run appropriate verification.",
         "Do not merely propose a plan; complete the implementation work for that exact issue.",
+        ...visualEvidencePromptLines(workItemId),
       ].join("\n")
 
 const buildContinueImplementPrompt = (
   repository: AgentTurnForgeRepository,
   issueNumber: number,
+  workItemId: string,
   gitLabAuth: AgentTurnForgeAuth,
 ) =>
   repository.forge === "github"
@@ -155,6 +168,7 @@ const buildContinueImplementPrompt = (
         "Inspect the current GitHub Issue, this Repository's agent/project instructions, and any partial work already present.",
         "Finish the implementation in this worktree and run appropriate verification.",
         "Do not merely propose a plan; complete the implementation work for that exact issue.",
+        ...visualEvidencePromptLines(workItemId),
       ].join("\n")
     : [
         `Continue implementing GitLab issue ${repository.projectPath}#${issueNumber} on ${repository.forgeHost}.`,
@@ -163,6 +177,7 @@ const buildContinueImplementPrompt = (
         gitLabAccessGuidance(repository, gitLabAuth),
         "Finish the implementation in this worktree and run appropriate verification.",
         "Do not merely propose a plan; complete the implementation work for that exact issue.",
+        ...visualEvidencePromptLines(workItemId),
       ].join("\n")
 
 const priorSessionId = (context: LifecycleStepContext): string | null => {
@@ -209,8 +224,18 @@ export const implement = (context: LifecycleStepContext) =>
     const existingSessionId = priorSessionId(context)
     const prompt =
       existingSessionId === null
-        ? buildImplementPrompt(repository, issueNumber, gitLabAuth)
-        : buildContinueImplementPrompt(repository, issueNumber, gitLabAuth)
+        ? buildImplementPrompt(
+            repository,
+            issueNumber,
+            context.workItemId,
+            gitLabAuth,
+          )
+        : buildContinueImplementPrompt(
+            repository,
+            issueNumber,
+            context.workItemId,
+            gitLabAuth,
+          )
 
     const agentBackend = yield* AgentBackend
     const sql = yield* SqlClient.SqlClient
