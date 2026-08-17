@@ -16,6 +16,7 @@ import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
 import { observeAutomatedReviewEvidenceProgram } from "../bin/observe-automated-review-evidence.js"
 import { rerunWorkflowRunProgram } from "../bin/rerun-workflow-run.js"
 import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
+import { uploadUserAttachmentProgram } from "../bin/upload-user-attachment.js"
 import { githubServiceBinScriptPath } from "../bin-script-path.js"
 import type { GitHubService } from "./github-service.js"
 
@@ -39,6 +40,7 @@ export const GITHUB_HELPER_OPERATIONS = [
   "mark-pr-ready-for-review",
   "merge-pull-request",
   "rerun-workflow-run",
+  "upload-user-attachment",
   "ensure-issue-completed-with-summary",
 ] as const
 
@@ -152,6 +154,7 @@ const programs: Record<
   "mark-pr-ready-for-review": markPrReadyForReviewProgram,
   "merge-pull-request": mergePullRequestProgram,
   "rerun-workflow-run": rerunWorkflowRunProgram,
+  "upload-user-attachment": uploadUserAttachmentProgram,
   "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
 }
 

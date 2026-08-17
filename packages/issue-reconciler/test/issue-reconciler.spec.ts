@@ -204,6 +204,10 @@ const makeGitHubLayer = (
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
     rerunWorkflowRun: () => Effect.void,
+    uploadUserAttachment: () =>
+      Effect.succeed(
+        "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
+      ),
     ensureIssueCompletedWithSummary: () => Effect.void,
     listReadyIssues: ({ projectPath }) => {
       actions.push(`github:${projectPath}`)

@@ -1179,6 +1179,50 @@ describe("Keymaxxer-backed GitHub layer", () => {
     }),
   )
 
+  it.effect(
+    "uploads a user attachment through the configured repository token",
+    () =>
+      Effect.gen(function* () {
+        const runs: RunWithSecretsInput[] = []
+        const attachmentUrl =
+          "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) => {
+            runs.push(input)
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: attachmentUrl,
+              stderr: successfulHelperControl,
+            })
+          },
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        const url = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          return yield* github.uploadUserAttachment(acmeWidgets, {
+            name: "before.png",
+            contentType: "image/png",
+            filePath: "/tmp/before.png",
+          })
+        }).pipe(Effect.provide(layer))
+
+        expect(url).toBe(attachmentUrl)
+        expect(runs).toHaveLength(1)
+        expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
+        expect(runs[0]?.command).toContain("upload-user-attachment.ts")
+        expect(runs[0]?.command).toContain('"--conditions"')
+        expect(runs[0]?.command).not.toContain("ghp_")
+      }),
+  )
+
   it.effect("rejects malformed Ready Issue fields through Schema", () =>
     Effect.gen(function* () {
       const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
@@ -1748,6 +1792,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           markPullRequestReadyForReview: () => Effect.die("not used"),
           mergePullRequest: () => Effect.die("not used"),
           rerunWorkflowRun: () => Effect.die("not used"),
+          uploadUserAttachment: () => Effect.die("not used"),
           ensureIssueCompletedWithSummary: () => Effect.die("not used"),
         } satisfies GitHubServiceShape
         const scope = yield* Effect.scope
@@ -1851,6 +1896,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           markPullRequestReadyForReview: () => Effect.die("not used"),
           mergePullRequest: () => Effect.die("not used"),
           rerunWorkflowRun: () => Effect.die("not used"),
+          uploadUserAttachment: () => Effect.die("not used"),
           ensureIssueCompletedWithSummary: () => Effect.die("not used"),
         } satisfies GitHubServiceShape
         const scope = yield* Effect.scope
