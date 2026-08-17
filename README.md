@@ -13,6 +13,23 @@ Watch [the introduction
 video](https://www.youtube.com/watch?v=TK1OeQZswiQ) to see the tool in
 action.
 
+## Contents
+
+- [Quick start](#quick-start)
+- [Requirements](#requirements)
+- [Features](#features)
+- [How it works](#how-it-works)
+- [Configuration](#configuration)
+- [Command reference](#command-reference)
+- [Shell completions](#shell-completions)
+- [Troubleshooting](#troubleshooting)
+- [Frequently Asked Questions](#frequently-asked-questions)
+- [Glossary](#glossary)
+- [Architecture](#architecture)
+- [Contributing](#contributing)
+- [License](#license)
+- [Related work](#related-work)
+
 ## Quick start
 
 1. Install the [prerequisites](#requirements) and have them on your PATH:
@@ -43,7 +60,7 @@ action.
    - Click **Inspect**, confirm the forge identity, then **Confirm and
      add**.
 
-   <img src="docs/add-repository-blank-slate.png" alt="Blank slate: add a repository from the UI (Browse, path field, or CLI)" width="90%" />
+   <img src="docs/add-repository-blank-slate.png" alt="Blank slate: add a repository from the UI (Browse, path field, or CLI)" width="75%" />
 
    Advanced: once the harness is running, you can also add from a
    shell:
