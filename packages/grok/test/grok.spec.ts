@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { FAKE_ACP_ENV, fakeAcpAgentPath } from "@ready-for-agent/acp-client"
 import {
   AgentBackend,
   AgentBackendConfigError,
@@ -43,6 +44,38 @@ const captureSessionScript = [
 ].join("\n")
 
 const endEvent = `printf '%s\\n' "{\\"type\\":\\"end\\",\\"stopReason\\":\\"EndTurn\\",\\"sessionId\\":\\"$sid\\"}"`
+
+const withAcpGrok = async <A>(
+  use: (path: string) => Promise<A>,
+  script = `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
+): Promise<A> => withExecutable(script, use)
+
+const SESSION_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+
+const continueTurn = (
+  binary: string,
+  input: {
+    readonly sessionId?: string
+    readonly prompt?: string
+    readonly model?: string
+    readonly thinkingLevel?: string | null
+    readonly command?: string
+    readonly timeout?: string
+  } = {},
+) =>
+  Effect.gen(function* () {
+    const backend = yield* AgentBackend
+    return yield* backend.continueTurn({
+      cwd: process.cwd(),
+      sessionId: input.sessionId ?? SESSION_ID,
+      prompt: input.prompt ?? "second",
+      model: input.model ?? "grok-code-fast-1",
+      thinkingLevel:
+        input.thinkingLevel === undefined ? "high" : input.thinkingLevel,
+      timeout: input.timeout ?? "5 seconds",
+      ...(input.command !== undefined ? { command: input.command } : {}),
+    })
+  }).pipe(Effect.provide(provide(binary)))
 
 const startTurn = (
   binary: string,
@@ -160,38 +193,73 @@ describe("Grok AgentBackend adapter", () => {
   })
 
   it("resumes exact session and can switch model/effort", async () => {
-    await withExecutable(
-      [
-        captureSessionScript,
-        `printf '%s\\n' '{"type":"text","data":"ok"}'`,
-        endEvent,
-      ].join("\n"),
-      async (binary) => {
-        const outcome = await Effect.runPromise(
-          Effect.gen(function* () {
-            const backend = yield* AgentBackend
-            const started = yield* backend.startTurn({
-              cwd: process.cwd(),
-              prompt: "first",
-              model: "grok-4.5",
-              thinkingLevel: "low",
-              timeout: "2 seconds",
-            })
-            const continued = yield* backend.continueTurn({
-              cwd: process.cwd(),
-              sessionId: started.sessionId,
-              prompt: "second",
-              model: "grok-code-fast-1",
-              thinkingLevel: "high",
-              timeout: "2 seconds",
-            })
-            return { started, continued }
-          }).pipe(Effect.provide(provide(binary))),
-        )
+    await withAcpGrok(async (binary) => {
+      const continued = await Effect.runPromise(continueTurn(binary))
+      expect(continued.sessionId).toBe(SESSION_ID)
+      expect(continued.assistantText).toBe("hello from fake agent")
+    })
+  })
 
-        expect(outcome.continued.sessionId).toBe(outcome.started.sessionId)
-        expect(outcome.continued.assistantText).toBe("ok")
+  it("rejects a Session ID mismatch from the ACP agent", async () => {
+    const reported = "00000000-0000-4000-8000-000000000099"
+    await withAcpGrok(
+      async (binary) => {
+        const error = await Effect.runPromise(
+          continueTurn(binary).pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendMalformedOutputError)
       },
+      [
+        `export ${FAKE_ACP_ENV.reportedSessionId}=${JSON.stringify(reported)}`,
+        `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
+      ].join("\n"),
+    )
+  })
+
+  it("prefixes /review into the ACP prompt on continueTurn", async () => {
+    await withAcpGrok(
+      async (binary) => {
+        const continued = await Effect.runPromise(
+          continueTurn(binary, {
+            command: "/review",
+            prompt: "Review uncommitted worktree changes.",
+          }),
+        )
+        expect(continued.sessionId).toBe(SESSION_ID)
+        expect(continued.assistantText).toBe(
+          "/review\nReview uncommitted worktree changes.",
+        )
+      },
+      [
+        `export ${FAKE_ACP_ENV.echoPrompt}=1`,
+        `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
+      ].join("\n"),
+    )
+  })
+
+  it("passes model, thinking level, and always-approve on the ACP spawn", async () => {
+    await withAcpGrok(
+      async (binary) => {
+        const continued = await Effect.runPromise(
+          continueTurn(binary, {
+            model: "grok-code-fast-1",
+            thinkingLevel: "high",
+          }),
+        )
+        expect(continued.sessionId).toBe(SESSION_ID)
+      },
+      [
+        'case " $* " in *" --no-auto-update "*) ;; *) exit 20 ;; esac',
+        'case " $* " in *" agent "*) ;; *) exit 21 ;; esac',
+        'case " $* " in *" --no-leader "*) ;; *) exit 22 ;; esac',
+        'case " $* " in *" --always-approve "*) ;; *) exit 23 ;; esac',
+        'case " $* " in *" -m grok-code-fast-1 "*) ;; *) exit 24 ;; esac',
+        'case " $* " in *" --reasoning-effort high "*) ;; *) exit 25 ;; esac',
+        'case " $* " in *" stdio "*) ;; *) exit 26 ;; esac',
+        'case " $* " in *" --resume "*) exit 27 ;; esac',
+        'case " $* " in *" -p "*) exit 28 ;; esac',
+        `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
+      ].join("\n"),
     )
   })
 

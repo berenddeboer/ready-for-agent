@@ -167,6 +167,51 @@ describe("Effect ACP client", () => {
     expect(result.prompt._meta).toEqual(meta)
   })
 
+  it("returns the Session ID the agent reported on prompt chunks", async () => {
+    const requested = AcpSessionId.make("sess_requested")
+    const reported = "sess_reported"
+    const result = await run(
+      (connection) =>
+        Effect.gen(function* () {
+          yield* connection.initialize()
+          yield* connection.resumeSession({
+            sessionId: requested,
+            cwd: process.cwd(),
+          })
+          return yield* connection.prompt({
+            sessionId: requested,
+            prompt: "continue",
+          })
+        }),
+      { [FAKE_ACP_ENV.reportedSessionId]: reported },
+    )
+
+    expect(result.sessionId).toBe(reported)
+    expect(result.assistantText).toBe("")
+  })
+
+  it("keeps the requested Session ID when a later chunk uses another Session", async () => {
+    const requested = AcpSessionId.make("sess_requested")
+    const result = await run(
+      (connection) =>
+        Effect.gen(function* () {
+          yield* connection.initialize()
+          yield* connection.resumeSession({
+            sessionId: requested,
+            cwd: process.cwd(),
+          })
+          return yield* connection.prompt({
+            sessionId: requested,
+            prompt: "continue",
+          })
+        }),
+      { [FAKE_ACP_ENV.alsoSessionId]: "sess_subagent" },
+    )
+
+    expect(result.sessionId).toBe(requested)
+    expect(result.assistantText).toBe("hello from fake agent")
+  })
+
   it("fails with a tagged protocol error when resume is refused", async () => {
     const result = await run(
       (connection) =>

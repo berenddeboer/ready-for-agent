@@ -2,19 +2,31 @@ import { randomUUID } from "node:crypto"
 import { Duration, Effect, FileSystem, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import {
+  AcpClient,
+  type AcpClientError,
+  AcpProcessExitError,
+  AcpProtocolError,
+  AcpSessionId,
+  AcpSpawnError,
+} from "@ready-for-agent/acp-client"
+import {
   AGENT_BACKEND_IDS,
   AgentBackend,
   AgentBackendConfigError,
   type AgentBackendError,
   AgentBackendExitError,
+  AgentBackendNotInstalledError,
+  AgentBackendTimeoutError,
   type ContinueTurnInput,
   type InspectInput,
   type StartTurnInput,
+  formatAgentCliNotFoundRemediation,
   malformedOutput,
   runCliCapture,
   runCliTurn,
 } from "@ready-for-agent/agent-backend"
 import {
+  buildAcpContinueArgs,
   buildPromptBody,
   buildRunArgs,
   shouldUsePromptFile,
@@ -47,9 +59,46 @@ export class Grok {
       Effect.gen(function* () {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const fs = yield* FileSystem.FileSystem
+        const acp = yield* AcpClient
         const binary = options.binary ?? DEFAULT_BINARY
         const defaultTimeout = options.defaultTimeout ?? DEFAULT_TIMEOUT
         const environment = makeGrokEnvironment()
+
+        const mapAcpError =
+          (input: { readonly cwd: string; readonly sessionId: string }) =>
+          (error: AcpClientError | AgentBackendError): AgentBackendError => {
+            if (error instanceof AcpSpawnError) {
+              if (error.message.includes("not found")) {
+                return new AgentBackendNotInstalledError({
+                  message: formatAgentCliNotFoundRemediation({
+                    backendLabel: GROK_BACKEND.label,
+                    binary,
+                  }),
+                  backend: GROK_BACKEND,
+                  binary,
+                  cause: error,
+                })
+              }
+              return AgentBackendExitError.new({
+                exitCode: 1,
+                cwd: input.cwd,
+                sessionId: input.sessionId,
+                message: error.message,
+              })
+            }
+            if (error instanceof AcpProcessExitError) {
+              return AgentBackendExitError.new({
+                exitCode: error.exitCode ?? 1,
+                cwd: input.cwd,
+                sessionId: input.sessionId,
+                message: error.message,
+              })
+            }
+            if (error instanceof AcpProtocolError) {
+              return malformedOutput(input.cwd, error.message)
+            }
+            return error
+          }
 
         const inspect = Effect.fn("Grok.inspect")(function* (
           input: InspectInput,
@@ -108,7 +157,6 @@ export class Grok {
           readonly model: string
           readonly thinkingLevel: string | null
           readonly sessionId: string
-          readonly resume: boolean
           readonly command?: string
           readonly timeout?: Duration.Input
           readonly onSessionId?: StartTurnInput["onSessionId"]
@@ -119,7 +167,7 @@ export class Grok {
           // Scoped so an oversized prompt file lives only as long as the turn.
           Effect.scoped(
             Effect.gen(function* () {
-              if (!input.resume && input.onSessionId !== undefined) {
+              if (input.onSessionId !== undefined) {
                 yield* input.onSessionId(input.sessionId).pipe(
                   Effect.catch((error) =>
                     Effect.logWarning("Grok onSessionId observer failed", {
@@ -144,9 +192,7 @@ export class Grok {
                 cwd: input.cwd,
                 model: input.model,
                 thinkingLevel: input.thinkingLevel,
-                ...(input.resume
-                  ? { resumeSessionId: input.sessionId }
-                  : { sessionId: input.sessionId }),
+                sessionId: input.sessionId,
                 ...(promptFile !== undefined ? { promptFile } : {}),
               })
 
@@ -237,20 +283,85 @@ export class Grok {
             runTurn({
               ...input,
               sessionId: randomUUID(),
-              resume: false,
             }),
           ),
           continueTurn: Effect.fn("Grok.continueTurn")(
-            (input: ContinueTurnInput) =>
-              runTurn({
-                ...input,
-                sessionId: input.sessionId,
-                resume: true,
-              }),
+            (input: ContinueTurnInput) => {
+              const timeout = input.timeout ?? defaultTimeout
+              const timeoutMs = Duration.toMillis(timeout)
+              return Effect.scoped(
+                Effect.gen(function* () {
+                  const connection = yield* acp.connect({
+                    command: binary,
+                    args: buildAcpContinueArgs({
+                      model: input.model,
+                      thinkingLevel: input.thinkingLevel,
+                    }),
+                    cwd: input.cwd,
+                    env: environment,
+                  })
+                  const initialized = yield* connection.initialize()
+                  if (
+                    initialized.authMethods.some(
+                      (method) => method.id === "cached_token",
+                    )
+                  ) {
+                    yield* connection.authenticate({
+                      methodId: "cached_token",
+                    })
+                  }
+                  const sessionId = AcpSessionId.make(input.sessionId)
+                  yield* connection.resumeSession({
+                    sessionId,
+                    cwd: input.cwd,
+                    _meta: { yoloMode: true },
+                  })
+                  const prompt = yield* connection.prompt({
+                    sessionId,
+                    prompt: buildPromptBody({
+                      prompt: input.prompt,
+                      ...(input.command !== undefined
+                        ? { command: input.command }
+                        : {}),
+                    }),
+                    _meta: { yoloMode: true },
+                  })
+                  if (prompt.sessionId !== input.sessionId) {
+                    return yield* malformedOutput(
+                      input.cwd,
+                      `(session id mismatch: expected ${input.sessionId}, got ${prompt.sessionId})`,
+                    )
+                  }
+                  if (prompt.stopReason !== "end_turn") {
+                    return yield* AgentBackendExitError.new({
+                      exitCode: 1,
+                      cwd: input.cwd,
+                      sessionId: input.sessionId,
+                      message: `Grok Build stopped: ${prompt.stopReason}`,
+                    })
+                  }
+                  return {
+                    sessionId: input.sessionId,
+                    assistantText: prompt.assistantText,
+                  }
+                }),
+              ).pipe(
+                Effect.mapError(mapAcpError(input)),
+                Effect.timeoutOrElse({
+                  duration: timeout,
+                  orElse: () =>
+                    new AgentBackendTimeoutError({
+                      cwd: input.cwd,
+                      timeoutMs,
+                      sessionId: input.sessionId,
+                    }),
+                }),
+              )
+            },
           ),
         })
       }),
-    )
+    ).pipe(Layer.provide(AcpClient.layer))
 
   static layerForTests = () => Grok.layer({})
 }

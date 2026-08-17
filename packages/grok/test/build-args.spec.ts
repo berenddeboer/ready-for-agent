@@ -1,5 +1,9 @@
 import { PROMPT_ARGV_BYTE_LIMIT } from "@ready-for-agent/agent-backend"
-import { buildRunArgs, shouldUsePromptFile } from "../src/index.js"
+import {
+  buildAcpContinueArgs,
+  buildRunArgs,
+  shouldUsePromptFile,
+} from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
 describe("buildRunArgs", () => {
@@ -117,6 +121,42 @@ describe("buildRunArgs", () => {
     })
     expect(args[args.indexOf("-p") + 1]).toBe(prompt)
     expect(args).not.toContain("--prompt-file")
+  })
+
+  it("builds unattended ACP stdio args without headless resume", () => {
+    expect(
+      buildAcpContinueArgs({
+        model: "grok-code-fast-1",
+        thinkingLevel: "high",
+      }),
+    ).toEqual([
+      "--no-auto-update",
+      "agent",
+      "--no-leader",
+      "--always-approve",
+      "-m",
+      "grok-code-fast-1",
+      "--reasoning-effort",
+      "high",
+      "stdio",
+    ])
+  })
+
+  it("omits ACP reasoning effort when thinkingLevel is null", () => {
+    expect(
+      buildAcpContinueArgs({
+        model: "grok-4.5",
+        thinkingLevel: null,
+      }),
+    ).toEqual([
+      "--no-auto-update",
+      "agent",
+      "--no-leader",
+      "--always-approve",
+      "-m",
+      "grok-4.5",
+      "stdio",
+    ])
   })
 
   it("counts the /review prefix toward the argv byte limit", () => {

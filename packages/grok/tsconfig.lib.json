@@ -11,6 +11,9 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../acp-client/tsconfig.lib.json"
+    },
+    {
       "path": "../agent-backend/tsconfig.lib.json"
     }
   ]

@@ -78,3 +78,19 @@ export const buildRunArgs = (input: {
 
   return args
 }
+
+export const buildAcpContinueArgs = (input: {
+  readonly model: string
+  readonly thinkingLevel: string | null
+}): ReadonlyArray<string> => [
+  "--no-auto-update",
+  "agent",
+  "--no-leader",
+  "--always-approve",
+  "-m",
+  input.model,
+  ...(input.thinkingLevel !== null
+    ? ["--reasoning-effort", input.thinkingLevel]
+    : []),
+  "stdio",
+]
