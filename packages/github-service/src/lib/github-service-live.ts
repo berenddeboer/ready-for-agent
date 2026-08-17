@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
   Config,
@@ -52,24 +53,27 @@ import {
   formatTlsTrustRemediation,
   githubApiHost,
 } from "./tls-trust.js"
-import type {
-  GitHubIssueReference,
-  GitHubIssueState,
-  GitHubPullRequestLifecycleState,
-  GitHubPullRequestReference,
-  GitHubRepository,
-  MergePullRequestResult,
-  PrStatusCheckDiagnostic,
-  PrStatusCheckDiagnosticSource,
-  PrStatusCheckDiagnosticsOptions,
-  PrStatusCheckDiagnosticsRequest,
-  PullRequestCheckStatus,
-  ReadyLabeledIssue,
-  TerminalPrStatusCheck,
+import {
+  type GitHubIssueReference,
+  type GitHubIssueState,
+  type GitHubPullRequestLifecycleState,
+  type GitHubPullRequestReference,
+  type GitHubRepository,
+  type MergePullRequestResult,
+  type PrStatusCheckDiagnostic,
+  type PrStatusCheckDiagnosticSource,
+  type PrStatusCheckDiagnosticsOptions,
+  type PrStatusCheckDiagnosticsRequest,
+  type PullRequestCheckStatus,
+  type ReadyLabeledIssue,
+  type TerminalPrStatusCheck,
+  isGitHubUserAttachmentUrl,
 } from "./types.js"
 
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 const GITHUB_API_URL = "https://api.github.com"
+const GITHUB_USER_ATTACHMENTS_URL =
+  "https://uploads.github.com/user-attachments/assets"
 
 class GitHubApiRepositoryUnavailableError extends Schema.TaggedErrorClass<GitHubApiRepositoryUnavailableError>()(
   "GitHubApiRepositoryUnavailableError",
@@ -402,6 +406,17 @@ export type RerunWorkflowRun = (
   workflowRunId: number,
   signal?: AbortSignal,
 ) => Promise<void>
+
+/** Upload file bytes as a GitHub user attachment and return the CDN URL. */
+export type UploadUserAttachment = (
+  repository: { owner: string; name: string },
+  input: {
+    readonly name: string
+    readonly contentType: string
+    readonly body: Uint8Array
+  },
+  signal?: AbortSignal,
+) => Promise<string>
 
 /** Observe automated-review evidence for a green Status Check Handoff. */
 export type ObserveAutomatedReviewEvidence = (
@@ -1223,6 +1238,7 @@ const makeGitHubApiService = (
   loadPrStatusCheckDiagnostics?: LoadPrStatusCheckDiagnostics,
   rerunWorkflowRunImpl?: RerunWorkflowRun,
   observeAutomatedReviewEvidenceImpl?: ObserveAutomatedReviewEvidence,
+  uploadUserAttachmentImpl?: UploadUserAttachment,
 ): GitHubApiServiceShape => ({
   getAuthenticatedUserLogin: Effect.fn(
     "GitHubService.getAuthenticatedUserLogin",
@@ -2215,6 +2231,43 @@ const makeGitHubApiService = (
       )
     },
   ),
+  uploadUserAttachment: Effect.fn("GitHubService.uploadUserAttachment")(
+    function* (repository, input) {
+      const name = input.name.trim()
+      const contentType = input.contentType.trim()
+      const filePath = input.filePath.trim()
+      if (name === "" || contentType === "" || filePath === "") {
+        return yield* new GitHubRequestError({
+          message: `Invalid user attachment input for ${repository.owner}/${repository.name}`,
+          retryable: false,
+        })
+      }
+      if (uploadUserAttachmentImpl === undefined) {
+        return yield* new GitHubRequestError({
+          message: `User attachment upload is not configured for ${repository.owner}/${repository.name}`,
+          retryable: false,
+        })
+      }
+      const body = yield* Effect.tryPromise({
+        try: () => readFile(filePath),
+        catch: (cause) =>
+          new GitHubRequestError({
+            message: `Failed to read attachment file for ${repository.owner}/${repository.name}`,
+            cause,
+            retryable: false,
+          }),
+      })
+      return yield* githubRequest(
+        `Failed to upload user attachment for ${repository.owner}/${repository.name}`,
+        (signal) =>
+          uploadUserAttachmentImpl(
+            repository,
+            { name, contentType, body },
+            signal,
+          ),
+      )
+    },
+  ),
   ensureIssueCompletedWithSummary: Effect.fn(
     "GitHubService.ensureIssueCompletedWithSummary",
   )(function* (repository, issueNumber, workItemId, summaryMarkdown) {
@@ -2909,6 +2962,7 @@ export const makeGitHubService = (
   loadPrStatusCheckDiagnostics?: LoadPrStatusCheckDiagnostics,
   rerunWorkflowRunImpl?: RerunWorkflowRun,
   observeAutomatedReviewEvidenceImpl?: ObserveAutomatedReviewEvidence,
+  uploadUserAttachmentImpl?: UploadUserAttachment,
 ): GitHubServiceShape => {
   const service = makeGitHubApiService(
     client,
@@ -2916,6 +2970,7 @@ export const makeGitHubService = (
     loadPrStatusCheckDiagnostics,
     rerunWorkflowRunImpl,
     observeAutomatedReviewEvidenceImpl,
+    uploadUserAttachmentImpl,
   )
   const adapt = adaptRepository(service)
   return {
@@ -2940,6 +2995,7 @@ export const makeGitHubService = (
     markPullRequestReadyForReview: adapt(service.markPullRequestReadyForReview),
     mergePullRequest: adapt(service.mergePullRequest),
     rerunWorkflowRun: adapt(service.rerunWorkflowRun),
+    uploadUserAttachment: adapt(service.uploadUserAttachment),
     ensureIssueCompletedWithSummary: adapt(
       service.ensureIssueCompletedWithSummary,
     ),
@@ -3106,6 +3162,58 @@ const makeRerunWorkflowRun =
         message: `Failed to rerun workflow run ${workflowRunId} for ${repository.owner}/${repository.name}: ${response.statusText}: ${await response.text()}`,
       })
     }
+  }
+
+const makeUploadUserAttachment =
+  (token: string, fetchImpl: GitHubFetch): UploadUserAttachment =>
+  async (repository, input, signal) => {
+    const repoResponse = await fetchImpl(
+      `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}`,
+      {
+        headers: githubRestHeaders(token),
+        signal,
+      },
+    )
+    const repoBody = await readGitHubJson<{ readonly id?: unknown }>(
+      repoResponse,
+      `Failed to resolve repository id for ${repository.owner}/${repository.name}`,
+    )
+    const repositoryId = repoBody.id
+    if (!Number.isSafeInteger(repositoryId) || Number(repositoryId) <= 0) {
+      throw new GitHubHttpError({
+        statusCode: 0,
+        headers: new Headers(),
+        message: `GitHub returned an invalid repository id for ${repository.owner}/${repository.name}`,
+      })
+    }
+    const uploadUrl = new URL(GITHUB_USER_ATTACHMENTS_URL)
+    uploadUrl.searchParams.set("name", input.name)
+    uploadUrl.searchParams.set("content_type", input.contentType)
+    uploadUrl.searchParams.set("repository_id", String(repositoryId))
+    const uploadResponse = await fetchImpl(uploadUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+      body: input.body,
+      signal,
+    })
+    const uploaded = await readGitHubJson<{ readonly url?: unknown }>(
+      uploadResponse,
+      `Failed to upload user attachment for ${repository.owner}/${repository.name}`,
+    )
+    if (
+      typeof uploaded.url !== "string" ||
+      !isGitHubUserAttachmentUrl(uploaded.url)
+    ) {
+      throw new GitHubHttpError({
+        statusCode: uploadResponse.status,
+        headers: uploadResponse.headers,
+        message: `GitHub returned an invalid user attachment URL for ${repository.owner}/${repository.name}`,
+      })
+    }
+    return uploaded.url
   }
 
 const loginFromAuthor = (author: unknown): string | null => {
@@ -3764,6 +3872,7 @@ export const makeGitHubServiceFromToken = (
     makeLoadPrStatusCheckDiagnostics(token, observingFetch, fs),
     makeRerunWorkflowRun(token, observingFetch),
     makeObserveAutomatedReviewEvidence(token, observingFetch),
+    makeUploadUserAttachment(token, observingFetch),
   )
 }
 

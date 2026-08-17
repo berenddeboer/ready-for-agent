@@ -3,8 +3,11 @@ import {
   GitHubRepositoryUnavailableError,
   type GitHubRequestError,
 } from "./errors.js"
-import { GitHubService } from "./github-service.js"
+import { GitHubService, type GitHubServiceShape } from "./github-service.js"
 import type { GitHubRepository, ReadyLabeledIssue } from "./types.js"
+
+const TEST_USER_ATTACHMENT_URL =
+  "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001"
 
 interface GitHubServiceTestFixtureBase {
   readonly repository: GitHubRepository
@@ -31,6 +34,9 @@ const repositoryKey = ({ forge, forgeHost, projectPath }: GitHubRepository) =>
 
 export const makeGitHubServiceTest = (
   fixtures: readonly GitHubServiceTestFixture[],
+  options: {
+    readonly uploadUserAttachment?: GitHubServiceShape["uploadUserAttachment"]
+  } = {},
 ): Layer.Layer<GitHubService> => {
   const fixturesByRepository = new Map(
     fixtures.map((fixture) => [repositoryKey(fixture.repository), fixture]),
@@ -65,6 +71,9 @@ export const makeGitHubServiceTest = (
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
     rerunWorkflowRun: () => Effect.void,
+    uploadUserAttachment:
+      options.uploadUserAttachment ??
+      (() => Effect.succeed(TEST_USER_ATTACHMENT_URL)),
     ensureIssueCompletedWithSummary: () => Effect.void,
     listReadyIssues: (repository) => {
       const fixture = fixturesByRepository.get(repositoryKey(repository))

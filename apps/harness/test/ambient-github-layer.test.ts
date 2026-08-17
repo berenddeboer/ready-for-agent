@@ -52,6 +52,7 @@ const serviceWithList = (
   markPullRequestReadyForReview: () => Effect.die("not used"),
   mergePullRequest: () => Effect.die("not used"),
   rerunWorkflowRun: () => Effect.void,
+  uploadUserAttachment: () => Effect.die("not used"),
   ensureIssueCompletedWithSummary: () => Effect.die("not used"),
 })
 

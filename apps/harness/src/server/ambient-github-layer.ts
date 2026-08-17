@@ -370,6 +370,12 @@ export const ambientGitHubLayer = (options: {
               service.rerunWorkflowRun(repository, workflowRunId),
             ),
         ),
+        uploadUserAttachment: Effect.fn("AmbientGitHub.uploadUserAttachment")(
+          (repository, input) =>
+            authenticated("lifecycle", repository, (service) =>
+              service.uploadUserAttachment(repository, input),
+            ),
+        ),
         ensureIssueCompletedWithSummary: Effect.fn(
           "AmbientGitHub.ensureIssueCompletedWithSummary",
         )((repository, issueNumber, workItemId, summaryMarkdown) =>

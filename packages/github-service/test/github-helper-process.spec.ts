@@ -185,6 +185,49 @@ describe("GitHub helper process boundary", () => {
     expect(stderr.length).toBeGreaterThan(0)
   })
 
+  test("upload-user-attachment helper fails safely without a token (write path)", async () => {
+    const child = spawn(
+      bunExecutable(),
+      [
+        "--conditions",
+        "@ready-for-agent/source",
+        harnessServerEntry,
+        INTERNAL_GITHUB_HELPER_ARG,
+        "upload-user-attachment",
+        encode("github"),
+        encode("github.com"),
+        encode("acme/widgets"),
+        encode(
+          JSON.stringify({
+            name: "before.png",
+            contentType: "image/png",
+            filePath: "/tmp/before.png",
+          }),
+        ),
+      ],
+      {
+        env: {
+          ...process.env,
+          GITHUB_TOKEN: "",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    )
+    children.push(child)
+
+    const stderrChunks: Buffer[] = []
+    child.stderr?.on("data", (chunk: Buffer) => stderrChunks.push(chunk))
+    const exitCode = await new Promise<number | null>((resolve) => {
+      child.on("close", (code) => resolve(code))
+    })
+
+    expect(exitCode).not.toBe(0)
+    expect(exitCode).not.toBe(2)
+    const stderr = Buffer.concat(stderrChunks).toString("utf8")
+    expect(stderr.length).toBeGreaterThan(0)
+    expect(stderr).not.toMatch(/ghp_[A-Za-z0-9]+/)
+  })
+
   test("rejects unknown helper operations", async () => {
     const child = spawn(
       bunExecutable(),

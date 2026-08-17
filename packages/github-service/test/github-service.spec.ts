@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Fiber, Result } from "effect"
 import { TestClock } from "effect/testing"
@@ -1894,6 +1897,113 @@ describe("GitHubService live implementation", () => {
     expect(calls).toEqual([
       "POST https://api.github.com/repos/acme/widgets/actions/runs/29906669357/rerun",
     ])
+  })
+
+  it("uploads a user attachment and returns the GitHub CDN URL", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rfa-upload-"))
+    const filePath = join(dir, "before.png")
+    await writeFile(filePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    const calls: string[] = []
+    const service = makeGitHubServiceFromToken("token", async (input, init) => {
+      const url = String(input)
+      calls.push(`${init?.method ?? "GET"} ${url}`)
+      if (url === "https://api.github.com/repos/acme/widgets") {
+        return new Response(JSON.stringify({ id: 424242 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (
+        url.startsWith("https://uploads.github.com/user-attachments/assets?") &&
+        init?.method === "POST"
+      ) {
+        const uploaded = new URL(url)
+        expect(uploaded.searchParams.get("name")).toBe("before.png")
+        expect(uploaded.searchParams.get("content_type")).toBe("image/png")
+        expect(uploaded.searchParams.get("repository_id")).toBe("424242")
+        expect(init.headers).toMatchObject({
+          Authorization: "Bearer token",
+          Accept: "application/json",
+        })
+        expect(init.body).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+        return new Response(
+          JSON.stringify({
+            url: "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+          }),
+          { status: 201, headers: { "content-type": "application/json" } },
+        )
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    try {
+      const url = await Effect.runPromise(
+        service.uploadUserAttachment(repository, {
+          name: "before.png",
+          contentType: "image/png",
+          filePath,
+        }),
+      )
+      expect(url).toBe(
+        "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      )
+      expect(calls).toEqual([
+        "GET https://api.github.com/repos/acme/widgets",
+        "POST https://uploads.github.com/user-attachments/assets?name=before.png&content_type=image%2Fpng&repository_id=424242",
+      ])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("surfaces a 404 user-attachment upload as a request error", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rfa-upload-"))
+    const filePath = join(dir, "after.png")
+    await writeFile(filePath, Buffer.from("png"))
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = String(input)
+      if (url === "https://api.github.com/repos/acme/widgets") {
+        return new Response(JSON.stringify({ id: 7 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      return new Response("Not Found", { status: 404, statusText: "Not Found" })
+    })
+
+    try {
+      const error = await Effect.runPromise(
+        service
+          .uploadUserAttachment(repository, {
+            name: "after.png",
+            contentType: "image/png",
+            filePath,
+          })
+          .pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(GitHubRequestError)
+      expect(error.statusCode).toBe(404)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("fails when the attachment file cannot be read", async () => {
+    const service = makeGitHubServiceFromToken("token", async () => {
+      throw new Error("should not call GitHub when the file is missing")
+    })
+
+    const error = await Effect.runPromise(
+      service
+        .uploadUserAttachment(repository, {
+          name: "missing.png",
+          contentType: "image/png",
+          filePath: join(tmpdir(), "rfa-missing-attachment.png"),
+        })
+        .pipe(Effect.flip),
+    )
+    expect(error).toBeInstanceOf(GitHubRequestError)
+    expect(error.retryable).toBe(false)
   })
 
   it("loads Actions job log diagnostics for actions-job external ids", async () => {
@@ -4595,5 +4705,58 @@ describe("makeGitHubServiceTest", () => {
     expect(result).toEqual(
       Result.fail(new GitHubRepositoryUnavailableError(repository)),
     )
+  })
+
+  it("can succeed or fail a user-attachment upload", async () => {
+    const successUrl =
+      "https://github.com/user-attachments/assets/11111111-2222-3333-4444-555555555555"
+    const successLayer = makeGitHubServiceTest([{ repository, issues: [] }])
+    const defaultUrl = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github.uploadUserAttachment(repository, {
+          name: "before.png",
+          contentType: "image/png",
+          filePath: "/tmp/before.png",
+        })
+      }).pipe(Effect.provide(successLayer)),
+    )
+    expect(
+      defaultUrl.startsWith("https://github.com/user-attachments/assets/"),
+    ).toBe(true)
+
+    const uploadError = new GitHubRequestError({
+      message: "upload failed",
+      statusCode: 404,
+    })
+    const failureLayer = makeGitHubServiceTest([{ repository, issues: [] }], {
+      uploadUserAttachment: () => Effect.fail(uploadError),
+    })
+    const failed = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github.uploadUserAttachment(repository, {
+          name: "before.png",
+          contentType: "image/png",
+          filePath: "/tmp/before.png",
+        })
+      }).pipe(Effect.provide(failureLayer), Effect.result),
+    )
+    expect(failed).toEqual(Result.fail(uploadError))
+
+    const overrideLayer = makeGitHubServiceTest([{ repository, issues: [] }], {
+      uploadUserAttachment: () => Effect.succeed(successUrl),
+    })
+    const overridden = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github.uploadUserAttachment(repository, {
+          name: "before.png",
+          contentType: "image/png",
+          filePath: "/tmp/before.png",
+        })
+      }).pipe(Effect.provide(overrideLayer)),
+    )
+    expect(overridden).toBe(successUrl)
   })
 })

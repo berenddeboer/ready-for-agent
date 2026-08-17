@@ -25,6 +25,7 @@ import {
   INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
   formatGitHubHelperShellCommand,
   formatTlsTrustRemediation,
+  isGitHubUserAttachmentUrl,
   parseGitHubHelperControl,
   resolveGitHubHelperChildSpawn,
 } from "@ready-for-agent/github-service"
@@ -799,6 +800,32 @@ export const keymaxxerGitHubLayer = (options: {
               describe: "rerun workflow run",
               args: [encodeArgument(String(workflowRunId))],
               decode: decodeVoid,
+            }),
+        ),
+        uploadUserAttachment: Effect.fn("KeymaxxerGitHub.uploadUserAttachment")(
+          (repository, input) =>
+            callHelper({
+              operation: "upload-user-attachment",
+              repository,
+              describe: "upload user attachment",
+              args: [
+                encodeArgument(
+                  JSON.stringify({
+                    name: input.name,
+                    contentType: input.contentType,
+                    filePath: input.filePath,
+                  }),
+                ),
+              ],
+              decode: (stdout) => {
+                const url = stdout.trim()
+                if (!isGitHubUserAttachmentUrl(url)) {
+                  return Effect.fail(
+                    requestError(repository, "decode user attachment URL"),
+                  )
+                }
+                return Effect.succeed(url)
+              },
             }),
         ),
         ensureIssueCompletedWithSummary: Effect.fn(

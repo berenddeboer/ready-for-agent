@@ -13,6 +13,7 @@ import type {
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
   ReadyLabeledIssue,
+  UploadUserAttachmentInput,
 } from "./types.js"
 
 /**
@@ -137,6 +138,15 @@ export interface GitHubServiceShape {
     repository: GitHubRepository,
     workflowRunId: number,
   ) => Effect.Effect<void, GitHubServiceError>
+  /**
+   * Upload a local file as a GitHub user attachment and return the
+   * `https://github.com/user-attachments/assets/…` CDN URL. A pull request
+   * does not need to exist. Uses the same credential path as other mutations.
+   */
+  readonly uploadUserAttachment: (
+    repository: GitHubRepository,
+    input: UploadUserAttachmentInput,
+  ) => Effect.Effect<string, GitHubServiceError>
   /**
    * Ensure a No-Change Outcome summary is posted once (hidden Work Item marker)
    * and the Issue is closed with state reason COMPLETED. Idempotent across
