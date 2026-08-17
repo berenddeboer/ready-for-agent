@@ -29,6 +29,7 @@ import {
   parsePublicationCopyResult,
   publicationCopyFromCommitMessage,
 } from "./publication-copy.js"
+import { rewritePublicationCopyAttachments } from "./publication-copy-attachments.js"
 import {
   classifyUnparsedResult,
   formatResultLineFailure,
@@ -39,6 +40,7 @@ import {
   type LifecycleStepCompletion,
   STEP_RUN_REASON,
 } from "./types.js"
+import { workItemAttachmentDirectory } from "./work-item-attachment-directory.js"
 
 const DIAGNOSTIC_CHAR_LIMIT = 4_000
 const HARNESS_ARTIFACT_PATHSPEC = ":(exclude).ready-for-agent"
@@ -323,10 +325,16 @@ const generatePublicationCopy = (
     const timeout =
       context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.commit
 
+    const attachmentDirectory = workItemAttachmentDirectory({
+      workItemId: context.workItemId,
+    })
     const first = yield* agentBackend
       .continueTurn({
         sessionId,
-        prompt: buildPublicationCopyPrompt(context.issueNumber),
+        prompt: buildPublicationCopyPrompt({
+          issueNumber: context.issueNumber,
+          attachmentDirectory,
+        }),
         cwd: worktreePath,
         model: context.model,
         thinkingLevel: context.thinkingLevel,
@@ -352,9 +360,10 @@ const generatePublicationCopy = (
       const correction = yield* agentBackend
         .continueTurn({
           sessionId,
-          prompt: buildPublicationCopyFormatCorrectionPrompt(
-            context.issueNumber,
-          ),
+          prompt: buildPublicationCopyFormatCorrectionPrompt({
+            issueNumber: context.issueNumber,
+            attachmentDirectory,
+          }),
           cwd: worktreePath,
           model: context.model,
           thinkingLevel: context.thinkingLevel,
@@ -407,7 +416,12 @@ const generatePublicationCopy = (
       } as const
     }
 
-    return { copy, source: PUBLICATION_COPY_SOURCE.agent } as const
+    const rewritten = yield* rewritePublicationCopyAttachments({
+      copy,
+      workItemId: context.workItemId,
+      repositoryId: context.repositoryId,
+    })
+    return { copy: rewritten, source: PUBLICATION_COPY_SOURCE.agent } as const
   })
 
 const resolvePublicationCopy = (

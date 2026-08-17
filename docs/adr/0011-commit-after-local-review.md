@@ -2,7 +2,7 @@
 
 After Review succeeds and before Create PR, the Commit Lifecycle Step creates the local git commit for the Work Item's changes.
 
-Before any native git mutation, Commit continues the Implement Session with the build model for one dedicated publication-copy Agent Turn. That turn authors shared title and body only (no file edits, stage, commit, push, or PR). The harness normalizes a single `Closes #<issue>` reference, bounds lengths, rejects blank or generic placeholder copy, and persists the canonical title and body on the Work Item before `git add` / `git commit`. Operator Retry and process restarts reuse persisted copy rather than generating again. When a commit already exists and copy is absent (in-flight upgrade), Commit seeds copy from the actual head commit message.
+Before any native git mutation, Commit continues the Implement Session with the build model for one dedicated publication-copy Agent Turn. That turn authors shared title and body only (no file edits, stage, commit, push, or PR) and may embed markdown images that point at files in the Work Item attachment directory. The harness normalizes a single `Closes #<issue>` reference, bounds lengths, rejects blank or generic placeholder copy, then uploads in-directory png/jpeg/gif/webp image files and rewrites those links to GitHub user-attachment URLs before persisting the canonical title and body on the Work Item. That post-rewrite body is the canonical publication copy used by `git add` / `git commit` and later by Create PR. Upload or rewrite failure is best-effort and does not fail Commit. Operator Retry and process restarts reuse persisted copy rather than generating or uploading again. When a commit already exists and copy is absent (in-flight upgrade), Commit seeds copy from the actual head commit message.
 
 The harness then attempts the operation natively: it stages only implementation changes in the isolated worktree (excluding harness-owned diagnostic artifacts such as `.ready-for-agent/`), commits with the canonical title as subject and body as the commit body, and runs `git commit` without bypassing hooks. Success is the postcondition that a commit exists after the Work Item starting commit and intended changes are committed—not process exit alone.
 
@@ -14,5 +14,5 @@ Commit remains a conditionally agent-using Lifecycle Step (not Agent-free) becau
 
 - Commit remains a first-class Lifecycle Step between Review and Create PR.
 - Pre-Commit remains harness-run git validation with an OpenCode fix loop on hook failure; Commit's primary commit path is harness-owned with agent repair only when needed.
-- Publication title and body are agent-authored once, persisted on the Work Item, and shared with Create PR.
+- Publication title and body are agent-authored once, rewritten for in-directory images, persisted on the Work Item, and shared with Create PR as that post-rewrite body.
 - Hooks and repository commit-message policy are never bypassed on the native path; agents still own unconventional message repair when policy rejects the authored copy.

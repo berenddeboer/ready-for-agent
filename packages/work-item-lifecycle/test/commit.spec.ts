@@ -1,8 +1,9 @@
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Layer } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import {
   AgentBackend,
   AgentBackendExitError,
@@ -10,7 +11,12 @@ import {
   AgentBackendTimeoutError,
 } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
-import { DbServiceLive } from "@ready-for-agent/db-service"
+import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
+import {
+  GitHubRequestError,
+  type GitHubService,
+  type UploadUserAttachmentInput,
+} from "@ready-for-agent/github-service"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CommitInvalidWorktreeContextError,
@@ -26,6 +32,10 @@ import {
   normalizePublicationCopy,
   parsePublicationCopyResult,
   publicationCopyFromCommitMessage,
+  replaceMarkdownImageDestinations,
+  resolveAttachmentImageCandidate,
+  stubGitHubServiceLayer,
+  workItemAttachmentDirectory,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -97,17 +107,86 @@ const stubOpencode = (impl: {
   )
 
 const run = <A, E>(
-  effect: Effect.Effect<A, E, AgentBackend>,
+  effect: Effect.Effect<A, E, AgentBackend | GitHubService>,
   opencodeLayer: Layer.Layer<AgentBackend, never, never> = stubOpencode({}),
+  githubLayer: Layer.Layer<
+    GitHubService,
+    never,
+    never
+  > = stubGitHubServiceLayer(),
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(opencodeLayer),
+      Effect.provide(githubLayer),
       Effect.provide(DbServiceLive),
       Effect.provide(DatabaseTest),
       Effect.provide(PlatformLayer),
     ),
   )
+
+const seedRepository = (
+  localPath: string,
+  identity: {
+    readonly forge: "github" | "gitlab"
+    readonly forgeHost: string
+    readonly projectPath: string
+  } = {
+    forge: "github",
+    forgeHost: "github.com",
+    projectPath: "acme/widgets",
+  },
+) =>
+  Effect.gen(function* () {
+    const db = yield* DbService
+    return yield* db.addRepository({
+      ...identity,
+      localPath,
+      isBare: false,
+    })
+  })
+
+const seedWorkItem = (input: {
+  readonly workItemId: string
+  readonly repositoryId: string
+  readonly issueNumber: number
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const now = Date.now()
+    yield* sql.unsafe(
+      `INSERT INTO work_item (
+         id, repository_id, issue_number, state, state_ready_at, worktree_path,
+         session_id, failure_code, failure_message, created_at, updated_at
+       ) VALUES (?, ?, ?,
+         'commit', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+      [input.workItemId, input.repositoryId, input.issueNumber, now, now, now],
+    )
+  })
+
+const readPersistedPublicationCopy = (workItemId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = (yield* sql.unsafe(
+      `SELECT publication_title, publication_body FROM work_item WHERE id = ? LIMIT 1`,
+      [workItemId],
+    )) as readonly {
+      readonly publication_title: string | null
+      readonly publication_body: string | null
+    }[]
+    return rows[0] ?? null
+  })
+
+const writeAttachment = async (
+  workItemId: string,
+  name: string,
+  contents = "png-bytes",
+): Promise<string> => {
+  const filePath = join(workItemAttachmentDirectory({ workItemId }), name)
+  await mkdir(dirname(filePath), { recursive: true })
+  await writeFile(filePath, contents)
+  return filePath
+}
 
 const git = async (cwd: string, args: ReadonlyArray<string>) => {
   const proc = Bun.spawn(["git", "-c", "commit.gpgsign=false", ...args], {
@@ -297,6 +376,125 @@ describe("publication copy parsing", () => {
   })
 })
 
+describe("publication copy image rewrite", () => {
+  const attachmentDirectory =
+    "/tmp/ready-for-agent/pr-attachments/wi-01HABCDEFGHJKMNPQRSTVWXYZ"
+
+  it("refuses destinations outside the attachment directory", () => {
+    expect(
+      resolveAttachmentImageCandidate({
+        destination: "/etc/passwd",
+        attachmentDirectory,
+      }),
+    ).toBeNull()
+    expect(
+      resolveAttachmentImageCandidate({
+        destination: "../escape.png",
+        attachmentDirectory,
+      }),
+    ).toBeNull()
+    expect(
+      resolveAttachmentImageCandidate({
+        destination: `${attachmentDirectory}/../outside.png`,
+        attachmentDirectory,
+      }),
+    ).toBeNull()
+  })
+
+  it("accepts png jpeg gif webp inside the directory and rejects other types", () => {
+    expect(
+      resolveAttachmentImageCandidate({
+        destination: `${attachmentDirectory}/shot.png`,
+        attachmentDirectory,
+      }),
+    ).toEqual({
+      filePath: `${attachmentDirectory}/shot.png`,
+      name: "shot.png",
+      contentType: "image/png",
+    })
+    expect(
+      resolveAttachmentImageCandidate({
+        destination: "shot.jpg",
+        attachmentDirectory,
+      }),
+    ).toEqual({
+      filePath: `${attachmentDirectory}/shot.jpg`,
+      name: "shot.jpg",
+      contentType: "image/jpeg",
+    })
+    expect(
+      resolveAttachmentImageCandidate({
+        destination: "shot.jpeg",
+        attachmentDirectory,
+      })?.contentType,
+    ).toBe("image/jpeg")
+    expect(
+      resolveAttachmentImageCandidate({
+        destination: "shot.gif",
+        attachmentDirectory,
+      })?.contentType,
+    ).toBe("image/gif")
+    expect(
+      resolveAttachmentImageCandidate({
+        destination: "shot.webp",
+        attachmentDirectory,
+      })?.contentType,
+    ).toBe("image/webp")
+    expect(
+      resolveAttachmentImageCandidate({
+        destination: "notes.txt",
+        attachmentDirectory,
+      }),
+    ).toBeNull()
+    expect(
+      resolveAttachmentImageCandidate({
+        destination: "https://example.com/shot.png",
+        attachmentDirectory,
+      }),
+    ).toBeNull()
+  })
+
+  it("leaves unknown and remote image links unchanged", () => {
+    const body = [
+      "See ![remote](https://example.com/a.png)",
+      "and ![cdn](https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee).",
+    ].join("\n")
+    expect(replaceMarkdownImageDestinations(body, new Map())).toBe(body)
+    expect(
+      replaceMarkdownImageDestinations(
+        body,
+        new Map([
+          [
+            "/tmp/x.png",
+            "https://github.com/user-attachments/assets/11111111-2222-3333-4444-555555555555",
+          ],
+        ]),
+      ),
+    ).toBe(body)
+  })
+
+  it("replaces the destination when alt or title repeats the local path", () => {
+    const localPath =
+      "/tmp/ready-for-agent/pr-attachments/wi-01HABCDEFGHJKMNPQRSTVWXYZ/shot.png"
+    const url =
+      "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    const replacements = new Map([[localPath, url]])
+
+    expect(
+      replaceMarkdownImageDestinations(
+        `![${localPath}](${localPath})`,
+        replacements,
+      ),
+    ).toBe(`![${localPath}](${url})`)
+    expect(
+      replaceMarkdownImageDestinations(
+        `![before](${localPath} "${localPath}")`,
+        replacements,
+      ),
+    ).toBe(`![before](${url} "${localPath}")`)
+  })
+})
+
 describe("commit", () => {
   it("rejects missing worktree context", async () => {
     const error = await run(commit(baseContext(null)).pipe(Effect.flip))
@@ -371,12 +569,14 @@ describe("commit", () => {
 
   it("generates publication copy once then commits natively", () =>
     withTempRepo(async (root, startingOid) => {
+      const workItemId = makeWorkItemId()
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
       const prompts: string[] = []
 
       const result = await run(
         commit(
           baseContext(root, {
+            workItemId,
             startingCommitOid: startingOid,
             issueNumber: 42,
             sessionId: "ses_from_implement",
@@ -403,9 +603,331 @@ describe("commit", () => {
       expect(prompts).toHaveLength(1)
       expect(prompts[0]).toContain("Write copy only")
       expect(prompts[0]).toContain("Do not edit files")
+      expect(prompts[0]).toContain(workItemAttachmentDirectory({ workItemId }))
+      expect(prompts[0]).toMatch(/[Dd]o not .*open or edit pull requests/)
       const message = await git(root, ["log", "-1", "--pretty=%B"])
       expect(message.startsWith("feat: implement widgets")).toBe(true)
       expect(message).toContain("Closes #42")
+    }))
+
+  it("uploads in-directory publication images once and persists the rewritten body", () =>
+    withTempRepo(async (root, startingOid) => {
+      const workItemId = makeWorkItemId()
+      const imagePath = await writeAttachment(workItemId, "before.png")
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      const attachmentUrl =
+        "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+      const uploads: UploadUserAttachmentInput[] = []
+
+      const result = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          yield* seedWorkItem({
+            workItemId,
+            repositoryId: repository.id,
+            issueNumber: 42,
+          })
+          const outcome = yield* commit(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              startingCommitOid: startingOid,
+              issueNumber: 42,
+              sessionId: "ses_from_implement",
+            }),
+          )
+          const persisted = yield* readPersistedPublicationCopy(workItemId)
+          return { outcome, persisted }
+        }),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: publicationResultLine(
+                "feat: implement widgets",
+                `Implements widgets as requested.\n\n![before](${imagePath})\n\nVerified via local checks.`,
+              ),
+            }),
+        }),
+        stubGitHubServiceLayer({
+          uploadUserAttachment: (_repository, input) => {
+            uploads.push(input)
+            return Effect.succeed(attachmentUrl)
+          },
+        }),
+      )
+
+      expect(result.outcome.completion).toBe("native")
+      expect(result.outcome.publicationTitle).toBe("feat: implement widgets")
+      expect(result.outcome.publicationBody).toContain(attachmentUrl)
+      expect(result.outcome.publicationBody).not.toContain(imagePath)
+      expect(result.outcome.publicationBody.endsWith("Closes #42")).toBe(true)
+      expect(result.persisted?.publication_title).toBe(
+        result.outcome.publicationTitle,
+      )
+      expect(result.persisted?.publication_body).toBe(
+        result.outcome.publicationBody,
+      )
+      expect(uploads).toEqual([
+        {
+          name: "before.png",
+          contentType: "image/png",
+          filePath: imagePath,
+        },
+      ])
+      const message = await git(root, ["log", "-1", "--pretty=%B"])
+      expect(message).toBe(
+        formatPublicationCommitMessage({
+          title: result.outcome.publicationTitle,
+          body: result.outcome.publicationBody,
+        }),
+      )
+      expect(message).toContain(attachmentUrl)
+      expect(message).not.toContain(imagePath)
+      expect(message).toContain("Closes #42")
+    }))
+
+  it("reuses already-persisted copy without a second upload or copy turn", () =>
+    withTempRepo(async (root, startingOid) => {
+      const workItemId = makeWorkItemId()
+      const imagePath = await writeAttachment(workItemId, "before.png")
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      const persistedBody = `Already rewritten with ![before](https://github.com/user-attachments/assets/bbbbbbbb-cccc-dddd-eeee-ffffffffffff) and leftover ![local](${imagePath}).\n\nCloses #91`
+      let continued = 0
+      let uploads = 0
+
+      const result = await run(
+        commit(
+          baseContext(root, {
+            workItemId,
+            startingCommitOid: startingOid,
+            publicationTitle: "feat: already persisted",
+            publicationBody: persistedBody,
+          }),
+        ),
+        stubOpencode({
+          continueTurn: () => {
+            continued += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "",
+            })
+          },
+        }),
+        stubGitHubServiceLayer({
+          uploadUserAttachment: () => {
+            uploads += 1
+            return Effect.succeed(
+              "https://github.com/user-attachments/assets/11111111-2222-3333-4444-555555555555",
+            )
+          },
+        }),
+      )
+
+      expect(result.completion).toBe("native")
+      expect(continued).toBe(0)
+      expect(uploads).toBe(0)
+      expect(result.publicationBody).toBe(persistedBody)
+      const message = await git(root, ["log", "-1", "--pretty=%B"])
+      expect(message).toContain(persistedBody)
+    }))
+
+  it("leaves a missing or failed upload image alone and still commits", () =>
+    withTempRepo(async (root, startingOid) => {
+      const workItemId = makeWorkItemId()
+      const missingPath = join(
+        workItemAttachmentDirectory({ workItemId }),
+        "missing.png",
+      )
+      const failedPath = await writeAttachment(workItemId, "failed.png")
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+
+      const result = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          return yield* commit(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              startingCommitOid: startingOid,
+              issueNumber: 42,
+              sessionId: "ses_from_implement",
+            }),
+          )
+        }),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: publicationResultLine(
+                "feat: implement widgets",
+                `Shows ![missing](${missingPath}) and ![failed](${failedPath}).`,
+              ),
+            }),
+        }),
+        stubGitHubServiceLayer({
+          uploadUserAttachment: () =>
+            Effect.fail(
+              new GitHubRequestError({
+                message: "Failed to upload user attachment",
+                statusCode: 404,
+                retryable: false,
+              }),
+            ),
+        }),
+      )
+
+      expect(result.completion).toBe("native")
+      expect(result.publicationBody).toContain(missingPath)
+      expect(result.publicationBody).toContain(failedPath)
+      expect(result.publicationBody).toContain("Closes #42")
+      const message = await git(root, ["log", "-1", "--pretty=%B"])
+      expect(message).toContain(missingPath)
+      expect(message).toContain(failedPath)
+    }))
+
+  it("does not upload image paths outside the attachment directory", () =>
+    withTempRepo(async (root, startingOid) => {
+      const workItemId = makeWorkItemId()
+      const outsidePath = join(root, "secret.png")
+      await writeFile(outsidePath, "secret")
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      let uploads = 0
+
+      const result = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          return yield* commit(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              startingCommitOid: startingOid,
+              issueNumber: 42,
+              sessionId: "ses_from_implement",
+            }),
+          )
+        }),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: publicationResultLine(
+                "feat: implement widgets",
+                `Must not read ![outside](${outsidePath}).`,
+              ),
+            }),
+        }),
+        stubGitHubServiceLayer({
+          uploadUserAttachment: () => {
+            uploads += 1
+            return Effect.succeed(
+              "https://github.com/user-attachments/assets/11111111-2222-3333-4444-555555555555",
+            )
+          },
+        }),
+      )
+
+      expect(result.completion).toBe("native")
+      expect(uploads).toBe(0)
+      expect(result.publicationBody).toContain(outsidePath)
+    }))
+
+  it("does not upload unreferenced files in the attachment directory", () =>
+    withTempRepo(async (root, startingOid) => {
+      const workItemId = makeWorkItemId()
+      const referenced = await writeAttachment(workItemId, "before.png")
+      const unused = await writeAttachment(workItemId, "unused.png")
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      const uploads: string[] = []
+
+      const result = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          return yield* commit(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              startingCommitOid: startingOid,
+              issueNumber: 42,
+              sessionId: "ses_from_implement",
+            }),
+          )
+        }),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: publicationResultLine(
+                "feat: implement widgets",
+                `Only this shot: ![before](${referenced}).`,
+              ),
+            }),
+        }),
+        stubGitHubServiceLayer({
+          uploadUserAttachment: (_repository, input) => {
+            uploads.push(input.filePath)
+            return Effect.succeed(
+              "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            )
+          },
+        }),
+      )
+
+      expect(result.completion).toBe("native")
+      expect(uploads).toEqual([referenced])
+      expect(result.publicationBody).not.toContain(unused)
+      expect(result.publicationBody).not.toContain("unused.png")
+    }))
+
+  it("does not upload publication images for a GitLab repository", () =>
+    withTempRepo(async (root, startingOid) => {
+      const workItemId = makeWorkItemId()
+      const imagePath = await writeAttachment(workItemId, "before.png")
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      let uploads = 0
+
+      const result = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root, {
+            forge: "gitlab",
+            forgeHost: "gitlab.example.com",
+            projectPath: "acme/widgets",
+          })
+          return yield* commit(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              startingCommitOid: startingOid,
+              issueNumber: 42,
+              sessionId: "ses_from_implement",
+            }),
+          )
+        }),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: publicationResultLine(
+                "feat: implement widgets",
+                `GitLab shot ![before](${imagePath}).`,
+              ),
+            }),
+        }),
+        stubGitHubServiceLayer({
+          uploadUserAttachment: () => {
+            uploads += 1
+            return Effect.succeed(
+              "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            )
+          },
+        }),
+      )
+
+      expect(result.completion).toBe("native")
+      expect(uploads).toBe(0)
+      expect(result.publicationBody).toContain(imagePath)
+      const message = await git(root, ["log", "-1", "--pretty=%B"])
+      expect(message).toContain(imagePath)
     }))
 
   it("retries generation once on malformed copy then commits harness fallback copy", () =>
