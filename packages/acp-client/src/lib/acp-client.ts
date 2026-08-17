@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process"
-import { Readable, Writable } from "node:stream"
+import { Writable } from "node:stream"
 import * as acp from "@agentclientprotocol/sdk"
 import { Context, Effect, Layer, Schema, type Scope } from "effect"
 import {
@@ -24,6 +24,7 @@ import type {
   AcpSessionResult,
 } from "./types.js"
 import { AcpSessionId, AcpStopReason } from "./types.js"
+import { readableToWebBytes } from "./web-streams.js"
 
 export type AcpClientShape = {
   readonly connect: (
@@ -76,6 +77,7 @@ const waitForSpawn = (
 type SessionBuffers = {
   readonly collecting: Set<string>
   readonly chunks: Map<string, string[]>
+  readonly reported: Map<string, string>
 }
 
 const attachConnection = (
@@ -205,6 +207,7 @@ const attachConnection = (
   ) {
     buffers.collecting.add(input.sessionId)
     buffers.chunks.delete(input.sessionId)
+    buffers.reported.delete(input.sessionId)
     const result = yield* request("session/prompt", () =>
       sdk.agent.request(acp.methods.agent.session.prompt, {
         sessionId: input.sessionId,
@@ -230,7 +233,9 @@ const attachConnection = (
       ),
     )
     const completed: AcpPromptResult = {
-      sessionId: input.sessionId,
+      sessionId: AcpSessionId.make(
+        buffers.reported.get(input.sessionId) ?? input.sessionId,
+      ),
       assistantText: takeText(input.sessionId),
       stopReason,
       ...responseMeta(result._meta),
@@ -302,20 +307,28 @@ const connect = Effect.fn("AcpClient.connect")(function* (
   const buffers: SessionBuffers = {
     collecting: new Set<string>(),
     chunks: new Map<string, string[]>(),
+    reported: new Map<string, string>(),
   }
   const collectSessionUpdate = (notification: acp.SessionNotification) => {
+    const update = notification.update
+    if (
+      update.sessionUpdate !== "agent_message_chunk" ||
+      update.content.type !== "text"
+    ) {
+      return
+    }
+    for (const requested of buffers.collecting) {
+      if (buffers.reported.get(requested) === requested) {
+        continue
+      }
+      buffers.reported.set(requested, notification.sessionId)
+    }
     if (!buffers.collecting.has(notification.sessionId)) {
       return
     }
-    const update = notification.update
-    if (
-      update.sessionUpdate === "agent_message_chunk" &&
-      update.content.type === "text"
-    ) {
-      const existing = buffers.chunks.get(notification.sessionId) ?? []
-      existing.push(update.content.text)
-      buffers.chunks.set(notification.sessionId, existing)
-    }
+    const existing = buffers.chunks.get(notification.sessionId) ?? []
+    existing.push(update.content.text)
+    buffers.chunks.set(notification.sessionId, existing)
   }
 
   const sdk = yield* Effect.acquireRelease(
@@ -323,7 +336,7 @@ const connect = Effect.fn("AcpClient.connect")(function* (
       try: () => {
         const stream = acp.ndJsonStream(
           Writable.toWeb(stdin),
-          Readable.toWeb(stdout),
+          readableToWebBytes(stdout),
         )
         return acp
           .client({ name: "ready-for-agent" })

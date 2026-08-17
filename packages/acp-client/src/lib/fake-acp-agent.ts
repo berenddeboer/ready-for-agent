@@ -1,6 +1,7 @@
-import { Readable, Writable } from "node:stream"
+import { Writable } from "node:stream"
 import { fileURLToPath } from "node:url"
 import * as acp from "@agentclientprotocol/sdk"
+import { readableToWebBytes } from "./web-streams.js"
 
 export const fakeAcpAgentPath = fileURLToPath(import.meta.url)
 
@@ -8,6 +9,9 @@ export const FAKE_ACP_ENV = {
   requireAuth: "FAKE_ACP_REQUIRE_AUTH",
   authMethodId: "FAKE_ACP_AUTH_METHOD_ID",
   assistantText: "FAKE_ACP_ASSISTANT_TEXT",
+  echoPrompt: "FAKE_ACP_ECHO_PROMPT",
+  reportedSessionId: "FAKE_ACP_REPORTED_SESSION_ID",
+  alsoSessionId: "FAKE_ACP_ALSO_SESSION_ID",
   resumeFail: "FAKE_ACP_RESUME_FAIL",
   loadFail: "FAKE_ACP_LOAD_FAIL",
   promptDelayMs: "FAKE_ACP_PROMPT_DELAY_MS",
@@ -18,8 +22,25 @@ const defaultAuthMethodId = "token"
 
 const envFlag = (name: string): boolean => process.env[name] === "1"
 
-const assistantText = (): string =>
-  process.env[FAKE_ACP_ENV.assistantText] ?? defaultAssistantText
+const promptText = (params: acp.PromptRequest): string => {
+  const parts: string[] = []
+  for (const block of params.prompt) {
+    if (block.type === "text") {
+      parts.push(block.text)
+    }
+  }
+  return parts.join("")
+}
+
+const assistantText = (params: acp.PromptRequest): string => {
+  if (envFlag(FAKE_ACP_ENV.echoPrompt)) {
+    return promptText(params)
+  }
+  return process.env[FAKE_ACP_ENV.assistantText] ?? defaultAssistantText
+}
+
+const reportedSessionId = (requested: string): string =>
+  process.env[FAKE_ACP_ENV.reportedSessionId] ?? requested
 
 const authMethodId = (): string =>
   process.env[FAKE_ACP_ENV.authMethodId] ?? defaultAuthMethodId
@@ -162,17 +183,31 @@ class FakeAcpAgent {
 
     try {
       await delay(promptDelayMs(), signal)
-      for (const chunk of textChunks(assistantText())) {
+      const sessionId = reportedSessionId(params.sessionId)
+      for (const chunk of textChunks(assistantText(params))) {
         if (signal.aborted) {
           return { stopReason: "cancelled", ...optionalMeta(params._meta) }
         }
         await client.notify(acp.methods.client.session.update, {
-          sessionId: params.sessionId,
+          sessionId,
           update: {
             sessionUpdate: "agent_message_chunk",
             content: {
               type: "text",
               text: chunk,
+            },
+          },
+        })
+      }
+      const extraSessionId = process.env[FAKE_ACP_ENV.alsoSessionId]
+      if (extraSessionId !== undefined && extraSessionId.length > 0) {
+        await client.notify(acp.methods.client.session.update, {
+          sessionId: extraSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+              type: "text",
+              text: "subagent",
             },
           },
         })
@@ -225,7 +260,7 @@ const delay = (ms: number, signal: AbortSignal): Promise<void> => {
 
 export const runFakeAcpAgent = (): void => {
   const input = Writable.toWeb(process.stdout)
-  const output = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>
+  const output = readableToWebBytes(process.stdin)
   const stream = acp.ndJsonStream(input, output)
   const agent = new FakeAcpAgent()
 
