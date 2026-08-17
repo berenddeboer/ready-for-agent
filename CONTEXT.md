@@ -104,8 +104,8 @@ The long-lived loopback companion process that owns one Keymaxxer stdio keyholde
 _Avoid_: Credential daemon, token cache, development-only sidecar
 
 **Agent Backend**:
-A supported headless coding-agent CLI integration shipped with Ready for Agent that can execute Agent Turns for the Harness. Harness Config, Repository settings, and an Explicit Work Item Execution Profile may select among built-in backends; arbitrary external backend plugins are not part of this boundary.
-_Avoid_: Agent (ambiguous), model, provider
+A supported coding-agent integration shipped with Ready for Agent that can execute Agent Turns for the Harness. Harness Config, Repository settings, and an Explicit Work Item Execution Profile may select among built-in backends; arbitrary external backend plugins are not part of this boundary.
+_Avoid_: Agent (ambiguous), model, provider, ACP (the protocol is not a backend)
 
 **Effective Agent Backend**:
 The Agent Backend a Repository uses for ordinary new Work Items: the Repository override when set, otherwise the Harness Config default. Ordinary creation requests capture it; Implement With may explicitly choose another backend for that Work Item without changing Repository settings or Harness Config.
@@ -140,7 +140,7 @@ An explicit operator request that revalidates one Agent Backend by id and refres
 _Avoid_: Automatic health poll, model-cache refresh only, Harness restart, Agent Backend Preview
 
 **Agent Model**:
-A model in an Agent Backend's catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific. Ordinary Work Items resolve build and review selections for each Agent Turn from current backend-scoped Repository settings falling back to Harness Config; an Explicit Work Item Execution Profile instead supplies durable selections for that Work Item. Selection is catalog-only: selection surfaces offer exactly the chosen Agent Backend's current catalog. Advertised Thinking Levels are part of each catalog entry's executable contract; an unsupported pair is rejected at Settings and before an Agent Turn rather than rewritten. A selected value the current catalog no longer lists is preserved and shown as unavailable rather than deleted, rewritten, translated between provider modes, or replaced by defaults; it blocks creation or a later Agent Turn before the Agent Backend CLI is spawned. An Agent Backend that reports no catalog at all carries no membership information and does not block ordinary work, but Implement With requires a non-empty catalog from which to make its explicit choices.
+A model in an Agent Backend's catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific. Ordinary Work Items resolve build and review selections for each Agent Turn from current backend-scoped Repository settings falling back to Harness Config; an Explicit Work Item Execution Profile instead supplies durable selections for that Work Item. Selection is catalog-only: selection surfaces offer exactly the chosen Agent Backend's current catalog. Advertised Thinking Levels are part of each catalog entry's executable contract; an unsupported pair is rejected at Settings and before an Agent Turn rather than rewritten. A selected value the current catalog no longer lists is preserved and shown as unavailable rather than deleted, rewritten, translated between provider modes, or replaced by defaults; it blocks creation or a later Agent Turn before that turn starts. An Agent Backend that reports no catalog at all carries no membership information and does not block ordinary work, but Implement With requires a non-empty catalog from which to make its explicit choices.
 _Avoid_: Provider, Agent Backend, model profile
 
 **Thinking Level**:
@@ -156,8 +156,8 @@ Optional Agent Backend-provided details about a Session, such as models, token t
 _Avoid_: Agent Turn Result, required backend capability
 
 **Agent Turn**:
-One fully unattended headless Agent Backend CLI invocation within a Session using an explicit Agent Model and optional Thinking Level. An Agent Backend must support both the first turn and later turns that continue the same Session; file, shell, and tool permissions cannot wait for operator approval during the turn.
-_Avoid_: Agent run, prompt run, OpenCode process
+One fully unattended invocation of an Agent Backend within a Session using an explicit Agent Model and optional Thinking Level. An Agent Backend must support both the first turn and later turns that continue the same Session; file, shell, and tool permissions cannot wait for operator approval during the turn.
+_Avoid_: Agent run, prompt run, OpenCode process, ACP request
 
 **Interactive Session Continuation**:
 An operator-driven interactive use of a Work Item's canonical Session through its captured Agent Backend and working directory. Its messages become part of the Session used by later Agent Turns, but the continuation is not itself an Agent Turn or Lifecycle Step.
