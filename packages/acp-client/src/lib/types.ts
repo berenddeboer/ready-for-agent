@@ -86,6 +86,7 @@ export type AcpCancelInput = {
 }
 
 export type AcpConnection = {
+  readonly pid: number
   readonly initialize: (
     input?: AcpInitializeInput,
   ) => Effect.Effect<AcpInitializeResult, AcpClientError>

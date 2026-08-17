@@ -16,11 +16,15 @@ import {
   type AgentBackendError,
   AgentBackendExitError,
   AgentBackendNotInstalledError,
+  AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
   type ContinueTurnInput,
+  DEFAULT_FORCE_KILL_AFTER,
+  DEFAULT_STARTUP_TIMEOUT,
   type InspectInput,
   type StartTurnInput,
   formatAgentCliNotFoundRemediation,
+  killProcessTree,
   malformedOutput,
   runCliCapture,
   runCliTurn,
@@ -62,6 +66,9 @@ export class Grok {
         const acp = yield* AcpClient
         const binary = options.binary ?? DEFAULT_BINARY
         const defaultTimeout = options.defaultTimeout ?? DEFAULT_TIMEOUT
+        const startupTimeout = options.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT
+        const forceKillAfter =
+          options.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER
         const environment = makeGrokEnvironment()
 
         const mapAcpError =
@@ -289,6 +296,7 @@ export class Grok {
             (input: ContinueTurnInput) => {
               const timeout = input.timeout ?? defaultTimeout
               const timeoutMs = Duration.toMillis(timeout)
+              const startupTimeoutMs = Duration.toMillis(startupTimeout)
               return Effect.scoped(
                 Effect.gen(function* () {
                   const connection = yield* acp.connect({
@@ -300,7 +308,27 @@ export class Grok {
                     cwd: input.cwd,
                     env: environment,
                   })
-                  const initialized = yield* connection.initialize()
+                  yield* Effect.addFinalizer(() =>
+                    killProcessTree(connection.pid, { forceKillAfter }).pipe(
+                      Effect.timeout(
+                        Duration.millis(
+                          Duration.toMillis(forceKillAfter) + 1_000,
+                        ),
+                      ),
+                      Effect.ignore,
+                    ),
+                  )
+                  const initialized = yield* connection.initialize().pipe(
+                    Effect.timeoutOrElse({
+                      duration: startupTimeout,
+                      orElse: () =>
+                        new AgentBackendStartupTimeoutError({
+                          cwd: input.cwd,
+                          startupTimeoutMs,
+                          sessionId: input.sessionId,
+                        }),
+                    }),
+                  )
                   if (
                     initialized.authMethods.some(
                       (method) => method.id === "cached_token",
@@ -311,11 +339,35 @@ export class Grok {
                     })
                   }
                   const sessionId = AcpSessionId.make(input.sessionId)
-                  yield* connection.resumeSession({
-                    sessionId,
-                    cwd: input.cwd,
-                    _meta: { yoloMode: true },
-                  })
+                  const sessionMeta = { yoloMode: true }
+                  yield* connection
+                    .resumeSession({
+                      sessionId,
+                      cwd: input.cwd,
+                      _meta: sessionMeta,
+                    })
+                    .pipe(
+                      Effect.catchTag("AcpProtocolError", () =>
+                        connection
+                          .loadSession({
+                            sessionId,
+                            cwd: input.cwd,
+                            _meta: sessionMeta,
+                          })
+                          .pipe(
+                            Effect.mapError((error) =>
+                              error instanceof AcpProtocolError
+                                ? AgentBackendExitError.new({
+                                    exitCode: 1,
+                                    cwd: input.cwd,
+                                    sessionId: input.sessionId,
+                                    message: `Grok Build could not restore Session ${input.sessionId}: ${error.message}`,
+                                  })
+                                : error,
+                            ),
+                          ),
+                      ),
+                    )
                   const prompt = yield* connection.prompt({
                     sessionId,
                     prompt: buildPromptBody({

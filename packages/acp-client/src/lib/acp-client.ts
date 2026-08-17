@@ -82,6 +82,8 @@ type SessionBuffers = {
 
 const attachConnection = (
   sdk: acp.ClientConnection,
+  child: ChildProcess,
+  pid: number,
   command: string,
   exit: { code?: number | null },
   buffers: SessionBuffers,
@@ -92,20 +94,22 @@ const attachConnection = (
     return text
   }
 
-  const toRequestError = (method: string) => (cause: unknown) => {
-    if (exit.code !== undefined) {
-      return new AcpProcessExitError({
-        command,
-        exitCode: exit.code,
-        message: `ACP agent exited before ${method} completed`,
-      })
-    }
-    return new AcpProtocolError({
+  const resolvedExitCode = (): number | null | undefined =>
+    exit.code ?? child.exitCode
+
+  const toProcessExitError = (method: string, exitCode: number | null) =>
+    new AcpProcessExitError({
+      command,
+      exitCode,
+      message: `ACP agent exited before ${method} completed`,
+    })
+
+  const toProtocolError = (method: string, cause: unknown) =>
+    new AcpProtocolError({
       method,
       message: cause instanceof Error ? cause.message : "ACP request failed",
       cause,
     })
-  }
 
   const request = <A>(
     method: string,
@@ -113,8 +117,22 @@ const attachConnection = (
   ): Effect.Effect<A, AcpClientError> =>
     Effect.tryPromise({
       try: run,
-      catch: toRequestError(method),
-    })
+      catch: (cause) => ({ cause }),
+    }).pipe(
+      Effect.catch(({ cause }) =>
+        Effect.gen(function* () {
+          let exitCode = resolvedExitCode()
+          if (exitCode === undefined || exitCode === null) {
+            yield* Effect.sleep("25 millis")
+            exitCode = resolvedExitCode()
+          }
+          if (exitCode !== undefined && exitCode !== null) {
+            return yield* toProcessExitError(method, exitCode)
+          }
+          return yield* toProtocolError(method, cause)
+        }),
+      ),
+    )
 
   const initialize = Effect.fn("AcpConnection.initialize")(function* (
     input: AcpInitializeInput = {},
@@ -255,6 +273,7 @@ const attachConnection = (
   })
 
   return {
+    pid,
     initialize,
     authenticate,
     newSession,
@@ -276,6 +295,7 @@ const connect = Effect.fn("AcpClient.connect")(function* (
           cwd: input.cwd,
           env: input.env === undefined ? process.env : { ...input.env },
           stdio: ["pipe", "pipe", "pipe"],
+          detached: process.platform !== "win32",
         }),
       catch: (cause) => toSpawnError(input.command, cause),
     }),
@@ -288,6 +308,14 @@ const connect = Effect.fn("AcpClient.connect")(function* (
   )
 
   yield* waitForSpawn(child, input.command)
+
+  const pid = child.pid
+  if (pid === undefined) {
+    return yield* new AcpSpawnError({
+      command: input.command,
+      message: "ACP agent pid is unavailable",
+    })
+  }
 
   const stdin = child.stdin
   const stdout = child.stdout
@@ -355,7 +383,7 @@ const connect = Effect.fn("AcpClient.connect")(function* (
     (connection) => Effect.sync(() => connection.close()),
   )
 
-  return attachConnection(sdk, input.command, exit, buffers)
+  return attachConnection(sdk, child, pid, input.command, exit, buffers)
 })
 
 export class AcpClient extends Context.Service<AcpClient, AcpClientShape>()(

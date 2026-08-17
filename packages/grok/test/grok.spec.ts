@@ -9,6 +9,7 @@ import {
   AgentBackendConfigError,
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
+  AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
   type OnSessionId,
   PROMPT_ARGV_BYTE_LIMIT,
@@ -31,8 +32,22 @@ const withExecutable = async <A>(
   }
 }
 
-const provide = (binary: string) =>
-  Grok.layer({ binary }).pipe(Layer.provide(BunServices.layer))
+const provide = (
+  binary: string,
+  options: {
+    readonly startupTimeout?: string
+    readonly forceKillAfter?: string
+  } = {},
+) =>
+  Grok.layer({
+    binary,
+    ...(options.startupTimeout !== undefined
+      ? { startupTimeout: options.startupTimeout }
+      : {}),
+    ...(options.forceKillAfter !== undefined
+      ? { forceKillAfter: options.forceKillAfter }
+      : {}),
+  }).pipe(Layer.provide(BunServices.layer))
 
 const captureSessionScript = [
   'sid=""',
@@ -61,6 +76,8 @@ const continueTurn = (
     readonly thinkingLevel?: string | null
     readonly command?: string
     readonly timeout?: string
+    readonly startupTimeout?: string
+    readonly forceKillAfter?: string
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -75,7 +92,18 @@ const continueTurn = (
       timeout: input.timeout ?? "5 seconds",
       ...(input.command !== undefined ? { command: input.command } : {}),
     })
-  }).pipe(Effect.provide(provide(binary)))
+  }).pipe(
+    Effect.provide(
+      provide(binary, {
+        ...(input.startupTimeout !== undefined
+          ? { startupTimeout: input.startupTimeout }
+          : {}),
+        ...(input.forceKillAfter !== undefined
+          ? { forceKillAfter: input.forceKillAfter }
+          : {}),
+      }),
+    ),
+  )
 
 const startTurn = (
   binary: string,
@@ -198,6 +226,76 @@ describe("Grok AgentBackend adapter", () => {
       expect(continued.sessionId).toBe(SESSION_ID)
       expect(continued.assistantText).toBe("hello from fake agent")
     })
+  })
+
+  it("falls back to load then prompt when resume fails", async () => {
+    await withAcpGrok(
+      async (binary) => {
+        const continued = await Effect.runPromise(continueTurn(binary))
+        expect(continued.sessionId).toBe(SESSION_ID)
+        expect(continued.assistantText).toBe("hello from fake agent")
+      },
+      [
+        `export ${FAKE_ACP_ENV.resumeFail}=1`,
+        `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
+      ].join("\n"),
+    )
+  })
+
+  it("fails when the ACP agent exits before prompt completes", async () => {
+    await withAcpGrok(
+      async (binary) => {
+        const error = await Effect.runPromise(
+          continueTurn(binary).pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.sessionId).toBe(SESSION_ID)
+          expect(error.message).toContain("exited before")
+        }
+      },
+      [
+        `export ${FAKE_ACP_ENV.exitBeforePrompt}=1`,
+        `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
+      ].join("\n"),
+    )
+  })
+
+  it("fails a silent hang as a startup failure, not a full-turn timeout", async () => {
+    await withExecutable("sleep 10", async (binary) => {
+      const error = await Effect.runPromise(
+        continueTurn(binary, {
+          timeout: "2 seconds",
+          startupTimeout: "200 millis",
+        }).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(AgentBackendStartupTimeoutError)
+      if (error instanceof AgentBackendStartupTimeoutError) {
+        expect(error.startupTimeoutMs).toBe(200)
+        expect(error.sessionId).toBe(SESSION_ID)
+      }
+    })
+  })
+
+  it("fails a refused Session continue with a diagnosable Agent Backend error", async () => {
+    await withAcpGrok(
+      async (binary) => {
+        const error = await Effect.runPromise(
+          continueTurn(binary).pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.sessionId).toBe(SESSION_ID)
+          expect(error.message).toContain("could not restore Session")
+          expect(error.message).toContain(SESSION_ID)
+        }
+      },
+      [
+        `export ${FAKE_ACP_ENV.resumeFail}=1`,
+        `export ${FAKE_ACP_ENV.loadFail}=1`,
+        `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
+      ].join("\n"),
+    )
   })
 
   it("rejects a Session ID mismatch from the ACP agent", async () => {
@@ -502,6 +600,96 @@ describe("Grok AgentBackend adapter", () => {
     )
   })
 
+  it("terminates the continueTurn process tree on turn timeout", async () => {
+    const markerDir = await mkdtemp(join(tmpdir(), "grok-acp-tree-"))
+    const childAlive = join(markerDir, "child-alive")
+    const grandPidFile = join(markerDir, "grand.pid")
+    try {
+      await withAcpGrok(
+        async (binary) => {
+          const error = await Effect.runPromise(
+            continueTurn(binary, {
+              timeout: "400 millis",
+              forceKillAfter: "100 millis",
+            }).pipe(Effect.flip),
+          )
+          expect(error).toBeInstanceOf(AgentBackendTimeoutError)
+          await Bun.sleep(300)
+          const grandPid = Number(
+            (
+              await Bun.file(grandPidFile)
+                .text()
+                .catch(() => "")
+            ).trim(),
+          )
+          expect(Number.isFinite(grandPid) && grandPid > 0).toBe(true)
+          expect(isPidAlive(grandPid)).toBe(false)
+          const stillTouched = await Bun.file(childAlive)
+            .stat()
+            .then((s) => Date.now() - s.mtime.getTime() < 200)
+            .catch(() => false)
+          expect(stillTouched).toBe(false)
+        },
+        [
+          `( while true; do touch ${JSON.stringify(childAlive)}; sleep 0.05; done ) &`,
+          `echo $! > ${JSON.stringify(grandPidFile)}`,
+          `export ${FAKE_ACP_ENV.promptDelayMs}=30000`,
+          `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
+        ].join("\n"),
+      )
+    } finally {
+      await rm(markerDir, { recursive: true, force: true })
+    }
+  })
+
+  it("terminates the continueTurn process tree on fiber interruption", async () => {
+    const markerDir = await mkdtemp(join(tmpdir(), "grok-acp-interrupt-"))
+    const childAlive = join(markerDir, "child-alive")
+    const grandPidFile = join(markerDir, "grand.pid")
+    try {
+      await withAcpGrok(
+        async (binary) => {
+          await Effect.runPromise(
+            Effect.gen(function* () {
+              const fiber = yield* Effect.forkChild(
+                continueTurn(binary, {
+                  timeout: "30 seconds",
+                  forceKillAfter: "100 millis",
+                }),
+              )
+              yield* Effect.sleep("200 millis")
+              yield* Fiber.interrupt(fiber)
+              return yield* Fiber.await(fiber)
+            }),
+          )
+          await Bun.sleep(300)
+          const grandPid = Number(
+            (
+              await Bun.file(grandPidFile)
+                .text()
+                .catch(() => "")
+            ).trim(),
+          )
+          expect(Number.isFinite(grandPid) && grandPid > 0).toBe(true)
+          expect(isPidAlive(grandPid)).toBe(false)
+          const stillTouched = await Bun.file(childAlive)
+            .stat()
+            .then((s) => Date.now() - s.mtime.getTime() < 200)
+            .catch(() => false)
+          expect(stillTouched).toBe(false)
+        },
+        [
+          `( while true; do touch ${JSON.stringify(childAlive)}; sleep 0.05; done ) &`,
+          `echo $! > ${JSON.stringify(grandPidFile)}`,
+          `export ${FAKE_ACP_ENV.promptDelayMs}=30000`,
+          `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
+        ].join("\n"),
+      )
+    } finally {
+      await rm(markerDir, { recursive: true, force: true })
+    }
+  })
+
   it("cancels the process tree on fiber interruption", async () => {
     await withExecutable(
       ["trap 'exit 0' TERM", "sleep 30"].join("\n"),
@@ -521,3 +709,12 @@ describe("Grok AgentBackend adapter", () => {
     )
   })
 })
+
+const isPidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
