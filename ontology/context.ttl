@@ -1948,7 +1948,7 @@ rfa:WorkerSlot
 rfa:AdmittedWorkItem
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Admitted Work Item"@en ;
-  skos:definition "An unfinished Work Item that has been granted a Worker Slot and may run Lifecycle Steps. A Work Item becomes Admitted when created while a Worker Slot is free and it is not Waiting for blockers, or when it leaves Waiting for blockers or is the next waiter and a slot frees, or when Retry or Start successfully re-acquires a free slot. A Worker Slot is released when the Work Item becomes terminal (Complete, Failed, Abandoned), Needs Human, paused (after any running Step Run finishes), or when a Step Run fails non-terminally (operator may Retry). A failed non-terminal Work Item does not auto-enter the wait queue; only Retry (or Start after Pause) attempts re-admission. Start or Retry when no slot is free leaves the Work Item Waiting for Worker Slot until re-admitted FIFO."@en ;
+  skos:definition "An unfinished Work Item that has been granted a Worker Slot and may run Lifecycle Steps. A Work Item becomes Admitted when created while a Worker Slot is free and it is not Waiting for blockers, or when it leaves Waiting for blockers or is the next waiter and a slot frees, or when Retry or Start successfully re-acquires a free slot. A Worker Slot is released when the Work Item becomes terminal (Complete, Failed, Abandoned), Needs Human, paused (after any running Step Run finishes), after Interrupt Work Item finishes that Step Run, or when a Step Run fails non-terminally (operator may Retry). A failed non-terminal Work Item does not auto-enter the wait queue; only Retry (or Start after Pause) attempts re-admission. Start or Retry when no slot is free leaves the Work Item Waiting for Worker Slot until re-admitted FIFO."@en ;
   skos:hiddenLabel "Running Work Item"@en, "active Work Item"@en .
 
 [
@@ -2688,7 +2688,7 @@ rfa:PostponedStepRun
 rfa:Retry
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Retry"@en ;
-  skos:definition "An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds or from an unparseable unchanged apply-findings verdict is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. A Needs Human outcome from a missing successful status-check aggregate on an autonomous merge path is also retryable: Retry clears the handoff reason and returns to Watch PR Status Checks in the existing Implement Session, worktree, branch, and PR. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. Retry is unavailable for a Postponed Step Run and while a Work Item is paused; the operator must Start first. Unattended `--all-retryable` Retry is an Autonomous Retry and is bounded by the Autonomous Retry Budget; explicit single-Issue, single-Work-Item, and UI Retry are not."@en ;
+  skos:definition "An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds or from an unparseable unchanged apply-findings verdict is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. A Needs Human outcome from a missing successful status-check aggregate on an autonomous merge path is also retryable: Retry clears the handoff reason and returns to Watch PR Status Checks in the existing Implement Session, worktree, branch, and PR. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. A Step Run interrupted by Interrupt Work Item is retryable once that request has cleared Pause. Autonomous Retry does not accept a Step Run interrupted with reason paused. Retry is unavailable for a Postponed Step Run and while a Work Item is paused; the operator must Start first. Unattended `--all-retryable` Retry is an Autonomous Retry and is bounded by the Autonomous Retry Budget; explicit single-Issue, single-Work-Item, and UI Retry are not."@en ;
   skos:hiddenLabel "Queue redelivery"@en, "resume"@en .
 
 [
@@ -2776,8 +2776,8 @@ rfa:ProviderHold
 rfa:PauseWorkItem
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Pause Work Item"@en ;
-  skos:definition "An explicit operator request that marks an unfinished Work Item paused so it will not start further Lifecycle Steps until Start. A running Step Run is not interrupted; after it finishes, the next step is neither enqueued nor started while paused. Step Runs still queued (not running) are cancelled. If the Work Item was Admitted and no Step Run is running, Pause releases its Worker Slot immediately; if a Step Run is still running, the Worker Slot is held until that Step Run finishes, then released. Pause is idempotent when already paused and is rejected for missing, terminal, or Waiting for blockers Work Items (the hold already means do not run; cancel with Reset). A paused Work Item remains unfinished and still blocks Implement Now and Queue for that Issue. The harness also applies Pause Work Item when Issue revalidation finds the Issue closed or missing while the Work Item still owns a Work Item PR that is open, closed unmerged, or of indeterminate lifecycle status, recording an operator-visible reason for that branch—never an invisible non-terminal park with no pause flag and no reason. A confirmed merged PR advances to local cleanup instead of Pause. Start after reopening the Issue resumes the current Lifecycle Step; reopening alone does not auto-Start. A later Refresh Job that finds the Work Item PR merged still supersedes this pause and advances cleanup toward Complete. Closed-unmerged Abandon remains limited to Needs Human after Decide PR Merge, Merge PR, or Resolve PR Merge Conflict. Distinct from Repository Paused."@en ;
-  skos:hiddenLabel "Suspend"@en, "hold"@en, "Abandon"@en, "Repository Paused"@en, "Waiting for blockers"@en, "silent park"@en .
+  skos:definition "An explicit operator request that marks an unfinished Work Item paused so it will not start further Lifecycle Steps until Start. A running Step Run is not interrupted; after it finishes, the next step is neither enqueued nor started while paused. A paused Work Item with a running Step Run may be stopped with Interrupt Work Item. Step Runs still queued (not running) are cancelled. If the Work Item was Admitted and no Step Run is running, Pause releases its Worker Slot immediately; if a Step Run is still running, the Worker Slot is held until that Step Run finishes, then released. Pause is idempotent when already paused and is rejected for missing, terminal, or Waiting for blockers Work Items (the hold already means do not run; cancel with Reset). A paused Work Item remains unfinished and still blocks Implement Now and Queue for that Issue. The harness also applies Pause Work Item when Issue revalidation finds the Issue closed or missing while the Work Item still owns a Work Item PR that is open, closed unmerged, or of indeterminate lifecycle status, recording an operator-visible reason for that branch—never an invisible non-terminal park with no pause flag and no reason. A confirmed merged PR advances to local cleanup instead of Pause. Start after reopening the Issue resumes the current Lifecycle Step; reopening alone does not auto-Start. A later Refresh Job that finds the Work Item PR merged still supersedes this pause and advances cleanup toward Complete. Closed-unmerged Abandon remains limited to Needs Human after Decide PR Merge, Merge PR, or Resolve PR Merge Conflict. Distinct from Repository Paused."@en ;
+  skos:hiddenLabel "Suspend"@en, "hold"@en, "Abandon"@en, "Repository Paused"@en, "Waiting for blockers"@en, "silent park"@en, "Interrupt Work Item"@en .
 
 [
   a owl:Axiom ;
@@ -2825,6 +2825,68 @@ rfa:PauseWorkItem
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "silent park"@en ;
   rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PauseWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Interrupt Work Item"@en ;
+  rfa:avoidanceRationale "Interrupt Work Item stops a running Step Run; Pause Work Item does not."@en ;
+] .
+
+rfa:InterruptWorkItem
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Interrupt Work Item"@en ;
+  skos:definition "An explicit operator request that stops a running Step Run on a paused Work Item without deleting the Work Item. It is legal only while the Work Item is paused and a Step Run is running. The Step Run is interrupted with reason paused; the paused flag is cleared; the worktree and Session are kept; the Worker Slot is released after that Step Run finishes. Resume is Retry, not Start. Distinct from Pause Work Item, which does not interrupt a running Step Run, and from Reset, which erases the Work Item."@en ;
+  skos:hiddenLabel "Pause Work Item"@en, "Reset"@en, "Stop"@en, "terminate"@en, "cancel"@en, "Start"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InterruptWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Pause Work Item"@en ;
+  rfa:avoidanceRationale "Pause Work Item does not interrupt a running Step Run."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InterruptWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Reset"@en ;
+  rfa:avoidanceRationale "Reset erases the Work Item; Interrupt Work Item keeps it."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InterruptWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Stop"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Interrupt Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InterruptWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "terminate"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Interrupt Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InterruptWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "cancel"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Interrupt Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InterruptWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Start"@en ;
+  rfa:avoidanceRationale "Resume after Interrupt Work Item is Retry, not Start."@en ;
 ] .
 
 rfa:StartWorkItem
@@ -2883,7 +2945,7 @@ rfa:Reset
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Reset"@en ;
   skos:definition "An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented when it remains Relevant. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused, Waiting for GitHub, Waiting for Worker Slot, or Waiting for blockers and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause). Waiting for blockers has no worktree yet; Reset is the operator cancel for a queued intent. Reset does not close, update, or otherwise mutate a competing Issue-closing PR."@en ;
-  skos:hiddenLabel "Abandon"@en, "Retry"@en, "cancel"@en .
+  skos:hiddenLabel "Abandon"@en, "Retry"@en, "cancel"@en, "Interrupt Work Item"@en .
 
 [
   a owl:Axiom ;
@@ -2907,6 +2969,14 @@ rfa:Reset
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "cancel"@en ;
   rfa:avoidanceRationale "CONTEXT.md prefers Reset for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Reset ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Interrupt Work Item"@en ;
+  rfa:avoidanceRationale "Interrupt Work Item stops a running Step Run without deleting the Work Item."@en ;
 ] .
 
 rfa:FailedWorkItem
