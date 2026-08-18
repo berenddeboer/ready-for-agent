@@ -1,5 +1,6 @@
 /**
- * Deterministic Work Item / Session Telemetry fixtures for live e2e (issue #841).
+ * Deterministic Work Item / Session Telemetry fixtures for live e2e
+ * (issues #841 / #1144).
  *
  * Seeds once per live Harness process via {@link ensureLiveHarnessPersistence}:
  * the first call writes rows against the stopped database and restarts; later
@@ -43,6 +44,15 @@ export const TELEMETRY_FIXTURE = {
   completedPageTwoSessionId: "ses_e2e_fixture_completed_page_two",
   completedPageTwoIssueNumber: 104,
   completedPageTwoIssueId: "issue-01KZD5SESS10NTE0FXX0000004",
+  /**
+   * OpenCode Work Item whose latest Agent Turn has no canonical activity
+   * (issue #1144). Session usage is AVAILABLE via GraphQL shaping; the tail
+   * peek is the empty Jump hint.
+   */
+  idleWorkItemId: "wi-01KZD5SESS10NTE0FXX0000005",
+  idleSessionId: "ses_e2e_fixture_idle",
+  idleIssueNumber: 105,
+  idleIssueId: "issue-01KZD5SESS10NTE0FXX0000005",
 } as const
 
 /** Named Session Telemetry Work Items the operator-visible scenarios open. */
@@ -51,6 +61,7 @@ export const SESSION_TELEMETRY_FIXTURE_WORK_ITEM_IDS = [
   TELEMETRY_FIXTURE.codexMissingWorkItemId,
   TELEMETRY_FIXTURE.completedWorkItemId,
   TELEMETRY_FIXTURE.completedPageTwoWorkItemId,
+  TELEMETRY_FIXTURE.idleWorkItemId,
 ] as const
 
 /** Completed archive fillers that pin the page-2 fixture. */
@@ -237,6 +248,22 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        ${now},
        ${now}
      );`,
+    `INSERT INTO issue (
+       id, repository_id, issue_number, title, body, url, state,
+       github_created_at, has_children, created_at, updated_at
+     ) VALUES (
+       ${sqlLiteral(TELEMETRY_FIXTURE.idleIssueId)},
+       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
+       ${TELEMETRY_FIXTURE.idleIssueNumber},
+       'E2E Session usage idle OpenCode tail',
+       '',
+       ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${TELEMETRY_FIXTURE.idleIssueNumber}`)},
+       'OPEN',
+       ${now},
+       0,
+       ${now},
+       ${now}
+     );`,
     `INSERT INTO work_item (
        id, repository_id, issue_number, issue_title, agent_backend,
        state, state_ready_at, paused, holds_worker_slot, session_id,
@@ -252,6 +279,24 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        1,
        0,
        ${sqlLiteral(TELEMETRY_FIXTURE.missingSessionId)},
+       ${now},
+       ${now}
+     );`,
+    `INSERT INTO work_item (
+       id, repository_id, issue_number, issue_title, agent_backend,
+       state, state_ready_at, paused, holds_worker_slot, session_id,
+       created_at, updated_at
+     ) VALUES (
+       ${sqlLiteral(TELEMETRY_FIXTURE.idleWorkItemId)},
+       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
+       ${TELEMETRY_FIXTURE.idleIssueNumber},
+       'E2E Session usage idle OpenCode tail',
+       'opencode',
+       'implement',
+       ${now},
+       1,
+       0,
+       ${sqlLiteral(TELEMETRY_FIXTURE.idleSessionId)},
        ${now},
        ${now}
      );`,

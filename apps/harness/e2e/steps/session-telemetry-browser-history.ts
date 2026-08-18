@@ -118,6 +118,7 @@ const installSessionQueryRoute = async (page: Page) => {
               cost: 1.25,
               createdAt: "2026-07-14T08:00:00.000Z",
               updatedAt: "2026-07-14T09:00:00.000Z",
+              agentTurnTailSupported: true,
             },
           },
         }),
