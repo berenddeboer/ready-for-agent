@@ -11,6 +11,7 @@ import {
   type InspectInput,
   type StartTurnInput,
   malformedOutput,
+  retrySilentKnownSessionStartup,
   runCliCapture,
   runCliTurn,
 } from "@ready-for-agent/agent-backend"
@@ -68,8 +69,8 @@ const clipProbeOutput = (text: string, maxChars = 240): string => {
  * normalize the JSONL stream into Session ID + ordered final assistant text
  * (issue #778 / ADR 0047).
  */
-export class Claude {
-  static layer = (options: ClaudeLayerOptions = {}) =>
+export const Claude = {
+  layer: (options: ClaudeLayerOptions = {}) =>
     Layer.effect(
       AgentBackend,
       Effect.gen(function* () {
@@ -318,15 +319,23 @@ export class Claude {
           ),
           continueTurn: Effect.fn("Claude.continueTurn")(
             (input: ContinueTurnInput) =>
-              runTurn({
-                ...input,
-                sessionId: input.sessionId,
-                resume: true,
-              }),
+              retrySilentKnownSessionStartup(
+                () =>
+                  runTurn({
+                    ...input,
+                    sessionId: input.sessionId,
+                    resume: true,
+                  }),
+                {
+                  sessionId: input.sessionId,
+                  model: input.model,
+                  observerLabel: "Claude Code",
+                },
+              ),
           ),
         })
       }),
-    )
+    ),
 
-  static layerForTests = () => Claude.layer({})
+  layerForTests: () => Claude.layer({}),
 }

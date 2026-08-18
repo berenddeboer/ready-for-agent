@@ -5,6 +5,7 @@ import {
   AgentBackend,
   AgentBackendStartupTimeoutError,
   agentBackendLabel,
+  formatAgentBackendStartupTimeoutMessage,
 } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
@@ -40,9 +41,19 @@ export const reviewAgentFailureMessage = (
   backendLabel: string,
   action: string,
   cause: unknown,
+  diagnostics?: {
+    readonly model?: string
+    readonly phase?: string
+  },
 ): string => {
   if (cause instanceof AgentBackendStartupTimeoutError) {
-    return `${backendLabel} failed ${action}: no output within the startup window (${cause.startupTimeoutMs}ms)`
+    return formatAgentBackendStartupTimeoutMessage({
+      backendLabel,
+      action,
+      cause,
+      ...(diagnostics?.model !== undefined ? { model: diagnostics.model } : {}),
+      ...(diagnostics?.phase !== undefined ? { phase: diagnostics.phase } : {}),
+    })
   }
   if (cause instanceof Error && cause.message.trim() !== "") {
     return `${backendLabel} failed ${action}: ${cause.message}`
@@ -597,6 +608,10 @@ export const review = (context: LifecycleStepContext) =>
                   agentBackendLabel(context.agentBackend),
                   "to review the Work Item",
                   cause,
+                  {
+                    model: context.reviewModel,
+                    phase: STEP_RUN_REASON.reviewReviewing,
+                  },
                 ),
                 worktreePath,
                 sessionId,
@@ -627,6 +642,10 @@ export const review = (context: LifecycleStepContext) =>
                     agentBackendLabel(context.agentBackend),
                     "to report the Review verdict",
                     cause,
+                    {
+                      model: context.reviewModel,
+                      phase: STEP_RUN_REASON.reviewReviewing,
+                    },
                   ),
                   worktreePath,
                   sessionId,
@@ -693,6 +712,10 @@ export const review = (context: LifecycleStepContext) =>
                   agentBackendLabel(context.agentBackend),
                   "while applying Review Findings",
                   cause,
+                  {
+                    model: context.model,
+                    phase: STEP_RUN_REASON.reviewApplyingFindings,
+                  },
                 ),
                 worktreePath,
                 sessionId,
@@ -729,6 +752,10 @@ export const review = (context: LifecycleStepContext) =>
                     agentBackendLabel(context.agentBackend),
                     "to report the apply-findings verdict",
                     cause,
+                    {
+                      model: context.model,
+                      phase: STEP_RUN_REASON.reviewApplyingFindings,
+                    },
                   ),
                   worktreePath,
                   sessionId,
@@ -844,6 +871,10 @@ export const review = (context: LifecycleStepContext) =>
                     agentBackendLabel(context.agentBackend),
                     "during Review Rerun Assessment",
                     cause,
+                    {
+                      model: context.model,
+                      phase: STEP_RUN_REASON.reviewAssessingRerun,
+                    },
                   ),
                   worktreePath,
                   sessionId,

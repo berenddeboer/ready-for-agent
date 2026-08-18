@@ -9,6 +9,7 @@ import {
   type InspectInput,
   type StartTurnInput,
   malformedOutput,
+  retrySilentKnownSessionStartup,
   runCliCapture,
   runCliTurn,
 } from "@ready-for-agent/agent-backend"
@@ -43,8 +44,8 @@ export type OpencodeLayerError = OpencodeConfigError
 /**
  * OpenCode adapter implementing the backend-neutral AgentBackend contract.
  */
-export class Opencode {
-  static layer = (options: OpencodeLayerOptions) =>
+export const Opencode = {
+  layer: (options: OpencodeLayerOptions) =>
     Layer.effect(
       AgentBackend,
       Effect.gen(function* () {
@@ -225,14 +226,18 @@ export class Opencode {
             runTurn(input),
           ),
           continueTurn: Effect.fn("Opencode.continueTurn")(
-            (input: ContinueTurnInput) => runTurn(input),
+            (input: ContinueTurnInput) =>
+              retrySilentKnownSessionStartup(() => runTurn(input), {
+                sessionId: input.sessionId,
+                model: input.model,
+                observerLabel: "OpenCode",
+              }),
           ),
         })
       }),
-    )
+    ),
 
   /** Test/integration helper with Keymaxxer enabled by default. */
-  static layerForTests = (
-    keymaxxerMcpUrl = "http://127.0.0.1:6057/test-cap/mcp",
-  ) => Opencode.layer({ keymaxxerMcpUrl })
+  layerForTests: (keymaxxerMcpUrl = "http://127.0.0.1:6057/test-cap/mcp") =>
+    Opencode.layer({ keymaxxerMcpUrl }),
 }

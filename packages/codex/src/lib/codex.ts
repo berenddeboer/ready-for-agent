@@ -10,6 +10,7 @@ import {
   type InspectInput,
   type StartTurnInput,
   malformedOutput,
+  retrySilentKnownSessionStartup,
   runCliCapture,
   runCliTurn,
 } from "@ready-for-agent/agent-backend"
@@ -61,8 +62,8 @@ const clipProbeOutput = (text: string, maxChars = 240): string => {
  * resume later turns with `codex exec resume`, and normalize the JSONL stream
  * into Session ID + ordered final assistant text (issue #557 / ADR 0041).
  */
-export class Codex {
-  static layer = (options: CodexLayerOptions = {}) =>
+export const Codex = {
+  layer: (options: CodexLayerOptions = {}) =>
     Layer.effect(
       AgentBackend,
       Effect.gen(function* () {
@@ -264,15 +265,23 @@ export class Codex {
           ),
           continueTurn: Effect.fn("Codex.continueTurn")(
             (input: ContinueTurnInput) =>
-              runTurn({
-                ...input,
-                sessionId: input.sessionId,
-                resume: true,
-              }),
+              retrySilentKnownSessionStartup(
+                () =>
+                  runTurn({
+                    ...input,
+                    sessionId: input.sessionId,
+                    resume: true,
+                  }),
+                {
+                  sessionId: input.sessionId,
+                  model: input.model,
+                  observerLabel: "Codex Build",
+                },
+              ),
           ),
         })
       }),
-    )
+    ),
 
-  static layerForTests = () => Codex.layer({})
+  layerForTests: () => Codex.layer({}),
 }

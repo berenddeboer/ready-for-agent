@@ -137,8 +137,41 @@ export class AgentBackendStartupTimeoutError extends Schema.TaggedErrorClass<Age
     cwd: Schema.String,
     startupTimeoutMs: Schema.Finite,
     sessionId: Schema.optionalKey(Schema.String),
+    /** Agent Model used for the silent continuation, when known. */
+    model: Schema.optionalKey(Schema.String),
+    /**
+     * How many silent startup attempts failed. `2` means the known-Session
+     * continuation was replayed once and both attempts produced no output.
+     */
+    attemptCount: Schema.optionalKey(Schema.Literals([1, 2])),
   },
 ) {}
+
+/**
+ * Operator-facing startup-timeout text. Names Session, Agent Model, Lifecycle
+ * phase, startup window, and attempt numbers when present. Never includes
+ * prompt contents or credentials.
+ */
+export const formatAgentBackendStartupTimeoutMessage = (input: {
+  readonly backendLabel: string
+  readonly action: string
+  readonly cause: AgentBackendStartupTimeoutError
+  readonly model?: string
+  readonly phase?: string
+}): string => {
+  const sessionId = input.cause.sessionId
+  const model = input.model ?? input.cause.model
+  const attemptCount = input.cause.attemptCount ?? 1
+  const attempts = attemptCount === 2 ? "attempts 1 and 2" : "attempt 1"
+  const details = [
+    `no output within the startup window (${input.cause.startupTimeoutMs}ms)`,
+    sessionId !== undefined ? `session ${sessionId}` : undefined,
+    model !== undefined ? `model ${model}` : undefined,
+    input.phase !== undefined ? `phase ${input.phase}` : undefined,
+    attempts,
+  ].filter((part): part is string => part !== undefined)
+  return `${input.backendLabel} failed ${input.action}: ${details.join("; ")}`
+}
 
 export class AgentBackendSessionIdMissingError extends Schema.TaggedErrorClass<AgentBackendSessionIdMissingError>()(
   "AgentBackendSessionIdMissingError",

@@ -678,12 +678,112 @@ describe("Opencode AgentBackend adapter", () => {
             cwd: process.cwd(),
             startupTimeoutMs: 200,
             sessionId: "ses_hang_parent",
+            model: "test/model",
+            attemptCount: 2,
           }),
         )
       } finally {
         rmSync(fixtureDir, { recursive: true, force: true })
       }
     })
+  })
+
+  it("retries a silent known-Session continuation once and returns the second result", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "opencode-retry-"))
+    const counterFile = join(directory, "count")
+    await writeFile(counterFile, "0")
+    try {
+      await withExecutable(
+        [
+          `count=$(($(cat "${counterFile}") + 1))`,
+          `echo "$count" > "${counterFile}"`,
+          `if [ "$count" -eq 1 ]; then sleep 100; fi`,
+          `printf '%s\\n' '{"type":"step_start","sessionID":"ses_retry_parent"}'`,
+          `printf '%s\\n' '{"type":"text","part":{"type":"text","text":"recovered"}}'`,
+        ].join("\n"),
+        async (binary) => {
+          const result = await Effect.runPromise(
+            Effect.gen(function* () {
+              const backend = yield* AgentBackend
+              return yield* backend.continueTurn({
+                sessionId: "ses_retry_parent",
+                cwd: process.cwd(),
+                prompt: "Apply the findings.",
+                model: "test/model",
+                thinkingLevel: "test",
+                timeout: "5 seconds",
+              })
+            }).pipe(
+              Effect.provide(
+                Opencode.layer({
+                  binary,
+                  keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+                  startupActivityDbPath: join(directory, "unused.db"),
+                  startupTimeout: "200 millis",
+                }).pipe(Layer.provide(BunServices.layer)),
+              ),
+            ),
+          )
+          expect(result).toEqual({
+            sessionId: "ses_retry_parent",
+            assistantText: "recovered",
+          })
+          expect((await Bun.file(counterFile).text()).trim()).toBe("2")
+        },
+      )
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("does not retry a silent first turn without a durable Session ID", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "opencode-start-noretry-"))
+    const counterFile = join(directory, "count")
+    await writeFile(counterFile, "0")
+    try {
+      await withExecutable(
+        [
+          `count=$(($(cat "${counterFile}") + 1))`,
+          `echo "$count" > "${counterFile}"`,
+          "sleep 100",
+        ].join("\n"),
+        async (binary) => {
+          const startedAt = Date.now()
+          const error = await Effect.runPromise(
+            Effect.gen(function* () {
+              const backend = yield* AgentBackend
+              return yield* backend.startTurn({
+                cwd: process.cwd(),
+                prompt: "Implement the issue.",
+                model: "test/model",
+                thinkingLevel: "test",
+                timeout: "30 seconds",
+              })
+            }).pipe(
+              Effect.provide(
+                Opencode.layer({
+                  binary,
+                  keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+                  startupTimeout: "200 millis",
+                }).pipe(Layer.provide(BunServices.layer)),
+              ),
+              Effect.flip,
+            ),
+          )
+          const elapsed = Date.now() - startedAt
+          expect(error).toEqual(
+            new AgentBackendStartupTimeoutError({
+              cwd: process.cwd(),
+              startupTimeoutMs: 200,
+            }),
+          )
+          expect((await Bun.file(counterFile).text()).trim()).toBe("1")
+          expect(elapsed).toBeLessThan(2_000)
+        },
+      )
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   it("does not fail the run when onSessionId fails", async () => {

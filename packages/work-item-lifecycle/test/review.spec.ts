@@ -10,6 +10,7 @@ import {
   AgentBackendSessionIdMissingError,
   AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
+  retrySilentKnownSessionStartup,
 } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbServiceLive } from "@ready-for-agent/db-service"
@@ -101,6 +102,42 @@ const stubOpencode = (impl: {
         Effect.succeed({
           sessionId: "ses_review_default",
           assistantText: "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+        }),
+      inspect: () =>
+        Effect.succeed({
+          backend: { id: "opencode" as const, label: "OpenCode" },
+          models: [],
+        }),
+    }),
+  )
+
+const stubOpencodeWithStartupRetry = (impl: {
+  readonly continueTurn: (input: {
+    readonly sessionId: string
+    readonly prompt: string
+    readonly cwd: string
+    readonly model: string
+    readonly thinkingLevel: string
+    readonly timeout?: Duration.Input
+    readonly command?: string
+  }) => Effect.Effect<
+    { sessionId: string; assistantText: string },
+    AgentBackendStartupTimeoutError
+  >
+}) =>
+  Layer.succeed(
+    AgentBackend,
+    AgentBackend.of({
+      startTurn: () =>
+        Effect.succeed({
+          sessionId: "ses_start_should_not_run",
+          assistantText: "",
+        }),
+      continueTurn: (input) =>
+        retrySilentKnownSessionStartup(() => impl.continueTurn(input), {
+          sessionId: input.sessionId,
+          model: input.model,
+          observerLabel: "OpenCode",
         }),
       inspect: () =>
         Effect.succeed({
@@ -2290,11 +2327,129 @@ describe("review", () => {
       expect((error as ReviewOpenCodeError).message).toContain(
         "no output within the startup window (60000ms)",
       )
+      expect((error as ReviewOpenCodeError).message).toContain(
+        "session ses_review",
+      )
+      expect((error as ReviewOpenCodeError).message).toContain(
+        "model opencode/test-model",
+      )
+      expect((error as ReviewOpenCodeError).message).toContain(
+        `phase ${STEP_RUN_REASON.reviewReviewing}`,
+      )
       expect((error as ReviewOpenCodeError).cause).toEqual(
         new AgentBackendStartupTimeoutError({
           cwd: root,
           startupTimeoutMs: 60_000,
           sessionId: "ses_review",
+        }),
+      )
+    }))
+
+  it("recovers a silent apply-findings startup timeout without another reviewing pass", () =>
+    withTemp(async (root) => {
+      const reviewingPrompts: string[] = []
+      const applyAttempts: string[] = []
+      const result = await run(
+        review(
+          baseContext(root, {
+            model: "opencode/build-model",
+            reviewModel: "opencode/review-model",
+          }),
+        ),
+        stubOpencodeWithStartupRetry({
+          continueTurn: (input) => {
+            if (isReviewingTurn(input)) {
+              reviewingPrompts.push(input.prompt)
+              return Effect.succeed({
+                sessionId: input.sessionId,
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium",
+              })
+            }
+            applyAttempts.push(input.prompt)
+            if (applyAttempts.length === 1) {
+              return Effect.fail(
+                new AgentBackendStartupTimeoutError({
+                  cwd: input.cwd,
+                  startupTimeoutMs: 200,
+                  sessionId: input.sessionId,
+                }),
+              )
+            }
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText:
+                "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: medium: follow-up",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({
+        _tag: "deferred",
+        severity: "medium",
+        reason: "follow-up",
+      })
+      expect(reviewingPrompts).toHaveLength(1)
+      expect(applyAttempts).toHaveLength(2)
+      expect(applyAttempts[0]).toBe(applyAttempts[1])
+      expect(applyAttempts[0]).toContain("Interpret those findings")
+    }))
+
+  it("fails apply-findings after two silent attempts with session, model, phase, and attempt numbers", () =>
+    withTemp(async (root) => {
+      const reviewingPrompts: string[] = []
+      let applyAttempts = 0
+      const error = await run(
+        review(
+          baseContext(root, {
+            model: "opencode/build-model",
+            reviewModel: "opencode/review-model",
+            sessionId: "ses_implement_session",
+          }),
+        ).pipe(Effect.flip),
+        stubOpencodeWithStartupRetry({
+          continueTurn: (input) => {
+            if (isReviewingTurn(input)) {
+              reviewingPrompts.push(input.prompt)
+              return Effect.succeed({
+                sessionId: input.sessionId,
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium",
+              })
+            }
+            applyAttempts += 1
+            return Effect.fail(
+              new AgentBackendStartupTimeoutError({
+                cwd: input.cwd,
+                startupTimeoutMs: 200,
+                sessionId: input.sessionId,
+              }),
+            )
+          },
+        }),
+      )
+
+      expect(reviewingPrompts).toHaveLength(1)
+      expect(applyAttempts).toBe(2)
+      expect(error).toBeInstanceOf(ReviewOpenCodeError)
+      const message = (error as ReviewOpenCodeError).message
+      expect(message).toContain("no output within the startup window (200ms)")
+      expect(message).toContain("session ses_implement_session")
+      expect(message).toContain("model opencode/build-model")
+      expect(message).toContain(
+        `phase ${STEP_RUN_REASON.reviewApplyingFindings}`,
+      )
+      expect(message).toContain("attempts 1 and 2")
+      expect(message).not.toContain("Interpret those findings")
+      expect(message).not.toContain("READY_FOR_AGENT_RESULT")
+      expect((error as ReviewOpenCodeError).cause).toEqual(
+        new AgentBackendStartupTimeoutError({
+          cwd: root,
+          startupTimeoutMs: 200,
+          sessionId: "ses_implement_session",
+          model: "opencode/build-model",
+          attemptCount: 2,
         }),
       )
     }))
