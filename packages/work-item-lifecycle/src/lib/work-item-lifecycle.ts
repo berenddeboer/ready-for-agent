@@ -75,6 +75,7 @@ import {
   AutonomousRetryLimitReachedError,
   BuildModelNotConfiguredError,
   ImplementAllWithAutoMergeNotEligibleError,
+  InterruptNotEligibleError,
   InvalidAutonomousRetryLimitError,
   InvalidExecutionProfileError,
   IssueBlockedError,
@@ -947,6 +948,15 @@ export type PauseError =
   | AcknowledgeError
   | JobNotFoundError
 
+export type InterruptError =
+  | WorkItemNotFoundError
+  | WorkItemTerminalError
+  | WorkItemWaitingForBlockersError
+  | InterruptNotEligibleError
+  | WorkItemLifecycleDatabaseError
+  | AcknowledgeError
+  | JobNotFoundError
+
 export type StartError =
   | WorkItemNotFoundError
   | WorkItemTerminalError
@@ -1049,6 +1059,9 @@ export interface WorkItemLifecycleShape {
   readonly pause: (
     workItemId: string,
   ) => Effect.Effect<WorkItemRecord, PauseError>
+  readonly interrupt: (
+    workItemId: string,
+  ) => Effect.Effect<WorkItemRecord, InterruptError>
   readonly start: (
     workItemId: string,
   ) => Effect.Effect<WorkItemRecord, StartError>
@@ -1251,6 +1264,7 @@ export const makeWorkItemLifecycleLive = (
           readonly workItemId: string
           readonly cancel: Deferred.Deferred<void>
           readonly finished: Deferred.Deferred<void>
+          reasonCode: StepRunReasonCode
         }
       >()
       const resettingWorkItems = new Set<string>()
@@ -3887,17 +3901,20 @@ export const makeWorkItemLifecycleLive = (
 
       const completeInterruptedStep = (input: {
         readonly stepRun: StepRunRow
+        readonly reasonCode?: StepRunReasonCode
         readonly reasonMessage: string
         readonly cause?: Cause.Cause<unknown>
       }): Effect.Effect<void, RunStepError> =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
           const { stepRun, reasonMessage } = input
+          const reasonCode = input.reasonCode ?? STEP_RUN_REASON.interrupted
 
           yield* Effect.logWarning("Lifecycle Step interrupted", {
             workItemId: stepRun.work_item_id,
             stepRunId: stepRun.id,
             step: stepRun.step,
+            reasonCode,
             reasonMessage,
           })
 
@@ -3912,13 +3929,7 @@ export const makeWorkItemLifecycleLive = (
                      reason_message = ?,
                      updated_at = ?
                  WHERE id = ? AND status = 'running'`,
-                  [
-                    now,
-                    STEP_RUN_REASON.interrupted,
-                    reasonMessage,
-                    now,
-                    stepRun.id,
-                  ],
+                  [now, reasonCode, reasonMessage, now, stepRun.id],
                 )
 
                 yield* sql.unsafe(
@@ -4256,6 +4267,7 @@ export const makeWorkItemLifecycleLive = (
           workItemId: workItem.id,
           cancel,
           finished,
+          reasonCode: STEP_RUN_REASON.interrupted as StepRunReasonCode,
         }
 
         return yield* Effect.acquireUseRelease(
@@ -4652,8 +4664,11 @@ export const makeWorkItemLifecycleLive = (
                     ) {
                       yield* completeInterruptedStep({
                         stepRun: afterStart,
+                        reasonCode: controller.reasonCode,
                         reasonMessage:
-                          "Lifecycle Step was interrupted before an outcome could be established",
+                          controller.reasonCode === STEP_RUN_REASON.paused
+                            ? "Work Item was interrupted while the Step Run was Running"
+                            : "Lifecycle Step was interrupted before an outcome could be established",
                         cause: handlerExit.cause,
                       })
                       const interrupted = yield* getWorkItem(workItem.id).pipe(
@@ -4896,6 +4911,190 @@ export const makeWorkItemLifecycleLive = (
           )
         }
         return paused
+      })
+
+      const interruptReasonMessage =
+        "Work Item was interrupted while the Step Run was Running"
+
+      const interrupt = Effect.fn("WorkItemLifecycle.interrupt")(function* (
+        workItemId: string,
+      ) {
+        const workItem = yield* loadWorkItemRow(workItemId)
+        if (!workItem) {
+          return yield* new WorkItemNotFoundError({ workItemId })
+        }
+
+        if (isTerminalWorkItemState(workItem.state)) {
+          return yield* new WorkItemTerminalError({
+            workItemId,
+            state: workItem.state,
+          })
+        }
+
+        if (workItem.waiting_for_blockers) {
+          return yield* new WorkItemWaitingForBlockersError({
+            workItemId,
+            operation: "interrupt",
+          })
+        }
+
+        if (!workItem.paused) {
+          return yield* new InterruptNotEligibleError({
+            workItemId,
+            reason: "not_paused",
+          })
+        }
+
+        const runningRows = (yield* sql
+          .unsafe(
+            `SELECT id, queue_job_id FROM step_run
+             WHERE work_item_id = ? AND status = 'running'
+             ORDER BY queued_at DESC, rowid DESC
+             LIMIT 1`,
+            [workItemId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly id: string
+          readonly queue_job_id: string | null
+        }[]
+        const running = runningRows[0]
+        if (!running) {
+          return yield* new InterruptNotEligibleError({
+            workItemId,
+            reason: "no_running_step",
+          })
+        }
+
+        const activeExecutions = [...activeStepExecutions.values()].filter(
+          (execution) => execution.workItemId === workItemId,
+        )
+        for (const execution of activeExecutions) {
+          execution.reasonCode = STEP_RUN_REASON.paused
+        }
+        yield* Effect.forEach(
+          activeExecutions,
+          ({ cancel }) => Deferred.succeed(cancel, undefined),
+          { discard: true },
+        )
+        yield* Effect.forEach(
+          activeExecutions,
+          ({ finished }) => Deferred.await(finished),
+          { discard: true },
+        )
+
+        const now = yield* Clock.currentTimeMillis
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const current = yield* loadWorkItemRow(workItemId)
+              if (!current) {
+                return yield* new WorkItemNotFoundError({ workItemId })
+              }
+              if (isTerminalWorkItemState(current.state)) {
+                return yield* new WorkItemTerminalError({
+                  workItemId,
+                  state: current.state,
+                })
+              }
+
+              const interruptedRows = (yield* sql.unsafe(
+                `UPDATE step_run
+                 SET status = 'interrupted',
+                     finished_at = COALESCE(finished_at, ?),
+                     reason_code = ?,
+                     reason_message = ?,
+                     updated_at = ?
+                 WHERE id = ?
+                   AND status IN ('running', 'interrupted')
+                 RETURNING id`,
+                [
+                  now,
+                  STEP_RUN_REASON.paused,
+                  interruptReasonMessage,
+                  now,
+                  running.id,
+                ],
+              )) as readonly { readonly id: string }[]
+
+              if (interruptedRows[0] === undefined) {
+                return
+              }
+
+              if (running.queue_job_id !== null) {
+                yield* queue
+                  .acknowledge(running.queue_job_id)
+                  .pipe(Effect.catchTag("JobNotFoundError", () => Effect.void))
+              }
+
+              yield* sql.unsafe(
+                `UPDATE work_item
+                 SET paused = 0,
+                     holds_worker_slot = 0,
+                     waiting_since = NULL,
+                     updated_at = ?
+                 WHERE id = ?`,
+                [now, workItemId],
+              )
+            }),
+          )
+          .pipe(
+            Effect.catch((error): Effect.Effect<never, InterruptError> => {
+              if (
+                error instanceof WorkItemNotFoundError ||
+                error instanceof WorkItemTerminalError
+              ) {
+                return Effect.fail(error)
+              }
+              if (error instanceof WorkItemLifecycleDatabaseError) {
+                return Effect.fail(error)
+              }
+              if (
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                (error as { _tag: string })._tag === "SqlError"
+              ) {
+                return Effect.fail(toDatabaseError(error as SqlError))
+              }
+              if (
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                ((error as { _tag: string })._tag === "AcknowledgeError" ||
+                  (error as { _tag: string })._tag === "JobNotFoundError")
+              ) {
+                return Effect.fail(
+                  error as unknown as AcknowledgeError | JobNotFoundError,
+                )
+              }
+              return Effect.fail(
+                new WorkItemLifecycleDatabaseError({
+                  message: `Unexpected transaction failure: ${String(error)}`,
+                  cause: error,
+                }),
+              )
+            }),
+          )
+
+        const interrupted = yield* getWorkItem(workItemId).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after interrupt: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
+        )
+        yield* notifyWorkItemsChanged(interrupted.repositoryId)
+        yield* admitWaitingWorkItems.pipe(
+          Effect.catch((error) =>
+            Effect.logError("Failed to admit waiters after interrupt", {
+              error: String(error),
+            }),
+          ),
+        )
+        return interrupted
       })
 
       const start = Effect.fn("WorkItemLifecycle.start")(function* (
@@ -6441,6 +6640,16 @@ export const makeWorkItemLifecycleLive = (
         }
 
         const autonomous = options?.autonomous
+        if (
+          autonomous !== undefined &&
+          latest?.status === "interrupted" &&
+          latest.reason_code === STEP_RUN_REASON.paused
+        ) {
+          return yield* new RetryNotEligibleError({
+            workItemId,
+            reason: "paused",
+          })
+        }
         if (autonomous !== undefined) {
           if (
             !Number.isInteger(autonomous.maxRetries) ||
@@ -7498,6 +7707,7 @@ export const makeWorkItemLifecycleLive = (
         wakePostponedStep,
         retry,
         pause,
+        interrupt,
         start,
         abandon,
         reset,

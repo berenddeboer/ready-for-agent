@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { canShowWorkItemResetAction } from "../src/work-item-job-actions.js"
+import {
+  canShowWorkItemResetAction,
+  workItemPauseControl,
+} from "../src/work-item-job-actions.js"
 import { describe, expect, test } from "bun:test"
 
 const homeSource = () =>
@@ -151,6 +154,65 @@ const cases = [
     show: false,
   },
 ] as const
+
+describe("workItemPauseControl", () => {
+  test("hides on terminal, Waiting for blockers, and idle not-paused jobs", () => {
+    expect(
+      workItemPauseControl({
+        isTerminal: true,
+        status: "FAILED",
+        paused: false,
+        hasActiveStepRun: false,
+      }),
+    ).toEqual({ kind: "hidden" })
+    expect(
+      workItemPauseControl({
+        isTerminal: false,
+        status: "WAITING_FOR_BLOCKERS",
+        paused: false,
+        hasActiveStepRun: false,
+      }),
+    ).toEqual({ kind: "hidden" })
+    expect(
+      workItemPauseControl({
+        isTerminal: false,
+        status: "FAILED",
+        paused: false,
+        hasActiveStepRun: false,
+      }),
+    ).toEqual({ kind: "hidden" })
+  })
+
+  test("shows pause bars for a live job and Interrupt after Pause while draining", () => {
+    expect(
+      workItemPauseControl({
+        isTerminal: false,
+        status: "RUNNING",
+        paused: false,
+        hasActiveStepRun: true,
+      }),
+    ).toEqual({ kind: "pause", label: "Pause job" })
+    expect(
+      workItemPauseControl({
+        isTerminal: false,
+        status: "NEEDS_HUMAN_REVIEW",
+        paused: true,
+        hasActiveStepRun: true,
+      }),
+    ).toEqual({ kind: "interrupt", label: "Interrupt job" })
+  })
+
+  test("shows play only when paused and idle", () => {
+    expect(
+      workItemPauseControl({
+        isTerminal: false,
+        status: "NEEDS_HUMAN_REVIEW",
+        paused: true,
+        hasActiveStepRun: false,
+      }),
+    ).toEqual({ kind: "start", label: "Start job" })
+  })
+})
 
 describe("canShowWorkItemResetAction", () => {
   for (const scenario of cases) {

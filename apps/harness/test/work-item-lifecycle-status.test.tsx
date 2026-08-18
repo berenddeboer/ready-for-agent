@@ -25,6 +25,7 @@ const waitingForGitHubWorkItem = {
   latestStepRunDetail: null,
   postponedUntil: "2026-08-07T12:00:00.000Z",
   paused: false,
+  hasActiveStepRun: false,
   canRetry: false,
   isTerminal: false,
   failureCode: null,

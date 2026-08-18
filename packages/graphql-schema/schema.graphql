@@ -927,6 +927,11 @@ type WorkItem {
   """
   postponedUntil: String
   paused: Boolean!
+  """
+  True when this Work Item has a queued or running Step Run. Used by the
+  pause control so clients do not scrape chips for drain vs idle.
+  """
+  hasActiveStepRun: Boolean!
   canRetry: Boolean!
   isTerminal: Boolean!
   stateReadyAt: String!
@@ -1101,6 +1106,11 @@ type Mutation {
   ): RetryWorkItemsResult!
   retryWorkItem(workItemId: ID!): WorkItem!
   pauseWorkItem(workItemId: ID!): WorkItem!
+  """
+  Stop a running Step Run on a paused Work Item without deleting it.
+  Legal only while paused and a Step Run is running. Resume is Retry.
+  """
+  interruptWorkItem(workItemId: ID!): WorkItem!
   startWorkItem(workItemId: ID!): WorkItem!
   resetWorkItem(workItemId: ID!): ID!
   updateConfig(input: UpdateConfigInput!): Config!

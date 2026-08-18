@@ -1,9 +1,12 @@
 import type { WorkItemRecord } from "@ready-for-agent/work-item-lifecycle"
+import { STEP_RUN_REASON } from "@ready-for-agent/work-item-lifecycle"
 import {
   cumulativeExecutionDurationMs,
   lifecycleLabels,
   statusLabel,
+  workItemCanAutonomousRetry,
   workItemCanRetry,
+  workItemHasActiveStepRun,
   workItemLatestStepRunDetail,
   workItemLatestStepRunReason,
   workItemPostponedUntil,
@@ -147,6 +150,56 @@ describe("Postponed Step Run projection", () => {
       ),
     ).toBe(false)
     expect(workItemCanRetry(workItemWith({ paused: true }))).toBe(false)
+    expect(
+      workItemCanRetry(
+        workItemWith({
+          paused: false,
+          stepRuns: [
+            {
+              ...baseStepRun,
+              status: "interrupted",
+              reasonCode: STEP_RUN_REASON.paused,
+            },
+          ],
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      workItemCanAutonomousRetry(
+        workItemWith({
+          paused: false,
+          stepRuns: [
+            {
+              ...baseStepRun,
+              status: "interrupted",
+              reasonCode: STEP_RUN_REASON.paused,
+            },
+          ],
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      workItemHasActiveStepRun(
+        workItemWith({
+          stepRuns: [{ ...baseStepRun, status: "running", finishedAt: null }],
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      workItemHasActiveStepRun(
+        workItemWith({
+          stepRuns: [{ ...baseStepRun, status: "failed" }],
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      workItemStatus(
+        workItemWith({
+          paused: true,
+          stepRuns: [{ ...baseStepRun, status: "running", finishedAt: null }],
+        }),
+      ),
+    ).toBe("needs_human_review")
     expect(
       workItemCanRetry(
         workItemWith({ waitingSince: new Date("2026-07-14T08:05:00.000Z") }),

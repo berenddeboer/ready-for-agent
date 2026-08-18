@@ -22,3 +22,34 @@ export function canShowWorkItemResetAction(args: {
   if (!args.isTerminal) return true
   return args.isNeedsHuman || args.isFailed
 }
+
+export type WorkItemPauseControl =
+  | { readonly kind: "hidden" }
+  | { readonly kind: "pause"; readonly label: "Pause job" }
+  | { readonly kind: "interrupt"; readonly label: "Interrupt job" }
+  | { readonly kind: "start"; readonly label: "Start job" }
+
+/**
+ * Pause control: pause bars while a Step Run is queued or running; Interrupt
+ * after Pause while still draining; play only when paused and idle; hidden
+ * when idle and not paused.
+ */
+export function workItemPauseControl(args: {
+  readonly isTerminal: boolean
+  readonly status: string
+  readonly paused: boolean
+  readonly hasActiveStepRun: boolean
+}): WorkItemPauseControl {
+  if (args.isTerminal || args.status === "WAITING_FOR_BLOCKERS") {
+    return { kind: "hidden" }
+  }
+  if (args.hasActiveStepRun) {
+    return args.paused
+      ? { kind: "interrupt", label: "Interrupt job" }
+      : { kind: "pause", label: "Pause job" }
+  }
+  if (args.paused) {
+    return { kind: "start", label: "Start job" }
+  }
+  return { kind: "hidden" }
+}

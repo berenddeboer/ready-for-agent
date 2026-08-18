@@ -174,6 +174,19 @@ export const workItemPostponedUntil = (
   return latest?.status === "postponed" ? latest.postponedUntil : null
 }
 
+export const workItemHasActiveStepRun = (workItem: WorkItemRecord): boolean =>
+  workItem.stepRuns.some(
+    (stepRun) => stepRun.status === "queued" || stepRun.status === "running",
+  )
+
+const isInterruptedWithPausedReason = (workItem: WorkItemRecord): boolean => {
+  const latest = latestStepRun(workItem)
+  return (
+    latest?.status === "interrupted" &&
+    latest.reasonCode === STEP_RUN_REASON.paused
+  )
+}
+
 export const workItemCanRetry = (workItem: WorkItemRecord): boolean => {
   if (
     workItem.waitingSince != null ||
@@ -201,6 +214,10 @@ export const workItemCanRetry = (workItem: WorkItemRecord): boolean => {
   const latestStatus = latestStepRun(workItem)?.status
   return latestStatus === "failed" || latestStatus === "interrupted"
 }
+
+/** UI / single-item Retry stays true; Autonomous Retry and --all-retryable do not. */
+export const workItemCanAutonomousRetry = (workItem: WorkItemRecord): boolean =>
+  workItemCanRetry(workItem) && !isInterruptedWithPausedReason(workItem)
 
 export const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
   const higherPriorityStatus = higherPriorityWorkItemStatus(workItem)

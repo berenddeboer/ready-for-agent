@@ -112,7 +112,10 @@ import { sessionWorktreeParts } from "./session-worktree-line.js"
 import { startWorkBannerMessage } from "./start-work-banner-message.js"
 import { cx, ui } from "./ui.js"
 import { workItemIssueUrl } from "./work-item-issue-url.js"
-import { canShowWorkItemResetAction } from "./work-item-job-actions.js"
+import {
+  canShowWorkItemResetAction,
+  workItemPauseControl,
+} from "./work-item-job-actions.js"
 import { WorkItemOutcomePresentation } from "./work-item-outcome-presentation.js"
 import {
   isStatusMessageAlarm,
@@ -309,6 +312,7 @@ export type WorkItem = {
   } | null
   postponedUntil: string | null
   paused: boolean
+  hasActiveStepRun: boolean
   canRetry: boolean
   isTerminal: boolean
   failureCode: string | null
@@ -358,6 +362,7 @@ const workItemFields = {
   },
   postponedUntil: true,
   paused: true,
+  hasActiveStepRun: true,
   canRetry: true,
   isTerminal: true,
   failureCode: true,
@@ -3358,6 +3363,18 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
     },
     onSuccess: updateWorkItem,
   })
+  const interrupt = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        interruptWorkItem: {
+          __args: { workItemId: workItem.id },
+          ...workItemFields,
+        },
+      })
+      return result.interruptWorkItem
+    },
+    onSuccess: updateWorkItem,
+  })
   const start = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -3371,13 +3388,20 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
     onSuccess: updateWorkItem,
   })
 
-  if (workItem.isTerminal || workItem.status === "WAITING_FOR_BLOCKERS") {
+  const control = workItemPauseControl({
+    isTerminal: workItem.isTerminal,
+    status: workItem.status,
+    paused: workItem.paused,
+    hasActiveStepRun: workItem.hasActiveStepRun,
+  })
+  if (control.kind === "hidden") {
     return null
   }
 
-  const pending = pause.isPending || start.isPending
-  const failed = pause.isError || start.isError
-  const label = workItem.paused ? "Start job" : "Pause job"
+  const pending = pause.isPending || interrupt.isPending || start.isPending
+  const failed = pause.isError || interrupt.isError || start.isError
+  const label = control.label
+  const showPlay = control.kind === "start"
 
   const pauseClass = cx(
     ui.iconBtn,
@@ -3390,7 +3414,17 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
       type="button"
       className={pauseClass}
       disabled={pending}
-      onClick={() => (workItem.paused ? start.mutate() : pause.mutate())}
+      onClick={() => {
+        if (control.kind === "start") {
+          start.mutate()
+          return
+        }
+        if (control.kind === "interrupt") {
+          interrupt.mutate()
+          return
+        }
+        pause.mutate()
+      }}
       aria-label={pending ? `${label} in progress` : label}
       title={failed ? `Could not ${label.toLowerCase()}. Try again.` : label}
     >
@@ -3417,7 +3451,7 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
             strokeLinecap="round"
           />
         </svg>
-      ) : workItem.paused ? (
+      ) : showPlay ? (
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
           <path d="m8 5 11 7-11 7V5Z" />
         </svg>

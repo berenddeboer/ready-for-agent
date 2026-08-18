@@ -50,10 +50,10 @@ describe("Waiting for blockers Working-row polish", () => {
       pauseFnStart,
     )
     const pauseFn = source.slice(pauseFnStart, pauseFnEnd)
-    expect(pauseFn).toContain(
-      'workItem.isTerminal || workItem.status === "WAITING_FOR_BLOCKERS"',
-    )
+    expect(pauseFn).toContain("workItemPauseControl({")
+    expect(pauseFn).toContain('control.kind === "hidden"')
     expect(pauseFn).toContain("return null")
+    expect(pauseFn).toContain("interruptWorkItem")
   })
 
   test("held Working row offers Reset and withholds Retry", () => {

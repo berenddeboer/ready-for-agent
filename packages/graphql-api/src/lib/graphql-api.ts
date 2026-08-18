@@ -82,6 +82,7 @@ import {
   statusLabel,
   workIssueProjection,
   workItemCanRetry,
+  workItemHasActiveStepRun,
   workItemIsTerminal,
   workItemLatestStepRunDetail,
   workItemLatestStepRunReason,
@@ -1209,6 +1210,7 @@ export const createGraphqlApi = <R>(
           postponedUntil: (workItem: WorkItemRecord) =>
             workItemPostponedUntil(workItem)?.toISOString() ?? null,
           paused: (workItem: WorkItemRecord) => workItem.paused,
+          hasActiveStepRun: workItemHasActiveStepRun,
           canRetry: workItemCanRetry,
           isTerminal: workItemIsTerminal,
           lifecycleLabels,
@@ -2110,6 +2112,18 @@ export const createGraphqlApi = <R>(
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.pause(args.workItemId)
               }).pipe(Effect.withSpan("graphql-api.pauseWorkItem")),
+              context,
+            ),
+          interruptWorkItem: async (
+            _parent: unknown,
+            args: WorkItemArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                return yield* lifecycle.interrupt(args.workItemId)
+              }).pipe(Effect.withSpan("graphql-api.interruptWorkItem")),
               context,
             ),
           startWorkItem: async (
