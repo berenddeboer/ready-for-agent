@@ -1,21 +1,15 @@
 import { Effect, Layer } from "effect"
 import {
-  AGENT_BACKEND_IDS,
   type SessionTelemetry,
   SessionTelemetryProvider,
-  unsupportedAgentTurnTail,
 } from "@ready-for-agent/agent-backend"
 import {
+  GROK_BACKEND,
   type GrokSession,
   GrokSessionStore,
   GrokSessionStoreLive,
   type GrokSessionStoreOptions,
 } from "./session-store.js"
-
-const GROK_BACKEND = {
-  id: AGENT_BACKEND_IDS.grok,
-  label: "Grok Build",
-} as const
 
 const toSessionTelemetry = (session: GrokSession): SessionTelemetry => ({
   id: session.id,
@@ -36,8 +30,9 @@ const toSessionTelemetry = (session: GrokSession): SessionTelemetry => ({
 })
 
 /**
- * Expose Grok Build on-disk Session Telemetry through the generic provider.
- * Reads `$GROK_HOME/sessions/<cwd-encoded>/<session-id>/` (summary.json + updates.jsonl).
+ * Expose Grok Build on-disk Session Telemetry and Agent Turn Tail.
+ * Reads `$GROK_HOME/sessions/<cwd-encoded>/<session-id>/` (summary.json +
+ * a bounded reverse read of updates.jsonl for the tail).
  */
 export const GrokSessionTelemetryLive = (
   options: GrokSessionStoreOptions = {},
@@ -50,7 +45,7 @@ export const GrokSessionTelemetryLive = (
       return SessionTelemetryProvider.of({
         getSession: (sessionId) =>
           store.getSession(sessionId).pipe(Effect.map(toSessionTelemetry)),
-        getTail: () => Effect.succeed(unsupportedAgentTurnTail(GROK_BACKEND)),
+        getTail: (sessionId) => store.getTail(sessionId),
       })
     }),
   ).pipe(Layer.provide(storeLayer))
