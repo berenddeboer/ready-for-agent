@@ -24,6 +24,23 @@ describe("ClaudeSessionTelemetryLive", () => {
       ),
     )
 
+  const getTail = (input: {
+    readonly claudeConfigDir: string
+    readonly sessionId: string
+  }) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* SessionTelemetryProvider
+        return yield* provider.getTail(input.sessionId)
+      }).pipe(
+        Effect.provide(
+          ClaudeSessionTelemetryLive({
+            claudeConfigDir: input.claudeConfigDir,
+          }),
+        ),
+      ),
+    )
+
   const writeTranscript = (input: {
     readonly claudeConfigDir: string
     readonly sessionId: string
@@ -102,6 +119,53 @@ describe("ClaudeSessionTelemetryLive", () => {
           providerId: "bedrock",
           thinkingLevel: "medium",
         },
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("serves Agent Turn Tail from the parent transcript only", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claude-session-telemetry-"))
+    try {
+      const sessionId = "tail-session"
+      const path = join(dir, "projects", "-work-repo", `${sessionId}.jsonl`)
+      mkdirSync(join(path, ".."), { recursive: true })
+      writeFileSync(
+        path,
+        [
+          JSON.stringify({
+            type: "user",
+            timestamp: "2026-08-18T12:00:01.000Z",
+            isSidechain: false,
+            message: { role: "user", content: "implement" },
+          }),
+          JSON.stringify({
+            type: "assistant",
+            timestamp: "2026-08-18T12:00:02.000Z",
+            isSidechain: false,
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "working" }],
+            },
+          }),
+        ].join("\n"),
+      )
+
+      await expect(
+        getTail({ claudeConfigDir: dir, sessionId }),
+      ).resolves.toEqual({
+        availability: "available",
+        backend: { id: "claude", label: "Claude Code" },
+        jumpHint: false,
+        items: [
+          {
+            kind: "assistant_text",
+            text: "working",
+            truncated: false,
+            at: "2026-08-18T12:00:02.000Z",
+          },
+        ],
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })

@@ -1,7 +1,26 @@
-import { type Dirent, readFileSync, readdirSync, statSync } from "node:fs"
+import {
+  type Dirent,
+  closeSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, join } from "node:path"
 import { Context, Effect, Layer } from "effect"
+import {
+  AGENT_BACKEND_IDS,
+  AGENT_TURN_TAIL_ITEM_LIMIT,
+  type AgentTurnTail,
+  type AgentTurnTailSourceEvent,
+  makeAgentTurnTail,
+  missingAgentTurnTail,
+  selectAgentTurnTail,
+  unavailableAgentTurnTail,
+} from "@ready-for-agent/agent-backend"
 
 export const CLAUDE_SESSION_PROVIDER_ID = "anthropic"
 export const CLAUDE_BEDROCK_SESSION_PROVIDER_ID = "bedrock"
@@ -44,8 +63,14 @@ export type ClaudeSessionUnavailable = {
 
 export type ClaudeSession = ClaudeSessionAvailable | ClaudeSessionUnavailable
 
+const CLAUDE_BACKEND = {
+  id: AGENT_BACKEND_IDS.claude,
+  label: "Claude Code",
+} as const
+
 export type ClaudeSessionStoreShape = {
   readonly getSession: (id: string) => Effect.Effect<ClaudeSession, never>
+  readonly getTail: (id: string) => Effect.Effect<AgentTurnTail, never>
 }
 
 export class ClaudeSessionStore extends Context.Service<
@@ -497,6 +522,286 @@ const readClaudeSessionFromDisk = (input: {
   }
 }
 
+const TAIL_READ_CHUNK_BYTES = 64 * 1024
+const NEWLINE = 0x0a
+
+type ClaudeTailLineEvent =
+  | { readonly kind: "user"; readonly at: string }
+  | {
+      readonly kind: "assistant_text"
+      readonly text: string
+      readonly at: string
+    }
+  | {
+      readonly kind: "tool_use"
+      readonly id: string
+      readonly name: string
+      readonly at: string
+    }
+  | {
+      readonly kind: "tool_result"
+      readonly id: string
+      readonly status: string
+      readonly at: string
+    }
+
+const isChildSessionLine = (
+  record: Readonly<Record<string, unknown>>,
+): boolean =>
+  record["isSidechain"] === true ||
+  (record["parent_tool_use_id"] !== undefined &&
+    record["parent_tool_use_id"] !== null)
+
+const toolStatusFromResult = (isError: unknown): string =>
+  isError === true ? "failed" : "completed"
+
+const eventsFromUserContent = (
+  content: unknown,
+  at: string,
+): ClaudeTailLineEvent[] => {
+  if (typeof content === "string") {
+    return [{ kind: "user", at }]
+  }
+  if (!Array.isArray(content)) {
+    return [{ kind: "user", at }]
+  }
+
+  const events: ClaudeTailLineEvent[] = []
+  let hasPrompt = false
+  for (const block of content) {
+    if (!isRecord(block)) {
+      continue
+    }
+    if (block["type"] === "tool_result") {
+      const id = nonEmptyString(block["tool_use_id"])
+      if (id !== null) {
+        events.push({
+          kind: "tool_result",
+          id,
+          status: toolStatusFromResult(block["is_error"]),
+          at,
+        })
+      }
+      continue
+    }
+    if (block["type"] === "text") {
+      hasPrompt = true
+    }
+  }
+  if (hasPrompt || events.length === 0) {
+    events.push({ kind: "user", at })
+  }
+  return events
+}
+
+const eventsFromAssistantContent = (
+  content: unknown,
+  at: string,
+): ClaudeTailLineEvent[] => {
+  if (typeof content === "string") {
+    return content === "" ? [] : [{ kind: "assistant_text", text: content, at }]
+  }
+  if (!Array.isArray(content)) {
+    return []
+  }
+
+  const events: ClaudeTailLineEvent[] = []
+  for (const block of content) {
+    if (!isRecord(block)) {
+      continue
+    }
+    if (block["type"] === "text") {
+      const text = typeof block["text"] === "string" ? block["text"] : ""
+      if (text !== "") {
+        events.push({ kind: "assistant_text", text, at })
+      }
+      continue
+    }
+    if (block["type"] === "tool_use") {
+      const id = nonEmptyString(block["id"])
+      const name = nonEmptyString(block["name"])
+      if (id !== null && name !== null) {
+        events.push({ kind: "tool_use", id, name, at })
+      }
+    }
+  }
+  return events
+}
+
+/** Map one JSONL line to tail events. Unknown shapes and child lines are skipped. */
+const eventsFromClaudeTranscriptLine = (
+  line: string,
+): ReadonlyArray<ClaudeTailLineEvent> => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(line)
+  } catch {
+    return []
+  }
+  if (!isRecord(parsed) || isChildSessionLine(parsed)) {
+    return []
+  }
+
+  const timestamp = timestampFromLine(parsed["timestamp"])
+  if (timestamp === null) {
+    return []
+  }
+  const at = timestamp.raw
+  const type = parsed["type"]
+
+  if (type === "user") {
+    const message = parsed["message"]
+    return eventsFromUserContent(
+      isRecord(message) ? message["content"] : undefined,
+      at,
+    )
+  }
+
+  if (type === "assistant") {
+    const message = parsed["message"]
+    return eventsFromAssistantContent(
+      isRecord(message) ? message["content"] : undefined,
+      at,
+    )
+  }
+
+  if (type === "tool_use") {
+    const id = nonEmptyString(parsed["id"])
+    const name = nonEmptyString(parsed["name"])
+    return id === null || name === null
+      ? []
+      : [{ kind: "tool_use", id, name, at }]
+  }
+
+  if (type === "tool_result") {
+    const id = nonEmptyString(parsed["tool_use_id"])
+    return id === null
+      ? []
+      : [
+          {
+            kind: "tool_result",
+            id,
+            status: toolStatusFromResult(parsed["is_error"]),
+            at,
+          },
+        ]
+  }
+
+  return []
+}
+
+/**
+ * Visit complete JSONL lines newest-first without decoding the rest of the
+ * file once the visitor stops.
+ */
+const forEachJsonlLineFromEnd = (
+  path: string,
+  visit: (line: string) => boolean,
+): void => {
+  const fd = openSync(path, "r")
+  try {
+    let position = fstatSync(fd).size
+    let leftover = Buffer.alloc(0)
+    while (position > 0) {
+      const toRead = Math.min(TAIL_READ_CHUNK_BYTES, position)
+      position -= toRead
+      const chunk = Buffer.allocUnsafe(toRead)
+      readSync(fd, chunk, 0, toRead, position)
+      const combined = Buffer.concat([chunk, leftover])
+      let end = combined.length
+      for (let index = combined.length - 1; index >= 0; index -= 1) {
+        if (combined[index] !== NEWLINE) {
+          continue
+        }
+        const line = combined.subarray(index + 1, end)
+        end = index
+        if (line.length === 0) {
+          continue
+        }
+        if (!visit(line.toString("utf8"))) {
+          return
+        }
+      }
+      leftover = combined.subarray(0, end)
+    }
+    if (leftover.length > 0) {
+      visit(leftover.toString("utf8"))
+    }
+  } finally {
+    closeSync(fd)
+  }
+}
+
+const readClaudeTailFromDisk = (input: {
+  readonly claudeConfigDir: string
+  readonly sessionId: string
+}): AgentTurnTail => {
+  const id = input.sessionId.trim()
+  if (id === "" || !isSafeClaudeSessionIdSegment(id)) {
+    return missingAgentTurnTail(CLAUDE_BACKEND)
+  }
+
+  const lookup = findClaudeSessionTranscript({
+    claudeConfigDir: input.claudeConfigDir,
+    sessionId: id,
+  })
+  if (lookup.kind === "missing") {
+    return missingAgentTurnTail(CLAUDE_BACKEND)
+  }
+  if (lookup.kind === "unavailable") {
+    return unavailableAgentTurnTail(CLAUDE_BACKEND)
+  }
+
+  try {
+    const newestFirst: AgentTurnTailSourceEvent[] = []
+    const pendingResults = new Map<string, string>()
+
+    forEachJsonlLineFromEnd(lookup.path, (line) => {
+      const lineEvents = eventsFromClaudeTranscriptLine(line)
+      for (let index = lineEvents.length - 1; index >= 0; index -= 1) {
+        const event = lineEvents[index]
+        if (event === undefined) {
+          continue
+        }
+        if (event.kind === "user") {
+          return false
+        }
+        if (event.kind === "tool_result") {
+          pendingResults.set(event.id, event.status)
+          continue
+        }
+        if (event.kind === "tool_use") {
+          newestFirst.push({
+            kind: "tool",
+            name: event.name,
+            status: pendingResults.get(event.id) ?? "running",
+            at: event.at,
+          })
+          pendingResults.delete(event.id)
+        } else {
+          newestFirst.push({
+            kind: "assistant_text",
+            text: event.text,
+            at: event.at,
+          })
+        }
+        if (newestFirst.length >= AGENT_TURN_TAIL_ITEM_LIMIT) {
+          return false
+        }
+      }
+      return true
+    })
+
+    return makeAgentTurnTail({
+      availability: "available",
+      backend: CLAUDE_BACKEND,
+      items: selectAgentTurnTail(newestFirst.reverse()),
+    })
+  } catch {
+    return unavailableAgentTurnTail(CLAUDE_BACKEND)
+  }
+}
+
 export const makeClaudeSessionStore = (
   shape: ClaudeSessionStoreShape,
 ): ClaudeSessionStoreShape => shape
@@ -510,6 +815,13 @@ export const ClaudeSessionStoreLive = (
       getSession: (id) =>
         Effect.sync(() =>
           readClaudeSessionFromDisk({
+            claudeConfigDir: resolveClaudeConfigDir(options),
+            sessionId: id,
+          }),
+        ),
+      getTail: (id) =>
+        Effect.sync(() =>
+          readClaudeTailFromDisk({
             claudeConfigDir: resolveClaudeConfigDir(options),
             sessionId: id,
           }),
