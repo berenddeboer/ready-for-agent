@@ -33,6 +33,19 @@ const getSession = (input: {
     ),
   )
 
+const getTail = (input: {
+  readonly codexHome: string
+  readonly sessionId: string
+}) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const store = yield* CodexSessionStore
+      return yield* store.getTail(input.sessionId)
+    }).pipe(
+      Effect.provide(CodexSessionStoreLive({ codexHome: input.codexHome })),
+    ),
+  )
+
 const writeScannedRollout = (input: {
   readonly codexHome: string
   readonly partition: string
@@ -776,5 +789,535 @@ describe("CodexSessionStore", () => {
     expect(resolveCodexHome({ env: { HOME: "/home/test" } })).toBe(
       "/home/test/.codex",
     )
+  })
+})
+
+describe("CodexSessionStore Agent Turn Tail", () => {
+  it("reads the latest Agent Turn without tool payloads", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
+    try {
+      const sessionId = "tail-latest-turn"
+      const payloadMarker = "HUGE_TOOL_OUTPUT_SHOULD_NOT_APPEAR"
+      writeScannedRollout({
+        codexHome,
+        partition: join("2026", "08", "18"),
+        sessionId,
+        raw: [
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:00.000Z",
+            type: "session_meta",
+            payload: { id: sessionId },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "old prompt" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            type: "event_msg",
+            payload: { type: "agent_message", message: "old turn" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:03.000Z",
+            type: "response_item",
+            payload: {
+              type: "function_call",
+              name: "read",
+              arguments: payloadMarker,
+              call_id: "call_old",
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:03.100Z",
+            type: "response_item",
+            payload: {
+              type: "function_call_output",
+              call_id: "call_old",
+              output: payloadMarker.repeat(200),
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:04.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "review the tests" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:05.000Z",
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call",
+              name: "bun test",
+              status: "failed",
+              call_id: "call_new",
+              input: payloadMarker,
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:05.100Z",
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call_output",
+              call_id: "call_new",
+              output: payloadMarker.repeat(200),
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:06.000Z",
+            type: "event_msg",
+            payload: { type: "agent_message", message: "tests failed" },
+          }),
+        ].join("\n"),
+      })
+
+      const tail = await getTail({ codexHome, sessionId })
+      expect(tail).toEqual({
+        availability: "available",
+        backend: { id: "codex", label: "Codex Build" },
+        jumpHint: false,
+        items: [
+          {
+            kind: "tool",
+            name: "bun test",
+            status: "failed",
+            at: "2026-08-18T12:00:05.000Z",
+          },
+          {
+            kind: "assistant_text",
+            text: "tests failed",
+            truncated: false,
+            at: "2026-08-18T12:00:06.000Z",
+          },
+        ],
+      })
+      expect(JSON.stringify(tail)).not.toContain(payloadMarker)
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("returns an empty tail with jumpHint when the latest turn has no activity", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
+    try {
+      const sessionId = "tail-empty-turn"
+      writeScannedRollout({
+        codexHome,
+        partition: join("2026", "08", "18"),
+        sessionId,
+        raw: [
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:00.000Z",
+            type: "session_meta",
+            payload: { id: sessionId },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "old prompt" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            type: "event_msg",
+            payload: { type: "agent_message", message: "old turn" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:03.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "new prompt" },
+          }),
+        ].join("\n"),
+      })
+
+      const tail = await getTail({ codexHome, sessionId })
+      expect(tail.availability).toBe("available")
+      expect(tail.items).toEqual([])
+      expect(tail.jumpHint).toBe(true)
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("does not include child Session or inter-agent activity", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
+    try {
+      const sessionId = "tail-no-children"
+      writeScannedRollout({
+        codexHome,
+        partition: join("2026", "08", "18"),
+        sessionId,
+        raw: [
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:00.000Z",
+            type: "session_meta",
+            payload: { id: sessionId },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "implement it" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            type: "event_msg",
+            payload: {
+              type: "sub_agent_activity",
+              kind: "started",
+              agent_thread_id: "child-session",
+              agent_path: "/root/spec_review",
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:03.000Z",
+            type: "response_item",
+            payload: {
+              type: "agent_message",
+              content: [
+                {
+                  type: "input_text",
+                  text: "Message Type: NEW_TASK\nTask name: /root/spec_review",
+                },
+              ],
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:04.000Z",
+            type: "response_item",
+            payload: {
+              type: "reasoning",
+              summary: [{ text: "thinking about child work" }],
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:05.000Z",
+            type: "event_msg",
+            payload: { type: "agent_message", message: "parent progress" },
+          }),
+        ].join("\n"),
+      })
+
+      const tail = await getTail({ codexHome, sessionId })
+      expect(tail).toEqual({
+        availability: "available",
+        backend: { id: "codex", label: "Codex Build" },
+        jumpHint: false,
+        items: [
+          {
+            kind: "assistant_text",
+            text: "parent progress",
+            truncated: false,
+            at: "2026-08-18T12:00:05.000Z",
+          },
+        ],
+      })
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("keeps only the last 20 activity items and truncates assistant text at 2k", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
+    try {
+      const sessionId = "tail-bounds"
+      const longText = `${"a".repeat(2000)}EXTRA`
+      const lines = [
+        JSON.stringify({
+          timestamp: "2026-08-18T12:00:00.000Z",
+          type: "session_meta",
+          payload: { id: sessionId },
+        }),
+        JSON.stringify({
+          timestamp: "2026-08-18T12:00:01.000Z",
+          type: "event_msg",
+          payload: { type: "user_message", message: "go" },
+        }),
+      ]
+      for (let index = 1; index <= 25; index += 1) {
+        lines.push(
+          JSON.stringify({
+            timestamp: `2026-08-18T12:00:${String(index + 1).padStart(2, "0")}.000Z`,
+            type: "response_item",
+            payload: {
+              type: "function_call",
+              name: `tool-${index}`,
+              call_id: `call_${index}`,
+            },
+          }),
+        )
+      }
+      lines.push(
+        JSON.stringify({
+          timestamp: "2026-08-18T12:00:28.000Z",
+          type: "event_msg",
+          payload: { type: "agent_message", message: longText },
+        }),
+      )
+      writeScannedRollout({
+        codexHome,
+        partition: join("2026", "08", "18"),
+        sessionId,
+        raw: lines.join("\n"),
+      })
+
+      const tail = await getTail({ codexHome, sessionId })
+      expect(tail.items).toHaveLength(20)
+      expect(tail.items[0]).toEqual({
+        kind: "tool",
+        name: "tool-7",
+        status: "unknown",
+        at: "2026-08-18T12:00:08.000Z",
+      })
+      expect(tail.items[19]).toEqual({
+        kind: "assistant_text",
+        text: "a".repeat(2000),
+        truncated: true,
+        at: "2026-08-18T12:00:28.000Z",
+      })
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("does not treat a large tool call whose payload mentions user_message as a turn boundary", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
+    try {
+      const sessionId = "tail-large-tool"
+      const input = `user_message ${"x".repeat(20_000)}`
+      writeScannedRollout({
+        codexHome,
+        partition: join("2026", "08", "18"),
+        sessionId,
+        raw: [
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:00.000Z",
+            type: "session_meta",
+            payload: { id: sessionId },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "apply the patch" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call",
+              name: "apply_patch",
+              status: "completed",
+              call_id: "call_patch",
+              input,
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:03.000Z",
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call_output",
+              call_id: "call_patch",
+              output: `user_message ${"y".repeat(40_000)}`,
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:04.000Z",
+            type: "event_msg",
+            payload: { type: "agent_message", message: "patched" },
+          }),
+        ].join("\n"),
+      })
+
+      const tail = await getTail({ codexHome, sessionId })
+      expect(tail).toEqual({
+        availability: "available",
+        backend: { id: "codex", label: "Codex Build" },
+        jumpHint: false,
+        items: [
+          {
+            kind: "tool",
+            name: "apply_patch",
+            status: "completed",
+            at: "2026-08-18T12:00:02.000Z",
+          },
+          {
+            kind: "assistant_text",
+            text: "patched",
+            truncated: false,
+            at: "2026-08-18T12:00:04.000Z",
+          },
+        ],
+      })
+      expect(JSON.stringify(tail)).not.toContain("x".repeat(100))
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("classifies turn boundaries and tools from payload type, not payload text", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
+    try {
+      const sessionId = "tail-payload-type"
+      const longAssistant = `mentions user_message ${"a".repeat(2500)}`
+      writeScannedRollout({
+        codexHome,
+        partition: join("2026", "08", "18"),
+        sessionId,
+        raw: [
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:00.000Z",
+            type: "session_meta",
+            payload: { id: sessionId },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "old prompt" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            type: "event_msg",
+            payload: { type: "agent_message", message: "old turn" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:03.000Z",
+            type: "event_msg",
+            payload: {
+              type: "user_message",
+              message: "what is function_call_output",
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:04.000Z",
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call",
+              name: "apply_patch",
+              status: "completed",
+              call_id: "call_patch",
+              input: `agent_message ${"z".repeat(20_000)}`,
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:05.000Z",
+            type: "event_msg",
+            payload: { type: "agent_message", message: longAssistant },
+          }),
+        ].join("\n"),
+      })
+
+      const tail = await getTail({ codexHome, sessionId })
+      expect(tail.availability).toBe("available")
+      expect(tail.jumpHint).toBe(false)
+      expect(tail.items).toEqual([
+        {
+          kind: "tool",
+          name: "apply_patch",
+          status: "completed",
+          at: "2026-08-18T12:00:04.000Z",
+        },
+        {
+          kind: "assistant_text",
+          text: longAssistant.slice(0, 2000),
+          truncated: true,
+          at: "2026-08-18T12:00:05.000Z",
+        },
+      ])
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("reads an indexed rollout tail and rejects unsafe Session IDs as MISSING", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
+    try {
+      const sessionId = "indexed-tail-session"
+      const rolloutPath = writeScannedRollout({
+        codexHome,
+        partition: join("2026", "08", "18"),
+        sessionId,
+        raw: [
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:00.000Z",
+            type: "session_meta",
+            payload: { id: sessionId },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "go" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            type: "event_msg",
+            payload: { type: "agent_message", message: "working" },
+          }),
+        ].join("\n"),
+      })
+      writeThreadsIndex({
+        codexHome,
+        sessionId,
+        rolloutPath,
+      })
+
+      await expect(getTail({ codexHome, sessionId })).resolves.toEqual({
+        availability: "available",
+        backend: { id: "codex", label: "Codex Build" },
+        jumpHint: false,
+        items: [
+          {
+            kind: "assistant_text",
+            text: "working",
+            truncated: false,
+            at: "2026-08-18T12:00:02.000Z",
+          },
+        ],
+      })
+      await expect(
+        getTail({ codexHome, sessionId: "../escape" }),
+      ).resolves.toMatchObject({
+        availability: "missing",
+        backend: { id: "codex", label: "Codex Build" },
+        items: [],
+      })
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("returns MISSING when the Codex Session record is absent", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
+    try {
+      mkdirSync(join(codexHome, "sessions"), { recursive: true })
+      await expect(
+        getTail({ codexHome, sessionId: "no-such-session" }),
+      ).resolves.toMatchObject({
+        availability: "missing",
+        backend: { id: "codex", label: "Codex Build" },
+        items: [],
+        jumpHint: false,
+      })
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("returns UNAVAILABLE when the Codex Session record is unreadable", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
+    try {
+      writeScannedRollout({
+        codexHome,
+        partition: join("2026", "08", "18"),
+        sessionId: "corrupt-tail-session",
+        raw: "not-json\n",
+      })
+      await expect(
+        getTail({ codexHome, sessionId: "corrupt-tail-session" }),
+      ).resolves.toMatchObject({
+        availability: "unavailable",
+        backend: { id: "codex", label: "Codex Build" },
+        items: [],
+        jumpHint: false,
+      })
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
   })
 })

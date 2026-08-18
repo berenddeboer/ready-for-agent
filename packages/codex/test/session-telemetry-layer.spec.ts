@@ -35,6 +35,19 @@ const getTelemetry = (input: {
     ),
   )
 
+const getTail = (input: {
+  readonly codexHome: string
+  readonly sessionId: string
+}) =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const provider = yield* SessionTelemetryProvider
+      return yield* provider.getTail(input.sessionId)
+    }).pipe(
+      Effect.provide(CodexSessionTelemetryLive({ codexHome: input.codexHome })),
+    ),
+  )
+
 describe("CodexSessionTelemetryLive", () => {
   it("live-reads the last cumulative rollout totals with Codex Build provenance", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codex-telemetry-"))
@@ -169,6 +182,113 @@ describe("CodexSessionTelemetryLive", () => {
         cost: null,
         createdAt: null,
         updatedAt: null,
+      })
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("serves the latest Agent Turn Tail without fetching it from session()", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-telemetry-"))
+    try {
+      const sessionId = "019fab2c-9466-7432-ad16-9de23f94f2db"
+      writeRollout({
+        codexHome,
+        sessionId,
+        lines: [
+          {
+            timestamp: "2026-08-08T01:02:03.123Z",
+            type: "session_meta",
+            payload: { id: sessionId },
+          },
+          {
+            timestamp: "2026-08-08T01:02:04.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "review the tests" },
+          },
+          {
+            timestamp: "2026-08-08T01:02:05.000Z",
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call",
+              name: "bun test",
+              status: "failed",
+              call_id: "call_tail",
+              input: "PAYLOAD_MUST_STAY_OUT",
+            },
+          },
+          {
+            timestamp: "2026-08-08T01:02:06.000Z",
+            type: "event_msg",
+            payload: { type: "agent_message", message: "tests failed" },
+          },
+          {
+            timestamp: "2026-08-08T01:03:00.456Z",
+            type: "event_msg",
+            payload: {
+              type: "token_count",
+              info: {
+                total_token_usage: {
+                  input_tokens: 250,
+                  output_tokens: 45,
+                  reasoning_output_tokens: 11,
+                  cached_input_tokens: 140,
+                  cache_write_input_tokens: 13,
+                },
+              },
+            },
+          },
+        ],
+      })
+
+      const session = await getTelemetry({ codexHome, sessionId })
+      expect(session.availability).toBe("available")
+      expect(session.tokens).toEqual({
+        input: 250,
+        output: 45,
+        reasoning: 11,
+        cacheRead: 140,
+        cacheWrite: 13,
+      })
+
+      const tail = await getTail({ codexHome, sessionId })
+      expect(tail).toEqual({
+        availability: "available",
+        backend: { id: "codex", label: "Codex Build" },
+        jumpHint: false,
+        items: [
+          {
+            kind: "tool",
+            name: "bun test",
+            status: "failed",
+            at: "2026-08-08T01:02:05.000Z",
+          },
+          {
+            kind: "assistant_text",
+            text: "tests failed",
+            truncated: false,
+            at: "2026-08-08T01:02:06.000Z",
+          },
+        ],
+      })
+      expect(JSON.stringify(session)).not.toContain("PAYLOAD_MUST_STAY_OUT")
+      expect(JSON.stringify(tail)).not.toContain("PAYLOAD_MUST_STAY_OUT")
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
+  it("maps a missing Session to MISSING tail without failing", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-telemetry-"))
+    try {
+      mkdirSync(join(codexHome, "sessions"), { recursive: true })
+      await expect(
+        getTail({ codexHome, sessionId: "no-such-session" }),
+      ).resolves.toMatchObject({
+        availability: "missing",
+        backend: { id: "codex", label: "Codex Build" },
+        items: [],
+        jumpHint: false,
       })
     } finally {
       rmSync(codexHome, { recursive: true, force: true })
