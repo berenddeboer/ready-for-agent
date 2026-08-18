@@ -100,6 +100,11 @@ type Query {
   """
   session(workItemId: ID!): Session
   """
+  Agent Turn Tail for a Work Item. Separate from session() so token usage
+  stays cheap. Returns null when the Work Item does not exist.
+  """
+  agentTurnTail(workItemId: ID!): AgentTurnTail
+  """
   Resolve an opaque backend Session ID to exactly one Work Item.
   Matches work_item.session_id exactly. Zero matches fail as not found;
   more than one match fails as ambiguous.
@@ -327,6 +332,35 @@ type Session {
   cost: Float
   createdAt: String
   updatedAt: String
+  """
+  Whether this Work Item's captured Agent Backend can serve an Agent Turn Tail.
+  Cheap capability flag; does not read Session content.
+  """
+  agentTurnTailSupported: Boolean!
+}
+
+"""
+Bounded on-demand excerpt of the latest Agent Turn on the canonical Session.
+"""
+type AgentTurnTail {
+  availability: SessionAvailability!
+  backend: AgentBackendInfo!
+  items: [AgentTurnTailItem!]!
+  jumpHint: Boolean!
+}
+
+union AgentTurnTailItem = AgentTurnTailAssistantText | AgentTurnTailTool
+
+type AgentTurnTailAssistantText {
+  at: String!
+  text: String!
+  truncated: Boolean!
+}
+
+type AgentTurnTailTool {
+  at: String!
+  name: String!
+  status: String!
 }
 
 """

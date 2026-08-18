@@ -30,6 +30,152 @@ const createEmptySessionDb = (dir: string): string => {
   return path
 }
 
+const createMessagePartTables = (db: Database): void => {
+  db.exec(`
+    CREATE TABLE message (
+      id text PRIMARY KEY,
+      session_id text NOT NULL,
+      data text NOT NULL,
+      time_created integer NOT NULL
+    );
+    CREATE TABLE part (
+      id text PRIMARY KEY,
+      session_id text NOT NULL,
+      message_id text NOT NULL,
+      data text NOT NULL,
+      time_created integer NOT NULL
+    );
+  `)
+}
+
+const insertMessage = (
+  db: Database,
+  row: {
+    readonly id: string
+    readonly role: string
+    readonly timeCreated: number
+  },
+): void => {
+  db.query(
+    `INSERT INTO message (id, session_id, data, time_created) VALUES (?, ?, ?, ?)`,
+  ).run(
+    row.id,
+    "ses_fixture",
+    JSON.stringify({ role: row.role }),
+    row.timeCreated,
+  )
+}
+
+const insertPart = (
+  db: Database,
+  row: {
+    readonly id: string
+    readonly messageId: string
+    readonly data: unknown
+    readonly timeCreated: number
+  },
+): void => {
+  db.query(
+    `INSERT INTO part (id, session_id, message_id, data, time_created)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(
+    row.id,
+    "ses_fixture",
+    row.messageId,
+    JSON.stringify(row.data),
+    row.timeCreated,
+  )
+}
+
+const createTailFixtureDb = (dir: string): string => {
+  const path = createFixtureDb(dir)
+  const db = new Database(path)
+  createMessagePartTables(db)
+  insertMessage(db, {
+    id: "msg_user_1",
+    role: "user",
+    timeCreated: Date.parse("2026-08-18T12:00:01.000Z"),
+  })
+  insertMessage(db, {
+    id: "msg_asst_1",
+    role: "assistant",
+    timeCreated: Date.parse("2026-08-18T12:00:02.000Z"),
+  })
+  insertPart(db, {
+    id: "part_old_text",
+    messageId: "msg_asst_1",
+    data: { type: "text", text: "old turn" },
+    timeCreated: Date.parse("2026-08-18T12:00:02.000Z"),
+  })
+  insertPart(db, {
+    id: "part_old_tool",
+    messageId: "msg_asst_1",
+    data: {
+      type: "tool",
+      tool: "read",
+      state: { status: "completed", output: "huge payload" },
+    },
+    timeCreated: Date.parse("2026-08-18T12:00:03.000Z"),
+  })
+  insertMessage(db, {
+    id: "msg_user_2",
+    role: "user",
+    timeCreated: Date.parse("2026-08-18T12:00:04.000Z"),
+  })
+  insertMessage(db, {
+    id: "msg_asst_2",
+    role: "assistant",
+    timeCreated: Date.parse("2026-08-18T12:00:05.000Z"),
+  })
+  insertPart(db, {
+    id: "part_new_tool",
+    messageId: "msg_asst_2",
+    data: {
+      type: "tool",
+      tool: "bun test",
+      state: { status: "failed", output: "x".repeat(50_000) },
+    },
+    timeCreated: Date.parse("2026-08-18T12:00:05.000Z"),
+  })
+  insertPart(db, {
+    id: "part_new_text",
+    messageId: "msg_asst_2",
+    data: { type: "text", text: "tests failed" },
+    timeCreated: Date.parse("2026-08-18T12:00:06.000Z"),
+  })
+  db.close()
+  return path
+}
+
+const createEmptyTurnFixtureDb = (dir: string): string => {
+  const path = createFixtureDb(dir)
+  const db = new Database(path)
+  createMessagePartTables(db)
+  insertMessage(db, {
+    id: "msg_user_1",
+    role: "user",
+    timeCreated: Date.parse("2026-08-18T12:00:01.000Z"),
+  })
+  insertMessage(db, {
+    id: "msg_asst_1",
+    role: "assistant",
+    timeCreated: Date.parse("2026-08-18T12:00:02.000Z"),
+  })
+  insertPart(db, {
+    id: "part_old_text",
+    messageId: "msg_asst_1",
+    data: { type: "text", text: "done" },
+    timeCreated: Date.parse("2026-08-18T12:00:02.000Z"),
+  })
+  insertMessage(db, {
+    id: "msg_user_2",
+    role: "user",
+    timeCreated: Date.parse("2026-08-18T12:00:03.000Z"),
+  })
+  db.close()
+  return path
+}
+
 const createFixtureDb = (dir: string): string => {
   const path = createEmptySessionDb(dir)
   const db = new Database(path)
@@ -155,6 +301,62 @@ describe("OpencodeSessionStore", () => {
       )
       await runtime.dispose()
       expect(session.availability).toBe("missing")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("reads the latest Agent Turn Tail without tool payloads", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opencode-session-"))
+    try {
+      const dbPath = createTailFixtureDb(dir)
+      const runtime = ManagedRuntime.make(OpencodeSessionStoreLive({ dbPath }))
+      const tail = await runtime.runPromise(
+        Effect.gen(function* () {
+          const store = yield* OpencodeSessionStore
+          return yield* store.getTail("ses_fixture")
+        }),
+      )
+      await runtime.dispose()
+      expect(tail).toEqual({
+        availability: "available",
+        backend: { id: "opencode", label: "OpenCode" },
+        jumpHint: false,
+        items: [
+          {
+            kind: "tool",
+            name: "bun test",
+            status: "failed",
+            at: "2026-08-18T12:00:05.000Z",
+          },
+          {
+            kind: "assistant_text",
+            text: "tests failed",
+            truncated: false,
+            at: "2026-08-18T12:00:06.000Z",
+          },
+        ],
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("returns empty tail with jumpHint when the latest turn has no activity", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "opencode-session-"))
+    try {
+      const dbPath = createEmptyTurnFixtureDb(dir)
+      const runtime = ManagedRuntime.make(OpencodeSessionStoreLive({ dbPath }))
+      const tail = await runtime.runPromise(
+        Effect.gen(function* () {
+          const store = yield* OpencodeSessionStore
+          return yield* store.getTail("ses_fixture")
+        }),
+      )
+      await runtime.dispose()
+      expect(tail.availability).toBe("available")
+      expect(tail.items).toEqual([])
+      expect(tail.jumpHint).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

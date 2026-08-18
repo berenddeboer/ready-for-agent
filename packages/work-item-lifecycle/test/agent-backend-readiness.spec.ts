@@ -188,6 +188,7 @@ describe("Agent Backend readiness gates", () => {
             continueTurn: () => Effect.die("unused"),
             inspectBackend: () => Effect.die("unused"),
             getSessionTelemetry: () => Effect.die("unused"),
+            getAgentTurnTail: () => Effect.die("unused"),
           }),
         ),
       ),
@@ -347,6 +348,7 @@ const cachedReadyBackendLayer = (options: {
       continueTurn: () => Effect.die("unused"),
       inspectBackend: () => Effect.die("unused"),
       getSessionTelemetry: () => Effect.die("unused"),
+      getAgentTurnTail: () => Effect.die("unused"),
     }),
   )
 }

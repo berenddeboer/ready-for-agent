@@ -100,6 +100,13 @@ const makeResolve =
             createdAt: null,
             updatedAt: null,
           }),
+        getTail: () =>
+          Effect.succeed({
+            availability: "unsupported" as const,
+            backend: reg.descriptor,
+            items: [],
+            jumpHint: false,
+          }),
       },
     })
   }
@@ -518,6 +525,13 @@ describe("ActiveAgentBackend multi-backend registry", () => {
             Effect.succeed(
               unsupportedSessionTelemetry(sessionId, reg.descriptor),
             ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: reg.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
         },
       })
     }
@@ -628,6 +642,13 @@ describe("ActiveAgentBackend multi-backend registry", () => {
             Effect.succeed(
               unsupportedSessionTelemetry(sessionId, reg.descriptor),
             ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: reg.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
         },
       })
     }
@@ -706,6 +727,13 @@ describe("ActiveAgentBackend multi-backend registry", () => {
             Effect.succeed(
               unsupportedSessionTelemetry(sessionId, reg.descriptor),
             ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: reg.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
         },
       })
     }
@@ -895,6 +923,13 @@ describe("inspectStartupBackend malformed-output confirmation", () => {
             Effect.succeed(
               unsupportedSessionTelemetry(sessionId, reg.descriptor),
             ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: reg.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
         },
       })
     }

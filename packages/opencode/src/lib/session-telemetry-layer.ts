@@ -48,6 +48,7 @@ export const OpencodeSessionTelemetryLive = (
       return SessionTelemetryProvider.of({
         getSession: (sessionId) =>
           store.getSession(sessionId).pipe(Effect.map(toSessionTelemetry)),
+        getTail: (sessionId) => store.getTail(sessionId),
       })
     }),
   ).pipe(Layer.provide(storeLayer))

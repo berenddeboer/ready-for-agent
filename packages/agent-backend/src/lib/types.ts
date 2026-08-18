@@ -108,4 +108,6 @@ export interface ContinueTurnInput {
 export type AgentBackendCapability =
   | { readonly _tag: "SessionTelemetry"; readonly supported: true }
   | { readonly _tag: "SessionTelemetry"; readonly supported: false }
+  | { readonly _tag: "AgentTurnTail"; readonly supported: true }
+  | { readonly _tag: "AgentTurnTail"; readonly supported: false }
   | { readonly _tag: "KeymaxxerMcp"; readonly supported: boolean }

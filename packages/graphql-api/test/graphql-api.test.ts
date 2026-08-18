@@ -410,6 +410,13 @@ const makeRuntime = (
           label: "OpenCode",
         }) satisfies SessionTelemetry,
       ),
+    getAgentTurnTail: () =>
+      Effect.succeed({
+        availability: "unsupported" as const,
+        backend: { id: "opencode", label: "OpenCode" },
+        items: [],
+        jumpHint: false,
+      }),
     ...activeBackendOverrides,
   }
   const localGit = Layer.succeed(LocalGit, {
@@ -10321,6 +10328,141 @@ describe("GraphQL API", () => {
           backend: { id: "opencode", label: "OpenCode" },
           model: null,
           cost: null,
+        },
+      },
+    })
+  })
+
+  test("session reports whether Agent Turn Tail is supported", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.succeed({
+            ...workItem,
+            sessionId: "ses_owned",
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) { agentTurnTailSupported }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: { session: { agentTurnTailSupported: true } },
+    })
+  })
+
+  test("agentTurnTail returns null for unknown Work Item", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.fail(new WorkItemNotFoundError({ workItemId: "wi-missing" })),
+      },
+      {
+        getAgentTurnTail: () => Effect.die("tail must not run"),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Tail($workItemId: ID!) {
+          agentTurnTail(workItemId: $workItemId) { availability }
+        }`,
+        variables: { workItemId: "wi-missing" },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: { agentTurnTail: null },
+    })
+  })
+
+  test("agentTurnTail returns the latest turn activity", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.succeed({
+            ...workItem,
+            sessionId: "ses_owned",
+          }),
+      },
+      {
+        getAgentTurnTail: () =>
+          Effect.succeed({
+            availability: "available",
+            backend: { id: "opencode", label: "OpenCode" },
+            jumpHint: false,
+            items: [
+              {
+                kind: "tool",
+                name: "bun test",
+                status: "failed",
+                at: "2026-08-18T12:00:05.000Z",
+              },
+              {
+                kind: "assistant_text",
+                text: "tests failed",
+                truncated: false,
+                at: "2026-08-18T12:00:06.000Z",
+              },
+            ],
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Tail($workItemId: ID!) {
+          agentTurnTail(workItemId: $workItemId) {
+            availability
+            backend { id label }
+            jumpHint
+            items {
+              ... on AgentTurnTailAssistantText { at text truncated }
+              ... on AgentTurnTailTool { at name status }
+            }
+          }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        agentTurnTail: {
+          availability: "AVAILABLE",
+          backend: { id: "opencode", label: "OpenCode" },
+          jumpHint: false,
+          items: [
+            {
+              at: "2026-08-18T12:00:05.000Z",
+              name: "bun test",
+              status: "failed",
+            },
+            {
+              at: "2026-08-18T12:00:06.000Z",
+              text: "tests failed",
+              truncated: false,
+            },
+          ],
         },
       },
     })
