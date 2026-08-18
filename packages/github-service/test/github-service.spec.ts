@@ -1924,6 +1924,7 @@ describe("GitHubService live implementation", () => {
         expect(init.headers).toMatchObject({
           Authorization: "Bearer token",
           Accept: "application/json",
+          "Content-Type": "image/png",
         })
         expect(init.body).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
         return new Response(
