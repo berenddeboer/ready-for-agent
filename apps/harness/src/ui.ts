@@ -33,9 +33,8 @@ const pipelineTabActiveRivets =
 const laneSwitchRivets = plateMiniRivets
 
 /**
- * Light-theme brushed metal for ticket-style cards (repo cards, completed
- * archive rows). Dark keeps solid `bg-panel`. Full static strings so Tailwind
- * can scan them.
+ * Light-theme brushed metal for ticket-style cards (repo cards). Dark keeps
+ * solid `bg-panel`. Full static strings so Tailwind can scan them.
  */
 const cardMetalLight =
   "in-[html[data-theme=light]]:bg-[linear-gradient(165deg,rgb(255_255_255/0.72)_0%,rgb(255_255_255/0.18)_42%,transparent_68%),linear-gradient(180deg,#f0f2f0_0%,#e3e7e4_55%,#dfe4e1_100%)]"
@@ -270,17 +269,13 @@ export const ui = {
   archiveRows: "m-0 grid list-none gap-[0.6rem] p-0",
 
   /**
-   * Completed archive card. Same shell, metal fill, and type scale as repo
-   * cards (§4.6) so Completed and Repos read as one family.
+   * Completed archive card. Kanban lane outer stroke (2px ink) on all four
+   * sides, parchment fill, repos type scale. No lane-color left bar.
    */
   archiveRow: cx(
-    "grid min-w-0 gap-[0.55rem] border-[1.5px] border-ink bg-panel",
+    "grid min-w-0 gap-[0.55rem] border-2 border-ink bg-[var(--ticket-fill)]",
     "px-[1.1rem] pt-4 pb-[1.15rem]",
-    cardMetalLight,
   ),
-
-  archiveRowComplete:
-    "shadow-[inset_6px_0_0_var(--lane-merged),inset_8px_0_0_var(--merged-halo)]",
 
   archiveRowAbandoned: "border-dashed border-ink-faint",
 

@@ -126,7 +126,7 @@ describe("Completed surface routes", () => {
     const row = rowSource()
     expect(row).toContain("export function CompletedWorkItemRow(")
     expect(row).toContain("planArchiveLegs")
-    expect(row).toContain("ui.archiveRowComplete")
+    expect(row).not.toContain("ui.archiveRowComplete")
     expect(row).toContain("ui.archiveRowAbandoned")
     expect(row).toContain("ui.legLane")
     expect(row).toContain("ui.archiveLeg")
@@ -166,11 +166,11 @@ describe("Completed surface routes", () => {
     expect(topIdx).toBeGreaterThan(-1)
     expect(prTopIdx).toBeGreaterThan(topIdx)
     expect(titleIdx).toBeGreaterThan(prTopIdx)
-    expect(ui).toContain("archiveRowComplete:")
-    // Same light-mode brushed metal as repo cards (shared cardMetalLight).
-    expect(ui).toMatch(
-      /archiveRow:[\s\S]*?cardMetalLight|archiveRow:[\s\S]*?#f0f2f0_0%/,
-    )
+    expect(ui).not.toContain("archiveRowComplete:")
+    expect(ui).not.toContain("inset_6px_0_0_var(--lane-merged)")
+    expect(ui).toMatch(/archiveRow:[\s\S]*?border-2[\s\S]*?border-ink/)
+    // Same parchment fill as Kanban tickets; 2px ink stroke like lane chrome.
+    expect(ui).toMatch(/archiveRow:[\s\S]*?bg-\[var\(--ticket-fill\)\]/)
     expect(ui).toContain("cardMetalLight")
     // Repos-aligned type: card padding, title metrics, issue-num mono, kicker repo.
     expect(ui).toMatch(/archiveRow:[\s\S]*?px-\[1\.1rem\]/)
