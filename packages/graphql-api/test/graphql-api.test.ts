@@ -345,6 +345,7 @@ const makeRuntime = (
     wakePostponedStep: unused,
     retry: unused,
     pause: unused,
+    interrupt: unused,
     start: unused,
     abandon: unused,
     reset: unused,
@@ -8801,6 +8802,74 @@ describe("GraphQL API", () => {
       },
     })
     expect(receivedWorkItemId).toBe(workItem.id)
+  })
+
+  test("pauseWorkItem and interruptWorkItem call distinct lifecycle requests", async () => {
+    const seen: string[] = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        pause: (workItemId) => {
+          seen.push(`pause:${workItemId}`)
+          return Effect.succeed({ ...workItem, paused: true })
+        },
+        interrupt: (workItemId) => {
+          seen.push(`interrupt:${workItemId}`)
+          return Effect.succeed({
+            ...workItem,
+            paused: false,
+            stepRuns: [
+              {
+                ...workItem.stepRuns[0]!,
+                status: "interrupted",
+                reasonCode: "paused",
+              },
+            ],
+          })
+        },
+      },
+    )
+
+    const api = createGraphqlApi(runtime)
+    const pauseResponse = await api.fetch(
+      graphqlRequest({
+        query: `mutation PauseWorkItem($workItemId: ID!) {
+          pauseWorkItem(workItemId: $workItemId) { id paused hasActiveStepRun }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+    const interruptResponse = await api.fetch(
+      graphqlRequest({
+        query: `mutation InterruptWorkItem($workItemId: ID!) {
+          interruptWorkItem(workItemId: $workItemId) { id paused canRetry }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+
+    expect(await pauseResponse.json()).toEqual({
+      data: {
+        pauseWorkItem: {
+          id: workItem.id,
+          paused: true,
+          hasActiveStepRun: true,
+        },
+      },
+    })
+    expect(await interruptResponse.json()).toEqual({
+      data: {
+        interruptWorkItem: {
+          id: workItem.id,
+          paused: false,
+          canRetry: true,
+        },
+      },
+    })
+    expect(seen).toEqual([`pause:${workItem.id}`, `interrupt:${workItem.id}`])
   })
 
   test("retryWorkItems rejects selector validation failures", async () => {

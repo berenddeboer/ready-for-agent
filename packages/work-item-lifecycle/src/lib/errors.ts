@@ -195,6 +195,15 @@ export class RetryNotEligibleError extends Schema.TaggedErrorClass<RetryNotEligi
   },
 ) {}
 
+/** Interrupt is legal only while paused with a running Step Run. */
+export class InterruptNotEligibleError extends Schema.TaggedErrorClass<InterruptNotEligibleError>()(
+  "InterruptNotEligibleError",
+  {
+    workItemId: Schema.String,
+    reason: Schema.String,
+  },
+) {}
+
 /** Autonomous Retry Budget exhausted for this Work Item at its current step. */
 export class AutonomousRetryLimitReachedError extends Schema.TaggedErrorClass<AutonomousRetryLimitReachedError>()(
   "AutonomousRetryLimitReachedError",

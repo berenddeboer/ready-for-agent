@@ -381,6 +381,7 @@ describe("production GraphQL SSE idle timeout", () => {
         wakePostponedStep: unused,
         retry: unused,
         pause: unused,
+        interrupt: unused,
         start: unused,
         abandon: unused,
         reset: unused,

@@ -17,7 +17,7 @@ import {
   isRetryableFailedWorkItem,
 } from "@ready-for-agent/work-item-lifecycle"
 import { toGraphQLError } from "./to-graphql-error.js"
-import { workItemCanRetry } from "./work-item-projection.js"
+import { workItemCanAutonomousRetry } from "./work-item-projection.js"
 
 export type RetryWorkItemsSelectorInput = {
   readonly issueNumber?: number | null
@@ -173,7 +173,7 @@ export const snapshotRetryTargets = (input: {
   switch (selector.kind) {
     case "all-retryable":
       return input.workItems
-        .filter((workItem) => workItemCanRetry(workItem))
+        .filter((workItem) => workItemCanAutonomousRetry(workItem))
         .slice()
         .sort(compareRetryTargets)
     case "work-item": {

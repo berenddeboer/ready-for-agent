@@ -119,4 +119,21 @@ describe("toGraphQLError", () => {
       sessionId: "ses-shared",
     })
   })
+
+  test("maps InterruptNotEligibleError to INTERRUPT_NOT_ELIGIBLE", () => {
+    const error = {
+      _tag: "InterruptNotEligibleError" as const,
+      workItemId: "wi-1",
+      reason: "not_paused",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toContain("cannot be interrupted")
+    expect(gqlError.extensions).toMatchObject({
+      code: "INTERRUPT_NOT_ELIGIBLE",
+      workItemId: "wi-1",
+      reason: "not_paused",
+    })
+  })
 })

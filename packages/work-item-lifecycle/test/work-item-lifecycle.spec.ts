@@ -37,6 +37,7 @@ import {
   CommitOpenCodeError,
   CreatePrOpenCodeError,
   ImplementAllWithAutoMergeNotEligibleError,
+  InterruptNotEligibleError,
   IssueBlockedError,
   IssueNotBlockedError,
   IssueNotFoundError,
@@ -10864,8 +10865,450 @@ describe("WorkItemLifecycle", () => {
 
           const startError = yield* Effect.flip(lifecycle.start(created.id))
           expect(startError).toBeInstanceOf(WorkItemTerminalError)
+
+          const interruptError = yield* Effect.flip(
+            lifecycle.interrupt(created.id),
+          )
+          expect(interruptError).toBeInstanceOf(WorkItemTerminalError)
         }),
       ))
+  })
+
+  describe("interrupt", () => {
+    it("stops a paused running Step Run as interrupted/paused and keeps the Work Item", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const handlerFinished = await Effect.runPromise(Deferred.make<void>())
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Deferred.succeed(handlerFinished, undefined)),
+            Effect.as({
+              worktreePath: "/tmp/worktrees/interrupt-keep",
+              startingCommitOid: "abc123",
+            }),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          const stepRunId = created.stepRuns[0]!.id
+          expect(created.sessionId).toBeNull()
+          expect(created.worktreePath).toBeNull()
+
+          const fiber = yield* Effect.forkChild(lifecycle.runStep(stepRunId))
+          yield* Deferred.await(started)
+
+          const paused = yield* lifecycle.pause(created.id)
+          expect(paused.paused).toBe(true)
+          expect(paused.holdsWorkerSlot).toBe(true)
+          expect(
+            paused.stepRuns.find((run) => run.id === stepRunId)?.status,
+          ).toBe("running")
+
+          const interrupted = yield* lifecycle.interrupt(created.id)
+          expect(interrupted.id).toBe(created.id)
+          expect(interrupted.paused).toBe(false)
+          expect(interrupted.holdsWorkerSlot).toBe(false)
+          expect(interrupted.worktreePath).toBe(created.worktreePath)
+          expect(interrupted.sessionId).toBe(created.sessionId)
+          expect(
+            interrupted.stepRuns.find((run) => run.id === stepRunId),
+          ).toMatchObject({
+            status: "interrupted",
+            reasonCode: STEP_RUN_REASON.paused,
+          })
+
+          expect(yield* Deferred.isDone(handlerFinished)).toBe(true)
+          const result = yield* Fiber.join(fiber)
+          expect(result._tag).toBe("processed")
+
+          const after = yield* lifecycle.getWorkItem(created.id)
+          expect(after.paused).toBe(false)
+          expect(after.holdsWorkerSlot).toBe(false)
+          expect(after.stepRuns.at(-1)).toMatchObject({
+            id: stepRunId,
+            status: "interrupted",
+            reasonCode: STEP_RUN_REASON.paused,
+          })
+        }),
+      )
+    })
+
+    it("rejects Interrupt when the Work Item is not paused or has no running Step Run", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          const notPaused = yield* Effect.flip(lifecycle.interrupt(created.id))
+          expect(notPaused).toBeInstanceOf(InterruptNotEligibleError)
+          if (notPaused instanceof InterruptNotEligibleError) {
+            expect(notPaused.reason).toBe("not_paused")
+          }
+
+          const paused = yield* lifecycle.pause(created.id)
+          expect(paused.stepRuns[0]!.status).toBe("cancelled")
+          const noRunning = yield* Effect.flip(lifecycle.interrupt(created.id))
+          expect(noRunning).toBeInstanceOf(InterruptNotEligibleError)
+          if (noRunning instanceof InterruptNotEligibleError) {
+            expect(noRunning.reason).toBe("no_running_step")
+          }
+
+          const missing = yield* Effect.flip(lifecycle.interrupt("wi-missing"))
+          expect(missing).toBeInstanceOf(WorkItemNotFoundError)
+        }),
+      ))
+
+    it("keeps Pause and allows Start when Interrupt loses to a successful drain", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const release = await Effect.runPromise(Deferred.make<void>())
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as({
+              worktreePath: "/tmp/worktrees/interrupt-drain-race",
+              startingCommitOid: "abc123",
+            }),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          const stepRunId = created.stepRuns[0]!.id
+          const fiber = yield* Effect.forkChild(lifecycle.runStep(stepRunId))
+          yield* Deferred.await(started)
+          yield* lifecycle.pause(created.id)
+
+          yield* Deferred.succeed(release, undefined)
+          const ran = yield* Fiber.join(fiber)
+          expect(ran._tag).toBe("processed")
+
+          const drained = yield* lifecycle.getWorkItem(created.id)
+          expect(drained.paused).toBe(true)
+          expect(
+            drained.stepRuns.find((run) => run.id === stepRunId)?.status,
+          ).toBe("succeeded")
+
+          const afterInterrupt = yield* lifecycle
+            .interrupt(created.id)
+            .pipe(
+              Effect.catchTag("InterruptNotEligibleError", (error) =>
+                error.reason === "no_running_step"
+                  ? lifecycle.getWorkItem(created.id)
+                  : Effect.fail(error),
+              ),
+            )
+          expect(afterInterrupt.paused).toBe(true)
+          expect(
+            afterInterrupt.stepRuns.find((run) => run.id === stepRunId)?.status,
+          ).toBe("succeeded")
+
+          const startedAfter = yield* lifecycle.start(created.id)
+          expect(startedAfter.paused).toBe(false)
+          expect(startedAfter.stepRuns.at(-1)).toMatchObject({
+            step: startedAfter.state,
+            status: "queued",
+          })
+        }),
+      )
+    })
+
+    it("does not unpause a successful drain that finishes during Interrupt", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const release = await Effect.runPromise(Deferred.make<void>())
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as({
+              worktreePath: "/tmp/worktrees/interrupt-drain-during",
+              startingCommitOid: "abc123",
+            }),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          const stepRunId = created.stepRuns[0]!.id
+          const runFiber = yield* Effect.forkChild(lifecycle.runStep(stepRunId))
+          yield* Deferred.await(started)
+          yield* lifecycle.pause(created.id)
+
+          yield* Deferred.succeed(release, undefined)
+          const interruptFiber = yield* Effect.forkChild(
+            lifecycle.interrupt(created.id),
+          )
+          yield* Fiber.join(runFiber)
+          yield* Fiber.await(interruptFiber)
+
+          const after = yield* lifecycle.getWorkItem(created.id)
+          const target = after.stepRuns.find((run) => run.id === stepRunId)
+          expect(target?.status === "succeeded" ? after.paused : true).toBe(
+            true,
+          )
+          if (target?.status === "succeeded") {
+            expect(after.paused).toBe(true)
+            const startedAfter = yield* lifecycle.start(created.id)
+            expect(startedAfter.paused).toBe(false)
+            expect(startedAfter.stepRuns.at(-1)?.status).toBe("queued")
+          } else {
+            expect(target).toMatchObject({
+              status: "interrupted",
+              reasonCode: STEP_RUN_REASON.paused,
+            })
+            expect(after.paused).toBe(false)
+          }
+        }),
+      )
+    })
+
+    it("retries the current step after Interrupt and does not Start it", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.as({
+              worktreePath: "/tmp/worktrees/interrupt-retry",
+              startingCommitOid: "abc123",
+            }),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          const fiber = yield* Effect.forkChild(
+            lifecycle.runStep(created.stepRuns[0]!.id),
+          )
+          yield* Deferred.await(started)
+          yield* lifecycle.pause(created.id)
+          yield* lifecycle.interrupt(created.id)
+          yield* Fiber.join(fiber)
+
+          const startedAfter = yield* lifecycle.start(created.id)
+          expect(startedAfter.paused).toBe(false)
+          expect(
+            startedAfter.stepRuns.every((run) => run.status !== "queued"),
+          ).toBe(true)
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.stepRuns.at(-1)).toMatchObject({
+            step: "create_worktree",
+            status: "queued",
+          })
+        }),
+      )
+    })
+
+    it("rejects Autonomous Retry for reason paused and accepts explicit Retry", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.as({
+              worktreePath: "/tmp/worktrees/interrupt-autonomous",
+              startingCommitOid: "abc123",
+            }),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          const fiber = yield* Effect.forkChild(
+            lifecycle.runStep(created.stepRuns[0]!.id),
+          )
+          yield* Deferred.await(started)
+          yield* lifecycle.pause(created.id)
+          yield* lifecycle.interrupt(created.id)
+          yield* Fiber.join(fiber)
+
+          const blocked = yield* Effect.flip(
+            lifecycle.retry(created.id, { autonomous: { maxRetries: 3 } }),
+          )
+          expect(blocked).toBeInstanceOf(RetryNotEligibleError)
+          if (blocked instanceof RetryNotEligibleError) {
+            expect(blocked.reason).toBe("paused")
+          }
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.stepRuns.at(-1)?.status).toBe("queued")
+        }),
+      )
+    })
+
+    it("releases the Worker Slot after Interrupt and admits a waiter", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.as({
+              worktreePath: "/tmp/worktrees/interrupt-slot",
+              startingCommitOid: "abc123",
+            }),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const config = yield* db.getConfig
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel:
+              config.defaultModel ?? "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
+            reviewModel: config.reviewModel,
+            reviewThinkingLevel: config.reviewThinkingLevel,
+            maxConcurrentAgentTurns: config.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: 1,
+          })
+
+          const firstIssue = yield* seedActionableIssue
+          const waiterRepo = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-waiter.git",
+            projectPath: "acme/widgets-waiter",
+          })
+          const waiterIssue = yield* db.storeIssue({
+            repositoryId: waiterRepo.id,
+            issueNumber: 43,
+            ...sampleIssueFields,
+            url: "https://github.com/acme/widgets-waiter/issues/43",
+          })
+
+          const first = yield* lifecycle.implementNow(
+            firstIssue.repository.id,
+            firstIssue.issue.issueNumber,
+          )
+          const waiter = yield* lifecycle.implementNow(
+            waiterRepo.id,
+            waiterIssue.issueNumber,
+          )
+          expect(waiter.waitingSince).not.toBeNull()
+
+          const fiber = yield* Effect.forkChild(
+            lifecycle.runStep(first.stepRuns[0]!.id),
+          )
+          yield* Deferred.await(started)
+          yield* lifecycle.pause(first.id)
+          expect((yield* lifecycle.getWorkItem(first.id)).holdsWorkerSlot).toBe(
+            true,
+          )
+          expect(
+            (yield* lifecycle.getWorkItem(waiter.id)).waitingSince,
+          ).not.toBeNull()
+
+          yield* lifecycle.interrupt(first.id)
+          yield* Fiber.join(fiber)
+
+          const afterFirst = yield* lifecycle.getWorkItem(first.id)
+          const admittedWaiter = yield* lifecycle.getWorkItem(waiter.id)
+          expect(afterFirst.holdsWorkerSlot).toBe(false)
+          expect(admittedWaiter.holdsWorkerSlot).toBe(true)
+          expect(admittedWaiter.waitingSince).toBeNull()
+          expect(admittedWaiter.stepRuns).toHaveLength(1)
+        }),
+      )
+    })
+
+    it("allows Abandon after Interrupt", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.as({
+              worktreePath: "/tmp/worktrees/interrupt-abandon",
+              startingCommitOid: "abc123",
+            }),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          const fiber = yield* Effect.forkChild(
+            lifecycle.runStep(created.stepRuns[0]!.id),
+          )
+          yield* Deferred.await(started)
+          yield* lifecycle.pause(created.id)
+
+          const runningError = yield* Effect.flip(lifecycle.abandon(created.id))
+          expect(runningError).toBeInstanceOf(WorkItemHasRunningStepError)
+
+          yield* lifecycle.interrupt(created.id)
+          yield* Fiber.join(fiber)
+
+          const abandoned = yield* lifecycle.abandon(created.id)
+          expect(abandoned.state).toBe("abandoned")
+          expect(abandoned.id).toBe(created.id)
+        }),
+      )
+    })
   })
 
   describe("Work Item change invalidation", () => {
@@ -11337,6 +11780,11 @@ describe("WorkItemLifecycle", () => {
 
           const startError = yield* Effect.flip(lifecycle.start(created.id))
           expect(startError).toBeInstanceOf(WorkItemWaitingForBlockersError)
+
+          const interruptError = yield* Effect.flip(
+            lifecycle.interrupt(created.id),
+          )
+          expect(interruptError).toBeInstanceOf(WorkItemWaitingForBlockersError)
 
           const stillHeld = yield* lifecycle.getWorkItem(created.id)
           expect(stillHeld.waitingForBlockers).toBe(true)

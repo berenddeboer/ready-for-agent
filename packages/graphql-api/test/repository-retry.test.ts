@@ -159,6 +159,20 @@ describe("snapshotRetryTargets", () => {
     state: "commit",
     stepRuns: [{ ...baseStepRun, step: "commit", status: "interrupted" }],
   })
+  const interruptedPaused = workItemWith({
+    id: "wi-interrupted-paused",
+    issueNumber: 32,
+    state: "create_worktree",
+    paused: false,
+    stepRuns: [
+      {
+        ...baseStepRun,
+        step: "create_worktree",
+        status: "interrupted",
+        reasonCode: "paused",
+      },
+    ],
+  })
   const retryableNeedsHuman = workItemWith({
     id: "wi-nh-review",
     issueNumber: 22,
@@ -246,6 +260,7 @@ describe("snapshotRetryTargets", () => {
     retryableFailed,
     retryableNeedsHuman,
     interrupted,
+    interruptedPaused,
     failedInterrupted,
   ]
 

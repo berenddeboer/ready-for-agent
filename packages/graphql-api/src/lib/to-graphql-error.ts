@@ -184,6 +184,15 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         `Work Item ${error.workItemId} cannot be retried: ${error.reason}`,
         "RETRY_NOT_ELIGIBLE",
       )
+    case "InterruptNotEligibleError":
+      return gql(
+        `Work Item ${error.workItemId} cannot be interrupted: ${error.reason}`,
+        "INTERRUPT_NOT_ELIGIBLE",
+        {
+          workItemId: error.workItemId,
+          reason: error.reason,
+        },
+      )
     case "AutonomousRetryLimitReachedError":
       return gql(
         `Autonomous Retry Budget exhausted for Work Item ${error.workItemId}`,
