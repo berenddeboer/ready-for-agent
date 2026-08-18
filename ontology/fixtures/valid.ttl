@@ -4,3 +4,6 @@
 example:valid-work-item
   a rfa:WorkItem ;
   rfa:currentState rfa:Implement .
+
+example:effective-always
+  a rfa:MergeModeAlways, rfa:MergePolicyAlways .

@@ -213,7 +213,7 @@ rfa:Paused
 rfa:RepositorySettings
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Repository settings"@en ;
-  skos:definition "Per-Repository operator preferences: Paused, optional Agent Backend override, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, Include all Issue Authors, and Wait for checks to start after ready for review (`waitForReadyForReviewChecks`, default true). Forge identity (Forge, Forge Host, and Project Path) is also corrected through Repository settings, subject to the Work Item gate described under Repository. An absent Agent Backend override inherits the Harness Config default Agent Backend. Build and review model selections are backend-scoped: each Agent Backend has its own optional overrides. An absent build model inherits the whole Harness build selection for the Repository's effective Agent Backend; an absent review model inherits the Harness review selection for that backend and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. For a Work Item without an Explicit Work Item Execution Profile, build and review selections are resolved at each Agent Turn from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend, so a model settings change affects the next turn without rewriting the Work Item. Changing the Agent Backend override is rejected while the Repository has an unfinished Work Item whose routing depends on that effective backend; an unfinished Work Item with an Explicit Work Item Execution Profile does not block the change."@en ;
+  skos:definition "Per-Repository operator preferences: Paused, optional Agent Backend override, optional build Agent Model selection, optional review Agent Model selection, Merge Policy, Include all Issue Authors, and Wait for checks to start after ready for review (`waitForReadyForReviewChecks`, default true). Forge identity (Forge, Forge Host, and Project Path) is also corrected through Repository settings, subject to the Work Item gate described under Repository. An absent Agent Backend override inherits the Harness Config default Agent Backend. Build and review model selections are backend-scoped: each Agent Backend has its own optional overrides. An absent build model inherits the whole Harness build selection for the Repository's effective Agent Backend; an absent review model inherits the Harness review selection for that backend and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. For a Work Item without an Explicit Work Item Execution Profile, build and review selections are resolved at each Agent Turn from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend, so a model settings change affects the next turn without rewriting the Work Item. Changing the Agent Backend override is rejected while the Repository has an unfinished Work Item whose routing depends on that effective backend; an unfinished Work Item with an Explicit Work Item Execution Profile does not block the change."@en ;
   skos:hiddenLabel "Project config"@en, "repo config file"@en .
 
 [
@@ -254,10 +254,70 @@ rfa:HarnessConfig
   rfa:avoidanceRationale "CONTEXT.md prefers Harness Config for this concept."@en ;
 ] .
 
+rfa:MergePolicy
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Merge Policy"@en ;
+  skos:definition "The three-state merge setting (`off` / `classify` / `always`) offered by Repository settings and Implement With. `off` requires a human merge; `classify` runs Decide PR Merge's existing risk assessment; `always` skips Classify only and, after the Check-Start Deadline, treats `no_checks` as green. Pending, failed, and Expected checks, merge conflicts, and Forge refusal still block Always. New Repositories default to `off`. Distinct from Auto-merge, which is only the parent Always command."@en ;
+  skos:hiddenLabel "Repository Auto-merge"@en, "Automerge"@en, "yolo"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:MergePolicy ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Repository Auto-merge"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Merge Policy for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:MergePolicy ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Automerge"@en ;
+  rfa:avoidanceRationale "GitHub product"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:MergePolicy ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "yolo"@en ;
+  rfa:avoidanceRationale "not a stored value, GraphQL enum member, or UI label"@en ;
+] .
+
+rfa:WorkItemMergePolicy
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Work Item Merge Policy"@en ;
+  skos:definition "A nullable durable pin of Merge Policy on a Work Item. `null` inherits the live Repository Merge Policy at merge-routing time; a concrete pin (`off` / `classify` / `always`) is the effective policy regardless of later Repository flips. Implement With always writes a pin when options are present; Implement Now, Queue, and Repository Intake leave it unset; Implement All with Auto-merge pins `always`. Retry and Start keep the pin."@en ;
+  skos:hiddenLabel "Work Item Auto-merge override"@en, "per-Issue Auto-merge"@en, "publication policy"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkItemMergePolicy ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Work Item Auto-merge override"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Work Item Merge Policy for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkItemMergePolicy ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "per-Issue Auto-merge"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Work Item Merge Policy for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkItemMergePolicy ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "publication policy"@en ;
+  rfa:avoidanceRationale "as an execution-profile field"@en ;
+] .
+
 rfa:AutoMerge
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Auto-merge"@en ;
-  skos:definition "A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human unless a true Work Item Auto-merge override is present. Enabling Auto-merge does not itself merge pull requests; only a subsequent Merge PR step merges when Decide PR Merge chooses clanker merge. A successful, non-empty Forge status-check aggregate is required before any harness-initiated merge; the absence of checks or a remaining Expected PR Status Check is not successful verification. It applies only when a Work Item has a pull request and does not gate Close Issue for a No-Change Outcome. Distinct from Merge Mode Always and from a Work Item Auto-merge override."@en ;
+  skos:definition "The parent-only Always command: Implement All with Auto-merge. It means Always — it pins Work Item Merge Policy `always` on created and adopted children — and is not a Repository setting or an Implement With choice."@en ;
   skos:hiddenLabel "Automerge"@en, "auto-approve"@en .
 
 [
@@ -276,40 +336,10 @@ rfa:AutoMerge
   rfa:avoidanceRationale "CONTEXT.md prefers Auto-merge for this concept."@en ;
 ] .
 
-rfa:WorkItemAutoMergeOverride
-  a owl:Class, skos:Concept, rfa:ContextTerm ;
-  skos:prefLabel "Work Item Auto-merge override"@en ;
-  skos:definition "A nullable durable Work Item policy for Decide PR Merge. `null` follows the live Repository Auto-merge setting; `true` permits the existing risk-assessed Auto-merge flow for this Work Item even if Repository Auto-merge is later disabled; `false` requires human merge even if Repository Auto-merge is later enabled. A true override changes merge ownership but does not relax the requirement for a successful, non-empty Forge status-check aggregate before harness-initiated merge. Implement With persists a concrete true or false override; other creation paths leave it null. Distinct from Merge Mode Always, which skips Decide PR Merge."@en ;
-  skos:hiddenLabel "Merge Mode Always"@en, "per-Issue Auto-merge"@en, "publication policy"@en .
-
-[
-  a owl:Axiom ;
-  owl:annotatedSource rfa:WorkItemAutoMergeOverride ;
-  owl:annotatedProperty skos:hiddenLabel ;
-  owl:annotatedTarget "Merge Mode Always"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Work Item Auto-merge override for this concept."@en ;
-] .
-
-[
-  a owl:Axiom ;
-  owl:annotatedSource rfa:WorkItemAutoMergeOverride ;
-  owl:annotatedProperty skos:hiddenLabel ;
-  owl:annotatedTarget "per-Issue Auto-merge"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Work Item Auto-merge override for this concept."@en ;
-] .
-
-[
-  a owl:Axiom ;
-  owl:annotatedSource rfa:WorkItemAutoMergeOverride ;
-  owl:annotatedProperty skos:hiddenLabel ;
-  owl:annotatedTarget "publication policy"@en ;
-  rfa:avoidanceRationale "as an execution-profile field"@en ;
-] .
-
 rfa:MergeMode
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Merge Mode"@en ;
-  skos:definition "Durable Work Item policy for post-check merge routing. `ordinary` follows Repository Auto-merge and Decide PR Merge. `always` skips Decide PR Merge (no agent risk decision) and advances to Merge PR after the normal pre-merge lifecycle settles, without bypassing status checks, automated-review handling, conflict resolution, merge revalidation, Forge requirements, or technical Needs Human outcomes. An absent, Expected, pending, or failed status-check aggregate does not satisfy that gate and cannot advance an `always` Work Item to Merge PR. No-Change Outcomes still close the Issue without merge-related steps. Stored on the Work Item and survives restarts. A merge-related Needs Human handoff reached before the mode became `always` is not revoked. Distinct from a Work Item Auto-merge override, which still runs Decide PR Merge."@en ;
+  skos:definition "Derived Work Item view of whether the Work Item Merge Policy pin is Always. `always` means the pin is `always` and skips Decide PR Merge; `ordinary` means the pin is unset, `off`, or `classify`. After the Check-Start Deadline, `no_checks` is green for Always and not for Classify. Pending, failed, and Expected checks, merge conflicts, merge revalidation of non-green aggregates other than Always+`no_checks`, and Forge refusal still block Always. Stored on the Work Item as the Always-pin encoding and survives restarts. A merge-related Needs Human handoff reached before the pin became `always` is not revoked."@en ;
   skos:hiddenLabel "Auto-merge"@en, "force merge"@en, "skip checks"@en .
 
 [
@@ -317,7 +347,7 @@ rfa:MergeMode
   owl:annotatedSource rfa:MergeMode ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Auto-merge"@en ;
-  rfa:avoidanceRationale "Repository setting"@en ;
+  rfa:avoidanceRationale "parent Always command"@en ;
 ] .
 
 [
@@ -1412,7 +1442,7 @@ rfa:ParentIssue
 rfa:ImplementAllWithAutoMerge
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Implement All with Auto-merge"@en ;
-  skos:definition "An atomic explicit operator request on a Parent Issue covering the open Child Issues present when the request is accepted. Children added later are not part of that request. It creates a separate Work Item for each covered child without unfinished work and sets every covered unfinished Work Item's Merge Mode to `Always`; if any child cannot be enrolled, none are created or changed. An unblocked child starts through the ordinary remote implementation and Worker Slot admission path, while a blocked child waits for its blockers through Queue. Siblings may run concurrently; hierarchy and child order add no dependency, and one child's later failure or Needs Human outcome does not stop its siblings. The Parent Issue itself does not become a Work Item, and the request never closes or updates it. The request does not overturn a Work Item already stopped at a merge-related Needs Human handoff."@en ;
+  skos:definition "An atomic explicit operator request on a Parent Issue covering the open Child Issues present when the request is accepted. Children added later are not part of that request. It creates a separate Work Item for each covered child without unfinished work and pins every covered unfinished Work Item's Work Item Merge Policy to `always`; if any child cannot be enrolled, none are created or changed. An unblocked child starts through the ordinary remote implementation and Worker Slot admission path, while a blocked child waits for its blockers through Queue. Siblings may run concurrently; hierarchy and child order add no dependency, and one child's later failure or Needs Human outcome does not stop its siblings. The Parent Issue itself does not become a Work Item, and the request never closes or updates it. The request does not overturn a Work Item already stopped at a merge-related Needs Human handoff."@en ;
   skos:hiddenLabel "Queue Parent Issue"@en, "Parent Work Item"@en, "Implement Now with Auto-merge"@en .
 
 [
@@ -1500,7 +1530,7 @@ rfa:LeafIssue
 rfa:WorkItem
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Work Item"@en ;
-  skos:definition "A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing an Agent Backend as provenance and routing authority, an optional Explicit Work Item Execution Profile, an optional Work Item Auto-merge override, and a durable Merge Mode (ordinary by default). Without an explicit profile, each Agent Turn resolves build and review selections from current backend-scoped Repository settings falling back to Harness Config. With one, the profile's build selection is used for Implement, Review Fix Rounds, Commit, and related steps, while its review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and issue number, captures the Issue title for identification after the Issue leaves the Issue store, records canonical publication title and body after Commit generates them (agent-authored when valid, with in-directory image links rewritten to GitHub user-attachment URLs before persist, otherwise harness fallback copy from the Issue identity; shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time."@en ;
+  skos:definition "A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing an Agent Backend as provenance and routing authority, an optional Explicit Work Item Execution Profile, and an optional Work Item Merge Policy pin (`null` inherits the live Repository Merge Policy). Without an explicit profile, each Agent Turn resolves build and review selections from current backend-scoped Repository settings falling back to Harness Config. With one, the profile's build selection is used for Implement, Review Fix Rounds, Commit, and related steps, while its review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and issue number, captures the Issue title for identification after the Issue leaves the Issue store, records canonical publication title and body after Commit generates them (agent-authored when valid, with in-directory image links rewritten to GitHub user-attachment URLs before persist, otherwise harness fallback copy from the Issue identity; shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time."@en ;
   skos:hiddenLabel "Issue lifecycle"@en, "implementation job"@en, "attempt"@en .
 
 [
@@ -1514,7 +1544,7 @@ rfa:WorkItem
 rfa:ExplicitWorkItemExecutionProfile
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Explicit Work Item Execution Profile"@en ;
-  skos:definition "A durable, immutable override of the Agent Backend, build Agent Model and optional Thinking Level, and review selection used by one Work Item for its entire lifetime. The review selection is either a distinct Agent Model and optional Thinking Level or the durable intent to use exactly the build selection. It does not carry a Work Item Auto-merge override or pause-before-step behavior. Implement With always persists an explicit profile, even when the pre-filled choices are submitted unchanged, without changing Repository settings or Harness Config; ordinary creation has no explicit profile and keeps resolving models from current settings. Retry and Start retain the profile, missing catalog selections fail closed without substitution, and choosing another profile requires Reset followed by a new attempt."@en ;
+  skos:definition "A durable, immutable override of the Agent Backend, build Agent Model and optional Thinking Level, and review selection used by one Work Item for its entire lifetime. The review selection is either a distinct Agent Model and optional Thinking Level or the durable intent to use exactly the build selection. It does not carry a Work Item Merge Policy pin or pause-before-step behavior. Implement With always persists an explicit profile, even when the pre-filled choices are submitted unchanged, without changing Repository settings or Harness Config; ordinary creation has no explicit profile and keeps resolving models from current settings. Retry and Start retain the profile, missing catalog selections fail closed without substitution, and choosing another profile requires Reset followed by a new attempt."@en ;
   skos:hiddenLabel "Issue settings"@en, "per-Issue settings"@en, "model snapshot"@en .
 
 [
@@ -2114,7 +2144,7 @@ rfa:WaitingForGitHub
 rfa:ImplementNow
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Implement Now"@en ;
-  skos:definition "An explicit operator request that creates a Work Item for an Actionable Issue and seeks Worker Slot admission immediately. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (operator error names the Agent Backend, repository or harness scope, Settings / per-repository path, and available catalog models when known). Distinct from Queue, which creates a Work Item only for a blocked open leaf and holds it until Implementable."@en ;
+  skos:definition "An explicit operator request that creates a Work Item for an Actionable Issue and seeks Worker Slot admission immediately. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (operator error names the Agent Backend, repository or harness scope, Settings / per-repository path, and available catalog models when known). It leaves Work Item Merge Policy unset so the Work Item inherits the live Repository Merge Policy. Distinct from Queue, which creates a Work Item only for a blocked open leaf and holds it until Implementable."@en ;
   skos:hiddenLabel "Auto-implement"@en, "enqueue Issue"@en, "Queue"@en .
 
 [
@@ -2128,7 +2158,7 @@ rfa:ImplementNow
 rfa:ImplementWith
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Implement With"@en ;
-  skos:definition "An explicit operator request for an Actionable Issue that chooses an Explicit Work Item Execution Profile plus a concrete Work Item Auto-merge override and an optional Implement Locally inspection pause, then creates the Work Item through the same Worker Slot admission path as Implement Now. Its ephemeral `Implement issue #N with...` dialog is pre-filled from the Repository's effective backend, currently resolved model selections, and live Auto-merge setting; model drafts stay backend-scoped while the two checkboxes stay dialog-wide; Implement Locally starts unchecked. A missing default build model leaves a required blank choice, and a failed backend selection does not disable choosing another backend. It requires a non-empty model catalog; submission atomically revalidates Issue eligibility, activates and inspects the chosen backend when necessary, validates catalog membership and the complete profile, persists the profile, override, and pause target together, and creates nothing on failure. Callers that omit the options keep repository-inherited Auto-merge and the remote path. The dialog has Implement and Cancel actions and ordinary loading and failure feedback, but no recovery, recheck, fallback, or retry workflow. It is offered only as `Implement with...` directly below Implement now in the Issue actions menu and does not change Harness Config or Repository settings."@en ;
+  skos:definition "An explicit operator request for an Actionable Issue that chooses an Explicit Work Item Execution Profile plus a concrete Work Item Merge Policy pin and an optional Implement Locally inspection pause, then creates the Work Item through the same Worker Slot admission path as Implement Now. Its ephemeral `Implement issue #N with...` dialog is pre-filled from the Repository's effective backend, currently resolved model selections, and live Repository Merge Policy; model drafts stay backend-scoped while the Merge Policy control and Implement Locally checkbox stay dialog-wide; Implement Locally starts unchecked. A missing default build model leaves a required blank choice, and a failed backend selection does not disable choosing another backend. It requires a non-empty model catalog; submission atomically revalidates Issue eligibility, activates and inspects the chosen backend when necessary, validates catalog membership and the complete profile, persists the profile, Merge Policy pin, and pause target together, and creates nothing on failure. Callers that omit the options leave Work Item Merge Policy unset and keep the remote path. The dialog has Implement and Cancel actions and ordinary loading and failure feedback, but no recovery, recheck, fallback, or retry workflow. It is offered only as `Implement with...` directly below Implement now in the Issue actions menu and does not change Harness Config or Repository settings."@en ;
   skos:hiddenLabel "Settings"@en, "Implement Locally With"@en, "per-Issue default"@en .
 
 [
@@ -2174,7 +2204,7 @@ rfa:ImplementWith
 rfa:Queue
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Queue"@en ;
-  skos:definition "An explicit operator request that creates a Work Item for a Relevant, open Leaf Issue that has listed blockers and no unfinished Work Item — the Issue would be Actionable except for blockers. The new Work Item is Waiting for blockers rather than Admitted. When the hold lifts, lifecycle and admission behave as if the operator had chosen Implement Now at that moment (full remote path, not Implement Locally), including when the Repository is Paused; backend or model problems after the hold lifts are handled like a post-create Implement Now failure, not by staying Waiting for blockers. Same hard blocks as Implement Now for the Repository's effective Agent Backend Unavailable and unresolved build Agent Model at request time. Not offered on Actionable Issues or outside the Issue store."@en ;
+  skos:definition "An explicit operator request that creates a Work Item for a Relevant, open Leaf Issue that has listed blockers and no unfinished Work Item — the Issue would be Actionable except for blockers. The new Work Item is Waiting for blockers rather than Admitted. When the hold lifts, lifecycle and admission behave as if the operator had chosen Implement Now at that moment (full remote path, not Implement Locally), including when the Repository is Paused; backend or model problems after the hold lifts are handled like a post-create Implement Now failure, not by staying Waiting for blockers. Same hard blocks as Implement Now for the Repository's effective Agent Backend Unavailable and unresolved build Agent Model at request time. It leaves Work Item Merge Policy unset so the Work Item inherits the live Repository Merge Policy. Not offered on Actionable Issues or outside the Issue store."@en ;
   skos:hiddenLabel "Implement Now"@en, "enqueue Issue"@en, "schedule"@en, "defer"@en .
 
 [
@@ -2212,7 +2242,7 @@ rfa:Queue
 rfa:RepositoryIntake
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Repository Intake"@en ;
-  skos:definition "An explicit operator request that considers every Relevant, open Leaf Issue in one Repository's current Issue projection, sends Implement Now for each Actionable Issue, and sends Queue for each blocked Issue eligible for Queue. Each Issue request is independent: a candidate-local failure does not roll back successful requests for other Issues or prevent later candidates from being attempted. Parent Issues and Issues with unfinished Work Items are left unchanged. Repository Intake neither refreshes Issues nor creates a durable aggregate or changes Harness or Repository settings."@en ;
+  skos:definition "An explicit operator request that considers every Relevant, open Leaf Issue in one Repository's current Issue projection, sends Implement Now for each Actionable Issue, and sends Queue for each blocked Issue eligible for Queue. Each Issue request is independent: a candidate-local failure does not roll back successful requests for other Issues or prevent later candidates from being attempted. Parent Issues and Issues with unfinished Work Items are left unchanged. Repository Intake neither refreshes Issues nor creates a durable aggregate or changes Harness or Repository settings. Created Work Items leave Work Item Merge Policy unset."@en ;
   skos:hiddenLabel "Queue all"@en, "batch run"@en, "Parent Issue intake"@en .
 
 [
@@ -2272,7 +2302,7 @@ rfa:IntakeCandidate
 rfa:ImplementLocally
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Implement Locally"@en ;
-  skos:definition "An explicit operator request that creates a Work Item for an Actionable Issue like Implement Now, but records that the Work Item should pause before remote completion. Subject to the same Worker Slot admission rules as Implement Now. Local steps run only after admission; changed work continues from Assess Changes through Pre-Commit and Review before pausing at Commit, while a No-Change Outcome pauses at Close Issue immediately after Assess Changes. No Step Run is enqueued for the paused step, so the operator can inspect the worktree. Start resumes the selected branch and continues the lifecycle. Implement With may request the same inspection pause while also persisting an Explicit Work Item Execution Profile and Work Item Auto-merge override; the one-click Implement Locally action remains a separate command without those choices. Queue has no Locally variant."@en ;
+  skos:definition "An explicit operator request that creates a Work Item for an Actionable Issue like Implement Now, but records that the Work Item should pause before remote completion. Subject to the same Worker Slot admission rules as Implement Now. Local steps run only after admission; changed work continues from Assess Changes through Pre-Commit and Review before pausing at Commit, while a No-Change Outcome pauses at Close Issue immediately after Assess Changes. No Step Run is enqueued for the paused step, so the operator can inspect the worktree. Start resumes the selected branch and continues the lifecycle. Implement With may request the same inspection pause while also persisting an Explicit Work Item Execution Profile and Work Item Merge Policy pin; the one-click Implement Locally action remains a separate command without those choices. Queue has no Locally variant."@en ;
   skos:hiddenLabel "Local-only mode"@en, "dry run"@en, "Implement Now without PR"@en, "Queue"@en .
 
 [
@@ -2384,7 +2414,7 @@ rfa:ActionableIssue
 rfa:LifecycleStep
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Lifecycle Step"@en ;
-  skos:definition "The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Assess Changes, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, Close Issue, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. Every operational Lifecycle Step declares whether it is Agent-free, its default maximum productive execution time, and whether a failed or interrupted Step Run permits Retry; in the PR completion loop, Watch prioritizes merge conflicts and red Status Check Handoffs, defers green-only Status Check Handoffs while any execution is still pending, then hands the accumulated unhandled batch once the aggregate settles, sends a settled draft through Mark PR Ready for Review, and sends a settled ready PR past its Check-Start Deadline to Decide PR Merge unless an autonomous merge path lacks a successful status-check aggregate, in which case Watch enters Needs Human."@en ;
+  skos:definition "The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Assess Changes, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, Close Issue, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. Every operational Lifecycle Step declares whether it is Agent-free, its default maximum productive execution time, and whether a failed or interrupted Step Run permits Retry; in the PR completion loop, Watch prioritizes merge conflicts and red Status Check Handoffs, defers green-only Status Check Handoffs while any execution is still pending, then hands the accumulated unhandled batch once the aggregate settles, sends a settled draft through Mark PR Ready for Review, and sends a settled ready PR past its Check-Start Deadline to Merge PR when the effective Merge Policy is Always, or to Decide PR Merge otherwise, except that Classify and `off` enter Needs Human when the aggregate is not a successful non-empty check set (Always treats post-deadline `no_checks` as green)."@en ;
   skos:hiddenLabel "Last completed step"@en, "phase"@en .
 
 [
@@ -2510,7 +2540,7 @@ rfa:CheckStartAnchor
 rfa:CheckStartDeadline
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Check-Start Deadline"@en ;
-  skos:definition "The instant 90 seconds after the latest Check-Start Anchor, before which neither an absence of checks nor an all-terminal observed set proves startup is complete. At or after the deadline, the harness assumes every check has started, while checks already pending are still watched until they finish. For an autonomous merge path, `no_checks` and Expected PR Status Checks at or after the deadline enter Needs Human rather than advancing to Decide PR Merge or Merge PR."@en ;
+  skos:definition "The instant 90 seconds after the latest Check-Start Anchor, before which neither an absence of checks nor an all-terminal observed set proves startup is complete. At or after the deadline, the harness assumes every check has started, while checks already pending are still watched until they finish. After the Check-Start Deadline, `no_checks` is green for Always and not for Classify; Expected PR Status Checks still do not authorize merge."@en ;
   skos:hiddenLabel "No-check grace"@en, "Watch residence time"@en, "check completion timeout"@en .
 
 [
@@ -2540,7 +2570,7 @@ rfa:CheckStartDeadline
 rfa:ReadyPhaseStatusCheckRound
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Ready-Phase Status Check Round"@en ;
-  skos:definition "The fresh PR Status Check observation period after a pull request known to the harness as draft becomes ready for review. It protects repositories whose ready-for-review transition can start additional checks. A Repository may omit this round when its settled, non-failing draft-phase checks are sufficient evidence, allowing Mark PR Ready for Review to advance directly to Decide PR Merge when those checks are successful, or to Needs Human when an autonomous merge path still has no successful checks. This omission does not shorten startup deadlines after PR creation, a head push, a check restart, or an automated-review rerun, and it never ignores an observed pending check or bypasses a known aggregate failure."@en ;
+  skos:definition "The fresh PR Status Check observation period after a pull request known to the harness as draft becomes ready for review. It protects repositories whose ready-for-review transition can start additional checks. A Repository may omit this round when its settled, non-failing draft-phase checks are sufficient evidence, allowing Mark PR Ready for Review to advance directly to Merge PR when the effective Merge Policy is Always and those checks are successful or post-deadline `no_checks`, to Decide PR Merge when Classify or `off` checks are successful, or to Needs Human when Classify or `off` still has no successful checks. This omission does not shorten startup deadlines after PR creation, a head push, a check restart, or an automated-review rerun, and it never ignores an observed pending check or bypasses a known aggregate failure."@en ;
   skos:hiddenLabel "Second CI run"@en, "duplicate checks"@en, "post-draft delay"@en .
 
 [
@@ -3050,7 +3080,7 @@ rfa:FailedWorkItem
 rfa:NeedsHumanWorkItem
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Needs Human Work Item"@en ;
-  skos:definition "A Work Item that cannot continue autonomously: either a Status Check Handoff cannot be processed autonomously or requires a human decision, an autonomous merge path reaches the Check-Start Deadline without a successful status-check aggregate, Resolve PR Merge Conflict cannot rebase autonomously, Decide PR Merge requires a human (including when Auto-merge is disabled), Merge PR cannot proceed after its revalidation budget is exhausted or the Forge rejects an unchanged mergeable PR or revalidation finds no successful checks, Review exhausts its Review Fix Round limit without a clean or deferred outcome, Review cannot classify an unchanged apply-findings turn after one verdict-repair turn, or a Refresh Job observes an active Issue-closing PR that is not owned by this Work Item. It records a concise intervention reason. Entering Needs Human releases its Worker Slot. It is terminal for ordinary Lifecycle Step advancement, Pause, and Start, and it blocks a second Implement Now or Implement Locally for the same Issue. A Needs Human outcome from Investigate PR Status Checks, from a missing successful status-check aggregate on an autonomous merge path, from exhausting Review Fix Rounds, or from an unparseable unchanged apply-findings verdict may be retried after intervention; other Needs Human outcomes are not eligible for Retry, including a competing Issue-closing PR stop. The operator inspects the remote PR and Resets this Work Item to discard the local attempt. Already Needs Human Work Items keep their original intervention reason. A Refresh Job may still leave Needs Human when a Work Item PR is present: a merged Work Item PR advances to local cleanup toward Complete (superseding the handoff). When the latest step was Decide PR Merge, Merge PR, or Resolve PR Merge Conflict and the PR was closed unmerged, Refresh Abandons after local cleanup succeeds. When the latest step was Decide PR Merge or Merge PR and the open PR is conflicting, Refresh advances to Resolve PR Merge Conflict. When the latest step was Resolve PR Merge Conflict and the open PR is no longer conflicting, Refresh advances to Watch PR Status Checks so merge decision can run again; a still-conflicting Resolve handoff stays parked. Those Refresh-driven resumptions must re-acquire a Worker Slot; if none is free, the Work Item becomes Waiting for Worker Slot until admitted. Other Needs Human causes are not auto-resumed by Refresh when the PR is still open."@en ;
+  skos:definition "A Work Item that cannot continue autonomously: either a Status Check Handoff cannot be processed autonomously or requires a human decision, Classify or `off` reaches the Check-Start Deadline without a successful status-check aggregate, Resolve PR Merge Conflict cannot rebase autonomously, Decide PR Merge requires a human (including when the effective Merge Policy is `off`), Merge PR cannot proceed after its revalidation budget is exhausted or the Forge rejects an unchanged mergeable PR or revalidation finds no successful checks except Always after the Check-Start Deadline with `no_checks`, Review exhausts its Review Fix Round limit without a clean or deferred outcome, Review cannot classify an unchanged apply-findings turn after one verdict-repair turn, or a Refresh Job observes an active Issue-closing PR that is not owned by this Work Item. It records a concise intervention reason. Entering Needs Human releases its Worker Slot. It is terminal for ordinary Lifecycle Step advancement, Pause, and Start, and it blocks a second Implement Now or Implement Locally for the same Issue. A Needs Human outcome from Investigate PR Status Checks, from a missing successful status-check aggregate on an autonomous merge path, from exhausting Review Fix Rounds, or from an unparseable unchanged apply-findings verdict may be retried after intervention; other Needs Human outcomes are not eligible for Retry, including a competing Issue-closing PR stop. The operator inspects the remote PR and Resets this Work Item to discard the local attempt. Already Needs Human Work Items keep their original intervention reason. A Refresh Job may still leave Needs Human when a Work Item PR is present: a merged Work Item PR advances to local cleanup toward Complete (superseding the handoff). When the latest step was Decide PR Merge, Merge PR, or Resolve PR Merge Conflict and the PR was closed unmerged, Refresh Abandons after local cleanup succeeds. When the latest step was Decide PR Merge or Merge PR and the open PR is conflicting, Refresh advances to Resolve PR Merge Conflict. When the latest step was Resolve PR Merge Conflict and the open PR is no longer conflicting, Refresh advances to Watch PR Status Checks so merge decision can run again; a still-conflicting Resolve handoff stays parked. Those Refresh-driven resumptions must re-acquire a Worker Slot; if none is free, the Work Item becomes Waiting for Worker Slot until admitted. Other Needs Human causes are not auto-resumed by Refresh when the PR is still open."@en ;
   skos:hiddenLabel "Failed Work Item"@en, "Failed Step Run"@en .
 
 [
@@ -3072,7 +3102,7 @@ rfa:NeedsHumanWorkItem
 rfa:CompleteWorkItem
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Complete Work Item"@en ;
-  skos:definition "A terminal Work Item whose remote outcome is finished and whose local cleanup has finished. For changed work, the Work Item PR is merged, either by the harness after a clanker Decide PR Merge decision or by a human (or other external merge). Confirmed merge advances cleanup when known at Step Run Issue revalidation, or later via a Refresh Job—including when that merge supersedes an unfinished operational Lifecycle Step such as Watch or Investigate PR Status Checks, or a Work Item paused because the Issue closed while the Work Item PR was still open. Closing the linked Issue as part of the merge does not turn the Work Item into a Failed Work Item. Owning a Work Item PR number alone never Completes. For a No-Change Outcome, the Issue is closed without a pull request."@en ;
+  skos:definition "A terminal Work Item whose remote outcome is finished and whose local cleanup has finished. For changed work, the Work Item PR is merged, either by the harness after a clanker Decide PR Merge decision or an Always skip of Decide PR Merge, or by a human (or other external merge). Confirmed merge advances cleanup when known at Step Run Issue revalidation, or later via a Refresh Job—including when that merge supersedes an unfinished operational Lifecycle Step such as Watch or Investigate PR Status Checks, or a Work Item paused because the Issue closed while the Work Item PR was still open. Closing the linked Issue as part of the merge does not turn the Work Item into a Failed Work Item. Owning a Work Item PR number alone never Completes. For a No-Change Outcome, the Issue is closed without a pull request."@en ;
   skos:hiddenLabel "Approved"@en, "done Issue"@en .
 
 [

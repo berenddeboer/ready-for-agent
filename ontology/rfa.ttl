@@ -14,7 +14,7 @@
     "The Ready for Agent domain vocabulary and Work Item lifecycle model."@en ;
   dcterms:source
     <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
-  owl:versionInfo "0.5.0" .
+  owl:versionInfo "0.6.0" .
 
 rfa:ContextTerm
   a owl:Class ;
@@ -549,7 +549,7 @@ rfa:WatchPrStatusChecks
   rfa:retryable true ;
   skos:prefLabel "Watch PR Status Checks"@en ;
   skos:definition
-    "The Lifecycle Step that observes the Work Item PR for merge conflicts, Status Check Handoffs, and settled completion conditions. After the Check-Start Deadline, a ready PR on an autonomous merge path that still reports no checks or only Expected PR Status Checks enters Needs Human rather than Decide PR Merge or Merge PR."@en .
+    "The Lifecycle Step that observes the Work Item PR for merge conflicts, Status Check Handoffs, and settled completion conditions. After the Check-Start Deadline, a ready PR whose effective Merge Policy is Always and whose aggregate is `no_checks` advances to Merge PR; Always still does not treat Expected PR Status Checks as green; Classify and `off` enter Needs Human for `no_checks` or only Expected PR Status Checks."@en .
 
 rfa:ResolvePrMergeConflict
   a owl:Class, owl:NamedIndividual, skos:Concept,
@@ -824,13 +824,25 @@ rfa:InterruptWorkItem
 rfa:WaitingForBlockers
   owl:disjointWith rfa:AdmittedWorkItem .
 
+rfa:MergePolicyOff
+  a owl:Class ;
+  rdfs:subClassOf rfa:MergePolicy ;
+  owl:disjointWith rfa:MergePolicyClassify, rfa:MergePolicyAlways .
+
+rfa:MergePolicyClassify
+  a owl:Class ;
+  rdfs:subClassOf rfa:MergePolicy ;
+  owl:disjointWith rfa:MergePolicyAlways .
+
+rfa:MergePolicyAlways
+  a owl:Class ;
+  rdfs:subClassOf rfa:MergePolicy ;
+  owl:equivalentClass rfa:MergeModeAlways .
+
 rfa:MergeModeAlways
   a owl:Class ;
   rdfs:subClassOf rfa:MergeMode ;
-  owl:disjointWith rfa:AutoMerge .
-
-rfa:AutoMerge
-  owl:disjointWith rfa:MergeMode .
+  owl:equivalentClass rfa:MergePolicyAlways .
 
 rfa:StepRun
   rdfs:subClassOf

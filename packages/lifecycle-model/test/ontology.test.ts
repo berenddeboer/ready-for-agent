@@ -572,7 +572,7 @@ describe("full vocabulary semantic distinctions", () => {
     expectDisjoint(term("WaitingForBlockers"), term("AdmittedWorkItem"))
   })
 
-  it("keeps Auto-merge distinct from Merge Mode always", () => {
+  it("treats Merge Mode Always as Merge Policy always", () => {
     expect(
       ontology.countQuads(
         term("MergeModeAlways"),
@@ -581,7 +581,26 @@ describe("full vocabulary semantic distinctions", () => {
         null,
       ),
     ).toBe(1)
-    expectDisjoint(term("AutoMerge"), term("MergeModeAlways"))
+    expect(
+      ontology.countQuads(
+        term("MergeModeAlways"),
+        owlEquivalentClass,
+        term("MergePolicyAlways"),
+        null,
+      ) +
+        ontology.countQuads(
+          term("MergePolicyAlways"),
+          owlEquivalentClass,
+          term("MergeModeAlways"),
+          null,
+        ),
+    ).toBeGreaterThan(0)
+  })
+
+  it("keeps the three Merge Policy states pairwise disjoint", () => {
+    expectDisjoint(term("MergePolicyOff"), term("MergePolicyClassify"))
+    expectDisjoint(term("MergePolicyOff"), term("MergePolicyAlways"))
+    expectDisjoint(term("MergePolicyClassify"), term("MergePolicyAlways"))
   })
 
   it("declares the terminal states pairwise disjoint", () => {
@@ -865,7 +884,7 @@ describe("SHACL and consistency fixture corpus", () => {
       "https://ready-for-agent.dev/ontology/examples#paused-repository-action",
     )
     expect(contradictorySubjects).toContain(
-      "https://ready-for-agent.dev/ontology/examples#auto-merge-mode-always",
+      "https://ready-for-agent.dev/ontology/examples#merge-policy-off-and-always",
     )
     expect(contradictorySubjects).toContain(
       "https://ready-for-agent.dev/ontology/examples#two-terminal-states",
