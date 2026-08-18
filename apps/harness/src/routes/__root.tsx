@@ -50,6 +50,7 @@ import { GitHubThrottleBanner } from "../github-throttle-banner.js"
 import { useGithubThrottleRetryAt } from "../github-throttle-errors.js"
 import { createHarnessGraphqlClient } from "../harness-graphql.js"
 import { getHarnessSettingsAutoOpenAction } from "../harness-settings-auto-open.js"
+import { openHarnessSettings } from "../harness-settings-nav.js"
 import { JobsRepositoryFilterProvider } from "../jobs-repository-filter.js"
 import { JobsViewSwitcher } from "../jobs-view-switcher.js"
 import { MastheadScrollwork } from "../masthead-scrollwork.js"
@@ -61,6 +62,7 @@ import {
   parseSessionTelemetryPath,
   readHarnessSettingsHistoryState,
   readSessionTelemetryHistoryState,
+  wasHarnessSettingsOpenedFromInApp,
   wasSessionTelemetryOpenedFromInApp,
 } from "../routed-dialog.js"
 import { SessionUsageDialog } from "../session-usage-dialog.js"
@@ -403,21 +405,21 @@ function SettingsChrome() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const router = useRouter()
-  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  // Public overlay URL when Settings is masked over Pipeline/Repos/Completed.
+  const pathname = useRouterState({
+    select: (s) => s.location.maskedLocation?.pathname ?? s.location.pathname,
+  })
   const settingsHistoryState = useRouterState({
     select: (s) => readHarnessSettingsHistoryState(s.location.state),
   })
   // Routed `/settings` open (explicit / direct / forward). First-run stays
-  // local-only and never pushes this path (issue #840).
+  // local-only and never pushes this path (issue #840). In-app opens keep
+  // the origin route and resolve the request from maskedLocation (#1146).
   const routedSettingsOpen = isHarnessSettingsPath(pathname)
   const [localSettingsOpen, setLocalSettingsOpen] = useState(false)
   const dialogOpen = routedSettingsOpen || localSettingsOpen
   // Prevent onClose from double-navigating when we close as part of leaveRoute.
   const dismissingRouteRef = useRef(false)
-  // True only after an explicit in-app open in this SPA document session.
-  // History state alone is not enough: HTML5 restores state across full reload,
-  // but refresh/direct entry must still close with replace → `/` (issue #840).
-  const settingsOpenedFromInAppThisSessionRef = useRef(false)
   // Coalesce rapid masthead clicks before the first `/settings` navigate commits.
   const settingsOpenNavigatePendingRef = useRef(false)
   // Mutation onSuccess is registered before dismissSettings is defined; call
@@ -809,7 +811,7 @@ function SettingsChrome() {
     // Require both history marker and same-document session flag so a full
     // reload (which restores history state) still uses replace → `/`.
     const openedFromInApp =
-      settingsOpenedFromInAppThisSessionRef.current &&
+      wasHarnessSettingsOpenedFromInApp() &&
       settingsHistoryState?.kind === "in-app-origin"
     if (openedFromInApp && router.history.canGoBack()) {
       router.history.back({ ignoreBlocker })
@@ -853,26 +855,13 @@ function SettingsChrome() {
       }
       return
     }
-    settingsOpenedFromInAppThisSessionRef.current = true
     settingsOpenNavigatePendingRef.current = true
     // Open immediately so focus trap matches pre-route UX; the route effect
     // remains the source of truth for direct/forward entry and Back close.
     if (dialogRef.current !== null && !dialogRef.current.open) {
       dialogRef.current.showModal()
     }
-    void navigate({
-      to: "/settings",
-      search: (prev) => prev,
-      state: (prev) => {
-        // HistoryState is an open bag; mark this entry as an explicit in-app open
-        // so Cancel/Save/Escape can history.back() instead of replace-to-home.
-        const next = { ...prev }
-        Object.assign(next, {
-          harnessSettings: { kind: "in-app-origin" as const },
-        })
-        return next
-      },
-    }).finally(() => {
+    void Promise.resolve(openHarnessSettings({ navigate })).finally(() => {
       settingsOpenNavigatePendingRef.current = false
     })
   }

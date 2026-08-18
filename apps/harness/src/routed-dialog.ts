@@ -191,7 +191,8 @@ export const isOtherRoutedDialogPath = (pathname: string): boolean => {
 
 /**
  * Pipeline is the canonical background for `/settings` and directly loaded
- * Session Telemetry. Masked in-app telemetry keeps its origin pathname here.
+ * Session Telemetry. Masked in-app Settings and telemetry keep their origin
+ * pathname here.
  */
 export const isPipelineBackgroundPath = (pathname: string): boolean =>
   pathname === "/" ||
@@ -222,7 +223,7 @@ export type JobsView = "pipeline" | "repos" | "completed"
 /**
  * Exclusive route → Jobs view. Overlay backgrounds use the same helpers as
  * the rest of the chrome so SSR and the client cannot pick different tabs.
- * Callers pass the runtime pathname (masked Session Telemetry keeps origin).
+ * Callers pass the runtime pathname (masked Settings / telemetry keep origin).
  */
 export const jobsViewForPath = (pathname: string): JobsView | undefined => {
   if (isReposBackgroundPath(pathname)) {
@@ -236,6 +237,21 @@ export const jobsViewForPath = (pathname: string): JobsView | undefined => {
   }
   return undefined
 }
+
+/**
+ * Document-session flag: true only after an explicit in-app Harness Settings
+ * open in this SPA document. Module-level so masthead / setup openers and
+ * root close share it; full reload clears it so direct/refresh close uses
+ * replace → `/`.
+ */
+let harnessSettingsOpenedFromInAppThisDocument = false
+
+export const markHarnessSettingsOpenedFromInApp = (): void => {
+  harnessSettingsOpenedFromInAppThisDocument = true
+}
+
+export const wasHarnessSettingsOpenedFromInApp = (): boolean =>
+  harnessSettingsOpenedFromInAppThisDocument
 
 /**
  * Document-session flag: true only after an explicit in-app Session Telemetry

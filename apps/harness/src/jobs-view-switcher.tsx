@@ -98,8 +98,9 @@ function JobsDestinationLink({
 export function JobsViewSwitcher() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   // Direct `/settings` and telemetry loads use Pipeline as their canonical
-  // background. Masked telemetry opens retain the runtime origin pathname, so
-  // the originating Jobs tab remains active (issues #840–#843 / #906).
+  // background. Masked Settings and telemetry opens retain the runtime origin
+  // pathname, so the originating Jobs tab remains active
+  // (issues #840–#843 / #906 / #1146).
   const jobsView = jobsViewForPath(pathname)
   const pipelineActive = jobsView === "pipeline"
   const reposActive = jobsView === "repos"
