@@ -1,7 +1,20 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { basename, isAbsolute, join } from "node:path"
 import { Context, Effect, Layer } from "effect"
+import {
+  AGENT_BACKEND_IDS,
+  type AgentTurnTail,
+  makeAgentTurnTail,
+  missingAgentTurnTail,
+  unavailableAgentTurnTail,
+} from "@ready-for-agent/agent-backend"
 import { type GrokHomeInput, resolveGrokHome } from "./grok-home.js"
+import { readGrokUpdatesJsonlTail } from "./session-tail.js"
+
+export const GROK_BACKEND = {
+  id: AGENT_BACKEND_IDS.grok,
+  label: "Grok Build",
+} as const
 
 /** 1 USD = 10^10 ticks (Grok headless `total_cost_usd_ticks` / `costUsdTicks`). */
 export const GROK_COST_USD_TICKS_PER_USD = 10_000_000_000
@@ -37,6 +50,7 @@ export type GrokSession = {
 
 export type GrokSessionStoreShape = {
   readonly getSession: (id: string) => Effect.Effect<GrokSession, never>
+  readonly getTail: (id: string) => Effect.Effect<AgentTurnTail, never>
 }
 
 export class GrokSessionStore extends Context.Service<
@@ -340,6 +354,51 @@ const readSessionFromDisk = (
   }
 }
 
+const readTailFromDisk = (
+  grokHome: string,
+  sessionId: string,
+): AgentTurnTail => {
+  const id = sessionId.trim()
+  if (id === "" || !isSafeGrokSessionIdSegment(id)) {
+    return missingAgentTurnTail(GROK_BACKEND)
+  }
+
+  const lookup = findGrokSessionDirectory(grokHome, id)
+  if (lookup.kind === "missing") {
+    return missingAgentTurnTail(GROK_BACKEND)
+  }
+  if (lookup.kind === "unavailable") {
+    return unavailableAgentTurnTail(GROK_BACKEND)
+  }
+
+  const summaryPath = join(lookup.path, "summary.json")
+  if (!existsSync(summaryPath)) {
+    return missingAgentTurnTail(GROK_BACKEND)
+  }
+  try {
+    const summaryRaw = readFileSync(summaryPath, "utf8")
+    if (parseSummary(summaryRaw) === null) {
+      return unavailableAgentTurnTail(GROK_BACKEND)
+    }
+  } catch {
+    return unavailableAgentTurnTail(GROK_BACKEND)
+  }
+
+  const updatesPath = join(lookup.path, "updates.jsonl")
+  if (!existsSync(updatesPath)) {
+    return makeAgentTurnTail({
+      availability: "available",
+      backend: GROK_BACKEND,
+      items: [],
+    })
+  }
+  return readGrokUpdatesJsonlTail({
+    updatesPath,
+    sessionId: id,
+    backend: GROK_BACKEND,
+  })
+}
+
 export const makeGrokSessionStore = (
   shape: GrokSessionStoreShape,
 ): GrokSessionStoreShape => shape
@@ -354,6 +413,11 @@ export const GrokSessionStoreLive = (
         Effect.sync(() => {
           const grokHome = resolveGrokHome(options)
           return readSessionFromDisk(grokHome, id)
+        }),
+      getTail: (id) =>
+        Effect.sync(() => {
+          const grokHome = resolveGrokHome(options)
+          return readTailFromDisk(grokHome, id)
         }),
     }),
   )

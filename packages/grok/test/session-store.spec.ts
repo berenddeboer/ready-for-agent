@@ -3,6 +3,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect, ManagedRuntime } from "effect"
 import {
+  AGENT_TURN_TAIL_ASSISTANT_TEXT_MAX,
+  AGENT_TURN_TAIL_ITEM_LIMIT,
+} from "@ready-for-agent/agent-backend"
+import {
+  GROK_BACKEND,
   GROK_COST_USD_TICKS_PER_USD,
   GROK_SESSION_PROVIDER_ID,
   GrokSessionStore,
@@ -432,6 +437,380 @@ describe("GrokSessionStore", () => {
       await runtime.dispose()
       expect(session.availability).toBe("available")
       expect(session.id).toBe("ses_trim")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+const TS_USER_OLD = 1787000001
+const TS_OLD_TEXT = 1787000002
+const TS_OLD_TOOL = 1787000003
+const TS_USER = 1787000004
+const TS_TOOL = 1787000005
+const TS_TEXT = 1787000006
+const AT_TOOL = "2026-08-17T20:53:25.000Z"
+const AT_TEXT = "2026-08-17T20:53:26.000Z"
+const AT_TOOL_7 = "2026-08-17T20:53:31.000Z"
+const SECRET_PAYLOAD = `SECRET_PAYLOAD_${"x".repeat(50_000)}`
+const CHILD_SECRET = "CHILD_SESSION_SECRET_SHOULD_NOT_APPEAR"
+
+const sessionUpdateLine = (
+  timestamp: number,
+  sessionId: string,
+  update: Record<string, unknown>,
+): string =>
+  JSON.stringify({
+    timestamp,
+    method: "session/update",
+    params: { sessionId, update },
+  })
+
+const userLine = (timestamp: number, sessionId: string, text: string): string =>
+  sessionUpdateLine(timestamp, sessionId, {
+    sessionUpdate: "user_message_chunk",
+    content: { type: "text", text },
+  })
+
+const thoughtLine = (
+  timestamp: number,
+  sessionId: string,
+  text: string,
+): string =>
+  sessionUpdateLine(timestamp, sessionId, {
+    sessionUpdate: "agent_thought_chunk",
+    content: { type: "text", text },
+  })
+
+const assistantLine = (
+  timestamp: number,
+  sessionId: string,
+  text: string,
+): string =>
+  sessionUpdateLine(timestamp, sessionId, {
+    sessionUpdate: "agent_message_chunk",
+    content: { type: "text", text },
+  })
+
+const toolCallLine = (
+  timestamp: number,
+  sessionId: string,
+  toolCallId: string,
+  name: string,
+): string =>
+  sessionUpdateLine(timestamp, sessionId, {
+    sessionUpdate: "tool_call",
+    toolCallId,
+    title: name,
+    rawInput: { command: "should-not-appear" },
+    _meta: {
+      "x.ai/tool": {
+        version: 1,
+        name,
+        kind: "execute",
+        namespace: "grok_build",
+        label: "Run Command",
+        read_only: false,
+      },
+    },
+  })
+
+const toolUpdateLine = (
+  timestamp: number,
+  sessionId: string,
+  toolCallId: string,
+  status: string,
+  output: string,
+): string =>
+  sessionUpdateLine(timestamp, sessionId, {
+    sessionUpdate: "tool_call_update",
+    toolCallId,
+    status,
+    rawOutput: { type: "Bash", output },
+    content: [{ type: "content", content: { type: "text", text: output } }],
+  })
+
+const subagentFinishedLineForTail = (
+  timestamp: number,
+  sessionId: string,
+): string =>
+  sessionUpdateLine(timestamp, sessionId, {
+    sessionUpdate: "subagent_finished",
+    child_session_id: "ses_child",
+    status: "completed",
+    output: CHILD_SECRET,
+  })
+
+const getTail = async (grokHome: string, sessionId: string) => {
+  const runtime = ManagedRuntime.make(GrokSessionStoreLive({ grokHome }))
+  const tail = await runtime.runPromise(
+    Effect.gen(function* () {
+      const store = yield* GrokSessionStore
+      return yield* store.getTail(sessionId)
+    }),
+  )
+  await runtime.dispose()
+  return tail
+}
+
+describe("GrokSessionStore.getTail", () => {
+  test("reads the latest Agent Turn Tail without tool payloads", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grok-tail-"))
+    try {
+      writeSessionFixture(dir, "%2Fwork", "ses_fixture", {
+        summary: { current_model_id: "grok-4.6" },
+        updatesJsonl: [
+          userLine(TS_USER_OLD, "ses_fixture", "old implement prompt"),
+          thoughtLine(TS_OLD_TEXT, "ses_fixture", "thinking about old turn"),
+          assistantLine(TS_OLD_TEXT, "ses_fixture", "old turn"),
+          toolCallLine(TS_OLD_TOOL, "ses_fixture", "call_old", "read_file"),
+          toolUpdateLine(
+            TS_OLD_TOOL,
+            "ses_fixture",
+            "call_old",
+            "completed",
+            SECRET_PAYLOAD,
+          ),
+          userLine(TS_USER, "ses_fixture", "harness review prompt"),
+          thoughtLine(TS_TOOL, "ses_fixture", "I will run tests"),
+          toolCallLine(
+            TS_TOOL,
+            "ses_fixture",
+            "call_new",
+            "run_terminal_command",
+          ),
+          toolUpdateLine(
+            TS_TOOL,
+            "ses_fixture",
+            "call_new",
+            "failed",
+            SECRET_PAYLOAD,
+          ),
+          assistantLine(TS_TEXT, "ses_fixture", "tests failed"),
+          turnCompletedLine({ inputTokens: 10 }),
+        ].join("\n"),
+      })
+
+      const tail = await getTail(dir, "ses_fixture")
+      expect(tail).toEqual({
+        availability: "available",
+        backend: GROK_BACKEND,
+        jumpHint: false,
+        items: [
+          {
+            kind: "tool",
+            name: "run_terminal_command",
+            status: "failed",
+            at: AT_TOOL,
+          },
+          {
+            kind: "assistant_text",
+            text: "tests failed",
+            truncated: false,
+            at: AT_TEXT,
+          },
+        ],
+      })
+      expect(JSON.stringify(tail)).not.toContain("SECRET_PAYLOAD")
+      expect(JSON.stringify(tail)).not.toContain("should-not-appear")
+      expect(JSON.stringify(tail)).not.toContain("old turn")
+      expect(JSON.stringify(tail)).not.toContain("thinking")
+      expect(JSON.stringify(tail)).not.toContain("harness review prompt")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("returns empty tail with jumpHint when the latest turn has no activity", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grok-tail-"))
+    try {
+      writeSessionFixture(dir, "%2Fwork", "ses_fixture", {
+        summary: { current_model_id: "grok-4.6" },
+        updatesJsonl: [
+          userLine(TS_USER_OLD, "ses_fixture", "implement"),
+          assistantLine(TS_OLD_TEXT, "ses_fixture", "done"),
+          userLine(TS_USER, "ses_fixture", "review in children"),
+          subagentFinishedLineForTail(TS_TEXT, "ses_fixture"),
+        ].join("\n"),
+      })
+
+      const tail = await getTail(dir, "ses_fixture")
+      expect(tail.availability).toBe("available")
+      expect(tail.items).toEqual([])
+      expect(tail.jumpHint).toBe(true)
+      expect(JSON.stringify(tail)).not.toContain(CHILD_SECRET)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("does not include child Session activity recorded under another Session ID", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grok-tail-"))
+    try {
+      writeSessionFixture(dir, "%2Fwork", "ses_fixture", {
+        summary: { current_model_id: "grok-4.6" },
+        updatesJsonl: [
+          userLine(TS_USER, "ses_fixture", "review"),
+          toolCallLine(TS_TOOL, "ses_child", "call_child", "grep"),
+          toolUpdateLine(
+            TS_TOOL,
+            "ses_child",
+            "call_child",
+            "completed",
+            "hit",
+          ),
+          assistantLine(TS_TEXT, "ses_child", CHILD_SECRET),
+        ].join("\n"),
+      })
+      writeSessionFixture(dir, "%2Fwork", "ses_child", {
+        summary: { current_model_id: "grok-4.6" },
+        updatesJsonl: [
+          userLine(TS_USER, "ses_child", "child prompt"),
+          assistantLine(TS_TEXT, "ses_child", CHILD_SECRET),
+        ].join("\n"),
+      })
+
+      const tail = await getTail(dir, "ses_fixture")
+      expect(tail.availability).toBe("available")
+      expect(tail.items).toEqual([])
+      expect(tail.jumpHint).toBe(true)
+      expect(JSON.stringify(tail)).not.toContain(CHILD_SECRET)
+      expect(JSON.stringify(tail)).not.toContain("grep")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("returns the last 20 activity items and truncates assistant text at 2k", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grok-tail-"))
+    try {
+      const longText = "a".repeat(AGENT_TURN_TAIL_ASSISTANT_TEXT_MAX + 50)
+      const toolLines = Array.from({ length: 25 }, (_, index) => {
+        const timestamp = TS_USER + 1 + index
+        const id = `call_${index + 1}`
+        return [
+          toolCallLine(timestamp, "ses_fixture", id, `tool-${index + 1}`),
+          toolUpdateLine(
+            timestamp,
+            "ses_fixture",
+            id,
+            "completed",
+            SECRET_PAYLOAD,
+          ),
+        ].join("\n")
+      })
+      writeSessionFixture(dir, "%2Fwork", "ses_fixture", {
+        summary: { current_model_id: "grok-4.6" },
+        updatesJsonl: [
+          userLine(TS_USER, "ses_fixture", "implement"),
+          ...toolLines,
+          assistantLine(TS_USER + 26, "ses_fixture", "part-one-"),
+          assistantLine(TS_USER + 27, "ses_fixture", longText),
+        ].join("\n"),
+      })
+
+      const tail = await getTail(dir, "ses_fixture")
+      expect(tail.availability).toBe("available")
+      expect(tail.items).toHaveLength(AGENT_TURN_TAIL_ITEM_LIMIT)
+      expect(tail.items[0]).toEqual({
+        kind: "tool",
+        name: "tool-7",
+        status: "completed",
+        at: AT_TOOL_7,
+      })
+      const last = tail.items[19]
+      expect(last?.kind).toBe("assistant_text")
+      if (last?.kind === "assistant_text") {
+        expect(last.text).toBe(
+          `part-one-${"a".repeat(AGENT_TURN_TAIL_ASSISTANT_TEXT_MAX - "part-one-".length)}`,
+        )
+        expect(last.truncated).toBe(true)
+      }
+      expect(JSON.stringify(tail)).not.toContain("SECRET_PAYLOAD")
+      expect(
+        tail.items.some(
+          (item) => item.kind === "tool" && item.name === "tool-6",
+        ),
+      ).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("returns MISSING when the Session directory is absent", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grok-tail-"))
+    try {
+      mkdirSync(join(dir, "sessions"), { recursive: true })
+      const tail = await getTail(dir, "ses_gone")
+      expect(tail).toEqual({
+        availability: "missing",
+        backend: GROK_BACKEND,
+        items: [],
+        jumpHint: false,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("returns UNAVAILABLE when the Session store is unreadable", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grok-tail-"))
+    try {
+      writeFileSync(join(dir, "sessions"), "not-a-directory")
+      const tail = await getTail(dir, "ses_any")
+      expect(tail).toEqual({
+        availability: "unavailable",
+        backend: GROK_BACKEND,
+        items: [],
+        jumpHint: false,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("Session token usage still loads without fetching the tail", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "grok-tail-"))
+    try {
+      writeSessionFixture(dir, "%2Fwork", "ses_fixture", {
+        summary: {
+          current_model_id: "grok-4.6",
+          created_at: "2026-08-17T20:00:00.000Z",
+          updated_at: "2026-08-17T20:53:26.000Z",
+        },
+        updatesJsonl: [
+          userLine(TS_USER, "ses_fixture", "implement"),
+          assistantLine(TS_TEXT, "ses_fixture", "done"),
+          turnCompletedLine({
+            inputTokens: 11,
+            outputTokens: 3,
+            reasoningTokens: 1,
+            cachedReadTokens: 2,
+            costUsdTicks: 100_000_000,
+          }),
+        ].join("\n"),
+      })
+
+      const runtime = ManagedRuntime.make(
+        GrokSessionStoreLive({ grokHome: dir }),
+      )
+      const session = await runtime.runPromise(
+        Effect.gen(function* () {
+          const store = yield* GrokSessionStore
+          return yield* store.getSession("ses_fixture")
+        }),
+      )
+      await runtime.dispose()
+
+      expect(session.availability).toBe("available")
+      expect(session.tokens).toEqual({
+        input: 11,
+        output: 3,
+        reasoning: 1,
+        cacheRead: 2,
+        cacheWrite: 0,
+      })
+      expect(session.cost).toBe(costUsdFromTicks(100_000_000))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

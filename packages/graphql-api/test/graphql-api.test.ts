@@ -10362,6 +10362,36 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("session reports Agent Turn Tail supported for Grok Build", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.succeed({
+            ...workItem,
+            agentBackend: "grok",
+            sessionId: "ses_owned",
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) { agentTurnTailSupported }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: { session: { agentTurnTailSupported: true } },
+    })
+  })
+
   test("agentTurnTail returns null for unknown Work Item", async () => {
     runtime = makeRuntime(
       {},

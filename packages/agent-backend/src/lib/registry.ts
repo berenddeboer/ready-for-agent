@@ -94,7 +94,7 @@ const GROK_REGISTRATION: AgentBackendRegistration = {
   },
   capabilities: [
     { _tag: "SessionTelemetry", supported: true },
-    { _tag: "AgentTurnTail", supported: false },
+    { _tag: "AgentTurnTail", supported: true },
     { _tag: "KeymaxxerMcp", supported: false },
   ],
 }
