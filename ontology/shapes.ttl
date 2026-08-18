@@ -121,6 +121,14 @@ rfa:StepRunReasonShape
     sh:datatype <http://www.w3.org/2001/XMLSchema#string> ;
     sh:minLength 1 ;
     sh:message "A Step Run reason must have one runtime notation."@en ;
+  ] ;
+  sh:property [
+    sh:path skos:definition ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:languageIn ("en") ;
+    sh:uniqueLang true ;
+    sh:message "A Step Run reason must have one English definition."@en ;
   ] .
 
 rfa:OperationalLifecycleStepShape
