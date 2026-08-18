@@ -3,6 +3,7 @@ import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
+import { resolveEffectiveMergePolicy } from "./merge-policy.js"
 import { workItemBranchName } from "./worktree-names.js"
 
 export class MergePrContextError extends Schema.TaggedErrorClass<MergePrContextError>()(
@@ -40,8 +41,13 @@ export const mergePr = (context: LifecycleStepContext) =>
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
     })
+    const effectivePolicy = resolveEffectiveMergePolicy({
+      repositoryMergePolicy: repository.mergePolicy,
+      workItemMergeMode: context.mergeMode,
+      workItemAutoMergeOverride: context.autoMergeOverride,
+    })
     const options =
-      context.mergeMode === "always" ? { acceptNoChecks: true } : undefined
+      effectivePolicy === "always" ? { acceptNoChecks: true } : undefined
     if (repository.forge === "gitlab") {
       const gitlab = yield* GitLabService
       return yield* gitlab.mergePullRequest(repository, branch, options)

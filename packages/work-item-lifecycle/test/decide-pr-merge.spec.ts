@@ -13,7 +13,7 @@ import {
   decidePrMerge,
   makeWorkItemId,
   parseDecidePrMergeResult,
-  resolveDecidePrMergeAutoMerge,
+  resolveEffectiveMergePolicy,
   stubActiveAgentBackendLayer,
   stubGrokActiveAgentBackendLayer,
 } from "../src/index.js"
@@ -21,7 +21,7 @@ import { describe, expect, it } from "bun:test"
 
 const repository = makeRepositoryRecord({
   localPath: "/repos/widgets",
-  autoMerge: true,
+  mergePolicy: "classify",
   includeAllIssueAuthors: false,
   waitForReadyForReviewChecks: true,
 })
@@ -103,29 +103,36 @@ describe("parseDecidePrMergeResult", () => {
   })
 })
 
-describe("resolveDecidePrMergeAutoMerge", () => {
-  it("lets a Work Item override disagree with the live Repository setting", () => {
+describe("resolveEffectiveMergePolicy", () => {
+  it("lets a Work Item pin disagree with the live Repository Merge Policy", () => {
     expect(
-      resolveDecidePrMergeAutoMerge({
-        repositoryAutoMerge: true,
+      resolveEffectiveMergePolicy({
+        repositoryMergePolicy: "classify",
+        workItemMergeMode: "ordinary",
         workItemAutoMergeOverride: false,
       }),
-    ).toEqual({
-      allowed: false,
-      reason: "Auto-merge is disabled for this Work Item",
-    })
+    ).toBe("off")
     expect(
-      resolveDecidePrMergeAutoMerge({
-        repositoryAutoMerge: false,
+      resolveEffectiveMergePolicy({
+        repositoryMergePolicy: "off",
+        workItemMergeMode: "ordinary",
         workItemAutoMergeOverride: true,
       }),
-    ).toEqual({ allowed: true })
+    ).toBe("classify")
     expect(
-      resolveDecidePrMergeAutoMerge({
-        repositoryAutoMerge: true,
+      resolveEffectiveMergePolicy({
+        repositoryMergePolicy: "always",
+        workItemMergeMode: "ordinary",
         workItemAutoMergeOverride: null,
       }),
-    ).toEqual({ allowed: true })
+    ).toBe("always")
+    expect(
+      resolveEffectiveMergePolicy({
+        repositoryMergePolicy: "off",
+        workItemMergeMode: "always",
+        workItemAutoMergeOverride: null,
+      }),
+    ).toBe("always")
   })
 })
 
@@ -320,7 +327,7 @@ describe("decidePrMerge", () => {
 
   it("skips OpenCode when auto-merge is disabled", async () => {
     const pausedRepoDb = stubDbServiceLayer({
-      listRepositories: Effect.succeed([{ ...repository, autoMerge: false }]),
+      listRepositories: Effect.succeed([{ ...repository, mergePolicy: "off" }]),
     })
     let continued = false
     const agentBackend = Layer.succeed(
@@ -399,7 +406,7 @@ describe("decidePrMerge", () => {
 
   it("runs risk assessment when the Work Item override is true and Repository Auto-merge is false", async () => {
     const disabledRepoDb = stubDbServiceLayer({
-      listRepositories: Effect.succeed([{ ...repository, autoMerge: false }]),
+      listRepositories: Effect.succeed([{ ...repository, mergePolicy: "off" }]),
     })
     let continued = false
     const agentBackend = Layer.succeed(

@@ -843,7 +843,7 @@ describe("implementWith", () => {
           defaultThinkingLevel: null,
           reviewModel: null,
           reviewThinkingLevel: null,
-          autoMerge: true,
+          mergePolicy: "classify",
           includeAllIssueAuthors: false,
           waitForReadyForReviewChecks: true,
         })
@@ -886,7 +886,7 @@ describe("implementWith", () => {
           defaultThinkingLevel: null,
           reviewModel: null,
           reviewThinkingLevel: null,
-          autoMerge: false,
+          mergePolicy: "off",
           includeAllIssueAuthors: false,
           waitForReadyForReviewChecks: true,
         })
@@ -904,7 +904,7 @@ describe("implementWith", () => {
           defaultThinkingLevel: null,
           reviewModel: null,
           reviewThinkingLevel: null,
-          autoMerge: false,
+          mergePolicy: "off",
           includeAllIssueAuthors: false,
           waitForReadyForReviewChecks: true,
         })

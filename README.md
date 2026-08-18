@@ -140,8 +140,8 @@ issues that come with running compute in the cloud.
   and Claude Code — switchable instance-wide.
 - Per-repo agent and model overrides: expensive models for hard
   repos, cheaper ones for the rest.
-- Auto-merge gated by an AI risk assessment: only low-risk PRs merge
-  unattended, higher risk still requires human review.
+- Per-repo Merge Policy: Off (human merge), Classify (risk-assessed
+  merge), or Always (skip classify; no CI is green only for Always).
 - "Implement locally" to inspect the work before any commit or PR
   exists.
 - Select a parent issue and it implements all child issues.
@@ -190,10 +190,11 @@ Currently the harness does not automatically pick issues to work
 on. Click on the kebab menu and implement an issue end to end via
 "Implement now".
 
-You can configure your repo to automatically merge the PR. Default is
-for human review to take place. If auto-merge is enabled, the harness
-will ask the AI about the risk of auto-merge. Only low risk PRs are
-auto-merged, higher risk still require human review.
+Each Repository has a Merge Policy. New Repositories start at Off —
+a human must merge. Classify runs Decide PR Merge and only low-risk
+PRs merge unattended. Always skips Classify and, after the Check-Start
+Deadline, treats an absence of CI as green. Pending, failed, and
+Expected checks still block.
 
 Pick the "Implement locally" option to implement the issue in the new
 worktree, but without creating a PR yet. This allows you to test and
@@ -252,9 +253,9 @@ READY_FOR_AGENT_GRAPHQL_URL=http://<reachable-host>:<port>/graphql \
 ### Per-repo settings
 
 Each repo can override the harness-wide coding agent and build/review
-models, and enable auto-merge. This allows you to configure more
-expensive models for more complex code, and cheaper models for
-others.
+models, and set a Merge Policy (Off, Classify, or Always). This allows
+you to configure more expensive models for more complex code, and
+cheaper models for others.
 
 ### KeyMaxxer
 

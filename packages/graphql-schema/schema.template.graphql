@@ -530,7 +530,12 @@ type Repository {
   advertised by the governing model.
   """
   reviewThinkingLevel: String
-  autoMerge: Boolean!
+  """
+  Live Repository Merge Policy. Unpinned Work Items inherit this at
+  merge-routing time. OFF requires a human merge, CLASSIFY runs Decide PR
+  Merge, ALWAYS skips Classify.
+  """
+  mergePolicy: MergePolicy!
   includeAllIssueAuthors: Boolean!
   """
   When true (default), a known draft-to-ready transition starts a Ready-Phase
@@ -842,8 +847,19 @@ type LifecycleLabel {
 }
 
 """
+Three-state Merge Policy for a Repository or a Work Item pin.
+OFF requires a human merge. CLASSIFY runs Decide PR Merge. ALWAYS skips
+Classify and treats post-deadline no_checks as green.
+"""
+enum MergePolicy {
+  OFF
+  CLASSIFY
+  ALWAYS
+}
+
+"""
 Durable Work Item merge policy.
-ORDINARY follows Repository Auto-merge and Decide PR Merge.
+ORDINARY follows the live Repository Merge Policy and Decide PR Merge.
 ALWAYS skips Decide PR Merge after pre-merge checks settle.
 """
 enum MergeMode {
@@ -907,8 +923,8 @@ type WorkItem {
   """
   executionProfile: WorkItemExecutionProfile
   """
-  Work Item Auto-merge override. Null follows the live Repository Auto-merge
-  setting. True permits risk-assessed Auto-merge; false requires human merge.
+  Work Item Auto-merge override. Null follows the live Repository Merge
+  Policy. True permits risk-assessed Classify; false requires human merge.
   Distinct from Merge Mode Always.
   """
   autoMergeOverride: Boolean
@@ -1016,7 +1032,10 @@ input UpdateRepositorySettingsInput {
   are preserved rather than deleted.
   """
   reviewThinkingLevel: String
-  autoMerge: Boolean!
+  """
+  Live Repository Merge Policy. New Repositories default to OFF.
+  """
+  mergePolicy: MergePolicy!
   includeAllIssueAuthors: Boolean!
   """
   Wait for checks to start after ready for review (Ready-Phase Status Check Round).

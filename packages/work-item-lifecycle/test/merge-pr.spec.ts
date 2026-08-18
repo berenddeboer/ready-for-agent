@@ -111,6 +111,56 @@ describe("mergePr", () => {
     expect(seenOptions).toEqual({ acceptNoChecks: true })
   })
 
+  it("asks GitHub to accept no_checks when an unpinned Work Item inherits live always", async () => {
+    let seenOptions: { readonly acceptNoChecks?: boolean } | undefined
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: (_repository, _branch, options) => {
+        seenOptions = options
+        return Effect.succeed({ _tag: "merged" as const })
+      },
+    } as GitHubServiceShape)
+    const liveAlways = stubDbServiceLayer({
+      listRepositories: Effect.succeed([
+        { ...repository, mergePolicy: "always" },
+      ]),
+    })
+
+    await Effect.runPromise(
+      mergePr({
+        ...context,
+        mergeMode: "ordinary",
+        autoMergeOverride: null,
+      }).pipe(Effect.provide(Layer.merge(liveAlways, github))),
+    )
+
+    expect(seenOptions).toEqual({ acceptNoChecks: true })
+  })
+
+  it("does not ask GitHub to accept no_checks when live Merge Policy is classify", async () => {
+    let seenOptions: { readonly acceptNoChecks?: boolean } | undefined
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: (_repository, _branch, options) => {
+        seenOptions = options
+        return Effect.succeed({ _tag: "merged" as const })
+      },
+    } as GitHubServiceShape)
+    const liveClassify = stubDbServiceLayer({
+      listRepositories: Effect.succeed([
+        { ...repository, mergePolicy: "classify" },
+      ]),
+    })
+
+    await Effect.runPromise(
+      mergePr({
+        ...context,
+        mergeMode: "ordinary",
+        autoMergeOverride: null,
+      }).pipe(Effect.provide(Layer.merge(liveClassify, github))),
+    )
+
+    expect(seenOptions).toBeUndefined()
+  })
+
   it("requires a worktree path", async () => {
     const github = Layer.succeed(GitHubService, {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
@@ -222,6 +272,40 @@ describe("mergePr", () => {
       mergePr({ ...context, mergeMode: "always" }).pipe(
         Effect.provide(Layer.mergeAll(gitlabDb, github, gitlab)),
       ),
+    )
+
+    expect(seenOptions).toEqual({ acceptNoChecks: true })
+  })
+
+  it("asks GitLab to accept no_checks when an unpinned Work Item inherits live always", async () => {
+    let seenOptions: { readonly acceptNoChecks?: boolean } | undefined
+    const gitlabRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/widgets",
+      localPath: "/repos/widgets",
+      mergePolicy: "always",
+    })
+    const gitlabDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([gitlabRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () => Effect.die("GitHub must not merge a GitLab repo"),
+    } as GitHubServiceShape)
+    const gitlab = Layer.succeed(GitLabService, {
+      mergePullRequest: (_repository, _branch, options) => {
+        seenOptions = options
+        return Effect.succeed({ _tag: "merged" as const })
+      },
+    } as GitLabServiceShape)
+
+    await Effect.runPromise(
+      mergePr({
+        ...context,
+        mergeMode: "ordinary",
+        autoMergeOverride: null,
+      }).pipe(Effect.provide(Layer.mergeAll(gitlabDb, github, gitlab))),
     )
 
     expect(seenOptions).toEqual({ acceptNoChecks: true })

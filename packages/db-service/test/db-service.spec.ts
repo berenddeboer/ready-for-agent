@@ -211,7 +211,7 @@ describe("DbService", () => {
             defaultThinkingLevel: "high",
             reviewModel: "openai/gpt-5.6-terra",
             reviewThinkingLevel: "max",
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -340,7 +340,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -400,7 +400,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -528,7 +528,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -765,7 +765,7 @@ describe("DbService", () => {
           expect(repo.defaultThinkingLevel).toBeNull()
           expect(repo.reviewModel).toBeNull()
           expect(repo.reviewThinkingLevel).toBeNull()
-          expect(repo.autoMerge).toBe(false)
+          expect(repo.mergePolicy).toBe("off")
           expect(repo.includeAllIssueAuthors).toBe(false)
           expect(repo.waitForReadyForReviewChecks).toBe(true)
           expect(repo.issuesReconciledAt).toBeNull()
@@ -888,7 +888,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -928,7 +928,7 @@ describe("DbService", () => {
               defaultThinkingLevel: null,
               reviewModel: null,
               reviewThinkingLevel: null,
-              autoMerge: false,
+              mergePolicy: "off",
               includeAllIssueAuthors: false,
               waitForReadyForReviewChecks: true,
             }),
@@ -977,7 +977,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -986,7 +986,7 @@ describe("DbService", () => {
         }),
       ))
 
-    it("updates pause, model override, auto-merge, include-all authors, and ready-check wait", () =>
+    it("updates pause, model override, merge policy, include-all authors, and ready-check wait", () =>
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
@@ -1000,7 +1000,7 @@ describe("DbService", () => {
             defaultThinkingLevel: "  high  ",
             reviewModel: "  anthropic/claude-opus-4-6  ",
             reviewThinkingLevel: "  max  ",
-            autoMerge: true,
+            mergePolicy: "classify",
             includeAllIssueAuthors: true,
             waitForReadyForReviewChecks: false,
           })
@@ -1013,11 +1013,34 @@ describe("DbService", () => {
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
             reviewThinkingLevel: "max",
-            autoMerge: true,
+            mergePolicy: "classify",
             includeAllIssueAuthors: true,
             waitForReadyForReviewChecks: false,
           })
           expect(yield* db.listRepositories).toEqual([updated])
+        }),
+      ))
+
+    it("persists Merge Policy always and new Repositories default to off", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          expect(repo.mergePolicy).toBe("off")
+
+          const always = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: repo.paused,
+            defaultModel: repo.defaultModel,
+            defaultThinkingLevel: repo.defaultThinkingLevel,
+            reviewModel: repo.reviewModel,
+            reviewThinkingLevel: repo.reviewThinkingLevel,
+            mergePolicy: "always",
+            includeAllIssueAuthors: repo.includeAllIssueAuthors,
+            waitForReadyForReviewChecks: repo.waitForReadyForReviewChecks,
+          })
+          expect(always.mergePolicy).toBe("always")
+          expect((yield* db.listRepositories)[0]?.mergePolicy).toBe("always")
         }),
       ))
 
@@ -1036,7 +1059,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1051,7 +1074,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1066,7 +1089,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1077,7 +1100,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1100,7 +1123,7 @@ describe("DbService", () => {
               defaultThinkingLevel: null,
               reviewModel: null,
               reviewThinkingLevel: null,
-              autoMerge: false,
+              mergePolicy: "off",
               includeAllIssueAuthors: false,
               waitForReadyForReviewChecks: true,
             }),
@@ -1154,7 +1177,7 @@ describe("DbService", () => {
               defaultThinkingLevel: null,
               reviewModel: null,
               reviewThinkingLevel: null,
-              autoMerge: false,
+              mergePolicy: "off",
               includeAllIssueAuthors: false,
               waitForReadyForReviewChecks: true,
             }),
@@ -1175,7 +1198,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1190,7 +1213,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1232,7 +1255,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1296,7 +1319,7 @@ describe("DbService", () => {
               defaultThinkingLevel: null,
               reviewModel: null,
               reviewThinkingLevel: null,
-              autoMerge: false,
+              mergePolicy: "off",
               includeAllIssueAuthors: false,
               waitForReadyForReviewChecks: true,
             }),
@@ -1334,7 +1357,7 @@ describe("DbService", () => {
             defaultThinkingLevel: "high",
             reviewModel: "openai/opencode-review",
             reviewThinkingLevel: "max",
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1348,7 +1371,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1397,7 +1420,7 @@ describe("DbService", () => {
             defaultThinkingLevel: "low",
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1477,7 +1500,7 @@ describe("DbService", () => {
             defaultThinkingLevel: "high",
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1489,7 +1512,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1533,7 +1556,7 @@ describe("DbService", () => {
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
             reviewThinkingLevel: "max",
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1545,7 +1568,7 @@ describe("DbService", () => {
             defaultThinkingLevel: null,
             reviewModel: " ",
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "off",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1569,7 +1592,7 @@ describe("DbService", () => {
               defaultThinkingLevel: null,
               reviewModel: null,
               reviewThinkingLevel: null,
-              autoMerge: false,
+              mergePolicy: "off",
               includeAllIssueAuthors: false,
               waitForReadyForReviewChecks: true,
             }),
@@ -1592,7 +1615,7 @@ describe("DbService", () => {
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
             reviewThinkingLevel: "max",
-            autoMerge: true,
+            mergePolicy: "classify",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1606,7 +1629,7 @@ describe("DbService", () => {
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
             reviewThinkingLevel: "max",
-            autoMerge: true,
+            mergePolicy: "classify",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })
@@ -1626,7 +1649,7 @@ describe("DbService", () => {
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
             reviewThinkingLevel: "max",
-            autoMerge: true,
+            mergePolicy: "classify",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           })

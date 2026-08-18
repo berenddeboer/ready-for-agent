@@ -870,7 +870,7 @@ function RepositoryCard({
   const [reviewThinkingLevel, setReviewVariant] = useState(
     repository.reviewThinkingLevel ?? "",
   )
-  const [autoMerge, setAutoMerge] = useState(repository.autoMerge)
+  const [mergePolicy, setMergePolicy] = useState(repository.mergePolicy)
   const [includeAllIssueAuthors, setIncludeAllIssueAuthors] = useState(
     repository.includeAllIssueAuthors,
   )
@@ -918,7 +918,7 @@ function RepositoryCard({
       defaultThinkingLevel: string | null
       reviewModel: string | null
       reviewThinkingLevel: string | null
-      autoMerge: boolean
+      mergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
       includeAllIssueAuthors: boolean
       waitForReadyForReviewChecks: boolean
     }) => {
@@ -938,7 +938,7 @@ function RepositoryCard({
           defaultThinkingLevel: true,
           reviewModel: true,
           reviewThinkingLevel: true,
-          autoMerge: true,
+          mergePolicy: true,
           includeAllIssueAuthors: true,
           waitForReadyForReviewChecks: true,
           issuesReconciledAt: true,
@@ -1079,7 +1079,7 @@ function RepositoryCard({
     setDefaultVariant(repository.defaultThinkingLevel ?? "")
     setReviewModel(repository.reviewModel ?? "")
     setReviewVariant(repository.reviewThinkingLevel ?? "")
-    setAutoMerge(repository.autoMerge)
+    setMergePolicy(repository.mergePolicy)
     setIncludeAllIssueAuthors(repository.includeAllIssueAuthors)
     setWaitForReadyForReviewChecks(repository.waitForReadyForReviewChecks)
     setPreviewModels(null)
@@ -1623,7 +1623,7 @@ function RepositoryCard({
       reviewModel: reviewModel.trim() === "" ? null : reviewModel.trim(),
       reviewThinkingLevel:
         reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel.trim(),
-      autoMerge,
+      mergePolicy,
       includeAllIssueAuthors,
       waitForReadyForReviewChecks,
     })
@@ -2083,16 +2083,33 @@ function RepositoryCard({
                     Skip autonomous work selection
                   </span>
                 </label>
-                <label className={ui.dialogCheck}>
-                  <input
-                    type="checkbox"
-                    className={ui.dialogCheckInput}
-                    checked={autoMerge}
-                    onChange={(event) => setAutoMerge(event.target.checked)}
-                  />
-                  Auto-merge
-                  <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
-                    Allow clanker merge when risk is low
+                <label className={ui.dialogField}>
+                  Merge Policy
+                  <select
+                    name="mergePolicy"
+                    className={ui.dialogInput}
+                    value={mergePolicy}
+                    onChange={(event) => {
+                      const next = event.target.value
+                      if (
+                        next === "OFF" ||
+                        next === "CLASSIFY" ||
+                        next === "ALWAYS"
+                      ) {
+                        setMergePolicy(next)
+                      }
+                    }}
+                  >
+                    <option value="OFF">Off — human merge</option>
+                    <option value="CLASSIFY">
+                      Classify — risk-assessed merge
+                    </option>
+                    <option value="ALWAYS">Always — skip classify</option>
+                  </select>
+                  <span className={ui.dialogFieldHint}>
+                    Off requires a human merge. Classify runs Decide PR Merge.
+                    Always skips Classify and treats missing CI as green after
+                    the Check-Start Deadline.
                   </span>
                 </label>
                 <label className={ui.dialogCheck}>
@@ -2572,8 +2589,14 @@ function RepositoryCard({
                 </dd>
               </div>
               <div className={ui.repoMetaRow}>
-                <dt>Auto-merge</dt>
-                <dd>{repository.autoMerge ? "Enabled" : "Disabled"}</dd>
+                <dt>Merge Policy</dt>
+                <dd>
+                  {repository.mergePolicy === "ALWAYS"
+                    ? "Always"
+                    : repository.mergePolicy === "CLASSIFY"
+                      ? "Classify"
+                      : "Off"}
+                </dd>
               </div>
             </dl>
             {!repository.credential.configured &&
@@ -3303,7 +3326,7 @@ function RepositoryIssueRow({
             reviewModel: repository.reviewModel,
             reviewThinkingLevel: repository.reviewThinkingLevel,
           }}
-          initialAutoMerge={repository.autoMerge}
+          initialAutoMerge={repository.mergePolicy !== "OFF"}
           submitPending={implementWith.isPending}
           submitError={
             implementWith.isError

@@ -24,7 +24,7 @@ export const makeRepositoryRecord = (
   defaultThinkingLevel: null,
   reviewModel: null,
   reviewThinkingLevel: null,
-  autoMerge: false,
+  mergePolicy: "off",
   includeAllIssueAuthors: false,
   waitForReadyForReviewChecks: true,
   issuesReconciledAt: null,

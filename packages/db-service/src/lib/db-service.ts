@@ -271,7 +271,7 @@ const decodeRunningStepRows = (rows: ReadonlyArray<unknown>) =>
 
 const repositorySelectColumns = `id, forge, forge_host, project_path, local_path, is_bare, paused,
              selected_agent_backend, default_model, default_thinking_level,
-             review_model, review_thinking_level, backend_model_prefs, auto_merge,
+             review_model, review_thinking_level, backend_model_prefs, merge_policy,
              include_all_issue_authors, wait_for_ready_for_review_checks,
              issues_reconciled_at`
 
@@ -293,7 +293,7 @@ const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
     defaultThinkingLevel: row.defaultThinkingLevel,
     reviewModel: row.reviewModel,
     reviewThinkingLevel: row.reviewThinkingLevel,
-    autoMerge: row.autoMerge,
+    mergePolicy: row.mergePolicy,
     includeAllIssueAuthors: row.includeAllIssueAuthors,
     waitForReadyForReviewChecks: row.waitForReadyForReviewChecks,
     issuesReconciledAt: row.issuesReconciledAt,
@@ -1037,7 +1037,7 @@ export const DbServiceLive = Layer.effect(
                selected_agent_backend,
                default_model, default_thinking_level, review_model, review_thinking_level,
                backend_model_prefs,
-               auto_merge, include_all_issue_authors, wait_for_ready_for_review_checks,
+               merge_policy, include_all_issue_authors, wait_for_ready_for_review_checks,
                created_at, updated_at
              ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, '{}', ?, ?, ?, ?, ?)
              RETURNING ${repositorySelectColumns}`,
@@ -1049,7 +1049,7 @@ export const DbServiceLive = Layer.effect(
             localPath,
             input.isBare,
             true,
-            false,
+            "off",
             false,
             true,
             now,
@@ -1266,7 +1266,7 @@ export const DbServiceLive = Layer.effect(
                  review_model = ?,
                  review_thinking_level = ?,
                  backend_model_prefs = ?,
-                 auto_merge = ?,
+                 merge_policy = ?,
                  include_all_issue_authors = ?,
                  wait_for_ready_for_review_checks = ?,
                  updated_at = ?
@@ -1283,7 +1283,7 @@ export const DbServiceLive = Layer.effect(
                   reviewModel,
                   reviewThinkingLevel,
                   backendModelPrefs,
-                  input.autoMerge,
+                  input.mergePolicy,
                   input.includeAllIssueAuthors,
                   input.waitForReadyForReviewChecks,
                   now,
