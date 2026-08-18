@@ -3195,6 +3195,8 @@ const makeUploadUserAttachment =
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
+        // Bun fetch leaves Buffer bodies without Content-Type; uploads.github.com then 400s.
+        "Content-Type": input.contentType,
       },
       body: input.body,
       signal,
