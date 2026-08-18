@@ -133,6 +133,11 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(body).toContain("ui.platePrimary")
     expect(body).toContain("Create GitHub token")
     expect(body).toContain("Store in Keymaxxer")
+    expect(body).toContain("Actions: Read and write")
+    expect(body).toContain("Workflows: Read and write")
+    expect(body).toContain(
+      "Already-created tokens are not upgraded automatically",
+    )
     expect(body).toContain("ui.guidanceCode")
 
     const ui = uiSource()

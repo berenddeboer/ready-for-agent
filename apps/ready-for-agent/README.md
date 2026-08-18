@@ -152,7 +152,8 @@ offers the existing Create GitHub token / Store in Keymaxxer flow.
 ### Upgrade an existing GitHub token
 
 New repository token links preselect **Actions: Read and write** (workflow
-reruns and CI job logs), plus Issues, Contents, Pull requests (write), and
+reruns and CI job logs) and **Workflows: Read and write** (push or update
+`.github/workflows/**`), plus Issues, Contents, Pull requests (write), and
 Commit statuses (read). Already-created tokens are **not** upgraded
 automatically when the harness changes its requested permissions. Edit the
 fine-grained token on GitHub (or recreate it), then replace the secret in

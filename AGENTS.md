@@ -17,7 +17,8 @@ Fine-grained GitHub PATs cannot call the Checks API (including GraphQL
 `statusCheckRollup.contexts`). That 403 is expected: the harness falls back to
 Actions jobs for terminal PR Status Check identity and downloads Actions job
 logs for Status Check Handoff diagnostics (`actions=write` for workflow
-reruns and job-log reads, `statuses=read`).
+reruns and job-log reads, `statuses=read`). Pushing or updating
+`.github/workflows/**` needs `workflows=write` (distinct from Actions write).
 
 ### Triage labels
 
