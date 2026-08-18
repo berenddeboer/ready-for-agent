@@ -310,6 +310,15 @@ const tryParseApplyReviewLine = (line: string): ApplyReviewResult | null => {
         reason: boundReason(fixedAndDeferred[2]),
       }
     }
+    // High is not a legal deferral, but the marker already states that
+    // high findings remain. Treat it as unresolved high instead of
+    // sending the apply-verdict through another repair turn.
+    if (parseSeverity(fixedAndDeferred[1]) === "high") {
+      return {
+        _tag: "unresolved_high",
+        reason: boundReason(fixedAndDeferred[2]),
+      }
+    }
   }
 
   const deferred = line.match(
@@ -325,6 +334,12 @@ const tryParseApplyReviewLine = (line: string): ApplyReviewResult | null => {
       return {
         _tag: "deferred",
         severity,
+        reason: boundReason(deferred[2]),
+      }
+    }
+    if (parseSeverity(deferred[1]) === "high") {
+      return {
+        _tag: "unresolved_high",
         reason: boundReason(deferred[2]),
       }
     }
@@ -357,6 +372,8 @@ const tryParseApplyReviewLine = (line: string): ApplyReviewResult | null => {
  * Parse the last valid READY_FOR_AGENT_RESULT marker from an apply-findings
  * pass, tolerating explanatory prose and other non-matching candidate lines.
  * Returns null only when no candidate line parses to a known marker.
+ * Recognized REVIEW_DEFERRED and REVIEW_FIXED_AND_DEFERRED lines whose
+ * severity argument is high are normalized to unresolved_high.
  */
 export const parseApplyReviewResult = (
   output: string,

@@ -328,6 +328,41 @@ describe("parseApplyReviewResult", () => {
     })
   })
 
+  it("normalizes recognized high-severity deferral shapes to unresolved high", () => {
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: high: cannot defer high",
+      ),
+    ).toEqual({
+      _tag: "unresolved_high",
+      reason: "cannot defer high",
+    })
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: high: auth bypass remains",
+      ),
+    ).toEqual({
+      _tag: "unresolved_high",
+      reason: "auth bypass remains",
+    })
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <high>: injection risk remains",
+      ),
+    ).toEqual({
+      _tag: "unresolved_high",
+      reason: "injection risk remains",
+    })
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: <high>: <auth bypass remains>",
+      ),
+    ).toEqual({
+      _tag: "unresolved_high",
+      reason: "auth bypass remains",
+    })
+  })
+
   it("accepts enum and reason arguments wrapped in one pair of placeholder brackets", () => {
     expect(
       parseApplyReviewResult(
@@ -373,9 +408,22 @@ describe("parseApplyReviewResult", () => {
         "READY_FOR_AGENT_RESULT: REVIEW_FIXED\ntrailing prose",
       ),
     ).toEqual({ _tag: "fixed" })
+    expect(
+      parseApplyReviewResult(
+        [
+          "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+          "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: high: leftover",
+        ].join("\n"),
+      ),
+    ).toEqual({ _tag: "unresolved_high", reason: "leftover" })
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: high: leftover\ntrailing prose",
+      ),
+    ).toEqual({ _tag: "unresolved_high", reason: "leftover" })
   })
 
-  it("rejects missing, blank, high-deferred, or reviewing-only markers", () => {
+  it("rejects missing, blank, invalid-severity, or reviewing-only markers", () => {
     expect(parseApplyReviewResult("no result line")).toBeNull()
     expect(
       parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_DEFERRED:"),
@@ -384,8 +432,21 @@ describe("parseApplyReviewResult", () => {
       parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: low:"),
     ).toBeNull()
     expect(
+      parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: high:"),
+    ).toBeNull()
+    expect(
       parseApplyReviewResult(
-        "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: high: cannot defer high",
+        "READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: high:",
+      ),
+    ).toBeNull()
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: critical: leftover nits",
+      ),
+    ).toBeNull()
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: critical: leftover nits",
       ),
     ).toBeNull()
     expect(
@@ -415,6 +476,22 @@ describe("parseApplyReviewResult", () => {
     ).toEqual({
       _tag: "deferred",
       severity: "low",
+      reason: long.slice(0, 500),
+    })
+    expect(
+      parseApplyReviewResult(
+        `READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: high: ${long}`,
+      ),
+    ).toEqual({
+      _tag: "unresolved_high",
+      reason: long.slice(0, 500),
+    })
+    expect(
+      parseApplyReviewResult(
+        `READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: high: ${long}`,
+      ),
+    ).toEqual({
+      _tag: "unresolved_high",
       reason: long.slice(0, 500),
     })
     expect(
@@ -937,6 +1014,81 @@ describe("review", () => {
         reason: "injection risk remains",
       })
       expect(REVIEW_UNRESOLVED_HIGH_REASON).toContain("high-severity")
+    }))
+
+  it("returns Needs Human for REVIEW_DEFERRED high without a verdict-repair turn", () =>
+    withTemp(async (root) => {
+      const prompts: string[] = []
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continueTurn: (input) => {
+            prompts.push(input.prompt)
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                prompts.length === 1
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high"
+                  : "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: high: cannot defer high",
+            })
+          },
+        }),
+      )
+      expect(result).toEqual({
+        _tag: "needs_human",
+        reason: "cannot defer high",
+      })
+      expect(prompts).toHaveLength(2)
+      expect(
+        prompts.some((prompt) =>
+          prompt.includes("The apply pass immediately above is complete"),
+        ),
+      ).toBe(false)
+    }))
+
+  it("returns Needs Human for REVIEW_FIXED_AND_DEFERRED high even when the worktree changed", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      const prompts: string[] = []
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.gen(function* () {
+              prompts.push(input.prompt)
+              if (isReviewingTurn(input)) {
+                return {
+                  sessionId: "ses_implement_session",
+                  assistantText:
+                    "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high",
+                }
+              }
+              yield* Effect.tryPromise({
+                try: () =>
+                  writeFile(join(root, "fixed.ts"), "export const n = 1\n"),
+                catch: (cause) => cause as Error,
+              })
+              return {
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: high: injection risk remains",
+              }
+            }).pipe(Effect.orDie),
+        }),
+      )
+      expect(result).toEqual({
+        _tag: "needs_human",
+        reason: "injection risk remains",
+      })
+      expect(prompts).toHaveLength(2)
+      expect(
+        prompts.some((prompt) =>
+          prompt.includes("The apply pass immediately above is complete"),
+        ),
+      ).toBe(false)
+      expect(
+        prompts.filter((prompt) => prompt === buildReviewingPrompt()),
+      ).toHaveLength(1)
     }))
 
   it("returns Needs Human when high findings are deferred without a fix", () =>
