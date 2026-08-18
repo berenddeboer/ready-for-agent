@@ -66,7 +66,6 @@ import {
   CurrentStepRun,
 } from "./agent-turn-limiter.js"
 import { CloseIssueEligibilityError } from "./close-issue-errors.js"
-import { resolveDecidePrMergeAutoMerge } from "./decide-pr-merge.js"
 import {
   AbandonCleanupError,
   ActiveStepRunExistsError,
@@ -113,6 +112,16 @@ import {
   LifecycleSteps,
   type RunHandlerError,
 } from "./lifecycle-steps.js"
+import {
+  type MergePolicy,
+  decodeMergeMode,
+  decodeMergePolicy,
+  decodeWorkItemAutoMergeOverride,
+  isAlwaysNoChecksCarveOut,
+  isAutonomousMergePolicy,
+  nextStateAfterReadyForMerge,
+  resolveEffectiveMergePolicy,
+} from "./merge-policy.js"
 import { PrStatusChecksUnresolvedError } from "./pr-status-checks.js"
 import {
   PreCommitHookFailedError,
@@ -423,9 +432,6 @@ type WorkItemRow = {
   readonly updated_at: number
 }
 
-const decodeMergeMode = (value: string | null | undefined): MergeMode =>
-  value === "always" ? "always" : "ordinary"
-
 const decodeExecutionProfile = (
   row: WorkItemRow,
 ): ExplicitWorkItemExecutionProfile | null => {
@@ -462,61 +468,16 @@ const decodeExecutionProfile = (
   }
 }
 
-/**
- * After pre-merge lifecycle settles: Always skips Decide PR Merge.
- */
-const nextStateAfterReadyForMerge = (
-  mergeMode: string | null | undefined,
-): "decide_pr_merge" | "merge_pr" =>
-  decodeMergeMode(mergeMode) === "always" ? "merge_pr" : "decide_pr_merge"
-
 const isMissingSuccessfulCheckStatus = (tag: string): boolean =>
   tag === "no_checks" || tag === "expected"
 
-/**
- * After the Check-Start Deadline, Always + `no_checks` is green (ADR 0059).
- * EXPECTED, pending, and failed still block. Classify stays fail-closed.
- */
-const isAlwaysNoChecksCarveOut = (
-  mergeMode: string | null | undefined,
-  statusTag: string,
-): boolean =>
-  decodeMergeMode(mergeMode) === "always" && statusTag === "no_checks"
-
 const shouldHandOffMissingSuccessfulChecks = (input: {
-  readonly autonomousMerge: boolean
-  readonly mergeMode: string | null | undefined
+  readonly effectivePolicy: MergePolicy
   readonly statusTag: string
 }): boolean =>
-  input.autonomousMerge &&
+  isAutonomousMergePolicy(input.effectivePolicy) &&
   isMissingSuccessfulCheckStatus(input.statusTag) &&
-  !isAlwaysNoChecksCarveOut(input.mergeMode, input.statusTag)
-
-const decodeWorkItemAutoMergeOverride = (
-  value: boolean | number | null | undefined,
-): boolean | null =>
-  value === null || value === undefined ? null : Boolean(value)
-
-/**
- * True when the Work Item would take a harness-initiated merge path:
- * Merge Mode Always, a true Work Item override, or live Repository Auto-merge
- * with no false override.
- */
-const isAutonomousMergePath = (input: {
-  readonly mergeMode: string | null | undefined
-  readonly repositoryAutoMerge: boolean
-  readonly workItemAutoMergeOverride: boolean | number | null | undefined
-}): boolean => {
-  if (decodeMergeMode(input.mergeMode) === "always") {
-    return true
-  }
-  return resolveDecidePrMergeAutoMerge({
-    repositoryAutoMerge: input.repositoryAutoMerge,
-    workItemAutoMergeOverride: decodeWorkItemAutoMergeOverride(
-      input.workItemAutoMergeOverride,
-    ),
-  }).allowed
-}
+  !isAlwaysNoChecksCarveOut(input.effectivePolicy, input.statusTag)
 
 const missingSuccessfulChecksReason = (statusTag: string): string =>
   statusTag === "expected"
@@ -694,10 +655,7 @@ const toWorkItemRecord = (
       : new Date(row.waiting_since),
   waitingForBlockers: Boolean(row.waiting_for_blockers),
   mergeMode: decodeMergeMode(row.merge_mode),
-  autoMergeOverride:
-    row.auto_merge_override === null || row.auto_merge_override === undefined
-      ? null
-      : Boolean(row.auto_merge_override),
+  autoMergeOverride: decodeWorkItemAutoMergeOverride(row.auto_merge_override),
   holdsWorkerSlot: Boolean(row.holds_worker_slot),
   pauseBeforeStep: row.pause_before_step,
   worktreePath: row.worktree_path,
@@ -2371,21 +2329,34 @@ export const makeWorkItemLifecycleLive = (
         })
 
       /**
-       * Live Repository Auto-merge policy. Missing row → false (non-autonomous).
+       * Live Repository Merge Policy. Missing row → off (human merge).
        */
-      const loadRepositoryAutoMerge = (
+      const loadRepositoryMergePolicy = (
         repositoryId: string,
-      ): Effect.Effect<boolean, WorkItemLifecycleDatabaseError> =>
+      ): Effect.Effect<MergePolicy, WorkItemLifecycleDatabaseError> =>
         Effect.gen(function* () {
           const rows = (yield* sql
-            .unsafe(`SELECT auto_merge FROM repository WHERE id = ?`, [
+            .unsafe(`SELECT merge_policy FROM repository WHERE id = ?`, [
               repositoryId,
             ])
             .pipe(Effect.mapError(toDatabaseError))) as readonly {
-            readonly auto_merge: number | boolean | null
+            readonly merge_policy: string | null
           }[]
-          const value = rows[0]?.auto_merge
-          return value === 1 || value === true
+          return decodeMergePolicy(rows[0]?.merge_policy)
+        })
+
+      const loadEffectiveMergePolicy = (
+        workItem: WorkItemRow,
+      ): Effect.Effect<MergePolicy, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const repositoryMergePolicy = yield* loadRepositoryMergePolicy(
+            workItem.repository_id,
+          )
+          return resolveEffectiveMergePolicy({
+            repositoryMergePolicy,
+            workItemMergeMode: workItem.merge_mode,
+            workItemAutoMergeOverride: workItem.auto_merge_override,
+          })
         })
 
       const runHandler = (
@@ -2529,14 +2500,8 @@ export const makeWorkItemLifecycleLive = (
                     yield* loadWaitForReadyForReviewChecks(
                       workItem.repository_id,
                     )
-                  const repositoryAutoMerge = yield* loadRepositoryAutoMerge(
-                    workItem.repository_id,
-                  )
-                  const autonomousMerge = isAutonomousMergePath({
-                    mergeMode: workItem.merge_mode,
-                    repositoryAutoMerge,
-                    workItemAutoMergeOverride: workItem.auto_merge_override,
-                  })
+                  const effectivePolicy =
+                    yield* loadEffectiveMergePolicy(workItem)
                   const rawHeadSha =
                     "headSha" in status ? (status.headSha ?? null) : null
                   const headSha =
@@ -2756,8 +2721,7 @@ export const makeWorkItemLifecycleLive = (
                     if (skipReadyPhaseStartupWait) {
                       if (
                         shouldHandOffMissingSuccessfulChecks({
-                          autonomousMerge,
-                          mergeMode: workItem.merge_mode,
+                          effectivePolicy,
                           statusTag: status._tag,
                         })
                       ) {
@@ -2765,7 +2729,7 @@ export const makeWorkItemLifecycleLive = (
                       }
                       if (
                         isAlwaysNoChecksCarveOut(
-                          workItem.merge_mode,
+                          effectivePolicy,
                           status._tag,
                         ) &&
                         !pastDeadline
@@ -2779,14 +2743,13 @@ export const makeWorkItemLifecycleLive = (
                       }
                       return {
                         transition: {
-                          nextState: nextStateAfterReadyForMerge(
-                            workItem.merge_mode,
-                          ),
+                          nextState:
+                            nextStateAfterReadyForMerge(effectivePolicy),
                         },
                       }
                     }
                     // Ready phase waits for the Check-Start Deadline, then Decide
-                    // (or Merge PR when Merge Mode is Always).
+                    // (or Merge PR when effective Merge Policy is Always).
                     if (!pastDeadline) {
                       return {
                         transition: {
@@ -2797,8 +2760,7 @@ export const makeWorkItemLifecycleLive = (
                     }
                     if (
                       shouldHandOffMissingSuccessfulChecks({
-                        autonomousMerge,
-                        mergeMode: workItem.merge_mode,
+                        effectivePolicy,
                         statusTag: status._tag,
                       })
                     ) {
@@ -2806,9 +2768,7 @@ export const makeWorkItemLifecycleLive = (
                     }
                     return {
                       transition: {
-                        nextState: nextStateAfterReadyForMerge(
-                          workItem.merge_mode,
-                        ),
+                        nextState: nextStateAfterReadyForMerge(effectivePolicy),
                       },
                     }
                   }
@@ -2817,7 +2777,7 @@ export const makeWorkItemLifecycleLive = (
                       nextState: isDraft
                         ? ("mark_pr_ready_for_review" as const)
                         : isReady
-                          ? nextStateAfterReadyForMerge(workItem.merge_mode)
+                          ? nextStateAfterReadyForMerge(effectivePolicy)
                           : ("watch_pr_status_checks" as const),
                     },
                   }
@@ -2881,14 +2841,8 @@ export const makeWorkItemLifecycleLive = (
                     yield* loadWaitForReadyForReviewChecks(
                       workItem.repository_id,
                     )
-                  const repositoryAutoMerge = yield* loadRepositoryAutoMerge(
-                    workItem.repository_id,
-                  )
-                  const autonomousMerge = isAutonomousMergePath({
-                    mergeMode: workItem.merge_mode,
-                    repositoryAutoMerge,
-                    workItemAutoMergeOverride: workItem.auto_merge_override,
-                  })
+                  const effectivePolicy =
+                    yield* loadEffectiveMergePolicy(workItem)
 
                   if (waitForReadyForReviewChecks) {
                     return {
@@ -2935,8 +2889,7 @@ export const makeWorkItemLifecycleLive = (
                   if (isSettledNonFailingPrStatus(status._tag)) {
                     if (
                       shouldHandOffMissingSuccessfulChecks({
-                        autonomousMerge,
-                        mergeMode: workItem.merge_mode,
+                        effectivePolicy,
                         statusTag: status._tag,
                       })
                     ) {
@@ -2946,7 +2899,7 @@ export const makeWorkItemLifecycleLive = (
                       }
                     }
                     if (
-                      isAlwaysNoChecksCarveOut(workItem.merge_mode, status._tag)
+                      isAlwaysNoChecksCarveOut(effectivePolicy, status._tag)
                     ) {
                       // Preserve the original Check-Start Deadline; Watch
                       // applies the Always + no_checks carve-out when due.
@@ -2960,9 +2913,7 @@ export const makeWorkItemLifecycleLive = (
                     return {
                       checkStartLastObservedIsDraft: 0 as const,
                       transition: {
-                        nextState: nextStateAfterReadyForMerge(
-                          workItem.merge_mode,
-                        ),
+                        nextState: nextStateAfterReadyForMerge(effectivePolicy),
                       },
                     }
                   }
@@ -2980,25 +2931,26 @@ export const makeWorkItemLifecycleLive = (
               ),
             )
           case "decide_pr_merge":
-            // Defensive: Always should never enter this step; if it does, skip
-            // the agent risk decision and advance to Merge PR.
-            if (decodeMergeMode(workItem.merge_mode) === "always") {
-              return Effect.succeed({
-                transition: { nextState: "merge_pr" as const },
-              })
-            }
-            return steps.decidePrMerge(context).pipe(
-              Effect.map((result) =>
-                result._tag === "clanker_merge"
-                  ? {}
-                  : {
-                      transition: {
-                        nextState: "needs_human" as const,
-                        reason: result.reason,
-                      },
-                    },
-              ),
-            )
+            // Defensive: effective Always should never enter this step; if it
+            // does, skip the agent risk decision and advance to Merge PR.
+            return Effect.gen(function* () {
+              const effectivePolicy = yield* loadEffectiveMergePolicy(workItem)
+              if (effectivePolicy === "always") {
+                return {
+                  transition: { nextState: "merge_pr" as const },
+                }
+              }
+              const result = yield* steps.decidePrMerge(context)
+              if (result._tag === "clanker_merge") {
+                return {}
+              }
+              return {
+                transition: {
+                  nextState: "needs_human" as const,
+                  reason: result.reason,
+                },
+              }
+            })
           case "merge_pr":
             return steps.mergePr(context).pipe(
               Effect.flatMap((result) =>

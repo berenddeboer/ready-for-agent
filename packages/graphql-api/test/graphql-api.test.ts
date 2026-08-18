@@ -291,7 +291,7 @@ const makeRuntime = (
         defaultThinkingLevel: input.defaultThinkingLevel,
         reviewModel: input.reviewModel,
         reviewThinkingLevel: input.reviewThinkingLevel,
-        autoMerge: input.autoMerge,
+        mergePolicy: input.mergePolicy,
         includeAllIssueAuthors: input.includeAllIssueAuthors,
         waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
       }),
@@ -1250,7 +1250,7 @@ describe("GraphQL API", () => {
             paused
             defaultModel
             defaultThinkingLevel
-            autoMerge
+            mergePolicy
             includeAllIssueAuthors
             waitForReadyForReviewChecks
             issuesReconciledAt
@@ -1273,7 +1273,7 @@ describe("GraphQL API", () => {
             paused: repository.paused,
             defaultModel: null,
             defaultThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "OFF",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
             issuesReconciledAt: null,
@@ -1281,6 +1281,55 @@ describe("GraphQL API", () => {
         ],
       },
     })
+  })
+
+  test("updateRepositorySettings persists Merge Policy always and no longer exposes autoMerge", async () => {
+    await runtime.dispose()
+    let savedPolicy: string | undefined
+    runtime = makeRuntime({
+      updateRepositorySettings: (input) => {
+        savedPolicy = input.mergePolicy
+        return Effect.succeed({
+          ...repository,
+          mergePolicy: input.mergePolicy,
+        })
+      },
+    })
+
+    const unknownField = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query ListRepositories { repositories { autoMerge } }`,
+      }),
+    )
+    const unknownPayload = (await unknownField.json()) as {
+      errors?: ReadonlyArray<{ message?: string }>
+    }
+    expect(unknownPayload.errors?.[0]?.message).toMatch(/autoMerge/)
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { mergePolicy }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "ALWAYS",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: { updateRepositorySettings: { mergePolicy: "ALWAYS" } },
+    })
+    expect(savedPolicy).toBe("always")
   })
 
   test("reports repository GitHub credential status", async () => {
@@ -2191,7 +2240,7 @@ describe("GraphQL API", () => {
           defaultThinkingLevel: input.defaultThinkingLevel,
           reviewModel: input.reviewModel,
           reviewThinkingLevel: input.reviewThinkingLevel,
-          autoMerge: input.autoMerge,
+          mergePolicy: input.mergePolicy,
           includeAllIssueAuthors: input.includeAllIssueAuthors,
           waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
         })
@@ -2216,7 +2265,7 @@ describe("GraphQL API", () => {
               repositoryId: repository.id,
               paused: false,
               selectedAgentBackend: null,
-              autoMerge: true,
+              mergePolicy: "CLASSIFY",
               includeAllIssueAuthors: false,
               waitForReadyForReviewChecks: false,
               ...input,
@@ -2285,7 +2334,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: "high",
             reviewModel: null,
             reviewThinkingLevel: "medium",
-            autoMerge: true,
+            mergePolicy: "CLASSIFY",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: false,
           },
@@ -2320,7 +2369,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: "medium",
-            autoMerge: true,
+            mergePolicy: "CLASSIFY",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: false,
           },
@@ -2366,7 +2415,7 @@ describe("GraphQL API", () => {
           defaultThinkingLevel: input.defaultThinkingLevel,
           reviewModel: input.reviewModel,
           reviewThinkingLevel: input.reviewThinkingLevel,
-          autoMerge: input.autoMerge,
+          mergePolicy: input.mergePolicy,
           includeAllIssueAuthors: input.includeAllIssueAuthors,
           waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
         })
@@ -2386,7 +2435,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: "medium",
-            autoMerge: true,
+            mergePolicy: "CLASSIFY",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: false,
           },
@@ -2434,7 +2483,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: input.defaultThinkingLevel,
             reviewModel: input.reviewModel,
             reviewThinkingLevel: input.reviewThinkingLevel,
-            autoMerge: input.autoMerge,
+            mergePolicy: input.mergePolicy,
             includeAllIssueAuthors: input.includeAllIssueAuthors,
             waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
           })
@@ -2461,7 +2510,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: "medium",
-            autoMerge: true,
+            mergePolicy: "CLASSIFY",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: false,
           },
@@ -2509,7 +2558,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: "high",
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: true,
+            mergePolicy: "CLASSIFY",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: false,
           },
@@ -2546,7 +2595,7 @@ describe("GraphQL API", () => {
           defaultThinkingLevel: input.defaultThinkingLevel,
           reviewModel: input.reviewModel,
           reviewThinkingLevel: input.reviewThinkingLevel,
-          autoMerge: input.autoMerge,
+          mergePolicy: input.mergePolicy,
           includeAllIssueAuthors: input.includeAllIssueAuthors,
           waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
         })
@@ -2560,7 +2609,7 @@ describe("GraphQL API", () => {
       defaultThinkingLevel: null,
       reviewModel: null,
       reviewThinkingLevel: null,
-      autoMerge: true,
+      mergePolicy: "CLASSIFY",
       includeAllIssueAuthors: false,
       waitForReadyForReviewChecks: false,
     })
@@ -2758,7 +2807,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: input.defaultThinkingLevel,
             reviewModel: input.reviewModel,
             reviewThinkingLevel: input.reviewThinkingLevel,
-            autoMerge: input.autoMerge,
+            mergePolicy: input.mergePolicy,
             includeAllIssueAuthors: input.includeAllIssueAuthors,
             waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
           })
@@ -2789,7 +2838,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel
             reviewModel
             reviewThinkingLevel
-            autoMerge
+            mergePolicy
             includeAllIssueAuthors
             waitForReadyForReviewChecks
           }
@@ -2803,7 +2852,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: "high",
             reviewModel: "opencode/deepseek-v4-flash-free",
             reviewThinkingLevel: "max",
-            autoMerge: true,
+            mergePolicy: "CLASSIFY",
             includeAllIssueAuthors: true,
             waitForReadyForReviewChecks: false,
           },
@@ -2820,7 +2869,7 @@ describe("GraphQL API", () => {
           defaultThinkingLevel: "high",
           reviewModel: "opencode/deepseek-v4-flash-free",
           reviewThinkingLevel: "max",
-          autoMerge: true,
+          mergePolicy: "CLASSIFY",
           includeAllIssueAuthors: true,
           waitForReadyForReviewChecks: false,
         },
@@ -2848,7 +2897,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "OFF",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           },
@@ -2881,7 +2930,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "OFF",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           },
@@ -2946,7 +2995,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "OFF",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           },
@@ -3033,7 +3082,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "OFF",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           },
@@ -3237,7 +3286,7 @@ describe("GraphQL API", () => {
           defaultThinkingLevel: input.defaultThinkingLevel,
           reviewModel: input.reviewModel,
           reviewThinkingLevel: input.reviewThinkingLevel,
-          autoMerge: input.autoMerge,
+          mergePolicy: input.mergePolicy,
           includeAllIssueAuthors: input.includeAllIssueAuthors,
           waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
         })
@@ -3261,7 +3310,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "OFF",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           },
@@ -3308,7 +3357,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "OFF",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           },
@@ -4386,7 +4435,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: false,
+            mergePolicy: "OFF",
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
           },

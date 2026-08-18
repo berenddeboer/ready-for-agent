@@ -178,7 +178,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           defaultThinkingLevel: "low",
           reviewModel: null,
           reviewThinkingLevel: null,
-          autoMerge: false,
+          mergePolicy: "off",
           includeAllIssueAuthors: false,
           waitForReadyForReviewChecks: true,
         })
@@ -232,7 +232,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           defaultThinkingLevel: null,
           reviewModel: null,
           reviewThinkingLevel: null,
-          autoMerge: false,
+          mergePolicy: "off",
           includeAllIssueAuthors: false,
           waitForReadyForReviewChecks: true,
         })
@@ -472,7 +472,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           defaultThinkingLevel: null,
           reviewModel: null,
           reviewThinkingLevel: null,
-          autoMerge: false,
+          mergePolicy: "off",
           includeAllIssueAuthors: false,
           waitForReadyForReviewChecks: true,
         })
@@ -525,7 +525,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           defaultThinkingLevel: "low",
           reviewModel: null,
           reviewThinkingLevel: null,
-          autoMerge: false,
+          mergePolicy: "off",
           includeAllIssueAuthors: false,
           waitForReadyForReviewChecks: true,
         })
@@ -578,7 +578,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           defaultThinkingLevel: null,
           reviewModel: null,
           reviewThinkingLevel: null,
-          autoMerge: false,
+          mergePolicy: "off",
           includeAllIssueAuthors: false,
           waitForReadyForReviewChecks: true,
         })
@@ -627,7 +627,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           defaultThinkingLevel: null,
           reviewModel: null,
           reviewThinkingLevel: null,
-          autoMerge: false,
+          mergePolicy: "off",
           includeAllIssueAuthors: false,
           waitForReadyForReviewChecks: true,
         })

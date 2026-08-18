@@ -15,6 +15,9 @@ export type IssueState = typeof IssueState.Type
 export const Forge = Schema.Literals(["github", "gitlab"])
 export type Forge = typeof Forge.Type
 
+export const MergePolicy = Schema.Literals(["off", "classify", "always"])
+export type MergePolicy = typeof MergePolicy.Type
+
 export const IssueReference = Schema.Struct({
   issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
   issueUrl: Schema.String,
@@ -48,7 +51,7 @@ export const RepositoryRecord = Schema.Struct({
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
   reviewThinkingLevel: Schema.NullOr(Schema.String),
-  autoMerge: Schema.Boolean,
+  mergePolicy: MergePolicy,
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
   issuesReconciledAt: Schema.NullOr(Schema.Date),
@@ -72,7 +75,7 @@ export const UpdateRepositorySettingsInput = Schema.Struct({
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
   reviewThinkingLevel: Schema.NullOr(Schema.String),
-  autoMerge: Schema.Boolean,
+  mergePolicy: MergePolicy,
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
 })
@@ -187,7 +190,7 @@ export const RepositorySqlRow = Schema.Struct({
   reviewModel: Schema.NullOr(Schema.String),
   reviewThinkingLevel: Schema.NullOr(Schema.String),
   backendModelPrefs: Schema.String,
-  autoMerge: SqlBoolean,
+  mergePolicy: MergePolicy,
   includeAllIssueAuthors: SqlBoolean,
   waitForReadyForReviewChecks: SqlBoolean,
   issuesReconciledAt: Schema.NullOr(Schema.DateFromMillis),
@@ -204,7 +207,7 @@ export const RepositorySqlRow = Schema.Struct({
     reviewModel: "review_model",
     reviewThinkingLevel: "review_thinking_level",
     backendModelPrefs: "backend_model_prefs",
-    autoMerge: "auto_merge",
+    mergePolicy: "merge_policy",
     includeAllIssueAuthors: "include_all_issue_authors",
     waitForReadyForReviewChecks: "wait_for_ready_for_review_checks",
     issuesReconciledAt: "issues_reconciled_at",

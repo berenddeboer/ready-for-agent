@@ -40,7 +40,14 @@ export const repository = snakeCase.table(
      * Flat model columns mirror this row's effective backend entry.
      */
     backendModelPrefs: text().notNull().default("{}"),
-    autoMerge: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * Three-state Merge Policy. `off` requires a human merge, `classify`
+     * runs Decide PR Merge, `always` skips Classify. New Repositories
+     * default to `off`.
+     */
+    mergePolicy: text({ enum: ["off", "classify", "always"] })
+      .notNull()
+      .default("off"),
     includeAllIssueAuthors: integer({ mode: "boolean" })
       .notNull()
       .default(false),
@@ -264,7 +271,7 @@ export const workItem = snakeCase.table(
     waitingForBlockers: integer({ mode: "boolean" }).notNull().default(false),
     /**
      * Durable merge policy for this Work Item.
-     * `ordinary` follows Repository Auto-merge and Decide PR Merge.
+     * `ordinary` follows the live Repository Merge Policy and Decide PR Merge.
      * `always` skips Decide PR Merge and advances to Merge PR after checks settle.
      */
     mergeMode: text({ enum: ["ordinary", "always"] })
@@ -272,7 +279,7 @@ export const workItem = snakeCase.table(
       .default("ordinary"),
     /**
      * Work Item Auto-merge override. Null follows the live Repository
-     * Auto-merge setting; true/false is a concrete Decide PR Merge policy
+     * Merge Policy; true/false is a concrete Classify/Off pin
      * for this Work Item. Distinct from Merge Mode Always.
      */
     autoMergeOverride: integer({ mode: "boolean" }),

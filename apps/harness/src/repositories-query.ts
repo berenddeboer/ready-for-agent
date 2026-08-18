@@ -31,7 +31,7 @@ export type Repository = {
   defaultThinkingLevel: string | null
   reviewModel: string | null
   reviewThinkingLevel: string | null
-  autoMerge: boolean
+  mergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
   includeAllIssueAuthors: boolean
   waitForReadyForReviewChecks: boolean
   issuesReconciledAt: string | null
@@ -61,7 +61,7 @@ export const repositoriesQuery = {
         defaultThinkingLevel: true,
         reviewModel: true,
         reviewThinkingLevel: true,
-        autoMerge: true,
+        mergePolicy: true,
         includeAllIssueAuthors: true,
         waitForReadyForReviewChecks: true,
         issuesReconciledAt: true,

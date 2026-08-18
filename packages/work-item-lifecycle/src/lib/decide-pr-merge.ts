@@ -8,6 +8,10 @@ import {
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
+import {
+  decodeWorkItemAutoMergeOverride,
+  resolveEffectiveMergePolicy,
+} from "./merge-policy.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { unwrapSentinelArgument } from "./unwrap-sentinel-argument.js"
 
@@ -36,27 +40,15 @@ export const AUTO_MERGE_DISABLED_FOR_REPOSITORY =
   "Auto-merge is disabled for this repository"
 
 /**
- * Resolve whether Decide PR Merge may ask a merge-risk Agent Turn.
- * A concrete Work Item Auto-merge override wins over the live Repository
- * setting. A false override must not spawn an Agent Turn.
+ * Human-merge reason when the effective Merge Policy is `off`.
+ * A false Work Item pin is distinct from inheriting a live Repository `off`.
  */
-export const resolveDecidePrMergeAutoMerge = (input: {
-  readonly repositoryAutoMerge: boolean
+export const decidePrMergeOffReason = (input: {
   readonly workItemAutoMergeOverride: boolean | null | undefined
-}):
-  | { readonly allowed: true }
-  | { readonly allowed: false; readonly reason: string } => {
-  if (input.workItemAutoMergeOverride === false) {
-    return { allowed: false, reason: AUTO_MERGE_DISABLED_FOR_WORK_ITEM }
-  }
-  if (input.workItemAutoMergeOverride === true) {
-    return { allowed: true }
-  }
-  if (!input.repositoryAutoMerge) {
-    return { allowed: false, reason: AUTO_MERGE_DISABLED_FOR_REPOSITORY }
-  }
-  return { allowed: true }
-}
+}): string =>
+  input.workItemAutoMergeOverride === false
+    ? AUTO_MERGE_DISABLED_FOR_WORK_ITEM
+    : AUTO_MERGE_DISABLED_FOR_REPOSITORY
 
 const resolveContext = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -129,15 +121,23 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, worktreePath, sessionId } =
       yield* resolveContext(context)
-    const autoMerge = resolveDecidePrMergeAutoMerge({
-      repositoryAutoMerge: repository.autoMerge,
+    const effectivePolicy = resolveEffectiveMergePolicy({
+      repositoryMergePolicy: repository.mergePolicy,
+      workItemMergeMode: context.mergeMode,
       workItemAutoMergeOverride: context.autoMergeOverride,
     })
-    if (!autoMerge.allowed) {
+    if (effectivePolicy === "off") {
       return {
         _tag: "needs_human" as const,
-        reason: autoMerge.reason,
+        reason: decidePrMergeOffReason({
+          workItemAutoMergeOverride: decodeWorkItemAutoMergeOverride(
+            context.autoMergeOverride,
+          ),
+        }),
       }
+    }
+    if (effectivePolicy === "always") {
+      return { _tag: "clanker_merge" as const }
     }
     const auth = yield* resolveAgentTurnForgeAuth(repository).pipe(
       Effect.mapError((cause) => {

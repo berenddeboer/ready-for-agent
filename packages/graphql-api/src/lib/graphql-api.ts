@@ -28,6 +28,7 @@ import {
   DbService,
   InvalidConfigInputError,
   InvalidRepositorySettingsError,
+  type MergePolicy,
   RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
@@ -148,9 +149,33 @@ type UpdateRepositorySettingsArgs = {
     defaultThinkingLevel: string | null
     reviewModel: string | null
     reviewThinkingLevel: string | null
-    autoMerge: boolean
+    mergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
     includeAllIssueAuthors: boolean
     waitForReadyForReviewChecks: boolean
+  }
+}
+
+type GraphqlMergePolicy = "OFF" | "CLASSIFY" | "ALWAYS"
+
+const toGraphqlMergePolicy = (policy: MergePolicy): GraphqlMergePolicy => {
+  switch (policy) {
+    case "off":
+      return "OFF"
+    case "classify":
+      return "CLASSIFY"
+    case "always":
+      return "ALWAYS"
+  }
+}
+
+const fromGraphqlMergePolicy = (value: GraphqlMergePolicy): MergePolicy => {
+  switch (value) {
+    case "OFF":
+      return "off"
+    case "CLASSIFY":
+      return "classify"
+    case "ALWAYS":
+      return "always"
   }
 }
 
@@ -1131,6 +1156,8 @@ export const createGraphqlApi = <R>(
             issue.githubCreatedAt.toISOString(),
         },
         Repository: {
+          mergePolicy: (repository: { mergePolicy: MergePolicy }) =>
+            toGraphqlMergePolicy(repository.mergePolicy),
           issuesReconciledAt: (repository: {
             issuesReconciledAt: Date | null
           }) => repository.issuesReconciledAt?.toISOString() ?? null,
@@ -1606,7 +1633,9 @@ export const createGraphqlApi = <R>(
                       reviewModel: args.input.reviewModel ?? null,
                       reviewThinkingLevel:
                         args.input.reviewThinkingLevel ?? null,
-                      autoMerge: args.input.autoMerge,
+                      mergePolicy: fromGraphqlMergePolicy(
+                        args.input.mergePolicy,
+                      ),
                       includeAllIssueAuthors: args.input.includeAllIssueAuthors,
                       waitForReadyForReviewChecks:
                         args.input.waitForReadyForReviewChecks,

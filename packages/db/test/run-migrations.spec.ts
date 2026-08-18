@@ -220,6 +220,7 @@ describe("runMigrations", () => {
           { name: "20260814120000_work_item_execution_profile" },
           { name: "20260815120000_work_item_auto_merge_override" },
           { name: "20260815180000_autonomous_retry_budget" },
+          { name: "20260818120000_repository_merge_policy" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -277,6 +278,62 @@ describe("runMigrations", () => {
           `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'autonomous_retry'`,
         )) as readonly { readonly name: string }[]
         expect(tables).toEqual([{ name: "autonomous_retry" }])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("replaces Repository Auto-merge with Merge Policy off/classify/always", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260818120000_repository_merge_policy/migration.sql",
+      ),
+      "utf8",
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(`
+          CREATE TABLE repository (
+            id text PRIMARY KEY,
+            auto_merge integer NOT NULL DEFAULT 0
+          )
+        `)
+        yield* sql.unsafe(
+          `INSERT INTO repository VALUES
+            ('repo-off', 0),
+            ('repo-classify', 1)`,
+        )
+
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        const columns = (yield* sql.unsafe(
+          `PRAGMA table_info(repository)`,
+        )) as readonly {
+          readonly name: string
+          readonly dflt_value: string | null
+        }[]
+        const names = new Set(columns.map((column) => column.name))
+        expect(names.has("merge_policy")).toBe(true)
+        expect(names.has("auto_merge")).toBe(false)
+        expect(
+          columns.find((column) => column.name === "merge_policy")?.dflt_value,
+        ).toBe("'off'")
+
+        const rows = yield* sql.unsafe(
+          `SELECT id, merge_policy FROM repository ORDER BY id`,
+        )
+        expect(rows).toEqual([
+          { id: "repo-classify", merge_policy: "classify" },
+          { id: "repo-off", merge_policy: "off" },
+        ])
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

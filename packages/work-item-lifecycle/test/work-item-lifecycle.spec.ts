@@ -374,7 +374,7 @@ describe("WorkItemLifecycle", () => {
             defaultThinkingLevel: "max",
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: repository.autoMerge,
+            mergePolicy: repository.mergePolicy,
             includeAllIssueAuthors: repository.includeAllIssueAuthors,
             waitForReadyForReviewChecks: repository.waitForReadyForReviewChecks,
           })
@@ -1596,8 +1596,8 @@ describe("WorkItemLifecycle", () => {
       }
     })
 
-    for (const autoMerge of [false, true] as const) {
-      it(`skips Decide PR Merge for Always when Repository Auto-merge is ${autoMerge ? "enabled" : "disabled"}`, () => {
+    for (const mergePolicy of ["off", "classify", "always"] as const) {
+      it(`skips Decide PR Merge for Always when Repository Merge Policy is ${mergePolicy}`, () => {
         let decideCalls = 0
         const steps: LifecycleStepsShape = {
           ...successfulSteps,
@@ -1622,7 +1622,7 @@ describe("WorkItemLifecycle", () => {
               defaultThinkingLevel: null,
               reviewModel: null,
               reviewThinkingLevel: null,
-              autoMerge,
+              mergePolicy,
               includeAllIssueAuthors: false,
               waitForReadyForReviewChecks: true,
             })
@@ -2155,7 +2155,7 @@ describe("WorkItemLifecycle", () => {
         yield* forgetCreatePrDraftProvenance(workItemId)
       })
 
-    const enableRepositoryAutoMerge = (
+    const setRepositoryMergePolicy = (
       repository: {
         readonly id: string
         readonly paused: boolean
@@ -2166,6 +2166,7 @@ describe("WorkItemLifecycle", () => {
         readonly includeAllIssueAuthors: boolean
         readonly waitForReadyForReviewChecks: boolean
       },
+      mergePolicy: "off" | "classify" | "always",
       options?: { readonly waitForReadyForReviewChecks?: boolean },
     ) =>
       Effect.gen(function* () {
@@ -2177,13 +2178,18 @@ describe("WorkItemLifecycle", () => {
           defaultThinkingLevel: repository.defaultThinkingLevel,
           reviewModel: repository.reviewModel,
           reviewThinkingLevel: repository.reviewThinkingLevel,
-          autoMerge: true,
+          mergePolicy,
           includeAllIssueAuthors: repository.includeAllIssueAuthors,
           waitForReadyForReviewChecks:
             options?.waitForReadyForReviewChecks ??
             repository.waitForReadyForReviewChecks,
         })
       })
+
+    const enableRepositoryAutoMerge = (
+      repository: Parameters<typeof setRepositoryMergePolicy>[0],
+      options?: { readonly waitForReadyForReviewChecks?: boolean },
+    ) => setRepositoryMergePolicy(repository, "classify", options)
 
     const setWorkItemAutoMergeOverride = (
       workItemId: string,
@@ -2917,6 +2923,159 @@ describe("WorkItemLifecycle", () => {
           expect(afterWatch.workItem.failureCode).toBeNull()
         }
         expect(mergeCalls).toBe(0)
+      })
+
+      it("advances an unpinned Work Item to Merge PR when live Repository Merge Policy is always", async () => {
+        let mergeCalls = 0
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () => Effect.succeed(watchResult("no_checks")),
+          decidePrMerge: () =>
+            Effect.die("Decide PR Merge must not run for live always"),
+          mergePr: () => {
+            mergeCalls += 1
+            return Effect.succeed({ _tag: "merged" as const })
+          },
+        }
+        const { afterWatch } = await runWatchToDeadline(
+          steps,
+          ({ repository }) => setRepositoryMergePolicy(repository, "always"),
+        )
+        expect(afterWatch._tag).toBe("processed")
+        if (afterWatch._tag === "processed") {
+          expect(afterWatch.workItem.state).toBe("merge_pr")
+          expect(afterWatch.workItem.failureCode).toBeNull()
+          expect(afterWatch.workItem.autoMergeOverride).toBeNull()
+        }
+        expect(mergeCalls).toBe(0)
+      })
+
+      it("flipping live classify to always changes the next Watch tick for unpinned work", () => {
+        const anchorInstant = 1_008_000
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () =>
+            Effect.succeed({
+              _tag: "no_checks" as const,
+              createdAt: new Date(anchorInstant),
+              headSha: "fresh-head",
+              headPushedAt: new Date(anchorInstant),
+              isDraft: false,
+            }),
+          decidePrMerge: () =>
+            Effect.die("Decide PR Merge must not run after flip to always"),
+          mergePr: () => Effect.die("Merge PR must not run in this tick"),
+        }
+        return Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                yield* TestClock.setTime(1_000_000)
+                const lifecycle = yield* WorkItemLifecycle
+                const { repository, issue } = yield* seedActionableIssue
+                yield* setRepositoryMergePolicy(repository, "classify")
+                const created = yield* lifecycle.implementNow(
+                  repository.id,
+                  issue.issueNumber,
+                )
+                expect(created.autoMergeOverride).toBeNull()
+                yield* driveThroughCreatePrAlreadyReady(created.id)
+
+                yield* TestClock.setTime(anchorInstant)
+                yield* makeQueuedJobsAvailable
+                const early = yield* claimAndRunPending
+                expect(early._tag).toBe("processed")
+                if (early._tag === "processed") {
+                  expect(early.workItem.state).toBe("watch_pr_status_checks")
+                }
+
+                yield* setRepositoryMergePolicy(repository, "always")
+                yield* TestClock.setTime(
+                  anchorInstant + CHECK_START_DEADLINE_MS,
+                )
+                yield* makeQueuedJobsAvailable
+                const afterDeadline = yield* claimAndRunPending
+                expect(afterDeadline._tag).toBe("processed")
+                if (afterDeadline._tag === "processed") {
+                  expect(afterDeadline.workItem.state).toBe("merge_pr")
+                  expect(afterDeadline.workItem.failureCode).toBeNull()
+                  expect(afterDeadline.workItem.autoMergeOverride).toBeNull()
+                }
+              }),
+              makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+            ),
+          ),
+        )
+      })
+
+      it("flipping live always to off requires a human for unpinned work", () => {
+        const anchorInstant = 1_008_000
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () =>
+            Effect.succeed({
+              _tag: "no_checks" as const,
+              createdAt: new Date(anchorInstant),
+              headSha: "fresh-head",
+              headPushedAt: new Date(anchorInstant),
+              isDraft: false,
+            }),
+          mergePr: () => Effect.die("Merge PR must not run after flip to off"),
+        }
+        return Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                yield* TestClock.setTime(1_000_000)
+                const lifecycle = yield* WorkItemLifecycle
+                const { repository, issue } = yield* seedActionableIssue
+                yield* setRepositoryMergePolicy(repository, "always")
+                const created = yield* lifecycle.implementNow(
+                  repository.id,
+                  issue.issueNumber,
+                )
+                expect(created.autoMergeOverride).toBeNull()
+                yield* driveThroughCreatePrAlreadyReady(created.id)
+
+                yield* setRepositoryMergePolicy(repository, "off")
+                yield* TestClock.setTime(
+                  anchorInstant + CHECK_START_DEADLINE_MS,
+                )
+                yield* makeQueuedJobsAvailable
+                const afterDeadline = yield* claimAndRunPending
+                expect(afterDeadline._tag).toBe("processed")
+                if (afterDeadline._tag === "processed") {
+                  expect(afterDeadline.workItem.state).toBe("decide_pr_merge")
+                  expect(afterDeadline.workItem.autoMergeOverride).toBeNull()
+                }
+              }),
+              makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+            ),
+          ),
+        )
+      })
+
+      it("flipping live always to off does not revoke a Merge Mode Always pin", async () => {
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () => Effect.succeed(watchResult("no_checks")),
+          decidePrMerge: () =>
+            Effect.die("Decide PR Merge must not run for a pinned Always"),
+          mergePr: () => Effect.succeed({ _tag: "merged" as const }),
+        }
+        const { afterWatch } = await runWatchToDeadline(
+          steps,
+          ({ repository, createdId }) =>
+            Effect.gen(function* () {
+              yield* setWorkItemMergeModeAlways(createdId)
+              yield* setRepositoryMergePolicy(repository, "off")
+            }),
+        )
+        expect(afterWatch._tag).toBe("processed")
+        if (afterWatch._tag === "processed") {
+          expect(afterWatch.workItem.state).toBe("merge_pr")
+          expect(afterWatch.workItem.mergeMode).toBe("always")
+        }
       })
 
       it("waits before the deadline then merges Always with no_checks", () => {
@@ -4068,7 +4227,7 @@ describe("WorkItemLifecycle", () => {
                 defaultThinkingLevel: repository.defaultThinkingLevel,
                 reviewModel: repository.reviewModel,
                 reviewThinkingLevel: repository.reviewThinkingLevel,
-                autoMerge: repository.autoMerge,
+                mergePolicy: repository.mergePolicy,
                 includeAllIssueAuthors: repository.includeAllIssueAuthors,
                 waitForReadyForReviewChecks: false,
               })
@@ -4150,7 +4309,7 @@ describe("WorkItemLifecycle", () => {
                 defaultThinkingLevel: repository.defaultThinkingLevel,
                 reviewModel: repository.reviewModel,
                 reviewThinkingLevel: repository.reviewThinkingLevel,
-                autoMerge: repository.autoMerge,
+                mergePolicy: repository.mergePolicy,
                 includeAllIssueAuthors: repository.includeAllIssueAuthors,
                 waitForReadyForReviewChecks: false,
               })
@@ -4247,7 +4406,7 @@ describe("WorkItemLifecycle", () => {
                 defaultThinkingLevel: repository.defaultThinkingLevel,
                 reviewModel: repository.reviewModel,
                 reviewThinkingLevel: repository.reviewThinkingLevel,
-                autoMerge: repository.autoMerge,
+                mergePolicy: repository.mergePolicy,
                 includeAllIssueAuthors: repository.includeAllIssueAuthors,
                 waitForReadyForReviewChecks: false,
               })
@@ -4340,7 +4499,7 @@ describe("WorkItemLifecycle", () => {
                 defaultThinkingLevel: repository.defaultThinkingLevel,
                 reviewModel: repository.reviewModel,
                 reviewThinkingLevel: repository.reviewThinkingLevel,
-                autoMerge: repository.autoMerge,
+                mergePolicy: repository.mergePolicy,
                 includeAllIssueAuthors: repository.includeAllIssueAuthors,
                 waitForReadyForReviewChecks: false,
               })
@@ -4422,7 +4581,7 @@ describe("WorkItemLifecycle", () => {
                 defaultThinkingLevel: repository.defaultThinkingLevel,
                 reviewModel: repository.reviewModel,
                 reviewThinkingLevel: repository.reviewThinkingLevel,
-                autoMerge: repository.autoMerge,
+                mergePolicy: repository.mergePolicy,
                 includeAllIssueAuthors: repository.includeAllIssueAuthors,
                 waitForReadyForReviewChecks: false,
               })
@@ -4513,7 +4672,7 @@ describe("WorkItemLifecycle", () => {
                 defaultThinkingLevel: repository.defaultThinkingLevel,
                 reviewModel: repository.reviewModel,
                 reviewThinkingLevel: repository.reviewThinkingLevel,
-                autoMerge: repository.autoMerge,
+                mergePolicy: repository.mergePolicy,
                 includeAllIssueAuthors: repository.includeAllIssueAuthors,
                 waitForReadyForReviewChecks: false,
               })
@@ -4534,7 +4693,7 @@ describe("WorkItemLifecycle", () => {
                 defaultThinkingLevel: repository.defaultThinkingLevel,
                 reviewModel: repository.reviewModel,
                 reviewThinkingLevel: repository.reviewThinkingLevel,
-                autoMerge: repository.autoMerge,
+                mergePolicy: repository.mergePolicy,
                 includeAllIssueAuthors: repository.includeAllIssueAuthors,
                 waitForReadyForReviewChecks: true,
               })
@@ -6376,7 +6535,7 @@ describe("WorkItemLifecycle", () => {
             defaultThinkingLevel: "max",
             reviewModel: null,
             reviewThinkingLevel: null,
-            autoMerge: repository.autoMerge,
+            mergePolicy: repository.mergePolicy,
             includeAllIssueAuthors: repository.includeAllIssueAuthors,
             waitForReadyForReviewChecks: repository.waitForReadyForReviewChecks,
           })
@@ -11871,6 +12030,8 @@ describe("WorkItemLifecycle", () => {
           expect(created.state).toBe("create_worktree")
           expect(created.pauseBeforeStep).toBeNull()
           expect(created.paused).toBe(false)
+          expect(created.mergeMode).toBe("ordinary")
+          expect(created.autoMergeOverride).toBeNull()
 
           const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isNone(job)).toBe(true)
