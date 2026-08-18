@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import { constants } from "node:os"
 import { Context, Effect, Layer } from "effect"
+import { sanitizeInheritedEnvironment } from "@ready-for-agent/agent-backend"
 import { JumpFailed } from "../jump-error.ts"
 
 export type DirectLaunchInput = {
@@ -91,7 +92,9 @@ export class DirectTerminal extends Context.Service<
         try {
           child = spawn(input.agentExecutable, [...input.agentArguments], {
             cwd: input.workingDirectory,
-            env: process.env,
+            env: sanitizeInheritedEnvironment(process.env, {
+              stripForgeTokens: false,
+            }),
             stdio: "inherit",
             shell: false,
             detached: false,

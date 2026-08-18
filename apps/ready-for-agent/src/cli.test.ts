@@ -2466,11 +2466,14 @@ describe("operator binary jump command", () => {
     backendId: "opencode",
   } as const
 
-  const omittedTmuxEnvPrefixes = [
+  const omittedPaneEnvironmentPrefixes = [
     "TMUX=",
     "TMUX_PANE=",
     "TERM=",
     "PWD=",
+    "SQLITE_DATABASE_PATH=",
+    "KEYMAXXER_SIDECAR_URL=",
+    "READY_FOR_AGENT_GRAPHQL_URL=",
   ] as const
 
   const tmuxFlagEnvAssignments = (
@@ -2510,7 +2513,7 @@ describe("operator binary jump command", () => {
   const expectForwardedPaneEnvironment = (args: readonly string[]) => {
     const assignments = tmuxFlagEnvAssignments(args)
     expect(assignments).toContain("CLAUDE_CODE_USE_BEDROCK=1")
-    for (const prefix of omittedTmuxEnvPrefixes) {
+    for (const prefix of omittedPaneEnvironmentPrefixes) {
       expect(
         assignments.some((assignment) => assignment.startsWith(prefix)),
       ).toBe(false)
@@ -2527,6 +2530,9 @@ describe("operator binary jump command", () => {
     TMUX_PANE: "%9",
     TERM: "xterm-256color",
     PWD: "/tmp/wrong-pwd",
+    SQLITE_DATABASE_PATH: "/tmp/ready-for-agent.db",
+    KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:6057/cap/mcp",
+    READY_FOR_AGENT_GRAPHQL_URL: "http://127.0.0.1:7000/graphql",
   } as const
 
   const withProcessEnv = (

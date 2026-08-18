@@ -7,7 +7,9 @@ export type MakeGrokEnvironmentOptions = {
 /**
  * Grok Build Agent Turns use ambient Forge authentication: inherit process env
  * (including ambient Forge tokens), and force auto-update off for the process
- * lifetime. Grok does not support KeymaxxerMcp, so tokens are never stripped.
+ * lifetime. Grok does not support KeymaxxerMcp, so Forge tokens are never
+ * stripped. Harness-owned operational names are still stripped by the shared
+ * sanitizer.
  */
 export const makeGrokEnvironment = (
   options: MakeGrokEnvironmentOptions = {},
