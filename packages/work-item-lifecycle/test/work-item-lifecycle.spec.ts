@@ -2897,14 +2897,14 @@ describe("WorkItemLifecycle", () => {
         }
       })
 
-      it("blocks Merge Mode always with no_checks and never calls Merge PR", async () => {
+      it("advances Merge Mode always to Merge PR after the deadline with no_checks", async () => {
         let mergeCalls = 0
         const steps: LifecycleStepsShape = {
           ...successfulSteps,
           watchPrStatusChecks: () => Effect.succeed(watchResult("no_checks")),
           mergePr: () => {
             mergeCalls += 1
-            return Effect.die("Merge PR must not run without successful checks")
+            return Effect.succeed({ _tag: "merged" as const })
           },
         }
         const { afterWatch } = await runWatchToDeadline(
@@ -2913,12 +2913,216 @@ describe("WorkItemLifecycle", () => {
         )
         expect(afterWatch._tag).toBe("processed")
         if (afterWatch._tag === "processed") {
-          expect(afterWatch.workItem.state).toBe("needs_human")
-          expect(afterWatch.workItem.failureMessage).toBe(
-            MISSING_SUCCESSFUL_CHECKS_REASON_NO_CHECKS,
-          )
+          expect(afterWatch.workItem.state).toBe("merge_pr")
+          expect(afterWatch.workItem.failureCode).toBeNull()
         }
         expect(mergeCalls).toBe(0)
+      })
+
+      it("waits before the deadline then merges Always with no_checks", () => {
+        const anchorInstant = 1_008_000
+        let mergeCalls = 0
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () =>
+            Effect.succeed({
+              _tag: "no_checks" as const,
+              createdAt: new Date(anchorInstant),
+              headSha: "fresh-head",
+              headPushedAt: new Date(anchorInstant),
+              isDraft: false,
+            }),
+          mergePr: () => {
+            mergeCalls += 1
+            return Effect.succeed({ _tag: "merged" as const })
+          },
+        }
+        return Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                yield* TestClock.setTime(1_000_000)
+                const lifecycle = yield* WorkItemLifecycle
+                const { repository, issue } = yield* seedActionableIssue
+                const created = yield* lifecycle.implementNow(
+                  repository.id,
+                  issue.issueNumber,
+                )
+                yield* setWorkItemMergeModeAlways(created.id)
+                yield* driveThroughCreatePrAlreadyReady(created.id)
+
+                yield* TestClock.setTime(anchorInstant)
+                yield* makeQueuedJobsAvailable
+                const early = yield* claimAndRunPending
+                expect(early._tag).toBe("processed")
+                if (early._tag === "processed") {
+                  expect(early.workItem.state).toBe("watch_pr_status_checks")
+                }
+
+                yield* TestClock.setTime(
+                  anchorInstant + CHECK_START_DEADLINE_MS,
+                )
+                yield* makeQueuedJobsAvailable
+                const afterDeadline = yield* claimAndRunPending
+                expect(afterDeadline._tag).toBe("processed")
+                if (afterDeadline._tag === "processed") {
+                  expect(afterDeadline.workItem.state).toBe("merge_pr")
+                  expect(afterDeadline.workItem.failureCode).toBeNull()
+                }
+                expect(mergeCalls).toBe(0)
+              }),
+              makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+            ),
+          ),
+        )
+      })
+
+      it("hands off GitHub EXPECTED under Merge Mode always at the deadline", async () => {
+        const { afterWatch } = await runWatchToDeadline(
+          expectedWatch,
+          ({ createdId }) => setWorkItemMergeModeAlways(createdId),
+        )
+        expect(afterWatch._tag).toBe("processed")
+        if (afterWatch._tag === "processed") {
+          expect(afterWatch.workItem.state).toBe("needs_human")
+          expect(afterWatch.workItem.failureMessage).toBe(
+            MISSING_SUCCESSFUL_CHECKS_REASON_EXPECTED,
+          )
+          expect(afterWatch.workItem.stepRuns.at(-1)?.reasonCode).toBe(
+            STEP_RUN_REASON.missingSuccessfulChecks,
+          )
+        }
+      })
+
+      it("keeps Always pending after the deadline until executions finish", async () => {
+        const pendingWatch: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () => Effect.succeed(watchResult("pending")),
+          mergePr: () => Effect.die("Merge PR must not run for pending checks"),
+        }
+        const { afterWatch } = await runWatchToDeadline(
+          pendingWatch,
+          ({ createdId }) => setWorkItemMergeModeAlways(createdId),
+        )
+        expect(afterWatch._tag).toBe("processed")
+        if (afterWatch._tag === "processed") {
+          expect(afterWatch.workItem.state).toBe("watch_pr_status_checks")
+        }
+      })
+
+      it("does not authorize Always merge when checks failed after the deadline", async () => {
+        const failedWatch: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () => Effect.succeed(watchResult("failed")),
+          mergePr: () => Effect.die("Merge PR must not run for failed checks"),
+        }
+        const { afterWatch } = await runWatchToDeadline(
+          failedWatch,
+          ({ createdId }) => setWorkItemMergeModeAlways(createdId),
+        )
+        expect(afterWatch._tag).toBe("processed")
+        if (afterWatch._tag === "processed") {
+          expect(afterWatch.workItem.state).not.toBe("merge_pr")
+          expect(afterWatch.workItem.state).not.toBe("decide_pr_merge")
+        }
+      })
+
+      it("sends Always merge conflicts to Resolve PR Merge Conflict", async () => {
+        const conflictWatch: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () =>
+            Effect.succeed({
+              _tag: "conflict" as const,
+              retiredCheckIds: [],
+              ...settledTiming,
+            }),
+          mergePr: () =>
+            Effect.die("Merge PR must not run for a conflicting PR"),
+        }
+        const { afterWatch } = await runWatchToDeadline(
+          conflictWatch,
+          ({ createdId }) => setWorkItemMergeModeAlways(createdId),
+        )
+        expect(afterWatch._tag).toBe("processed")
+        if (afterWatch._tag === "processed") {
+          expect(afterWatch.workItem.state).toBe("resolve_pr_merge_conflict")
+        }
+      })
+
+      it("does not shortcut waitForReadyForReviewChecks:false Always no_checks before the deadline", () => {
+        let prIsDraft = true
+        let mergeCalls = 0
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () =>
+            Effect.succeed({
+              _tag: "no_checks" as const,
+              createdAt: new Date(0),
+              headSha: "shortcut-no-checks",
+              headPushedAt: new Date(0),
+              isDraft: prIsDraft,
+            }),
+          markPrReadyForReview: () => {
+            prIsDraft = false
+            return Effect.void
+          },
+          mergePr: () => {
+            mergeCalls += 1
+            return Effect.succeed({ _tag: "merged" as const })
+          },
+        }
+
+        return Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                yield* TestClock.setTime(1_000_000)
+                const lifecycle = yield* WorkItemLifecycle
+                const { repository, issue } = yield* seedActionableIssue
+                yield* enableRepositoryAutoMerge(repository, {
+                  waitForReadyForReviewChecks: false,
+                })
+                const created = yield* lifecycle.implementNow(
+                  repository.id,
+                  issue.issueNumber,
+                )
+                yield* setWorkItemMergeModeAlways(created.id)
+
+                for (let index = 0; index < 8; index += 1) {
+                  yield* TestClock.adjust(1_000)
+                  yield* claimAndRunPending
+                }
+                yield* TestClock.adjust(1_000)
+                const afterDraftWatch = yield* claimAndRunPending
+                expect(afterDraftWatch._tag).toBe("processed")
+                if (afterDraftWatch._tag === "processed") {
+                  expect(afterDraftWatch.workItem.state).toBe(
+                    "mark_pr_ready_for_review",
+                  )
+                }
+
+                const afterMarkReady = yield* claimAndRunPending
+                expect(afterMarkReady._tag).toBe("processed")
+                if (afterMarkReady._tag === "processed") {
+                  expect(afterMarkReady.workItem.state).toBe(
+                    "watch_pr_status_checks",
+                  )
+                }
+                expect(mergeCalls).toBe(0)
+
+                yield* TestClock.setTime(1_000_000 + CHECK_START_DEADLINE_MS)
+                yield* makeQueuedJobsAvailable
+                const afterDeadline = yield* claimAndRunPending
+                expect(afterDeadline._tag).toBe("processed")
+                if (afterDeadline._tag === "processed") {
+                  expect(afterDeadline.workItem.state).toBe("merge_pr")
+                }
+                expect(mergeCalls).toBe(0)
+              }),
+              makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+            ),
+          ),
+        )
       })
 
       it("advances Merge Mode always to Merge PR when checks succeeded", async () => {

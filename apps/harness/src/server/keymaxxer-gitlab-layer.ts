@@ -651,7 +651,7 @@ export const keymaxxerGitLabLayer = (options: {
           ),
         ),
         mergePullRequest: Effect.fn("KeymaxxerGitLab.mergePullRequest")(
-          (repository, headRefName) =>
+          (repository, headRefName, options) =>
             withVaultOrAmbient(
               repository,
               (tokenName) =>
@@ -660,7 +660,16 @@ export const keymaxxerGitLabLayer = (options: {
                   repository,
                   tokenName,
                   describe: "merge pull request",
-                  args: [encodeArgument(headRefName)],
+                  args: [
+                    encodeArgument(headRefName),
+                    ...(options?.acceptNoChecks === true
+                      ? [
+                          encodeArgument(
+                            JSON.stringify({ acceptNoChecks: true }),
+                          ),
+                        ]
+                      : []),
+                  ],
                   decode: decodeJson(
                     SerializedMergePullRequestResult,
                     repository,
@@ -668,7 +677,11 @@ export const keymaxxerGitLabLayer = (options: {
                   ),
                 }),
               (ambientService) =>
-                ambientService.mergePullRequest(repository, headRefName),
+                ambientService.mergePullRequest(
+                  repository,
+                  headRefName,
+                  options,
+                ),
             ),
         ),
         ensureIssueCompletedWithSummary: Effect.fn(

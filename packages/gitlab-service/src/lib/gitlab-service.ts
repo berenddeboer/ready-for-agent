@@ -1,5 +1,6 @@
 import { Context, type Effect } from "effect"
 import type {
+  MergePullRequestOptions,
   MergePullRequestResult,
   PrStatusCheckDiagnostic,
   PrStatusCheckDiagnosticsOptions,
@@ -144,6 +145,7 @@ export interface GitLabServiceShape {
   readonly mergePullRequest: (
     repository: GitLabRepository,
     headRefName: string,
+    options?: MergePullRequestOptions,
   ) => Effect.Effect<MergePullRequestResult, GitLabServiceError>
   /**
    * Ensure a No-Change Outcome summary is posted once (hidden Work Item marker)

@@ -359,9 +359,9 @@ export const ambientGitHubLayer = (options: {
           ),
         ),
         mergePullRequest: Effect.fn("AmbientGitHub.mergePullRequest")(
-          (repository, headRefName) =>
+          (repository, headRefName, options) =>
             authenticated("lifecycle", repository, (service) =>
-              service.mergePullRequest(repository, headRefName),
+              service.mergePullRequest(repository, headRefName, options),
             ),
         ),
         rerunWorkflowRun: Effect.fn("AmbientGitHub.rerunWorkflowRun")(

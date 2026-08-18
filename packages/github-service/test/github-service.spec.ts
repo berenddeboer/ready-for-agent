@@ -2743,6 +2743,87 @@ describe("GitHubService live implementation", () => {
     },
   )
 
+  it("merges Always when the check rollup is absent", async () => {
+    const mutations: unknown[] = []
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOOpen",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "abc123",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: null,
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: (request) => {
+        mutations.push(request)
+        return Promise.resolve({
+          mergePullRequest: {
+            pullRequest: { merged: true, state: "MERGED" },
+          },
+        }) as never
+      },
+    })
+
+    const result = await Effect.runPromise(
+      service.mergePullRequest(repository, "branch", {
+        acceptNoChecks: true,
+      }),
+    )
+    expect(result).toEqual({ _tag: "merged" })
+    expect(mutations).toHaveLength(1)
+  })
+
+  it("still returns missing-check Needs Human for Always when a required context is EXPECTED", async () => {
+    const mutations: unknown[] = []
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOOpen",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "abc123",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: { state: "EXPECTED" },
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: (request) => {
+        mutations.push(request)
+        return Promise.resolve({
+          mergePullRequest: {
+            pullRequest: { merged: true, state: "MERGED" },
+          },
+        }) as never
+      },
+    })
+
+    const result = await Effect.runPromise(
+      service.mergePullRequest(repository, "branch", {
+        acceptNoChecks: true,
+      }),
+    )
+    expect(result).toMatchObject({
+      _tag: "needs_human",
+      reason: "missing_successful_checks",
+    })
+    expect(mutations).toHaveLength(0)
+  })
+
   it.each([
     ["non-green checks", "MERGEABLE", "FAILURE", "checks_not_green"],
     ["a conflict", "CONFLICTING", "SUCCESS", "mergeability_changed"],

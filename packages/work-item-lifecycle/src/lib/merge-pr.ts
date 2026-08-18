@@ -40,10 +40,12 @@ export const mergePr = (context: LifecycleStepContext) =>
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
     })
+    const options =
+      context.mergeMode === "always" ? { acceptNoChecks: true } : undefined
     if (repository.forge === "gitlab") {
       const gitlab = yield* GitLabService
-      return yield* gitlab.mergePullRequest(repository, branch)
+      return yield* gitlab.mergePullRequest(repository, branch, options)
     }
     const github = yield* GitHubService
-    return yield* github.mergePullRequest(repository, branch)
+    return yield* github.mergePullRequest(repository, branch, options)
   })

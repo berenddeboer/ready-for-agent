@@ -779,12 +779,17 @@ export const keymaxxerGitHubLayer = (options: {
           }),
         ),
         mergePullRequest: Effect.fn("KeymaxxerGitHub.mergePullRequest")(
-          (repository, headRefName) =>
+          (repository, headRefName, options) =>
             callHelper({
               operation: "merge-pull-request",
               repository,
               describe: "merge pull request",
-              args: [encodeArgument(headRefName)],
+              args: [
+                encodeArgument(headRefName),
+                ...(options?.acceptNoChecks === true
+                  ? [encodeArgument(JSON.stringify({ acceptNoChecks: true }))]
+                  : []),
+              ],
               decode: decodeJson(
                 SerializedMergePullRequestResult,
                 repository,

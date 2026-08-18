@@ -307,12 +307,14 @@ type MergeCheckRollupVerdict =
   | { readonly _tag: "checks_not_green" }
 
 /**
- * Harness-initiated merge requires a non-empty successful aggregate.
- * A null rollup or EXPECTED context is not green.
+ * Harness-initiated merge requires a non-empty successful aggregate, except
+ * Always after the Check-Start Deadline may accept a null/`no_checks` rollup.
+ * EXPECTED is never green.
  */
 const classifyMergeCheckRollup = (
   rollup: { readonly state: unknown } | null | undefined,
   context: string,
+  options?: { readonly acceptNoChecks?: boolean },
 ): MergeCheckRollupVerdict => {
   if (rollup === undefined) {
     return {
@@ -320,7 +322,12 @@ const classifyMergeCheckRollup = (
       message: `GitHub omitted the check rollup for ${context}`,
     }
   }
-  if (rollup === null || rollup.state === "EXPECTED") {
+  if (rollup === null) {
+    return options?.acceptNoChecks === true
+      ? { _tag: "ok" }
+      : { _tag: "missing_successful_checks" }
+  }
+  if (rollup.state === "EXPECTED") {
     return { _tag: "missing_successful_checks" }
   }
   if (!isGitHubStatusCheckState(rollup.state)) {
@@ -1955,7 +1962,7 @@ const makeGitHubApiService = (
     }
   }),
   mergePullRequest: Effect.fn("GitHubService.mergePullRequest")(
-    function* (repository, headRefName) {
+    function* (repository, headRefName, options) {
       const loadPullRequest = () =>
         githubQuery(
           `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
@@ -2032,6 +2039,7 @@ const makeGitHubApiService = (
       const preMergeChecks = classifyMergeCheckRollup(
         pullRequest.statusCheckRollup,
         `${repository.owner}/${repository.name}:${headRefName}`,
+        options,
       )
       if (preMergeChecks._tag === "invalid") {
         return yield* new GitHubRequestError({
@@ -2169,6 +2177,7 @@ const makeGitHubApiService = (
       const postMergeChecks = classifyMergeCheckRollup(
         mergedPullRequest.statusCheckRollup,
         `${repository.owner}/${repository.name}:${headRefName}`,
+        options,
       )
       if (postMergeChecks._tag === "invalid") {
         return yield* new GitHubRequestError({

@@ -74,8 +74,9 @@ describe("mergePr", () => {
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
-      mergePullRequest: (_repository, branch) => {
+      mergePullRequest: (_repository, branch, options) => {
         requestedBranch = branch
+        expect(options).toBeUndefined()
         return Effect.succeed({ _tag: "merged" as const })
       },
       uploadUserAttachment: () =>
@@ -90,6 +91,24 @@ describe("mergePr", () => {
     )
 
     expect(requestedBranch).toBe(`rfa/acme-widgets/42/${context.workItemId}`)
+  })
+
+  it("asks GitHub to accept no_checks only for Always", async () => {
+    let seenOptions: { readonly acceptNoChecks?: boolean } | undefined
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: (_repository, _branch, options) => {
+        seenOptions = options
+        return Effect.succeed({ _tag: "merged" as const })
+      },
+    } as GitHubServiceShape)
+
+    await Effect.runPromise(
+      mergePr({ ...context, mergeMode: "always" }).pipe(
+        Effect.provide(Layer.merge(db, github)),
+      ),
+    )
+
+    expect(seenOptions).toEqual({ acceptNoChecks: true })
   })
 
   it("requires a worktree path", async () => {
@@ -160,8 +179,9 @@ describe("mergePr", () => {
       },
     } as GitHubServiceShape)
     const gitlab = Layer.succeed(GitLabService, {
-      mergePullRequest: (_repository, branch) => {
+      mergePullRequest: (_repository, branch, options) => {
         requestedBranch = branch
+        expect(options).toBeUndefined()
         return Effect.succeed({ _tag: "merged" as const })
       },
     } as GitLabServiceShape)
@@ -174,5 +194,36 @@ describe("mergePr", () => {
 
     expect(requestedBranch).toBe(`rfa/project-widgets/42/${context.workItemId}`)
     expect(githubCalls).toBe(0)
+  })
+
+  it("asks GitLab to accept no_checks only for Always", async () => {
+    let seenOptions: { readonly acceptNoChecks?: boolean } | undefined
+    const gitlabRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/widgets",
+      localPath: "/repos/widgets",
+    })
+    const gitlabDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([gitlabRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () => Effect.die("GitHub must not merge a GitLab repo"),
+    } as GitHubServiceShape)
+    const gitlab = Layer.succeed(GitLabService, {
+      mergePullRequest: (_repository, _branch, options) => {
+        seenOptions = options
+        return Effect.succeed({ _tag: "merged" as const })
+      },
+    } as GitLabServiceShape)
+
+    await Effect.runPromise(
+      mergePr({ ...context, mergeMode: "always" }).pipe(
+        Effect.provide(Layer.mergeAll(gitlabDb, github, gitlab)),
+      ),
+    )
+
+    expect(seenOptions).toEqual({ acceptNoChecks: true })
   })
 })

@@ -162,6 +162,15 @@ export type MergeRevalidationReason =
   | "checks_not_green"
   | "mergeability_changed"
 
+/**
+ * Options for a Forge merge mutation. Always after the Check-Start Deadline
+ * accepts an absent/`no_checks` aggregate; EXPECTED, pending, and failed still
+ * block. Classify and omitted options stay fail-closed on `no_checks`.
+ */
+export type MergePullRequestOptions = {
+  readonly acceptNoChecks?: boolean
+}
+
 /** Domain result of a merge attempt; request/response failures remain errors. */
 export type MergePullRequestResult =
   | { readonly _tag: "merged" }

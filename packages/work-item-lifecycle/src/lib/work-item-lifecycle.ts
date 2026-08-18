@@ -473,6 +473,25 @@ const nextStateAfterReadyForMerge = (
 const isMissingSuccessfulCheckStatus = (tag: string): boolean =>
   tag === "no_checks" || tag === "expected"
 
+/**
+ * After the Check-Start Deadline, Always + `no_checks` is green (ADR 0059).
+ * EXPECTED, pending, and failed still block. Classify stays fail-closed.
+ */
+const isAlwaysNoChecksCarveOut = (
+  mergeMode: string | null | undefined,
+  statusTag: string,
+): boolean =>
+  decodeMergeMode(mergeMode) === "always" && statusTag === "no_checks"
+
+const shouldHandOffMissingSuccessfulChecks = (input: {
+  readonly autonomousMerge: boolean
+  readonly mergeMode: string | null | undefined
+  readonly statusTag: string
+}): boolean =>
+  input.autonomousMerge &&
+  isMissingSuccessfulCheckStatus(input.statusTag) &&
+  !isAlwaysNoChecksCarveOut(input.mergeMode, input.statusTag)
+
 const decodeWorkItemAutoMergeOverride = (
   value: boolean | number | null | undefined,
 ): boolean | null =>
@@ -2736,10 +2755,27 @@ export const makeWorkItemLifecycleLive = (
                     // Known draft→ready with opt-out: reuse settled draft evidence.
                     if (skipReadyPhaseStartupWait) {
                       if (
-                        autonomousMerge &&
-                        isMissingSuccessfulCheckStatus(status._tag)
+                        shouldHandOffMissingSuccessfulChecks({
+                          autonomousMerge,
+                          mergeMode: workItem.merge_mode,
+                          statusTag: status._tag,
+                        })
                       ) {
                         return missingSuccessfulChecksHandoff(status._tag)
+                      }
+                      if (
+                        isAlwaysNoChecksCarveOut(
+                          workItem.merge_mode,
+                          status._tag,
+                        ) &&
+                        !pastDeadline
+                      ) {
+                        return {
+                          transition: {
+                            nextState: "watch_pr_status_checks" as const,
+                            delay: requeueDelay,
+                          },
+                        }
                       }
                       return {
                         transition: {
@@ -2760,8 +2796,11 @@ export const makeWorkItemLifecycleLive = (
                       }
                     }
                     if (
-                      autonomousMerge &&
-                      isMissingSuccessfulCheckStatus(status._tag)
+                      shouldHandOffMissingSuccessfulChecks({
+                        autonomousMerge,
+                        mergeMode: workItem.merge_mode,
+                        statusTag: status._tag,
+                      })
                     ) {
                       return missingSuccessfulChecksHandoff(status._tag)
                     }
@@ -2895,12 +2934,27 @@ export const makeWorkItemLifecycleLive = (
                   }
                   if (isSettledNonFailingPrStatus(status._tag)) {
                     if (
-                      autonomousMerge &&
-                      isMissingSuccessfulCheckStatus(status._tag)
+                      shouldHandOffMissingSuccessfulChecks({
+                        autonomousMerge,
+                        mergeMode: workItem.merge_mode,
+                        statusTag: status._tag,
+                      })
                     ) {
                       return {
                         checkStartLastObservedIsDraft: 0 as const,
                         ...missingSuccessfulChecksHandoff(status._tag),
+                      }
+                    }
+                    if (
+                      isAlwaysNoChecksCarveOut(workItem.merge_mode, status._tag)
+                    ) {
+                      // Preserve the original Check-Start Deadline; Watch
+                      // applies the Always + no_checks carve-out when due.
+                      return {
+                        checkStartLastObservedIsDraft: 0 as const,
+                        transition: {
+                          nextState: "watch_pr_status_checks" as const,
+                        },
                       }
                     }
                     return {
@@ -4536,6 +4590,7 @@ export const makeWorkItemLifecycleLive = (
                   workItem.auto_merge_override === undefined
                     ? null
                     : Boolean(workItem.auto_merge_override),
+                mergeMode: decodeMergeMode(workItem.merge_mode),
                 maxDuration,
               }
 

@@ -1531,7 +1531,7 @@ export const makeGitLabService = (options: {
       })
     }),
     mergePullRequest: Effect.fn("GitLabService.mergePullRequest")(
-      function* (repository, headRefName) {
+      function* (repository, headRefName, options) {
         const loadMergeRequest = (): Effect.Effect<
           MergeRequestCheck | null,
           GitLabServiceError
@@ -1573,7 +1573,7 @@ export const makeGitLabService = (options: {
          * allow_failure failures are not hard-fail, while still-running and
          * hard-fail pipelines revalidate. An absent head pipeline or a
          * no_checks aggregate (including skipped-only / ignore-only jobs) is
-         * not green and yields missing_successful_checks. A tip-aligned
+         * not green unless Always accepts `no_checks`. A tip-aligned
          * head_pipeline whose SHA is not the MR tip is treated as not green so
          * a concurrent push cannot merge an untested head under a stale
          * success (same tip-freshness rule as Watch pending). Merged-results
@@ -1588,7 +1588,9 @@ export const makeGitLabService = (options: {
           Effect.gen(function* () {
             const headPipeline = mergeRequest.head_pipeline
             if (headPipeline === null || headPipeline === undefined) {
-              return "missing_successful_checks" as const
+              return options?.acceptNoChecks === true
+                ? null
+                : ("missing_successful_checks" as const)
             }
             if (isStaleHeadPipelineForTip(mergeRequest)) {
               return "checks_not_green" as const
@@ -1636,7 +1638,9 @@ export const makeGitLabService = (options: {
               return "checks_not_green" as const
             }
             if (aggregate === "no_checks") {
-              return "missing_successful_checks" as const
+              return options?.acceptNoChecks === true
+                ? null
+                : ("missing_successful_checks" as const)
             }
             return null
           })
