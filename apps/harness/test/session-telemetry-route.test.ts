@@ -35,7 +35,7 @@ const jobsSwitcherSource = () =>
 const routedDialogSource = () =>
   readFileSync(join(import.meta.dir, "../src/routed-dialog.ts"), "utf8")
 
-describe("Session Telemetry route (issues #841 / #843 / #906)", () => {
+describe("Session Telemetry route (issues #841 / #843 / #906 / #1144)", () => {
   test("is a dedicated TanStack file route with a canonical Pipeline background", () => {
     const source = telemetryRouteSource()
     expect(source).toContain(
@@ -120,5 +120,7 @@ describe("Session Telemetry route (issues #841 / #843 / #906)", () => {
     expect(dialog).toContain("No recent activity on this Session")
     expect(dialog).toContain("Child Sessions are not shown")
     expect(dialog).toContain("Jump")
+    expect(dialog).toContain("enabled: enabled && tailOpen")
+    expect(dialog).toContain("setTailOpen(false)")
   })
 })
