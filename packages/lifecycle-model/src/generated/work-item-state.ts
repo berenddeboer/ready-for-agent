@@ -48,6 +48,113 @@ export const WORK_ITEM_STATES = [
 export const WorkItemState = Schema.Literals(WORK_ITEM_STATES)
 export type WorkItemState = typeof WorkItemState.Type
 
+export const STEP_RUN_REASONS = [
+  "abandoned",
+  "agent_backend_auth_rejected",
+  "agent_backend_unavailable",
+  "agent_fallback",
+  "agent_model_not_in_catalog",
+  "build_model_not_configured",
+  "copy_generation",
+  "github_throttled",
+  "green-no-review-evidence",
+  "handler_defect",
+  "handler_failed",
+  "interrupted",
+  "issue_closed_pr_closed_unmerged",
+  "issue_closed_while_pr_open",
+  "merge_revalidation",
+  "missing_successful_checks",
+  "native",
+  "paused",
+  "pr_merged",
+  "pr_status_checks_unresolved",
+  "reset",
+  "review_accepted",
+  "review_applying_findings",
+  "review_assessing_rerun",
+  "review_cleared",
+  "review_deferred",
+  "review_pre_commit",
+  "review_reviewing",
+  "thinking_level_not_in_catalog",
+  "timeout",
+  "waiting_for_agent_turn",
+  "worker_restarted",
+] as const
+
+export const StepRunReason = Schema.Literals(STEP_RUN_REASONS)
+export type StepRunReason = typeof StepRunReason.Type
+
+export const STEP_RUN_REASON = {
+  /** The Step Run was cancelled because the operator abandoned the Work Item. */
+  abandoned: "abandoned",
+  /** An Agent Turn failed because the backend provider rejected credentials as missing, expired, or invalid. */
+  agentBackendAuthRejected: "agent_backend_auth_rejected",
+  /** An agent-dependent step is blocked because the Active Agent Backend is unavailable. */
+  agentBackendUnavailable: "agent_backend_unavailable",
+  /** A conditionally agent-using step completed via one repair Agent Turn after the native path did not establish the postcondition. */
+  agentFallback: "agent_fallback",
+  /** An agent-dependent step is blocked because the resolved Agent Model is absent from the Agent Backend's current Ready catalog. Rejected before the backend CLI is spawned. */
+  agentModelNotInCatalog: "agent_model_not_in_catalog",
+  /** An agent-dependent step is blocked because no build Agent Model is configured. */
+  buildModelNotConfigured: "build_model_not_configured",
+  /** Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt. */
+  copyGeneration: "copy_generation",
+  /** Watch PR Status Checks stopped cleanly at GitHub's explicit retry time. */
+  githubThrottled: "github_throttled",
+  /** A green-only Status Check Handoff completed without an Agent Turn because harness-owned GitHub observation found no positive automated-review evidence. */
+  greenNoReviewEvidence: "green-no-review-evidence",
+  /** The Step Run ended because the Lifecycle Step handler threw a defect rather than a typed failure. */
+  handlerDefect: "handler_defect",
+  /** The Step Run ended because the Lifecycle Step handler failed with a typed or unexpected error. */
+  handlerFailed: "handler_failed",
+  /** The Step Run was stopped before completion by an operator or harness interrupt. */
+  interrupted: "interrupted",
+  /** A successful Step Run stopped because Issue revalidation found the Issue closed or missing and the Work Item PR was closed without merge. The Work Item is paused for an operator Start, Abandon, or Reset decision. */
+  issueClosedPrClosedUnmerged: "issue_closed_pr_closed_unmerged",
+  /** A successful Step Run stopped because Issue revalidation found the Issue closed or missing while a Work Item PR is still open or PR status was indeterminate. The Work Item is paused for operator Start after reopen. */
+  issueClosedWhilePrOpen: "issue_closed_while_pr_open",
+  /** A successful Merge PR run that returned to Watch PR Status Checks for fresh validation. */
+  mergeRevalidation: "merge_revalidation",
+  /** Autonomous merge stopped because the Forge reported no successful status-check aggregate by the deadline. */
+  missingSuccessfulChecks: "missing_successful_checks",
+  /** A conditionally agent-using step completed via the harness-owned native path with no Agent Turn. */
+  native: "native",
+  /** The Step Run stopped because the Work Item was paused. */
+  paused: "paused",
+  /** Confirmed Work Item PR merge outcome, used when a Step Run is cancelled because the PR merged before it finished, or a successful Step Run advances to local cleanup after Issue revalidation finds the Issue closed or missing and the owned PR already merged. */
+  prMerged: "pr_merged",
+  /** Watch PR Status Checks stopped because the status-check observation did not resolve. */
+  prStatusChecksUnresolved: "pr_status_checks_unresolved",
+  /** The Step Run was cancelled because the operator reset the Work Item. */
+  reset: "reset",
+  /** A successful Review that accepted low-severity remediation without a full rerun. */
+  reviewAccepted: "review_accepted",
+  /** Mid-run: Review is applying findings with the build model. */
+  reviewApplyingFindings: "review_applying_findings",
+  /** Mid-run: Review is assessing whether low-severity remediation needs a rerun. */
+  reviewAssessingRerun: "review_assessing_rerun",
+  /** A successful Review that cleared low or medium findings without changes. */
+  reviewCleared: "review_cleared",
+  /** A successful Review that deferred findings and advanced to Commit. */
+  reviewDeferred: "review_deferred",
+  /** Mid-run: Review is re-running Pre-Commit after FIXED before re-review. */
+  reviewPreCommit: "review_pre_commit",
+  /** Mid-run: Review is running the reviewing Agent Turn. */
+  reviewReviewing: "review_reviewing",
+  /** An agent-dependent step is blocked because the resolved Thinking Level is not advertised by the governing Agent Model's current catalog entry. Rejected before the backend CLI is spawned. */
+  thinkingLevelNotInCatalog: "thinking_level_not_in_catalog",
+  /** The Step Run ended because the Lifecycle Step exceeded its configured maximum duration. */
+  timeout: "timeout",
+  /** Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns. */
+  waitingForAgentTurn: "waiting_for_agent_turn",
+  /** The prior harness or job-worker process ended while the Step Run was still Running. */
+  workerRestarted: "worker_restarted",
+} as const satisfies Record<string, StepRunReason>
+
+export type StepRunReasonCode = (typeof STEP_RUN_REASON)[keyof typeof STEP_RUN_REASON]
+
 export type LifecycleStepPropertyMap<Value> = {
   readonly [Step in OperationalLifecycleStep]: Value
 }
@@ -123,7 +230,7 @@ export interface LifecycleTransition {
   readonly from: WorkItemState
   readonly to: WorkItemState
   readonly guard: string
-  readonly reasonCode: string
+  readonly reasonCode: StepRunReason
 }
 
 export const LIFECYCLE_TRANSITIONS = [

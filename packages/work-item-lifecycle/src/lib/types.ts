@@ -4,6 +4,7 @@ import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
   OperationalLifecycleStep,
+  STEP_RUN_REASON,
   TERMINAL_WORK_ITEM_STATES,
   TerminalWorkItemState,
   WorkItemState,
@@ -16,6 +17,10 @@ import {
   JOBS_COMPLETED_WINDOW_MS,
 } from "./jobs-completed-window.js"
 
+export {
+  STEP_RUN_REASON,
+  type StepRunReasonCode,
+} from "@ready-for-agent/lifecycle-model"
 export type {
   ExecutionProfileReviewSelection,
   ExplicitWorkItemExecutionProfile,
@@ -368,108 +373,6 @@ export const filterWorkItemsByListKind = <
 
 /** How a conditionally agent-using step completed its postcondition. */
 export type LifecycleStepCompletion = "native" | "agent_fallback"
-
-export const STEP_RUN_REASON = {
-  handlerFailed: "handler_failed",
-  handlerDefect: "handler_defect",
-  prStatusChecksUnresolved: "pr_status_checks_unresolved",
-  /** Watch PR Status Checks stopped cleanly at GitHub's explicit retry time. */
-  githubThrottled: "github_throttled",
-  timeout: "timeout",
-  interrupted: "interrupted",
-  /** Prior harness/job-worker process ended while the Step Run was still Running. */
-  workerRestarted: "worker_restarted",
-  abandoned: "abandoned",
-  reset: "reset",
-  paused: "paused",
-  /** Mid-run: Step Run is Running but blocked on maxConcurrentAgentTurns. */
-  waitingForAgentTurn: "waiting_for_agent_turn",
-  /** Agent-dependent step blocked because Active Agent Backend is unavailable. */
-  agentBackendUnavailable: "agent_backend_unavailable",
-  /**
-   * Agent Turn failed because the backend provider rejected credentials
-   * (missing, expired, or invalid). Distinct from handler_failed so the
-   * outage is queryable (issue #1058).
-   */
-  agentBackendAuthRejected: "agent_backend_auth_rejected",
-  /** Agent-dependent step blocked because no build Agent Model is configured. */
-  buildModelNotConfigured: "build_model_not_configured",
-  /**
-   * Agent-dependent step blocked because the resolved Agent Model is absent
-   * from the Agent Backend's current Ready catalog (issue #838). Rejected
-   * before the backend CLI is spawned.
-   */
-  agentModelNotInCatalog: "agent_model_not_in_catalog",
-  /**
-   * Agent-dependent step blocked because the resolved Thinking Level is not
-   * advertised by the governing Agent Model's current catalog entry
-   * (issue #1073). Rejected before the backend CLI is spawned.
-   */
-  thinkingLevelNotInCatalog: "thinking_level_not_in_catalog",
-  /**
-   * Autonomous merge stopped because the Forge reported no successful
-   * status-check aggregate (`no_checks` or GitHub EXPECTED) by the deadline.
-   */
-  missingSuccessfulChecks: "missing_successful_checks",
-  /** Mid-run: Review is running the reviewing OpenCode pass. */
-  reviewReviewing: "review_reviewing",
-  /** Mid-run: Review is applying findings with the build model. */
-  reviewApplyingFindings: "review_applying_findings",
-  /** Mid-run: Review is re-running Pre-Commit after FIXED before re-review. */
-  reviewPreCommit: "review_pre_commit",
-  /** Mid-run: Review is assessing whether low-severity remediation needs rerun. */
-  reviewAssessingRerun: "review_assessing_rerun",
-  /** Successful Review that deferred findings and advanced to Commit. */
-  reviewDeferred: "review_deferred",
-  /** Successful Review that cleared low/medium findings without changes. */
-  reviewCleared: "review_cleared",
-  /** Successful Review that accepted low-severity remediation without full rerun. */
-  reviewAccepted: "review_accepted",
-  /** Successful Merge PR run that returned to Watch for fresh validation. */
-  mergeRevalidation: "merge_revalidation",
-  /**
-   * Green-only Status Check Handoff completed without an Agent Turn because
-   * harness-owned GitHub observation found no positive automated-review evidence.
-   */
-  greenNoReviewEvidence: "green-no-review-evidence",
-  /**
-   * Confirmed Work Item PR merge outcome. Used when:
-   * - a Step Run is interrupted/cancelled because the PR merged before it finished
-   * - a successful Step Run stops at Issue revalidation because the Issue is
-   *   closed/missing and the owned PR is already merged (advance to local cleanup)
-   */
-  prMerged: "pr_merged",
-  /**
-   * Successful Step Run that stopped because Issue revalidation found the
-   * Issue closed/missing while a Work Item PR is still open (or PR status
-   * was indeterminate). Work Item is paused for operator Start after reopen.
-   */
-  issueClosedWhilePrOpen: "issue_closed_while_pr_open",
-  /**
-   * Successful Step Run that stopped because Issue revalidation found the
-   * Issue closed/missing and the Work Item PR was closed without merge.
-   * Work Item is paused for operator decision (Start / Abandon / Reset).
-   */
-  issueClosedPrClosedUnmerged: "issue_closed_pr_closed_unmerged",
-  /**
-   * Conditionally agent-using step completed via harness-owned native path
-   * (no Agent Turn).
-   */
-  native: "native",
-  /**
-   * Conditionally agent-using step completed via one repair Agent Turn after
-   * the native path did not establish the postcondition.
-   */
-  agentFallback: "agent_fallback",
-  /**
-   * Mid-run: Commit is generating shared publication copy via an Agent Turn
-   * before the native git commit attempt.
-   */
-  copyGeneration: "copy_generation",
-} as const
-
-export type StepRunReasonCode =
-  (typeof STEP_RUN_REASON)[keyof typeof STEP_RUN_REASON]
 
 const AUTONOMOUS_MERGE_CHECK_REQUIREMENT =
   "Autonomous merge requires at least one successful external check. Configure or run a check, then Retry checks; otherwise review and merge the pull request manually."

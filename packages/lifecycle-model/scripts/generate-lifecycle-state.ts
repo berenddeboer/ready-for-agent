@@ -25,8 +25,10 @@ const owlOnProperty = iri(`${namespace.owl}onProperty`)
 const owlSomeValuesFrom = iri(`${namespace.owl}someValuesFrom`)
 const owlUnionOf = iri(`${namespace.owl}unionOf`)
 const skosNotation = iri(`${namespace.skos}notation`)
+const skosDefinition = iri(`${namespace.skos}definition`)
 const operationalLifecycleStep = term("OperationalLifecycleStep")
 const terminalWorkItemState = term("TerminalWorkItemState")
+const stepRunReasonClass = term("StepRunReason")
 const transitionClass = term("Transition")
 const fromStep = term("fromStep")
 const toStep = term("toStep")
@@ -429,6 +431,87 @@ const notationsForClass = (
   return values
 }
 
+interface GeneratedStepRunReason {
+  readonly key: string
+  readonly notation: string
+  readonly definition: string
+}
+
+const notationToCamelCase = (notation: string): string => {
+  const key = notation
+    .split(/[-_]/)
+    .map((part, index) =>
+      index === 0 ? part : `${part.charAt(0).toUpperCase()}${part.slice(1)}`,
+    )
+    .join("")
+
+  if (key.length === 0 || !/^[A-Za-z][A-Za-z0-9]*$/.test(key)) {
+    throw new Error(`Cannot derive a TypeScript key from notation: ${notation}`)
+  }
+
+  return key
+}
+
+const stepRunReasons = (store: Store): readonly GeneratedStepRunReason[] => {
+  const values = store
+    .getSubjects(rdfType, stepRunReasonClass, null)
+    .map((subject): GeneratedStepRunReason => {
+      const notation = onlyNotation(store, subject)
+      return {
+        key: notationToCamelCase(notation),
+        notation,
+        definition: onlyLiteral(store, subject, skosDefinition),
+      }
+    })
+    .sort((left, right) => left.notation.localeCompare(right.notation))
+
+  if (values.length === 0) {
+    throw new Error("No Step Run reason codes found")
+  }
+
+  const duplicateNotation = values.find(
+    (value, index) => value.notation === values[index - 1]?.notation,
+  )
+  if (duplicateNotation !== undefined) {
+    throw new Error(
+      `Duplicate Step Run reason notation: ${duplicateNotation.notation}`,
+    )
+  }
+
+  const keys = values.map((value) => value.key).sort()
+  const duplicateKey = keys.find((key, index) => key === keys[index - 1])
+  if (duplicateKey !== undefined) {
+    throw new Error(`Duplicate Step Run reason key: ${duplicateKey}`)
+  }
+
+  return values
+}
+
+const renderJsDoc = (definition: string): string => {
+  const escaped = definition.replaceAll("*/", "*\\/")
+  return `  /** ${escaped} */`
+}
+
+const renderStepRunReasons = (values: readonly GeneratedStepRunReason[]) => `\
+${renderTuple(
+  "STEP_RUN_REASONS",
+  values.map((value) => value.notation),
+)}
+export const StepRunReason = Schema.Literals(STEP_RUN_REASONS)
+export type StepRunReason = typeof StepRunReason.Type
+
+export const STEP_RUN_REASON = {
+${values
+  .map(
+    (value) =>
+      `${renderJsDoc(value.definition)}\n  ${value.key}: ${JSON.stringify(value.notation)},`,
+  )
+  .join("\n")}
+} as const satisfies Record<string, StepRunReason>
+
+export type StepRunReasonCode = (typeof STEP_RUN_REASON)[keyof typeof STEP_RUN_REASON]
+`
+
 interface GeneratedTransition {
   readonly from: string
   readonly to: string
@@ -440,6 +523,7 @@ const transitions = (
   store: Store,
   operationalSteps: readonly string[],
   terminalStates: readonly string[],
+  reasonNotations: ReadonlySet<string>,
 ): readonly GeneratedTransition[] => {
   const stateSet = new Set([...operationalSteps, ...terminalStates])
   const values = store
@@ -460,6 +544,11 @@ const transitions = (
       if (!stateSet.has(to)) {
         throw new Error(
           `${subject.value} to-step ${to} is not a Work Item state`,
+        )
+      }
+      if (!reasonNotations.has(transitionReasonCode)) {
+        throw new Error(
+          `${subject.value} reason ${transitionReasonCode} is not a declared Step Run reason`,
         )
       }
 
@@ -506,7 +595,7 @@ export interface LifecycleTransition {
   readonly from: WorkItemState
   readonly to: WorkItemState
   readonly guard: string
-  readonly reasonCode: string
+  readonly reasonCode: StepRunReason
 }
 
 export const LIFECYCLE_TRANSITIONS = [
@@ -568,6 +657,7 @@ export const isAgentDependentLifecycleStep = (step: string): boolean =>
 const renderGeneratedSource = (
   operationalSteps: readonly string[],
   terminalStates: readonly string[],
+  lifecycleReasons: readonly GeneratedStepRunReason[],
   lifecycleTransitions: readonly GeneratedTransition[],
   lifecycleStepProperties: readonly GeneratedStepProperties[],
 ) => `\
@@ -597,6 +687,7 @@ export const WORK_ITEM_STATES = [
 export const WorkItemState = Schema.Literals(WORK_ITEM_STATES)
 export type WorkItemState = typeof WorkItemState.Type
 
+${renderStepRunReasons(lifecycleReasons)}
 ${renderStepPropertyMaps(lifecycleStepProperties)}
 ${renderTransitions(lifecycleTransitions)}
 `
@@ -610,6 +701,7 @@ const generate = async () => {
   const ontology = new Store(quads)
   const operationalSteps = notationsForClass(ontology, operationalLifecycleStep)
   const terminalStates = notationsForClass(ontology, terminalWorkItemState)
+  const lifecycleReasons = stepRunReasons(ontology)
   const lifecycleStepProperties = stepProperties(ontology)
 
   if (
@@ -627,7 +719,13 @@ const generate = async () => {
     stateSource: renderGeneratedSource(
       operationalSteps,
       terminalStates,
-      transitions(ontology, operationalSteps, terminalStates),
+      lifecycleReasons,
+      transitions(
+        ontology,
+        operationalSteps,
+        terminalStates,
+        new Set(lifecycleReasons.map((reason) => reason.notation)),
+      ),
       lifecycleStepProperties,
     ),
     predicateSource: renderPredicateExpressions(predicateExpressions(ontology)),

@@ -14,7 +14,7 @@
     "The Ready for Agent domain vocabulary and Work Item lifecycle model."@en ;
   dcterms:source
     <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
-  owl:versionInfo "0.4.2" .
+  owl:versionInfo "0.5.0" .
 
 rfa:ContextTerm
   a owl:Class ;
@@ -220,7 +220,7 @@ rfa:StepRunReason
   a owl:Class ;
   rdfs:label "Step Run reason"@en ;
   skos:definition
-    "A reason code from the harness Step Run reason vocabulary."@en .
+    "A named reason a Step Run finished, was cancelled, or is blocked. The class is the complete harness vocabulary: transition reasons and operational mid-run reasons."@en .
 
 rfa:fromStep
   a owl:ObjectProperty ;
@@ -266,21 +266,197 @@ rfa:retryable
   skos:definition
     "Whether a failed or interrupted run of the Lifecycle Step may be retried."@en .
 
-rfa:NativeReason a rfa:StepRunReason ; skos:notation "native" .
-rfa:AgentFallbackReason a rfa:StepRunReason ; skos:notation "agent_fallback" .
-rfa:ReviewDeferredReason a rfa:StepRunReason ; skos:notation "review_deferred" .
-rfa:ReviewClearedReason a rfa:StepRunReason ; skos:notation "review_cleared" .
-rfa:ReviewAcceptedReason a rfa:StepRunReason ; skos:notation "review_accepted" .
-rfa:HandlerFailedReason a rfa:StepRunReason ; skos:notation "handler_failed" .
-rfa:MergeRevalidationReason a rfa:StepRunReason ; skos:notation "merge_revalidation" .
-rfa:GreenNoReviewEvidenceReason a rfa:StepRunReason ; skos:notation "green-no-review-evidence" .
-rfa:PrMergedReason a rfa:StepRunReason ; skos:notation "pr_merged" .
-rfa:AbandonedReason a rfa:StepRunReason ; skos:notation "abandoned" .
-rfa:PrStatusChecksUnresolvedReason a rfa:StepRunReason ; skos:notation "pr_status_checks_unresolved" .
-rfa:GitHubThrottledReason a rfa:StepRunReason ; skos:notation "github_throttled" .
-rfa:ThinkingLevelNotInCatalogReason a rfa:StepRunReason ; skos:notation "thinking_level_not_in_catalog" .
-rfa:MissingSuccessfulChecksReason a rfa:StepRunReason ; skos:notation "missing_successful_checks" .
-rfa:PausedReason a rfa:StepRunReason ; skos:notation "paused" .
+rfa:AbandonedReason
+  a rfa:StepRunReason ;
+  skos:notation "abandoned" ;
+  skos:definition
+    "The Step Run was cancelled because the operator abandoned the Work Item."@en .
+
+rfa:AgentBackendAuthRejectedReason
+  a rfa:StepRunReason ;
+  skos:notation "agent_backend_auth_rejected" ;
+  skos:definition
+    "An Agent Turn failed because the backend provider rejected credentials as missing, expired, or invalid."@en .
+
+rfa:AgentBackendUnavailableReason
+  a rfa:StepRunReason ;
+  skos:notation "agent_backend_unavailable" ;
+  skos:definition
+    "An agent-dependent step is blocked because the Active Agent Backend is unavailable."@en .
+
+rfa:AgentFallbackReason
+  a rfa:StepRunReason ;
+  skos:notation "agent_fallback" ;
+  skos:definition
+    "A conditionally agent-using step completed via one repair Agent Turn after the native path did not establish the postcondition."@en .
+
+rfa:AgentModelNotInCatalogReason
+  a rfa:StepRunReason ;
+  skos:notation "agent_model_not_in_catalog" ;
+  skos:definition
+    "An agent-dependent step is blocked because the resolved Agent Model is absent from the Agent Backend's current Ready catalog. Rejected before the backend CLI is spawned."@en .
+
+rfa:BuildModelNotConfiguredReason
+  a rfa:StepRunReason ;
+  skos:notation "build_model_not_configured" ;
+  skos:definition
+    "An agent-dependent step is blocked because no build Agent Model is configured."@en .
+
+rfa:CopyGenerationReason
+  a rfa:StepRunReason ;
+  skos:notation "copy_generation" ;
+  skos:definition
+    "Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt."@en .
+
+rfa:GitHubThrottledReason
+  a rfa:StepRunReason ;
+  skos:notation "github_throttled" ;
+  skos:definition
+    "Watch PR Status Checks stopped cleanly at GitHub's explicit retry time."@en .
+
+rfa:GreenNoReviewEvidenceReason
+  a rfa:StepRunReason ;
+  skos:notation "green-no-review-evidence" ;
+  skos:definition
+    "A green-only Status Check Handoff completed without an Agent Turn because harness-owned GitHub observation found no positive automated-review evidence."@en .
+
+rfa:HandlerDefectReason
+  a rfa:StepRunReason ;
+  skos:notation "handler_defect" ;
+  skos:definition
+    "The Step Run ended because the Lifecycle Step handler threw a defect rather than a typed failure."@en .
+
+rfa:HandlerFailedReason
+  a rfa:StepRunReason ;
+  skos:notation "handler_failed" ;
+  skos:definition
+    "The Step Run ended because the Lifecycle Step handler failed with a typed or unexpected error."@en .
+
+rfa:InterruptedReason
+  a rfa:StepRunReason ;
+  skos:notation "interrupted" ;
+  skos:definition
+    "The Step Run was stopped before completion by an operator or harness interrupt."@en .
+
+rfa:IssueClosedPrClosedUnmergedReason
+  a rfa:StepRunReason ;
+  skos:notation "issue_closed_pr_closed_unmerged" ;
+  skos:definition
+    "A successful Step Run stopped because Issue revalidation found the Issue closed or missing and the Work Item PR was closed without merge. The Work Item is paused for an operator Start, Abandon, or Reset decision."@en .
+
+rfa:IssueClosedWhilePrOpenReason
+  a rfa:StepRunReason ;
+  skos:notation "issue_closed_while_pr_open" ;
+  skos:definition
+    "A successful Step Run stopped because Issue revalidation found the Issue closed or missing while a Work Item PR is still open or PR status was indeterminate. The Work Item is paused for operator Start after reopen."@en .
+
+rfa:MergeRevalidationReason
+  a rfa:StepRunReason ;
+  skos:notation "merge_revalidation" ;
+  skos:definition
+    "A successful Merge PR run that returned to Watch PR Status Checks for fresh validation."@en .
+
+rfa:MissingSuccessfulChecksReason
+  a rfa:StepRunReason ;
+  skos:notation "missing_successful_checks" ;
+  skos:definition
+    "Autonomous merge stopped because the Forge reported no successful status-check aggregate by the deadline."@en .
+
+rfa:NativeReason
+  a rfa:StepRunReason ;
+  skos:notation "native" ;
+  skos:definition
+    "A conditionally agent-using step completed via the harness-owned native path with no Agent Turn."@en .
+
+rfa:PausedReason
+  a rfa:StepRunReason ;
+  skos:notation "paused" ;
+  skos:definition
+    "The Step Run stopped because the Work Item was paused."@en .
+
+rfa:PrMergedReason
+  a rfa:StepRunReason ;
+  skos:notation "pr_merged" ;
+  skos:definition
+    "Confirmed Work Item PR merge outcome, used when a Step Run is cancelled because the PR merged before it finished, or a successful Step Run advances to local cleanup after Issue revalidation finds the Issue closed or missing and the owned PR already merged."@en .
+
+rfa:PrStatusChecksUnresolvedReason
+  a rfa:StepRunReason ;
+  skos:notation "pr_status_checks_unresolved" ;
+  skos:definition
+    "Watch PR Status Checks stopped because the status-check observation did not resolve."@en .
+
+rfa:ResetReason
+  a rfa:StepRunReason ;
+  skos:notation "reset" ;
+  skos:definition
+    "The Step Run was cancelled because the operator reset the Work Item."@en .
+
+rfa:ReviewAcceptedReason
+  a rfa:StepRunReason ;
+  skos:notation "review_accepted" ;
+  skos:definition
+    "A successful Review that accepted low-severity remediation without a full rerun."@en .
+
+rfa:ReviewApplyingFindingsReason
+  a rfa:StepRunReason ;
+  skos:notation "review_applying_findings" ;
+  skos:definition
+    "Mid-run: Review is applying findings with the build model."@en .
+
+rfa:ReviewAssessingRerunReason
+  a rfa:StepRunReason ;
+  skos:notation "review_assessing_rerun" ;
+  skos:definition
+    "Mid-run: Review is assessing whether low-severity remediation needs a rerun."@en .
+
+rfa:ReviewClearedReason
+  a rfa:StepRunReason ;
+  skos:notation "review_cleared" ;
+  skos:definition
+    "A successful Review that cleared low or medium findings without changes."@en .
+
+rfa:ReviewDeferredReason
+  a rfa:StepRunReason ;
+  skos:notation "review_deferred" ;
+  skos:definition
+    "A successful Review that deferred findings and advanced to Commit."@en .
+
+rfa:ReviewPreCommitReason
+  a rfa:StepRunReason ;
+  skos:notation "review_pre_commit" ;
+  skos:definition
+    "Mid-run: Review is re-running Pre-Commit after FIXED before re-review."@en .
+
+rfa:ReviewReviewingReason
+  a rfa:StepRunReason ;
+  skos:notation "review_reviewing" ;
+  skos:definition
+    "Mid-run: Review is running the reviewing Agent Turn."@en .
+
+rfa:ThinkingLevelNotInCatalogReason
+  a rfa:StepRunReason ;
+  skos:notation "thinking_level_not_in_catalog" ;
+  skos:definition
+    "An agent-dependent step is blocked because the resolved Thinking Level is not advertised by the governing Agent Model's current catalog entry. Rejected before the backend CLI is spawned."@en .
+
+rfa:TimeoutReason
+  a rfa:StepRunReason ;
+  skos:notation "timeout" ;
+  skos:definition
+    "The Step Run ended because the Lifecycle Step exceeded its configured maximum duration."@en .
+
+rfa:WaitingForAgentTurnReason
+  a rfa:StepRunReason ;
+  skos:notation "waiting_for_agent_turn" ;
+  skos:definition
+    "Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns."@en .
+
+rfa:WorkerRestartedReason
+  a rfa:StepRunReason ;
+  skos:notation "worker_restarted" ;
+  skos:definition
+    "The prior harness or job-worker process ended while the Step Run was still Running."@en .
 
 rfa:CreateWorktree
   a owl:Class, owl:NamedIndividual, skos:Concept,

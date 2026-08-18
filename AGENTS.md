@@ -29,13 +29,14 @@ Single-context layout (root CONTEXT.md + docs/adr/). See `docs/agents/domain.md`
 
 ### Domain ontology
 
-The Work Item lifecycle and the CONTEXT.md glossary are derived from a
-versioned ontology under `ontology/` (see `ontology/README.md` and
-`docs/adr/0044-ontology-derived-lifecycle-model.md`). Domain changes start
-with an ontology edit and flow through codegen — never edit
+The Work Item lifecycle, every Step Run reason code, and the CONTEXT.md
+glossary are derived from a versioned ontology under `ontology/` (see
+`ontology/README.md`, `docs/adr/0044-ontology-derived-lifecycle-model.md`,
+and `docs/adr/0058-ontology-owns-step-run-reason-codes.md`). Domain changes
+start with an ontology edit and flow through codegen — never edit
 `packages/lifecycle-model/src/generated/work-item-state.ts` or the state
 enums directly. Use the `ontology-change` skill when adding or changing
-lifecycle states, transitions, or glossary terms.
+lifecycle states, transitions, Step Run reason codes, or glossary terms.
 
 <!-- effect-solutions:start -->
 

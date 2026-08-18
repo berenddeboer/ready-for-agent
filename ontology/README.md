@@ -43,7 +43,7 @@ flowchart LR
 
   subgraph lm["packages/lifecycle-model"]
     gen["scripts/generate-lifecycle-state.ts<br/>(n3 Turtle parser)"]
-    generated["src/generated/work-item-state.ts<br/>Effect Schema literals +<br/>LIFECYCLE_TRANSITIONS +<br/>isDeclaredLifecycleTransition"]
+    generated["src/generated/work-item-state.ts<br/>Effect Schema literals +<br/>STEP_RUN_REASON +<br/>LIFECYCLE_TRANSITIONS +<br/>isDeclaredLifecycleTransition"]
     tests["test/ontology.test.ts<br/>SHACL validation, OWL consistency,<br/>CONTEXT.md parity"]
   end
 
@@ -71,6 +71,8 @@ emits `packages/lifecycle-model/src/generated/work-item-state.ts`:
   space, keyed by each term's `skos:notation` (the runtime string, e.g.
   `create_worktree`).
 - `WorkItemState` — an Effect `Schema.Literals` union over both.
+- `STEP_RUN_REASONS` / `STEP_RUN_REASON` — every `rfa:StepRunReason`
+  (`skos:notation` plus camelCase accessor), the complete harness vocabulary.
 - `LIFECYCLE_TRANSITIONS` — every declared `rfa:Transition` as queryable data
   (`from`, `to`, `guard`, `reasonCode`).
 - `isDeclaredLifecycleTransition(from, to)` — membership in the declared
@@ -160,7 +162,8 @@ Notes on the modelling:
 ## The lifecycle state space
 
 16 operational Lifecycle Steps, 4 terminal Work Item states, and 110 declared
-transitions, each carrying a named guard and one of 13 Step Run reason codes.
+transitions, each carrying a named guard and one Step Run reason code from the
+generated vocabulary.
 The happy path:
 
 ```mermaid
@@ -251,11 +254,12 @@ bunx nx run lifecycle-model:check-generated
 bunx nx run lifecycle-model:test
 ```
 
-When adding a lifecycle state or transition:
+When adding a lifecycle state, transition, or Step Run reason:
 
 1. Declare it in `rfa.ttl` (class + individual + SKOS concept with a
    `skos:notation`, or an `rfa:Transition` with `fromStep`, `toStep`,
-   `guard`, and `reasonCode`).
+   `guard`, and `reasonCode`, or an `rfa:StepRunReason` with `skos:notation`
+   and `skos:definition`).
 2. If it is a CONTEXT.md glossary term, add the glossary entry and mirror it
    in `context.ttl` — the parity test fails on any mismatch.
 3. Regenerate `lifecycle-model` and `graphql-schema`, and update fixtures if

@@ -1,17 +1,20 @@
 ---
 name: ontology-change
-description: Change the Ready for Agent domain model — lifecycle states, transitions, guards, Step Run reason codes, or CONTEXT.md glossary terms. Use whenever a task adds, renames, or removes a Work Item state or transition, touches ontology/*.ttl, edits the CONTEXT.md glossary, or fails the lifecycle-model parity or check-generated targets. The ontology is the source of truth; TypeScript, GraphQL, and DB enums are generated from it.
+description: Change the Ready for Agent domain model — lifecycle states, transitions, guards, every Step Run reason code (transition and operational), or CONTEXT.md glossary terms. Use whenever a task adds, renames, or removes a Work Item state, transition, or Step Run reason, touches ontology/*.ttl, edits the CONTEXT.md glossary, or fails the lifecycle-model parity or check-generated targets. The ontology owns the complete reason vocabulary; TypeScript, GraphQL, and DB enums are generated from it.
 ---
 
 # Changing the domain ontology
 
 The domain model lives in `ontology/` as RDF (Turtle) and is the single
-source of truth per ADR-0044 (`docs/adr/0044-ontology-derived-lifecycle-model.md`).
+source of truth per ADR-0044
+(`docs/adr/0044-ontology-derived-lifecycle-model.md`) and ADR-0058
+(`docs/adr/0058-ontology-owns-step-run-reason-codes.md`).
 Read `ontology/README.md` for the full model and diagrams before editing.
 
 **Never hand-edit generated artifacts.** These are derived and CI-checked:
 
 - `packages/lifecycle-model/src/generated/work-item-state.ts`
+  (state space, transition relation, and the complete `STEP_RUN_REASON` table)
 - `packages/graphql-schema/src/type-defs.gen.ts`
 - Any state enum in `db-schema` or SDL that lists Work Item states — they
   import from `@ready-for-agent/lifecycle-model`.
@@ -29,8 +32,12 @@ Read `ontology/README.md` for the full model and diagrams before editing.
      (`rfa:WorkItemShape`).
    - New transition: declare an `rfa:Transition` individual in `rfa.ttl`
      with exactly one `rfa:fromStep`, `rfa:toStep`, `rfa:guard` (non-empty
-     string), and `rfa:reasonCode` (an `rfa:StepRunReason`; declare a new
-     reason with a `skos:notation` if none fits).
+     string), and `rfa:reasonCode` (an `rfa:StepRunReason`).
+   - New Step Run reason (transition or operational): declare an
+     `rfa:StepRunReason` individual in `rfa.ttl` with one `skos:notation`
+     (the runtime snake_case or kebab-case string) and one English
+     `skos:definition`. `STEP_RUN_REASON` is generated from these
+     individuals.
 2. **Keep the glossary in parity.** If the term is (or becomes) a CONTEXT.md
    glossary entry, update the glossary in `CONTEXT.md` and mirror it in
    `ontology/context.ttl` (`rfa:ContextTerm` with matching
