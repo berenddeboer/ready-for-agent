@@ -40,6 +40,6 @@ Feature: Session usage Agent Turn Tail
     And the Session usage dialog does not show Agent Turn Tail
 
   Scenario: Show tail is hidden when the Agent Backend cannot serve a tail
-    When I open the Codex missing Session Telemetry path directly
+    When I open Session usage for a Session whose Agent Backend cannot serve a tail
     Then the Session usage dialog is visible
     And the Session usage dialog does not show Show tail
