@@ -49,10 +49,12 @@ const githubTokenCreationUrl = (repository: Repository) => {
   url.searchParams.set("issues", "write")
   url.searchParams.set("contents", "write")
   url.searchParams.set("pull_requests", "write")
-  // Actions write enables workflow reruns; read covers CI visibility and job logs.
+  // Actions write enables workflow reruns and job-log reads. Workflows write
+  // is a separate permission required to push `.github/workflows/**`.
   // Commit statuses help with CI visibility. Per-check CheckRun nodes need Checks
   // API access, which fine-grained PATs cannot grant — see AGENTS.md.
   url.searchParams.set("actions", "write")
+  url.searchParams.set("workflows", "write")
   url.searchParams.set("statuses", "read")
   return url.toString()
 }

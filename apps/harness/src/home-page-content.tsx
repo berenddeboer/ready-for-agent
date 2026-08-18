@@ -2651,9 +2651,15 @@ function RepositoryCard({
                         {repository.projectPath.split("/").at(-1)}
                       </code>
                       , and allow <strong>Actions: Read and write</strong>{" "}
-                      (required for workflow reruns and CI logs).
-                      Already-created tokens are not upgraded automatically —
-                      edit or recreate them if Actions is still read-only.
+                      (workflow reruns and CI logs) and{" "}
+                      <strong>Workflows: Read and write</strong> (required to
+                      push{" "}
+                      <code className={ui.guidanceCode}>
+                        .github/workflows/**
+                      </code>
+                      ). Already-created tokens are not upgraded automatically —
+                      edit or recreate them if Workflows is missing, then
+                      replace the secret in Keymaxxer.
                     </p>
                   )}
                   {addGitHubToken.isError ? (
