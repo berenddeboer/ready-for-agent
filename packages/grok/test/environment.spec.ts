@@ -12,6 +12,8 @@ describe("makeGrokEnvironment", () => {
         GITHUB_TOKEN_repo: "secret3",
         GITLAB_TOKEN: "secret4",
         GITLAB_TOKEN_repo: "secret5",
+        SQLITE_DATABASE_PATH: "/tmp/ready-for-agent.db",
+        KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:6057/cap/mcp",
         KEEP: "yes",
       },
     })
@@ -23,6 +25,8 @@ describe("makeGrokEnvironment", () => {
     expect(env.GITHUB_TOKEN_repo).toBe("secret3")
     expect(env.GITLAB_TOKEN).toBe("secret4")
     expect(env.GITLAB_TOKEN_repo).toBe("secret5")
+    expect(env.SQLITE_DATABASE_PATH).toBeUndefined()
+    expect(env.KEYMAXXER_SIDECAR_URL).toBeUndefined()
     expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined()
   })
 })

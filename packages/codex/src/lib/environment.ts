@@ -7,7 +7,8 @@ export type MakeCodexEnvironmentOptions = {
 /**
  * Codex Build Agent Turns use ambient Forge authentication: inherit process
  * env (including ambient Forge tokens and OPENAI_API_KEY). Codex does not
- * support KeymaxxerMcp, so tokens are never stripped.
+ * support KeymaxxerMcp, so Forge tokens are never stripped. Harness-owned
+ * operational names are still stripped by the shared sanitizer.
  */
 export const makeCodexEnvironment = (
   options: MakeCodexEnvironmentOptions = {},

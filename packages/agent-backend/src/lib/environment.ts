@@ -5,6 +5,27 @@ const isGitHubTokenEnvName = (name: string) =>
 
 const isGitLabTokenEnvName = (name: string) => name.startsWith("GITLAB_TOKEN")
 
+/**
+ * Harness operational names that must never reach an Agent Turn or Interactive
+ * Session Continuation. Always stripped, independent of Forge-token options.
+ */
+export const HARNESS_OWNED_ENVIRONMENT_NAMES = [
+  "SQLITE_DATABASE_PATH",
+  "KEYMAXXER_SIDECAR_URL",
+  "KEYMAXXER_SIDECAR_PORT",
+  "KEYMAXXER_ENABLED",
+  "KEYMAXXER_MASTER_KEY",
+  "KEYMAXXER_APPROVE",
+  "READY_FOR_AGENT_GRAPHQL_URL",
+] as const
+
+const harnessOwnedEnvironmentNameSet = new Set<string>(
+  HARNESS_OWNED_ENVIRONMENT_NAMES,
+)
+
+const isHarnessOwnedEnvironmentName = (name: string) =>
+  harnessOwnedEnvironmentNameSet.has(name)
+
 export type SanitizeInheritedEnvironmentOptions = {
   /**
    * When true (default), strip GitHub and GitLab token variables.
@@ -23,8 +44,9 @@ export type SanitizeInheritedEnvironmentOptions = {
 }
 
 /**
- * Inherit process environment, dropping undefined entries. Optionally strip
- * Forge token variables when the backend receives vault-backed credentials.
+ * Inherit process environment, dropping undefined entries. Always strip
+ * Harness-owned operational names. Optionally strip Forge token variables when
+ * the backend receives vault-backed credentials.
  */
 export const sanitizeInheritedEnvironment = (
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -38,6 +60,7 @@ export const sanitizeInheritedEnvironment = (
     Object.entries(environment).filter(
       (entry): entry is [string, string] =>
         entry[1] !== undefined &&
+        !isHarnessOwnedEnvironmentName(entry[0]) &&
         !(stripGitHubTokens && isGitHubTokenEnvName(entry[0])) &&
         !(stripGitLabTokens && isGitLabTokenEnvName(entry[0])),
     ),

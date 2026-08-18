@@ -1800,6 +1800,9 @@ if (recordPath !== undefined && recordPath.length > 0) {
       argv1: process.argv[1],
       cwd: process.cwd(),
       envMarker: process.env.RFA_DIRECT_MARKER ?? null,
+      sqliteDatabasePath: process.env.SQLITE_DATABASE_PATH ?? null,
+      keymaxxerSidecarUrl: process.env.KEYMAXXER_SIDECAR_URL ?? null,
+      graphqlUrl: process.env.READY_FOR_AGENT_GRAPHQL_URL ?? null,
       stdinIsTTY: Boolean(process.stdin.isTTY),
       stdoutIsTTY: Boolean(process.stdout.isTTY),
       stderrIsTTY: Boolean(process.stderr.isTTY),
@@ -1832,6 +1835,9 @@ type BackendRecord = {
   readonly argv1: string
   readonly cwd: string
   readonly envMarker: string | null
+  readonly sqliteDatabasePath: string | null
+  readonly keymaxxerSidecarUrl: string | null
+  readonly graphqlUrl: string | null
   readonly stdinIsTTY: boolean
   readonly stdoutIsTTY: boolean
   readonly stderrIsTTY: boolean
@@ -2658,6 +2664,8 @@ process.exit(1)
     TMUX_ARGV_LOG: tmuxLog,
     BACKEND_RECORD: backendRecord,
     RFA_DIRECT_MARKER: "from-parent",
+    SQLITE_DATABASE_PATH: "/tmp/ready-for-agent.db",
+    KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:6057/cap/mcp",
     ...overrides,
   })
 
@@ -2732,6 +2740,9 @@ process.exit(1)
         expect(record.argv).toEqual(expectedResumeArgs[backendId](worktree))
         expect(record.cwd).toBe(worktree)
         expect(record.envMarker).toBe("from-parent")
+        expect(record.sqliteDatabasePath).toBeNull()
+        expect(record.keymaxxerSidecarUrl).toBeNull()
+        expect(record.graphqlUrl).toBeNull()
         expect(record.stdinIsTTY).toBe(true)
         expect(record.stdoutIsTTY).toBe(true)
       } finally {

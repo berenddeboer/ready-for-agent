@@ -12,6 +12,7 @@ describe("makeCodexEnvironment", () => {
         GITLAB_TOKEN: "secret3",
         GITLAB_TOKEN_ACME_WIDGETS: "secret4",
         OPENAI_API_KEY: "sk-test",
+        SQLITE_DATABASE_PATH: "/tmp/ready-for-agent.db",
         KEEP: "yes",
       },
     })
@@ -22,5 +23,6 @@ describe("makeCodexEnvironment", () => {
     expect(env.GITLAB_TOKEN).toBe("secret3")
     expect(env.GITLAB_TOKEN_ACME_WIDGETS).toBe("secret4")
     expect(env.OPENAI_API_KEY).toBe("sk-test")
+    expect(env.SQLITE_DATABASE_PATH).toBeUndefined()
   })
 })

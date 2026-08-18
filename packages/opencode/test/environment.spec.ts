@@ -69,6 +69,8 @@ describe("makeOpencodeEnvironment", () => {
         GITHUB_TOKEN_ACME_WIDGETS: "secret",
         GITLAB_TOKEN: "secret",
         GITLAB_TOKEN_ACME_WIDGETS: "secret",
+        SQLITE_DATABASE_PATH: "/tmp/ready-for-agent.db",
+        KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:6057/cap/mcp",
         KEEP: "yes",
       },
     })
@@ -79,6 +81,11 @@ describe("makeOpencodeEnvironment", () => {
     expect(env.GITHUB_TOKEN_ACME_WIDGETS).toBeUndefined()
     expect(env.GITLAB_TOKEN).toBeUndefined()
     expect(env.GITLAB_TOKEN_ACME_WIDGETS).toBeUndefined()
+    expect(env.SQLITE_DATABASE_PATH).toBeUndefined()
+    expect(env.KEYMAXXER_SIDECAR_URL).toBeUndefined()
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT).mcp.keymaxxer.url).toBe(
+      "http://127.0.0.1:6057/cap/mcp",
+    )
   })
 
   it("preserves ambient Forge tokens when vault MCP is not configured", () => {
@@ -90,6 +97,8 @@ describe("makeOpencodeEnvironment", () => {
         GITHUB_TOKEN_ACME_WIDGETS: "secret",
         GITLAB_TOKEN: "secret",
         GITLAB_TOKEN_ACME_WIDGETS: "secret",
+        SQLITE_DATABASE_PATH: "/tmp/ready-for-agent.db",
+        KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:6057/cap/mcp",
         KEEP: "yes",
       },
     })
@@ -100,6 +109,8 @@ describe("makeOpencodeEnvironment", () => {
     expect(env.GITHUB_TOKEN_ACME_WIDGETS).toBe("secret")
     expect(env.GITLAB_TOKEN).toBe("secret")
     expect(env.GITLAB_TOKEN_ACME_WIDGETS).toBe("secret")
+    expect(env.SQLITE_DATABASE_PATH).toBeUndefined()
+    expect(env.KEYMAXXER_SIDECAR_URL).toBeUndefined()
   })
 
   it("does not configure Keymaxxer when its capability URL is missing", () => {
