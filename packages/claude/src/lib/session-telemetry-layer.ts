@@ -3,7 +3,6 @@ import {
   AGENT_BACKEND_IDS,
   type SessionTelemetry,
   SessionTelemetryProvider,
-  unsupportedAgentTurnTail,
 } from "@ready-for-agent/agent-backend"
 import {
   type ClaudeSession,
@@ -51,7 +50,7 @@ export const ClaudeSessionTelemetryLive = (
       return SessionTelemetryProvider.of({
         getSession: (sessionId) =>
           store.getSession(sessionId).pipe(Effect.map(toSessionTelemetry)),
-        getTail: () => Effect.succeed(unsupportedAgentTurnTail(CLAUDE_BACKEND)),
+        getTail: (sessionId) => store.getTail(sessionId),
       })
     }),
   ).pipe(Layer.provide(storeLayer))

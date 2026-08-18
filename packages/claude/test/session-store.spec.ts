@@ -66,6 +66,101 @@ const getSession = async (input: {
   }
 }
 
+const getTail = async (input: {
+  readonly claudeConfigDir: string
+  readonly id: string
+}) => {
+  const runtime = ManagedRuntime.make(
+    ClaudeSessionStoreLive({ claudeConfigDir: input.claudeConfigDir }),
+  )
+  try {
+    return await runtime.runPromise(
+      Effect.gen(function* () {
+        const store = yield* ClaudeSessionStore
+        return yield* store.getTail(input.id)
+      }),
+    )
+  } finally {
+    await runtime.dispose()
+  }
+}
+
+const userPromptLine = (input: {
+  readonly timestamp: string
+  readonly text: string
+}): string =>
+  JSON.stringify({
+    type: "user",
+    timestamp: input.timestamp,
+    isSidechain: false,
+    message: { role: "user", content: input.text },
+  })
+
+const assistantTextLine = (input: {
+  readonly timestamp: string
+  readonly text: string
+  readonly isSidechain?: boolean
+  readonly parentToolUseId?: string
+}): string =>
+  JSON.stringify({
+    type: "assistant",
+    timestamp: input.timestamp,
+    isSidechain: input.isSidechain ?? false,
+    ...(input.parentToolUseId === undefined
+      ? {}
+      : { parent_tool_use_id: input.parentToolUseId }),
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: input.text }],
+    },
+  })
+
+const assistantToolUseLine = (input: {
+  readonly timestamp: string
+  readonly id: string
+  readonly name: string
+  readonly command: string
+}): string =>
+  JSON.stringify({
+    type: "assistant",
+    timestamp: input.timestamp,
+    isSidechain: false,
+    message: {
+      role: "assistant",
+      content: [
+        {
+          type: "tool_use",
+          id: input.id,
+          name: input.name,
+          input: { command: input.command },
+        },
+      ],
+    },
+  })
+
+const userToolResultLine = (input: {
+  readonly timestamp: string
+  readonly toolUseId: string
+  readonly content: string
+  readonly isError?: boolean
+}): string =>
+  JSON.stringify({
+    type: "user",
+    timestamp: input.timestamp,
+    isSidechain: false,
+    message: {
+      role: "user",
+      content: [
+        {
+          tool_use_id: input.toolUseId,
+          type: "tool_result",
+          content: input.content,
+          is_error: input.isError ?? false,
+        },
+      ],
+    },
+  })
+
 describe("ClaudeSessionStore", () => {
   test("reads real-shaped main and recursive subagent transcripts", async () => {
     const dir = mkdtempSync(join(tmpdir(), "claude-session-"))
@@ -441,6 +536,412 @@ describe("ClaudeSessionStore", () => {
       ).resolves.toMatchObject({
         availability: "unavailable",
         tokens: null,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("reads the latest Agent Turn Tail without tool payloads", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claude-session-"))
+    const payload = "PAYLOAD_MUST_NOT_APPEAR".repeat(200)
+    try {
+      writeTranscript({
+        claudeConfigDir: dir,
+        project: "-work-repo",
+        sessionId: "tail-session",
+        jsonl: [
+          userPromptLine({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            text: "old harness prompt",
+          }),
+          assistantTextLine({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            text: "old turn",
+          }),
+          assistantToolUseLine({
+            timestamp: "2026-08-18T12:00:03.000Z",
+            id: "toolu_old",
+            name: "Read",
+            command: payload,
+          }),
+          userToolResultLine({
+            timestamp: "2026-08-18T12:00:03.500Z",
+            toolUseId: "toolu_old",
+            content: payload,
+          }),
+          userPromptLine({
+            timestamp: "2026-08-18T12:00:04.000Z",
+            text: "Implement GitHub issue #1145.",
+          }),
+          assistantToolUseLine({
+            timestamp: "2026-08-18T12:00:05.000Z",
+            id: "toolu_test",
+            name: "Bash",
+            command: "bun test",
+          }),
+          userToolResultLine({
+            timestamp: "2026-08-18T12:00:05.500Z",
+            toolUseId: "toolu_test",
+            content: payload,
+            isError: true,
+          }),
+          JSON.stringify({
+            type: "assistant",
+            timestamp: "2026-08-18T12:00:06.000Z",
+            isSidechain: false,
+            message: {
+              role: "assistant",
+              content: [
+                { type: "thinking", thinking: payload },
+                { type: "text", text: "tests failed" },
+              ],
+            },
+          }),
+        ].join("\n"),
+      })
+
+      const tail = await getTail({
+        claudeConfigDir: dir,
+        id: "  tail-session  ",
+      })
+      expect(tail).toEqual({
+        availability: "available",
+        backend: { id: "claude", label: "Claude Code" },
+        jumpHint: false,
+        items: [
+          {
+            kind: "tool",
+            name: "Bash",
+            status: "failed",
+            at: "2026-08-18T12:00:05.000Z",
+          },
+          {
+            kind: "assistant_text",
+            text: "tests failed",
+            truncated: false,
+            at: "2026-08-18T12:00:06.000Z",
+          },
+        ],
+      })
+      expect(JSON.stringify(tail)).not.toContain("PAYLOAD_MUST_NOT_APPEAR")
+      expect(JSON.stringify(tail)).not.toContain("bun test")
+      expect(JSON.stringify(tail)).not.toContain("old harness prompt")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("returns empty tail with jumpHint when the latest turn has no activity", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claude-session-"))
+    try {
+      writeTranscript({
+        claudeConfigDir: dir,
+        project: "-work-repo",
+        sessionId: "empty-turn",
+        jsonl: [
+          userPromptLine({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            text: "implement",
+          }),
+          assistantTextLine({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            text: "done",
+          }),
+          userPromptLine({
+            timestamp: "2026-08-18T12:00:03.000Z",
+            text: "review in children",
+          }),
+        ].join("\n"),
+      })
+
+      const tail = await getTail({
+        claudeConfigDir: dir,
+        id: "empty-turn",
+      })
+      expect(tail.availability).toBe("available")
+      expect(tail.items).toEqual([])
+      expect(tail.jumpHint).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("returns the last 20 activity items of the latest turn", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claude-session-"))
+    try {
+      const lines = [
+        userPromptLine({
+          timestamp: "2026-08-18T12:00:00.000Z",
+          text: "implement",
+        }),
+      ]
+      for (let index = 1; index <= 25; index += 1) {
+        const second = String(index).padStart(2, "0")
+        lines.push(
+          assistantToolUseLine({
+            timestamp: `2026-08-18T12:00:${second}.000Z`,
+            id: `toolu_${index}`,
+            name: `tool-${index}`,
+            command: "secret-arg",
+          }),
+          userToolResultLine({
+            timestamp: `2026-08-18T12:00:${second}.500Z`,
+            toolUseId: `toolu_${index}`,
+            content: "secret-output",
+          }),
+        )
+      }
+      writeTranscript({
+        claudeConfigDir: dir,
+        project: "-work-repo",
+        sessionId: "long-turn",
+        jsonl: lines.join("\n"),
+      })
+
+      const tail = await getTail({
+        claudeConfigDir: dir,
+        id: "long-turn",
+      })
+      expect(tail.items).toHaveLength(20)
+      expect(tail.items[0]).toEqual({
+        kind: "tool",
+        name: "tool-6",
+        status: "completed",
+        at: "2026-08-18T12:00:06.000Z",
+      })
+      expect(tail.items[19]).toEqual({
+        kind: "tool",
+        name: "tool-25",
+        status: "completed",
+        at: "2026-08-18T12:00:25.000Z",
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("truncates assistant text at 2k characters", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claude-session-"))
+    try {
+      writeTranscript({
+        claudeConfigDir: dir,
+        project: "-work-repo",
+        sessionId: "long-text",
+        jsonl: [
+          userPromptLine({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            text: "summarize",
+          }),
+          assistantTextLine({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            text: "a".repeat(2050),
+          }),
+        ].join("\n"),
+      })
+
+      await expect(
+        getTail({ claudeConfigDir: dir, id: "long-text" }),
+      ).resolves.toMatchObject({
+        availability: "available",
+        items: [
+          {
+            kind: "assistant_text",
+            text: "a".repeat(2000),
+            truncated: true,
+            at: "2026-08-18T12:00:02.000Z",
+          },
+        ],
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("does not include child Session or subagent activity", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claude-session-"))
+    try {
+      const mainPath = writeTranscript({
+        claudeConfigDir: dir,
+        project: "-work-repo",
+        sessionId: "parent-session",
+        jsonl: [
+          userPromptLine({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            text: "implement",
+          }),
+          assistantTextLine({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            text: "parent done",
+          }),
+          userPromptLine({
+            timestamp: "2026-08-18T12:00:03.000Z",
+            text: "review in children",
+          }),
+          assistantTextLine({
+            timestamp: "2026-08-18T12:00:04.000Z",
+            text: "sidechain leak",
+            isSidechain: true,
+          }),
+          assistantTextLine({
+            timestamp: "2026-08-18T12:00:05.000Z",
+            text: "nested subagent leak",
+            parentToolUseId: "toolu_parent",
+          }),
+        ].join("\n"),
+      })
+      const subagentPath = join(
+        mainPath,
+        "..",
+        "parent-session",
+        "subagents",
+        "worker.jsonl",
+      )
+      mkdirSync(join(subagentPath, ".."), { recursive: true })
+      writeFileSync(
+        subagentPath,
+        assistantTextLine({
+          timestamp: "2026-08-18T12:00:06.000Z",
+          text: "child is reviewing",
+          isSidechain: true,
+        }),
+      )
+
+      const tail = await getTail({
+        claudeConfigDir: dir,
+        id: "parent-session",
+      })
+      expect(tail).toEqual({
+        availability: "available",
+        backend: { id: "claude", label: "Claude Code" },
+        jumpHint: true,
+        items: [],
+      })
+      expect(JSON.stringify(tail)).not.toContain("child is reviewing")
+      expect(JSON.stringify(tail)).not.toContain("sidechain leak")
+      expect(JSON.stringify(tail)).not.toContain("nested subagent leak")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("keeps MISSING and UNAVAILABLE instead of failing the tail read", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claude-session-"))
+    try {
+      writeTranscript({
+        claudeConfigDir: dir,
+        project: "-other-project",
+        sessionId: "foreign-session",
+        jsonl: "",
+      })
+      await expect(
+        getTail({ claudeConfigDir: dir, id: "wanted-session" }),
+      ).resolves.toEqual({
+        availability: "missing",
+        backend: { id: "claude", label: "Claude Code" },
+        items: [],
+        jumpHint: false,
+      })
+
+      writeTranscript({
+        claudeConfigDir: dir,
+        project: "-project-a",
+        sessionId: "duplicated-session",
+        jsonl: "",
+      })
+      writeTranscript({
+        claudeConfigDir: dir,
+        project: "-project-b",
+        sessionId: "duplicated-session",
+        jsonl: "",
+      })
+      await expect(
+        getTail({ claudeConfigDir: dir, id: "duplicated-session" }),
+      ).resolves.toEqual({
+        availability: "unavailable",
+        backend: { id: "claude", label: "Claude Code" },
+        items: [],
+        jumpHint: false,
+      })
+
+      mkdirSync(join(dir, "projects", "-work-repo", "corrupt-session.jsonl"), {
+        recursive: true,
+      })
+      await expect(
+        getTail({ claudeConfigDir: dir, id: "corrupt-session" }),
+      ).resolves.toEqual({
+        availability: "unavailable",
+        backend: { id: "claude", label: "Claude Code" },
+        items: [],
+        jumpHint: false,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("reads Session token usage without fetching the tail", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "claude-session-"))
+    try {
+      const sessionId = "usage-without-tail"
+      const mainPath = writeTranscript({
+        claudeConfigDir: dir,
+        project: "-work-repo",
+        sessionId,
+        jsonl: [
+          assistantLine({
+            timestamp: "2026-08-18T12:00:01.000Z",
+            model: "claude-sonnet-5",
+            usage: {
+              input_tokens: 10,
+              output_tokens: 4,
+              cache_read_input_tokens: 30,
+              cache_creation_input_tokens: 5,
+            },
+          }),
+          userPromptLine({
+            timestamp: "2026-08-18T12:00:02.000Z",
+            text: "review in children",
+          }),
+        ].join("\n"),
+      })
+      const subagentPath = join(
+        mainPath,
+        "..",
+        sessionId,
+        "subagents",
+        "worker.jsonl",
+      )
+      mkdirSync(join(subagentPath, ".."), { recursive: true })
+      writeFileSync(
+        subagentPath,
+        assistantLine({
+          timestamp: "2026-08-18T12:00:03.000Z",
+          model: "claude-haiku-4-5-20251001",
+          usage: {
+            input_tokens: 2,
+            output_tokens: 11,
+          },
+        }),
+      )
+
+      const session = await getSession({ claudeConfigDir: dir, id: sessionId })
+      expect(session).toMatchObject({
+        availability: "available",
+        tokens: {
+          input: 12,
+          output: 15,
+          reasoning: 0,
+          cacheRead: 30,
+          cacheWrite: 5,
+        },
+      })
+      await expect(
+        getTail({ claudeConfigDir: dir, id: sessionId }),
+      ).resolves.toMatchObject({
+        availability: "available",
+        items: [],
+        jumpHint: true,
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })
