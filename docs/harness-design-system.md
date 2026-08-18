@@ -407,9 +407,11 @@ not pure white, not brushed metal. No radius, no offset shadow.
   extends to this single-column surface; no lane columns here.
 - **Archive body**: `--panel`, 1.5px ink border (no top), 0.8rem padding,
   0.6rem row gap.
-- **Rows**: hard-bordered cards sharing the **repos** type + shell language
-  (1.1rem padding, brushed-metal light fill / `--panel` dark).
-  - *Complete* — 6px Merged line bar (`inset`, halo in dark). **No COMPLETE
+- **Rows**: hard-bordered cards sharing Kanban lane chrome (2px ink stroke
+  on all four sides, `--ticket-fill` parchment) and the **repos** type
+  scale (1.1rem padding).
+  - *Complete* — 2px ink border on all four sides (same weight as the
+    Kanban board’s outer left/right; no Merged left bar). **No COMPLETE
     stamp** — Complete is the page's default; only exceptions are stamped.
   - *Abandoned* — dashed `--ink-faint` border, ghosted title (`--ink-dim`),
     dashed ABANDONED stamp.

@@ -36,7 +36,7 @@ export type CompletedWorkItemIssueLookup = {
  * Completed Work Item archive row for the historical Completed page
  * (`docs/harness-design-system.md` §4.5, wayfinder #698 prototype).
  *
- * Complete rows: 6px Merged line bar, no stamp. Abandoned rows: dashed border,
+ * Complete rows: 2px ink border on all sides, no stamp. Abandoned rows: dashed border,
  * ghosted title, dashed ABANDONED stamp. Footer carries lane-coloured archive
  * legs (BUILD / REVIEW / PR|MR) that expand to fine-grained lifecycle chips
  * (same pattern as Kanban earlier-lane summaries). The forge change-request
@@ -123,12 +123,7 @@ export function CompletedWorkItemRow({
   )
 
   return (
-    <li
-      className={cx(
-        ui.archiveRow,
-        abandoned ? ui.archiveRowAbandoned : ui.archiveRowComplete,
-      )}
-    >
+    <li className={cx(ui.archiveRow, abandoned && ui.archiveRowAbandoned)}>
       <div className={ui.archiveRowTop}>
         <p className={ui.archiveRepo} title={repositoryLabel}>
           {repositoryLabel}
