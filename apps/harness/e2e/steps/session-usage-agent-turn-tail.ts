@@ -54,6 +54,18 @@ const idleAgentTurnTail = {
   items: [],
 } as const
 
+const unsupportedTailSession = {
+  id: TELEMETRY_FIXTURE.codexMissingSessionId,
+  availability: "MISSING",
+  backend: { id: "codex", label: "Codex Build" },
+  model: null,
+  tokens: null,
+  cost: null,
+  createdAt: null,
+  updatedAt: null,
+  agentTurnTailSupported: false,
+} as const
+
 const installIdleTailRoute = async (page: Page) => {
   await page.unroute("**/graphql").catch(() => {})
   await page.route("**/graphql", async (route) => {
@@ -94,6 +106,47 @@ const installIdleTailRoute = async (page: Page) => {
     await route.continue()
   })
 }
+
+When(
+  "I open Session usage for a Session whose Agent Backend cannot serve a tail",
+  async ({ page }) => {
+    await page.unroute("**/graphql").catch(() => {})
+    await page.route("**/graphql", async (route) => {
+      const request = route.request()
+      if (request.method() !== "POST") {
+        await route.continue()
+        return
+      }
+      let query = ""
+      try {
+        const body = request.postDataJSON() as {
+          query?: string
+        }
+        query = body.query ?? ""
+      } catch {
+        await route.continue()
+        return
+      }
+      if (isSessionUsageQuery(query)) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ data: { session: unsupportedTailSession } }),
+        })
+        return
+      }
+      await route.continue()
+    })
+    await page.goto(
+      `/session/${TELEMETRY_FIXTURE.codexMissingWorkItemId}/telemetry`,
+    )
+    const dialog = sessionUsageDialog(page)
+    await expect(dialog).toBeVisible({ timeout: 15_000 })
+    await expect(dialog.getByText("Loading usage…")).toHaveCount(0, {
+      timeout: 30_000,
+    })
+  },
+)
 
 When(
   "I open Session usage for the idle OpenCode Session from Pipeline",

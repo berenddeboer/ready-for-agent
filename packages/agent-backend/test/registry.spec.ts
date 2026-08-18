@@ -109,7 +109,7 @@ describe("Agent Backend registry", () => {
     const codex = getBuiltInAgentBackend(AGENT_BACKEND_IDS.codex)
     expect(codex).toBeDefined()
     expect(capabilitySupported(codex!, "SessionTelemetry")).toBe(true)
-    expect(capabilitySupported(codex!, "AgentTurnTail")).toBe(false)
+    expect(capabilitySupported(codex!, "AgentTurnTail")).toBe(true)
     expect(capabilitySupported(codex!, "KeymaxxerMcp")).toBe(false)
 
     const claude = getBuiltInAgentBackend(AGENT_BACKEND_IDS.claude)
