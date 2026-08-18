@@ -17,7 +17,10 @@ const routeTreeSource = () =>
 const jobsSwitcherSource = () =>
   readFileSync(join(import.meta.dir, "../src/jobs-view-switcher.tsx"), "utf8")
 
-describe("/settings route (issue #840)", () => {
+const navSource = () =>
+  readFileSync(join(import.meta.dir, "../src/harness-settings-nav.ts"), "utf8")
+
+describe("/settings route (issues #840 / #1146)", () => {
   test("is a dedicated TanStack file route over the Pipeline background", () => {
     const source = settingsSource()
     expect(source).toContain('createFileRoute("/settings")')
@@ -34,12 +37,26 @@ describe("/settings route (issue #840)", () => {
     expect(source).toContain("'/settings': typeof SettingsRoute")
   })
 
-  test("explicit openers push /settings with in-app origin state", () => {
+  test("explicit openers mask /settings over the current runtime surface", () => {
+    const nav = navSource()
+    expect(nav).toContain("openHarnessSettings")
+    expect(nav).toContain('to: "."')
+    expect(nav).toContain("mask:")
+    expect(nav).toContain('to: "/settings"')
+    expect(nav).toContain("unmaskOnReload: true")
+    expect(nav).toContain("markHarnessSettingsOpenedFromInApp")
+    expect(nav).toContain("harnessSettings")
+    expect(nav).toContain('kind: "in-app-origin"')
+    expect(nav).toContain("search: (prev) => prev")
+    expect(nav).toContain("resetScroll: false")
+
     const source = rootSource()
-    expect(source).toContain('to: "/settings"')
-    expect(source).toContain('kind: "in-app-origin"')
-    expect(source).toContain("harnessSettings")
-    expect(source).toContain("search: (prev) => prev")
+    expect(source).toContain("openHarnessSettings")
+    expect(source).not.toContain('to: "/settings"')
+    const settingsChrome = source.slice(
+      source.indexOf("function SettingsChrome"),
+    )
+    expect(settingsChrome).toContain("maskedLocation")
   })
 
   test("automatic open stays local-only and yields to other routed dialogs", () => {
@@ -69,8 +86,8 @@ describe("/settings route (issue #840)", () => {
     expect(source).toContain("replace: true")
     expect(source).toContain("dismissSettings")
     // Reload must not treat restored history state alone as in-app origin.
-    expect(source).toContain("settingsOpenedFromInAppThisSessionRef")
-    expect(source).toContain("settingsOpenedFromInAppThisSessionRef.current &&")
+    expect(source).toContain("wasHarnessSettingsOpenedFromInApp")
+    expect(source).toContain("wasHarnessSettingsOpenedFromInApp() &&")
   })
 
   test("blocks navigation while Save is pending", () => {

@@ -122,8 +122,8 @@ describe("Harness settings Agent Backend change", () => {
     )
     expect(prepare).toContain("void models.refetch()")
     expect(prepare).toContain("void backendStatus.refetch()")
-    // Explicit openers still prepare then push `/settings` (issue #840).
-    expect(source).toContain('to: "/settings"')
+    // Explicit openers still prepare then mask `/settings` (issues #840 / #1146).
+    expect(source).toContain("openHarnessSettings")
     expect(source).toContain("prepareSettingsSession()")
   })
 })

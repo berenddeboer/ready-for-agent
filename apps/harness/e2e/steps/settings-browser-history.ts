@@ -1,5 +1,6 @@
 /**
- * Playwright-BDD steps for routed Harness Settings history (issue #840).
+ * Playwright-BDD steps for routed Harness Settings history
+ * (issues #840 / #1146).
  */
 import { type Page, expect } from "@playwright/test"
 import {
@@ -263,6 +264,36 @@ Then(
     await expect(input).not.toHaveValue(draft)
     // Default concurrency is 2 agent turns in a fresh harness.
     await expect(input).toHaveValue("2")
+  },
+)
+
+Then(
+  "the Pipeline blank slate remains visible under the dialog",
+  async ({ page }) => {
+    await expect(settingsDialog(page)).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "No repositories configured" }),
+    ).toBeVisible()
+    await expect(
+      page.getByRole("region", { name: "Add a repository" }),
+    ).toBeVisible()
+  },
+)
+
+Then("Completed remains visible under the dialog", async ({ page }) => {
+  await expect(settingsDialog(page)).toBeVisible()
+  await expect(
+    page.getByRole("navigation", { name: "Completed work items pagination" }),
+  ).toBeVisible()
+})
+
+Then(
+  "Completed page 2 remains visible under the Harness settings dialog",
+  async ({ page }) => {
+    await expect(settingsDialog(page)).toBeVisible()
+    await expect(
+      page.getByRole("navigation", { name: "Completed work items pagination" }),
+    ).toContainText("Page 2 of")
   },
 )
 

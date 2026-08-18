@@ -8,6 +8,7 @@ import {
   isRepositorySettingsPathFor,
   isSessionTelemetryPath,
   jobsViewForPath,
+  markHarnessSettingsOpenedFromInApp,
   markRepositorySettingsOpenedFromInApp,
   markSessionTelemetryOpenedFromInApp,
   parseRepositorySettingsRepositoryId,
@@ -15,6 +16,7 @@ import {
   readHarnessSettingsHistoryState,
   readRepositorySettingsHistoryState,
   readSessionTelemetryHistoryState,
+  wasHarnessSettingsOpenedFromInApp,
   wasRepositorySettingsOpenedFromInAppThisDocument,
   wasSessionTelemetryOpenedFromInApp,
 } from "../src/routed-dialog.ts"
@@ -86,6 +88,11 @@ describe("routed dialog path helpers (issues #840 / #841)", () => {
         sessionTelemetry: { kind: "other" },
       }),
     ).toBeUndefined()
+  })
+
+  test("document-session flag tracks explicit Harness Settings opens", () => {
+    markHarnessSettingsOpenedFromInApp()
+    expect(wasHarnessSettingsOpenedFromInApp()).toBe(true)
   })
 
   test("document-session flag tracks explicit Session Telemetry opens", () => {
