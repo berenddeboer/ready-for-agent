@@ -91,9 +91,9 @@ export type ImplementWithProfileInput = {
   readonly reviewThinkingLevel: string | null
 }
 
-/** GraphQL `implementWith` options. The dialog always submits both values. */
+/** GraphQL `implementWith` options. The dialog always submits a concrete pin. */
 type ImplementWithOptionsInput = {
-  readonly autoMerge: boolean
+  readonly mergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
   readonly implementLocally: boolean
 }
 

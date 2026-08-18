@@ -101,32 +101,41 @@ describe("decodeImplementWithProfile", () => {
 describe("decodeImplementWithOptions", () => {
   it("treats omitted options as repository-inherited remote behavior", () => {
     expect(decodeImplementWithOptions()).toEqual({
-      autoMergeOverride: null,
+      mergePolicy: null,
       implementLocally: false,
     })
     expect(decodeImplementWithOptions({})).toEqual({
-      autoMergeOverride: null,
+      mergePolicy: null,
       implementLocally: false,
     })
   })
 
-  it("persists concrete Auto-merge values and the local inspection pause", () => {
+  it("persists a concrete Merge Policy pin and the local inspection pause", () => {
     expect(
       decodeImplementWithOptions({
-        autoMerge: true,
+        mergePolicy: "classify",
         implementLocally: true,
       }),
     ).toEqual({
-      autoMergeOverride: true,
+      mergePolicy: "classify",
       implementLocally: true,
     })
     expect(
       decodeImplementWithOptions({
-        autoMerge: false,
+        mergePolicy: "off",
         implementLocally: false,
       }),
     ).toEqual({
-      autoMergeOverride: false,
+      mergePolicy: "off",
+      implementLocally: false,
+    })
+    expect(
+      decodeImplementWithOptions({
+        mergePolicy: "always",
+        implementLocally: false,
+      }),
+    ).toEqual({
+      mergePolicy: "always",
       implementLocally: false,
     })
   })

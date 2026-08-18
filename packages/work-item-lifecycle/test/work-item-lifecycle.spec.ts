@@ -3055,6 +3055,75 @@ describe("WorkItemLifecycle", () => {
         )
       })
 
+      it("pin off requires a human even when the live Repository Merge Policy is always", async () => {
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () => Effect.succeed(watchResult("no_checks")),
+          mergePr: () =>
+            Effect.die("Merge PR must not run for a pinned off Work Item"),
+        }
+        const { afterWatch } = await runWatchToDeadline(
+          steps,
+          ({ repository, createdId }) =>
+            Effect.gen(function* () {
+              yield* setWorkItemAutoMergeOverride(createdId, false)
+              yield* setRepositoryMergePolicy(repository, "always")
+            }),
+        )
+        expect(afterWatch._tag).toBe("processed")
+        if (afterWatch._tag === "processed") {
+          expect(afterWatch.workItem.state).toBe("decide_pr_merge")
+          expect(afterWatch.workItem.mergeMode).toBe("ordinary")
+          expect(afterWatch.workItem.autoMergeOverride).toBe(false)
+        }
+      })
+
+      it("pin classify runs Decide PR Merge even when the live Repository Merge Policy is always", async () => {
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () => Effect.succeed(watchResult("succeeded")),
+          mergePr: () =>
+            Effect.die("Merge PR must not run for a pinned classify Work Item"),
+        }
+        const { afterWatch } = await runWatchToDeadline(
+          steps,
+          ({ repository, createdId }) =>
+            Effect.gen(function* () {
+              yield* setWorkItemAutoMergeOverride(createdId, true)
+              yield* setRepositoryMergePolicy(repository, "always")
+            }),
+        )
+        expect(afterWatch._tag).toBe("processed")
+        if (afterWatch._tag === "processed") {
+          expect(afterWatch.workItem.state).toBe("decide_pr_merge")
+          expect(afterWatch.workItem.mergeMode).toBe("ordinary")
+          expect(afterWatch.workItem.autoMergeOverride).toBe(true)
+        }
+      })
+
+      it("pin always skips Decide even when the live Repository Merge Policy is classify", async () => {
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () => Effect.succeed(watchResult("no_checks")),
+          decidePrMerge: () =>
+            Effect.die("Decide PR Merge must not run for a pinned Always"),
+          mergePr: () => Effect.succeed({ _tag: "merged" as const }),
+        }
+        const { afterWatch } = await runWatchToDeadline(
+          steps,
+          ({ repository, createdId }) =>
+            Effect.gen(function* () {
+              yield* setWorkItemMergeModeAlways(createdId)
+              yield* setRepositoryMergePolicy(repository, "classify")
+            }),
+        )
+        expect(afterWatch._tag).toBe("processed")
+        if (afterWatch._tag === "processed") {
+          expect(afterWatch.workItem.state).toBe("merge_pr")
+          expect(afterWatch.workItem.mergeMode).toBe("always")
+        }
+      })
+
       it("flipping live always to off does not revoke a Merge Mode Always pin", async () => {
         const steps: LifecycleStepsShape = {
           ...successfulSteps,

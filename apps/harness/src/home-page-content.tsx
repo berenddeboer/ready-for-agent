@@ -295,7 +295,7 @@ export type WorkItem = {
     reviewThinkingLevel: string | null
   } | null
   mergeMode?: "ORDINARY" | "ALWAYS"
-  autoMergeOverride?: boolean | null
+  mergePolicy?: "OFF" | "CLASSIFY" | "ALWAYS" | null
   pauseBeforeStep?: WorkItemState | null
   state: WorkItemState
   stateLabel: string
@@ -345,7 +345,7 @@ const workItemFields = {
     reviewThinkingLevel: true,
   },
   mergeMode: true,
-  autoMergeOverride: true,
+  mergePolicy: true,
   pauseBeforeStep: true,
   state: true,
   stateLabel: true,
@@ -3326,7 +3326,7 @@ function RepositoryIssueRow({
             reviewModel: repository.reviewModel,
             reviewThinkingLevel: repository.reviewThinkingLevel,
           }}
-          initialAutoMerge={repository.mergePolicy !== "OFF"}
+          initialMergePolicy={repository.mergePolicy}
           submitPending={implementWith.isPending}
           submitError={
             implementWith.isError

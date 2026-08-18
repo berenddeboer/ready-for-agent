@@ -47,6 +47,7 @@ import {
   WorkItemLifecycle,
   type WorkItemRecord,
   type WorkItemsListKind,
+  decodeWorkItemMergePolicy,
   filterWorkItemsByListKind,
   isJobsCompletedWorkItemState,
   isJobsWorkingWorkItem,
@@ -393,7 +394,7 @@ type ImplementWithArgs = ImplementNowArgs & {
     readonly reviewThinkingLevel?: string | null
   }
   options?: {
-    readonly autoMerge: boolean
+    readonly mergePolicy: GraphqlMergePolicy
     readonly implementLocally: boolean
   } | null
 }
@@ -1246,6 +1247,13 @@ export const createGraphqlApi = <R>(
             toGraphqlBackend(resolveWorkItemBackend(workItem.agentBackend)),
           mergeMode: (workItem: { mergeMode: string }) =>
             workItem.mergeMode.toUpperCase(),
+          mergePolicy: (workItem: WorkItemRecord) => {
+            const pin = decodeWorkItemMergePolicy({
+              workItemMergeMode: workItem.mergeMode,
+              workItemAutoMergeOverride: workItem.autoMergeOverride,
+            })
+            return pin === null ? null : toGraphqlMergePolicy(pin)
+          },
           executionProfile: (workItem: WorkItemRecord) => {
             const profile = workItem.executionProfile
             if (profile === null || profile === undefined) return null
@@ -1261,8 +1269,6 @@ export const createGraphqlApi = <R>(
               reviewThinkingLevel: selection.reviewThinkingLevel,
             }
           },
-          autoMergeOverride: (workItem: WorkItemRecord) =>
-            workItem.autoMergeOverride ?? null,
           pauseBeforeStep: (workItem: WorkItemRecord) =>
             workItem.pauseBeforeStep == null
               ? null
@@ -2111,7 +2117,9 @@ export const createGraphqlApi = <R>(
                   args.options === undefined || args.options === null
                     ? undefined
                     : {
-                        autoMerge: args.options.autoMerge,
+                        mergePolicy: fromGraphqlMergePolicy(
+                          args.options.mergePolicy,
+                        ),
                         implementLocally: args.options.implementLocally,
                       },
                 )

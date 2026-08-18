@@ -11,6 +11,8 @@ import {
 import {
   type LifecycleStepContext,
   decidePrMerge,
+  decodeWorkItemMergePolicy,
+  encodeWorkItemMergePolicyPin,
   makeWorkItemId,
   parseDecidePrMergeResult,
   resolveEffectiveMergePolicy,
@@ -100,6 +102,55 @@ describe("parseDecidePrMergeResult", () => {
         "READY_FOR_AGENT_RESULT: CLANKER_MERGE\nAdditional output",
       ),
     ).toBeNull()
+  })
+})
+
+describe("decodeWorkItemMergePolicy", () => {
+  it("decodes existing overrides and Merge Mode Always as classify / off / inherit / always", () => {
+    expect(
+      decodeWorkItemMergePolicy({
+        workItemMergeMode: "ordinary",
+        workItemAutoMergeOverride: true,
+      }),
+    ).toBe("classify")
+    expect(
+      decodeWorkItemMergePolicy({
+        workItemMergeMode: "ordinary",
+        workItemAutoMergeOverride: false,
+      }),
+    ).toBe("off")
+    expect(
+      decodeWorkItemMergePolicy({
+        workItemMergeMode: "ordinary",
+        workItemAutoMergeOverride: null,
+      }),
+    ).toBeNull()
+    expect(
+      decodeWorkItemMergePolicy({
+        workItemMergeMode: "always",
+        workItemAutoMergeOverride: null,
+      }),
+    ).toBe("always")
+    expect(
+      decodeWorkItemMergePolicy({
+        workItemMergeMode: "always",
+        workItemAutoMergeOverride: false,
+      }),
+    ).toBe("always")
+  })
+})
+
+describe("encodeWorkItemMergePolicyPin", () => {
+  it("encodes each pin so decode recovers it", () => {
+    for (const pin of ["always", "classify", "off"] as const) {
+      const encoded = encodeWorkItemMergePolicyPin(pin)
+      expect(
+        decodeWorkItemMergePolicy({
+          workItemMergeMode: encoded.mergeMode,
+          workItemAutoMergeOverride: encoded.autoMergeOverride,
+        }),
+      ).toBe(pin)
+    }
   })
 })
 

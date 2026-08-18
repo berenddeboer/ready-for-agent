@@ -71,9 +71,9 @@ export const StepRunStatus = Schema.Literals([
 export type StepRunStatus = typeof StepRunStatus.Type
 
 /**
- * Durable Work Item merge policy.
- * `ordinary` follows Repository Auto-merge and Decide PR Merge.
- * `always` skips Decide PR Merge after pre-merge lifecycle settles.
+ * Derived skip-Decide signal for a Work Item Merge Policy pin.
+ * `always` iff the pin is `always`; `ordinary` covers unset, `off`, and
+ * `classify`.
  */
 export const MergeMode = Schema.Literals(["ordinary", "always"])
 export type MergeMode = typeof MergeMode.Type
@@ -147,12 +147,15 @@ export interface WorkItemRecord {
    */
   readonly waitingForBlockers: boolean
   /**
-   * Durable merge policy. `always` skips Decide PR Merge; `ordinary` does not.
+   * Derived skip-Decide signal. `always` iff the Work Item Merge Policy pin
+   * is `always`; otherwise `ordinary`.
    */
   readonly mergeMode: MergeMode
   /**
-   * Work Item Auto-merge override. Null follows the live Repository
-   * Auto-merge setting; true/false is a concrete Decide PR Merge policy.
+   * Storage encoding of a Work Item Merge Policy pin together with
+   * `mergeMode`. Null with ordinary Merge Mode means inherit; true is
+   * pin `classify`; false is pin `off`. Merge Mode `always` is pin
+   * `always` regardless of this field.
    */
   readonly autoMergeOverride: boolean | null
   /** Whether this Work Item currently occupies a Worker Slot (Admitted). */

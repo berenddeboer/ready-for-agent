@@ -37,7 +37,7 @@ export type ImplementWithIssueDialogProps = {
   readonly repositoryId: string
   readonly initialBackendId: string
   readonly repositoryPrefs: ExecutionProfilePrefSource
-  readonly initialAutoMerge: boolean
+  readonly initialMergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
   readonly submitPending: boolean
   readonly submitError: string | null
   readonly onSubmit: (input: ImplementWithSubmitInput) => void
@@ -54,7 +54,7 @@ export function ImplementWithIssueDialog({
   repositoryId,
   initialBackendId,
   repositoryPrefs,
-  initialAutoMerge,
+  initialMergePolicy,
   submitPending,
   submitError,
   onSubmit,
@@ -251,7 +251,7 @@ export function ImplementWithIssueDialog({
       initialDraft={initialDraft}
       catalog={catalog}
       prefsError={prefsError}
-      initialAutoMerge={initialAutoMerge}
+      initialMergePolicy={initialMergePolicy}
       submitPending={submitPending}
       submitError={submitError}
       onSubmit={onSubmit}

@@ -1,4 +1,5 @@
 import { InvalidExecutionProfileError } from "./errors.js"
+import type { MergePolicy } from "./merge-policy.js"
 import type { AgentModelSelection } from "./resolve-agent-models.js"
 
 /** Review selection stored as intent, not only resolved values. */
@@ -35,23 +36,22 @@ export type ImplementWithProfileInput = {
 }
 
 /**
- * Separate Implement With options. Omission keeps repository-inherited
- * Auto-merge and the remote path. Concrete values persist a Work Item
- * Auto-merge override and optional local inspection pause.
+ * Separate Implement With options. Omission leaves Work Item Merge Policy
+ * unset (inherit) and keeps the remote path. A concrete `mergePolicy` is
+ * a durable pin; Implement Locally is an optional inspection pause.
  */
 export type ImplementWithOptionsInput = {
-  readonly autoMerge?: boolean
+  readonly mergePolicy?: MergePolicy
   readonly implementLocally?: boolean
 }
 
 export const decodeImplementWithOptions = (
   options?: ImplementWithOptionsInput,
 ): {
-  readonly autoMergeOverride: boolean | null
+  readonly mergePolicy: MergePolicy | null
   readonly implementLocally: boolean
 } => ({
-  autoMergeOverride:
-    options?.autoMerge === undefined ? null : options.autoMerge,
+  mergePolicy: options?.mergePolicy ?? null,
   implementLocally: options?.implementLocally === true,
 })
 

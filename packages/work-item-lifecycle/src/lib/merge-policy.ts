@@ -19,18 +19,17 @@ export const decodeWorkItemAutoMergeOverride = (
   value === null || value === undefined ? null : Boolean(value)
 
 /**
- * Effective Merge Policy at merge-routing time.
- * A concrete pin wins; an unset pin inherits the live Repository policy.
+ * Decode the stored Merge Mode + override columns as a Work Item Merge
+ * Policy pin. `null` means inherit the live Repository Merge Policy.
  *
  * Encoding: Merge Mode `always` = pin `always`; ordinary + override true =
  * pin `classify`; ordinary + override false = pin `off`; ordinary +
  * override null = unpinned.
  */
-export const resolveEffectiveMergePolicy = (input: {
-  readonly repositoryMergePolicy: MergePolicy
+export const decodeWorkItemMergePolicy = (input: {
   readonly workItemMergeMode: string | null | undefined
   readonly workItemAutoMergeOverride: boolean | number | null | undefined
-}): MergePolicy => {
+}): MergePolicy | null => {
   if (decodeMergeMode(input.workItemMergeMode) === "always") {
     return "always"
   }
@@ -43,8 +42,36 @@ export const resolveEffectiveMergePolicy = (input: {
   if (override === true) {
     return "classify"
   }
-  return input.repositoryMergePolicy
+  return null
 }
+
+/** Persist a concrete Work Item Merge Policy pin in the existing columns. */
+export const encodeWorkItemMergePolicyPin = (
+  pin: MergePolicy,
+): {
+  readonly mergeMode: "ordinary" | "always"
+  readonly autoMergeOverride: boolean | null
+} => {
+  switch (pin) {
+    case "always":
+      return { mergeMode: "always", autoMergeOverride: null }
+    case "classify":
+      return { mergeMode: "ordinary", autoMergeOverride: true }
+    case "off":
+      return { mergeMode: "ordinary", autoMergeOverride: false }
+  }
+}
+
+/**
+ * Effective Merge Policy at merge-routing time.
+ * A concrete pin wins; an unset pin inherits the live Repository policy.
+ */
+export const resolveEffectiveMergePolicy = (input: {
+  readonly repositoryMergePolicy: MergePolicy
+  readonly workItemMergeMode: string | null | undefined
+  readonly workItemAutoMergeOverride: boolean | number | null | undefined
+}): MergePolicy =>
+  decodeWorkItemMergePolicy(input) ?? input.repositoryMergePolicy
 
 export const nextStateAfterReadyForMerge = (
   policy: MergePolicy,

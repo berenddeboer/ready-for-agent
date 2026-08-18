@@ -656,6 +656,7 @@ describe("implementWith", () => {
           repo.id,
           9,
           sameAsBuildProfile,
+          { mergePolicy: "always", implementLocally: false },
         )
         const paused = yield* lifecycle.pause(created.id)
         expect(paused.executionProfile).toEqual({
@@ -663,8 +664,10 @@ describe("implementWith", () => {
           build: { model: "build-model", thinkingLevel: "high" },
           review: { kind: "same_as_build" },
         })
+        expect(paused.mergeMode).toBe("always")
         const started = yield* lifecycle.start(paused.id)
         expect(started.executionProfile).toEqual(paused.executionProfile)
+        expect(started.mergeMode).toBe("always")
         const queuedCreate = started.stepRuns.find(
           (run) => run.step === "create_worktree" && run.status === "queued",
         )
@@ -678,6 +681,7 @@ describe("implementWith", () => {
         expect(afterFail._tag).toBe("processed")
         const retried = yield* lifecycle.retry(created.id)
         expect(retried.executionProfile).toEqual(paused.executionProfile)
+        expect(retried.mergeMode).toBe("always")
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer(), failingInstall))),
     )
   })
@@ -783,13 +787,14 @@ describe("implementWith", () => {
           build: { model: "build-model", thinkingLevel: "high" },
           review: { kind: "same_as_build" },
         })
+        expect(waiter.mergeMode).toBe("ordinary")
         expect(waiter.autoMergeOverride).toBeNull()
         expect(waiter.pauseBeforeStep).toBeNull()
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
     )
   })
 
-  it("omitted options keep repository-inherited Auto-merge and the remote path", async () => {
+  it("omitted options leave Work Item Merge Policy unset and keep the remote path", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = yield* DbService
@@ -811,16 +816,18 @@ describe("implementWith", () => {
           20,
           sameAsBuildProfile,
         )
+        expect(created.mergeMode).toBe("ordinary")
         expect(created.autoMergeOverride).toBeNull()
         expect(created.pauseBeforeStep).toBeNull()
         const reloaded = yield* lifecycle.getWorkItem(created.id)
+        expect(reloaded.mergeMode).toBe("ordinary")
         expect(reloaded.autoMergeOverride).toBeNull()
         expect(reloaded.pauseBeforeStep).toBeNull()
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
     )
   })
 
-  it("persists a concrete Auto-merge override that can disagree with the Repository setting", async () => {
+  it("persists a concrete off pin that can disagree with the Repository Merge Policy", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = yield* DbService
@@ -852,18 +859,19 @@ describe("implementWith", () => {
           repo.id,
           21,
           sameAsBuildProfile,
-          { autoMerge: false, implementLocally: false },
+          { mergePolicy: "off", implementLocally: false },
         )
         expect(created.autoMergeOverride).toBe(false)
         expect(created.mergeMode).toBe("ordinary")
         expect(created.pauseBeforeStep).toBeNull()
         const reloaded = yield* lifecycle.getWorkItem(created.id)
         expect(reloaded.autoMergeOverride).toBe(false)
+        expect(reloaded.mergeMode).toBe("ordinary")
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
     )
   })
 
-  it("keeps a checked Auto-merge override after Repository Auto-merge is disabled", async () => {
+  it("keeps a classify pin after the Repository Merge Policy is turned off", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = yield* DbService
@@ -895,7 +903,7 @@ describe("implementWith", () => {
           repo.id,
           22,
           sameAsBuildProfile,
-          { autoMerge: true, implementLocally: false },
+          { mergePolicy: "classify", implementLocally: false },
         )
         yield* db.updateRepositorySettings({
           repositoryId: repo.id,
@@ -910,7 +918,51 @@ describe("implementWith", () => {
         })
         const reloaded = yield* lifecycle.getWorkItem(created.id)
         expect(reloaded.autoMergeOverride).toBe(true)
+        expect(reloaded.mergeMode).toBe("ordinary")
         expect(reloaded.executionProfile).toEqual(created.executionProfile)
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
+  it("persists an always pin that skips Classify even when the Repository is off", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-always-pin.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* db.updateRepositorySettings({
+          repositoryId: repo.id,
+          paused: true,
+          defaultModel: null,
+          defaultThinkingLevel: null,
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          mergePolicy: "off",
+          includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 25)
+        const created = yield* lifecycle.implementWith(
+          repo.id,
+          25,
+          sameAsBuildProfile,
+          { mergePolicy: "always", implementLocally: false },
+        )
+        expect(created.mergeMode).toBe("always")
+        expect(created.autoMergeOverride).toBeNull()
+        const reloaded = yield* lifecycle.getWorkItem(created.id)
+        expect(reloaded.mergeMode).toBe("always")
+        expect(reloaded.autoMergeOverride).toBeNull()
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
     )
   })
@@ -936,9 +988,10 @@ describe("implementWith", () => {
           repo.id,
           23,
           explicitReviewProfile,
-          { autoMerge: true, implementLocally: true },
+          { mergePolicy: "classify", implementLocally: true },
         )
         expect(created.executionProfile).not.toBeNull()
+        expect(created.mergeMode).toBe("ordinary")
         expect(created.autoMergeOverride).toBe(true)
         expect(created.pauseBeforeStep).toBe("commit")
         let stepRunId = created.stepRuns[0]!.id
@@ -977,6 +1030,7 @@ describe("implementWith", () => {
         expect(started.paused).toBe(false)
         expect(started.state).toBe("commit")
         expect(started.executionProfile).toEqual(created.executionProfile)
+        expect(started.mergeMode).toBe("ordinary")
         expect(started.autoMergeOverride).toBe(true)
         expect(started.stepRuns.at(-1)).toMatchObject({
           step: "commit",
@@ -1015,7 +1069,7 @@ describe("implementWith", () => {
           repo.id,
           24,
           sameAsBuildProfile,
-          { autoMerge: false, implementLocally: true },
+          { mergePolicy: "off", implementLocally: true },
         )
         const afterCreate = yield* advanceToQueued(
           lifecycle,
@@ -1047,6 +1101,7 @@ describe("implementWith", () => {
         expect(started.paused).toBe(false)
         expect(started.state).toBe("close_issue")
         expect(started.executionProfile).toEqual(created.executionProfile)
+        expect(started.mergeMode).toBe("ordinary")
         expect(started.autoMergeOverride).toBe(false)
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer(), noChangeSteps))),
     )
