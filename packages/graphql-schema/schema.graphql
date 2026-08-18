@@ -203,15 +203,16 @@ input ExplicitWorkItemExecutionProfileInput {
 
 """
 Implement With options, separate from the Explicit Work Item Execution Profile.
-Omission keeps repository-inherited Auto-merge and the remote path. The Harness
-dialog always submits both concrete checkbox values.
+Omission leaves Work Item Merge Policy unset and keeps the remote path. The
+Harness dialog always submits a concrete Merge Policy pin.
 """
 input ImplementWithOptionsInput {
   """
-  Concrete Work Item Auto-merge override. True permits risk-assessed Auto-merge
-  for this Work Item; false requires human merge. Distinct from Merge Mode Always.
+  Concrete Work Item Merge Policy pin. OFF requires a human merge, CLASSIFY
+  runs Decide PR Merge, ALWAYS skips Classify. Survives later Repository
+  Merge Policy flips.
   """
-  autoMerge: Boolean!
+  mergePolicy: MergePolicy!
   """
   When true, run through Review then pause before Commit (or Close Issue for a
   No-Change Outcome) so the operator can inspect the worktree.
@@ -880,9 +881,8 @@ enum MergePolicy {
 }
 
 """
-Durable Work Item merge policy.
-ORDINARY follows the live Repository Merge Policy and Decide PR Merge.
-ALWAYS skips Decide PR Merge after pre-merge checks settle.
+Derived skip-Decide signal. ALWAYS iff the Work Item Merge Policy pin is
+ALWAYS. ORDINARY covers an unset pin, OFF, and CLASSIFY.
 """
 enum MergeMode {
   ORDINARY
@@ -936,7 +936,8 @@ type WorkItem {
   """
   agentBackend: AgentBackendInfo!
   """
-  Durable merge policy for this Work Item.
+  Derived skip-Decide signal. ALWAYS iff the Work Item Merge Policy pin is
+  ALWAYS; otherwise ORDINARY (unset, OFF, or CLASSIFY).
   """
   mergeMode: MergeMode!
   """
@@ -945,11 +946,11 @@ type WorkItem {
   """
   executionProfile: WorkItemExecutionProfile
   """
-  Work Item Auto-merge override. Null follows the live Repository Merge
-  Policy. True permits risk-assessed Classify; false requires human merge.
-  Distinct from Merge Mode Always.
+  Work Item Merge Policy pin. Null inherits the live Repository Merge Policy
+  at merge-routing time. A concrete pin is the effective policy regardless of
+  later Repository flips.
   """
-  autoMergeOverride: Boolean
+  mergePolicy: MergePolicy
   """
   When set, successful advancement into this Lifecycle Step pauses the Work
   Item so the operator can inspect local work.

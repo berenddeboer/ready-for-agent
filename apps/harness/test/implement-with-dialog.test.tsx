@@ -124,7 +124,7 @@ const baseProps = {
     reviewSameAsBuild: true as const,
   },
   catalog: readyCatalog,
-  initialAutoMerge: false,
+  initialMergePolicy: "OFF",
   submitPending: false,
   submitError: null,
   onSubmit: () => undefined,
@@ -150,23 +150,31 @@ describe("ImplementWithDialog copy and catalog", () => {
     expect(html).not.toContain("Recheck")
     expect(html).not.toContain('href="/settings"')
     expect(html).not.toContain("<datalist")
-    expect(html).toContain('name="autoMerge"')
+    expect(html).toContain('name="mergePolicy"')
+    expect(html).toContain("Off — human merge")
+    expect(html).toContain("Classify — risk-assessed merge")
+    expect(html).toContain("Always — skip classify")
     expect(html).toContain('name="implementLocally"')
     expect(html).toContain("inspect the worktree")
+    expect(html).not.toContain("Auto-merge")
   })
 
-  test("initializes Auto-merge from the Repository setting and Implement locally to false", () => {
-    const disabled = renderToStaticMarkup(
-      <ImplementWithDialog {...baseProps} initialAutoMerge={false} />,
+  test("prefills Merge Policy from the live Repository and Implement locally to false", () => {
+    const off = renderToStaticMarkup(
+      <ImplementWithDialog {...baseProps} initialMergePolicy="OFF" />,
     )
-    expect(disabled).toContain('name="autoMerge"')
-    expect(disabled).not.toMatch(/name="autoMerge"[^>]*checked/)
-    expect(disabled).not.toMatch(/name="implementLocally"[^>]*checked/)
-    const enabled = renderToStaticMarkup(
-      <ImplementWithDialog {...baseProps} initialAutoMerge={true} />,
+    expect(off).toContain('name="mergePolicy"')
+    expect(off).toContain('value="OFF" selected=""')
+    expect(off).not.toMatch(/name="implementLocally"[^>]*checked/)
+    const classify = renderToStaticMarkup(
+      <ImplementWithDialog {...baseProps} initialMergePolicy="CLASSIFY" />,
     )
-    expect(enabled).toMatch(/name="autoMerge"[^>]*checked/)
-    expect(enabled).not.toMatch(/name="implementLocally"[^>]*checked/)
+    expect(classify).toContain('value="CLASSIFY" selected=""')
+    expect(classify).not.toMatch(/name="implementLocally"[^>]*checked/)
+    const always = renderToStaticMarkup(
+      <ImplementWithDialog {...baseProps} initialMergePolicy="ALWAYS" />,
+    )
+    expect(always).toContain('value="ALWAYS" selected=""')
   })
 
   test("starts from pre-filled build values and Same as build", () => {
@@ -287,9 +295,9 @@ describe("ImplementWithDialog copy and catalog", () => {
     expect(html).toContain('value="high"')
     expect(html).toContain(">Same as build</option>")
     expect(html).not.toMatch(/type="submit"[^>]*\sdisabled=/)
-    expect(html).toMatch(/name="autoMerge"/)
+    expect(html).toMatch(/name="mergePolicy"/)
     expect(html).toMatch(/name="implementLocally"/)
-    expect(html).not.toMatch(/name="autoMerge"[^>]*checked/)
+    expect(html).toContain('value="OFF" selected=""')
     expect(html).not.toMatch(/name="implementLocally"[^>]*checked/)
   })
 
@@ -516,6 +524,17 @@ describe("ImplementWithDialog interaction", () => {
     return select as HTMLSelectElement
   }
 
+  test("submitting the prefilled Merge Policy always writes that pin", () => {
+    const { node, submitted } = render({ initialMergePolicy: "ALWAYS" })
+    flushSync(() => {
+      fire(node.querySelector("form"), "submit")
+    })
+    expect(submitted.at(-1)?.options).toEqual({
+      mergePolicy: "ALWAYS",
+      implementLocally: false,
+    })
+  })
+
   test("submitting unchanged pre-filled values still creates an explicit profile", () => {
     const { node, submitted } = render()
     const form = node.querySelector("form")
@@ -532,7 +551,7 @@ describe("ImplementWithDialog interaction", () => {
           reviewModel: null,
           reviewThinkingLevel: null,
         },
-        options: { autoMerge: false, implementLocally: false },
+        options: { mergePolicy: "OFF", implementLocally: false },
       },
     ])
   })
@@ -562,7 +581,7 @@ describe("ImplementWithDialog interaction", () => {
         reviewModel: "haiku",
         reviewThinkingLevel: "low",
       },
-      options: { autoMerge: false, implementLocally: false },
+      options: { mergePolicy: "OFF", implementLocally: false },
     })
   })
 
@@ -580,7 +599,7 @@ describe("ImplementWithDialog interaction", () => {
     expect(submitted.at(-1)?.profile.buildThinkingLevel).toBeNull()
   })
 
-  test("pending submission disables Implement, Cancel, and the option checkboxes", () => {
+  test("pending submission disables Implement, Cancel, Merge Policy, and Implement locally", () => {
     const { node } = render({ submitPending: true })
     const implement = [...node.querySelectorAll("button")].find(
       (button) => button.textContent === "Starting...",
@@ -588,15 +607,15 @@ describe("ImplementWithDialog interaction", () => {
     const cancel = [...node.querySelectorAll("button")].find(
       (button) => button.textContent === "Cancel",
     )
-    const autoMerge = node.querySelector(
-      'input[name="autoMerge"]',
-    ) as HTMLInputElement | null
+    const mergePolicy = node.querySelector(
+      'select[name="mergePolicy"]',
+    ) as HTMLSelectElement | null
     const implementLocally = node.querySelector(
       'input[name="implementLocally"]',
     ) as HTMLInputElement | null
     expect(implement?.disabled).toBe(true)
     expect(cancel?.disabled).toBe(true)
-    expect(autoMerge?.disabled).toBe(true)
+    expect(mergePolicy?.disabled).toBe(true)
     expect(implementLocally?.disabled).toBe(true)
   })
 
@@ -677,7 +696,7 @@ describe("ImplementWithDialog interaction", () => {
         reviewModel: null,
         reviewThinkingLevel: null,
       },
-      options: { autoMerge: false, implementLocally: false },
+      options: { mergePolicy: "OFF", implementLocally: false },
     })
     rerender({
       backendId: "grok",
@@ -700,25 +719,26 @@ describe("ImplementWithDialog interaction", () => {
         reviewModel: null,
         reviewThinkingLevel: null,
       },
-      options: { autoMerge: false, implementLocally: false },
+      options: { mergePolicy: "OFF", implementLocally: false },
     })
   })
 
   test("toggling options does not change model drafts and survives backend switching", () => {
-    const { node, submitted, rerender } = render({ initialAutoMerge: true })
-    const autoMerge = node.querySelector(
-      'input[name="autoMerge"]',
-    ) as HTMLInputElement
+    const { node, submitted, rerender } = render({
+      initialMergePolicy: "CLASSIFY",
+    })
+    const mergePolicy = selectNamed(node, "mergePolicy")
     const implementLocally = node.querySelector(
       'input[name="implementLocally"]',
     ) as HTMLInputElement
-    expect(autoMerge.checked).toBe(true)
+    expect(mergePolicy.value).toBe("CLASSIFY")
     expect(implementLocally.checked).toBe(false)
     flushSync(() => {
-      toggleCheckbox(autoMerge, false)
+      mergePolicy.value = "OFF"
+      fire(mergePolicy, "change")
       toggleCheckbox(implementLocally, true)
     })
-    expect(autoMerge.checked).toBe(false)
+    expect(selectNamed(node, "mergePolicy").value).toBe("OFF")
     expect(implementLocally.checked).toBe(true)
     rerender({
       backendId: "grok",
@@ -728,12 +748,9 @@ describe("ImplementWithDialog interaction", () => {
         buildThinkingLevel: "low",
         reviewSameAsBuild: true,
       },
-      initialAutoMerge: true,
+      initialMergePolicy: "CLASSIFY",
     })
-    expect(
-      (node.querySelector('input[name="autoMerge"]') as HTMLInputElement)
-        .checked,
-    ).toBe(false)
+    expect(selectNamed(node, "mergePolicy").value).toBe("OFF")
     expect(
       (node.querySelector('input[name="implementLocally"]') as HTMLInputElement)
         .checked,
@@ -742,7 +759,7 @@ describe("ImplementWithDialog interaction", () => {
       fire(node.querySelector("form"), "submit")
     })
     expect(submitted.at(-1)?.options).toEqual({
-      autoMerge: false,
+      mergePolicy: "OFF",
       implementLocally: true,
     })
     rerender({
@@ -754,29 +771,28 @@ describe("ImplementWithDialog interaction", () => {
         warnings: [],
       },
     })
-    expect(
-      (node.querySelector('input[name="autoMerge"]') as HTMLInputElement)
-        .checked,
-    ).toBe(false)
+    expect(selectNamed(node, "mergePolicy").value).toBe("OFF")
     expect(
       (node.querySelector('input[name="implementLocally"]') as HTMLInputElement)
         .checked,
     ).toBe(true)
   })
 
-  test("reopening restores Auto-merge from the current Repository value", () => {
+  test("reopening restores Merge Policy from the live Repository value", () => {
     const first = renderToStaticMarkup(
-      <ImplementWithDialog {...baseProps} initialAutoMerge={true} />,
+      <ImplementWithDialog {...baseProps} initialMergePolicy="ALWAYS" />,
     )
-    expect(first).toMatch(/name="autoMerge"[^>]*checked/)
+    expect(first).toContain('name="mergePolicy"')
+    expect(first).toContain('value="ALWAYS" selected=""')
     const second = renderToStaticMarkup(
-      <ImplementWithDialog {...baseProps} initialAutoMerge={false} />,
+      <ImplementWithDialog {...baseProps} initialMergePolicy="OFF" />,
     )
-    expect(second).not.toMatch(/name="autoMerge"[^>]*checked/)
+    expect(second).toContain('name="mergePolicy"')
+    expect(second).toContain('value="OFF" selected=""')
     expect(second).not.toMatch(/name="implementLocally"[^>]*checked/)
   })
 
-  test("catalog pinning does not reset Auto-merge or Implement locally", () => {
+  test("catalog pinning does not reset Merge Policy or Implement locally", () => {
     const firstReady = {
       kind: "READY",
       models: catalogModels,
@@ -793,7 +809,7 @@ describe("ImplementWithDialog interaction", () => {
       previewFailed: false,
       pin,
     })
-    const { node, rerender } = render({ initialAutoMerge: true })
+    const { node, rerender } = render({ initialMergePolicy: "ALWAYS" })
     const implementLocally = node.querySelector(
       'input[name="implementLocally"]',
     ) as HTMLInputElement
@@ -809,10 +825,7 @@ describe("ImplementWithDialog interaction", () => {
         warnings: [],
       },
     })
-    expect(
-      (node.querySelector('input[name="autoMerge"]') as HTMLInputElement)
-        .checked,
-    ).toBe(true)
+    expect(selectNamed(node, "mergePolicy").value).toBe("ALWAYS")
     expect(
       (node.querySelector('input[name="implementLocally"]') as HTMLInputElement)
         .checked,

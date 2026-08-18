@@ -48,7 +48,7 @@ export type ImplementWithDialogProps = {
   readonly initialDraft: ExecutionProfileDraft
   readonly catalog: ImplementWithCatalog
   readonly prefsError?: string | null
-  readonly initialAutoMerge: boolean
+  readonly initialMergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
   readonly submitPending: boolean
   readonly submitError: string | null
   readonly onSubmit: (input: ImplementWithSubmitInput) => void
@@ -127,7 +127,7 @@ export function ImplementWithDialog({
   initialDraft,
   catalog,
   prefsError = null,
-  initialAutoMerge,
+  initialMergePolicy,
   submitPending,
   submitError,
   onSubmit,
@@ -141,7 +141,7 @@ export function ImplementWithDialog({
       models: catalog.models,
     }),
   )
-  const [autoMerge, setAutoMerge] = useState(initialAutoMerge)
+  const [mergePolicy, setMergePolicy] = useState(initialMergePolicy)
   const [implementLocally, setImplementLocally] = useState(false)
   const titleId = `implement-with-title-${issueNumber}`
   const backendLabel =
@@ -267,7 +267,7 @@ export function ImplementWithDialog({
         draft,
       }),
       options: {
-        autoMerge,
+        mergePolicy,
         implementLocally,
       },
     })
@@ -546,20 +546,33 @@ export function ImplementWithDialog({
               </h3>
               <span className={ui.dialogSectionMeta}>This Work Item</span>
             </div>
-            <label className={ui.dialogCheck}>
-              <input
-                type="checkbox"
-                className={ui.dialogCheckInput}
-                name="autoMerge"
-                checked={autoMerge}
+            <label className={ui.dialogField}>
+              Merge Policy
+              <select
+                name="mergePolicy"
+                className={ui.dialogInput}
+                value={mergePolicy}
                 disabled={submitPending}
-                onChange={(event) => setAutoMerge(event.target.checked)}
-              />
-              Auto-merge
-              <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
-                Permit risk-assessed Auto-merge for this Work Item. Unchecked
-                requires a human merge even if Repository Auto-merge later
-                changes.
+                onChange={(event) => {
+                  const next = event.target.value
+                  if (
+                    next === "OFF" ||
+                    next === "CLASSIFY" ||
+                    next === "ALWAYS"
+                  ) {
+                    setMergePolicy(next)
+                  }
+                }}
+              >
+                <option value="OFF">Off — human merge</option>
+                <option value="CLASSIFY">Classify — risk-assessed merge</option>
+                <option value="ALWAYS">Always — skip classify</option>
+              </select>
+              <span className={ui.dialogFieldHint}>
+                Off requires a human merge. Classify runs Decide PR Merge.
+                Always skips Classify and treats missing CI as green after the
+                Check-Start Deadline. This pin stays on the Work Item even if
+                Repository Merge Policy later changes.
               </span>
             </label>
             <label className={ui.dialogCheck}>

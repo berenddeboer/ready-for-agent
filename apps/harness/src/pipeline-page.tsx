@@ -227,7 +227,7 @@ export function AddRepositoryGuidance({
           defaultThinkingLevel: true,
           reviewModel: true,
           reviewThinkingLevel: true,
-          autoMerge: true,
+          mergePolicy: true,
           includeAllIssueAuthors: true,
           waitForReadyForReviewChecks: true,
           issuesReconciledAt: true,

@@ -4572,6 +4572,7 @@ describe("GraphQL API", () => {
           expect(options).toBeUndefined()
           return Effect.succeed({
             ...profiled,
+            mergeMode: "ordinary" as const,
             autoMergeOverride: null,
             pauseBeforeStep: null,
           })
@@ -4599,7 +4600,8 @@ describe("GraphQL API", () => {
               reviewModel
               reviewThinkingLevel
             }
-            autoMergeOverride
+            mergePolicy
+            mergeMode
             pauseBeforeStep
           }
         }`,
@@ -4627,14 +4629,64 @@ describe("GraphQL API", () => {
             reviewModel: "build-model",
             reviewThinkingLevel: "high",
           },
-          autoMergeOverride: null,
+          mergePolicy: null,
+          mergeMode: "ORDINARY",
           pauseBeforeStep: null,
         },
       },
     })
   })
 
-  test("implementWith forwards concrete options for both boolean values", async () => {
+  test("implementWith no longer exposes autoMerge or autoMergeOverride", async () => {
+    const unknownOptions = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementWith(
+          $repositoryId: ID!
+          $issueNumber: Int!
+          $profile: ExplicitWorkItemExecutionProfileInput!
+          $options: ImplementWithOptionsInput
+        ) {
+          implementWith(
+            repositoryId: $repositoryId
+            issueNumber: $issueNumber
+            profile: $profile
+            options: $options
+          ) { id }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+          profile: {
+            agentBackendId: "opencode",
+            buildModel: "build-model",
+            reviewSameAsBuild: true,
+          },
+          options: { autoMerge: true, implementLocally: false },
+        },
+      }),
+    )
+    const unknownOptionsPayload = (await unknownOptions.json()) as {
+      errors?: ReadonlyArray<{ message: string }>
+    }
+    expect(unknownOptionsPayload.errors?.[0]?.message).toMatch(/autoMerge/)
+
+    const unknownField = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!) {
+          workItems(repositoryId: $repositoryId) { autoMergeOverride }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+    const unknownFieldPayload = (await unknownField.json()) as {
+      errors?: ReadonlyArray<{ message: string }>
+    }
+    expect(unknownFieldPayload.errors?.[0]?.message).toMatch(
+      /autoMergeOverride/,
+    )
+  })
+
+  test("implementWith forwards a concrete Merge Policy pin", async () => {
     const profiled = {
       ...workItem,
       executionProfile: {
@@ -4642,6 +4694,7 @@ describe("GraphQL API", () => {
         build: { model: "build-model", thinkingLevel: null },
         review: { kind: "same_as_build" as const },
       },
+      mergeMode: "ordinary" as const,
       autoMergeOverride: true,
       pauseBeforeStep: "commit",
     } as WorkItemRecord
@@ -4653,7 +4706,7 @@ describe("GraphQL API", () => {
       {
         implementWith: (_repositoryId, _issueNumber, _profile, options) => {
           expect(options).toEqual({
-            autoMerge: true,
+            mergePolicy: "classify",
             implementLocally: true,
           })
           return Effect.succeed(profiled)
@@ -4674,7 +4727,8 @@ describe("GraphQL API", () => {
             profile: $profile
             options: $options
           ) {
-            autoMergeOverride
+            mergePolicy
+            mergeMode
             pauseBeforeStep
           }
         }`,
@@ -4686,21 +4740,22 @@ describe("GraphQL API", () => {
             buildModel: "build-model",
             reviewSameAsBuild: true,
           },
-          options: { autoMerge: true, implementLocally: true },
+          options: { mergePolicy: "CLASSIFY", implementLocally: true },
         },
       }),
     )
     expect(await response.json()).toEqual({
       data: {
         implementWith: {
-          autoMergeOverride: true,
+          mergePolicy: "CLASSIFY",
+          mergeMode: "ORDINARY",
           pauseBeforeStep: "COMMIT",
         },
       },
     })
   })
 
-  test("implementWith projects a false Auto-merge override without a pause target", async () => {
+  test("implementWith projects an always pin as Merge Mode Always", async () => {
     const profiled = {
       ...workItem,
       executionProfile: {
@@ -4708,7 +4763,8 @@ describe("GraphQL API", () => {
         build: { model: "build-model", thinkingLevel: null },
         review: { kind: "same_as_build" as const },
       },
-      autoMergeOverride: false,
+      mergeMode: "always" as const,
+      autoMergeOverride: null,
       pauseBeforeStep: null,
     } as WorkItemRecord
     await runtime.dispose()
@@ -4719,7 +4775,7 @@ describe("GraphQL API", () => {
       {
         implementWith: (_repositoryId, _issueNumber, _profile, options) => {
           expect(options).toEqual({
-            autoMerge: false,
+            mergePolicy: "always",
             implementLocally: false,
           })
           return Effect.succeed(profiled)
@@ -4740,7 +4796,8 @@ describe("GraphQL API", () => {
             profile: $profile
             options: $options
           ) {
-            autoMergeOverride
+            mergePolicy
+            mergeMode
             pauseBeforeStep
           }
         }`,
@@ -4752,14 +4809,84 @@ describe("GraphQL API", () => {
             buildModel: "build-model",
             reviewSameAsBuild: true,
           },
-          options: { autoMerge: false, implementLocally: false },
+          options: { mergePolicy: "ALWAYS", implementLocally: false },
         },
       }),
     )
     expect(await response.json()).toEqual({
       data: {
         implementWith: {
-          autoMergeOverride: false,
+          mergePolicy: "ALWAYS",
+          mergeMode: "ALWAYS",
+          pauseBeforeStep: null,
+        },
+      },
+    })
+  })
+
+  test("implementWith projects an off pin without a pause target", async () => {
+    const profiled = {
+      ...workItem,
+      executionProfile: {
+        agentBackend: "opencode",
+        build: { model: "build-model", thinkingLevel: null },
+        review: { kind: "same_as_build" as const },
+      },
+      mergeMode: "ordinary" as const,
+      autoMergeOverride: false,
+      pauseBeforeStep: null,
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementWith: (_repositoryId, _issueNumber, _profile, options) => {
+          expect(options).toEqual({
+            mergePolicy: "off",
+            implementLocally: false,
+          })
+          return Effect.succeed(profiled)
+        },
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementWith(
+          $repositoryId: ID!
+          $issueNumber: Int!
+          $profile: ExplicitWorkItemExecutionProfileInput!
+          $options: ImplementWithOptionsInput
+        ) {
+          implementWith(
+            repositoryId: $repositoryId
+            issueNumber: $issueNumber
+            profile: $profile
+            options: $options
+          ) {
+            mergePolicy
+            mergeMode
+            pauseBeforeStep
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+          profile: {
+            agentBackendId: "opencode",
+            buildModel: "build-model",
+            reviewSameAsBuild: true,
+          },
+          options: { mergePolicy: "OFF", implementLocally: false },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        implementWith: {
+          mergePolicy: "OFF",
+          mergeMode: "ORDINARY",
           pauseBeforeStep: null,
         },
       },
@@ -7458,7 +7585,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $issueNumber: Int!) {
           implementAllWithAutoMerge(repositoryId: $repositoryId, issueNumber: $issueNumber) {
-            id issueNumber mergeMode state status statusLabel
+            id issueNumber mergeMode mergePolicy state status statusLabel
           }
         }`,
         variables: {
@@ -7475,6 +7602,7 @@ describe("GraphQL API", () => {
             id: actionableChild.id,
             issueNumber: 43,
             mergeMode: "ALWAYS",
+            mergePolicy: "ALWAYS",
             state: "CREATE_WORKTREE",
             status: "RUNNING",
             statusLabel: "Running",
@@ -7483,6 +7611,7 @@ describe("GraphQL API", () => {
             id: blockedChild.id,
             issueNumber: 44,
             mergeMode: "ALWAYS",
+            mergePolicy: "ALWAYS",
             state: "CREATE_WORKTREE",
             status: "WAITING_FOR_BLOCKERS",
             statusLabel: "Waiting for blockers",

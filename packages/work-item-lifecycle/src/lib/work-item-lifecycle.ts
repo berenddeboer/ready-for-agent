@@ -117,6 +117,7 @@ import {
   decodeMergeMode,
   decodeMergePolicy,
   decodeWorkItemAutoMergeOverride,
+  encodeWorkItemMergePolicyPin,
   isAlwaysNoChecksCarveOut,
   isAutonomousMergePolicy,
   nextStateAfterReadyForMerge,
@@ -7200,10 +7201,18 @@ export const makeWorkItemLifecycleLive = (
             return yield* decoded
           }
           const options = decodeImplementWithOptions(optionsInput)
+          const pin =
+            options.mergePolicy === null
+              ? {
+                  mergeMode: "ordinary" as const,
+                  autoMergeOverride: null,
+                }
+              : encodeWorkItemMergePolicyPin(options.mergePolicy)
           return yield* createWorkItem(repositoryId, issueNumber, {
             pauseBeforeStep: options.implementLocally ? "commit" : null,
             executionProfile: decoded,
-            autoMergeOverride: options.autoMergeOverride,
+            mergeMode: pin.mergeMode,
+            autoMergeOverride: pin.autoMergeOverride,
           })
         },
       )
