@@ -1,6 +1,8 @@
 ---
 status: accepted
-amended-by: 0028
+amended-by:
+  - 0028
+  - 0059
 ---
 
 # Mark PR Ready for Review
@@ -9,7 +11,7 @@ After Watch PR Status Checks reports green checks, the Work Item advances to Mar
 
 ## Consequences
 
-- After success the Work Item advances to Decide PR Merge (see ADR 0015), not Complete.
-- Checks green and the draft PR ready for review are preconditions for the merge-risk decision, not the end of the lifecycle.
+- After success the Work Item advances to Merge PR when the effective Merge Policy is Always, or to Decide PR Merge otherwise (see ADR 0015 and ADR 0059), not Complete.
+- Checks green and the draft PR ready for review are preconditions for merge routing, not the end of the lifecycle.
 - The harness remains free of `gh` for this step; Keymaxxer injects `GITHUB_TOKEN` into a small bin that runs `GitHubServiceLive`, matching get-pr-check-status.
 - New Repository credentials still need Pull requests write so the mutation can succeed.

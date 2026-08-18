@@ -150,9 +150,11 @@ Notes on the modelling:
   disjoint, all twenty lifecycle values are pairwise disjoint, operational
   steps are disjoint from terminal states, and prose-fought distinctions are
   encoded as axioms: Repository `rfa:Paused` vs `rfa:PauseWorkItem`,
-  `rfa:WaitingForBlockers` vs `rfa:AdmittedWorkItem`, Repository
-  `rfa:AutoMerge` vs Work Item `rfa:MergeModeAlways`. A data graph that
-  conflates any of these becomes inconsistent (see
+  `rfa:WaitingForBlockers` vs `rfa:AdmittedWorkItem`, and the three Merge
+  Policy states (`rfa:MergePolicyOff`, `rfa:MergePolicyClassify`,
+  `rfa:MergePolicyAlways`). Merge Mode Always is the same Always as Merge
+  Policy `always` (`owl:equivalentClass`); they are not disjoint. A data
+  graph that conflates any of the disjoint pairs becomes inconsistent (see
   `fixtures/contradictory.ttl`).
 - **Provenance.** Execution concepts align with PROV-O so outcomes are
   attributable: a Step Run is a harness activity, an Agent Turn is an agent

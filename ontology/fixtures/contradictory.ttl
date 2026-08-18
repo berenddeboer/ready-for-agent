@@ -8,8 +8,8 @@ example:waiting-and-admitted
 example:paused-repository-action
   a rfa:Paused, rfa:PauseWorkItem .
 
-example:auto-merge-mode-always
-  a rfa:AutoMerge, rfa:MergeModeAlways .
+example:merge-policy-off-and-always
+  a rfa:MergePolicyOff, rfa:MergePolicyAlways .
 
 example:two-terminal-states
   a rfa:WorkItem, rfa:Complete, rfa:Failed ;
