@@ -55,7 +55,7 @@ import type {
 } from "./resolve-pr-merge-conflict.js"
 import type { ReviewResult } from "./review.js"
 import type { ReviewError } from "./review-errors.js"
-import type { WorkItemId } from "./types.js"
+import type { MergeMode, WorkItemId } from "./types.js"
 
 /**
  * Context supplied to every Lifecycle Step handler.
@@ -93,6 +93,11 @@ export interface LifecycleStepContext {
    * Work Item Auto-merge override. Null/omitted follows Repository Auto-merge.
    */
   readonly autoMergeOverride?: boolean | null
+  /**
+   * Durable Merge Mode. `always` is the Always pin and accepts post-deadline
+   * `no_checks` at Merge PR revalidation.
+   */
+  readonly mergeMode?: MergeMode
   readonly maxDuration?: Duration.Duration
 }
 

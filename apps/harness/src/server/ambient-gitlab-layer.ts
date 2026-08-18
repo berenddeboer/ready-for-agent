@@ -261,9 +261,9 @@ export const ambientGitLabLayer = (options: {
           ),
         ),
         mergePullRequest: Effect.fn("AmbientGitLab.mergePullRequest")(
-          (repository, headRefName) =>
+          (repository, headRefName, options) =>
             authenticated(repository.forgeHost, (service) =>
-              service.mergePullRequest(repository, headRefName),
+              service.mergePullRequest(repository, headRefName, options),
             ),
         ),
         ensureIssueCompletedWithSummary: Effect.fn(

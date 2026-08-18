@@ -2278,6 +2278,106 @@ describe("GitLab PR status checks and ready-for-review", () => {
     expect(putCount).toBe(0)
   })
 
+  test("mergePullRequest merges Always when no head pipeline is visible", async () => {
+    let putCount = 0
+    const service = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname.endsWith("/merge_requests") &&
+        url.search.includes("state=opened")
+      ) {
+        return json([{ iid: 12, draft: false }])
+      }
+      if (method === "GET" && url.pathname.endsWith("/merge_requests/12")) {
+        return json({
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "Ready",
+          sha: "abc123",
+          target_branch: "main",
+          detailed_merge_status: "mergeable",
+          merge_status: "can_be_merged",
+          has_conflicts: false,
+          head_pipeline: null,
+        })
+      }
+      if (method === "PUT") {
+        putCount += 1
+        return json({ iid: 12, state: "merged" })
+      }
+      throw new Error(`Unexpected: ${method} ${url.pathname}${url.search}`)
+    }) as typeof fetch)
+
+    expect(
+      await Effect.runPromise(
+        service.mergePullRequest(repository, "rfa/branch", {
+          acceptNoChecks: true,
+        }),
+      ),
+    ).toEqual({ _tag: "merged" })
+    expect(putCount).toBe(1)
+  })
+
+  test("mergePullRequest merges Always for skipped-only jobs", async () => {
+    let putCount = 0
+    const service = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname.endsWith("/merge_requests") &&
+        url.search.includes("state=opened")
+      ) {
+        return json([{ iid: 12, draft: false }])
+      }
+      if (method === "GET" && url.pathname.endsWith("/merge_requests/12")) {
+        return json({
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "Ready",
+          sha: "abc123",
+          target_branch: "main",
+          detailed_merge_status: "mergeable",
+          merge_status: "can_be_merged",
+          has_conflicts: false,
+          head_pipeline: { id: 1, status: "manual", sha: "abc123" },
+        })
+      }
+      if (method === "GET" && url.pathname.includes("/pipelines/1/jobs")) {
+        return json([
+          { id: 1, name: "test", status: "skipped", allow_failure: false },
+        ])
+      }
+      if (method === "GET" && url.pathname.includes("/bridges")) {
+        return json([])
+      }
+      if (method === "PUT") {
+        putCount += 1
+        return json({ iid: 12, state: "merged" })
+      }
+      throw new Error(`Unexpected: ${method} ${url.pathname}${url.search}`)
+    }) as typeof fetch)
+
+    expect(
+      await Effect.runPromise(
+        service.mergePullRequest(repository, "rfa/branch", {
+          acceptNoChecks: true,
+        }),
+      ),
+    ).toEqual({ _tag: "merged" })
+    expect(putCount).toBe(1)
+  })
+
   test.each([
     [
       "non-green pipeline",

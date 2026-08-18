@@ -6,6 +6,7 @@ import type {
 import type { GitHubServiceError } from "./errors.js"
 import type {
   GitHubRepository,
+  MergePullRequestOptions,
   MergePullRequestResult,
   PrStatusCheckDiagnostic,
   PrStatusCheckDiagnosticsOptions,
@@ -128,6 +129,7 @@ export interface GitHubServiceShape {
   readonly mergePullRequest: (
     repository: GitHubRepository,
     headRefName: string,
+    options?: MergePullRequestOptions,
   ) => Effect.Effect<MergePullRequestResult, GitHubServiceError>
   /**
    * Rerun an entire GitHub Actions workflow run (not failed-jobs-only).
