@@ -1039,6 +1039,44 @@ rfa:AgentTurn
   rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn for this concept."@en ;
 ] .
 
+rfa:AgentTurnTail
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent Turn Tail"@en ;
+  skos:definition "A bounded excerpt of recent activity in the latest Agent Turn of a Work Item's canonical Session: assistant text and tool names/status, without tool payloads or child Session activity. The Harness does not persist it."@en ;
+  skos:hiddenLabel "Session tail"@en, "transcript"@en, "conversation"@en, "Session Telemetry"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentTurnTail ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Session tail"@en ;
+  rfa:avoidanceRationale "the excerpt is the latest Agent Turn on the canonical Session, not an arbitrary slice of Session history"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentTurnTail ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "transcript"@en ;
+  rfa:avoidanceRationale "the Harness does not persist or reconstruct conversation history"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentTurnTail ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "conversation"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn Tail for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentTurnTail ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Session Telemetry"@en ;
+  rfa:avoidanceRationale "Session Telemetry is models, tokens, cost, and timestamps, not turn activity"@en ;
+] .
+
 rfa:InteractiveSessionContinuation
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Interactive Session Continuation"@en ;

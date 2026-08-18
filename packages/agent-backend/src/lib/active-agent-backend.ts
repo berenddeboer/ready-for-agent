@@ -2,6 +2,11 @@ import { Context, Effect, Layer, Ref, Result, Schema, Semaphore } from "effect"
 import type { AgentBackend, AgentBackendError } from "./agent-backend.js"
 import { AgentBackend as AgentBackendService } from "./agent-backend.js"
 import {
+  type AgentTurnTail,
+  missingAgentTurnTail,
+  unsupportedAgentTurnTail,
+} from "./agent-turn-tail.js"
+import {
   AgentBackendConfigError,
   isAgentBackendMalformedOutputError,
 } from "./errors.js"
@@ -100,6 +105,7 @@ export type AgentBackendTelemetry = {
   readonly getSession: (
     sessionId: string,
   ) => Effect.Effect<SessionTelemetry, never>
+  readonly getTail: (sessionId: string) => Effect.Effect<AgentTurnTail, never>
 }
 
 export type ResolvedAgentBackendRuntime = {
@@ -376,6 +382,10 @@ export type ActiveAgentBackendShape = {
     readonly backendId: string
     readonly sessionId: string | null
   }) => Effect.Effect<SessionTelemetry>
+  readonly getAgentTurnTail: (input: {
+    readonly backendId: string
+    readonly sessionId: string | null
+  }) => Effect.Effect<AgentTurnTail>
 }
 
 export class ActiveAgentBackend extends Context.Service<
@@ -433,6 +443,10 @@ export const ActiveAgentBackendLive = (
                       sessionId,
                       registration.descriptor,
                     ),
+                  ),
+                getTail: () =>
+                  Effect.succeed(
+                    unsupportedAgentTurnTail(registration.descriptor),
                   ),
               },
             } satisfies ResolvedAgentBackendRuntime)
@@ -963,6 +977,37 @@ export const ActiveAgentBackendLive = (
         return yield* runtime.telemetry.getSession(input.sessionId)
       })
 
+      const getAgentTurnTail = Effect.fn("ActiveAgentBackend.getAgentTurnTail")(
+        function* (input: {
+          readonly backendId: string
+          readonly sessionId: string | null
+        }) {
+          const registration =
+            getBuiltInAgentBackend(input.backendId) ??
+            resolveActiveRegistration(
+              isSelectableAgentBackendId(input.backendId)
+                ? input.backendId
+                : defaultAgentBackendId,
+            )
+          const backend = registration.descriptor
+          if (!capabilitySupported(registration, "AgentTurnTail")) {
+            return unsupportedAgentTurnTail(backend)
+          }
+          if (input.sessionId === null || input.sessionId.trim() === "") {
+            return missingAgentTurnTail(backend)
+          }
+          const state = yield* Ref.get(stateRef)
+          const entry = state.entries.get(registration.descriptor.id)
+          if (entry !== undefined) {
+            return yield* entry.telemetry.getTail(input.sessionId)
+          }
+          const runtime = yield* resolveOrUnavailable(
+            registration.descriptor.id,
+          )
+          return yield* runtime.telemetry.getTail(input.sessionId)
+        },
+      )
+
       const activeService = ActiveAgentBackend.of({
         listStatuses,
         getBackendStatus,
@@ -981,6 +1026,7 @@ export const ActiveAgentBackendLive = (
         continueTurn,
         inspectBackend,
         getSessionTelemetry,
+        getAgentTurnTail,
       })
 
       const agentBackendService = AgentBackendService.of({
@@ -1042,6 +1088,18 @@ export const ActiveAgentBackendLive = (
                 )
               }
               return entry.telemetry.getSession(sessionId)
+            }),
+          ),
+        getTail: (sessionId) =>
+          Ref.get(stateRef).pipe(
+            Effect.flatMap((state) => {
+              const entry = state.entries.get(state.proxyBackendId)
+              if (entry === undefined) {
+                return Effect.succeed(
+                  unsupportedAgentTurnTail(descriptorFor(state.proxyBackendId)),
+                )
+              }
+              return entry.telemetry.getTail(sessionId)
             }),
           ),
       })

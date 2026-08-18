@@ -15,8 +15,10 @@ import {
   type AgentBackendId,
   type AgentBackendRuntimeStatus,
   type AgentBackendStatus,
+  type AgentTurnTail,
   type SessionTelemetry,
   type SessionTelemetryAvailability,
+  capabilitySupported,
   getBuiltInAgentBackend,
   isSelectableAgentBackendId,
   listSelectableAgentBackendInfos,
@@ -220,7 +222,10 @@ const toGraphqlBackend = (backend: {
   label: backend.label,
 })
 
-const toGraphqlSession = (session: SessionTelemetry) => ({
+const toGraphqlSession = (
+  session: SessionTelemetry,
+  agentTurnTailSupported: boolean,
+) => ({
   id: session.id,
   availability: toGraphqlSessionAvailability(session.availability),
   backend: toGraphqlBackend(session.backend),
@@ -236,7 +241,40 @@ const toGraphqlSession = (session: SessionTelemetry) => ({
   cost: session.cost,
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
+  agentTurnTailSupported,
 })
+
+const toGraphqlAgentTurnTailItem = (item: AgentTurnTail["items"][number]) => {
+  if (item.kind === "assistant_text") {
+    return {
+      __typename: "AgentTurnTailAssistantText" as const,
+      at: item.at,
+      text: item.text,
+      truncated: item.truncated,
+    }
+  }
+  return {
+    __typename: "AgentTurnTailTool" as const,
+    at: item.at,
+    name: item.name,
+    status: item.status,
+  }
+}
+
+const toGraphqlAgentTurnTail = (tail: AgentTurnTail) => ({
+  availability: toGraphqlSessionAvailability(tail.availability),
+  backend: toGraphqlBackend(tail.backend),
+  items: tail.items.map(toGraphqlAgentTurnTailItem),
+  jumpHint: tail.jumpHint,
+})
+
+const agentTurnTailSupportedFor = (backendId: string): boolean => {
+  const registration = getBuiltInAgentBackend(backendId)
+  if (registration === undefined) {
+    return false
+  }
+  return capabilitySupported(registration, "AgentTurnTail")
+}
 
 const toGraphqlProvider = (
   provider: AgentBackendStatus["provider"] | null | undefined,
@@ -936,8 +974,38 @@ export const createGraphqlApi = <R>(
                   backendId: workItem.agentBackend,
                   sessionId: workItem.sessionId,
                 })
-                return toGraphqlSession(session)
+                return toGraphqlSession(
+                  session,
+                  agentTurnTailSupportedFor(workItem.agentBackend),
+                )
               }).pipe(Effect.withSpan("graphql-api.session")),
+              context,
+            ),
+          agentTurnTail: async (
+            _parent: unknown,
+            args: SessionArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                const workItem = yield* lifecycle
+                  .getWorkItem(args.workItemId)
+                  .pipe(
+                    Effect.catchTag("WorkItemNotFoundError", () =>
+                      Effect.succeed(null),
+                    ),
+                  )
+                if (workItem === null) {
+                  return null
+                }
+                const active = yield* ActiveAgentBackend
+                const tail = yield* active.getAgentTurnTail({
+                  backendId: workItem.agentBackend,
+                  sessionId: workItem.sessionId,
+                })
+                return toGraphqlAgentTurnTail(tail)
+              }).pipe(Effect.withSpan("graphql-api.agentTurnTail")),
               context,
             ),
           workItemBySessionId: async (

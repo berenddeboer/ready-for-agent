@@ -6,7 +6,7 @@
  * and Completed open the same path; this component only presents state.
  */
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useId, useRef } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { Banner } from "./banner.js"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
 import { cx, ui } from "./ui.js"
@@ -37,9 +37,38 @@ const sessionQuery = (workItemId: string) => ({
         cost: true,
         createdAt: true,
         updatedAt: true,
+        agentTurnTailSupported: true,
       },
     })
     return result.session
+  },
+})
+
+const agentTurnTailQuery = (workItemId: string) => ({
+  queryKey: ["agentTurnTail", workItemId] as const,
+  queryFn: async () => {
+    const result = await graphql.query({
+      agentTurnTail: {
+        __args: { workItemId },
+        availability: true,
+        backend: { id: true, label: true },
+        jumpHint: true,
+        items: {
+          __typename: true,
+          on_AgentTurnTailAssistantText: {
+            at: true,
+            text: true,
+            truncated: true,
+          },
+          on_AgentTurnTailTool: {
+            at: true,
+            name: true,
+            status: true,
+          },
+        },
+      },
+    })
+    return result.agentTurnTail
   },
 })
 
@@ -84,10 +113,21 @@ export function SessionUsageDialog({
   // coexists (tests, transitions). Root is the sole production owner.
   const titleId = `session-usage-title-${useId().replaceAll(":", "")}`
   const enabled = open && workItemId !== null
+  const [tailOpen, setTailOpen] = useState(false)
   const session = useQuery({
     ...sessionQuery(workItemId ?? ""),
     enabled,
   })
+  const tail = useQuery({
+    ...agentTurnTailQuery(workItemId ?? ""),
+    enabled: enabled && tailOpen,
+  })
+
+  useEffect(() => {
+    if (!open) {
+      setTailOpen(false)
+    }
+  }, [open])
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -108,6 +148,8 @@ export function SessionUsageDialog({
       ? sessionId
       : (session.data?.id ?? null)
   const showSessionId = displaySessionId !== null && displaySessionId.length > 0
+  const showTailAction =
+    showSessionId && session.data?.agentTurnTailSupported === true
 
   return (
     <dialog
@@ -253,8 +295,36 @@ export function SessionUsageDialog({
             </tbody>
           </table>
         )}
+        {tailOpen ? (
+          <AgentTurnTailPanel
+            isPending={tail.isPending}
+            isError={tail.isError}
+            data={tail.data}
+          />
+        ) : null}
       </div>
-      <div className={cx(ui.dialogFooter, ui.dialogFooterCompact)}>
+      <div
+        className={cx(
+          ui.dialogFooter,
+          ui.dialogFooterCompact,
+          showTailAction && "justify-between",
+        )}
+      >
+        {showTailAction ? (
+          <button
+            type="button"
+            className={ui.plateMini}
+            onClick={() => {
+              if (tailOpen) {
+                void tail.refetch()
+                return
+              }
+              setTailOpen(true)
+            }}
+          >
+            {tailOpen ? "Refresh" : "Show tail"}
+          </button>
+        ) : null}
         <button
           type="button"
           className={ui.plateMini}
@@ -266,5 +336,119 @@ export function SessionUsageDialog({
         </button>
       </div>
     </dialog>
+  )
+}
+
+function AgentTurnTailPanel({
+  isPending,
+  isError,
+  data,
+}: {
+  readonly isPending: boolean
+  readonly isError: boolean
+  readonly data:
+    | Awaited<ReturnType<ReturnType<typeof agentTurnTailQuery>["queryFn"]>>
+    | undefined
+}) {
+  if (isPending) {
+    return <p className={ui.dialogLoading}>Loading tail…</p>
+  }
+  if (isError) {
+    return (
+      <Banner
+        className={ui.bannerCompact}
+        tone="alarm"
+        tag="Error"
+        role="alert"
+      >
+        Could not load Agent Turn Tail. Try Refresh.
+      </Banner>
+    )
+  }
+  if (data === null || data === undefined) {
+    return (
+      <Banner
+        className={ui.bannerCompact}
+        tone="guidance"
+        tag="Session"
+        role="status"
+      >
+        Work Item not found.
+      </Banner>
+    )
+  }
+  if (data.availability === "UNSUPPORTED") {
+    return (
+      <Banner
+        className={ui.bannerCompact}
+        tone="guidance"
+        tag="Session"
+        role="status"
+      >
+        {data.backend.label} cannot serve a bounded Agent Turn Tail.
+      </Banner>
+    )
+  }
+  if (data.availability === "MISSING") {
+    return (
+      <Banner
+        className={ui.bannerCompact}
+        tone="guidance"
+        tag="Session"
+        role="status"
+      >
+        {data.backend.label} no longer has this Session locally. Tail cannot be
+        loaded.
+      </Banner>
+    )
+  }
+  if (data.availability === "UNAVAILABLE") {
+    return (
+      <Banner
+        className={ui.bannerCompact}
+        tone="guidance"
+        tag="Session"
+        role="status"
+      >
+        {data.backend.label} Agent Turn Tail is temporarily unavailable.
+      </Banner>
+    )
+  }
+  if (data.jumpHint || data.items.length === 0) {
+    return (
+      <Banner
+        className={ui.bannerCompact}
+        tone="guidance"
+        tag="Session"
+        role="status"
+      >
+        No recent activity on this Session. Child Sessions are not shown. Use
+        Jump.
+      </Banner>
+    )
+  }
+  return (
+    <ol className="m-0 grid max-h-64 list-none gap-2 overflow-y-auto p-0">
+      {data.items.map((item) => (
+        <li
+          key={`${item.__typename}-${item.at}-${item.__typename === "AgentTurnTailTool" ? item.name : item.text}`}
+          className="border border-line-ghost px-3 py-2"
+        >
+          <p className="m-0 font-mono text-[0.62rem] tracking-[0.08em] text-ink-faint uppercase">
+            {formatSessionInstant(item.at)}
+          </p>
+          {item.__typename === "AgentTurnTailTool" ? (
+            <p className="mt-1 mb-0 font-mono text-xs text-ink">
+              {item.name} ({item.status})
+            </p>
+          ) : (
+            <p className="mt-1 mb-0 font-display text-sm text-ink">
+              {item.text}
+              {item.truncated ? "…" : ""}
+            </p>
+          )}
+        </li>
+      ))}
+    </ol>
   )
 }

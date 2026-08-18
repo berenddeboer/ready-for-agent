@@ -211,6 +211,13 @@ export const stubActiveAgentBackendLayer = (
             registrationFor(input.backendId).descriptor,
           ) satisfies SessionTelemetry,
         ),
+      getAgentTurnTail: (input) =>
+        Effect.succeed({
+          availability: "unsupported" as const,
+          backend: registrationFor(input.backendId).descriptor,
+          items: [],
+          jumpHint: false,
+        }),
     }),
   )
 }

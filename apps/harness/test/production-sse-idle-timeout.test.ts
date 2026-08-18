@@ -349,6 +349,13 @@ describe("production GraphQL SSE idle timeout", () => {
               label: "OpenCode",
             }),
           ),
+        getAgentTurnTail: () =>
+          Effect.succeed({
+            availability: "unsupported" as const,
+            backend: { id: "opencode", label: "OpenCode" },
+            items: [],
+            jumpHint: false,
+          }),
       }
 
       const lifecycle: WorkItemLifecycleShape = {

@@ -56,6 +56,13 @@ const makeResolveWithSequences =
       telemetry: {
         getSession: (id: string) =>
           Effect.succeed(unsupportedSessionTelemetry(id, reg.descriptor)),
+        getTail: () =>
+          Effect.succeed({
+            availability: "unsupported" as const,
+            backend: reg.descriptor,
+            items: [],
+            jumpHint: false,
+          }),
       },
     })
   }

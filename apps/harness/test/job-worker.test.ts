@@ -410,6 +410,13 @@ const stubActiveAgentBackend = (): ActiveAgentBackendShape => {
           label: "OpenCode",
         }),
       ),
+    getAgentTurnTail: () =>
+      Effect.succeed({
+        availability: "unsupported" as const,
+        backend: { id: "opencode", label: "OpenCode" },
+        items: [],
+        jumpHint: false,
+      }),
   }
 }
 
@@ -986,6 +993,13 @@ describe("Job worker", () => {
             cost: null,
             createdAt: null,
             updatedAt: null,
+          }),
+        getTail: () =>
+          Effect.succeed({
+            availability: "missing" as const,
+            backend: { id: "opencode", label: "OpenCode" },
+            items: [],
+            jumpHint: false,
           }),
       })
       const localGit = Layer.succeed(LocalGit, {

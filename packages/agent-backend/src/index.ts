@@ -5,6 +5,7 @@ export {
 export * from "./lib/active-agent-backend.js"
 export * from "./lib/agent-backend.js"
 export * from "./lib/agent-cli-not-found.js"
+export * from "./lib/agent-turn-tail.js"
 export * from "./lib/classify-credential-error.js"
 export * from "./lib/cli-runner.js"
 export * from "./lib/collect-child-stdout.js"

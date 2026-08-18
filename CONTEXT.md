@@ -159,6 +159,10 @@ _Avoid_: Agent Turn Result, required backend capability
 One fully unattended invocation of an Agent Backend within a Session using an explicit Agent Model and optional Thinking Level. An Agent Backend must support both the first turn and later turns that continue the same Session; file, shell, and tool permissions cannot wait for operator approval during the turn.
 _Avoid_: Agent run, prompt run, OpenCode process, ACP request
 
+**Agent Turn Tail**:
+A bounded excerpt of recent activity in the latest Agent Turn of a Work Item's canonical Session: assistant text and tool names/status, without tool payloads or child Session activity. The Harness does not persist it.
+_Avoid_: Session tail, transcript, conversation, Session Telemetry
+
 **Interactive Session Continuation**:
 An operator-driven interactive use of a Work Item's canonical Session through its captured Agent Backend and working directory. Its messages become part of the Session used by later Agent Turns, but the continuation is not itself an Agent Turn or Lifecycle Step.
 _Avoid_: Agent Turn, Resume Work Item, human-only fork

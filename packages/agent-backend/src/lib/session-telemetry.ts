@@ -1,5 +1,6 @@
 import type { Effect } from "effect"
 import { Context } from "effect"
+import type { AgentTurnTail } from "./agent-turn-tail.js"
 import type { AgentBackendDescriptor } from "./types.js"
 
 export type SessionTelemetryAvailability =
@@ -47,6 +48,7 @@ export class SessionTelemetryProvider extends Context.Service<
     readonly getSession: (
       sessionId: string,
     ) => Effect.Effect<SessionTelemetry, never>
+    readonly getTail: (sessionId: string) => Effect.Effect<AgentTurnTail, never>
   }
 >()("@ready-for-agent/agent-backend/SessionTelemetryProvider") {}
 

@@ -68,6 +68,13 @@ const resolveCaptureRuntime =
             Effect.succeed(
               unsupportedSessionTelemetry(sessionId, found.descriptor),
             ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: found.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
         },
       }
     })
