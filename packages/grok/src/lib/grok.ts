@@ -26,6 +26,7 @@ import {
   formatAgentCliNotFoundRemediation,
   killProcessTree,
   malformedOutput,
+  retrySilentKnownSessionStartup,
   runCliCapture,
   runCliTurn,
 } from "@ready-for-agent/agent-backend"
@@ -56,8 +57,8 @@ const GROK_BACKEND = {
 /**
  * Grok Build adapter implementing the backend-neutral AgentBackend contract.
  */
-export class Grok {
-  static layer = (options: GrokLayerOptions = {}) =>
+export const Grok = {
+  layer: (options: GrokLayerOptions = {}) =>
     Layer.effect(
       AgentBackend,
       Effect.gen(function* () {
@@ -297,123 +298,130 @@ export class Grok {
               const timeout = input.timeout ?? defaultTimeout
               const timeoutMs = Duration.toMillis(timeout)
               const startupTimeoutMs = Duration.toMillis(startupTimeout)
-              return Effect.scoped(
-                Effect.gen(function* () {
-                  const connection = yield* acp.connect({
-                    command: binary,
-                    args: buildAcpContinueArgs({
-                      model: input.model,
-                      thinkingLevel: input.thinkingLevel,
-                    }),
-                    cwd: input.cwd,
-                    env: environment,
-                  })
-                  yield* Effect.addFinalizer(() =>
-                    killProcessTree(connection.pid, { forceKillAfter }).pipe(
-                      Effect.timeout(
-                        Duration.millis(
-                          Duration.toMillis(forceKillAfter) + 1_000,
-                        ),
-                      ),
-                      Effect.ignore,
-                    ),
-                  )
-                  const initialized = yield* connection.initialize().pipe(
-                    Effect.timeoutOrElse({
-                      duration: startupTimeout,
-                      orElse: () =>
-                        new AgentBackendStartupTimeoutError({
-                          cwd: input.cwd,
-                          startupTimeoutMs,
-                          sessionId: input.sessionId,
-                        }),
-                    }),
-                  )
-                  if (
-                    initialized.authMethods.some(
-                      (method) => method.id === "cached_token",
-                    )
-                  ) {
-                    yield* connection.authenticate({
-                      methodId: "cached_token",
-                    })
-                  }
-                  const sessionId = AcpSessionId.make(input.sessionId)
-                  const sessionMeta = { yoloMode: true }
-                  yield* connection
-                    .resumeSession({
-                      sessionId,
+              const runContinue = () =>
+                Effect.scoped(
+                  Effect.gen(function* () {
+                    const connection = yield* acp.connect({
+                      command: binary,
+                      args: buildAcpContinueArgs({
+                        model: input.model,
+                        thinkingLevel: input.thinkingLevel,
+                      }),
                       cwd: input.cwd,
-                      _meta: sessionMeta,
+                      env: environment,
                     })
-                    .pipe(
-                      Effect.catchTag("AcpProtocolError", () =>
-                        connection
-                          .loadSession({
-                            sessionId,
-                            cwd: input.cwd,
-                            _meta: sessionMeta,
-                          })
-                          .pipe(
-                            Effect.mapError((error) =>
-                              error instanceof AcpProtocolError
-                                ? AgentBackendExitError.new({
-                                    exitCode: 1,
-                                    cwd: input.cwd,
-                                    sessionId: input.sessionId,
-                                    message: `Grok Build could not restore Session ${input.sessionId}: ${error.message}`,
-                                  })
-                                : error,
-                            ),
+                    yield* Effect.addFinalizer(() =>
+                      killProcessTree(connection.pid, { forceKillAfter }).pipe(
+                        Effect.timeout(
+                          Duration.millis(
+                            Duration.toMillis(forceKillAfter) + 1_000,
                           ),
+                        ),
+                        Effect.ignore,
                       ),
                     )
-                  const prompt = yield* connection.prompt({
-                    sessionId,
-                    prompt: buildPromptBody({
-                      prompt: input.prompt,
-                      ...(input.command !== undefined
-                        ? { command: input.command }
-                        : {}),
-                    }),
-                    _meta: { yoloMode: true },
-                  })
-                  if (prompt.sessionId !== input.sessionId) {
-                    return yield* malformedOutput(
-                      input.cwd,
-                      `(session id mismatch: expected ${input.sessionId}, got ${prompt.sessionId})`,
+                    const initialized = yield* connection.initialize().pipe(
+                      Effect.timeoutOrElse({
+                        duration: startupTimeout,
+                        orElse: () =>
+                          new AgentBackendStartupTimeoutError({
+                            cwd: input.cwd,
+                            startupTimeoutMs,
+                            sessionId: input.sessionId,
+                          }),
+                      }),
                     )
-                  }
-                  if (prompt.stopReason !== "end_turn") {
-                    return yield* AgentBackendExitError.new({
-                      exitCode: 1,
-                      cwd: input.cwd,
-                      sessionId: input.sessionId,
-                      message: `Grok Build stopped: ${prompt.stopReason}`,
+                    if (
+                      initialized.authMethods.some(
+                        (method) => method.id === "cached_token",
+                      )
+                    ) {
+                      yield* connection.authenticate({
+                        methodId: "cached_token",
+                      })
+                    }
+                    const sessionId = AcpSessionId.make(input.sessionId)
+                    const sessionMeta = { yoloMode: true }
+                    yield* connection
+                      .resumeSession({
+                        sessionId,
+                        cwd: input.cwd,
+                        _meta: sessionMeta,
+                      })
+                      .pipe(
+                        Effect.catchTag("AcpProtocolError", () =>
+                          connection
+                            .loadSession({
+                              sessionId,
+                              cwd: input.cwd,
+                              _meta: sessionMeta,
+                            })
+                            .pipe(
+                              Effect.mapError((error) =>
+                                error instanceof AcpProtocolError
+                                  ? AgentBackendExitError.new({
+                                      exitCode: 1,
+                                      cwd: input.cwd,
+                                      sessionId: input.sessionId,
+                                      message: `Grok Build could not restore Session ${input.sessionId}: ${error.message}`,
+                                    })
+                                  : error,
+                              ),
+                            ),
+                        ),
+                      )
+                    const prompt = yield* connection.prompt({
+                      sessionId,
+                      prompt: buildPromptBody({
+                        prompt: input.prompt,
+                        ...(input.command !== undefined
+                          ? { command: input.command }
+                          : {}),
+                      }),
+                      _meta: { yoloMode: true },
                     })
-                  }
-                  return {
-                    sessionId: input.sessionId,
-                    assistantText: prompt.assistantText,
-                  }
-                }),
-              ).pipe(
-                Effect.mapError(mapAcpError(input)),
-                Effect.timeoutOrElse({
-                  duration: timeout,
-                  orElse: () =>
-                    new AgentBackendTimeoutError({
-                      cwd: input.cwd,
-                      timeoutMs,
+                    if (prompt.sessionId !== input.sessionId) {
+                      return yield* malformedOutput(
+                        input.cwd,
+                        `(session id mismatch: expected ${input.sessionId}, got ${prompt.sessionId})`,
+                      )
+                    }
+                    if (prompt.stopReason !== "end_turn") {
+                      return yield* AgentBackendExitError.new({
+                        exitCode: 1,
+                        cwd: input.cwd,
+                        sessionId: input.sessionId,
+                        message: `Grok Build stopped: ${prompt.stopReason}`,
+                      })
+                    }
+                    return {
                       sessionId: input.sessionId,
-                    }),
-                }),
-              )
+                      assistantText: prompt.assistantText,
+                    }
+                  }),
+                ).pipe(
+                  Effect.mapError(mapAcpError(input)),
+                  Effect.timeoutOrElse({
+                    duration: timeout,
+                    orElse: () =>
+                      new AgentBackendTimeoutError({
+                        cwd: input.cwd,
+                        timeoutMs,
+                        sessionId: input.sessionId,
+                      }),
+                  }),
+                )
+
+              return retrySilentKnownSessionStartup(runContinue, {
+                sessionId: input.sessionId,
+                model: input.model,
+                observerLabel: "Grok Build",
+              })
             },
           ),
         })
       }),
-    ).pipe(Layer.provide(AcpClient.layer))
+    ).pipe(Layer.provide(AcpClient.layer)),
 
-  static layerForTests = () => Grok.layer({})
+  layerForTests: () => Grok.layer({}),
 }

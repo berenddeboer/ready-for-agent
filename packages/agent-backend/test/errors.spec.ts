@@ -1,5 +1,7 @@
 import {
   AgentBackendExitError,
+  AgentBackendStartupTimeoutError,
+  formatAgentBackendStartupTimeoutMessage,
   formatSilentAgentBackendExitMessage,
 } from "../src/lib/errors.js"
 import { sanitizeAgentBackendStderrTail } from "../src/lib/sanitize-exit-message.js"
@@ -124,5 +126,26 @@ describe("sanitizeAgentBackendStderrTail", () => {
     expect(tail).not.toMatch(/ghp_[A-Za-z0-9_]+/)
     expect(tail?.includes("this_must_never")).toBe(false)
     expect(tail?.length).toBeLessThanOrEqual(500)
+  })
+})
+
+describe("formatAgentBackendStartupTimeoutMessage", () => {
+  it("names session, model, phase, window, and both attempts without prompt text", () => {
+    const message = formatAgentBackendStartupTimeoutMessage({
+      backendLabel: "OpenCode",
+      action: "while applying Review Findings",
+      cause: new AgentBackendStartupTimeoutError({
+        cwd: "/tmp",
+        startupTimeoutMs: 60_000,
+        sessionId: "ses_review",
+        model: "opencode/deepseek",
+        attemptCount: 2,
+      }),
+      phase: "review_applying_findings",
+    })
+    expect(message).toBe(
+      "OpenCode failed while applying Review Findings: no output within the startup window (60000ms); session ses_review; model opencode/deepseek; phase review_applying_findings; attempts 1 and 2",
+    )
+    expect(message).not.toContain("Interpret those findings")
   })
 })
