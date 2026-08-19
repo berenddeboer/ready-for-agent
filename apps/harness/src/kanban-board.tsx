@@ -23,6 +23,7 @@ import {
   useNowMs,
 } from "./live-duration.js"
 import { MetalLaneHeader } from "./metal-lane-header.js"
+import { PipelineBottomOrnament } from "./pipeline-bottom-ornament.js"
 import { PIPELINE_LANES, type PipelineLaneId } from "./pipeline-lanes.js"
 import { PipelineRoute, usePipelineRouteFlights } from "./pipeline-route.js"
 import {
@@ -495,6 +496,7 @@ function KanbanJobsBoard() {
               )
             })}
           </div>
+          <PipelineBottomOrnament />
         </section>
       </div>
     </article>

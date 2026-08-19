@@ -679,6 +679,18 @@ export const ui = {
   pipelineBoard:
     "mt-[1.6rem] grid gap-[0.55rem] max-[900px]:mt-[0.85rem] max-[900px]:gap-0",
 
+  pipelineBottomOrnament:
+    "relative z-0 -mt-[0.55rem] min-h-[9.625rem] overflow-hidden text-[#151515] max-[900px]:-mt-[0.1rem] max-[900px]:min-h-24",
+
+  pipelineBottomOrnamentSvg:
+    "block h-auto w-full min-w-[54rem] overflow-visible max-[900px]:w-[175%] max-[900px]:min-w-[45rem] max-[900px]:-translate-x-[21.5%]",
+
+  pipelineBottomOrnamentTruss:
+    "[filter:drop-shadow(0_4px_2px_rgb(0_0_0/0.35))]",
+
+  pipelineBottomOrnamentSign:
+    "fill-[#151515] font-mono text-[10px] font-extrabold tracking-[0.12em]",
+
   /**
    * Route spine + pot-belly furnace stops. Spine is a brass pneumatic tube
    * (see pipelineRouteSpine) centered on the furnace belly; stack sits above
