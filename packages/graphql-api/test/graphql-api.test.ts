@@ -1374,9 +1374,7 @@ describe("GraphQL API", () => {
     const creationUrl = new URL(
       body.data.repositoryCredentials[0]!.githubTokenCreationUrl as string,
     )
-    expect(creationUrl.searchParams.get("name")).toBe(
-      `${repository.projectPath.split("/").at(-1)} - ready-for-agent`,
-    )
+    expect(creationUrl.searchParams.get("name")).toBe("rfa - widgets")
     expect(creationUrl.searchParams.get("issues")).toBe("write")
     expect(creationUrl.searchParams.get("contents")).toBe("write")
     expect(creationUrl.searchParams.get("pull_requests")).toBe("write")
