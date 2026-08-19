@@ -19,6 +19,7 @@ import {
   buildRunArgs,
   shouldUsePromptStdin,
 } from "./build-args.js"
+import { resolveCodexUserProvider } from "./custom-provider.js"
 import { makeCodexEnvironment } from "./environment.js"
 import { parseCodexLoginStatus } from "./parse-login-status.js"
 import {
@@ -56,7 +57,11 @@ const clipProbeOutput = (text: string, maxChars = 240): string => {
 /**
  * Codex Build adapter implementing the backend-neutral AgentBackend contract.
  *
- * Registration, static catalog, and readiness inspection ship with this layer.
+ * Registration, static catalog, and provider-aware readiness inspection
+ * ship with this layer. First-party login uses `codex login status`; a
+ * valid user-level custom `model_provider` with `Not logged in` is Ready
+ * after local `codex debug models --bundled`, without running token
+ * commands or `codex exec`.
  * Agent Turns run `codex exec --json` unsandboxed, capture `thread_id` from
  * `thread.started` via `onSessionId` while the first turn is still running,
  * resume later turns with `codex exec resume`, and normalize the JSONL stream
@@ -70,7 +75,11 @@ export const Codex = {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const binary = options.binary ?? DEFAULT_BINARY
         const defaultTimeout = options.defaultTimeout ?? DEFAULT_TIMEOUT
-        const environment = makeCodexEnvironment()
+        const environment = makeCodexEnvironment(
+          options.environment !== undefined
+            ? { environment: options.environment }
+            : {},
+        )
 
         const inspect = Effect.fn("Codex.inspect")(function* (
           input: InspectInput,
@@ -95,9 +104,54 @@ export const Codex = {
             .join("\n")
           const status = parseCodexLoginStatus(statusOutput, result.exitCode)
           if (status.kind === "unauthenticated") {
-            return yield* new AgentBackendConfigError({
-              message: CODEX_UNAUTHENTICATED_MESSAGE,
+            const provider = resolveCodexUserProvider({ env: environment })
+            if (provider.kind === "malformed") {
+              return yield* new AgentBackendConfigError({
+                message: provider.message,
+              })
+            }
+            if (provider.kind === "firstParty") {
+              return yield* new AgentBackendConfigError({
+                message: CODEX_UNAUTHENTICATED_MESSAGE,
+              })
+            }
+
+            // Custom providers use command-backed or env-key auth that
+            // `codex login status` never inspects. Validate the CLI and
+            // bundled catalog locally with `codex debug models --bundled`
+            // — never unbundled refresh (that runs provider token commands
+            // and GET /models), never `codex exec`.
+            const debug = yield* runCliCapture({
+              spawner,
+              backend: CODEX_BACKEND,
+              binary,
+              args: ["debug", "models", "--bundled"],
+              cwd: input.cwd,
+              env: environment,
+              timeout: input.timeout ?? defaultTimeout,
+              allowNonZeroExit: true,
+              captureStderr: true,
             })
+            if (debug.exitCode !== 0) {
+              const debugOutput = [debug.stdout, debug.stderr]
+                .filter((part) => part.length > 0)
+                .join("\n")
+              const probe = clipProbeOutput(debugOutput)
+              return yield* new AgentBackendConfigError({
+                message: `Codex custom provider "${provider.providerId}" is configured, but \`codex debug models --bundled\` failed (exit ${debug.exitCode}): ${probe}`,
+              })
+            }
+
+            return {
+              backend: CODEX_BACKEND,
+              models: CODEX_STATIC_CATALOG.map((model) => ({
+                id: model.id,
+                thinkingLevels: [...model.thinkingLevels],
+              })),
+              warnings: [
+                `Codex custom provider "${provider.providerId}" is configured; its credentials will be validated on the first Agent Turn.`,
+              ],
+            }
           }
           if (status.kind === "failed") {
             return yield* AgentBackendExitError.new({
