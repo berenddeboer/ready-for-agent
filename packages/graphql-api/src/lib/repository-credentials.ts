@@ -39,7 +39,7 @@ const tokenSecretName = (repository: Repository) =>
 const githubTokenCreationUrl = (repository: Repository) => {
   const [owner = "", name = ""] = repository.projectPath.split("/")
   const url = new URL("https://github.com/settings/personal-access-tokens/new")
-  url.searchParams.set("name", `${name} - ready-for-agent`)
+  url.searchParams.set("name", `rfa - ${name}`)
   url.searchParams.set(
     "description",
     `Ready For Agent token for ${repository.projectPath}`,
