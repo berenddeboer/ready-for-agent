@@ -1,5 +1,6 @@
 export * from "./lib/build-args.js"
 export * from "./lib/codex.js"
+export * from "./lib/custom-provider.js"
 export * from "./lib/environment.js"
 export * from "./lib/parse-login-status.js"
 export * from "./lib/parse-stream.js"

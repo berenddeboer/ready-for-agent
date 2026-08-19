@@ -18,6 +18,7 @@ import {
   CODEX_STATIC_CATALOG,
   CODEX_UNAUTHENTICATED_MESSAGE,
   Codex,
+  type CodexLayerOptions,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -36,17 +37,73 @@ const withExecutable = async <A>(
   }
 }
 
-const provide = (binary: string) =>
-  Codex.layer({ binary }).pipe(Layer.provide(BunServices.layer))
+const provide = (
+  binary: string,
+  options: Pick<CodexLayerOptions, "environment"> = {},
+) =>
+  Codex.layer({
+    binary,
+    ...options,
+  }).pipe(Layer.provide(BunServices.layer))
 
-const inspect = (binary: string, timeout = "2 seconds") =>
+const inspect = (
+  binary: string,
+  timeout = "2 seconds",
+  options: Pick<CodexLayerOptions, "environment"> = {},
+) =>
   Effect.gen(function* () {
     const backend = yield* AgentBackend
     return yield* backend.inspect({
       cwd: process.cwd(),
       timeout,
     })
-  }).pipe(Effect.provide(provide(binary)))
+  }).pipe(Effect.provide(provide(binary, options)))
+
+const withCodexHome = async <A>(
+  files: Readonly<Record<string, string>>,
+  use: (env: {
+    readonly CODEX_HOME: string
+    readonly HOME: string
+  }) => Promise<A>,
+): Promise<A> => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-inspect-home-"))
+  try {
+    for (const [name, content] of Object.entries(files)) {
+      await writeFile(join(directory, name), content)
+    }
+    return await use({ CODEX_HOME: directory, HOME: directory })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+}
+
+const isolatedFirstPartyEnv = async <A>(
+  use: (env: {
+    readonly CODEX_HOME: string
+    readonly HOME: string
+  }) => Promise<A>,
+): Promise<A> => withCodexHome({}, use)
+
+const expectedStaticCatalog = () =>
+  CODEX_STATIC_CATALOG.map((model) => ({
+    id: model.id,
+    thinkingLevels: [...model.thinkingLevels],
+  }))
+
+const azureConfig = (authCommand: string) =>
+  `
+model = "gpt-5.6-terra"
+model_provider = "azure"
+
+[model_providers.azure]
+name = "Azure"
+base_url = "https://example.openai.azure.com/openai"
+wire_api = "responses"
+
+[model_providers.azure.auth]
+command = ${JSON.stringify(authCommand)}
+args = ["--audience", "codex"]
+`.trim()
 
 /** Fake stream: early thread.started, agent_message, turn.completed. */
 const successfulTurnStream = (
@@ -89,12 +146,8 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
       async (binary) => {
         const result = await Effect.runPromise(inspect(binary))
         expect(result.backend).toEqual({ id: "codex", label: "Codex Build" })
-        expect(result.models).toEqual(
-          CODEX_STATIC_CATALOG.map((model) => ({
-            id: model.id,
-            thinkingLevels: [...model.thinkingLevels],
-          })),
-        )
+        expect(result.models).toEqual(expectedStaticCatalog())
+        expect(result.warnings ?? []).toEqual([])
       },
     )
   })
@@ -114,41 +167,50 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
   })
 
   it("fails inspect with actionable config error when unauthenticated (stderr)", async () => {
-    await withExecutable(
-      [
-        'case " $* " in *" login status "*) ;; *) exit 20 ;; esac',
-        "echo 'Not logged in' 1>&2",
-        "exit 1",
-      ].join("\n"),
-      async (binary) => {
-        const error = await Effect.runPromise(inspect(binary).pipe(Effect.flip))
-        expect(error).toBeInstanceOf(AgentBackendConfigError)
-        if (error instanceof AgentBackendConfigError) {
-          expect(error.message).toBe(CODEX_UNAUTHENTICATED_MESSAGE)
-          expect(error.message).toContain("codex login")
-          expect(error.message).toContain("OPENAI_API_KEY")
-        }
-      },
-    )
+    await isolatedFirstPartyEnv(async (environment) => {
+      await withExecutable(
+        [
+          'case " $* " in *" login status "*) ;; *) exit 20 ;; esac',
+          "echo 'Not logged in' 1>&2",
+          "exit 1",
+        ].join("\n"),
+        async (binary) => {
+          const error = await Effect.runPromise(
+            inspect(binary, "2 seconds", { environment }).pipe(Effect.flip),
+          )
+          expect(error).toBeInstanceOf(AgentBackendConfigError)
+          if (error instanceof AgentBackendConfigError) {
+            expect(error.message).toBe(CODEX_UNAUTHENTICATED_MESSAGE)
+            expect(error.message).toContain("codex login")
+            expect(error.message).toContain("model_provider")
+            expect(error.message).not.toContain("OPENAI_API_KEY")
+          }
+        },
+      )
+    })
   })
 
   it("prefers parsed unauthenticated copy over extra stderr noise", async () => {
-    await withExecutable(
-      [
-        'case " $* " in *" login status "*) ;; *) exit 20 ;; esac',
-        "echo 'Not logged in' 1>&2",
-        "echo 'raw stderr should lose' 1>&2",
-        "exit 1",
-      ].join("\n"),
-      async (binary) => {
-        const error = await Effect.runPromise(inspect(binary).pipe(Effect.flip))
-        expect(error).toBeInstanceOf(AgentBackendConfigError)
-        if (error instanceof AgentBackendConfigError) {
-          expect(error.message).toBe(CODEX_UNAUTHENTICATED_MESSAGE)
-          expect(error.message).not.toContain("raw stderr should lose")
-        }
-      },
-    )
+    await isolatedFirstPartyEnv(async (environment) => {
+      await withExecutable(
+        [
+          'case " $* " in *" login status "*) ;; *) exit 20 ;; esac',
+          "echo 'Not logged in' 1>&2",
+          "echo 'raw stderr should lose' 1>&2",
+          "exit 1",
+        ].join("\n"),
+        async (binary) => {
+          const error = await Effect.runPromise(
+            inspect(binary, "2 seconds", { environment }).pipe(Effect.flip),
+          )
+          expect(error).toBeInstanceOf(AgentBackendConfigError)
+          if (error instanceof AgentBackendConfigError) {
+            expect(error.message).toBe(CODEX_UNAUTHENTICATED_MESSAGE)
+            expect(error.message).not.toContain("raw stderr should lose")
+          }
+        },
+      )
+    })
   })
 
   it("maps non-zero login status without auth markers to exit failure with probe text", async () => {
@@ -179,6 +241,189 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
       async (binary) => {
         const error = await Effect.runPromise(inspect(binary).pipe(Effect.flip))
         expect(error).toBeInstanceOf(AgentBackendMalformedOutputError)
+      },
+    )
+  })
+
+  it("inspects Ready with the static catalog and a warning for a valid Azure custom provider when login status is Not logged in", async () => {
+    await withCodexHome({}, async (environment) => {
+      const marker = join(environment.CODEX_HOME, "token-ran")
+      const authCommand = join(environment.CODEX_HOME, "token.sh")
+      const argvLog = join(environment.CODEX_HOME, "argv.log")
+      await writeFile(
+        authCommand,
+        `#!/bin/sh\necho ran > "${marker}"\necho fake-token\n`,
+      )
+      await chmod(authCommand, 0o700)
+      await writeFile(
+        join(environment.CODEX_HOME, "config.toml"),
+        azureConfig(authCommand),
+      )
+
+      await withExecutable(
+        [
+          `printf '%s\\n' "$*" >> ${JSON.stringify(argvLog)}`,
+          'case " $* " in *" exec "*) exit 20 ;; esac',
+          'case " $* " in *" login status "*)',
+          "  echo 'Not logged in' 1>&2",
+          "  exit 1",
+          "  ;;",
+          "esac",
+          'case " $* " in *" debug models "*"--bundled "*)',
+          "  echo 'gpt-5.6-terra'",
+          "  exit 0",
+          "  ;;",
+          "esac",
+          'case " $* " in *" debug models "*) exit 31 ;; esac',
+          "exit 21",
+        ].join("\n"),
+        async (binary) => {
+          const result = await Effect.runPromise(
+            inspect(binary, "2 seconds", { environment }),
+          )
+          expect(result.backend).toEqual({
+            id: "codex",
+            label: "Codex Build",
+          })
+          expect(result.models).toEqual(expectedStaticCatalog())
+          expect(
+            result.models.some((model) => model.id === "gpt-5.6-terra"),
+          ).toBe(true)
+          expect(result.warnings).toEqual([
+            'Codex custom provider "azure" is configured; its credentials will be validated on the first Agent Turn.',
+          ])
+        },
+      )
+
+      expect(await Bun.file(marker).exists()).toBe(false)
+      const argv = (await Bun.file(argvLog).text()).trim()
+      expect(argv).toContain("login status")
+      expect(argv).toContain("debug models")
+      expect(argv).toContain("--bundled")
+      expect(argv).not.toContain("exec")
+    })
+  })
+
+  it("keeps default OpenAI Unavailable for the same Not logged in status", async () => {
+    await withCodexHome(
+      { "config.toml": 'model = "gpt-5.6-terra"\n' },
+      async (environment) => {
+        await withExecutable(
+          [
+            'case " $* " in *" login status "*)',
+            "  echo 'Not logged in' 1>&2",
+            "  exit 1",
+            "  ;;",
+            "esac",
+            'case " $* " in *" debug models "*) exit 30 ;; esac',
+            "exit 20",
+          ].join("\n"),
+          async (binary) => {
+            const error = await Effect.runPromise(
+              inspect(binary, "2 seconds", { environment }).pipe(Effect.flip),
+            )
+            expect(error).toBeInstanceOf(AgentBackendConfigError)
+            if (error instanceof AgentBackendConfigError) {
+              expect(error.message).toBe(CODEX_UNAUTHENTICATED_MESSAGE)
+            }
+          },
+        )
+      },
+    )
+  })
+
+  it("fails inspect with an actionable diagnostic for malformed custom-provider config", async () => {
+    await withCodexHome(
+      { "config.toml": 'model_provider = "azure"\n' },
+      async (environment) => {
+        await withExecutable(
+          [
+            'case " $* " in *" login status "*)',
+            "  echo 'Not logged in' 1>&2",
+            "  exit 1",
+            "  ;;",
+            "esac",
+            'case " $* " in *" debug models "*) exit 30 ;; esac',
+            "exit 20",
+          ].join("\n"),
+          async (binary) => {
+            const error = await Effect.runPromise(
+              inspect(binary, "2 seconds", { environment }).pipe(Effect.flip),
+            )
+            expect(error).toBeInstanceOf(AgentBackendConfigError)
+            if (error instanceof AgentBackendConfigError) {
+              expect(error.message).toContain("azure")
+              expect(error.message).toContain("model_providers")
+              expect(error.message).toContain("Recheck Agent Backend")
+            }
+          },
+        )
+      },
+    )
+  })
+
+  it("fails inspect with an actionable diagnostic when custom-provider config validation fails", async () => {
+    await withCodexHome(
+      {
+        "config.toml": azureConfig("/usr/local/bin/fetch-codex-token"),
+      },
+      async (environment) => {
+        await withExecutable(
+          [
+            'case " $* " in *" exec "*) exit 20 ;; esac',
+            'case " $* " in *" login status "*)',
+            "  echo 'Not logged in' 1>&2",
+            "  exit 1",
+            "  ;;",
+            "esac",
+            'case " $* " in *" debug models "*"--bundled "*)',
+            "  echo 'invalid provider configuration' 1>&2",
+            "  exit 2",
+            "  ;;",
+            "esac",
+            'case " $* " in *" debug models "*) exit 31 ;; esac',
+            "exit 21",
+          ].join("\n"),
+          async (binary) => {
+            const error = await Effect.runPromise(
+              inspect(binary, "2 seconds", { environment }).pipe(Effect.flip),
+            )
+            expect(error).toBeInstanceOf(AgentBackendConfigError)
+            if (error instanceof AgentBackendConfigError) {
+              expect(error.message).toContain("azure")
+              expect(error.message).toContain("codex debug models --bundled")
+              expect(error.message).toContain("invalid provider configuration")
+            }
+          },
+        )
+      },
+    )
+  })
+
+  it("does not re-probe custom providers when stored login is present", async () => {
+    await withCodexHome(
+      {
+        "config.toml": azureConfig("/usr/local/bin/fetch-codex-token"),
+      },
+      async (environment) => {
+        await withExecutable(
+          [
+            'case " $* " in *" login status "*)',
+            "  echo 'Logged in using ChatGPT' 1>&2",
+            "  exit 0",
+            "  ;;",
+            "esac",
+            'case " $* " in *" debug models "*) exit 30 ;; esac',
+            "exit 20",
+          ].join("\n"),
+          async (binary) => {
+            const result = await Effect.runPromise(
+              inspect(binary, "2 seconds", { environment }),
+            )
+            expect(result.models).toEqual(expectedStaticCatalog())
+            expect(result.warnings ?? []).toEqual([])
+          },
+        )
       },
     )
   })
