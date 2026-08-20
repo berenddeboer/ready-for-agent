@@ -1,14 +1,27 @@
 import { Data, type Duration, Effect } from "effect"
 import {
+  AZURE_DEVOPS_PAT_ENV_VAR,
+  azureDevOpsVaultAccount,
+} from "@ready-for-agent/azure-devops-service"
+import {
   GitLabService,
   gitlabVaultAccount,
 } from "@ready-for-agent/gitlab-service"
 import {
   KeymaxxerService,
+  type KeymaxxerServiceShape,
   keymaxxerError,
 } from "@ready-for-agent/keymaxxer-service"
 import { activateRepositoryPolling } from "./issue-polling.js"
 
+/**
+ * `forge` is untyped external data here (sourced from the persisted
+ * Repository row via `DbService`, not the narrower literal union used by
+ * `LocalRepository`/`AgentTurnForgeRepository`). Every switch below lists all
+ * three known Forges explicitly and falls back to the historical
+ * GitHub-first default for any unrecognized value, rather than relying on a
+ * compile-time exhaustiveness check that plain `string` cannot provide.
+ */
 export type Repository = {
   id: string
   forge: string
@@ -31,10 +44,26 @@ export const gitlabTokenSecretName = (repository: Repository) =>
     .replace(/[^A-Za-z0-9_]/g, "_")
     .toUpperCase()
 
-const tokenSecretName = (repository: Repository) =>
-  repository.forge === "gitlab"
-    ? gitlabTokenSecretName(repository)
-    : githubTokenSecretName(repository)
+/** Suggested Keymaxxer secret name: `AZURE_DEVOPS_TOKEN_<ORG>_<PROJECT>`. */
+export const azureDevOpsTokenSecretName = (repository: Repository) =>
+  `AZURE_DEVOPS_TOKEN_${repository.projectPath}`
+    .replace(/[^A-Za-z0-9_]/g, "_")
+    .toUpperCase()
+
+const tokenSecretName = (repository: Repository) => {
+  switch (repository.forge) {
+    case "gitlab":
+      return gitlabTokenSecretName(repository)
+    case "azure-devops":
+      return azureDevOpsTokenSecretName(repository)
+    // "github" and any unrecognized/legacy forge value both preserve the
+    // historical GitHub-first fallback (`Repository.forge` is untyped
+    // external data here, so this default cannot be a compile-time
+    // exhaustiveness check the way the narrower literal-union forge types are).
+    default:
+      return githubTokenSecretName(repository)
+  }
+}
 
 const githubTokenCreationUrl = (repository: Repository) => {
   const [owner = "", name = ""] = repository.projectPath.split("/")
@@ -63,10 +92,22 @@ const githubTokenCreationUrl = (repository: Repository) => {
 const gitlabTokenCreationUrl = (repository: Repository) =>
   `https://${repository.forgeHost}/-/user_settings/personal_access_tokens`
 
-const tokenCreationUrl = (repository: Repository) =>
-  repository.forge === "gitlab"
-    ? gitlabTokenCreationUrl(repository)
-    : githubTokenCreationUrl(repository)
+/** Organization-scoped Azure DevOps personal access token creation page. */
+const azureDevOpsTokenCreationUrl = (repository: Repository) => {
+  const [organization = ""] = repository.projectPath.split("/")
+  return `https://dev.azure.com/${organization}/_usersSettings/tokens`
+}
+
+const tokenCreationUrl = (repository: Repository) => {
+  switch (repository.forge) {
+    case "gitlab":
+      return gitlabTokenCreationUrl(repository)
+    case "azure-devops":
+      return azureDevOpsTokenCreationUrl(repository)
+    default:
+      return githubTokenCreationUrl(repository)
+  }
+}
 
 export const repositoryCredential = (
   repository: Repository,
@@ -129,6 +170,46 @@ export const gitlabHasAmbientCredentialsBounded = (
     )
   })
 
+/**
+ * Whether the ambient `AZURE_DEVOPS_EXT_PAT` env var resolves. Azure DevOps
+ * has no `az`-CLI shellout convention in this codebase (PAT-only auth,
+ * unlike GitLab's `glab`), so — unlike `gitlabHasAmbientCredentialsBounded`,
+ * which asks `GitLabService` — this is a direct env var check with no
+ * service round-trip to bound.
+ */
+export const hasAzureDevOpsAmbientCredential = (): boolean => {
+  const value = process.env[AZURE_DEVOPS_PAT_ENV_VAR]
+  return typeof value === "string" && value.trim() !== ""
+}
+
+/** Distinguish a clean vault miss from Keymaxxer unavailable (see below). */
+type VaultProbe =
+  | { readonly kind: "secret"; readonly name: string }
+  | { readonly kind: "miss" }
+  | { readonly kind: "unavailable" }
+
+const probeVaultSecret = (
+  keymaxxer: KeymaxxerServiceShape,
+  input: { readonly provider: string; readonly account: string },
+  metadataTimeout: Duration.Duration | undefined,
+): Effect.Effect<VaultProbe> => {
+  const lookup = keymaxxer.findSecret(input)
+  const timedLookup =
+    metadataTimeout === undefined
+      ? lookup
+      : withKeymaxxerMetadataTimeout(lookup, metadataTimeout, "findSecret")
+  return timedLookup.pipe(
+    Effect.map(
+      (name): VaultProbe =>
+        name === null ? { kind: "miss" } : { kind: "secret", name },
+    ),
+    Effect.catchTag(
+      "KeymaxxerError",
+      (): Effect.Effect<VaultProbe> => Effect.succeed({ kind: "unavailable" }),
+    ),
+  )
+}
+
 /** Activate durable Issue Polling only when this repository has forge credentials. */
 export const activatePollingIfCredentialed = Effect.fn(
   "graphql-api.activatePollingIfCredentialed",
@@ -138,76 +219,95 @@ export const activatePollingIfCredentialed = Effect.fn(
 ) {
   const keymaxxer = yield* KeymaxxerService
   if (keymaxxer.enabled === false) {
-    if (repository.forge === "gitlab") {
-      if (
-        yield* gitlabHasAmbientCredentialsBounded(
-          repository,
-          options?.metadataTimeout,
-        )
-      ) {
+    switch (repository.forge) {
+      case "gitlab": {
+        if (
+          yield* gitlabHasAmbientCredentialsBounded(
+            repository,
+            options?.metadataTimeout,
+          )
+        ) {
+          yield* activateRepositoryPolling(repository.id)
+        }
+        return
+      }
+      case "azure-devops": {
+        if (hasAzureDevOpsAmbientCredential()) {
+          yield* activateRepositoryPolling(repository.id)
+        }
+        return
+      }
+      // "github" and any unrecognized/legacy forge value both preserve the
+      // historical GitHub-first fallback (no ambient check today).
+      default: {
+        yield* activateRepositoryPolling(repository.id)
+        return
+      }
+    }
+  }
+
+  switch (repository.forge) {
+    case "gitlab": {
+      // Distinguish clean vault miss from Keymaxxer unavailable so we never
+      // re-enter vault RPC after a timed-out probe — ambient-only path instead.
+      const vaultProbe = yield* probeVaultSecret(
+        keymaxxer,
+        { provider: "gitlab", account: gitlabVaultAccount(repository) },
+        options?.metadataTimeout,
+      )
+      if (vaultProbe.kind === "secret") {
+        yield* activateRepositoryPolling(repository.id)
+        return
+      }
+      // miss or unavailable: ambient only (no second vault findSecret).
+      // Do not re-apply the full GraphQL metadata bound — vault already
+      // consumed that budget; ambient glab/env has its own short path.
+      if (yield* gitlabHasAmbientCredentialsBounded(repository)) {
         yield* activateRepositoryPolling(repository.id)
       }
       return
     }
-    yield* activateRepositoryPolling(repository.id)
-    return
-  }
-
-  if (repository.forge === "gitlab") {
-    const lookup = keymaxxer.findSecret({
-      provider: "gitlab",
-      account: gitlabVaultAccount(repository),
-    })
-    // Distinguish clean vault miss from Keymaxxer unavailable so we never
-    // re-enter vault RPC after a timed-out probe — ambient-only path instead.
-    type VaultProbe =
-      | { readonly kind: "secret"; readonly name: string }
-      | { readonly kind: "miss" }
-      | { readonly kind: "unavailable" }
-    const timedLookup =
-      options?.metadataTimeout === undefined
-        ? lookup
-        : withKeymaxxerMetadataTimeout(
-            lookup,
-            options.metadataTimeout,
-            "findSecret",
-          )
-    const vaultProbe: VaultProbe = yield* timedLookup.pipe(
-      Effect.map(
-        (name): VaultProbe =>
-          name === null ? { kind: "miss" } : { kind: "secret", name },
-      ),
-      Effect.catchTag(
-        "KeymaxxerError",
-        (): Effect.Effect<VaultProbe> =>
-          Effect.succeed({ kind: "unavailable" }),
-      ),
-    )
-    if (vaultProbe.kind === "secret") {
+    case "azure-devops": {
+      const vaultProbe = yield* probeVaultSecret(
+        keymaxxer,
+        {
+          provider: "azure-devops",
+          account: azureDevOpsVaultAccount(repository),
+        },
+        options?.metadataTimeout,
+      )
+      if (vaultProbe.kind === "secret") {
+        yield* activateRepositoryPolling(repository.id)
+        return
+      }
+      // miss or unavailable: ambient AZURE_DEVOPS_EXT_PAT only, matching
+      // GitLab's permissive fallback posture rather than GitHub's fail-closed
+      // one (mirrors resolveAgentTurnForgeAuth's Agent Turn auth posture).
+      if (hasAzureDevOpsAmbientCredential()) {
+        yield* activateRepositoryPolling(repository.id)
+      }
+      return
+    }
+    // "github" and any unrecognized/legacy forge value both preserve the
+    // historical GitHub-first fallback (fail-closed vault-first, no ambient
+    // check, matching GitHub's existing posture rather than GitLab's/Azure
+    // DevOps's permissive one).
+    default: {
+      const lookup = keymaxxer.findSecret({
+        provider: "github",
+        account: repository.projectPath,
+      })
+      const credential =
+        options?.metadataTimeout === undefined
+          ? yield* lookup
+          : yield* withKeymaxxerMetadataTimeout(
+              lookup,
+              options.metadataTimeout,
+              "findSecret",
+            )
+      if (credential === null) return
       yield* activateRepositoryPolling(repository.id)
       return
     }
-    // miss or unavailable: ambient only (no second vault findSecret).
-    // Do not re-apply the full GraphQL metadata bound — vault already consumed
-    // that budget; ambient glab/env has its own short path.
-    if (yield* gitlabHasAmbientCredentialsBounded(repository)) {
-      yield* activateRepositoryPolling(repository.id)
-    }
-    return
   }
-
-  const lookup = keymaxxer.findSecret({
-    provider: "github",
-    account: repository.projectPath,
-  })
-  const credential =
-    options?.metadataTimeout === undefined
-      ? yield* lookup
-      : yield* withKeymaxxerMetadataTimeout(
-          lookup,
-          options.metadataTimeout,
-          "findSecret",
-        )
-  if (credential === null) return
-  yield* activateRepositoryPolling(repository.id)
 })

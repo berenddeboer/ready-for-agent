@@ -1411,6 +1411,79 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("keeps GitHub token attribution correct when a non-github/gitlab Repository sits between two GitHub Repositories", async () => {
+    // Regression test: repositoryCredentials must key vault batch results by
+    // Repository id, not by a running index over the unfiltered Repository
+    // list — a third Forge (Azure DevOps) between two GitHub Repositories
+    // must not shift which vault token each GitHub Repository is shown with.
+    const githubRepositoryA = repository
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: "repo-01J00000000000000000000002",
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/other",
+    })
+    const githubRepositoryB = makeRepositoryRecord({
+      id: "repo-01J00000000000000000000003",
+      projectPath: "acme/second",
+    })
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([
+          githubRepositoryA,
+          azureDevOpsRepository,
+          githubRepositoryB,
+        ]),
+      },
+      {
+        findSecrets: (inputs) =>
+          Effect.succeed(
+            inputs.map(({ provider, account }) => {
+              if (provider !== "github") {
+                throw new Error(`Unexpected vault probe for ${provider}`)
+              }
+              if (account === "acme/widgets") return "TOKEN_A"
+              if (account === "acme/second") return "TOKEN_B"
+              return null
+            }),
+          ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          repositoryCredentials {
+            repositoryId configured githubTokenSecretName
+          }
+        }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        repositoryCredentials: [
+          {
+            repositoryId: githubRepositoryA.id,
+            configured: true,
+            githubTokenSecretName: "TOKEN_A",
+          },
+          {
+            repositoryId: azureDevOpsRepository.id,
+            configured: false,
+            githubTokenSecretName: "AZURE_DEVOPS_TOKEN_ACME_OTHER",
+          },
+          {
+            repositoryId: githubRepositoryB.id,
+            configured: true,
+            githubTokenSecretName: "TOKEN_B",
+          },
+        ],
+      },
+    })
+  })
+
   test("opens Keymaxxer setup for a missing repository token", async () => {
     let tokenName: string | null = null
     let addCalls = 0

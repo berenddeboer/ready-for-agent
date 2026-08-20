@@ -80,6 +80,9 @@
     },
     {
       "path": "./packages/lifecycle-model"
+    },
+    {
+      "path": "./packages/azure-devops-service"
     }
   ]
 }

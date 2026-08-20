@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test"
 const expectRemote = (
   url: string,
   expected: {
-    readonly forge: "github" | "gitlab"
+    readonly forge: "github" | "gitlab" | "azure-devops"
     readonly forgeHost: string
     readonly projectPath: string
   },
@@ -81,5 +81,51 @@ describe("parseForgeRemote", () => {
   test("rejects local and malformed remotes", () => {
     expect(Option.isNone(parseForgeRemote("../owner/repo.git"))).toBe(true)
     expect(Option.isNone(parseForgeRemote("not-a-url"))).toBe(true)
+  })
+
+  test("recognizes dev.azure.com HTTPS and SSH remotes", () => {
+    expectRemote("https://dev.azure.com/acme/widgets/_git/widgets", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    })
+    // Org-as-userinfo spelling some clients emit.
+    expectRemote("https://acme@dev.azure.com/acme/widgets/_git/widgets", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    })
+    expectRemote("git@ssh.dev.azure.com:v3/acme/widgets/widgets", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    })
+  })
+
+  test("recognizes legacy *.visualstudio.com remotes and canonicalizes the Forge Host", () => {
+    expectRemote("https://acme.visualstudio.com/widgets/_git/widgets", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    })
+    expectRemote(
+      "https://acme.visualstudio.com/DefaultCollection/widgets/_git/widgets",
+      {
+        forge: "azure-devops",
+        forgeHost: "dev.azure.com",
+        projectPath: "acme/widgets",
+      },
+    )
+  })
+
+  test("does not misclassify an Azure DevOps host missing the _git path segment", () => {
+    // Falls through to the GitLab catch-all rather than Azure DevOps —
+    // matches "matched before the GitLab catch-all" without inventing an
+    // org/project split for an unrecognized dev.azure.com path shape.
+    expectRemote("https://dev.azure.com/acme/widgets", {
+      forge: "gitlab",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    })
   })
 })

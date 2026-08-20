@@ -1,5 +1,5 @@
 export interface LocalRepository {
-  readonly forge: "github" | "gitlab"
+  readonly forge: "github" | "gitlab" | "azure-devops"
   readonly forgeHost: string
   readonly projectPath: string
   readonly localPath: string
@@ -13,7 +13,7 @@ export type GitHubRemote = {
 }
 
 export type ForgeRemote = {
-  readonly forge: "github" | "gitlab"
+  readonly forge: "github" | "gitlab" | "azure-devops"
   readonly forgeHost: string
   readonly projectPath: string
 }

@@ -11,31 +11,34 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../lifecycle-model/tsconfig.lib.json"
-    },
-    {
       "path": "../work-item-lifecycle/tsconfig.lib.json"
     },
     {
       "path": "../queue-service/tsconfig.lib.json"
     },
     {
-      "path": "../keymaxxer-service/tsconfig.lib.json"
+      "path": "../local-git/tsconfig.lib.json"
     },
     {
-      "path": "../local-git/tsconfig.lib.json"
+      "path": "../lifecycle-model/tsconfig.lib.json"
+    },
+    {
+      "path": "../keymaxxer-service/tsconfig.lib.json"
     },
     {
       "path": "../graphql-schema/tsconfig.lib.json"
     },
     {
-      "path": "../github-service/tsconfig.lib.json"
-    },
-    {
       "path": "../gitlab-service/tsconfig.lib.json"
     },
     {
+      "path": "../github-service/tsconfig.lib.json"
+    },
+    {
       "path": "../db-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../azure-devops-service/tsconfig.lib.json"
     },
     {
       "path": "../agent-backend/tsconfig.lib.json"

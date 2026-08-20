@@ -645,7 +645,7 @@ export const formatDiagnosticBlock = (
 }
 
 const buildInvestigationWorkPrompt = (
-  forge: "github" | "gitlab",
+  forge: "github" | "gitlab" | "azure-devops",
   checks: readonly ObservedPrStatusCheckRow[],
   diagnostics: readonly PrStatusCheckDiagnostic[],
 ): string => {
@@ -664,14 +664,25 @@ const buildInvestigationWorkPrompt = (
             "When calling `gh api` with query parameters on GET endpoints, pass `--method GET` with `-f` (or use a GET-safe invocation). Bare `-f` defaults to POST and can produce misleading 404 responses.",
             "For transient infrastructure failures (for example GitHub 503, runner outages, or flaky network during the check), restart the failed checks when appropriate so new executions can run before concluding the handoff cannot progress.",
           ]
-        : [
-            "Use the supplied GitLab pipeline-job traces first; call the GitLab REST API only when more detail is needed.",
-            "For transient infrastructure failures (for example GitLab 503, runner outages, or flaky network during the job), restart the failed pipeline jobs when appropriate so new executions can run before concluding the handoff cannot progress.",
-          ]),
+        : forge === "gitlab"
+          ? [
+              "Use the supplied GitLab pipeline-job traces first; call the GitLab REST API only when more detail is needed.",
+              "For transient infrastructure failures (for example GitLab 503, runner outages, or flaky network during the job), restart the failed pipeline jobs when appropriate so new executions can run before concluding the handoff cannot progress.",
+            ]
+          : [
+              "Use the supplied Azure DevOps build validation / branch policy diagnostics first; call the Azure DevOps REST API only when more detail is needed.",
+              "For transient infrastructure failures (for example Azure DevOps outages or flaky network during the check), restart the failed checks when appropriate so new executions can run before concluding the handoff cannot progress.",
+            ]),
     )
     if (diagnostics.length > 0) {
+      const forgeLabel =
+        forge === "github"
+          ? "GitHub"
+          : forge === "gitlab"
+            ? "GitLab"
+            : "Azure DevOps"
       lines.push(
-        `Harness diagnostics for the red checks follow. Use these artifacts first; only call ${forge === "github" ? "GitHub" : "GitLab"} for additional detail if needed.`,
+        `Harness diagnostics for the red checks follow. Use these artifacts first; only call ${forgeLabel} for additional detail if needed.`,
         ...diagnostics.map(formatDiagnosticBlock),
       )
     }
@@ -704,7 +715,7 @@ const buildInvestigationWorkPrompt = (
 
 /** Shared outcome contract for status-check work, recovery, and fallback. */
 const investigationOutcomeContractLines = (
-  forge: "github" | "gitlab" = "github",
+  forge: "github" | "gitlab" | "azure-devops" = "github",
 ): readonly string[] => [
   "You may include a concise work and verification summary before the result line.",
   "End your final response with exactly one machine-readable result line:",
@@ -728,7 +739,7 @@ const investigationOutcomeContractLines = (
 ]
 
 const buildInvestigationOutcomeFallbackPrompt = (
-  forge: "github" | "gitlab" = "github",
+  forge: "github" | "gitlab" | "azure-devops" = "github",
 ): string =>
   [
     "Based only on the PR status-check work you just did in this session, report the outcome.",
@@ -739,7 +750,7 @@ const buildInvestigationOutcomeFallbackPrompt = (
 /** Recovery prompt after a FAILED investigation outcome (exported for tests). */
 export const buildInvestigationRecoveryPrompt = (
   reason: string,
-  forge: "github" | "gitlab" = "github",
+  forge: "github" | "gitlab" | "azure-devops" = "github",
 ): string =>
   [
     "Make one focused recovery attempt to process the PR Status Check Handoff.",
