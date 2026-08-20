@@ -3,8 +3,9 @@ import type { ClaudeAuthProvider } from "./parse-auth-status.js"
 
 /**
  * Map Claude Code `apiProvider` from `claude auth status` to a stable provider
- * identity for Agent Backend status (issue #819). Derived only from Claude's
- * reported field — never from `CLAUDE_CODE_USE_BEDROCK` alone.
+ * identity for Agent Backend status (issues #819, #8). Derived only from
+ * Claude's reported field — never from `CLAUDE_CODE_USE_BEDROCK` /
+ * `CLAUDE_CODE_USE_FOUNDRY` alone.
  */
 export const claudeProviderIdentity = (
   provider: ClaudeAuthProvider,
@@ -14,6 +15,9 @@ export const claudeProviderIdentity = (
   }
   if (provider === "firstParty") {
     return { id: "firstParty", label: "First-party" }
+  }
+  if (provider === "foundry") {
+    return { id: "foundry", label: "Azure AI Foundry" }
   }
   return null
 }

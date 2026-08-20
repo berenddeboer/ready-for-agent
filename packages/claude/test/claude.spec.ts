@@ -326,6 +326,48 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
     )
   })
 
+  it("Foundry Ready never calls Bedrock discovery and keeps static aliases (issue #8)", async () => {
+    let discoveryCalls = 0
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        'printf \'%s\\n\' \'{"loggedIn":true,"authMethod":"third_party","apiProvider":"foundry"}\'',
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          inspect(binary, "2 seconds", {
+            discoverBedrockModels: fakeDiscover(
+              {
+                models: [
+                  {
+                    id: "should-not-appear",
+                    thinkingLevels: [...CLAUDE_THINKING_LEVELS],
+                  },
+                ],
+                warning: null,
+              },
+              () => {
+                discoveryCalls += 1
+              },
+            ),
+          }),
+        )
+        expect(result.provider).toEqual({
+          id: "foundry",
+          label: "Azure AI Foundry",
+        })
+        expect(result.models.map((m) => m.id)).toEqual([
+          "haiku",
+          "sonnet",
+          "opus",
+          "fable",
+        ])
+        expect(discoveryCalls).toBe(0)
+        expect(result.warnings).toEqual([])
+      },
+    )
+  })
+
   it("does not infer Bedrock provider from CLAUDE_CODE_USE_BEDROCK alone", async () => {
     // Stale/ineffective env flag must not produce a Bedrock label when Claude
     // reports first-party (issue #819).
@@ -518,6 +560,30 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
           expect(error.provider).toEqual({
             id: "firstParty",
             label: "First-party",
+          })
+        }
+      },
+    )
+  })
+
+  it("attaches Azure AI Foundry provider on unauthenticated ConfigError (issue #8)", async () => {
+    // Foundry is not Bedrock, so this still uses the generic first-party
+    // unauthenticated message/remediation text — only the provider identity
+    // (label) is Foundry-specific, matching the issue's cosmetic-label scope.
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        'printf \'%s\\n\' \'{"loggedIn":false,"authMethod":"third_party","apiProvider":"foundry"}\'',
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(inspect(binary).pipe(Effect.flip))
+        expect(error).toBeInstanceOf(AgentBackendConfigError)
+        if (error instanceof AgentBackendConfigError) {
+          expect(error.message).toBe(CLAUDE_UNAUTHENTICATED_MESSAGE)
+          expect(error.provider).toEqual({
+            id: "foundry",
+            label: "Azure AI Foundry",
           })
         }
       },

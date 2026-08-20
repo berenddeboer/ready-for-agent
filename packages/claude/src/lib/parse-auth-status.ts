@@ -1,9 +1,14 @@
 /**
  * Claude Code `apiProvider` as reported by `claude auth status` JSON.
- * Used for readiness classification (first-party vs Amazon Bedrock, issue #801).
- * Unknown when the field is absent or not a recognized value.
+ * Used for readiness classification (first-party vs Amazon Bedrock vs Azure
+ * AI Foundry, issues #801, #8). Unknown when the field is absent or not a
+ * recognized value.
  */
-export type ClaudeAuthProvider = "firstParty" | "bedrock" | "unknown"
+export type ClaudeAuthProvider =
+  | "firstParty"
+  | "bedrock"
+  | "foundry"
+  | "unknown"
 
 export type ClaudeAuthStatus =
   | { readonly kind: "authenticated"; readonly provider: ClaudeAuthProvider }
@@ -16,7 +21,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * Map Claude’s reported `apiProvider` string. Classification uses this field
- * (and `loggedIn`), never “missing claude.ai login implies Bedrock”.
+ * (and `loggedIn`), never “missing claude.ai login implies Bedrock/Foundry”.
  */
 export const readClaudeAuthProvider = (value: unknown): ClaudeAuthProvider => {
   if (value === "bedrock") {
@@ -24,6 +29,9 @@ export const readClaudeAuthProvider = (value: unknown): ClaudeAuthProvider => {
   }
   if (value === "firstParty") {
     return "firstParty"
+  }
+  if (value === "foundry") {
+    return "foundry"
   }
   return "unknown"
 }
@@ -78,6 +86,9 @@ export const extractFirstJsonObject = (text: string): string | undefined => {
  * Real CLI shapes:
  * - First-party ready: `{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty",...}`
  * - Bedrock ready: `{"loggedIn":true,"authMethod":"third_party","apiProvider":"bedrock"}`
+ * - Foundry ready (`CLAUDE_CODE_USE_FOUNDRY=1`): `{"loggedIn":true,"apiProvider":"foundry",...}`
+ *   (issue #8 — `apiProvider` is the verified field; the exact `authMethod`
+ *   value isn't asserted here since classification never reads it)
  * - Unauthenticated: `loggedIn: false` (often exit non-zero), first-party path
  *
  * Classification prefers JSON `loggedIn` plus `apiProvider` so:
