@@ -240,33 +240,177 @@ describe("installDependencies", () => {
       },
     ))
 
-  it("starts OpenCode when no manager is recognizable", () =>
+  it("does not start an Agent Turn when no manager is recognizable", () =>
     withTemp(
       async () => {},
       async (root) => {
-        let started: {
-          prompt: string
-          cwd: string
-          model: string
-          variant: string
-        } | null = null
+        let startTurnCount = 0
         await run(
           installDependencies(baseContext(root)),
           stubOpencode({
-            startTurn: (input) => {
-              started = input
+            startTurn: () => {
+              startTurnCount += 1
               return Effect.succeed({
-                sessionId: "ses_ambiguous",
+                sessionId: "ses_should_not_start",
                 assistantText: "",
               })
             },
           }),
         )
+        expect(startTurnCount).toBe(0)
+      },
+    ))
+
+  it("does not start an Agent Turn for Python and Rust manifests in subdirectories", () =>
+    withTemp(
+      async (root) => {
+        await mkdir(join(root, "nested"), { recursive: true })
+        await writeFile(join(root, "nested", "requirements.txt"), "requests\n")
+        await writeFile(join(root, "nested", "pyproject.toml"), "[project]\n")
+        await writeFile(join(root, "nested", "Cargo.toml"), "[package]\n")
+      },
+      async (root) => {
+        let startTurnCount = 0
+        await run(
+          installDependencies(baseContext(root)),
+          stubOpencode({
+            startTurn: () => {
+              startTurnCount += 1
+              return Effect.succeed({
+                sessionId: "ses_should_not_start",
+                assistantText: "",
+              })
+            },
+          }),
+        )
+        expect(startTurnCount).toBe(0)
+      },
+    ))
+
+  it("starts OpenCode for a root requirements.txt", () =>
+    withTemp(
+      async (root) => {
+        await writeFile(join(root, "requirements.txt"), "requests==2.32.0\n")
+      },
+      async (root) => {
+        let started: {
+          prompt: string
+          cwd: string
+          model: string
+          thinkingLevel: string
+        } | null = null
+        let startTurnCount = 0
+        await run(
+          installDependencies(baseContext(root)),
+          stubOpencode({
+            startTurn: (input) => {
+              startTurnCount += 1
+              started = input
+              return Effect.succeed({
+                sessionId: "ses_requirements",
+                assistantText: "",
+              })
+            },
+          }),
+        )
+        expect(startTurnCount).toBe(1)
         expect(started).not.toBeNull()
         expect(started!.cwd).toBe(root)
         expect(started!.model).toBe("opencode/test-model")
         expect(started!.thinkingLevel).toBe("high")
         expect(started!.prompt).toContain("could not choose")
+        expect(started!.prompt).toContain("requirements.txt")
+      },
+    ))
+
+  it("starts OpenCode for a root pyproject.toml", () =>
+    withTemp(
+      async (root) => {
+        await writeFile(
+          join(root, "pyproject.toml"),
+          '[project]\nname = "demo"\n',
+        )
+      },
+      async (root) => {
+        let started: { prompt: string } | null = null
+        let startTurnCount = 0
+        await run(
+          installDependencies(baseContext(root)),
+          stubOpencode({
+            startTurn: (input) => {
+              startTurnCount += 1
+              started = { prompt: input.prompt }
+              return Effect.succeed({
+                sessionId: "ses_pyproject",
+                assistantText: "",
+              })
+            },
+          }),
+        )
+        expect(startTurnCount).toBe(1)
+        expect(started).not.toBeNull()
+        expect(started!.prompt).toContain("pyproject.toml")
+      },
+    ))
+
+  it("starts OpenCode for a root Cargo.toml", () =>
+    withTemp(
+      async (root) => {
+        await writeFile(join(root, "Cargo.toml"), '[package]\nname = "demo"\n')
+      },
+      async (root) => {
+        let started: { prompt: string } | null = null
+        let startTurnCount = 0
+        await run(
+          installDependencies(baseContext(root)),
+          stubOpencode({
+            startTurn: (input) => {
+              startTurnCount += 1
+              started = { prompt: input.prompt }
+              return Effect.succeed({
+                sessionId: "ses_cargo",
+                assistantText: "",
+              })
+            },
+          }),
+        )
+        expect(startTurnCount).toBe(1)
+        expect(started).not.toBeNull()
+        expect(started!.prompt).toContain("Cargo.toml")
+      },
+    ))
+
+  it("starts exactly one Agent Turn when multiple Python and Rust manifests are present", () =>
+    withTemp(
+      async (root) => {
+        await writeFile(join(root, "requirements.txt"), "requests==2.32.0\n")
+        await writeFile(
+          join(root, "pyproject.toml"),
+          '[project]\nname = "demo"\n',
+        )
+        await writeFile(join(root, "Cargo.toml"), '[package]\nname = "demo"\n')
+      },
+      async (root) => {
+        let started: { prompt: string } | null = null
+        let startTurnCount = 0
+        await run(
+          installDependencies(baseContext(root)),
+          stubOpencode({
+            startTurn: (input) => {
+              startTurnCount += 1
+              started = { prompt: input.prompt }
+              return Effect.succeed({
+                sessionId: "ses_multi_manifest",
+                assistantText: "",
+              })
+            },
+          }),
+        )
+        expect(startTurnCount).toBe(1)
+        expect(started).not.toBeNull()
+        expect(started!.prompt).toContain("requirements.txt")
+        expect(started!.prompt).toContain("pyproject.toml")
+        expect(started!.prompt).toContain("Cargo.toml")
       },
     ))
 
@@ -406,7 +550,12 @@ describe("installDependencies", () => {
 
   it("does not return or require a Session id on successful fallback", () =>
     withTemp(
-      async () => {},
+      async (root) => {
+        await writeFile(
+          join(root, "pyproject.toml"),
+          '[project]\nname = "demo"\n',
+        )
+      },
       async (root) => {
         const outcome = await run(
           installDependencies(baseContext(root)).pipe(
@@ -433,6 +582,7 @@ describe("installDependencies fallback failure", () => {
     )
     const root = await mkdtemp(join(tmpdir(), "rfa-install-fallback-fail-"))
     try {
+      await writeFile(join(root, "Cargo.toml"), '[package]\nname = "demo"\n')
       const error = await Effect.runPromise(
         installDependencies(baseContext(root)).pipe(
           Effect.flip,

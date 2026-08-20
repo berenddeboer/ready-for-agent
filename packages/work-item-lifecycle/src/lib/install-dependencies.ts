@@ -166,13 +166,19 @@ const runOpencodeFallback = (
 
 /**
  * Production Install Dependencies Lifecycle Step.
- * Directly runs an unambiguous package-manager install, or delegates to
- * OpenCode when detection is inconclusive or the direct command fails.
+ * Directly runs an unambiguous package-manager install, completes without
+ * an Agent Turn when no recognized root dependency manifests exist, or
+ * delegates to OpenCode when detection is inconclusive or the direct
+ * command fails.
  */
 export const installDependencies = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
     const plan = yield* detectInstallPlan(worktreePath)
+
+    if (plan._tag === "NoOp") {
+      return
+    }
 
     if (plan._tag === "Fallback") {
       yield* runOpencodeFallback(

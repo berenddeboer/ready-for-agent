@@ -14,6 +14,7 @@ export type InstallPlan =
       readonly _tag: "Fallback"
       readonly reason: string
     }
+  | { readonly _tag: "NoOp" }
 
 const NODE_LOCKFILES: ReadonlyArray<{
   readonly file: string
@@ -25,6 +26,12 @@ const NODE_LOCKFILES: ReadonlyArray<{
   { file: "pnpm-lock.yaml", manager: "pnpm" },
   { file: "yarn.lock", manager: "yarn" },
 ]
+
+const PYTHON_RUST_MANIFESTS = [
+  "requirements.txt",
+  "pyproject.toml",
+  "Cargo.toml",
+] as const
 
 const installFor = (
   manager: NodePackageManager | "composer",
@@ -101,10 +108,25 @@ const listPresentNodeLockfiles = (worktreePath: string) =>
     return present
   })
 
+const listPresentPythonRustManifests = (worktreePath: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const present: string[] = []
+    for (const file of PYTHON_RUST_MANIFESTS) {
+      if (yield* fs.exists(path.join(worktreePath, file))) {
+        present.push(file)
+      }
+    }
+    return present
+  })
+
 /**
  * Derive a direct install command from root metadata and lockfiles only.
  * Never executes repository-controlled shell text; returns Fallback when
- * the layout is ambiguous, conflicting, or unsupported.
+ * the layout is ambiguous, conflicting, or unsupported; returns NoOp when
+ * the worktree root has no recognized Node, Composer, Python, or Rust
+ * dependency manifests.
  */
 export const detectInstallPlan = (worktreePath: string) =>
   Effect.gen(function* () {
@@ -141,9 +163,16 @@ export const detectInstallPlan = (worktreePath: string) =>
             "Node lockfile present without package.json; install manager is unsupported",
         } satisfies InstallPlan
       }
+      const pythonRustManifests =
+        yield* listPresentPythonRustManifests(worktreePath)
+      if (pythonRustManifests.length > 0) {
+        return {
+          _tag: "Fallback",
+          reason: `Detected root dependency manifests without a supported direct install command: ${pythonRustManifests.join(", ")}`,
+        } satisfies InstallPlan
+      }
       return {
-        _tag: "Fallback",
-        reason: "No recognizable root package manager metadata or lockfile",
+        _tag: "NoOp",
       } satisfies InstallPlan
     }
 
