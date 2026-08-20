@@ -25,10 +25,13 @@ export class AzureDevOpsRequestError extends Schema.TaggedErrorClass<AzureDevOps
 
 /**
  * A service method not yet implemented against the real Azure DevOps REST
- * API. `verifyProject`, `getAuthenticatedUserLogin`, `hasCredentials`, and
- * `hasAmbientCredentials` are implemented; the remaining 14 methods on
- * {@link AzureDevOpsServiceShape} fail with this error until later tickets
- * build them out (PR/merge state machine, Ready Issue listing, etc.).
+ * API. `verifyProject`, `getAuthenticatedUserLogin`, `hasCredentials`,
+ * `hasAmbientCredentials`, `getOpenPullRequestNumber`,
+ * `findOpenPullRequestNumber`, `createDraftPullRequest`,
+ * `updateOpenDraftPullRequestCopy`, and `markPullRequestReadyForReview` are
+ * implemented; the remaining 9 methods on {@link AzureDevOpsServiceShape}
+ * fail with this error until later tickets build them out (merge state
+ * machine, Ready Issue listing, etc.).
  */
 export class AzureDevOpsNotImplementedError extends Schema.TaggedErrorClass<AzureDevOpsNotImplementedError>()(
   "AzureDevOpsNotImplementedError",

@@ -185,31 +185,6 @@ describe("Azure DevOps not-yet-implemented methods", () => {
         run: () => service.listReadyIssues(repository),
       },
       {
-        method: "getOpenPullRequestNumber",
-        run: () => service.getOpenPullRequestNumber(repository, "feature"),
-      },
-      {
-        method: "findOpenPullRequestNumber",
-        run: () => service.findOpenPullRequestNumber(repository, "feature"),
-      },
-      {
-        method: "createDraftPullRequest",
-        run: () =>
-          service.createDraftPullRequest(repository, {
-            headRefName: "feature",
-            title: "t",
-            body: "b",
-          }),
-      },
-      {
-        method: "updateOpenDraftPullRequestCopy",
-        run: () =>
-          service.updateOpenDraftPullRequestCopy(repository, "feature", {
-            title: "t",
-            body: "b",
-          }),
-      },
-      {
         method: "countOpenNonDraftPullRequests",
         run: () => service.countOpenNonDraftPullRequests(repository),
       },
@@ -220,10 +195,6 @@ describe("Azure DevOps not-yet-implemented methods", () => {
       {
         method: "getPrStatusCheckDiagnostics",
         run: () => service.getPrStatusCheckDiagnostics(repository, []),
-      },
-      {
-        method: "markPullRequestReadyForReview",
-        run: () => service.markPullRequestReadyForReview(repository, "feature"),
       },
       {
         method: "getPullRequestLifecycleStatus",
@@ -253,7 +224,7 @@ describe("Azure DevOps not-yet-implemented methods", () => {
         run: () => service.deleteBranch(repository, "feature"),
       },
     ]
-    expect(cases).toHaveLength(14)
+    expect(cases).toHaveLength(9)
     for (const { method, run } of cases) {
       const error = await Effect.runPromise(run().pipe(Effect.flip))
       expect(error).toBeInstanceOf(AzureDevOpsNotImplementedError)
@@ -261,5 +232,295 @@ describe("Azure DevOps not-yet-implemented methods", () => {
         expect(error.method).toBe(method)
       }
     }
+  })
+})
+
+describe("Azure DevOps getOpenPullRequestNumber / findOpenPullRequestNumber", () => {
+  test("finds the open pull request for the exact source branch", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "/acme/widgets/_apis/git/repositories/widgets/pullrequests?searchCriteria.status=active&searchCriteria.sourceRefName=refs%2Fheads%2Ffeature&api-version=7.1":
+          {
+            value: [
+              {
+                pullRequestId: 42,
+                status: "active",
+                isDraft: true,
+                title: "t",
+                description: "b",
+                sourceRefName: "refs/heads/feature",
+              },
+            ],
+          },
+      }),
+    )
+    await expect(
+      Effect.runPromise(
+        service.findOpenPullRequestNumber(repository, "feature"),
+      ),
+    ).resolves.toBe(42)
+    await expect(
+      Effect.runPromise(
+        service.getOpenPullRequestNumber(repository, "feature"),
+      ),
+    ).resolves.toBe(42)
+  })
+
+  test("findOpenPullRequestNumber returns null when none exists", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "/acme/widgets/_apis/git/repositories/widgets/pullrequests?searchCriteria.status=active&searchCriteria.sourceRefName=refs%2Fheads%2Ffeature&api-version=7.1":
+          { value: [] },
+      }),
+    )
+    await expect(
+      Effect.runPromise(
+        service.findOpenPullRequestNumber(repository, "feature"),
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("getOpenPullRequestNumber fails when none exists", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "/acme/widgets/_apis/git/repositories/widgets/pullrequests?searchCriteria.status=active&searchCriteria.sourceRefName=refs%2Fheads%2Ffeature&api-version=7.1":
+          { value: [] },
+      }),
+    )
+    const error = await Effect.runPromise(
+      service.getOpenPullRequestNumber(repository, "feature").pipe(Effect.flip),
+    )
+    expect(error).toBeInstanceOf(AzureDevOpsRequestError)
+  })
+})
+
+describe("Azure DevOps createDraftPullRequest", () => {
+  test("creates a draft pull request against an explicit base", async () => {
+    let requestBody: unknown = null
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      _input,
+      init,
+    ) => {
+      requestBody = JSON.parse(String(init?.body))
+      return json({
+        pullRequestId: 7,
+        status: "active",
+        isDraft: true,
+      })
+    }) as unknown as typeof fetch)
+
+    await expect(
+      Effect.runPromise(
+        service.createDraftPullRequest(repository, {
+          headRefName: "feature",
+          title: "t",
+          body: "b",
+          baseRefName: "main",
+        }),
+      ),
+    ).resolves.toBe(7)
+    expect(requestBody).toEqual({
+      sourceRefName: "refs/heads/feature",
+      targetRefName: "refs/heads/main",
+      title: "t",
+      description: "b",
+      isDraft: true,
+    })
+  })
+
+  test("resolves the base branch from the repository default when omitted", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "/acme/widgets/_apis/git/repositories/widgets?api-version=7.1": {
+          defaultBranch: "refs/heads/main",
+        },
+        "POST /acme/widgets/_apis/git/repositories/widgets/pullrequests?api-version=7.1":
+          { pullRequestId: 9, status: "active", isDraft: true },
+      }),
+    )
+    await expect(
+      Effect.runPromise(
+        service.createDraftPullRequest(repository, {
+          headRefName: "feature",
+          title: "t",
+          body: "b",
+        }),
+      ),
+    ).resolves.toBe(9)
+  })
+
+  test("fails when Azure DevOps returns a non-draft pull request", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "POST /acme/widgets/_apis/git/repositories/widgets/pullrequests?api-version=7.1":
+          { pullRequestId: 9, status: "active", isDraft: false },
+      }),
+    )
+    const error = await Effect.runPromise(
+      service
+        .createDraftPullRequest(repository, {
+          headRefName: "feature",
+          title: "t",
+          body: "b",
+          baseRefName: "main",
+        })
+        .pipe(Effect.flip),
+    )
+    expect(error).toBeInstanceOf(AzureDevOpsRequestError)
+  })
+})
+
+describe("Azure DevOps updateOpenDraftPullRequestCopy", () => {
+  test("updates title and description of an open draft pull request", async () => {
+    let updateBody: unknown = null
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      if ((init?.method ?? "GET") === "PATCH") {
+        updateBody = JSON.parse(String(init?.body))
+        return json({ pullRequestId: 42, isDraft: true })
+      }
+      if (url.pathname.endsWith("/pullrequests")) {
+        return json({
+          value: [
+            {
+              pullRequestId: 42,
+              status: "active",
+              isDraft: true,
+              title: "old title",
+              description: "old body",
+            },
+          ],
+        })
+      }
+      throw new Error(`Unexpected request: ${url.pathname}`)
+    }) as unknown as typeof fetch)
+
+    await expect(
+      Effect.runPromise(
+        service.updateOpenDraftPullRequestCopy(repository, "feature", {
+          title: "new title",
+          body: "new body",
+        }),
+      ),
+    ).resolves.toBe(42)
+    expect(updateBody).toEqual({ title: "new title", description: "new body" })
+  })
+
+  test("returns null when no open pull request exists", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "/acme/widgets/_apis/git/repositories/widgets/pullrequests?searchCriteria.status=active&searchCriteria.sourceRefName=refs%2Fheads%2Ffeature&api-version=7.1":
+          { value: [] },
+      }),
+    )
+    await expect(
+      Effect.runPromise(
+        service.updateOpenDraftPullRequestCopy(repository, "feature", {
+          title: "t",
+          body: "b",
+        }),
+      ),
+    ).resolves.toBeNull()
+  })
+
+  test("does not overwrite a non-draft open pull request", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "/acme/widgets/_apis/git/repositories/widgets/pullrequests?searchCriteria.status=active&searchCriteria.sourceRefName=refs%2Fheads%2Ffeature&api-version=7.1":
+          {
+            value: [
+              {
+                pullRequestId: 42,
+                status: "active",
+                isDraft: false,
+                title: "ready title",
+                description: "ready body",
+              },
+            ],
+          },
+      }),
+    )
+    await expect(
+      Effect.runPromise(
+        service.updateOpenDraftPullRequestCopy(repository, "feature", {
+          title: "t",
+          body: "b",
+        }),
+      ),
+    ).resolves.toBe(42)
+  })
+})
+
+describe("Azure DevOps markPullRequestReadyForReview", () => {
+  test("clears the draft flag for an open draft pull request", async () => {
+    let updateBody: unknown = null
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      if ((init?.method ?? "GET") === "PATCH") {
+        updateBody = JSON.parse(String(init?.body))
+        return json({ pullRequestId: 42, isDraft: false })
+      }
+      if (url.pathname.endsWith("/pullrequests")) {
+        return json({
+          value: [{ pullRequestId: 42, status: "active", isDraft: true }],
+        })
+      }
+      throw new Error(`Unexpected request: ${url.pathname}`)
+    }) as unknown as typeof fetch)
+
+    await Effect.runPromise(
+      service.markPullRequestReadyForReview(repository, "feature"),
+    )
+    expect(updateBody).toEqual({ isDraft: false })
+  })
+
+  test("is idempotent when already ready for review", async () => {
+    let patchCalled = false
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      _input,
+      init,
+    ) => {
+      if ((init?.method ?? "GET") === "PATCH") {
+        patchCalled = true
+        return json({ pullRequestId: 42, isDraft: false })
+      }
+      return json({
+        value: [{ pullRequestId: 42, status: "active", isDraft: false }],
+      })
+    }) as unknown as typeof fetch)
+
+    await Effect.runPromise(
+      service.markPullRequestReadyForReview(repository, "feature"),
+    )
+    expect(patchCalled).toBe(false)
+  })
+
+  test("fails when no open pull request exists", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "/acme/widgets/_apis/git/repositories/widgets/pullrequests?searchCriteria.status=active&searchCriteria.sourceRefName=refs%2Fheads%2Ffeature&api-version=7.1":
+          { value: [] },
+      }),
+    )
+    const error = await Effect.runPromise(
+      service
+        .markPullRequestReadyForReview(repository, "feature")
+        .pipe(Effect.flip),
+    )
+    expect(error).toBeInstanceOf(AzureDevOpsRequestError)
   })
 })

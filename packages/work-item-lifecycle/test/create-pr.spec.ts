@@ -7,6 +7,11 @@ import {
   type ActiveAgentBackend,
   AgentBackend,
 } from "@ready-for-agent/agent-backend"
+import {
+  AzureDevOpsRequestError,
+  AzureDevOpsService,
+  type AzureDevOpsServiceShape,
+} from "@ready-for-agent/azure-devops-service"
 import type { DbService } from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
@@ -171,6 +176,42 @@ const stubGitLab = (
     ...overrides,
   } satisfies GitLabServiceShape)
 
+const stubAzureDevOps = (
+  overrides: Partial<AzureDevOpsServiceShape> = {},
+): Layer.Layer<AzureDevOpsService> =>
+  Layer.succeed(AzureDevOpsService, {
+    verifyProject: (repository) => Effect.succeed(repository),
+    getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+    listReadyIssues: () => Effect.succeed([]),
+    hasCredentials: () => Effect.succeed(true),
+    hasAmbientCredentials: () => Effect.succeed(true),
+    getOpenPullRequestNumber: () => Effect.succeed(321),
+    findOpenPullRequestNumber: () => Effect.succeed(null),
+    createDraftPullRequest: () => Effect.succeed(321),
+    updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+    countOpenNonDraftPullRequests: () => Effect.succeed(0),
+    getPullRequestCheckStatus: () =>
+      Effect.succeed({
+        _tag: "succeeded",
+        terminalChecks: [],
+        mergeability: "mergeable",
+        baseRefName: "main",
+        headPushedAt: null,
+        headSha: null,
+        createdAt: null,
+        isDraft: null,
+      }),
+    getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+    markPullRequestReadyForReview: () => Effect.void,
+    getPullRequestLifecycleStatus: () =>
+      Effect.succeed({ _tag: "open" as const }),
+    mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+    ensureIssueCompletedWithSummary: () => Effect.void,
+    closeOpenPullRequestsForBranch: () => Effect.void,
+    deleteBranch: () => Effect.void,
+    ...overrides,
+  } satisfies AzureDevOpsServiceShape)
+
 const stubOpencode = (
   overrides: {
     continueTurn?: (input: {
@@ -210,6 +251,7 @@ const run = <A, E>(
     | DbService
     | GitHubService
     | GitLabService
+    | AzureDevOpsService
     | KeymaxxerService
     | AgentBackend
     | ActiveAgentBackend
@@ -220,6 +262,7 @@ const run = <A, E>(
     opencode?: Layer.Layer<AgentBackend>
     github?: Layer.Layer<GitHubService>
     gitlab?: Layer.Layer<GitLabService>
+    azureDevOps?: Layer.Layer<AzureDevOpsService>
     activeBackend?: Layer.Layer<ActiveAgentBackend>
   } = {},
 ): Promise<A> =>
@@ -230,6 +273,7 @@ const run = <A, E>(
           layers.db ?? stubDb,
           layers.github ?? stubGitHub(),
           layers.gitlab ?? stubGitLab(),
+          layers.azureDevOps ?? stubAzureDevOps(),
           layers.keymaxxer ?? stubKeymaxxer(),
           layers.opencode ?? stubOpencode(),
           layers.activeBackend ?? stubActiveAgentBackendLayer(),
@@ -444,6 +488,231 @@ describe("createPr", () => {
       })
     }))
 
+  it("creates a draft Azure DevOps PR without calling GitHub", () =>
+    withTemp(async (root) => {
+      let githubCalls = 0
+      let created: {
+        headRefName: string
+        title: string
+        body: string
+      } | null = null
+      const pushCommands: string[] = []
+      let agentCalls = 0
+      const azureDevOpsDb = stubDbServiceLayer({
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme-widgets",
+          }),
+        ]),
+      })
+      const context = baseContext(root, {
+        issueNumber: 3601642,
+        publicationTitle: "feat: refresh tokens",
+        publicationBody: "Implements refresh.\n\nCloses #3601642",
+      })
+      const expectedBranch = workItemBranchName({
+        projectPath: "acme/widgets",
+        issueNumber: 3601642,
+        workItemId: context.workItemId,
+      })
+
+      const result = await run(createPr(context), {
+        db: azureDevOpsDb,
+        github: stubGitHub({
+          findOpenPullRequestNumber: () => {
+            githubCalls += 1
+            return Effect.succeed(null)
+          },
+          createDraftPullRequest: () => {
+            githubCalls += 1
+            return Effect.succeed(1)
+          },
+        }),
+        azureDevOps: stubAzureDevOps({
+          findOpenPullRequestNumber: () => Effect.succeed(null),
+          createDraftPullRequest: (_repository, input) => {
+            created = input
+            return Effect.succeed(91)
+          },
+          updateOpenDraftPullRequestCopy: () => Effect.succeed(91),
+        }),
+        keymaxxer: stubKeymaxxer({
+          enabled: true,
+          findSecret: (input) => {
+            expect(input).toEqual({
+              provider: "azure-devops",
+              account: "acme/widgets",
+            })
+            return Effect.succeed("AZURE_DEVOPS_TOKEN_ACME_WIDGETS")
+          },
+          runWithSecrets: (input) => {
+            pushCommands.push(input.command)
+            return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" })
+          },
+        }),
+        opencode: stubOpencode({
+          continueTurn: () => {
+            agentCalls += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "",
+            })
+          },
+        }),
+      })
+
+      expect(result).toMatchObject({
+        pullRequestNumber: 91,
+        completion: "native",
+        publicationTitle: "feat: refresh tokens",
+        publicationBody: "Implements refresh.\n\nCloses #3601642",
+      })
+      expect(created).toEqual({
+        headRefName: expectedBranch,
+        title: "feat: refresh tokens",
+        body: "Implements refresh.\n\nCloses #3601642",
+      })
+      expect(githubCalls).toBe(0)
+      expect(agentCalls).toBe(0)
+      expect(pushCommands).toHaveLength(1)
+      const pushCommand = pushCommands[0]!
+      expect(pushCommand).toContain(
+        "https://dev.azure.com/acme/widgets/_git/widgets",
+      )
+      expect(pushCommand).not.toContain(" origin ")
+      expect(pushCommand).toContain("Authorization: Basic $BASIC")
+      // Real shell assignment before git — not BASIC=… git … $BASIC prefix form.
+      expect(pushCommand).toContain(')" && git ')
+      // Empty-username Basic auth (":<pat>"), not GitLab's "oauth2:<pat>".
+      expect(pushCommand).toContain("printf ':%s'")
+    }))
+
+  it("reuses an existing exact-branch open Azure DevOps PR without creation", () =>
+    withTemp(async (root) => {
+      let createCalls = 0
+      let githubCalls = 0
+      let reconciled: { title: string; body: string } | null = null
+      const azureDevOpsDb = stubDbServiceLayer({
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme-widgets",
+          }),
+        ]),
+      })
+      const context = baseContext(root, {
+        issueNumber: 3601642,
+        publicationTitle: "feat: refresh tokens",
+        publicationBody: "Implements refresh.\n\nCloses #3601642",
+      })
+
+      const result = await run(createPr(context), {
+        db: azureDevOpsDb,
+        github: stubGitHub({
+          findOpenPullRequestNumber: () => {
+            githubCalls += 1
+            return Effect.succeed(null)
+          },
+        }),
+        azureDevOps: stubAzureDevOps({
+          findOpenPullRequestNumber: () => Effect.succeed(77),
+          createDraftPullRequest: () => {
+            createCalls += 1
+            return Effect.succeed(91)
+          },
+          updateOpenDraftPullRequestCopy: (_repository, _branch, input) => {
+            reconciled = input
+            return Effect.succeed(77)
+          },
+        }),
+        keymaxxer: stubKeymaxxer({
+          enabled: false,
+          findSecret: () => Effect.succeed(null),
+        }),
+        opencode: stubOpencode({
+          continueTurn: () =>
+            Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "",
+            }),
+        }),
+      })
+
+      expect(result).toMatchObject({
+        pullRequestNumber: 77,
+        completion: "native",
+        publicationTitle: "feat: refresh tokens",
+      })
+      expect(createCalls).toBe(0)
+      expect(githubCalls).toBe(0)
+      expect(reconciled).toEqual({
+        title: "feat: refresh tokens",
+        body: "Implements refresh.\n\nCloses #3601642",
+      })
+    }))
+
+  it("falls back to one Agent Turn with Azure DevOps guidance when ambient push has no token", () =>
+    withTemp(async (root) => {
+      let continueInput: {
+        sessionId: string
+        prompt: string
+        cwd: string
+        model: string
+        thinkingLevel: string | null
+      } | null = null
+      let agentRan = false
+      const azureDevOpsDb = stubDbServiceLayer({
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme-widgets",
+          }),
+        ]),
+      })
+      const context = baseContext(root, {
+        sessionId: "ses_from_implement",
+        issueNumber: 2039,
+      })
+
+      const result = await run(createPr(context), {
+        db: azureDevOpsDb,
+        azureDevOps: stubAzureDevOps({
+          findOpenPullRequestNumber: () =>
+            Effect.succeed(agentRan ? 654 : null),
+        }),
+        keymaxxer: stubKeymaxxer({
+          enabled: false,
+          findSecret: () => Effect.die("must not inspect the vault"),
+        }),
+        opencode: stubOpencode({
+          continueTurn: (input) => {
+            continueInput = input
+            agentRan = true
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "",
+            })
+          },
+        }),
+      })
+
+      expect(result.pullRequestNumber).toBe(654)
+      expect(result.completion).toBe("agent_fallback")
+      expect(continueInput).not.toBeNull()
+      expect(continueInput!.prompt).toContain(
+        "No ambient Azure DevOps token available",
+      )
+      expect(continueInput!.prompt).toContain("Azure DevOps API or push access")
+      expect(continueInput!.prompt).toContain("AZURE_DEVOPS_EXT_PAT")
+    }))
+
   it("reuses an existing exact-branch open PR without creation or Agent Turn", () =>
     withTemp(async (root) => {
       let createCalls = 0
@@ -554,6 +823,49 @@ describe("createPr", () => {
             updateOpenDraftPullRequestCopy: () =>
               Effect.fail(
                 new GitHubRequestError({ message: "mutation rate limited" }),
+              ),
+            createDraftPullRequest: () => {
+              createCalls += 1
+              return Effect.succeed(999)
+            },
+          }),
+        },
+      )
+      expect(result.pullRequestNumber).toBe(55)
+      expect(result.completion).toBe("native")
+      expect(createCalls).toBe(0)
+    }))
+
+  it("reuses an existing open Azure DevOps PR when draft copy reconcile fails", () =>
+    withTemp(async (root) => {
+      let createCalls = 0
+      const azureDevOpsDb = stubDbServiceLayer({
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme-widgets",
+          }),
+        ]),
+      })
+      const result = await run(
+        createPr(
+          baseContext(root, {
+            issueNumber: 55,
+            publicationTitle: "feat: x",
+            publicationBody: "Body for issue 55.\n\nCloses #55",
+          }),
+        ),
+        {
+          db: azureDevOpsDb,
+          azureDevOps: stubAzureDevOps({
+            findOpenPullRequestNumber: () => Effect.succeed(55),
+            updateOpenDraftPullRequestCopy: () =>
+              Effect.fail(
+                new AzureDevOpsRequestError({
+                  message: "mutation rate limited",
+                }),
               ),
             createDraftPullRequest: () => {
               createCalls += 1

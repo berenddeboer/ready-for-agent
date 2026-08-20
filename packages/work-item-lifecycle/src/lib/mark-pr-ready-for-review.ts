@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
@@ -15,7 +16,8 @@ export class MarkPrReadyForReviewContextError extends Schema.TaggedErrorClass<Ma
 /**
  * Production Mark PR Ready for Review Lifecycle Step.
  * After status checks are green, converts the draft PR/MR on the Work Item
- * branch to ready for review (GitHub GraphQL or GitLab draft flag).
+ * branch to ready for review (GitHub GraphQL, GitLab draft flag, or Azure
+ * DevOps `isDraft` field).
  */
 export const markPrReadyForReview = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -39,11 +41,25 @@ export const markPrReadyForReview = (context: LifecycleStepContext) =>
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
     })
-    if (repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      yield* gitlab.markPullRequestReadyForReview(repository, branch)
-      return
+    switch (repository.forge) {
+      case "gitlab": {
+        const gitlab = yield* GitLabService
+        yield* gitlab.markPullRequestReadyForReview(repository, branch)
+        return
+      }
+      case "azure-devops": {
+        const azureDevOps = yield* AzureDevOpsService
+        yield* azureDevOps.markPullRequestReadyForReview(repository, branch)
+        return
+      }
+      case "github": {
+        const github = yield* GitHubService
+        yield* github.markPullRequestReadyForReview(repository, branch)
+        return
+      }
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
     }
-    const github = yield* GitHubService
-    yield* github.markPullRequestReadyForReview(repository, branch)
   })

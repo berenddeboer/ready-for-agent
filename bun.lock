@@ -31,6 +31,7 @@
       "dependencies": {
         "@effect/platform-bun": "^4.0.0-beta.97",
         "@ready-for-agent/agent-backend": "workspace:*",
+        "@ready-for-agent/azure-devops-service": "workspace:*",
         "@ready-for-agent/claude": "workspace:*",
         "@ready-for-agent/codex": "workspace:*",
         "@ready-for-agent/db": "workspace:*",

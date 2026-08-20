@@ -26,7 +26,7 @@
   ],
   "references": [
     {
-      "path": "../../packages/lifecycle-model/tsconfig.lib.json"
+      "path": "../../packages/azure-devops-service/tsconfig.lib.json"
     },
     {
       "path": "../../packages/work-item-lifecycle/tsconfig.lib.json"
@@ -51,6 +51,9 @@
     },
     {
       "path": "../../packages/local-git/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/lifecycle-model/tsconfig.lib.json"
     },
     {
       "path": "../../packages/issue-reconciler/tsconfig.lib.json"
