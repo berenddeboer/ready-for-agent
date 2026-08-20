@@ -25,10 +25,11 @@ export type AzureDevOpsServiceError =
 
 /**
  * Same 18-method surface as {@link @ready-for-agent/gitlab-service#GitLabServiceShape}.
- * Only `verifyProject`, `getAuthenticatedUserLogin`, `hasCredentials`, and
- * `hasAmbientCredentials` are implemented against the real Azure DevOps REST
- * API today; every other method fails with `AzureDevOpsNotImplementedError`
- * until a later ticket builds it out (see method-level docs).
+ * Only `verifyProject`, `getAuthenticatedUserLogin`, `hasCredentials`,
+ * `hasAmbientCredentials`, and `listReadyIssues` are implemented against the
+ * real Azure DevOps REST API today; every other method fails with
+ * `AzureDevOpsNotImplementedError` until a later ticket builds it out (see
+ * method-level docs).
  */
 export interface AzureDevOpsServiceShape {
   /**
@@ -47,7 +48,11 @@ export interface AzureDevOpsServiceShape {
   ) => Effect.Effect<string, AzureDevOpsServiceError>
   /**
    * Open work items tagged `ready-for-agent` via a WIQL
-   * `[System.Tags] CONTAINS 'ready-for-agent'` query. Not yet implemented.
+   * `[System.Tags] CONTAINS 'ready-for-agent'` query, followed by a batch
+   * fetch (`$expand=all`) for fields and relations. `blockedBy` is populated
+   * from native `System.LinkTypes.Dependency-Reverse` (Predecessor) links,
+   * filtered to currently-open blockers — the same posture as GitHub's
+   * `blockedBy`, not a task-list/tag convention. Implemented.
    */
   readonly listReadyIssues: (
     repository: AzureDevOpsRepository,

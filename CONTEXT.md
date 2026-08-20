@@ -5,7 +5,7 @@ Opinionated agentic software engineering harness that works Forge issues into pu
 ## Language
 
 **Forge**:
-A code-hosting platform kind the harness supports as a Repository's source of git hosting, Issues, and Pull Requests: GitHub, GitLab, or Azure DevOps. A Repository belongs to exactly one Forge, chosen when the Repository is added. Azure DevOps support is partial today: remote detection and PAT-based authentication are implemented; Issue/Pull Request machinery is not yet wired up.
+A code-hosting platform kind the harness supports as a Repository's source of git hosting, Issues, and Pull Requests: GitHub, GitLab, or Azure DevOps. A Repository belongs to exactly one Forge, chosen when the Repository is added. Azure DevOps support is partial today: remote detection, PAT-based authentication, and Ready Issue listing/reconciliation (including native Predecessor/Successor blocking links, surfaced as blockedBy) are implemented; Pull Request creation and the merge state machine are not yet wired up.
 _Avoid_: Provider (overloaded with model provider and credential metadata), issue source (too narrow — the Forge also hosts Pull Requests and checks), platform
 
 **Forge Host**:

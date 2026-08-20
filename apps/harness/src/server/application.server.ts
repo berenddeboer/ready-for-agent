@@ -154,13 +154,15 @@ export const createApplication = async (
           workspaceRoot: toolCwd,
           environment,
         }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
-  // Ambient-only for now (see ambient-azure-devops-layer.ts doc comment);
-  // vault-first Keymaxxer wiring is tracked separately.
-  const azureDevOpsLayer = ambientAzureDevOpsLayer(environment)
+  // Ambient-only regardless of sidecarUrl: Azure DevOps has no
+  // Keymaxxer-vault-backed Harness-side path yet (see
+  // ambient-azure-devops-layer.ts).
+  const azureDevOpsLayer = ambientAzureDevOpsLayer({ environment })
   const reconcilerLayer = IssueReconcilerLive.pipe(
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),
     Layer.provideMerge(gitlabLayer),
+    Layer.provideMerge(azureDevOpsLayer),
   )
   const queueLayer = SqliteQueueServiceLive.pipe(
     Layer.provideMerge(databaseLayer),
@@ -233,6 +235,7 @@ export const createApplication = async (
     Layer.provideMerge(lifecycleLayer),
     Layer.provideMerge(keymaxxerLayer),
     Layer.provideMerge(gitlabLayer),
+    Layer.provideMerge(azureDevOpsLayer),
   )
   const loggingLayer = Logger.layer([Logger.consolePretty({ colors: false })])
   const localGitLayer = LocalGit.layer.pipe(Layer.provide(platformLayer))

@@ -11,6 +11,7 @@ import {
   Schedule,
   Schema,
 } from "effect"
+import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import {
   DbService,
   RepositoryId,
@@ -136,11 +137,22 @@ const repositoryHasGitHubCredential = Effect.fn(
 
 const repositoryHasCredential = Effect.fn("JobWorker.repositoryHasCredential")(
   function* (repository: RepositoryRecord) {
-    if (repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      return yield* gitlab.hasCredentials(repository)
+    switch (repository.forge) {
+      case "gitlab": {
+        const gitlab = yield* GitLabService
+        return yield* gitlab.hasCredentials(repository)
+      }
+      case "azure-devops": {
+        const azureDevOps = yield* AzureDevOpsService
+        return yield* azureDevOps.hasCredentials(repository)
+      }
+      case "github":
+        return yield* repositoryHasGitHubCredential(repository.projectPath)
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
     }
-    return yield* repositoryHasGitHubCredential(repository.projectPath)
   },
 )
 

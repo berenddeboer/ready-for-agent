@@ -1,27 +1,48 @@
 import { Effect, Layer } from "effect"
+import type {
+  MergePullRequestResult,
+  PullRequestCheckStatus,
+  PullRequestLifecycleStatus,
+} from "@ready-for-agent/github-service"
 import { AzureDevOpsService } from "./azure-devops-service.js"
 import {
   AzureDevOpsNotImplementedError,
   AzureDevOpsProjectUnavailableError,
   AzureDevOpsRequestError,
 } from "./errors.js"
-import type { AzureDevOpsRepository } from "./types.js"
+import type {
+  AzureDevOpsReadyLabeledIssue,
+  AzureDevOpsRepository,
+} from "./types.js"
 
 /**
- * Hand-written fake for the nine Azure DevOps service methods implemented
- * against the real REST API today. Mirrors
+ * Hand-written fake for the Azure DevOps service surface: the 15 REST-backed
+ * methods plus the two local credential checks (`hasCredentials`/
+ * `hasAmbientCredentials`). Mirrors
  * `gitlab-service-test.ts`'s in-memory `Map`-keyed `Layer.succeed` pattern:
- * no HTTP mocking library. Every other method fails with
+ * no HTTP mocking library. Every other method (only
+ * `countOpenNonDraftPullRequests` remains) fails with
  * `AzureDevOpsNotImplementedError`, matching the live layer, so callers
  * exercising unimplemented methods against this fake see the same error they
  * would see against `AzureDevOpsServiceLive`.
  */
 export interface AzureDevOpsServiceTestFixture {
   readonly repository: AzureDevOpsRepository
+  /**
+   * `listReadyIssues` fixture. Populate `blockedBy` on individual issues to
+   * exercise blocking-link behavior against the fake (the live layer's WIQL
+   * + `System.LinkTypes.Dependency-Reverse` reads that produce this same
+   * shape are covered separately, against a fake `fetch`, in
+   * `test/azure-devops-service.spec.ts`).
+   */
+  readonly issues?: readonly AzureDevOpsReadyLabeledIssue[]
   readonly operatorLogin?: string
   readonly hasCredentials?: boolean
   /** Open pull request number keyed by exact source branch. */
   readonly openPullRequestByBranch?: Readonly<Record<string, number>>
+  readonly pullRequestCheckStatus?: PullRequestCheckStatus
+  readonly pullRequestLifecycleStatus?: PullRequestLifecycleStatus
+  readonly mergePullRequestResult?: MergePullRequestResult
   readonly error?: AzureDevOpsRequestError
 }
 
@@ -89,7 +110,14 @@ export const makeAzureDevOpsServiceTest = (
         state !== undefined && (state.fixture.hasCredentials ?? true),
       )
     },
-    listReadyIssues: notImplemented("listReadyIssues"),
+    listReadyIssues: (repository) =>
+      failOr(repository, (state) =>
+        Effect.succeed(
+          [...(state.fixture.issues ?? [])].sort(
+            (left, right) => left.number - right.number,
+          ),
+        ),
+      ),
     getOpenPullRequestNumber: (repository, headRefName) => {
       const state = stateFor(repository)
       if (state === undefined) {
@@ -126,20 +154,43 @@ export const makeAzureDevOpsServiceTest = (
     countOpenNonDraftPullRequests: notImplemented(
       "countOpenNonDraftPullRequests",
     ),
-    getPullRequestCheckStatus: notImplemented("getPullRequestCheckStatus"),
-    getPrStatusCheckDiagnostics: notImplemented("getPrStatusCheckDiagnostics"),
+    getPullRequestCheckStatus: (repository) =>
+      failOr(repository, (state) =>
+        Effect.succeed(
+          state.fixture.pullRequestCheckStatus ?? {
+            _tag: "succeeded" as const,
+            terminalChecks: [],
+            mergeability: "mergeable" as const,
+            baseRefName: "main",
+            headPushedAt: null,
+            headSha: null,
+            createdAt: null,
+            isDraft: null,
+          },
+        ),
+      ),
+    getPrStatusCheckDiagnostics: (repository) =>
+      failOr(repository, () => Effect.succeed([])),
     markPullRequestReadyForReview: (repository) =>
       failOr(repository, () => Effect.void),
-    getPullRequestLifecycleStatus: notImplemented(
-      "getPullRequestLifecycleStatus",
-    ),
-    mergePullRequest: notImplemented("mergePullRequest"),
-    ensureIssueCompletedWithSummary: notImplemented(
-      "ensureIssueCompletedWithSummary",
-    ),
-    closeOpenPullRequestsForBranch: notImplemented(
-      "closeOpenPullRequestsForBranch",
-    ),
-    deleteBranch: notImplemented("deleteBranch"),
+    getPullRequestLifecycleStatus: (repository) =>
+      failOr(repository, (state) =>
+        Effect.succeed(
+          state.fixture.pullRequestLifecycleStatus ??
+            ({ _tag: "open" } satisfies PullRequestLifecycleStatus),
+        ),
+      ),
+    mergePullRequest: (repository) =>
+      failOr(repository, (state) =>
+        Effect.succeed(
+          state.fixture.mergePullRequestResult ??
+            ({ _tag: "merged" } satisfies MergePullRequestResult),
+        ),
+      ),
+    ensureIssueCompletedWithSummary: (repository) =>
+      failOr(repository, () => Effect.void),
+    closeOpenPullRequestsForBranch: (repository) =>
+      failOr(repository, () => Effect.void),
+    deleteBranch: (repository) => failOr(repository, () => Effect.void),
   })
 }

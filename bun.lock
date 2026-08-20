@@ -302,6 +302,7 @@
       "name": "@ready-for-agent/issue-reconciler",
       "version": "0.0.1",
       "dependencies": {
+        "@ready-for-agent/azure-devops-service": "workspace:*",
         "@ready-for-agent/db-service": "workspace:*",
         "@ready-for-agent/github-service": "workspace:*",
         "@ready-for-agent/gitlab-service": "workspace:*",

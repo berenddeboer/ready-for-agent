@@ -57,6 +57,18 @@ export interface RelevantIssuePredicateContext {
     | { readonly includeAll: false; readonly operatorLogin: string }
 }
 
+/**
+ * Forges with no native sub-Issue hierarchy queried by this harness, so a
+ * Ready Issue reporting `hierarchySupported: false` is expected rather than
+ * anomalous. `forge` stays `string` here (this module has no Forge union of
+ * its own to stay decoupled from `db-service`); kept as a Set so a third
+ * such Forge is a one-line addition instead of another inline comparison.
+ */
+const FORGES_WITHOUT_HIERARCHY_SUPPORT: ReadonlySet<string> = new Set([
+  "gitlab",
+  "azure-devops",
+])
+
 export type ClosingPullRequestClassificationKind =
   | "exact_owned"
   | "pending_self"
@@ -418,14 +430,19 @@ export const evaluateRelevantIssue = (
         hierarchyFailure = { _tag: "issue_parent_not_ready" }
       }
     }
-  } else {
-    if (context.forge !== "gitlab") {
-      hierarchyFailure = { _tag: "issue_hierarchy_unsupported" }
-    } else if (issue.state !== "OPEN") {
+  } else if (FORGES_WITHOUT_HIERARCHY_SUPPORT.has(context.forge)) {
+    // GitLab and Azure DevOps have no native sub-Issue hierarchy queried by
+    // this harness today, so `hierarchySupported: false` is an expected,
+    // legitimate signal from those Forges rather than a bug — fall back to
+    // the flat-Issue rules below. Any other Forge (GitHub) reporting
+    // `hierarchySupported: false` is unexpected and fails closed instead.
+    if (issue.state !== "OPEN") {
       hierarchyFailure = { _tag: "issue_not_open", state: issue.state }
     } else if (issue.parent !== null || issue.hasChildren) {
       hierarchyFailure = { _tag: "issue_hierarchy_unsupported" }
     }
+  } else {
+    hierarchyFailure = { _tag: "issue_hierarchy_unsupported" }
   }
 
   const classification = classifyActiveClosingPullRequests(issue, context)

@@ -441,6 +441,21 @@ const isSameOriginRequest = (request: Request): boolean => {
   return origin === null || origin === new URL(request.url).origin
 }
 
+/**
+ * Resolution of the "does this file need an Azure DevOps branch?" open
+ * question carried over from the Azure DevOps detection/auth ticket: this
+ * file's three `forge`-aware call sites (`verifyRepositoryIdentity` below,
+ * the `repositoryCredentials` resolver's vault-probe branch, and
+ * `Repository.pullRequestCount`) are GraphQL-only internals for project
+ * verification, vault-credential display, and PR count — none of them read
+ * or relate to `listReadyIssues`. Azure DevOps has no GraphQL API of its
+ * own, so its Ready Issue listing and blocking-link reads (ticket: "List
+ * and reconcile Azure DevOps work items as the ready-for-agent frontier")
+ * are consumed entirely inside `@ready-for-agent/issue-reconciler`, which
+ * never routes through this file. No `listReadyIssues`-related branch is
+ * needed here; each of the three sites already has its own explicit,
+ * deliberate (if temporary) Azure DevOps posture documented inline below.
+ */
 const verifyRepositoryIdentity = Effect.fn(
   "graphql-api.verifyRepositoryIdentity",
 )(function* (identity: {

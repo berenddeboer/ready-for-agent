@@ -81,6 +81,9 @@
     },
     {
       "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/azure-devops-service/tsconfig.lib.json"
     }
   ]
 }

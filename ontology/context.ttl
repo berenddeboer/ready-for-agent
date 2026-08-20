@@ -25,7 +25,7 @@ rfa:Abandoned a rfa:ContextTerm .
 rfa:Forge
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Forge"@en ;
-  skos:definition "A code-hosting platform kind the harness supports as a Repository's source of git hosting, Issues, and Pull Requests: GitHub, GitLab, or Azure DevOps. A Repository belongs to exactly one Forge, chosen when the Repository is added. Azure DevOps support is partial today: remote detection and PAT-based authentication are implemented; Issue/Pull Request machinery is not yet wired up."@en ;
+  skos:definition "A code-hosting platform kind the harness supports as a Repository's source of git hosting, Issues, and Pull Requests: GitHub, GitLab, or Azure DevOps. A Repository belongs to exactly one Forge, chosen when the Repository is added. Azure DevOps support is partial today: remote detection, PAT-based authentication, and Ready Issue listing/reconciliation (including native Predecessor/Successor blocking links, surfaced as blockedBy) are implemented; Pull Request creation and the merge state machine are not yet wired up."@en ;
   skos:hiddenLabel "Provider"@en, "issue source"@en, "platform"@en .
 
 [

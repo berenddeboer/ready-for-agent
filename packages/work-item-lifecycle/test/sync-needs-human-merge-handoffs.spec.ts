@@ -18,6 +18,7 @@ import {
   WorkItemLifecycle,
   WorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
+  stubAzureDevOpsServiceLayer,
   stubGitLabServiceLayer,
   syncNeedsHumanMergeHandoffs,
 } from "../src/index.js"
@@ -173,6 +174,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
         ),
       ),
       Layer.provideMerge(stubGitLabServiceLayer(gitlab)),
+      Layer.provideMerge(stubAzureDevOpsServiceLayer()),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),

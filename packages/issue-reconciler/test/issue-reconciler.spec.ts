@@ -1,5 +1,10 @@
 import { Effect, Layer } from "effect"
 import {
+  AzureDevOpsService,
+  type AzureDevOpsServiceShape,
+  makeAzureDevOpsServiceTest,
+} from "@ready-for-agent/azure-devops-service"
+import {
   DatabaseError,
   DbService,
   type IssueRecord,
@@ -249,17 +254,57 @@ const defaultGitLabShape = {
 
 const defaultGitLabLayer = Layer.succeed(GitLabService, defaultGitLabShape)
 
+const defaultAzureDevOpsShape = {
+  verifyProject: (repository) => Effect.succeed(repository),
+  getAuthenticatedUserLogin: () => Effect.succeed("operator"),
+  listReadyIssues: () => Effect.succeed([]),
+  hasCredentials: () => Effect.succeed(true),
+  hasAmbientCredentials: () => Effect.succeed(true),
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  findOpenPullRequestNumber: () => Effect.succeed(null),
+  createDraftPullRequest: () => Effect.succeed(1),
+  updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+  countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  getPullRequestCheckStatus: () =>
+    Effect.succeed({
+      _tag: "succeeded",
+      terminalChecks: [],
+      mergeability: "mergeable",
+      baseRefName: "main",
+      headPushedAt: null,
+      headSha: null,
+      createdAt: null,
+      isDraft: null,
+    }),
+  getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+  markPullRequestReadyForReview: () => Effect.void,
+  getPullRequestLifecycleStatus: () =>
+    Effect.succeed({ _tag: "open" as const }),
+  mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+  ensureIssueCompletedWithSummary: () => Effect.void,
+  closeOpenPullRequestsForBranch: () => Effect.void,
+  deleteBranch: () => Effect.void,
+} satisfies AzureDevOpsServiceShape
+
+const defaultAzureDevOpsLayer = Layer.succeed(
+  AzureDevOpsService,
+  defaultAzureDevOpsShape,
+)
+
 const runReconciliation = <A, E>(
   effect: Effect.Effect<A, E, IssueReconciler>,
   dbLayer: Layer.Layer<DbService>,
   githubLayer: Layer.Layer<GitHubService>,
   gitlabLayer: Layer.Layer<GitLabService> = defaultGitLabLayer,
+  azureDevOpsLayer: Layer.Layer<AzureDevOpsService> = defaultAzureDevOpsLayer,
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(
         IssueReconcilerLive.pipe(
-          Layer.provide(Layer.mergeAll(dbLayer, githubLayer, gitlabLayer)),
+          Layer.provide(
+            Layer.mergeAll(dbLayer, githubLayer, gitlabLayer, azureDevOpsLayer),
+          ),
         ),
       ),
     ),
@@ -1247,6 +1292,73 @@ describe("IssueReconciler", () => {
       }),
       db.layer,
       github,
+    )
+  })
+
+  it("reconciles Azure DevOps Ready-labeled work items via the Azure DevOps service, honoring predecessor blockedBy", () => {
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: "repo-1",
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      includeAllIssueAuthors: true,
+    })
+    const db = makeDbFixture({ issues: [] })
+    const issues = [
+      remoteIssue(1, { hierarchySupported: false }),
+      remoteIssue(2, {
+        hierarchySupported: false,
+        blockedBy: [
+          {
+            number: 99,
+            url: "https://dev.azure.com/acme/widgets/_workitems/edit/99",
+          },
+        ],
+      }),
+    ]
+    // Exercises the hand-written Azure DevOps fake's `issues` fixture,
+    // including a Predecessor blocking link surfaced as `blockedBy` — the
+    // same canonical shape GitHub's native `blockedBy` field already uses.
+    const azureDevOps = makeAzureDevOpsServiceTest([
+      {
+        repository: azureDevOpsRepository,
+        operatorLogin: "operator",
+        issues,
+      },
+    ])
+    const github = makeGitHubLayer([], db.actions)
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(azureDevOpsRepository)
+
+        // Reconciliation tracks every Relevant Issue regardless of blocking
+        // status (blockedBy gates Work Item kickoff, a separate concern in
+        // work-item-lifecycle) — both work items are inserted, and the
+        // Predecessor link is preserved on the blocked one as `blockedBy`,
+        // the same canonical shape GitHub's native field already uses.
+        expect(summary).toEqual({
+          fetched: 2,
+          inserted: 2,
+          updated: 0,
+          deleted: 0,
+          unchanged: 0,
+          competingObservations: [],
+        })
+        expect(db.stored.map(({ issueNumber }) => issueNumber)).toEqual([1, 2])
+        expect(db.stored[0]?.blockedBy).toEqual([])
+        expect(db.stored[1]?.blockedBy).toEqual([
+          {
+            issueNumber: 99,
+            issueUrl: "https://dev.azure.com/acme/widgets/_workitems/edit/99",
+          },
+        ])
+      }),
+      db.layer,
+      github,
+      defaultGitLabLayer,
+      azureDevOps,
     )
   })
 })

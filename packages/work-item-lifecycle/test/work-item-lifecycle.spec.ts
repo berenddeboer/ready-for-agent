@@ -75,6 +75,7 @@ import {
   isTerminalWorkItemState,
   makeWorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
+  stubAzureDevOpsServiceLayer,
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
 } from "../src/index.js"
@@ -154,6 +155,7 @@ describe("WorkItemLifecycle", () => {
     Layer.provideMerge(stubActiveAgentBackendLayer()),
     Layer.provideMerge(stubGitHubServiceLayer()),
     Layer.provideMerge(stubGitLabServiceLayer()),
+    Layer.provideMerge(stubAzureDevOpsServiceLayer()),
     Layer.provideMerge(SuccessfulStepsLive),
     Layer.provideMerge(DbServiceLive),
     Layer.provideMerge(SqliteQueueServiceLive),
@@ -170,11 +172,13 @@ describe("WorkItemLifecycle", () => {
     steps: LifecycleStepsShape,
     github: Parameters<typeof stubGitHubServiceLayer>[0] = {},
     gitlab: Parameters<typeof stubGitLabServiceLayer>[0] = {},
+    azureDevOps: Parameters<typeof stubAzureDevOpsServiceLayer>[0] = {},
   ) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
       Layer.provideMerge(stubGitHubServiceLayer(github)),
       Layer.provideMerge(stubGitLabServiceLayer(gitlab)),
+      Layer.provideMerge(stubAzureDevOpsServiceLayer(azureDevOps)),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -188,6 +192,7 @@ describe("WorkItemLifecycle", () => {
       Layer.provideMerge(stubActiveAgentBackendLayer()),
       Layer.provideMerge(stubGitHubServiceLayer()),
       Layer.provideMerge(stubGitLabServiceLayer()),
+      Layer.provideMerge(stubAzureDevOpsServiceLayer()),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -565,6 +570,7 @@ describe("WorkItemLifecycle", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -1098,6 +1104,7 @@ describe("WorkItemLifecycle", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -1348,6 +1355,7 @@ describe("WorkItemLifecycle", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -2103,6 +2111,7 @@ describe("WorkItemLifecycle", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(NonTransactionalQueueLive),
@@ -7830,6 +7839,100 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("uses Azure DevOps lifecycle status (not GitHub or GitLab) when an Azure DevOps work item closes with an owned PR", () => {
+      let githubLifecycleLookupCalls = 0
+      let gitlabLifecycleLookupCalls = 0
+      let azureDevOpsLifecycleLookupCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      const layer = makeTestLayer(
+        steps,
+        {
+          getPullRequestLifecycleStatus: () => {
+            githubLifecycleLookupCalls += 1
+            return Effect.succeed({ _tag: "merged" })
+          },
+        },
+        {
+          getPullRequestLifecycleStatus: () => {
+            gitlabLifecycleLookupCalls += 1
+            return Effect.succeed({ _tag: "merged" })
+          },
+        },
+        {
+          getPullRequestLifecycleStatus: () => {
+            azureDevOpsLifecycleLookupCalls += 1
+            return Effect.succeed({ _tag: "open" })
+          },
+        },
+      )
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          yield* seedHarnessBuildModel
+          const repository = yield* db.addRepository({
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets.git",
+            isBare: true,
+          })
+          const issue = yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 42,
+            ...sampleIssueFields,
+            url: "https://dev.azure.com/acme/widgets/_workitems/edit/42",
+          })
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
+          yield* makeQueuedJobsAvailable
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            expect(afterInvestigate.workItem.paused).toBe(true)
+            expect(afterInvestigate.workItem.failureMessage).toBe(
+              formatIssueClosedWhilePrOpenMessage(issue.issueNumber, 101),
+            )
+            expect(
+              afterInvestigate.workItem.stepRuns.find(
+                (run) =>
+                  run.step === "investigate_pr_status_checks" &&
+                  run.status === "succeeded",
+              )?.reasonCode,
+            ).toBe(STEP_RUN_REASON.issueClosedWhilePrOpen)
+          }
+          expect(githubLifecycleLookupCalls).toBe(0)
+          expect(gitlabLifecycleLookupCalls).toBe(0)
+          expect(azureDevOpsLifecycleLookupCalls).toBeGreaterThan(0)
+          expect(
+            Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
     it("Starts a Work Item paused for closed Issue + open PR and resumes the current step", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
@@ -8892,6 +8995,7 @@ describe("WorkItemLifecycle", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -9560,6 +9664,7 @@ describe("WorkItemLifecycle", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(slowSteps)),
         ),
@@ -10444,6 +10549,7 @@ describe("WorkItemLifecycle", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -10544,6 +10650,7 @@ describe("WorkItemLifecycle", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),

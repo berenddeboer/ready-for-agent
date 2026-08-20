@@ -16,6 +16,7 @@ import {
   WorkItemLifecycleLive,
   assessChanges,
   stubActiveAgentBackendLayer,
+  stubAzureDevOpsServiceLayer,
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
 } from "../src/index.js"
@@ -116,6 +117,7 @@ describe("Assess Changes lifecycle routes", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -276,6 +278,7 @@ describe("Assess Changes lifecycle routes", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -406,6 +409,7 @@ describe("Assess Changes lifecycle routes", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -573,6 +577,7 @@ describe("Assess Changes lifecycle routes", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -765,6 +770,7 @@ describe("Assess Changes lifecycle routes", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -1008,6 +1014,7 @@ describe("Assess Changes lifecycle routes", () => {
           Layer.provideMerge(stubActiveAgentBackendLayer()),
           Layer.provideMerge(stubGitHubServiceLayer()),
           Layer.provideMerge(stubGitLabServiceLayer()),
+          Layer.provideMerge(stubAzureDevOpsServiceLayer()),
           Layer.provideMerge(
             Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
           ),
@@ -1148,6 +1155,7 @@ describe("Assess Changes lifecycle routes", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -1284,6 +1292,7 @@ describe("Assess Changes lifecycle routes", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -1420,6 +1429,7 @@ describe("Assess Changes lifecycle routes", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -1602,6 +1612,7 @@ describe("Assess Changes lifecycle routes", () => {
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
