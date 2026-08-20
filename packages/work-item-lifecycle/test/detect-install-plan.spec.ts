@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
@@ -238,17 +238,14 @@ describe("detectInstallPlan", () => {
       },
     ))
 
-  it("falls back when no recognizable manager exists", () =>
+  it("returns a no-op plan when no recognizable manager exists", () =>
     withTemp(
       async () => {
         // empty directory
       },
       async (root) => {
         const plan = await run(detectInstallPlan(root))
-        expect(plan._tag).toBe("Fallback")
-        if (plan._tag === "Fallback") {
-          expect(plan.reason).toContain("No recognizable")
-        }
+        expect(plan).toEqual({ _tag: "NoOp" })
       },
     ))
 
@@ -260,6 +257,106 @@ describe("detectInstallPlan", () => {
       async (root) => {
         const plan = await run(detectInstallPlan(root))
         expect(plan._tag).toBe("Fallback")
+      },
+    ))
+
+  it("falls back for a root requirements.txt", () =>
+    withTemp(
+      async (root) => {
+        await writeFile(join(root, "requirements.txt"), "requests==2.32.0\n")
+      },
+      async (root) => {
+        const plan = await run(detectInstallPlan(root))
+        expect(plan._tag).toBe("Fallback")
+        if (plan._tag === "Fallback") {
+          expect(plan.reason).toContain("requirements.txt")
+        }
+      },
+    ))
+
+  it("falls back for a root pyproject.toml", () =>
+    withTemp(
+      async (root) => {
+        await writeFile(
+          join(root, "pyproject.toml"),
+          '[project]\nname = "demo"\n',
+        )
+      },
+      async (root) => {
+        const plan = await run(detectInstallPlan(root))
+        expect(plan._tag).toBe("Fallback")
+        if (plan._tag === "Fallback") {
+          expect(plan.reason).toContain("pyproject.toml")
+        }
+      },
+    ))
+
+  it("falls back for a root Cargo.toml", () =>
+    withTemp(
+      async (root) => {
+        await writeFile(join(root, "Cargo.toml"), '[package]\nname = "demo"\n')
+      },
+      async (root) => {
+        const plan = await run(detectInstallPlan(root))
+        expect(plan._tag).toBe("Fallback")
+        if (plan._tag === "Fallback") {
+          expect(plan.reason).toContain("Cargo.toml")
+        }
+      },
+    ))
+
+  it("falls back once when multiple Python and Rust manifests are present", () =>
+    withTemp(
+      async (root) => {
+        await writeFile(join(root, "requirements.txt"), "requests==2.32.0\n")
+        await writeFile(
+          join(root, "pyproject.toml"),
+          '[project]\nname = "demo"\n',
+        )
+        await writeFile(join(root, "Cargo.toml"), '[package]\nname = "demo"\n')
+      },
+      async (root) => {
+        const plan = await run(detectInstallPlan(root))
+        expect(plan._tag).toBe("Fallback")
+        if (plan._tag === "Fallback") {
+          expect(plan.reason).toContain("requirements.txt")
+          expect(plan.reason).toContain("pyproject.toml")
+          expect(plan.reason).toContain("Cargo.toml")
+        }
+      },
+    ))
+
+  it("ignores Python and Rust manifests in subdirectories", () =>
+    withTemp(
+      async (root) => {
+        await mkdir(join(root, "nested"), { recursive: true })
+        await writeFile(join(root, "nested", "requirements.txt"), "requests\n")
+        await writeFile(join(root, "nested", "pyproject.toml"), "[project]\n")
+        await writeFile(join(root, "nested", "Cargo.toml"), "[package]\n")
+      },
+      async (root) => {
+        const plan = await run(detectInstallPlan(root))
+        expect(plan).toEqual({ _tag: "NoOp" })
+      },
+    ))
+
+  it("keeps a Node direct plan when Cargo.toml is also present", () =>
+    withTemp(
+      async (root) => {
+        await writeFile(join(root, "package.json"), "{}\n")
+        await writeFile(join(root, "bun.lock"), "{}\n")
+        await writeFile(join(root, "Cargo.toml"), '[package]\nname = "demo"\n')
+      },
+      async (root) => {
+        const plan = await run(detectInstallPlan(root))
+        expect(plan).toEqual({
+          _tag: "Direct",
+          install: {
+            command: "bun",
+            args: ["install"],
+            packageManager: "bun",
+          },
+        })
       },
     ))
 })
