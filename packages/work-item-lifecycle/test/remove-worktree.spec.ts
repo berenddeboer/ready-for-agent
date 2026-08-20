@@ -10,6 +10,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Effect, FileSystem, Layer, type Layer as LayerType } from "effect"
+import {
+  AzureDevOpsService,
+  type AzureDevOpsServiceShape,
+} from "@ready-for-agent/azure-devops-service"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import {
@@ -91,6 +95,42 @@ const stubGitLab = (
     deleteBranch: () => Effect.void,
     ...overrides,
   } satisfies GitLabServiceShape)
+
+const stubAzureDevOps = (
+  overrides: Partial<AzureDevOpsServiceShape> = {},
+): Layer.Layer<AzureDevOpsService> =>
+  Layer.succeed(AzureDevOpsService, {
+    verifyProject: (repository) => Effect.succeed(repository),
+    getAuthenticatedUserLogin: () => Effect.succeed("operator"),
+    listReadyIssues: () => Effect.succeed([]),
+    hasCredentials: () => Effect.succeed(true),
+    hasAmbientCredentials: () => Effect.succeed(true),
+    getOpenPullRequestNumber: () => Effect.succeed(1),
+    findOpenPullRequestNumber: () => Effect.succeed(null),
+    createDraftPullRequest: () => Effect.succeed(1),
+    updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+    countOpenNonDraftPullRequests: () => Effect.succeed(0),
+    getPullRequestCheckStatus: () =>
+      Effect.succeed({
+        _tag: "succeeded",
+        terminalChecks: [],
+        mergeability: "mergeable",
+        baseRefName: "main",
+        headPushedAt: null,
+        headSha: null,
+        createdAt: null,
+        isDraft: null,
+      }),
+    getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+    markPullRequestReadyForReview: () => Effect.void,
+    getPullRequestLifecycleStatus: () =>
+      Effect.succeed({ _tag: "open" as const }),
+    mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+    ensureIssueCompletedWithSummary: () => Effect.void,
+    closeOpenPullRequestsForBranch: () => Effect.void,
+    deleteBranch: () => Effect.void,
+    ...overrides,
+  } satisfies AzureDevOpsServiceShape)
 
 const stubGitHub = (
   overrides: Partial<GitHubServiceShape> = {},
@@ -183,6 +223,7 @@ const run = <A, E>(
     | KeymaxxerService
     | GitLabService
     | GitHubService
+    | AzureDevOpsService
   >,
   keymaxxerLayer: Layer.Layer<KeymaxxerService> = stubKeymaxxer(),
   gitlabLayer: Layer.Layer<GitLabService> = stubGitLab(),
@@ -192,6 +233,7 @@ const run = <A, E>(
     FileSystem.FileSystem
   >,
   githubLayer: Layer.Layer<GitHubService> = stubGitHub(),
+  azureDevOpsLayer: Layer.Layer<AzureDevOpsService> = stubAzureDevOps(),
 ): Promise<A> => {
   const withServices = effect.pipe(
     Effect.provide(DbServiceLive),
@@ -199,6 +241,7 @@ const run = <A, E>(
     Effect.provide(keymaxxerLayer),
     Effect.provide(gitlabLayer),
     Effect.provide(githubLayer),
+    Effect.provide(azureDevOpsLayer),
   )
   const withPlatform =
     fileSystemOverlay === undefined
@@ -473,6 +516,87 @@ describe("removeWorktree", () => {
       expect(closedBranches).toEqual([branch])
       expect(deletedBranches).toEqual([branch])
       expect(keymaxxerCalls).toBe(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("cleans up Azure DevOps remote PRs and branch via AzureDevOpsService", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-azure-devops-"))
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+      const closedBranches: string[] = []
+      const deletedBranches: string[] = []
+      let githubCalls = 0
+
+      const { path, branch } = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: bare,
+            isBare: true,
+          })
+          const context = {
+            workItemId,
+            repositoryId: repository.id,
+            issueNumber: 42,
+            issueTitle: null,
+            agentBackend: "opencode",
+            model: "opencode/test",
+            thinkingLevel: "low",
+            reviewModel: "opencode/test",
+            reviewThinkingLevel: "low",
+            worktreePath: null,
+            startingCommitOid: null,
+            completionSummary: null,
+            publicationTitle: null,
+            publicationBody: null,
+            sessionId: null,
+          } as const
+          const created = yield* createWorktree(context)
+          yield* removeWorktree({
+            ...context,
+            worktreePath: created.worktreePath,
+          })
+          return {
+            path: created.worktreePath,
+            branch: workItemBranchName({
+              projectPath: "acme/widgets",
+              issueNumber: 42,
+              workItemId,
+            }),
+          }
+        }),
+        stubKeymaxxer(),
+        stubGitLab(),
+        undefined,
+        stubGitHub({
+          closeOpenPullRequestsAndDeleteBranch: () => {
+            githubCalls += 1
+            return Effect.void
+          },
+        }),
+        stubAzureDevOps({
+          closeOpenPullRequestsForBranch: (_repository, headRefName) =>
+            Effect.sync(() => {
+              closedBranches.push(headRefName)
+            }),
+          deleteBranch: (_repository, branchName) =>
+            Effect.sync(() => {
+              deletedBranches.push(branchName)
+            }),
+        }),
+      )
+
+      expect(await Bun.file(join(path, "README.md")).exists()).toBe(false)
+      expect(await git(bare, ["branch", "--list", branch])).toBe("")
+      expect(closedBranches).toEqual([branch])
+      expect(deletedBranches).toEqual([branch])
+      expect(githubCalls).toBe(0)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

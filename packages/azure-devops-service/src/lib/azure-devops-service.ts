@@ -25,11 +25,9 @@ export type AzureDevOpsServiceError =
 
 /**
  * Same 18-method surface as {@link @ready-for-agent/gitlab-service#GitLabServiceShape}.
- * Only `verifyProject`, `getAuthenticatedUserLogin`, `hasCredentials`,
- * `hasAmbientCredentials`, and `listReadyIssues` are implemented against the
- * real Azure DevOps REST API today; every other method fails with
- * `AzureDevOpsNotImplementedError` until a later ticket builds it out (see
- * method-level docs).
+ * Only `countOpenNonDraftPullRequests` still fails with
+ * `AzureDevOpsNotImplementedError`; every other method is implemented
+ * against the real Azure DevOps REST API (see method-level docs).
  */
 export interface AzureDevOpsServiceShape {
   /**
@@ -109,12 +107,20 @@ export interface AzureDevOpsServiceShape {
   readonly countOpenNonDraftPullRequests: (
     repository: AzureDevOpsRepository,
   ) => Effect.Effect<number, AzureDevOpsServiceError>
-  /** Observe build validation / branch policy checks as PR Status Checks. Not yet implemented. */
+  /**
+   * Observe build validation / branch policy checks as PR Status Checks
+   * (`GET .../pullrequests/{id}/statuses` + the policy evaluations API).
+   * Implemented.
+   */
   readonly getPullRequestCheckStatus: (
     repository: AzureDevOpsRepository,
     headRefName: string,
   ) => Effect.Effect<PullRequestCheckStatus, AzureDevOpsServiceError>
-  /** Load harness diagnostics for red PR Status Checks. Not yet implemented. */
+  /**
+   * Load harness diagnostics for red PR Status Checks: build logs for policy
+   * evaluations backed by a build; unavailable for plain PR statuses (Azure
+   * DevOps exposes no log content for those). Implemented.
+   */
   readonly getPrStatusCheckDiagnostics: (
     repository: AzureDevOpsRepository,
     checks: readonly PrStatusCheckDiagnosticsRequest[],
@@ -123,35 +129,47 @@ export interface AzureDevOpsServiceShape {
     readonly PrStatusCheckDiagnostic[],
     AzureDevOpsServiceError
   >
-  /** Clear the open pull request's Draft flag. Not yet implemented. */
+  /** Clear the open pull request's Draft flag. Implemented. */
   readonly markPullRequestReadyForReview: (
     repository: AzureDevOpsRepository,
     headRefName: string,
   ) => Effect.Effect<void, AzureDevOpsServiceError>
-  /** Lifecycle state of the pull request on a source branch, or not found. Not yet implemented. */
+  /** Lifecycle state of the pull request on a source branch, or not found. Implemented. */
   readonly getPullRequestLifecycleStatus: (
     repository: AzureDevOpsRepository,
     headRefName: string,
   ) => Effect.Effect<PullRequestLifecycleStatus, AzureDevOpsServiceError>
-  /** Merge the open pull request on the exact source branch. Not yet implemented. */
+  /**
+   * Merge the open pull request on the exact source branch
+   * (`PATCH .../pullrequests/{id}` with `status: "completed"`). Implemented.
+   */
   readonly mergePullRequest: (
     repository: AzureDevOpsRepository,
     headRefName: string,
     options?: MergePullRequestOptions,
   ) => Effect.Effect<MergePullRequestResult, AzureDevOpsServiceError>
-  /** Post a completion summary and transition the work item state. Not yet implemented. */
+  /**
+   * Post a completion summary comment and transition the work item to its
+   * type's Completed-category state (falling back to `Closed`). Implemented.
+   */
   readonly ensureIssueCompletedWithSummary: (
     repository: AzureDevOpsRepository,
     issueNumber: number,
     workItemId: string,
     summaryMarkdown: string,
   ) => Effect.Effect<void, AzureDevOpsServiceError>
-  /** Close every open pull request whose source branch matches exactly. Not yet implemented. */
+  /**
+   * Abandon every active pull request whose source branch matches exactly
+   * (`PATCH .../pullrequests/{id}` with `status: "abandoned"`). Implemented.
+   */
   readonly closeOpenPullRequestsForBranch: (
     repository: AzureDevOpsRepository,
     headRefName: string,
   ) => Effect.Effect<void, AzureDevOpsServiceError>
-  /** Delete a remote branch by name. Not yet implemented. */
+  /**
+   * Delete a remote branch by name
+   * (`POST .../refs` with `newObjectId: "0000...0000"`). Implemented.
+   */
   readonly deleteBranch: (
     repository: AzureDevOpsRepository,
     branchName: string,

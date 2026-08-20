@@ -1,4 +1,5 @@
 import { Duration, Effect, FileSystem, Path } from "effect"
+import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
@@ -143,15 +144,59 @@ const removeGitHubRemoteArtifacts = (input: {
     )
   })
 
+const removeAzureDevOpsRemoteArtifacts = (input: {
+  readonly repository: RepositoryRecord
+  readonly branchName: string
+}) =>
+  Effect.gen(function* () {
+    const azureDevOps = yield* AzureDevOpsService
+    const forgeRepository = {
+      forge: input.repository.forge,
+      forgeHost: input.repository.forgeHost,
+      projectPath: input.repository.projectPath,
+    }
+    yield* azureDevOps
+      .closeOpenPullRequestsForBranch(forgeRepository, input.branchName)
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new RemoveWorktreeRemoteError({
+              message:
+                "Failed to close open Azure DevOps pull requests for cleanup",
+              branchName: input.branchName,
+              cause,
+            }),
+        ),
+      )
+    yield* azureDevOps.deleteBranch(forgeRepository, input.branchName).pipe(
+      Effect.mapError(
+        (cause) =>
+          new RemoveWorktreeRemoteError({
+            message: "Failed to delete remote Azure DevOps Work Item branch",
+            branchName: input.branchName,
+            cause,
+          }),
+      ),
+    )
+  })
+
 const removeRemoteArtifacts = (input: {
   readonly repository: RepositoryRecord
   readonly branchName: string
 }) =>
   Effect.gen(function* () {
-    if (input.repository.forge === "gitlab") {
-      return yield* removeGitLabRemoteArtifacts(input)
+    switch (input.repository.forge) {
+      case "gitlab":
+        return yield* removeGitLabRemoteArtifacts(input)
+      case "azure-devops":
+        return yield* removeAzureDevOpsRemoteArtifacts(input)
+      case "github":
+        return yield* removeGitHubRemoteArtifacts(input)
+      default: {
+        const _exhaustive: never = input.repository.forge
+        return _exhaustive
+      }
     }
-    yield* removeGitHubRemoteArtifacts(input)
   })
 
 const removeLocalArtifacts = (
@@ -276,8 +321,9 @@ export const localCleanup = (
 /**
  * Inverse of createWorktree: remove local artifacts, close any open remote
  * PR/MR, and drop the remote branch when present. Missing artifacts are
- * success (idempotent). GitHub uses the coordinator-backed GitHub service;
- * GitLab cleanup uses the ambient GitLab service.
+ * success (idempotent). GitHub uses the coordinator-backed GitHub service
+ * (a single combined close+delete operation); GitLab and Azure DevOps
+ * cleanup close and delete as two sequential calls on their own services.
  */
 export const removeWorktree = (
   context: LifecycleStepContext,

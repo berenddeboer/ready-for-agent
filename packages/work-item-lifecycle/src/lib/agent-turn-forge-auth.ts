@@ -28,6 +28,28 @@ export type AgentTurnForgeAuth =
   | { readonly _tag: "keymaxxer"; readonly tokenName: string }
   | { readonly _tag: "ambient" }
 
+/**
+ * Human-readable Forge name for operator-facing messages. Exhaustive over
+ * the three Forges so a new Forge fails to compile here instead of silently
+ * mislabeling itself as one of the other two.
+ */
+export const forgeDisplayName = (
+  forge: "github" | "gitlab" | "azure-devops",
+): string => {
+  switch (forge) {
+    case "github":
+      return "GitHub"
+    case "gitlab":
+      return "GitLab"
+    case "azure-devops":
+      return "Azure DevOps"
+    default: {
+      const _exhaustive: never = forge
+      return _exhaustive
+    }
+  }
+}
+
 export type AgentTurnForgeRepository = {
   readonly forge: "github" | "gitlab" | "azure-devops"
   readonly forgeHost: string

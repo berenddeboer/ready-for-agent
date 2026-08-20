@@ -1,5 +1,9 @@
 import { Effect, Layer } from "effect"
 import {
+  AzureDevOpsService,
+  type AzureDevOpsServiceShape,
+} from "@ready-for-agent/azure-devops-service"
+import {
   makeRepositoryRecord,
   stubDbServiceLayer,
 } from "@ready-for-agent/db-service/test"
@@ -306,6 +310,75 @@ describe("mergePr", () => {
         mergeMode: "ordinary",
         autoMergeOverride: null,
       }).pipe(Effect.provide(Layer.mergeAll(gitlabDb, github, gitlab))),
+    )
+
+    expect(seenOptions).toEqual({ acceptNoChecks: true })
+  })
+
+  it("merges the deterministic Work Item branch PR for Azure DevOps", async () => {
+    let requestedBranch = ""
+    let githubCalls = 0
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/widgets",
+    })
+    const azureDevOpsDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () => {
+        githubCalls += 1
+        return Effect.succeed({ _tag: "merged" as const })
+      },
+    } as GitHubServiceShape)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      mergePullRequest: (_repository, branch, options) => {
+        requestedBranch = branch
+        expect(options).toBeUndefined()
+        return Effect.succeed({ _tag: "merged" as const })
+      },
+    } as AzureDevOpsServiceShape)
+
+    await Effect.runPromise(
+      mergePr(context).pipe(
+        Effect.provide(Layer.mergeAll(azureDevOpsDb, github, azureDevOps)),
+      ),
+    )
+
+    expect(requestedBranch).toBe(`rfa/acme-widgets/42/${context.workItemId}`)
+    expect(githubCalls).toBe(0)
+  })
+
+  it("asks Azure DevOps to accept no_checks only for Always", async () => {
+    let seenOptions: { readonly acceptNoChecks?: boolean } | undefined
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/widgets",
+    })
+    const azureDevOpsDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () =>
+        Effect.die("GitHub must not merge an Azure DevOps repo"),
+    } as GitHubServiceShape)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      mergePullRequest: (_repository, _branch, options) => {
+        seenOptions = options
+        return Effect.succeed({ _tag: "merged" as const })
+      },
+    } as AzureDevOpsServiceShape)
+
+    await Effect.runPromise(
+      mergePr({ ...context, mergeMode: "always" }).pipe(
+        Effect.provide(Layer.mergeAll(azureDevOpsDb, github, azureDevOps)),
+      ),
     )
 
     expect(seenOptions).toEqual({ acceptNoChecks: true })

@@ -5,6 +5,7 @@ import {
   AgentTurnForgeCredentialMissingError,
   InvalidCapturedAgentBackendError,
   agentTurnForgeCredentialGuidance,
+  forgeDisplayName,
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
@@ -148,21 +149,29 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
           return new DecidePrMergeContextError({ message: cause.message })
         }
         return new DecidePrMergeContextError({
-          message: `Failed to resolve the repository ${repository.forge === "github" ? "GitHub" : "GitLab"} credential`,
+          message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential`,
         })
       }),
     )
+    const accessScope = ((): string => {
+      switch (repository.forge) {
+        case "github":
+          return "GitHub CLI or API access"
+        case "gitlab":
+          return "GitLab API access"
+        case "azure-devops":
+          return "Azure DevOps REST API access"
+        default: {
+          const _exhaustive: never = repository.forge
+          return _exhaustive
+        }
+      }
+    })()
     const prompt = [
       "Assess whether this pull request is low enough risk for an automated agent (clanker) to merge, or whether a human must merge it.",
       "Base the decision on risk: blast radius, security or auth changes, data migrations, irreversible operations, ambiguous requirements, incomplete verification, or anything that needs human judgment.",
       "Inspect the PR and its checks if needed. Do not merge the pull request.",
-      agentTurnForgeCredentialGuidance(
-        repository,
-        auth,
-        repository.forge === "github"
-          ? "GitHub CLI or API access"
-          : "GitLab API access",
-      ),
+      agentTurnForgeCredentialGuidance(repository, auth, accessScope),
       "End your final response with exactly one machine-readable result line:",
       "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
       "or, only when a human must merge:",
