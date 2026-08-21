@@ -27,6 +27,34 @@ const binDir = dirname(fileURLToPath(import.meta.url))
 const linuxX64Test =
   process.platform === "linux" && process.arch === "x64" ? test : test.skip
 
+// Piped core_pattern still records ulimit -c 0 crashes in coredumpctl.
+// PR_SET_DUMPABLE 0 makes systemd-coredump ignore the process.
+const SIGILL_NONDUMPABLE_C = [
+  "#include <signal.h>",
+  "#include <sys/prctl.h>",
+  "int main(void) {",
+  "  prctl(PR_SET_DUMPABLE, 0);",
+  "  raise(SIGILL);",
+  "}",
+  "",
+].join("\n")
+
+const writeNondumpableSigillBinary = (outputPath: string): void => {
+  const cc = Bun.which("cc") ?? Bun.which("gcc")
+  if (cc === null) {
+    throw new Error("cc is required to build the SIGILL launcher fixture")
+  }
+  const compiled = spawnSync(cc, ["-o", outputPath, "-x", "c", "-"], {
+    encoding: "utf8",
+    input: SIGILL_NONDUMPABLE_C,
+  })
+  if (compiled.status !== 0) {
+    throw new Error(
+      `failed to compile SIGILL launcher fixture: ${compiled.stderr}`,
+    )
+  }
+}
+
 describe("selectPlatformPackage", () => {
   test("selects each supported linux/darwin/win32 × x64/arm64 package", () => {
     const cases = [
@@ -237,7 +265,7 @@ describe("selectPlatformPackage", () => {
         join(platformRoot, "package.json"),
         JSON.stringify({ name: "ready-for-agent-linux-x64" }),
       )
-      writeFileSync(platformBin, "#!/bin/sh\nkill -ILL $$\n")
+      writeNondumpableSigillBinary(platformBin)
       chmodSync(platformBin, 0o755)
 
       const node = Bun.which("node")
