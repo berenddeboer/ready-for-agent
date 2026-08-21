@@ -2668,30 +2668,22 @@ export const makeWorkItemLifecycleLive = (
                     }
                   }
                   if (status._tag === "failed") {
-                    // Draft with no unhandled terminals and known mergeability
-                    // still advances to Mark Ready; the ready-phase window can
-                    // restart checks. Ready PRs fail retryably at the deadline.
-                    if (isDraft) {
-                      return {
-                        transition: {
-                          nextState: "mark_pr_ready_for_review" as const,
-                        },
-                      }
+                    // Known draft or ready: poll until the deadline, then fail
+                    // retryably. Unknown draft status keeps polling.
+                    if ((isDraft || isReady) && pastDeadline) {
+                      return yield* new PrStatusChecksUnresolvedError({
+                        message:
+                          "Manual fixing may be required. Status checks remained failed without a new check execution to investigate. Please fix or rerun the checks on the pull request, then click Retry checks.",
+                      })
                     }
-                    if (!isReady || !pastDeadline) {
-                      return {
-                        transition: {
-                          nextState: "watch_pr_status_checks" as const,
-                          delay: pastDeadline
-                            ? PR_STATUS_CHECKS_POLL_DELAY
-                            : requeueDelay,
-                        },
-                      }
+                    return {
+                      transition: {
+                        nextState: "watch_pr_status_checks" as const,
+                        delay: pastDeadline
+                          ? PR_STATUS_CHECKS_POLL_DELAY
+                          : requeueDelay,
+                      },
                     }
-                    return yield* new PrStatusChecksUnresolvedError({
-                      message:
-                        "Manual fixing may be required. Status checks remained failed without a new check execution to investigate. Please fix or rerun the checks on the pull request, then click Retry checks.",
-                    })
                   }
                   // Settled: no_checks, expected, and all-terminal success.
                   if (
@@ -2699,8 +2691,17 @@ export const makeWorkItemLifecycleLive = (
                     status._tag === "expected" ||
                     status._tag === "succeeded"
                   ) {
-                    // Draft skips the catch-up window and advances to Mark Ready.
+                    // Green draft advances immediately. Check-less / EXPECTED
+                    // drafts poll until the deadline, then mark ready (no-CI).
                     if (isDraft) {
+                      if (status._tag !== "succeeded" && !pastDeadline) {
+                        return {
+                          transition: {
+                            nextState: "watch_pr_status_checks" as const,
+                            delay: requeueDelay,
+                          },
+                        }
+                      }
                       return {
                         transition: {
                           nextState: "mark_pr_ready_for_review" as const,
@@ -2775,11 +2776,9 @@ export const makeWorkItemLifecycleLive = (
                   }
                   return {
                     transition: {
-                      nextState: isDraft
-                        ? ("mark_pr_ready_for_review" as const)
-                        : isReady
-                          ? nextStateAfterReadyForMerge(effectivePolicy)
-                          : ("watch_pr_status_checks" as const),
+                      nextState: isReady
+                        ? nextStateAfterReadyForMerge(effectivePolicy)
+                        : ("watch_pr_status_checks" as const),
                     },
                   }
                 }),

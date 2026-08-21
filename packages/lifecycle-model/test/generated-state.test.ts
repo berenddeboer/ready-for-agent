@@ -125,4 +125,17 @@ describe("generated lifecycle state", () => {
 
     expect(exactRecords.size).toBe(LIFECYCLE_TRANSITIONS.length)
   })
+
+  it("gates Watch-to-Mark-Ready draft transitions on green checks or a deadline-scoped no-CI carve-out", () => {
+    const draftToMarkReady = LIFECYCLE_TRANSITIONS.filter(
+      (transition) =>
+        transition.from === "watch_pr_status_checks" &&
+        transition.to === "mark_pr_ready_for_review",
+    ).map((transition) => transition.guard)
+
+    expect(draftToMarkReady).toEqual([
+      "draft_no_checks_after_start_deadline",
+      "green_checks_on_draft",
+    ])
+  })
 })
