@@ -945,19 +945,13 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "watch_pr_status_checks",
     to: "mark_pr_ready_for_review",
-    guard: "failed_checks_on_draft",
+    guard: "draft_no_checks_after_start_deadline",
     reasonCode: "native",
   },
   {
     from: "watch_pr_status_checks",
     to: "mark_pr_ready_for_review",
-    guard: "fallback_draft_observation",
-    reasonCode: "native",
-  },
-  {
-    from: "watch_pr_status_checks",
-    to: "mark_pr_ready_for_review",
-    guard: "settled_draft",
+    guard: "green_checks_on_draft",
     reasonCode: "native",
   },
   {

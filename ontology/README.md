@@ -163,7 +163,7 @@ Notes on the modelling:
 
 ## The lifecycle state space
 
-16 operational Lifecycle Steps, 4 terminal Work Item states, and 110 declared
+16 operational Lifecycle Steps, 4 terminal Work Item states, and 130 declared
 transitions, each carrying a named guard and one Step Run reason code from the
 generated vocabulary.
 The happy path:
@@ -184,7 +184,7 @@ stateDiagram-v2
   resolve_pr_merge_conflict --> watch_pr_status_checks : conflict_processed
   watch_pr_status_checks --> investigate_pr_status_checks : status_check_handoff_needed
   investigate_pr_status_checks --> watch_pr_status_checks : handoff_processed
-  watch_pr_status_checks --> mark_pr_ready_for_review : settled_draft
+  watch_pr_status_checks --> mark_pr_ready_for_review : green_checks_on_draft
   mark_pr_ready_for_review --> decide_pr_merge : settled, ordinary merge mode
   mark_pr_ready_for_review --> merge_pr : settled, always merge mode
   decide_pr_merge --> merge_pr : clanker_merge_decision
