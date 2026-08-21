@@ -943,6 +943,22 @@ type PeekedRollout =
   | { readonly kind: "corrupt" }
   | { readonly kind: "identity"; readonly sessionId: string }
 
+const identityFromSessionMetaPrefix = (line: string): string | null => {
+  if (!/"type"\s*:\s*"session_meta"/.test(line)) {
+    return null
+  }
+  const payloadStart = /"payload"\s*:\s*\{/.exec(line)
+  if (payloadStart === null) {
+    return null
+  }
+  const payloadPrefix = line.slice(
+    payloadStart.index + payloadStart[0].length,
+    payloadStart.index + payloadStart[0].length + 1_024,
+  )
+  const identity = /"id"\s*:\s*"([^"\\]+)"/.exec(payloadPrefix)?.[1]
+  return identity === undefined ? null : nonEmptyString(identity)
+}
+
 const peekCodexRolloutIdentity = (path: string): PeekedRollout => {
   let fd: number | undefined
   try {
@@ -950,7 +966,8 @@ const peekCodexRolloutIdentity = (path: string): PeekedRollout => {
     const buf = Buffer.alloc(IDENTITY_PEEK_BYTES)
     const bytesRead = readSync(fd, buf, 0, IDENTITY_PEEK_BYTES, 0)
     const raw = buf.subarray(0, bytesRead).toString("utf8")
-    for (const line of raw.split("\n")) {
+    const lines = raw.split("\n")
+    for (const [index, line] of lines.entries()) {
       if (line.trim() === "") {
         continue
       }
@@ -967,7 +984,16 @@ const peekCodexRolloutIdentity = (path: string): PeekedRollout => {
         if (sessionId !== null) {
           return { kind: "identity", sessionId }
         }
-      } catch {}
+      } catch {
+        const lineMayBeTruncated =
+          bytesRead === IDENTITY_PEEK_BYTES && index === lines.length - 1
+        if (lineMayBeTruncated) {
+          const sessionId = identityFromSessionMetaPrefix(line)
+          if (sessionId !== null) {
+            return { kind: "identity", sessionId }
+          }
+        }
+      }
     }
     return { kind: "corrupt" }
   } catch {
