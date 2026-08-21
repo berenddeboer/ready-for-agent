@@ -103,6 +103,7 @@ import {
   type Forge,
   type Repository,
   decodeForge,
+  forgeDisplayName,
   repositoriesQuery,
 } from "./repositories-query.js"
 import {
@@ -2772,7 +2773,9 @@ function RepositoryCard({
                       ? "Refresh issues"
                       : repository.forge === "gitlab"
                         ? "Authenticate GitLab before refreshing issues"
-                        : "Add a GitHub token before refreshing issues"
+                        : repository.forge === "azure-devops"
+                          ? "Authenticate Azure DevOps before refreshing issues"
+                          : "Add a GitHub token before refreshing issues"
                   }
                 >
                   <svg
@@ -2872,7 +2875,7 @@ function RepositoryIssues({
   if (issues.length === 0) {
     return (
       <p className={ui.repoIssuesEmpty}>
-        Label {repository.forge === "gitlab" ? "GitLab" : "GitHub"} issues with{" "}
+        Label {forgeDisplayName(repository.forge)} issues with{" "}
         <code className={ui.guidanceCode}>ready-for-agent</code> for them to
         show up here. If an issue is a child issue, the parent itself cannot be
         a child issue too.

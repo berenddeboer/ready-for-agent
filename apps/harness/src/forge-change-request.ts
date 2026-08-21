@@ -3,10 +3,22 @@
  * Used on archive legs, PR badges, and aria-labels.
  */
 
-export type ForgeId = "github" | "gitlab"
+export type ForgeId = "github" | "gitlab" | "azure-devops"
 
+/**
+ * Azure DevOps uses GitHub's "pull request" terminology, so it maps onto the
+ * "PR" branch; the exhaustive mapping exists so a new Forge fails here instead
+ * of silently inheriting the wrong noun.
+ */
 export function normalizeForge(forge: string | undefined | null): ForgeId {
-  return forge === "gitlab" ? "gitlab" : "github"
+  switch (forge) {
+    case "gitlab":
+      return "gitlab"
+    case "azure-devops":
+      return "azure-devops"
+    default:
+      return "github"
+  }
 }
 
 /** Compact chip / badge token: "PR" (GitHub) or "MR" (GitLab). */

@@ -4,7 +4,11 @@ import {
   resolveGraphqlFetchUrl,
   toFetchableGraphqlUrl,
 } from "../src/harness-graphql.ts"
-import { decodeForge, repositoriesQuery } from "../src/repositories-query.ts"
+import {
+  decodeForge,
+  forgeDisplayName,
+  repositoriesQuery,
+} from "../src/repositories-query.ts"
 import { describe, expect, test } from "bun:test"
 
 const emptyRepositoriesPayload = {
@@ -50,6 +54,14 @@ describe("decodeForge", () => {
 
   test("rejects unknown Forge values", () => {
     expect(() => decodeForge("bitbucket")).toThrow("Unsupported Forge")
+  })
+})
+
+describe("forgeDisplayName", () => {
+  test("names every supported Forge", () => {
+    expect(forgeDisplayName("github")).toBe("GitHub")
+    expect(forgeDisplayName("gitlab")).toBe("GitLab")
+    expect(forgeDisplayName("azure-devops")).toBe("Azure DevOps")
   })
 })
 

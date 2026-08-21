@@ -19,6 +19,15 @@ type RepositoryCredential = {
 
 export type Forge = "github" | "gitlab" | "azure-devops"
 
+const FORGE_DISPLAY_NAMES: Record<Forge, string> = {
+  github: "GitHub",
+  gitlab: "GitLab",
+  "azure-devops": "Azure DevOps",
+}
+
+export const forgeDisplayName = (forge: Forge): string =>
+  FORGE_DISPLAY_NAMES[forge]
+
 export const decodeForge = (value: unknown): Forge => {
   switch (value) {
     case "github":
