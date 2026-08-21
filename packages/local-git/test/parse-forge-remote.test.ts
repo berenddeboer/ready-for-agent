@@ -116,6 +116,17 @@ describe("parseForgeRemote", () => {
         projectPath: "acme/widgets",
       },
     )
+    // Legacy SSH host: org comes from the v3 path, not the hostname.
+    expectRemote("git@vs-ssh.visualstudio.com:v3/acme/Default/gantry", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/Default/gantry",
+    })
+    expectRemote("git@vs-ssh.visualstudio.com:v3/acme/widgets/widgets", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    })
   })
 
   test("does not misclassify an Azure DevOps host missing the _git path segment", () => {

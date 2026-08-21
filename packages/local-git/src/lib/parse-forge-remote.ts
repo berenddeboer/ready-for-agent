@@ -54,6 +54,7 @@ const parseUrlRemote = (
 /** Canonical Azure DevOps Forge Host both clone URL spellings resolve to. */
 const AZURE_DEVOPS_CANONICAL_HOST = "dev.azure.com"
 const AZURE_DEVOPS_SSH_HOST = "ssh.dev.azure.com"
+const AZURE_DEVOPS_VS_SSH_HOST = "vs-ssh.visualstudio.com"
 const VISUALSTUDIO_HOST_SUFFIX = ".visualstudio.com"
 
 const pathSegments = (rawPath: string): string[] =>
@@ -67,8 +68,11 @@ const pathSegments = (rawPath: string): string[] =>
  * Match an Azure DevOps org/project/repository identity from a clone
  * remote's host and path. Handles the canonical `dev.azure.com` host (HTTPS
  * `/{org}/{project}/_git/{repo}` and the `ssh.dev.azure.com` SCP form
- * `v3/{org}/{project}/{repo}`) and legacy per-org `*.visualstudio.com` hosts
- * (`/{project}/_git/{repo}`, optionally under `/DefaultCollection/`).
+ * `v3/{org}/{project}/{repo}`), the legacy per-org `*.visualstudio.com`
+ * HTTPS hosts (`/{project}/_git/{repo}`, optionally under
+ * `/DefaultCollection/`), and the legacy `vs-ssh.visualstudio.com` SSH host
+ * (`v3/{org}/{project}/{repo}` — unlike the HTTPS form, the org comes from
+ * the path, not the hostname).
  * Always resolves to the canonical `dev.azure.com` Forge Host so both
  * spellings share one Repository identity — the ADO analogue of preferring
  * GitLab's canonical `web_url` host over the SSH/remote guess. The `repo`
@@ -82,7 +86,10 @@ const parseAzureDevOpsRemote = (
 ):
   | { readonly org: string; readonly project: string; readonly repo: string }
   | undefined => {
-  if (hostNoPort === AZURE_DEVOPS_SSH_HOST) {
+  if (
+    hostNoPort === AZURE_DEVOPS_SSH_HOST ||
+    hostNoPort === AZURE_DEVOPS_VS_SSH_HOST
+  ) {
     const segments = pathSegments(rawPath)
     const [v3, org, project, repo] = segments
     if (

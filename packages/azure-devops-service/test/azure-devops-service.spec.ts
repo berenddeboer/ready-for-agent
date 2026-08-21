@@ -1067,6 +1067,53 @@ describe("Azure DevOps ensureIssueCompletedWithSummary", () => {
     expect(commentApiVersions).toEqual(["7.1-preview.3", "7.1-preview.3"])
   })
 
+  test("accepts a custom Completed-category state name as closed (ADR 0061)", async () => {
+    // A process template can define a custom Completed state ("Complete")
+    // that the CLOSED_STATE_NAMES read-side heuristic does not know; a
+    // successful transition to it must satisfy the close-out postcondition.
+    let patchBody: unknown = null
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (url.pathname.endsWith("/comments")) {
+        if (method === "POST") {
+          const posted = JSON.parse(String(init?.body)) as { text: string }
+          return json({ text: posted.text })
+        }
+        return json({ comments: [] })
+      }
+      if (url.pathname.endsWith("/states")) {
+        return json({
+          value: [
+            { name: "New", category: "Proposed" },
+            { name: "Complete", category: "Completed" },
+          ],
+        })
+      }
+      if (method === "PATCH") {
+        patchBody = JSON.parse(String(init?.body))
+        return json({
+          id: 1,
+          fields: { "System.State": "Complete" },
+        })
+      }
+      return json({
+        id: 1,
+        fields: { "System.State": "Active", "System.WorkItemType": "Task" },
+      })
+    }) as unknown as typeof fetch)
+
+    await Effect.runPromise(
+      service.ensureIssueCompletedWithSummary(repository, 1, "wi-1", "Done"),
+    )
+    expect(patchBody).toEqual([
+      { op: "add", path: "/fields/System.State", value: "Complete" },
+    ])
+  })
+
   test("falls back to the literal Closed state when the type-states lookup fails", async () => {
     let patchBody: unknown = null
     const service = makeAzureDevOpsServiceFromToken("test-pat", (async (

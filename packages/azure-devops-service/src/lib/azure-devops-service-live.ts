@@ -2121,9 +2121,15 @@ export const makeAzureDevOpsService = (options: {
           ),
         ),
       )
-      if (isOpenState(closed.fields["System.State"])) {
+      // Verify against the exact state this close-out wrote, not the
+      // CLOSED_STATE_NAMES read-side heuristic: process templates can define
+      // custom Completed-category state names (e.g. "Complete", "Archived")
+      // that the heuristic does not know, and rejecting a successful
+      // transition to one of them would fail a correctly-closed Work Item.
+      const closedState = closed.fields["System.State"]?.trim() ?? ""
+      if (closedState.toLowerCase() !== targetStateName.toLowerCase()) {
         return yield* new AzureDevOpsRequestError({
-          message: `Work Item ${issueRef} is still open after close`,
+          message: `Work Item ${issueRef} did not reach the ${targetStateName} state after close (state: ${closedState === "" ? "unknown" : closedState})`,
         })
       }
     }),
