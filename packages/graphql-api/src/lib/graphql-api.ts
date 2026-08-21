@@ -26,6 +26,7 @@ import {
 } from "@ready-for-agent/agent-backend"
 import {
   DbService,
+  type Forge,
   InvalidConfigInputError,
   InvalidRepositorySettingsError,
   type MergePolicy,
@@ -98,7 +99,7 @@ import {
 
 type AddRepositoryArgs = {
   input: {
-    forge: "github" | "gitlab"
+    forge: Forge
     forgeHost: string
     projectPath: string
     localPath: string
@@ -137,7 +138,7 @@ type UpdateConfigArgs = {
 type UpdateRepositorySettingsArgs = {
   input: {
     repositoryId: string
-    forge?: "github" | "gitlab"
+    forge?: Forge
     forgeHost?: string
     projectPath?: string
     paused: boolean

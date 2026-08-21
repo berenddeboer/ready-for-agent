@@ -17,9 +17,22 @@ type RepositoryCredential = {
   githubTokenCreationUrl: string
 }
 
+export type Forge = "github" | "gitlab" | "azure-devops"
+
+export const decodeForge = (value: unknown): Forge => {
+  switch (value) {
+    case "github":
+    case "gitlab":
+    case "azure-devops":
+      return value
+    default:
+      throw new Error(`Unsupported Forge: ${String(value)}`)
+  }
+}
+
 export type Repository = {
   id: string
-  forge: string
+  forge: Forge
   forgeHost: string
   projectPath: string
   localPath: string
@@ -81,7 +94,7 @@ export const repositoriesQuery = {
       if (credential === undefined) {
         throw new Error(`Missing credential status for ${repository.id}`)
       }
-      return { ...repository, credential }
+      return { ...repository, forge: decodeForge(repository.forge), credential }
     })
   },
 }

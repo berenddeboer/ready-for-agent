@@ -119,6 +119,14 @@ describe("blank-slate add repository command", () => {
     expect(guidance).toContain("setInspection(null)")
   })
 
+  test("preserves an inspected Azure DevOps forge identity", () => {
+    const guidance = addRepositoryGuidanceSource()
+    expect(guidance).toContain("forge: decodeForge(result.forge)")
+    expect(guidance).toContain(
+      '<option value="azure-devops">Azure DevOps</option>',
+    )
+  })
+
   test("shows add-repository guidance in the empty state via shared blank slate", () => {
     const cards = repositoryCardsSource()
     const emptyStart = cards.indexOf("if (repositories.length === 0)")

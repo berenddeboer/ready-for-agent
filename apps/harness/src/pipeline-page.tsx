@@ -13,7 +13,11 @@ import {
   followRepositoryMembershipLive,
   liveUpdatesWarningPresentation,
 } from "./refresh-repositories-live.js"
-import { repositoriesQuery } from "./repositories-query.js"
+import {
+  type Forge,
+  decodeForge,
+  repositoriesQuery,
+} from "./repositories-query.js"
 import { cx, ui } from "./ui.js"
 
 const graphql = createHarnessGraphqlClient({ batch: true })
@@ -192,7 +196,7 @@ export function AddRepositoryGuidance({
   const [path, setPath] = useState("")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [inspection, setInspection] = useState<{
-    forge: "github" | "gitlab"
+    forge: Forge
     forgeHost: string
     projectPath: string
     localPath: string
@@ -276,7 +280,7 @@ export function AddRepositoryGuidance({
     onSuccess: (result) => {
       setInspection({
         ...result,
-        forge: result.forge === "gitlab" ? "gitlab" : "github",
+        forge: decodeForge(result.forge),
       })
       setErrorMessage(null)
     },
@@ -418,12 +422,13 @@ export function AddRepositoryGuidance({
                 onChange={(event) =>
                   setInspection({
                     ...inspection,
-                    forge: event.target.value as "github" | "gitlab",
+                    forge: decodeForge(event.target.value),
                   })
                 }
               >
                 <option value="github">GitHub</option>
                 <option value="gitlab">GitLab</option>
+                <option value="azure-devops">Azure DevOps</option>
               </select>
             </label>
             <label className={ui.blankSlateField}>
