@@ -3,6 +3,8 @@ status: accepted
 amends:
   - 0014
   - 0027
+amended-by:
+  - 0060
 ---
 
 # Bound PR Status Check Startup with Trigger-Anchored Deadlines
