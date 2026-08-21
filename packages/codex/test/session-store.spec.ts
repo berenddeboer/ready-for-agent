@@ -1282,6 +1282,46 @@ describe("CodexSessionStore Agent Turn Tail", () => {
     }
   })
 
+  it("reads a tail when session metadata exceeds the bounded identity peek", async () => {
+    const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
+    try {
+      const sessionId = "large-session-metadata"
+      writeScannedRollout({
+        codexHome,
+        partition: join("2026", "08", "21"),
+        sessionId,
+        raw: [
+          JSON.stringify({
+            timestamp: "2026-08-21T01:45:35.450Z",
+            type: "session_meta",
+            payload: {
+              session_id: "parent-session",
+              id: sessionId,
+              base_instructions: { text: "x".repeat(20_000) },
+            },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-21T01:45:36.000Z",
+            type: "event_msg",
+            payload: { type: "user_message", message: "go" },
+          }),
+          JSON.stringify({
+            timestamp: "2026-08-21T01:45:37.000Z",
+            type: "event_msg",
+            payload: { type: "agent_message", message: "working" },
+          }),
+        ].join("\n"),
+      })
+
+      await expect(getTail({ codexHome, sessionId })).resolves.toMatchObject({
+        availability: "available",
+        items: [{ kind: "assistant_text", text: "working" }],
+      })
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true })
+    }
+  })
+
   it("returns MISSING when the Codex Session record is absent", async () => {
     const codexHome = mkdtempSync(join(tmpdir(), "codex-session-tail-"))
     try {
