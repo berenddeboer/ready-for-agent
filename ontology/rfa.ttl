@@ -549,7 +549,7 @@ rfa:WatchPrStatusChecks
   rfa:retryable true ;
   skos:prefLabel "Watch PR Status Checks"@en ;
   skos:definition
-    "The Lifecycle Step that observes the Work Item PR for merge conflicts, Status Check Handoffs, and settled completion conditions. After the Check-Start Deadline, a ready PR whose effective Merge Policy is Always and whose aggregate is `no_checks` advances to Merge PR; Always still does not treat Expected PR Status Checks as green; Classify and `off` enter Needs Human for `no_checks` or only Expected PR Status Checks."@en .
+    "The Lifecycle Step that observes the Work Item PR for merge conflicts, Status Check Handoffs, and settled completion conditions. A draft advances to Mark PR Ready for Review only on an all-green aggregate, or on `no_checks` or only Expected PR Status Checks at or after the Check-Start Deadline; red checks on a draft go to Investigate PR Status Checks while the PR stays draft. After the Check-Start Deadline, a ready PR whose effective Merge Policy is Always and whose aggregate is `no_checks` advances to Merge PR; Always still does not treat Expected PR Status Checks as green; Classify and `off` enter Needs Human for `no_checks` or only Expected PR Status Checks."@en .
 
 rfa:ResolvePrMergeConflict
   a owl:Class, owl:NamedIndividual, skos:Concept,
@@ -585,7 +585,7 @@ rfa:MarkPrReadyForReview
   rfa:retryable true ;
   skos:prefLabel "Mark PR Ready for Review"@en ;
   skos:definition
-    "The Lifecycle Step that changes a settled draft Work Item PR to ready for review."@en .
+    "The Lifecycle Step that changes a Work Item PR from draft to ready for review after Watch observes all-green draft checks, or a check-less draft at or after the Check-Start Deadline. Red draft checks are investigated while the PR stays draft and do not reach this step."@en .
 
 rfa:DecidePrMerge
   a owl:Class, owl:NamedIndividual, skos:Concept,
