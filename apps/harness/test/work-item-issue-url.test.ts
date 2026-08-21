@@ -18,4 +18,21 @@ describe("workItemIssueUrl", () => {
       ),
     ).toBe("https://git.drupalcode.org/project/oauth_client/-/issues/3601642")
   })
+
+  test("builds Azure DevOps Work Item URL from a two-segment Project Path", () => {
+    expect(
+      workItemIssueUrl("azure-devops", "dev.azure.com", "acme/widgets", 42),
+    ).toBe("https://dev.azure.com/acme/widgets/_workitems/edit/42")
+  })
+
+  test("omits the Git repository segment from Azure DevOps Work Item URLs", () => {
+    expect(
+      workItemIssueUrl(
+        "azure-devops",
+        "dev.azure.com",
+        "acme/Default/gantry",
+        42,
+      ),
+    ).toBe("https://dev.azure.com/acme/Default/_workitems/edit/42")
+  })
 })

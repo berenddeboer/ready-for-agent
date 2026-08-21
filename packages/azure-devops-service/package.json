@@ -13,6 +13,12 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./types": {
+      "@ready-for-agent/source": "./src/lib/types.ts",
+      "types": "./dist/lib/types.d.ts",
+      "import": "./dist/lib/types.js",
+      "default": "./dist/lib/types.js"
     }
   },
   "dependencies": {
