@@ -18,6 +18,7 @@ import {
   WorkItemLifecycle,
   WorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
+  stubAzureDevOpsServiceLayer,
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
 } from "../src/index.js"
@@ -101,6 +102,7 @@ const makeTestLayer = (steps: LifecycleStepsShape) =>
     Layer.provideMerge(stubActiveAgentBackendLayer()),
     Layer.provideMerge(stubGitHubServiceLayer()),
     Layer.provideMerge(stubGitLabServiceLayer()),
+    Layer.provideMerge(stubAzureDevOpsServiceLayer()),
     Layer.provideMerge(Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps))),
     Layer.provideMerge(DbServiceLive),
     Layer.provideMerge(SqliteQueueServiceLive),
@@ -112,6 +114,7 @@ const makeRestartLayer = (steps: LifecycleStepsShape, filename: string) =>
     Layer.provideMerge(stubActiveAgentBackendLayer()),
     Layer.provideMerge(stubGitHubServiceLayer()),
     Layer.provideMerge(stubGitLabServiceLayer()),
+    Layer.provideMerge(stubAzureDevOpsServiceLayer()),
     Layer.provideMerge(Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps))),
     Layer.provideMerge(DbServiceLive),
     Layer.provideMerge(SqliteQueueServiceLive),

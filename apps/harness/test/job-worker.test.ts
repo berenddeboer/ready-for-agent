@@ -19,6 +19,10 @@ import {
   missingSessionTelemetry,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
+import {
+  AzureDevOpsService,
+  type AzureDevOpsServiceShape,
+} from "@ready-for-agent/azure-devops-service"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   DatabaseError,
@@ -184,7 +188,44 @@ const defaultGitlabLayer = Layer.succeed(GitLabService, {
   deleteBranch: () => Effect.void,
 } satisfies GitLabServiceShape)
 
-const defaultGithubLayer = Layer.merge(
+const defaultAzureDevOpsShape = {
+  verifyProject: (repository) => Effect.succeed(repository),
+  getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+  listReadyIssues: () => Effect.succeed([]),
+  hasCredentials: () => Effect.succeed(true),
+  hasAmbientCredentials: () => Effect.succeed(true),
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  findOpenPullRequestNumber: () => Effect.succeed(null),
+  createDraftPullRequest: () => Effect.succeed(1),
+  updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+  countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  getPullRequestCheckStatus: () =>
+    Effect.succeed({
+      _tag: "succeeded",
+      terminalChecks: [],
+      mergeability: "mergeable",
+      baseRefName: "main",
+      headPushedAt: null,
+      headSha: null,
+      createdAt: null,
+      isDraft: null,
+    }),
+  getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+  markPullRequestReadyForReview: () => Effect.void,
+  getPullRequestLifecycleStatus: () =>
+    Effect.succeed({ _tag: "open" as const }),
+  mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+  ensureIssueCompletedWithSummary: () => Effect.void,
+  closeOpenPullRequestsForBranch: () => Effect.void,
+  deleteBranch: () => Effect.void,
+} satisfies AzureDevOpsServiceShape
+
+const defaultAzureDevOpsLayer = Layer.succeed(
+  AzureDevOpsService,
+  defaultAzureDevOpsShape,
+)
+
+const defaultGithubLayer = Layer.mergeAll(
   Layer.succeed(GitHubService, {
     getOpenPullRequestNumber: () => Effect.succeed(1),
     findOpenPullRequestNumber: () => Effect.succeed(1),
@@ -223,6 +264,7 @@ const defaultGithubLayer = Layer.merge(
     listReadyIssues: () => Effect.succeed([]),
   } satisfies GitHubServiceShape),
   defaultGitlabLayer,
+  defaultAzureDevOpsLayer,
 )
 
 const queueLayer = (
@@ -817,6 +859,7 @@ describe("Job worker", () => {
         Layer.provideMerge(database),
         Layer.provideMerge(github),
         Layer.provideMerge(defaultGitlabLayer),
+        Layer.provideMerge(defaultAzureDevOpsLayer),
       )
       const layer = Layer.mergeAll(
         database,
@@ -2170,6 +2213,76 @@ describe("Job worker", () => {
         ),
       )
     }),
+  )
+
+  it.live(
+    "polls a credentialed Azure DevOps Repository while Paused, via the explicit Azure DevOps branch",
+    () =>
+      Effect.gen(function* () {
+        const pausedAzureDevOps = makeRepositoryRecord({
+          id: repository.id,
+          forge: "azure-devops",
+          forgeHost: "dev.azure.com",
+          projectPath: "acme/widgets",
+          paused: true,
+        })
+        const job = rawJob(
+          refreshPayload,
+          ISSUE_POLL_QUEUE,
+          pausedAzureDevOps.id,
+        )
+        const postponed = yield* Deferred.make<string>()
+
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({
+              idlePollInterval: Duration.zero,
+              samplePollingDelay: Effect.succeed(Duration.seconds(125)),
+            }).pipe(Effect.forkScoped({ startImmediately: true }))
+            expect(yield* Deferred.await(postponed)).toBe(job.jobId)
+          }),
+          Layer.mergeAll(
+            Layer.succeed(GitHubService, {} as GitHubServiceShape),
+            defaultGitlabLayer,
+            Layer.succeed(AzureDevOpsService, {
+              ...defaultAzureDevOpsShape,
+              hasCredentials: () => Effect.succeed(true),
+            }),
+            queueLayer(
+              [job],
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              (jobId) => Deferred.succeed(postponed, jobId),
+            ),
+            dbLayer([pausedAzureDevOps]),
+            Layer.succeed(IssueReconciler, {
+              reconcile: (repo) =>
+                Effect.sync(() => {
+                  expect(repo.forge).toBe("azure-devops")
+                  expect(repo.paused).toBe(true)
+                  return {
+                    fetched: 0,
+                    inserted: 0,
+                    updated: 0,
+                    deleted: 0,
+                    unchanged: 0,
+                    competingObservations: [],
+                  }
+                }),
+            }),
+            // No GitHub credential and no GitLab-owning path is exercised
+            // (`Layer.succeed(GitHubService, {} as GitHubServiceShape)` dies
+            // if ever called) — proving the explicit `azure-devops` branch,
+            // not a GitHub fallback, gates this Repository's polling
+            // eligibility.
+            keymaxxerLayer(new Set()),
+          ),
+        )
+      }),
   )
 
   it.live(

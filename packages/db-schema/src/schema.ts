@@ -18,7 +18,7 @@ export const repository = snakeCase.table(
     id: text()
       .primaryKey()
       .$defaultFn(() => `repo-${ulid()}`),
-    forge: text({ enum: ["github", "gitlab"] })
+    forge: text({ enum: ["github", "gitlab", "azure-devops"] })
       .notNull()
       .default("github"),
     forgeHost: text().notNull().default("github.com"),

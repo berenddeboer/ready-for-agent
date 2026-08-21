@@ -17,6 +17,13 @@ describe("claudeProviderIdentity", () => {
     expect(claudeProviderIdentity("firstParty")?.label).not.toContain("Bedrock")
   })
 
+  it("maps apiProvider foundry to Azure AI Foundry", () => {
+    expect(claudeProviderIdentity("foundry")).toEqual({
+      id: "foundry",
+      label: "Azure AI Foundry",
+    })
+  })
+
   it("returns null for unknown providers (no env-flag inference)", () => {
     expect(claudeProviderIdentity("unknown")).toBeNull()
   })

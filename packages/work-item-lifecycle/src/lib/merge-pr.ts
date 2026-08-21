@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
@@ -17,7 +18,8 @@ export class MergePrContextError extends Schema.TaggedErrorClass<MergePrContextE
  * Production Merge PR Lifecycle Step.
  * After Decide PR Merge chooses clanker merge, merges the open PR/MR on the
  * Work Item branch via the Forge API (token-backed; expected head SHA).
- * GitHub squash-merges; GitLab defers merge method to project settings.
+ * GitHub squash-merges; GitLab and Azure DevOps defer merge method to
+ * project/repository settings.
  */
 export const mergePr = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -48,10 +50,22 @@ export const mergePr = (context: LifecycleStepContext) =>
     })
     const options =
       effectivePolicy === "always" ? { acceptNoChecks: true } : undefined
-    if (repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      return yield* gitlab.mergePullRequest(repository, branch, options)
+    switch (repository.forge) {
+      case "gitlab": {
+        const gitlab = yield* GitLabService
+        return yield* gitlab.mergePullRequest(repository, branch, options)
+      }
+      case "azure-devops": {
+        const azureDevOps = yield* AzureDevOpsService
+        return yield* azureDevOps.mergePullRequest(repository, branch, options)
+      }
+      case "github": {
+        const github = yield* GitHubService
+        return yield* github.mergePullRequest(repository, branch, options)
+      }
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
     }
-    const github = yield* GitHubService
-    return yield* github.mergePullRequest(repository, branch, options)
   })

@@ -46,6 +46,7 @@ import {
 } from "@ready-for-agent/work-item-lifecycle"
 import type { ApplicationRequestContext } from "../application-request-context.js"
 import { READY_FOR_AGENT_VERSION } from "../generated/version.js"
+import { ambientAzureDevOpsLayer } from "./ambient-azure-devops-layer.js"
 import { ambientGitHubLayer } from "./ambient-github-layer.js"
 import { ambientGitLabLayer } from "./ambient-gitlab-layer.js"
 import {
@@ -153,10 +154,15 @@ export const createApplication = async (
           workspaceRoot: toolCwd,
           environment,
         }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
+  // Ambient-only regardless of sidecarUrl: Azure DevOps has no
+  // Keymaxxer-vault-backed Harness-side path yet (see
+  // ambient-azure-devops-layer.ts).
+  const azureDevOpsLayer = ambientAzureDevOpsLayer({ environment })
   const reconcilerLayer = IssueReconcilerLive.pipe(
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),
     Layer.provideMerge(gitlabLayer),
+    Layer.provideMerge(azureDevOpsLayer),
   )
   const queueLayer = SqliteQueueServiceLive.pipe(
     Layer.provideMerge(databaseLayer),
@@ -220,6 +226,7 @@ export const createApplication = async (
     Layer.provideMerge(keymaxxerLayer),
     Layer.provideMerge(githubLayer),
     Layer.provideMerge(gitlabLayer),
+    Layer.provideMerge(azureDevOpsLayer),
     Layer.provide(platformLayer),
   )
   const workerLayer = JobWorkerLive.pipe(
@@ -228,6 +235,7 @@ export const createApplication = async (
     Layer.provideMerge(lifecycleLayer),
     Layer.provideMerge(keymaxxerLayer),
     Layer.provideMerge(gitlabLayer),
+    Layer.provideMerge(azureDevOpsLayer),
   )
   const loggingLayer = Logger.layer([Logger.consolePretty({ colors: false })])
   const localGitLayer = LocalGit.layer.pipe(Layer.provide(platformLayer))

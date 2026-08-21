@@ -18,6 +18,7 @@ import {
   WorkItemLifecycle,
   WorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
+  stubAzureDevOpsServiceLayer,
   stubGitLabServiceLayer,
   syncNeedsHumanMergeHandoffs,
 } from "../src/index.js"
@@ -160,6 +161,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     getMergeability: () => Mergeability = () => "mergeable",
     getCheckStatusTag: () => CheckStatusTag = () => "succeeded",
     githubLookupOverrides: GitHubLookupOverrides = {},
+    azureDevOps: Parameters<typeof stubAzureDevOpsServiceLayer>[0] = {},
   ) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
@@ -173,6 +175,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
         ),
       ),
       Layer.provideMerge(stubGitLabServiceLayer(gitlab)),
+      Layer.provideMerge(stubAzureDevOpsServiceLayer(azureDevOps)),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -198,7 +201,41 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     return yield* lifecycle.runStep(payload.stepRunId)
   })
 
-  const driveToNeedsHuman = (forge: "github" | "gitlab" = "github") =>
+  const forgeHostFor = (
+    forge: "github" | "gitlab" | "azure-devops",
+  ): string => {
+    switch (forge) {
+      case "github":
+        return "github.com"
+      case "gitlab":
+        return "git.drupalcode.org"
+      case "azure-devops":
+        return "dev.azure.com"
+      default: {
+        const _exhaustive: never = forge
+        return _exhaustive
+      }
+    }
+  }
+
+  const issueUrlFor = (forge: "github" | "gitlab" | "azure-devops"): string => {
+    switch (forge) {
+      case "github":
+        return "https://github.com/acme/widgets/issues/42"
+      case "gitlab":
+        return "https://git.drupalcode.org/acme/widgets/-/issues/42"
+      case "azure-devops":
+        return "https://dev.azure.com/acme/widgets/_workitems/edit/42"
+      default: {
+        const _exhaustive: never = forge
+        return _exhaustive
+      }
+    }
+  }
+
+  const driveToNeedsHuman = (
+    forge: "github" | "gitlab" | "azure-devops" = "github",
+  ) =>
     Effect.gen(function* () {
       const db = yield* DbService
       const lifecycle = yield* WorkItemLifecycle
@@ -213,7 +250,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       })
       const repository = yield* db.addRepository({
         forge,
-        forgeHost: forge === "github" ? "github.com" : "git.drupalcode.org",
+        forgeHost: forgeHostFor(forge),
         projectPath: "acme/widgets",
         localPath: "/repos/acme/widgets.git",
         isBare: true,
@@ -223,10 +260,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
         issueNumber: 42,
         title: "Implement feature",
         body: "Issue body",
-        url:
-          forge === "github"
-            ? "https://github.com/acme/widgets/issues/42"
-            : "https://git.drupalcode.org/acme/widgets/-/issues/42",
+        url: issueUrlFor(forge),
         state: "OPEN",
         githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
         issueAuthor: null,
@@ -475,6 +509,74 @@ describe("syncNeedsHumanMergeHandoffs", () => {
             getPullRequestLifecycleStatus: () =>
               Effect.succeed({ _tag: "closed" }),
           }),
+        ),
+      ),
+    )
+  })
+
+  it("uses Azure DevOps PR lifecycle for persisted Azure DevOps Work Items", async () => {
+    let githubCalls = 0
+    let azureDevOpsCalls = 0
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToNeedsHuman("azure-devops")
+        expect(
+          (yield* lifecycle.getWorkItem(created.id)).pullRequestNumber,
+        ).toBe(101)
+
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const resumed = yield* lifecycle.getWorkItem(created.id)
+        expect(resumed.state).toBe("local_cleanup")
+        expect(githubCalls).toBe(0)
+        expect(azureDevOpsCalls).toBeGreaterThan(0)
+      }).pipe(
+        Effect.provide(
+          makeLayerWithStatus(
+            () => {
+              githubCalls += 1
+              return { _tag: "merged" }
+            },
+            successfulSteps,
+            {},
+            () => "mergeable",
+            () => "succeeded",
+            {},
+            {
+              getPullRequestLifecycleStatus: () => {
+                azureDevOpsCalls += 1
+                return Effect.succeed({ _tag: "merged" })
+              },
+            },
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("abandons Azure DevOps merge-related Needs Human when the PR is closed unmerged", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToNeedsHuman("azure-devops")
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const abandoned = yield* lifecycle.getWorkItem(created.id)
+        expect(abandoned.state).toBe("abandoned")
+        expect(abandoned.worktreePath).toBeNull()
+      }).pipe(
+        Effect.provide(
+          makeLayerWithStatus(
+            () => ({ _tag: "open" }),
+            successfulSteps,
+            {},
+            () => "mergeable",
+            () => "succeeded",
+            {},
+            {
+              getPullRequestLifecycleStatus: () =>
+                Effect.succeed({ _tag: "closed" }),
+            },
+          ),
         ),
       ),
     )

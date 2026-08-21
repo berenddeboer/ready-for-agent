@@ -27,6 +27,7 @@ import {
   resolveAgentModelSelection,
   resolveAgentModelsForBackend,
   stubActiveAgentBackendLayer,
+  stubAzureDevOpsServiceLayer,
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
 } from "../src/index.js"
@@ -123,6 +124,7 @@ const lifecycleLayer = (
     Layer.provideMerge(active),
     Layer.provideMerge(stubGitHubServiceLayer()),
     Layer.provideMerge(stubGitLabServiceLayer()),
+    Layer.provideMerge(stubAzureDevOpsServiceLayer()),
     Layer.provideMerge(Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps))),
     Layer.provideMerge(DbServiceLive),
     Layer.provideMerge(SqliteQueueServiceLive),

@@ -25,6 +25,16 @@ describe("formatAgentBackendStatusLabel (issue #819)", () => {
     ).toBe("Claude Code · First-party · Ready")
   })
 
+  test("shows Claude Code · Azure AI Foundry · Ready (issue #8)", () => {
+    expect(
+      formatAgentBackendStatusLabel({
+        backendLabel: "Claude Code",
+        kind: "READY",
+        provider: { id: "foundry", label: "Azure AI Foundry" },
+      }),
+    ).toBe("Claude Code · Azure AI Foundry · Ready")
+  })
+
   test("omits provider segment when the backend does not report one", () => {
     expect(
       formatAgentBackendStatusLabel({

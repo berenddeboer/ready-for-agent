@@ -2,6 +2,13 @@ import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import {
+  AZURE_DEVOPS_PAT_ENV_VAR,
+  type AzureDevOpsRepository,
+  AzureDevOpsService,
+  azureDevOpsVaultAccount,
+  splitAzureDevOpsProjectPath,
+} from "@ready-for-agent/azure-devops-service"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
 import {
   type GitHubRepository,
@@ -50,6 +57,40 @@ import { workItemBranchName } from "./worktree-names.js"
 
 const DIAGNOSTIC_CHAR_LIMIT = 4_000
 const NATIVE_PUSH_TIMEOUT_MS = 60_000
+
+/** Human-readable Forge name for error messages and Agent Turn prompts. */
+const forgeDisplayName = (forge: RepositoryRecord["forge"]): string => {
+  switch (forge) {
+    case "github":
+      return "GitHub"
+    case "gitlab":
+      return "GitLab"
+    case "azure-devops":
+      return "Azure DevOps"
+    default: {
+      const _exhaustive: never = forge
+      return _exhaustive
+    }
+  }
+}
+
+/** Agent Turn credential-guidance access-scope phrase, per Forge. */
+const nativeCredentialAccessScope = (
+  forge: RepositoryRecord["forge"],
+): string => {
+  switch (forge) {
+    case "github":
+      return "GitHub CLI or API access"
+    case "gitlab":
+      return "GitLab API or push access"
+    case "azure-devops":
+      return "Azure DevOps API or push access"
+    default: {
+      const _exhaustive: never = forge
+      return _exhaustive
+    }
+  }
+}
 
 export type CreatePrResult = {
   readonly pullRequestNumber: number
@@ -205,35 +246,61 @@ const findExistingOpenPr = (
   branch: string,
 ) =>
   Effect.gen(function* () {
-    if (repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      return yield* gitlab
-        .findOpenPullRequestNumber(toGitLabRepository(repository), branch)
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new CreatePrLookupError({
-                repositoryId: context.repositoryId,
-                message: `Failed to look up an open merge request for ${repository.projectPath}:${branch}`,
-                cause,
-              }),
-          ),
-        )
+    switch (repository.forge) {
+      case "gitlab": {
+        const gitlab = yield* GitLabService
+        return yield* gitlab
+          .findOpenPullRequestNumber(toGitLabRepository(repository), branch)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new CreatePrLookupError({
+                  repositoryId: context.repositoryId,
+                  message: `Failed to look up an open merge request for ${repository.projectPath}:${branch}`,
+                  cause,
+                }),
+            ),
+          )
+      }
+      case "azure-devops": {
+        const azureDevOps = yield* AzureDevOpsService
+        return yield* azureDevOps
+          .findOpenPullRequestNumber(
+            toAzureDevOpsRepository(repository),
+            branch,
+          )
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new CreatePrLookupError({
+                  repositoryId: context.repositoryId,
+                  message: `Failed to look up an open pull request for ${repository.projectPath}:${branch}`,
+                  cause,
+                }),
+            ),
+          )
+      }
+      case "github": {
+        const github = yield* GitHubService
+        return yield* github
+          .findOpenPullRequestNumber(toGitHubRepository(repository), branch)
+          .pipe(
+            Effect.mapError((cause) =>
+              isGitHubThrottledError(cause)
+                ? cause
+                : new CreatePrLookupError({
+                    repositoryId: context.repositoryId,
+                    message: `Failed to look up an open pull request for ${repository.projectPath}:${branch}`,
+                    cause,
+                  }),
+            ),
+          )
+      }
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
     }
-    const github = yield* GitHubService
-    return yield* github
-      .findOpenPullRequestNumber(toGitHubRepository(repository), branch)
-      .pipe(
-        Effect.mapError((cause) =>
-          isGitHubThrottledError(cause)
-            ? cause
-            : new CreatePrLookupError({
-                repositoryId: context.repositoryId,
-                message: `Failed to look up an open pull request for ${repository.projectPath}:${branch}`,
-                cause,
-              }),
-        ),
-      )
   })
 
 /**
@@ -270,36 +337,75 @@ const resolveRequiredOpenPr = (
   branch: string,
 ) =>
   Effect.gen(function* () {
-    if (repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      return yield* gitlab
-        .getOpenPullRequestNumber(toGitLabRepository(repository), branch)
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new CreatePrLookupError({
-                repositoryId: context.repositoryId,
-                message: `Failed to resolve the open merge request for ${repository.projectPath}:${branch}`,
-                cause,
-              }),
-          ),
-        )
+    switch (repository.forge) {
+      case "gitlab": {
+        const gitlab = yield* GitLabService
+        return yield* gitlab
+          .getOpenPullRequestNumber(toGitLabRepository(repository), branch)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new CreatePrLookupError({
+                  repositoryId: context.repositoryId,
+                  message: `Failed to resolve the open merge request for ${repository.projectPath}:${branch}`,
+                  cause,
+                }),
+            ),
+          )
+      }
+      case "azure-devops": {
+        const azureDevOps = yield* AzureDevOpsService
+        return yield* azureDevOps
+          .getOpenPullRequestNumber(toAzureDevOpsRepository(repository), branch)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new CreatePrLookupError({
+                  repositoryId: context.repositoryId,
+                  message: `Failed to resolve the open pull request for ${repository.projectPath}:${branch}`,
+                  cause,
+                }),
+            ),
+          )
+      }
+      case "github": {
+        const github = yield* GitHubService
+        return yield* github
+          .getOpenPullRequestNumber(toGitHubRepository(repository), branch)
+          .pipe(
+            Effect.mapError((cause) =>
+              isGitHubThrottledError(cause)
+                ? cause
+                : new CreatePrLookupError({
+                    repositoryId: context.repositoryId,
+                    message: `Failed to resolve the open pull request for ${repository.projectPath}:${branch}`,
+                    cause,
+                  }),
+            ),
+          )
+      }
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
     }
-    const github = yield* GitHubService
-    return yield* github
-      .getOpenPullRequestNumber(toGitHubRepository(repository), branch)
-      .pipe(
-        Effect.mapError((cause) =>
-          isGitHubThrottledError(cause)
-            ? cause
-            : new CreatePrLookupError({
-                repositoryId: context.repositoryId,
-                message: `Failed to resolve the open pull request for ${repository.projectPath}:${branch}`,
-                cause,
-              }),
-        ),
-      )
   })
+
+/** Keymaxxer vault account for native push, per Forge. */
+const nativePushVaultAccount = (repository: RepositoryRecord): string => {
+  switch (repository.forge) {
+    case "gitlab":
+      return `${repository.forgeHost}/${repository.projectPath}`
+    case "azure-devops":
+      return azureDevOpsVaultAccount(repository)
+    case "github":
+      return repository.projectPath
+    default: {
+      const _exhaustive: never = repository.forge
+      return _exhaustive
+    }
+  }
+}
 
 /**
  * Vault secret name for native push when Keymaxxer is enabled; null for ambient
@@ -311,20 +417,17 @@ const resolveNativePushTokenName = (repository: RepositoryRecord) =>
     if (keymaxxer.enabled === false) {
       return null
     }
-    const isGitLab = repository.forge === "gitlab"
     return yield* keymaxxer
       .findSecret({
-        provider: isGitLab ? "gitlab" : "github",
-        account: isGitLab
-          ? `${repository.forgeHost}/${repository.projectPath}`
-          : repository.projectPath,
+        provider: repository.forge,
+        account: nativePushVaultAccount(repository),
       })
       .pipe(
         Effect.mapError(
           (cause) =>
             new CreatePrCredentialError({
               repositoryId: repository.id,
-              message: `Failed to resolve the repository ${isGitLab ? "GitLab" : "GitHub"} credential for native push`,
+              message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential for native push`,
               cause,
             }),
         ),
@@ -333,6 +436,20 @@ const resolveNativePushTokenName = (repository: RepositoryRecord) =>
 
 const gitlabHttpsRemoteUrl = (repository: RepositoryRecord): string =>
   `https://${repository.forgeHost}/${repository.projectPath}.git`
+
+/**
+ * Azure DevOps clone URL: `https://<forge-host>/<org>/<project>/_git/<repo>`.
+ * The repo segment is the Git repository's own name, which is usually but
+ * not always the project name — see `splitAzureDevOpsProjectPath` doc.
+ */
+const azureDevOpsHttpsRemoteUrl = (repository: RepositoryRecord): string => {
+  const identity = splitAzureDevOpsProjectPath(repository.projectPath)
+  if (identity === null) {
+    return `https://${repository.forgeHost}/${repository.projectPath}/_git/${repository.projectPath}`
+  }
+  const repositoryName = identity.repository ?? identity.project
+  return `https://${repository.forgeHost}/${identity.organization}/${identity.project}/_git/${repositoryName}`
+}
 
 /**
  * Resolve ambient GitLab token for HTTPS push (Keymaxxer path unavailable).
@@ -349,10 +466,119 @@ const resolveAmbientGitLabToken = (forgeHost: string) =>
   })
 
 /**
+ * Resolve ambient Azure DevOps PAT for HTTPS push (Keymaxxer path
+ * unavailable). There is no `az`-CLI shellout convention in this codebase to
+ * fall back to (unlike GitLab's `glab`), so the ambient env var is the only
+ * source.
+ */
+const resolveAmbientAzureDevOpsToken = (): string | null => {
+  const fromEnv = process.env[AZURE_DEVOPS_PAT_ENV_VAR]?.trim()
+  return fromEnv !== undefined && fromEnv !== "" ? fromEnv : null
+}
+
+/**
+ * Push to the Azure DevOps clone URL with PAT auth. Basic auth with an empty
+ * username (matches the REST client convention in
+ * `azure-devops-service-live.ts`). Leaves the operator's SSH origin
+ * untouched (never git remote set-url).
+ */
+const attemptAzureDevOpsHttpsPush = (
+  worktreePath: string,
+  branch: string,
+  repository: RepositoryRecord,
+  tokenName: string | null,
+) =>
+  Effect.gen(function* () {
+    const remoteUrl = azureDevOpsHttpsRemoteUrl(repository)
+    const host = repository.forgeHost
+    const refspec = `${branch}:${branch}`
+
+    if (tokenName !== null) {
+      const keymaxxer = yield* KeymaxxerService
+      // Empty-username Basic auth: expand the vault secret inside the
+      // Keymaxxer child, then base64. Real assignment + `&&` — not a
+      // simple-command prefix assignment (same gotcha documented for the
+      // GitHub bearer and GitLab Basic auth paths above).
+      const command = [
+        `BASIC="$(printf ':%s' "$${tokenName}" | (base64 -w0 2>/dev/null || base64 | tr -d '\\n'))"`,
+        "&&",
+        "git",
+        "-C",
+        shellQuote(worktreePath),
+        "-c",
+        `"http.https://${host}/.extraheader=Authorization: Basic $BASIC"`,
+        "push",
+        shellQuote(remoteUrl),
+        shellQuote(refspec),
+      ].join(" ")
+
+      const result = yield* keymaxxer
+        .runWithSecrets({
+          command,
+          cwd: worktreePath,
+          secrets: [tokenName],
+          timeoutMs: NATIVE_PUSH_TIMEOUT_MS,
+        })
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.succeed({
+              exitCode: 1,
+              stdout: "",
+              stderr: `Keymaxxer runWithSecrets failed: ${errorMessage(cause)}`,
+            }),
+          ),
+        )
+
+      if (result.exitCode !== 0) {
+        const output = [result.stdout, result.stderr]
+          .map((part) => part.trim())
+          .filter((part) => part.length > 0)
+          .join("\n")
+        return {
+          ok: false as const,
+          diagnostics: boundDiagnostics(
+            `credentialed Azure DevOps HTTPS push failed (exit ${result.exitCode})\n${output}`,
+          ),
+        }
+      }
+      return { ok: true as const }
+    }
+
+    const ambientToken = resolveAmbientAzureDevOpsToken()
+    if (ambientToken === null) {
+      return {
+        ok: false as const,
+        diagnostics: boundDiagnostics(
+          `No ambient Azure DevOps token available for HTTPS push to ${remoteUrl} (set ${AZURE_DEVOPS_PAT_ENV_VAR})`,
+        ),
+      }
+    }
+
+    const basic = Buffer.from(`:${ambientToken}`, "utf8").toString("base64")
+    const push = yield* runGitInWorktree(worktreePath, [
+      "-c",
+      `http.https://${host}/.extraheader=Authorization: Basic ${basic}`,
+      "push",
+      remoteUrl,
+      refspec,
+    ])
+    if (push.exitCode !== 0) {
+      return {
+        ok: false as const,
+        diagnostics: boundDiagnostics(
+          `Azure DevOps HTTPS push failed (exit ${push.exitCode})\n${push.output}`,
+        ),
+      }
+    }
+    return { ok: true as const }
+  })
+
+/**
  * Push the Work Item branch via the harness credential path when a vault
  * secret is available (Keymaxxer runWithSecrets + HTTPS Authorization header).
- * Ambient GitHub uses plain git push to origin. Ambient GitLab pushes over
- * HTTPS to the Forge Host with token auth and never modifies origin.
+ * Ambient GitHub uses plain git push to origin. Ambient GitLab and Azure
+ * DevOps push over HTTPS to the Forge Host with token auth and never modify
+ * origin.
  */
 const attemptNativePush = (
   worktreePath: string,
@@ -361,13 +587,27 @@ const attemptNativePush = (
   tokenName: string | null,
 ) =>
   Effect.gen(function* () {
-    if (repository.forge === "gitlab") {
-      return yield* attemptGitLabHttpsPush(
-        worktreePath,
-        branch,
-        repository,
-        tokenName,
-      )
+    switch (repository.forge) {
+      case "gitlab":
+        return yield* attemptGitLabHttpsPush(
+          worktreePath,
+          branch,
+          repository,
+          tokenName,
+        )
+      case "azure-devops":
+        return yield* attemptAzureDevOpsHttpsPush(
+          worktreePath,
+          branch,
+          repository,
+          tokenName,
+        )
+      case "github":
+        break
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
     }
 
     if (tokenName === null) {
@@ -548,52 +788,83 @@ const attemptNativeCreateDraft = (
   copy: PublicationCopy,
 ) =>
   Effect.gen(function* () {
-    if (repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      return yield* gitlab
-        .createDraftPullRequest(toGitLabRepository(repository), {
-          headRefName: branch,
-          title: copy.title,
-          body: copy.body,
-        })
-        .pipe(
-          Effect.map((pullRequestNumber) => ({
-            ok: true as const,
-            pullRequestNumber,
-          })),
-          Effect.catch((cause) =>
-            Effect.succeed({
-              ok: false as const,
-              diagnostics: boundDiagnostics(
-                `createDraftPullRequest failed: ${errorMessage(cause)}`,
-              ),
-            }),
-          ),
-        )
-    }
-    const github = yield* GitHubService
-    return yield* github
-      .createDraftPullRequest(toGitHubRepository(repository), {
-        headRefName: branch,
-        title: copy.title,
-        body: copy.body,
-      })
-      .pipe(
-        Effect.map((pullRequestNumber) => ({
-          ok: true as const,
-          pullRequestNumber,
-        })),
-        Effect.catch((cause) =>
-          isGitHubThrottledError(cause)
-            ? Effect.fail(cause)
-            : Effect.succeed({
+    switch (repository.forge) {
+      case "gitlab": {
+        const gitlab = yield* GitLabService
+        return yield* gitlab
+          .createDraftPullRequest(toGitLabRepository(repository), {
+            headRefName: branch,
+            title: copy.title,
+            body: copy.body,
+          })
+          .pipe(
+            Effect.map((pullRequestNumber) => ({
+              ok: true as const,
+              pullRequestNumber,
+            })),
+            Effect.catch((cause) =>
+              Effect.succeed({
                 ok: false as const,
                 diagnostics: boundDiagnostics(
                   `createDraftPullRequest failed: ${errorMessage(cause)}`,
                 ),
               }),
-        ),
-      )
+            ),
+          )
+      }
+      case "azure-devops": {
+        const azureDevOps = yield* AzureDevOpsService
+        return yield* azureDevOps
+          .createDraftPullRequest(toAzureDevOpsRepository(repository), {
+            headRefName: branch,
+            title: copy.title,
+            body: copy.body,
+          })
+          .pipe(
+            Effect.map((pullRequestNumber) => ({
+              ok: true as const,
+              pullRequestNumber,
+            })),
+            Effect.catch((cause) =>
+              Effect.succeed({
+                ok: false as const,
+                diagnostics: boundDiagnostics(
+                  `createDraftPullRequest failed: ${errorMessage(cause)}`,
+                ),
+              }),
+            ),
+          )
+      }
+      case "github": {
+        const github = yield* GitHubService
+        return yield* github
+          .createDraftPullRequest(toGitHubRepository(repository), {
+            headRefName: branch,
+            title: copy.title,
+            body: copy.body,
+          })
+          .pipe(
+            Effect.map((pullRequestNumber) => ({
+              ok: true as const,
+              pullRequestNumber,
+            })),
+            Effect.catch((cause) =>
+              isGitHubThrottledError(cause)
+                ? Effect.fail(cause)
+                : Effect.succeed({
+                    ok: false as const,
+                    diagnostics: boundDiagnostics(
+                      `createDraftPullRequest failed: ${errorMessage(cause)}`,
+                    ),
+                  }),
+            ),
+          )
+      }
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
+    }
   })
 
 /**
@@ -638,49 +909,86 @@ const softReconcileDraftCopy = (
   pullRequestNumber: number,
 ) =>
   Effect.gen(function* () {
-    if (repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      yield* gitlab
-        .updateOpenDraftPullRequestCopy(
-          toGitLabRepository(repository),
-          branch,
-          {
-            title: copy.title,
-            body: copy.body,
-          },
-        )
-        .pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning(
-              "Failed to reconcile draft MR title/body to canonical publication copy; reusing open MR",
-              {
-                pullRequestNumber,
-                cause,
-              },
-            ).pipe(Effect.as(pullRequestNumber)),
-          ),
-        )
-      return
-    }
-    const github = yield* GitHubService
-    yield* github
-      .updateOpenDraftPullRequestCopy(toGitHubRepository(repository), branch, {
-        title: copy.title,
-        body: copy.body,
-      })
-      .pipe(
-        Effect.catch((cause) =>
-          isGitHubThrottledError(cause)
-            ? Effect.fail(cause)
-            : Effect.logWarning(
+    switch (repository.forge) {
+      case "gitlab": {
+        const gitlab = yield* GitLabService
+        yield* gitlab
+          .updateOpenDraftPullRequestCopy(
+            toGitLabRepository(repository),
+            branch,
+            {
+              title: copy.title,
+              body: copy.body,
+            },
+          )
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning(
+                "Failed to reconcile draft MR title/body to canonical publication copy; reusing open MR",
+                {
+                  pullRequestNumber,
+                  cause,
+                },
+              ).pipe(Effect.as(pullRequestNumber)),
+            ),
+          )
+        return
+      }
+      case "azure-devops": {
+        const azureDevOps = yield* AzureDevOpsService
+        yield* azureDevOps
+          .updateOpenDraftPullRequestCopy(
+            toAzureDevOpsRepository(repository),
+            branch,
+            {
+              title: copy.title,
+              body: copy.body,
+            },
+          )
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning(
                 "Failed to reconcile draft PR title/body to canonical publication copy; reusing open PR",
                 {
                   pullRequestNumber,
                   cause,
                 },
               ).pipe(Effect.as(pullRequestNumber)),
-        ),
-      )
+            ),
+          )
+        return
+      }
+      case "github": {
+        const github = yield* GitHubService
+        yield* github
+          .updateOpenDraftPullRequestCopy(
+            toGitHubRepository(repository),
+            branch,
+            {
+              title: copy.title,
+              body: copy.body,
+            },
+          )
+          .pipe(
+            Effect.catch((cause) =>
+              isGitHubThrottledError(cause)
+                ? Effect.fail(cause)
+                : Effect.logWarning(
+                    "Failed to reconcile draft PR title/body to canonical publication copy; reusing open PR",
+                    {
+                      pullRequestNumber,
+                      cause,
+                    },
+                  ).pipe(Effect.as(pullRequestNumber)),
+            ),
+          )
+        return
+      }
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
+    }
   })
 
 const toGitHubRepository = (
@@ -694,6 +1002,14 @@ const toGitHubRepository = (
 const toGitLabRepository = (
   repository: RepositoryRecord,
 ): GitLabRepository => ({
+  forge: repository.forge,
+  forgeHost: repository.forgeHost,
+  projectPath: repository.projectPath,
+})
+
+const toAzureDevOpsRepository = (
+  repository: RepositoryRecord,
+): AzureDevOpsRepository => ({
   forge: repository.forge,
   forgeHost: repository.forgeHost,
   projectPath: repository.projectPath,
@@ -852,7 +1168,7 @@ export const createPr = (context: LifecycleStepContext) =>
         }
         return new CreatePrCredentialError({
           repositoryId: context.repositoryId,
-          message: `Failed to resolve the repository ${repository.forge === "github" ? "GitHub" : "GitLab"} credential`,
+          message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential`,
           cause,
         })
       }),
@@ -877,9 +1193,7 @@ export const createPr = (context: LifecycleStepContext) =>
           credentialGuidance: agentTurnForgeCredentialGuidance(
             repository,
             auth,
-            repository.forge === "github"
-              ? "GitHub CLI or API access"
-              : "GitLab API or push access",
+            nativeCredentialAccessScope(repository.forge),
           ),
           diagnostics,
         }),

@@ -1,5 +1,9 @@
 import { Effect, Layer } from "effect"
 import {
+  AzureDevOpsService,
+  type AzureDevOpsServiceShape,
+} from "@ready-for-agent/azure-devops-service"
+import {
   makeRepositoryRecord,
   stubDbServiceLayer,
 } from "@ready-for-agent/db-service/test"
@@ -207,6 +211,73 @@ describe("closeIssue", () => {
         workItemId: context.workItemId,
         summary: "Findings complete.",
         projectPath: "project/widgets",
+      },
+    ])
+  })
+
+  it("closes an Azure DevOps work item via AzureDevOpsService without calling GitHub", async () => {
+    const azureDevOpsRepository = makeRepositoryRecord({
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/acme-widgets",
+    })
+    const db = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+      listIssues: () =>
+        Effect.succeed([
+          {
+            ...openLeaf,
+            repositoryId: azureDevOpsRepository.id,
+            url: "https://dev.azure.com/acme/widgets/_workitems/edit/42",
+          },
+        ]),
+    })
+    let githubCalls = 0
+    const calls: Array<{
+      issueNumber: number
+      workItemId: string
+      summary: string
+      projectPath: string
+    }> = []
+    const github = Layer.succeed(GitHubService, {
+      ...unusedGithub,
+      ensureIssueCompletedWithSummary: () => {
+        githubCalls += 1
+        return Effect.void
+      },
+    } satisfies GitHubServiceShape)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      ensureIssueCompletedWithSummary: (
+        repository,
+        issueNumber,
+        workItemId,
+        summaryMarkdown,
+      ) =>
+        Effect.sync(() => {
+          calls.push({
+            issueNumber,
+            workItemId,
+            summary: summaryMarkdown,
+            projectPath: repository.projectPath,
+          })
+        }),
+    } as AzureDevOpsServiceShape)
+
+    await Effect.runPromise(
+      closeIssue({
+        ...context,
+        repositoryId: azureDevOpsRepository.id,
+      }).pipe(Effect.provide(Layer.mergeAll(db, github, azureDevOps))),
+    )
+
+    expect(githubCalls).toBe(0)
+    expect(calls).toEqual([
+      {
+        issueNumber: 42,
+        workItemId: context.workItemId,
+        summary: "Findings complete.",
+        projectPath: "acme/widgets",
       },
     ])
   })

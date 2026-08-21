@@ -8,6 +8,7 @@ import {
   type AgentTurnForgeRepository,
   InvalidCapturedAgentBackendError,
   agentTurnForgeCredentialGuidance,
+  forgeDisplayName,
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
 import {
@@ -114,15 +115,21 @@ const resolveIssueNumber = (context: LifecycleStepContext) => {
   return Effect.succeed(context.issueNumber)
 }
 
-const gitLabAccessGuidance = (
-  repository: AgentTurnForgeRepository,
-  auth: AgentTurnForgeAuth,
-) =>
-  agentTurnForgeCredentialGuidance(
-    repository,
-    auth,
-    "GitLab Issue or API access",
-  )
+/** Per-Forge access scope for the Implement credential guidance line. */
+const implementAccessScope = (repository: AgentTurnForgeRepository): string => {
+  switch (repository.forge) {
+    case "gitlab":
+      return "GitLab Issue or API access"
+    case "azure-devops":
+      return "Azure DevOps Work Item or REST API access"
+    case "github":
+      return "GitHub Issue or API access"
+    default: {
+      const _exhaustive: never = repository.forge
+      return _exhaustive
+    }
+  }
+}
 
 const visualEvidencePromptLines = (workItemId: string): readonly string[] => {
   const attachmentDirectory = workItemAttachmentDirectory({ workItemId })
@@ -132,11 +139,16 @@ const visualEvidencePromptLines = (workItemId: string): readonly string[] => {
   ]
 }
 
+/**
+ * Issue identity plus Forge name in the prompt. GitHub stays ambient (no host,
+ * no credential line); GitLab and Azure DevOps name the host and carry the
+ * Forge-selected credential guidance.
+ */
 const buildImplementPrompt = (
   repository: AgentTurnForgeRepository,
   issueNumber: number,
   workItemId: string,
-  gitLabAuth: AgentTurnForgeAuth,
+  forgeAuth: AgentTurnForgeAuth,
 ) =>
   repository.forge === "github"
     ? [
@@ -147,9 +159,13 @@ const buildImplementPrompt = (
         ...visualEvidencePromptLines(workItemId),
       ].join("\n")
     : [
-        `Implement GitLab issue ${repository.projectPath}#${issueNumber} on ${repository.forgeHost}.`,
-        "Inspect the current GitLab Issue and this Repository's agent/project instructions.",
-        gitLabAccessGuidance(repository, gitLabAuth),
+        `Implement ${forgeDisplayName(repository.forge)} issue ${repository.projectPath}#${issueNumber} on ${repository.forgeHost}.`,
+        `Inspect the current ${forgeDisplayName(repository.forge)} Issue and this Repository's agent/project instructions.`,
+        agentTurnForgeCredentialGuidance(
+          repository,
+          forgeAuth,
+          implementAccessScope(repository),
+        ),
         "Make the implementation in this worktree and run appropriate verification.",
         "Do not merely propose a plan; complete the implementation work for that exact issue.",
         ...visualEvidencePromptLines(workItemId),
@@ -159,7 +175,7 @@ const buildContinueImplementPrompt = (
   repository: AgentTurnForgeRepository,
   issueNumber: number,
   workItemId: string,
-  gitLabAuth: AgentTurnForgeAuth,
+  forgeAuth: AgentTurnForgeAuth,
 ) =>
   repository.forge === "github"
     ? [
@@ -171,10 +187,14 @@ const buildContinueImplementPrompt = (
         ...visualEvidencePromptLines(workItemId),
       ].join("\n")
     : [
-        `Continue implementing GitLab issue ${repository.projectPath}#${issueNumber} on ${repository.forgeHost}.`,
+        `Continue implementing ${forgeDisplayName(repository.forge)} issue ${repository.projectPath}#${issueNumber} on ${repository.forgeHost}.`,
         "A previous Implement attempt was interrupted or failed; resume from the existing session and worktree state.",
-        "Inspect the current GitLab Issue, this Repository's agent/project instructions, and any partial work already present.",
-        gitLabAccessGuidance(repository, gitLabAuth),
+        `Inspect the current ${forgeDisplayName(repository.forge)} Issue, this Repository's agent/project instructions, and any partial work already present.`,
+        agentTurnForgeCredentialGuidance(
+          repository,
+          forgeAuth,
+          implementAccessScope(repository),
+        ),
         "Finish the implementation in this worktree and run appropriate verification.",
         "Do not merely propose a plan; complete the implementation work for that exact issue.",
         ...visualEvidencePromptLines(workItemId),
@@ -199,27 +219,24 @@ export const implement = (context: LifecycleStepContext) =>
     const worktreePath = yield* resolveWorktreePath(context)
     const repository = yield* resolveRepository(context)
     const issueNumber = yield* resolveIssueNumber(context)
-    const gitLabAuth =
-      repository.forge === "gitlab"
-        ? yield* resolveAgentTurnForgeAuth(repository).pipe(
-            Effect.mapError((cause) => {
-              if (
-                cause instanceof AgentTurnForgeCredentialMissingError ||
-                cause instanceof InvalidCapturedAgentBackendError
-              ) {
-                return new ImplementForgeCredentialError({
-                  repositoryId: context.repositoryId,
-                  message: cause.message,
-                })
-              }
-              return new ImplementForgeCredentialError({
-                repositoryId: context.repositoryId,
-                message: `Failed to resolve the repository GitLab credential`,
-                cause,
-              })
-            }),
-          )
-        : ({ _tag: "ambient" } satisfies AgentTurnForgeAuth)
+    const forgeAuth = yield* resolveAgentTurnForgeAuth(repository).pipe(
+      Effect.mapError((cause) => {
+        if (
+          cause instanceof AgentTurnForgeCredentialMissingError ||
+          cause instanceof InvalidCapturedAgentBackendError
+        ) {
+          return new ImplementForgeCredentialError({
+            repositoryId: context.repositoryId,
+            message: cause.message,
+          })
+        }
+        return new ImplementForgeCredentialError({
+          repositoryId: context.repositoryId,
+          message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential`,
+          cause,
+        })
+      }),
+    )
 
     const existingSessionId = priorSessionId(context)
     const prompt =
@@ -228,13 +245,13 @@ export const implement = (context: LifecycleStepContext) =>
             repository,
             issueNumber,
             context.workItemId,
-            gitLabAuth,
+            forgeAuth,
           )
         : buildContinueImplementPrompt(
             repository,
             issueNumber,
             context.workItemId,
-            gitLabAuth,
+            forgeAuth,
           )
 
     const agentBackend = yield* AgentBackend

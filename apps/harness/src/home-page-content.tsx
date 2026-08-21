@@ -99,7 +99,13 @@ import {
   followRepositoryWorkItemsLive,
   kanbanStatusQueryKeyPrefix,
 } from "./refresh-work-items-live.js"
-import { type Repository, repositoriesQuery } from "./repositories-query.js"
+import {
+  type Forge,
+  type Repository,
+  decodeForge,
+  forgeDisplayName,
+  repositoriesQuery,
+} from "./repositories-query.js"
 import {
   isRepositorySettingsPathFor,
   markRepositorySettingsOpenedFromInApp,
@@ -850,9 +856,7 @@ function RepositoryCard({
     ...agentBackendsQuery,
     enabled: dialogOpen,
   })
-  const [forge, setForge] = useState<"github" | "gitlab">(
-    repository.forge === "gitlab" ? "gitlab" : "github",
-  )
+  const [forge, setForge] = useState<Forge>(repository.forge)
   const [forgeHost, setForgeHost] = useState(repository.forgeHost)
   const [projectPath, setProjectPath] = useState(repository.projectPath)
   const [paused, setPaused] = useState(repository.paused)
@@ -909,7 +913,7 @@ function RepositoryCard({
   const updateSettings = useMutation({
     mutationFn: async (input: {
       repositoryId: string
-      forge: "github" | "gitlab"
+      forge: Forge
       forgeHost: string
       projectPath: string
       paused: boolean
@@ -953,7 +957,7 @@ function RepositoryCard({
         (repositories) =>
           repositories?.map((candidate) =>
             candidate.id === updated.id
-              ? { ...candidate, ...updated }
+              ? { ...candidate, ...updated, forge: decodeForge(updated.forge) }
               : candidate,
           ),
       )
@@ -1071,7 +1075,7 @@ function RepositoryCard({
   prepareSettingsSessionRef.current = () => {
     previewGenerationRef.current += 1
     setPaused(repository.paused)
-    setForge(repository.forge === "gitlab" ? "gitlab" : "github")
+    setForge(repository.forge)
     setForgeHost(repository.forgeHost)
     setProjectPath(repository.projectPath)
     setSelectedAgentBackend(repository.selectedAgentBackend)
@@ -2027,11 +2031,12 @@ function RepositoryCard({
                     className={ui.dialogInput}
                     value={forge}
                     onChange={(event) =>
-                      setForge(event.target.value as "github" | "gitlab")
+                      setForge(decodeForge(event.target.value))
                     }
                   >
                     <option value="github">GitHub</option>
                     <option value="gitlab">GitLab</option>
+                    <option value="azure-devops">Azure DevOps</option>
                   </select>
                 </label>
                 <label className={ui.dialogField}>
@@ -2768,7 +2773,9 @@ function RepositoryCard({
                       ? "Refresh issues"
                       : repository.forge === "gitlab"
                         ? "Authenticate GitLab before refreshing issues"
-                        : "Add a GitHub token before refreshing issues"
+                        : repository.forge === "azure-devops"
+                          ? "Authenticate Azure DevOps before refreshing issues"
+                          : "Add a GitHub token before refreshing issues"
                   }
                 >
                   <svg
@@ -2868,7 +2875,7 @@ function RepositoryIssues({
   if (issues.length === 0) {
     return (
       <p className={ui.repoIssuesEmpty}>
-        Label {repository.forge === "gitlab" ? "GitLab" : "GitHub"} issues with{" "}
+        Label {forgeDisplayName(repository.forge)} issues with{" "}
         <code className={ui.guidanceCode}>ready-for-agent</code> for them to
         show up here. If an issue is a child issue, the parent itself cannot be
         a child issue too.

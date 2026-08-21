@@ -7,6 +7,10 @@ import {
   isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
 import {
+  AZURE_DEVOPS_VAULT_METADATA_BUDGET_SECONDS,
+  azureDevOpsVaultAccount,
+} from "@ready-for-agent/azure-devops-service"
+import {
   GITLAB_VAULT_METADATA_BUDGET_SECONDS,
   gitlabVaultAccount,
 } from "@ready-for-agent/gitlab-service"
@@ -24,8 +28,30 @@ export type AgentTurnForgeAuth =
   | { readonly _tag: "keymaxxer"; readonly tokenName: string }
   | { readonly _tag: "ambient" }
 
+/**
+ * Human-readable Forge name for operator-facing messages. Exhaustive over
+ * the three Forges so a new Forge fails to compile here instead of silently
+ * mislabeling itself as one of the other two.
+ */
+export const forgeDisplayName = (
+  forge: "github" | "gitlab" | "azure-devops",
+): string => {
+  switch (forge) {
+    case "github":
+      return "GitHub"
+    case "gitlab":
+      return "GitLab"
+    case "azure-devops":
+      return "Azure DevOps"
+    default: {
+      const _exhaustive: never = forge
+      return _exhaustive
+    }
+  }
+}
+
 export type AgentTurnForgeRepository = {
-  readonly forge: "github" | "gitlab"
+  readonly forge: "github" | "gitlab" | "azure-devops"
   readonly forgeHost: string
   readonly projectPath: string
 }
@@ -57,7 +83,7 @@ export const isAgentTurnKeymaxxerEffective = (
 ): boolean => keymaxxerMcpSupported && keymaxxerEnabled !== false
 
 const resolveAgentTurnKeymaxxerAuth = (input: {
-  readonly provider: "github" | "gitlab"
+  readonly provider: "github" | "gitlab" | "azure-devops"
   readonly account: string
   readonly credentialDescription: string
   /**
@@ -157,37 +183,71 @@ export const AGENT_TURN_GITLAB_VAULT_METADATA_BUDGET = Duration.seconds(
 )
 
 /**
+ * Keymaxxer vault account for an Azure DevOps Repository (the full Project
+ * Path: `<organization>/<project>` or `<organization>/<project>/<repository>`).
+ * Same formatter as harness forge ops — re-export, not a parallel implementation.
+ */
+export const agentTurnAzureDevOpsVaultAccount = azureDevOpsVaultAccount
+
+/**
+ * Vault metadata budget for Azure DevOps Agent Turns before ambient fallback.
+ * Shared constant with harness layer (`AZURE_DEVOPS_VAULT_METADATA_BUDGET_SECONDS`).
+ */
+export const AGENT_TURN_AZURE_DEVOPS_VAULT_METADATA_BUDGET = Duration.seconds(
+  AZURE_DEVOPS_VAULT_METADATA_BUDGET_SECONDS,
+)
+
+/**
  * Resolve Agent Turn authentication at the Forge boundary.
  *
- * GitLab vault-first: when Keymaxxer MCP is effective and a per-Repository
- * secret exists (`provider: gitlab`, `account: <forge-host>/<project-path>`),
- * use `keymaxxer_run`. When no secret exists — or vault metadata times out /
- * errors — ambient `GITLAB_TOKEN` / `glab` remains the fallback (unlike
- * GitHub, which fails closed without a vault secret on Keymaxxer-capable
- * backends).
+ * GitLab and Azure DevOps are vault-first with a permissive ambient fallback:
+ * when Keymaxxer MCP is effective and a per-Repository secret exists
+ * (`provider: gitlab` / `azure-devops`, account per-Forge below), use
+ * `keymaxxer_run`. When no secret exists — or vault metadata times out /
+ * errors — ambient `GITLAB_TOKEN` / `glab` (GitLab) or `AZURE_DEVOPS_EXT_PAT`
+ * (Azure DevOps) remains the fallback (unlike GitHub, which fails closed
+ * without a vault secret on Keymaxxer-capable backends).
  */
 export const resolveAgentTurnForgeAuth = (
   repository: AgentTurnForgeRepository,
   options?: {
     /** Override GitLab vault metadata budget (tests). */
     readonly gitlabVaultMetadataBudget?: Duration.Duration
+    /** Override Azure DevOps vault metadata budget (tests). */
+    readonly azureDevOpsVaultMetadataBudget?: Duration.Duration
   },
 ) =>
   Effect.gen(function* () {
-    if (repository.forge === "gitlab") {
-      return yield* resolveAgentTurnKeymaxxerAuth({
-        provider: "gitlab",
-        account: gitlabVaultAccount(repository),
-        credentialDescription: "GitLab credential",
-        vaultMetadataBudget:
-          options?.gitlabVaultMetadataBudget ??
-          AGENT_TURN_GITLAB_VAULT_METADATA_BUDGET,
-        ambientOnVaultUnavailable: true,
-      })
+    switch (repository.forge) {
+      case "gitlab":
+        return yield* resolveAgentTurnKeymaxxerAuth({
+          provider: "gitlab",
+          account: gitlabVaultAccount(repository),
+          credentialDescription: "GitLab credential",
+          vaultMetadataBudget:
+            options?.gitlabVaultMetadataBudget ??
+            AGENT_TURN_GITLAB_VAULT_METADATA_BUDGET,
+          ambientOnVaultUnavailable: true,
+        })
+      case "azure-devops":
+        return yield* resolveAgentTurnKeymaxxerAuth({
+          provider: "azure-devops",
+          account: azureDevOpsVaultAccount(repository),
+          credentialDescription: "Azure DevOps credential",
+          vaultMetadataBudget:
+            options?.azureDevOpsVaultMetadataBudget ??
+            AGENT_TURN_AZURE_DEVOPS_VAULT_METADATA_BUDGET,
+          ambientOnVaultUnavailable: true,
+        })
+      case "github":
+        return yield* resolveAgentTurnGitHubAuth({
+          projectPath: repository.projectPath,
+        })
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
     }
-    return yield* resolveAgentTurnGitHubAuth({
-      projectPath: repository.projectPath,
-    })
   })
 
 /**
@@ -207,24 +267,59 @@ export const agentTurnGitHubCredentialGuidance = (
 }
 
 /**
+ * Azure DevOps credential and tool guidance. There is no `az`-CLI shellout
+ * convention in this codebase to extend (unlike GitHub's `gh` / GitLab's
+ * `glab`), so guidance always points at the raw REST API authenticated with
+ * the PAT as HTTP Basic auth (empty username, PAT as password).
+ */
+const agentTurnAzureDevOpsCredentialGuidance = (
+  repository: AgentTurnForgeRepository,
+  auth: AgentTurnForgeAuth,
+  accessScope: string,
+): string => {
+  const target = `https://${repository.forgeHost}/${repository.projectPath}`
+  if (auth._tag === "keymaxxer") {
+    return [
+      `For any ${accessScope}, use Keymaxxer secret ${auth.tokenName} via keymaxxer_run against the Azure DevOps REST API for ${target}.`,
+      `Authenticate with HTTP Basic auth: an empty username and "$${auth.tokenName}" as the password. Never put secret values in the ambient environment.`,
+    ].join(" ")
+  }
+  return `For any ${accessScope}, use the ambient AZURE_DEVOPS_EXT_PAT environment variable as HTTP Basic auth (empty username, the PAT as password) against the Azure DevOps REST API for ${target}.`
+}
+
+/**
  * Forge-selected credential and tool guidance for lifecycle Agent Turns.
- * GitLab guidance uses host-scoped glab and explicitly excludes the GitHub
- * CLI so the Turn cannot silently target the wrong Forge.
+ * GitLab guidance uses host-scoped glab and Azure DevOps guidance uses raw
+ * REST + PAT; both explicitly exclude the GitHub CLI so the Turn cannot
+ * silently target the wrong Forge.
  */
 export const agentTurnForgeCredentialGuidance = (
   repository: AgentTurnForgeRepository,
   auth: AgentTurnForgeAuth,
   accessScope: string,
 ): string => {
-  if (repository.forge === "github") {
-    return agentTurnGitHubCredentialGuidance(auth, accessScope)
+  switch (repository.forge) {
+    case "github":
+      return agentTurnGitHubCredentialGuidance(auth, accessScope)
+    case "azure-devops":
+      return agentTurnAzureDevOpsCredentialGuidance(
+        repository,
+        auth,
+        accessScope,
+      )
+    case "gitlab": {
+      if (auth._tag === "keymaxxer") {
+        return [
+          `For any ${accessScope}, use Keymaxxer secret ${auth.tokenName} via keymaxxer_run to drive glab for https://${repository.forgeHost}/${repository.projectPath}.`,
+          `On POSIX shells, pass a child command of the form \`GITLAB_TOKEN="$${auth.tokenName}" GITLAB_HOST="https://${repository.forgeHost}" glab <subcommand> ...\`.`,
+          `On Windows cmd.exe, use \`set "GITLAB_TOKEN=%${auth.tokenName}%" && set "GITLAB_HOST=https://${repository.forgeHost}" && glab <subcommand> ...\`. Never put secret values in the ambient environment.`,
+        ].join(" ")
+      }
+      return `For any ${accessScope}, use the glab CLI authenticated for ${repository.forgeHost} and target https://${repository.forgeHost}/${repository.projectPath}.`
+    }
+    default: {
+      const _exhaustive: never = repository.forge
+      return _exhaustive
+    }
   }
-  if (auth._tag === "keymaxxer") {
-    return [
-      `For any ${accessScope}, use Keymaxxer secret ${auth.tokenName} via keymaxxer_run to drive glab for https://${repository.forgeHost}/${repository.projectPath}.`,
-      `On POSIX shells, pass a child command of the form \`GITLAB_TOKEN="$${auth.tokenName}" GITLAB_HOST="https://${repository.forgeHost}" glab <subcommand> ...\`.`,
-      `On Windows cmd.exe, use \`set "GITLAB_TOKEN=%${auth.tokenName}%" && set "GITLAB_HOST=https://${repository.forgeHost}" && glab <subcommand> ...\`. Never put secret values in the ambient environment.`,
-    ].join(" ")
-  }
-  return `For any ${accessScope}, use the glab CLI authenticated for ${repository.forgeHost} and target https://${repository.forgeHost}/${repository.projectPath}.`
 }

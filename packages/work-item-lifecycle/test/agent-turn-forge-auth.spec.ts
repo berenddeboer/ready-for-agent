@@ -1,4 +1,5 @@
 import { Duration, Effect, Layer } from "effect"
+import { AZURE_DEVOPS_VAULT_METADATA_BUDGET_SECONDS } from "@ready-for-agent/azure-devops-service"
 import { GITLAB_VAULT_METADATA_BUDGET_SECONDS } from "@ready-for-agent/gitlab-service"
 import {
   KeymaxxerService,
@@ -6,10 +7,12 @@ import {
   keymaxxerError,
 } from "@ready-for-agent/keymaxxer-service"
 import {
+  AGENT_TURN_AZURE_DEVOPS_VAULT_METADATA_BUDGET,
   AGENT_TURN_GITLAB_VAULT_METADATA_BUDGET,
   CurrentCapturedAgentBackendId,
   CurrentStepRun,
   InvalidCapturedAgentBackendError,
+  agentTurnAzureDevOpsVaultAccount,
   agentTurnForgeCredentialGuidance,
   agentTurnGitHubCredentialGuidance,
   agentTurnGitLabVaultAccount,
@@ -294,6 +297,107 @@ describe("resolveAgentTurnForgeAuth", () => {
     expect(auth).toEqual({ _tag: "ambient" })
     expect(Date.now() - started).toBeLessThan(2_000)
   })
+
+  it("uses the Repository-scoped Azure DevOps credential when Keymaxxer is effective", async () => {
+    const findSecretCalls: {
+      readonly provider: string
+      readonly account: string
+    }[] = []
+    const repository = {
+      forge: "azure-devops" as const,
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    }
+    expect(agentTurnAzureDevOpsVaultAccount(repository)).toBe("acme/widgets")
+    const auth = await Effect.runPromise(
+      resolveAgentTurnForgeAuth(repository).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(KeymaxxerService, {
+              initialize: Effect.void,
+              hasSecret: () => Effect.succeed(true),
+              findSecret: (input) => {
+                findSecretCalls.push(input)
+                return Effect.succeed("AZURE_DEVOPS_TOKEN_ACME_WIDGETS")
+              },
+              findSecrets: () => Effect.succeed([]),
+              addSecret: () => Effect.succeed(true),
+              runWithSecrets: () =>
+                Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+            } satisfies KeymaxxerServiceShape),
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+    expect(auth).toEqual({
+      _tag: "keymaxxer",
+      tokenName: "AZURE_DEVOPS_TOKEN_ACME_WIDGETS",
+    })
+    expect(findSecretCalls).toEqual([
+      { provider: "azure-devops", account: "acme/widgets" },
+    ])
+  })
+
+  it("falls back to ambient Azure DevOps auth when no vault secret exists", async () => {
+    const auth = await Effect.runPromise(
+      resolveAgentTurnForgeAuth({
+        forge: "azure-devops",
+        forgeHost: "dev.azure.com",
+        projectPath: "acme/widgets",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(KeymaxxerService, {
+              initialize: Effect.void,
+              hasSecret: () => Effect.succeed(false),
+              findSecret: () => Effect.succeed(null),
+              findSecrets: () => Effect.succeed([]),
+              addSecret: () => Effect.succeed(true),
+              runWithSecrets: () =>
+                Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+            } satisfies KeymaxxerServiceShape),
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+    expect(auth).toEqual({ _tag: "ambient" })
+  })
+
+  it("falls back to ambient Azure DevOps auth when vault findSecret hangs past budget", async () => {
+    expect(
+      Duration.toMillis(AGENT_TURN_AZURE_DEVOPS_VAULT_METADATA_BUDGET),
+    ).toBe(AZURE_DEVOPS_VAULT_METADATA_BUDGET_SECONDS * 1000)
+    const started = Date.now()
+    const auth = await Effect.runPromise(
+      resolveAgentTurnForgeAuth(
+        {
+          forge: "azure-devops",
+          forgeHost: "dev.azure.com",
+          projectPath: "acme/widgets",
+        },
+        { azureDevOpsVaultMetadataBudget: Duration.millis(40) },
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(KeymaxxerService, {
+              initialize: Effect.void,
+              hasSecret: () => Effect.succeed(true),
+              findSecret: () => Effect.never,
+              findSecrets: () => Effect.succeed([]),
+              addSecret: () => Effect.succeed(true),
+              runWithSecrets: () =>
+                Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+            } satisfies KeymaxxerServiceShape),
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+    expect(auth).toEqual({ _tag: "ambient" })
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
 })
 
 describe("agentTurnGitHubCredentialGuidance", () => {
@@ -377,5 +481,42 @@ describe("agentTurnForgeCredentialGuidance", () => {
     )
     expect(guidance).not.toContain("curl")
     expect(guidance).not.toMatch(/\bgh\b/i)
+  })
+
+  it("guides ambient Azure DevOps turns to the REST API with AZURE_DEVOPS_EXT_PAT", () => {
+    const guidance = agentTurnForgeCredentialGuidance(
+      {
+        forge: "azure-devops",
+        forgeHost: "dev.azure.com",
+        projectPath: "acme/widgets",
+      },
+      { _tag: "ambient" },
+      "Azure DevOps work item or API access",
+    )
+    expect(guidance).toContain("AZURE_DEVOPS_EXT_PAT")
+    expect(guidance).toContain("https://dev.azure.com/acme/widgets")
+    expect(guidance).not.toContain("keymaxxer_run")
+    expect(guidance).not.toMatch(/\bgh\b/i)
+    expect(guidance).not.toMatch(/\bglab\b/i)
+  })
+
+  it("guides vault-backed Azure DevOps turns to run keymaxxer_run against the REST API", () => {
+    const guidance = agentTurnForgeCredentialGuidance(
+      {
+        forge: "azure-devops",
+        forgeHost: "dev.azure.com",
+        projectPath: "acme/widgets",
+      },
+      {
+        _tag: "keymaxxer",
+        tokenName: "AZURE_DEVOPS_TOKEN_ACME_WIDGETS",
+      },
+      "Azure DevOps work item or API access",
+    )
+    expect(guidance).toContain("keymaxxer_run")
+    expect(guidance).toContain("AZURE_DEVOPS_TOKEN_ACME_WIDGETS")
+    expect(guidance).toContain("https://dev.azure.com/acme/widgets")
+    expect(guidance).not.toMatch(/\bgh\b/i)
+    expect(guidance).not.toMatch(/\bglab\b/i)
   })
 })

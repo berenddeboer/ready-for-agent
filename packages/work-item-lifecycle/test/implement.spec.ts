@@ -185,7 +185,7 @@ const expectVisualEvidencePrompt = (prompt: string, workItemId: string) => {
 const seedRepository = (
   localPath: string,
   identity: {
-    readonly forge: "github" | "gitlab"
+    readonly forge: "github" | "gitlab" | "azure-devops"
     readonly forgeHost: string
     readonly projectPath: string
   } = {
@@ -429,6 +429,110 @@ describe("implement", () => {
       expect(prompt).not.toContain("PRIVATE-TOKEN")
       expect(prompt).not.toContain("ambient GITLAB_TOKEN")
       expect(prompt).not.toMatch(/\bgh\b/i)
+    }))
+
+  it("starts an Azure DevOps Implement turn with REST API ambient guidance and no glab or gh guidance", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      let prompt = ""
+      const sessionId = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root, {
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+          })
+          return yield* implement(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              issueNumber: 4021,
+            }),
+          )
+        }),
+        stubOpencode({
+          startTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: "ses_azure_devops_implement",
+              assistantText: "",
+            })
+          },
+        }),
+      )
+
+      expect(sessionId).toBe("ses_azure_devops_implement")
+      expect(prompt).toContain(
+        "Implement Azure DevOps issue acme/widgets#4021 on dev.azure.com.",
+      )
+      expect(prompt).toContain("Inspect the current Azure DevOps Issue")
+      expect(prompt).toContain("AZURE_DEVOPS_EXT_PAT")
+      expect(prompt).toContain("https://dev.azure.com/acme/widgets")
+      expect(prompt).toContain("Azure DevOps Work Item or REST API access")
+      expect(prompt).not.toContain("glab")
+      expect(prompt).not.toMatch(/\bgh\b/i)
+      expect(prompt).not.toContain("GitLab")
+      expectVisualEvidencePrompt(prompt, workItemId)
+    }))
+
+  it("uses the Repository-scoped Keymaxxer credential for an Azure DevOps Implement turn", () =>
+    withTemp(async (root) => {
+      let prompt = ""
+      const findSecretCalls: {
+        readonly provider: string
+        readonly account: string
+      }[] = []
+      const vaultAuth = Layer.mergeAll(
+        Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          hasSecret: () => Effect.succeed(true),
+          findSecret: (input) => {
+            findSecretCalls.push(input)
+            return Effect.succeed("AZURE_DEVOPS_PAT_ACME_WIDGETS")
+          },
+          findSecrets: () => Effect.succeed([]),
+          addSecret: () => Effect.succeed(true),
+          runWithSecrets: () =>
+            Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+        } satisfies KeymaxxerServiceShape),
+        stubActiveAgentBackendLayer(),
+      )
+      const sessionId = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root, {
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+          })
+          return yield* implement(
+            baseContext(root, {
+              repositoryId: repository.id,
+              issueNumber: 4021,
+            }),
+          )
+        }),
+        stubOpencode({
+          startTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: "ses_azure_devops_vault_implement",
+              assistantText: "",
+            })
+          },
+        }),
+        vaultAuth,
+      )
+
+      expect(sessionId).toBe("ses_azure_devops_vault_implement")
+      expect(findSecretCalls).toEqual([
+        { provider: "azure-devops", account: "acme/widgets" },
+      ])
+      expect(prompt).toContain(
+        "use Keymaxxer secret AZURE_DEVOPS_PAT_ACME_WIDGETS via keymaxxer_run",
+      )
+      expect(prompt).toContain('"$AZURE_DEVOPS_PAT_ACME_WIDGETS"')
+      expect(prompt).not.toContain("glab")
+      expect(prompt).not.toContain("GITLAB_TOKEN")
     }))
 
   it("starts a fresh Session when session_id is blank", () =>

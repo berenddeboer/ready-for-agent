@@ -109,6 +109,15 @@ describe("/repos/$repositoryId/settings route (issue #842)", () => {
     )
   })
 
+  test("preserves Azure DevOps when opening and resetting settings", () => {
+    const source = homeSource()
+    expect(source).toContain("useState<Forge>(repository.forge)")
+    expect(source).toContain("setForge(repository.forge)")
+    expect(source).toContain(
+      '<option value="azure-devops">Azure DevOps</option>',
+    )
+  })
+
   test("missing Repository renders an accessible in-dialog not-found state", () => {
     const source = homeSource()
     expect(source).toContain("RepositorySettingsNotFoundDialog")

@@ -16,9 +16,16 @@ const resolveFilePath = (databasePath: string): string | undefined => {
       : databasePath
 }
 
-export type RepositoryForge = "github" | "gitlab"
+export type RepositoryForge = "github" | "gitlab" | "azure-devops"
 
-const REPOSITORY_FORGES: ReadonlyArray<RepositoryForge> = ["github", "gitlab"]
+const REPOSITORY_FORGES: ReadonlyArray<RepositoryForge> = [
+  "github",
+  "gitlab",
+  "azure-devops",
+]
+
+const isRepositoryForge = (value: string): value is RepositoryForge =>
+  value === "github" || value === "gitlab" || value === "azure-devops"
 
 /** HTTPS endpoint a cold-start TLS preflight should probe. */
 export type ForgeApiEndpoint = {
@@ -33,6 +40,17 @@ const GITHUB_API_ENDPOINT: ForgeApiEndpoint = {
   forge: "github",
   host: "api.github.com",
   path: "/",
+}
+
+/**
+ * Azure DevOps has no self-hosted Forge Host variance (unlike GitLab), so a
+ * single canonical `dev.azure.com` endpoint covers every ADO Repository —
+ * the ADO analogue of GitHub's one `api.github.com` endpoint.
+ */
+const AZURE_DEVOPS_API_ENDPOINT: ForgeApiEndpoint = {
+  forge: "azure-devops",
+  host: "dev.azure.com",
+  path: "/_apis/connectionData",
 }
 
 /**
@@ -72,7 +90,7 @@ export const peekRepositoryForges = (
           .values()
         const found = new Set<RepositoryForge>()
         for (const [forge] of rows) {
-          if (forge === "github" || forge === "gitlab") {
+          if (typeof forge === "string" && isRepositoryForge(forge)) {
             found.add(forge)
           }
         }
@@ -142,21 +160,37 @@ export const peekForgeApiEndpoints = (
           .values()
         const endpoints: ForgeApiEndpoint[] = []
         let hasGitHub = false
+        let hasAzureDevOps = false
         const gitlabHosts = new Set<string>()
         for (const [forge, forgeHost] of rows) {
-          if (forge === "github") {
-            hasGitHub = true
-            continue
-          }
-          if (forge === "gitlab" && typeof forgeHost === "string") {
-            const host = normalizeHost(forgeHost)
-            if (host !== "") {
-              gitlabHosts.add(host)
-            }
+          // `forge` is untyped external data (a raw distinct DB column
+          // value); unrecognized/legacy values are safely ignored rather
+          // than exhaustively type-checked (that guard lives at
+          // isRepositoryForge, the boundary parser above).
+          switch (forge) {
+            case "github":
+              hasGitHub = true
+              break
+            case "gitlab":
+              if (typeof forgeHost === "string") {
+                const host = normalizeHost(forgeHost)
+                if (host !== "") {
+                  gitlabHosts.add(host)
+                }
+              }
+              break
+            case "azure-devops":
+              hasAzureDevOps = true
+              break
+            default:
+              break
           }
         }
         if (hasGitHub) {
           endpoints.push(GITHUB_API_ENDPOINT)
+        }
+        if (hasAzureDevOps) {
+          endpoints.push(AZURE_DEVOPS_API_ENDPOINT)
         }
         for (const host of [...gitlabHosts].sort()) {
           endpoints.push({

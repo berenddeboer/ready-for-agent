@@ -301,7 +301,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "function ParentIssueGroup(",
     )
     expect(issues).toContain(
-      'Label {repository.forge === "gitlab" ? "GitLab" : "GitHub"} issues with',
+      "Label {forgeDisplayName(repository.forge)} issues with",
     )
     expect(issues).not.toContain("Label GitHub/GitLab issues with")
     expect(issues).toContain("ready-for-agent")

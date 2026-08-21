@@ -1,4 +1,5 @@
 import { Effect } from "effect"
+import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
@@ -72,22 +73,40 @@ export const closeIssue = (context: LifecycleStepContext) =>
       forgeHost: repository.forgeHost,
       projectPath: repository.projectPath,
     }
-    if (repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      yield* gitlab.ensureIssueCompletedWithSummary(
-        forgeRepository,
-        context.issueNumber,
-        context.workItemId,
-        summary,
-      )
-      return
+    switch (repository.forge) {
+      case "gitlab": {
+        const gitlab = yield* GitLabService
+        yield* gitlab.ensureIssueCompletedWithSummary(
+          forgeRepository,
+          context.issueNumber,
+          context.workItemId,
+          summary,
+        )
+        return
+      }
+      case "azure-devops": {
+        const azureDevOps = yield* AzureDevOpsService
+        yield* azureDevOps.ensureIssueCompletedWithSummary(
+          forgeRepository,
+          context.issueNumber,
+          context.workItemId,
+          summary,
+        )
+        return
+      }
+      case "github": {
+        const github = yield* GitHubService
+        yield* github.ensureIssueCompletedWithSummary(
+          forgeRepository,
+          context.issueNumber,
+          context.workItemId,
+          summary,
+        )
+        return
+      }
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
     }
-
-    const github = yield* GitHubService
-    yield* github.ensureIssueCompletedWithSummary(
-      forgeRepository,
-      context.issueNumber,
-      context.workItemId,
-      summary,
-    )
   })

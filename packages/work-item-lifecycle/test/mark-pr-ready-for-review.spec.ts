@@ -1,5 +1,9 @@
 import { Effect, Layer } from "effect"
 import {
+  AzureDevOpsService,
+  type AzureDevOpsServiceShape,
+} from "@ready-for-agent/azure-devops-service"
+import {
   makeRepositoryRecord,
   stubDbServiceLayer,
 } from "@ready-for-agent/db-service/test"
@@ -177,5 +181,41 @@ describe("markPrReadyForReview", () => {
 
     expect(githubCalls).toBe(0)
     expect(gitlabBranch).toBe(`rfa/project-widgets/42/${context.workItemId}`)
+  })
+
+  it("marks an Azure DevOps draft PR ready for review without querying GitHub", async () => {
+    let githubCalls = 0
+    let azureDevOpsBranch = ""
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/widgets",
+    })
+    const azureDevOpsDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      markPullRequestReadyForReview: () => {
+        githubCalls += 1
+        return Effect.void
+      },
+    } as GitHubServiceShape)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      markPullRequestReadyForReview: (_repository, branch) => {
+        azureDevOpsBranch = branch
+        return Effect.void
+      },
+    } as AzureDevOpsServiceShape)
+
+    await Effect.runPromise(
+      markPrReadyForReview(context).pipe(
+        Effect.provide(Layer.mergeAll(azureDevOpsDb, github, azureDevOps)),
+      ),
+    )
+
+    expect(githubCalls).toBe(0)
+    expect(azureDevOpsBranch).toBe(`rfa/acme-widgets/42/${context.workItemId}`)
   })
 })

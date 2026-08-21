@@ -42,13 +42,17 @@ export interface TerminalPrStatusCheck {
 /**
  * Where a stored PR Status Check external id came from (prefix of the id).
  * Watch emits `actions-job:<id>` for Checks runs and Actions jobs,
- * `status:<id>` for commit statuses, and `gitlab-job:<id>` for GitLab
- * head-pipeline jobs.
+ * `status:<id>` for commit statuses, `gitlab-job:<id>` for GitLab
+ * head-pipeline jobs, `azure-policy:<id>` for Azure DevOps branch policy
+ * evaluations (including build validation), and `azure-status:<id>` for
+ * Azure DevOps pull request statuses.
  */
 export type PrStatusCheckDiagnosticSource =
   | "actions-job"
   | "status"
   | "gitlab-job"
+  | "azure-policy"
+  | "azure-status"
   | "unknown"
 
 export type PrStatusCheckLogFetch =

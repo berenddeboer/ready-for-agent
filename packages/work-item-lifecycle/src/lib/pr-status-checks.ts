@@ -2,6 +2,7 @@ import { Clock, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { ulid } from "ulidx"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService } from "@ready-for-agent/db-service"
 import {
   GREEN_NO_REVIEW_EVIDENCE_REASON,
@@ -19,6 +20,7 @@ import {
   AgentTurnForgeCredentialMissingError,
   InvalidCapturedAgentBackendError,
   agentTurnForgeCredentialGuidance,
+  forgeDisplayName,
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
@@ -282,13 +284,31 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, branch } = yield* resolveContext(context)
     let status: PullRequestCheckStatus
-    // Forge dispatch: GitLab head-pipeline jobs vs GitHub Checks/statuses.
-    if (repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      status = yield* gitlab.getPullRequestCheckStatus(repository, branch)
-    } else {
-      const github = yield* GitHubService
-      status = yield* github.getPullRequestCheckStatus(repository, branch)
+    // Forge dispatch: GitLab head-pipeline jobs, Azure DevOps build
+    // validation / branch policy checks, or GitHub Checks/statuses.
+    switch (repository.forge) {
+      case "gitlab": {
+        const gitlab = yield* GitLabService
+        status = yield* gitlab.getPullRequestCheckStatus(repository, branch)
+        break
+      }
+      case "azure-devops": {
+        const azureDevOps = yield* AzureDevOpsService
+        status = yield* azureDevOps.getPullRequestCheckStatus(
+          repository,
+          branch,
+        )
+        break
+      }
+      case "github": {
+        const github = yield* GitHubService
+        status = yield* github.getPullRequestCheckStatus(repository, branch)
+        break
+      }
+      default: {
+        const _exhaustive: never = repository.forge
+        return _exhaustive
+      }
     }
     const evidence = timingEvidence(status)
     const terminalChecks =
@@ -604,6 +624,12 @@ const sourceLabel = (externalId: string): string => {
   if (externalId.startsWith("gitlab-job:")) {
     return "GitLab pipeline job"
   }
+  if (externalId.startsWith("azure-policy:")) {
+    return "Azure DevOps policy evaluation"
+  }
+  if (externalId.startsWith("azure-status:")) {
+    return "Azure DevOps pull request status"
+  }
   return "unknown source"
 }
 
@@ -645,7 +671,7 @@ export const formatDiagnosticBlock = (
 }
 
 const buildInvestigationWorkPrompt = (
-  forge: "github" | "gitlab",
+  forge: "github" | "gitlab" | "azure-devops",
   checks: readonly ObservedPrStatusCheckRow[],
   diagnostics: readonly PrStatusCheckDiagnostic[],
 ): string => {
@@ -664,14 +690,20 @@ const buildInvestigationWorkPrompt = (
             "When calling `gh api` with query parameters on GET endpoints, pass `--method GET` with `-f` (or use a GET-safe invocation). Bare `-f` defaults to POST and can produce misleading 404 responses.",
             "For transient infrastructure failures (for example GitHub 503, runner outages, or flaky network during the check), restart the failed checks when appropriate so new executions can run before concluding the handoff cannot progress.",
           ]
-        : [
-            "Use the supplied GitLab pipeline-job traces first; call the GitLab REST API only when more detail is needed.",
-            "For transient infrastructure failures (for example GitLab 503, runner outages, or flaky network during the job), restart the failed pipeline jobs when appropriate so new executions can run before concluding the handoff cannot progress.",
-          ]),
+        : forge === "gitlab"
+          ? [
+              "Use the supplied GitLab pipeline-job traces first; call the GitLab REST API only when more detail is needed.",
+              "For transient infrastructure failures (for example GitLab 503, runner outages, or flaky network during the job), restart the failed pipeline jobs when appropriate so new executions can run before concluding the handoff cannot progress.",
+            ]
+          : [
+              "Use the supplied Azure DevOps build validation / branch policy diagnostics first; call the Azure DevOps REST API only when more detail is needed.",
+              "For transient infrastructure failures (for example Azure DevOps outages or flaky network during the check), restart the failed checks when appropriate so new executions can run before concluding the handoff cannot progress.",
+            ]),
     )
     if (diagnostics.length > 0) {
+      const forgeLabel = forgeDisplayName(forge)
       lines.push(
-        `Harness diagnostics for the red checks follow. Use these artifacts first; only call ${forge === "github" ? "GitHub" : "GitLab"} for additional detail if needed.`,
+        `Harness diagnostics for the red checks follow. Use these artifacts first; only call ${forgeLabel} for additional detail if needed.`,
         ...diagnostics.map(formatDiagnosticBlock),
       )
     }
@@ -704,7 +736,7 @@ const buildInvestigationWorkPrompt = (
 
 /** Shared outcome contract for status-check work, recovery, and fallback. */
 const investigationOutcomeContractLines = (
-  forge: "github" | "gitlab" = "github",
+  forge: "github" | "gitlab" | "azure-devops" = "github",
 ): readonly string[] => [
   "You may include a concise work and verification summary before the result line.",
   "End your final response with exactly one machine-readable result line:",
@@ -728,7 +760,7 @@ const investigationOutcomeContractLines = (
 ]
 
 const buildInvestigationOutcomeFallbackPrompt = (
-  forge: "github" | "gitlab" = "github",
+  forge: "github" | "gitlab" | "azure-devops" = "github",
 ): string =>
   [
     "Based only on the PR status-check work you just did in this session, report the outcome.",
@@ -739,7 +771,7 @@ const buildInvestigationOutcomeFallbackPrompt = (
 /** Recovery prompt after a FAILED investigation outcome (exported for tests). */
 export const buildInvestigationRecoveryPrompt = (
   reason: string,
-  forge: "github" | "gitlab" = "github",
+  forge: "github" | "gitlab" | "azure-devops" = "github",
 ): string =>
   [
     "Make one focused recovery attempt to process the PR Status Check Handoff.",
@@ -978,7 +1010,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
           return new PrStatusChecksContextError({ message: cause.message })
         }
         return new PrStatusChecksContextError({
-          message: `Failed to resolve the repository ${repository.forge === "github" ? "GitHub" : "GitLab"} credential`,
+          message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential`,
         })
       }),
     )
@@ -1000,34 +1032,56 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
               ? `Failed to load PR Status Check diagnostics: ${cause.message}`
               : "Failed to load PR Status Check diagnostics for red PR Status Checks",
         })
-      if (repository.forge === "gitlab") {
-        const gitlab = yield* GitLabService
-        diagnostics = yield* gitlab
-          .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
-            logDirectory,
-          })
-          .pipe(Effect.mapError(mapDiagnosticError))
-      } else {
-        const github = yield* GitHubService
-        diagnostics = yield* github
-          .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
-            logDirectory,
-          })
-          .pipe(
-            Effect.mapError((cause) =>
-              isGitHubThrottledError(cause) ? cause : mapDiagnosticError(cause),
-            ),
-          )
+      switch (repository.forge) {
+        case "gitlab": {
+          const gitlab = yield* GitLabService
+          diagnostics = yield* gitlab
+            .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
+              logDirectory,
+            })
+            .pipe(Effect.mapError(mapDiagnosticError))
+          break
+        }
+        case "azure-devops": {
+          const azureDevOps = yield* AzureDevOpsService
+          diagnostics = yield* azureDevOps
+            .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
+              logDirectory,
+            })
+            .pipe(Effect.mapError(mapDiagnosticError))
+          break
+        }
+        case "github": {
+          const github = yield* GitHubService
+          diagnostics = yield* github
+            .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
+              logDirectory,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                isGitHubThrottledError(cause)
+                  ? cause
+                  : mapDiagnosticError(cause),
+              ),
+            )
+          break
+        }
+        default: {
+          const _exhaustive: never = repository.forge
+          return _exhaustive
+        }
       }
     }
     const agentBackend = yield* AgentBackend
     const timeout =
       context.maxDuration ??
       DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks
+    // RERUN_REVIEW is a GitHub-only outcome (automated-review workflow rerun
+    // authorization); GitLab and Azure DevOps never offer it.
     const missingOutcomeMessage =
-      repository.forge === "gitlab"
-        ? `${agentBackendLabel(context.agentBackend)} did not report CHECKS_TRIGGERED, PROCESSED, FAILED, or NEEDS_HUMAN`
-        : `${agentBackendLabel(context.agentBackend)} did not report CHECKS_TRIGGERED, PROCESSED, RERUN_REVIEW, FAILED, or NEEDS_HUMAN`
+      repository.forge === "github"
+        ? `${agentBackendLabel(context.agentBackend)} did not report CHECKS_TRIGGERED, PROCESSED, RERUN_REVIEW, FAILED, or NEEDS_HUMAN`
+        : `${agentBackendLabel(context.agentBackend)} did not report CHECKS_TRIGGERED, PROCESSED, FAILED, or NEEDS_HUMAN`
 
     const continueInvestigationTurn = (
       prompt: string,
@@ -1086,9 +1140,20 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         agentTurnForgeCredentialGuidance(
           repository,
           auth,
-          repository.forge === "github"
-            ? "GitHub CLI, API, commit, or push access"
-            : "GitLab API, commit, or push access",
+          ((): string => {
+            switch (repository.forge) {
+              case "github":
+                return "GitHub CLI, API, commit, or push access"
+              case "gitlab":
+                return "GitLab API, commit, or push access"
+              case "azure-devops":
+                return "Azure DevOps REST API, commit, or push access"
+              default: {
+                const _exhaustive: never = repository.forge
+                return _exhaustive
+              }
+            }
+          })(),
         ),
         // Outcome contract must remain last so the final-line rule is not diluted.
         ...investigationOutcomeContractLines(repository.forge),
@@ -1131,9 +1196,11 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       typeof investigation !== "string" &&
       investigation._tag === "rerun_review"
     ) {
-      if (repository.forge === "gitlab") {
+      // RERUN_REVIEW is a GitHub-only outcome; GitLab and Azure DevOps never
+      // offer it, so any other forge reporting it is a harness/agent bug.
+      if (repository.forge !== "github") {
         return yield* new PrStatusChecksOpenCodeError({
-          message: `${agentBackendLabel(context.agentBackend)} reported the GitHub-only RERUN_REVIEW outcome for a GitLab Repository`,
+          message: `${agentBackendLabel(context.agentBackend)} reported the GitHub-only RERUN_REVIEW outcome for a ${forgeDisplayName(repository.forge)} Repository`,
         })
       }
       const workflowIdentity = formatAutomatedReviewWorkflowIdentity(
@@ -1239,7 +1306,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       typeof investigation !== "string" && investigation._tag === "failed"
         ? investigation.reason
         : "Unknown investigation outcome"
-    const forgeLabel = repository.forge === "gitlab" ? "GitLab" : "GitHub"
+    const forgeLabel = forgeDisplayName(repository.forge)
     return yield* new PrStatusChecksUnresolvedError({
       message: `Manual fixing may be required. ${failedReason}. Please fix or rerun the checks on ${forgeLabel}, then click Retry checks.`,
     })

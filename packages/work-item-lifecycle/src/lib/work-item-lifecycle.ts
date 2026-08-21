@@ -25,6 +25,7 @@ import {
   formatTerminalAuthErrorMessage,
   isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
+import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import {
   type DatabaseError,
   DbService,
@@ -1198,6 +1199,7 @@ export const makeWorkItemLifecycleLive = (
   | ActiveAgentBackend
   | GitHubService
   | GitLabService
+  | AzureDevOpsService
 > =>
   Layer.effect(
     WorkItemLifecycle,
@@ -1209,6 +1211,7 @@ export const makeWorkItemLifecycleLive = (
       const activeAgentBackend = yield* ActiveAgentBackend
       const github = yield* GitHubService
       const gitlab = yield* GitLabService
+      const azureDevOps = yield* AzureDevOpsService
       /**
        * Resolve build/review models for a backend id (create: effective;
        * turns: captured). Uses repository flat columns (project effective)
@@ -3067,19 +3070,27 @@ export const makeWorkItemLifecycleLive = (
             issueNumber: row.issue_number,
             workItemId: row.id,
           })
-          if (repository.forge === "gitlab") {
-            return yield* gitlab.getPullRequestLifecycleStatus(
-              repository,
-              headRefName,
-            )
+          switch (repository.forge) {
+            case "gitlab":
+              return yield* gitlab.getPullRequestLifecycleStatus(
+                repository,
+                headRefName,
+              )
+            case "github":
+              return yield* github.getPullRequestLifecycleStatus(
+                repository,
+                headRefName,
+              )
+            case "azure-devops":
+              return yield* azureDevOps.getPullRequestLifecycleStatus(
+                repository,
+                headRefName,
+              )
+            default: {
+              const _exhaustive: never = repository.forge
+              return _exhaustive
+            }
           }
-          if (repository.forge !== "github") {
-            return null
-          }
-          return yield* github.getPullRequestLifecycleStatus(
-            repository,
-            headRefName,
-          )
         }).pipe(
           Effect.catch((error) =>
             isGitHubThrottledError(error)

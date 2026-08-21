@@ -5,7 +5,7 @@ Opinionated agentic software engineering harness that works Forge issues into pu
 ## Language
 
 **Forge**:
-A code-hosting platform kind the harness supports as a Repository's source of git hosting, Issues, and Pull Requests: GitHub or GitLab. A Repository belongs to exactly one Forge, chosen when the Repository is added.
+A code-hosting platform kind the harness supports as a Repository's source of git hosting, Issues, and Pull Requests: GitHub, GitLab, or Azure DevOps. A Repository belongs to exactly one Forge, chosen when the Repository is added. Azure DevOps now has the same end-to-end lifecycle as GitHub and GitLab: remote detection, PAT-based authentication, Ready Issue listing/reconciliation (including native Predecessor/Successor blocking links, surfaced as blockedBy), draft Pull Request creation, PR Status Checks (build validation / branch policy evaluations), merge, and work item close-out with a completion summary are all implemented.
 _Avoid_: Provider (overloaded with model provider and credential metadata), issue source (too narrow — the Forge also hosts Pull Requests and checks), platform
 
 **Forge Host**:
@@ -13,11 +13,11 @@ The hostname of the Forge instance serving a Repository — `github.com` for Git
 _Avoid_: Instance URL, server, domain
 
 **Project Path**:
-The Forge's own slash-separated path addressing the project within its Forge Host — `owner/name` for GitHub, a group or nested subgroup path for GitLab (e.g., `project/oauth_client`). Case-insensitive identity; display casing preserved.
+The Forge's own slash-separated path addressing the project within its Forge Host — `owner/name` for GitHub, a group or nested subgroup path for GitLab (e.g., `project/oauth_client`), and `<organization>/<project>` for Azure DevOps, with an optional third segment (`<organization>/<project>/<repository>`) when the Git repository's name differs from its project's. Case-insensitive identity; display casing preserved.
 _Avoid_: Owner/repo pair (cannot express nested GitLab paths), clone URL (too many spellings for one project)
 
 **Repository**:
-A project on a Forge the harness is configured to work on, identified by Forge, Forge Host, and Project Path (case-insensitive identity; display casing preserved). One row per project; the harness keeps a single local clone of it (bare or working). Displayed as its Project Path — no separate display label. Forge, Forge Host, and Project Path are guessed from the local clone's remote when the Repository is added, verified against the Forge API, and may be corrected in Repository settings; changing them is rejected while any Work Item exists for the Repository.
+A project on a Forge the harness is configured to work on, identified by Forge, Forge Host, and Project Path (case-insensitive identity; display casing preserved). One row per configured Repository identity; the harness keeps a single local clone of it (bare or working). Displayed as its Project Path — no separate display label. Forge, Forge Host, and Project Path are guessed from the local clone's remote when the Repository is added, verified against the Forge API, and may be corrected in Repository settings; changing them is rejected while any Work Item exists for the Repository.
 _Avoid_: Repo (in formal docs), target, project, checkout
 
 **End-to-End Fixture Repository**:

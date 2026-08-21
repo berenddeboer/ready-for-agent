@@ -7,6 +7,7 @@ import {
   type AgentTurnForgeRepository,
   InvalidCapturedAgentBackendError,
   agentTurnForgeCredentialGuidance,
+  forgeDisplayName,
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
@@ -74,6 +75,23 @@ const mergeConflictOutcomeContractLines = (): readonly string[] => [
   "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
 ]
 
+const forgeFetchPushAccessScope = (
+  forge: "github" | "gitlab" | "azure-devops",
+): string => {
+  switch (forge) {
+    case "github":
+      return "GitHub CLI, API, fetch, or push access"
+    case "gitlab":
+      return "GitLab API, fetch, or push access"
+    case "azure-devops":
+      return "Azure DevOps REST API, fetch, or push access"
+    default: {
+      const _exhaustive: never = forge
+      return _exhaustive
+    }
+  }
+}
+
 const workPrompt = (
   repository: AgentTurnForgeRepository,
   auth: AgentTurnForgeAuth,
@@ -89,9 +107,7 @@ const workPrompt = (
     agentTurnForgeCredentialGuidance(
       repository,
       auth,
-      repository.forge === "github"
-        ? "GitHub CLI, API, fetch, or push access"
-        : "GitLab API, fetch, or push access",
+      forgeFetchPushAccessScope(repository.forge),
     ),
     ...mergeConflictOutcomeContractLines(),
   ].join("\n")
@@ -137,7 +153,7 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
           })
         }
         return new ResolvePrMergeConflictContextError({
-          message: `Failed to resolve the repository ${repository.forge === "github" ? "GitHub" : "GitLab"} credential`,
+          message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential`,
         })
       }),
     )

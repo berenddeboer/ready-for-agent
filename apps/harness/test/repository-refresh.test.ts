@@ -6,6 +6,7 @@ import {
 import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
 import {
   WorkItemLifecycle,
+  stubAzureDevOpsServiceLayer,
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
 } from "@ready-for-agent/work-item-lifecycle"
@@ -41,6 +42,7 @@ describe("refreshLoadedRepository", () => {
             }),
             stubGitHubServiceLayer(),
             stubGitLabServiceLayer(),
+            stubAzureDevOpsServiceLayer(),
             Layer.succeed(IssueReconciler, {
               reconcile: () =>
                 Effect.sync(() => {

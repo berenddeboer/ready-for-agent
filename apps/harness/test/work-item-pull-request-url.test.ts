@@ -21,6 +21,28 @@ describe("workItemPullRequestUrl", () => {
     )
   })
 
+  test("builds Azure DevOps PR URL when project and repository names match", () => {
+    expect(
+      workItemPullRequestUrl(
+        "azure-devops",
+        "dev.azure.com",
+        "acme/widgets",
+        91,
+      ),
+    ).toBe("https://dev.azure.com/acme/widgets/_git/widgets/pullrequest/91")
+  })
+
+  test("builds Azure DevOps PR URL with a distinct Git repository name", () => {
+    expect(
+      workItemPullRequestUrl(
+        "azure-devops",
+        "dev.azure.com",
+        "acme/Default/gantry",
+        91,
+      ),
+    ).toBe("https://dev.azure.com/acme/Default/_git/gantry/pullrequest/91")
+  })
+
   test("returns null when no Work Item PR is recorded", () => {
     expect(
       workItemPullRequestUrl("github", "github.com", "acme/widgets", null),

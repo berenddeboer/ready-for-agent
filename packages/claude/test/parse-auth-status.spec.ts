@@ -46,6 +46,24 @@ describe("parseClaudeAuthStatus", () => {
     ).toEqual({ kind: "authenticated", provider: "bedrock" })
   })
 
+  it("recognizes Azure AI Foundry auth status as authenticated (CLAUDE_CODE_USE_FOUNDRY shape)", () => {
+    // Issue #8: `apiProvider: "foundry"` is the verified field Claude reports
+    // under CLAUDE_CODE_USE_FOUNDRY=1. `authMethod: "third_party"` here is a
+    // plausible value by analogy with Bedrock's third-party auth, not an
+    // independently confirmed CLI shape — classification never reads
+    // `authMethod`, so this test only depends on `loggedIn` + `apiProvider`.
+    expect(
+      parseClaudeAuthStatus(
+        JSON.stringify({
+          loggedIn: true,
+          authMethod: "third_party",
+          apiProvider: "foundry",
+        }),
+        0,
+      ),
+    ).toEqual({ kind: "authenticated", provider: "foundry" })
+  })
+
   it("classifies Bedrock from apiProvider, not from missing claude.ai login", () => {
     // First-party not logged in must never be inferred as Bedrock readiness.
     expect(
@@ -84,6 +102,23 @@ describe("parseClaudeAuthStatus", () => {
         1,
       ),
     ).toEqual({ kind: "unauthenticated", provider: "bedrock" })
+  })
+
+  it("classifies Foundry loggedIn false as unauthenticated with foundry provider", () => {
+    // Issue #8: Foundry-backed unauthenticated status must still surface the
+    // "foundry" provider (not fall back to "unknown") so Active status,
+    // Preview, and Recheck can show the Azure AI Foundry label even when
+    // unavailable, mirroring the Bedrock unauthenticated case above.
+    expect(
+      parseClaudeAuthStatus(
+        JSON.stringify({
+          loggedIn: false,
+          authMethod: "third_party",
+          apiProvider: "foundry",
+        }),
+        1,
+      ),
+    ).toEqual({ kind: "unauthenticated", provider: "foundry" })
   })
 
   it("recognizes loggedIn false JSON as unauthenticated", () => {

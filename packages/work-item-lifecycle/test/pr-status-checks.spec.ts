@@ -4,6 +4,10 @@ import {
   AgentBackend,
   AgentBackendExitError,
 } from "@ready-for-agent/agent-backend"
+import {
+  AzureDevOpsService,
+  type AzureDevOpsServiceShape,
+} from "@ready-for-agent/azure-devops-service"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   makeRepositoryRecord,
@@ -84,6 +88,16 @@ const gitlabRepository = makeRepositoryRecord({
 })
 const gitlabDb = stubDbServiceLayer({
   listRepositories: Effect.succeed([gitlabRepository]),
+})
+const azureDevOpsRepository = makeRepositoryRecord({
+  id: repository.id,
+  forge: "azure-devops",
+  forgeHost: "dev.azure.com",
+  projectPath: "acme/widgets",
+  localPath: "/repos/widgets",
+})
+const azureDevOpsDb = stubDbServiceLayer({
+  listRepositories: Effect.succeed([azureDevOpsRepository]),
 })
 
 const keymaxxerService = Layer.succeed(KeymaxxerService, {
@@ -220,6 +234,33 @@ const gitlabWith = (
     deleteBranch: () => Effect.void,
     ...overrides,
   } satisfies GitLabServiceShape)
+
+const azureDevOpsWith = (
+  status: PullRequestCheckStatus,
+  overrides: Partial<AzureDevOpsServiceShape> = {},
+) =>
+  Layer.succeed(AzureDevOpsService, {
+    verifyProject: (repository) => Effect.succeed(repository),
+    getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+    listReadyIssues: () => Effect.succeed([]),
+    hasCredentials: () => Effect.succeed(true),
+    hasAmbientCredentials: () => Effect.succeed(true),
+    getOpenPullRequestNumber: () => Effect.succeed(1),
+    findOpenPullRequestNumber: () => Effect.succeed(1),
+    createDraftPullRequest: () => Effect.succeed(1),
+    updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
+    countOpenNonDraftPullRequests: () => Effect.succeed(0),
+    getPullRequestCheckStatus: () => Effect.succeed(status),
+    getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+    markPullRequestReadyForReview: () => Effect.void,
+    getPullRequestLifecycleStatus: () =>
+      Effect.succeed({ _tag: "open" as const }),
+    mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+    ensureIssueCompletedWithSummary: () => Effect.void,
+    closeOpenPullRequestsForBranch: () => Effect.void,
+    deleteBranch: () => Effect.void,
+    ...overrides,
+  } satisfies AzureDevOpsServiceShape)
 
 const opencodeWith = (
   outputs: readonly string[],
@@ -1273,6 +1314,172 @@ describe("PR status check steps", () => {
     expect(status.isDraft).toBe(true)
   })
 
+  it("watches Azure DevOps build validation / branch policy checks without querying GitHub", async () => {
+    let githubCalled = false
+    let azureDevOpsBranch = ""
+    const status = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        return yield* watchPrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            azureDevOpsDb,
+            githubWith(
+              {
+                _tag: "pending",
+                ...mergeable,
+                terminalChecks: [],
+              },
+              {
+                getPullRequestCheckStatus: () => {
+                  githubCalled = true
+                  return Effect.die("must not query GitHub")
+                },
+              },
+            ),
+            azureDevOpsWith(
+              {
+                _tag: "failed",
+                ...mergeable,
+                isDraft: true,
+                headSha: "abc123",
+                terminalChecks: [
+                  {
+                    externalId: "azure-policy:e1",
+                    name: "Build validation",
+                    outcome: "red",
+                  },
+                  {
+                    externalId: "azure-status:2",
+                    name: "ci/lint",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                getPullRequestCheckStatus: (_repository, branch) => {
+                  azureDevOpsBranch = branch
+                  return Effect.succeed({
+                    _tag: "failed" as const,
+                    ...mergeable,
+                    isDraft: true,
+                    headSha: "abc123",
+                    terminalChecks: [
+                      {
+                        externalId: "azure-policy:e1",
+                        name: "Build validation",
+                        outcome: "red" as const,
+                      },
+                      {
+                        externalId: "azure-status:2",
+                        name: "ci/lint",
+                        outcome: "green" as const,
+                      },
+                    ],
+                  })
+                },
+              },
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(githubCalled).toBe(false)
+    expect(azureDevOpsBranch).toContain("acme-widgets")
+    expect(status._tag).toBe("handoff_needed")
+    expect(status.isDraft).toBe(true)
+  })
+
+  it("uses Azure DevOps REST API credential guidance for investigate and never mentions curl or gh", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* seedStatusCheck({
+          id: "psc-azure-devops-lint",
+          externalId: "azure-policy:e1",
+          name: "Build validation",
+          outcome: "red",
+        })
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            azureDevOpsDb,
+            githubWith(
+              {
+                _tag: "failed",
+                ...mergeable,
+                terminalChecks: [],
+              },
+              {
+                getPullRequestCheckStatus: () =>
+                  Effect.die("must not inspect GitHub status"),
+                getPrStatusCheckDiagnostics: () =>
+                  Effect.die("must not inspect GitHub diagnostics"),
+                observeAutomatedReviewEvidence: () =>
+                  Effect.die("must not inspect GitHub review evidence"),
+                rerunWorkflowRun: () =>
+                  Effect.die("must not rerun a GitHub workflow"),
+              },
+            ),
+            azureDevOpsWith(
+              {
+                _tag: "failed",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "azure-policy:e1",
+                    name: "Build validation",
+                    outcome: "red",
+                  },
+                ],
+              },
+              {
+                getPrStatusCheckDiagnostics: () =>
+                  Effect.succeed([
+                    {
+                      externalId: "azure-policy:e1",
+                      name: "Build validation",
+                      source: "azure-policy" as const,
+                      htmlUrl:
+                        "https://dev.azure.com/acme/widgets/_build/results?buildId=1",
+                      logFetch: {
+                        _tag: "ok" as const,
+                        excerpt: "ERROR: build validation failed",
+                        localPath: null,
+                      },
+                    },
+                  ]),
+              },
+            ),
+            keymaxxerDisabled,
+            opencodeWith(
+              ["fixed and pushed\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"],
+              (prompt) => prompts.push(prompt),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe("checks_triggered")
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain(
+      "Azure DevOps build validation / branch policy diagnostics",
+    )
+    expect(prompts[0]).toContain("ERROR: build validation failed")
+    expect(prompts[0]).toContain("AZURE_DEVOPS_EXT_PAT")
+    expect(prompts[0]).toContain("https://dev.azure.com/acme/widgets")
+    expect(prompts[0]).not.toContain("curl")
+    expect(prompts[0]).not.toMatch(/\bgh\b/i)
+    expect(prompts[0]).not.toContain("glab")
+  })
+
   it("completes a GitLab green-only handoff without an Agent Turn", async () => {
     let continueCalled = false
     const result = await Effect.runPromise(
@@ -2202,6 +2409,36 @@ describe("PR status check steps", () => {
     )
     expect(prompts[0]).toContain("READY_FOR_AGENT_RESULT: PROCESSED")
     expect(prompts[0]).toContain("READY_FOR_AGENT_RESULT: NEEDS_HUMAN:")
+  })
+
+  it("resolves an Azure DevOps merge conflict with REST API credential guidance", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      resolvePrMergeConflict({
+        ...context,
+        repositoryId: azureDevOpsRepository.id,
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            azureDevOpsDb,
+            keymaxxerDisabled,
+            opencodeWith(
+              [
+                "rebased, verified, and pushed\nREADY_FOR_AGENT_RESULT: PROCESSED",
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({ _tag: "processed" })
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain("Azure DevOps REST API, fetch, or push access")
+    expect(prompts[0]).toContain("AZURE_DEVOPS_EXT_PAT")
+    expect(prompts[0]).not.toContain("GitHub CLI")
+    expect(prompts[0]).not.toContain("glab")
   })
 
   it("uses ambient gh guidance for merge-conflict when Keymaxxer is disabled", async () => {

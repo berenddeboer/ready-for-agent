@@ -495,4 +495,54 @@ describe("decidePrMerge", () => {
     expect(continued).toBe(true)
     expect(result).toEqual({ _tag: "clanker_merge" })
   })
+
+  it("guides the risk-assessment turn to the Azure DevOps REST API", async () => {
+    let prompt = ""
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/widgets",
+      mergePolicy: "classify",
+    })
+    const azureDevOpsDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+    })
+    const agentBackend = Layer.succeed(
+      AgentBackend,
+      AgentBackend.of({
+        startTurn: () => Effect.die("unused"),
+        continueTurn: (input) => {
+          prompt = input.prompt
+          return Effect.succeed({
+            sessionId: input.sessionId,
+            assistantText: "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
+          })
+        },
+        inspect: () =>
+          Effect.succeed({
+            backend: { id: "opencode" as const, label: "OpenCode" },
+            models: [],
+          }),
+      }),
+    )
+
+    const result = await Effect.runPromise(
+      decidePrMerge(context).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            azureDevOpsDb,
+            keymaxxer,
+            agentBackend,
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({ _tag: "clanker_merge" })
+    expect(prompt).toContain("Azure DevOps REST API access")
+    expect(prompt).not.toContain("GitHub CLI")
+  })
 })

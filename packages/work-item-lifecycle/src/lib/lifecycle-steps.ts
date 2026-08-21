@@ -3,6 +3,11 @@ import type { PlatformError } from "effect/PlatformError"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import type { AgentBackendNotInstalledError } from "@ready-for-agent/agent-backend"
 import type {
+  AzureDevOpsNotImplementedError,
+  AzureDevOpsProjectUnavailableError,
+  AzureDevOpsRequestError,
+} from "@ready-for-agent/azure-devops-service"
+import type {
   DatabaseError,
   RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
@@ -142,6 +147,9 @@ export type LifecycleStepError =
   | GitHubRepositoryUnavailableError
   | GitLabRequestError
   | GitLabProjectUnavailableError
+  | AzureDevOpsRequestError
+  | AzureDevOpsProjectUnavailableError
+  | AzureDevOpsNotImplementedError
   | KeymaxxerError
   | PlatformError
   | SqlError

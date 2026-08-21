@@ -26,6 +26,7 @@ import {
 } from "@ready-for-agent/agent-backend"
 import {
   DbService,
+  type Forge,
   InvalidConfigInputError,
   InvalidRepositorySettingsError,
   type MergePolicy,
@@ -98,7 +99,7 @@ import {
 
 type AddRepositoryArgs = {
   input: {
-    forge: "github" | "gitlab"
+    forge: Forge
     forgeHost: string
     projectPath: string
     localPath: string
@@ -137,7 +138,7 @@ type UpdateConfigArgs = {
 type UpdateRepositorySettingsArgs = {
   input: {
     repositoryId: string
-    forge?: "github" | "gitlab"
+    forge?: Forge
     forgeHost?: string
     projectPath?: string
     paused: boolean
@@ -441,13 +442,31 @@ const isSameOriginRequest = (request: Request): boolean => {
   return origin === null || origin === new URL(request.url).origin
 }
 
+/**
+ * Resolution of the "does this file need an Azure DevOps branch?" open
+ * question carried over from the Azure DevOps detection/auth ticket: this
+ * file's three `forge`-aware call sites (`verifyRepositoryIdentity` below,
+ * the `repositoryCredentials` resolver's vault-probe branch, and
+ * `Repository.pullRequestCount`) are GraphQL-only internals for project
+ * verification, vault-credential display, and PR count — none of them read
+ * or relate to `listReadyIssues`. Azure DevOps has no GraphQL API of its
+ * own, so its Ready Issue listing and blocking-link reads (ticket: "List
+ * and reconcile Azure DevOps work items as the ready-for-agent frontier")
+ * are consumed entirely inside `@ready-for-agent/issue-reconciler`, which
+ * never routes through this file. No `listReadyIssues`-related branch is
+ * needed here; each of the three sites already has its own explicit,
+ * deliberate (if temporary) Azure DevOps posture documented inline below.
+ */
 const verifyRepositoryIdentity = Effect.fn(
   "graphql-api.verifyRepositoryIdentity",
 )(function* (identity: {
-  readonly forge: "github" | "gitlab"
+  readonly forge: "github" | "gitlab" | "azure-devops"
   readonly forgeHost: string
   readonly projectPath: string
 }) {
+  // Azure DevOps project verification is not wired here yet (out of scope
+  // for the detection/auth ticket that widened this type) — pass through
+  // unverified like GitHub, matching the identity-defaulting posture below.
   if (identity.forge !== "gitlab") return identity
   const gitlab = yield* GitLabService
   const resolved = yield* gitlab.verifyProject(identity)
@@ -644,14 +663,29 @@ export const createGraphqlApi = <R>(
                           ),
                         ),
                       )
-                let githubIndex = 0
-                let gitlabIndex = 0
+                // Keyed by Repository id (not positional index): repositories
+                // may include Forges other than github/gitlab (e.g. Azure
+                // DevOps), so a shared running counter over the unfiltered
+                // list would misalign with these batches once such a
+                // Repository sits between two github/gitlab ones.
+                const githubTokenNameById = new Map(
+                  githubRepositories.map((repository, index) => [
+                    repository.id,
+                    githubTokenNames[index] ?? null,
+                  ]),
+                )
+                const gitlabTokenNameById = new Map(
+                  gitlabRepositories.map((repository, index) => [
+                    repository.id,
+                    gitlabTokenNames[index] ?? null,
+                  ]),
+                )
                 return yield* Effect.forEach(
                   repositories,
                   (repository) => {
                     if (repository.forge === "gitlab") {
                       const vaultTokenName =
-                        gitlabTokenNames[gitlabIndex++] ?? null
+                        gitlabTokenNameById.get(repository.id) ?? null
                       if (vaultTokenName !== null) {
                         return Effect.succeed(
                           repositoryCredential(
@@ -672,12 +706,28 @@ export const createGraphqlApi = <R>(
                         ),
                       )
                     }
-                    const tokenName = githubTokenNames[githubIndex++] ?? null
+                    if (repository.forge === "github") {
+                      const tokenName =
+                        githubTokenNameById.get(repository.id) ?? null
+                      return Effect.succeed(
+                        repositoryCredential(
+                          repository,
+                          tokenName,
+                          ambientAuthentication || tokenName !== null,
+                        ),
+                      )
+                    }
+                    // Any other Forge (currently only Azure DevOps) has no
+                    // batched vault probe wired into this aggregate query yet
+                    // (its own credential machinery is a separate, later
+                    // ticket) — report unconfigured unless Keymaxxer is
+                    // disabled entirely, rather than borrowing another
+                    // Repository's github/gitlab probe result.
                     return Effect.succeed(
                       repositoryCredential(
                         repository,
-                        tokenName,
-                        ambientAuthentication || tokenName !== null,
+                        null,
+                        ambientAuthentication,
                       ),
                     )
                   },

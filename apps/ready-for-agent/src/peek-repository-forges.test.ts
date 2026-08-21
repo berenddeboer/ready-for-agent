@@ -71,6 +71,24 @@ describe("peekRepositoryForges", () => {
     expect(peekRepositoryForges(path)).toEqual(["github", "gitlab"])
   })
 
+  test("includes Azure DevOps in the stable distinct Repository Forge set", () => {
+    const { path, root } = createTempDb()
+    roots.push(root)
+    const db = new Database(path, { create: true })
+    try {
+      ensureRepositoryTable(db)
+      db.run(
+        `INSERT INTO repository (id, forge) VALUES ('repo-ado', 'azure-devops')`,
+      )
+      db.run(
+        `INSERT INTO repository (id, forge) VALUES ('repo-github', 'github')`,
+      )
+    } finally {
+      db.close()
+    }
+    expect(peekRepositoryForges(path)).toEqual(["github", "azure-devops"])
+  })
+
   test("treats non-empty pre-identity repository tables as GitHub", () => {
     const { path, root } = createTempDb()
     roots.push(root)
@@ -145,6 +163,34 @@ describe("peekForgeApiEndpoints", () => {
         path: "/api/v4/version",
       },
       { forge: "gitlab", host: "gitlab.com", path: "/api/v4/version" },
+    ])
+  })
+
+  test("includes a single canonical Azure DevOps endpoint", () => {
+    const { path, root } = createTempDb()
+    roots.push(root)
+    const db = new Database(path, { create: true })
+    try {
+      ensureRepositoryTable(db)
+      db.run(
+        `INSERT INTO repository (id, forge, forge_host) VALUES ('a1', 'azure-devops', 'dev.azure.com')`,
+      )
+      db.run(
+        `INSERT INTO repository (id, forge, forge_host) VALUES ('a2', 'azure-devops', 'dev.azure.com')`,
+      )
+      db.run(
+        `INSERT INTO repository (id, forge, forge_host) VALUES ('gh', 'github', 'github.com')`,
+      )
+    } finally {
+      db.close()
+    }
+    expect(peekForgeApiEndpoints(path)).toEqual([
+      { forge: "github", host: "api.github.com", path: "/" },
+      {
+        forge: "azure-devops",
+        host: "dev.azure.com",
+        path: "/_apis/connectionData",
+      },
     ])
   })
 })

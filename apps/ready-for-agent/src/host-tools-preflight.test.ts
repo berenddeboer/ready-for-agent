@@ -89,4 +89,49 @@ describe("host tools preflight", () => {
     expect(result.message).toContain("never block the Harness UI")
     expect(result.message).toContain("Keymaxxer is optional")
   })
+
+  test("requires no PATH tool for Azure DevOps but does require the PAT env var", () => {
+    const withPat = checkHostTools((command) => command === "git", {
+      repositoryForges: ["azure-devops"],
+      hasEnvVar: () => true,
+    })
+    expect(withPat).toEqual({ ok: true })
+
+    const withoutPat = checkHostTools((command) => command === "git", {
+      repositoryForges: ["azure-devops"],
+      hasEnvVar: () => false,
+    })
+    expect(withoutPat.ok).toBe(false)
+    if (withoutPat.ok) return
+    expect(withoutPat.missing.map((tool) => tool.name)).toEqual([
+      "AZURE_DEVOPS_EXT_PAT",
+    ])
+    expect(withoutPat.message).toContain("AZURE_DEVOPS_EXT_PAT")
+    expect(withoutPat.message).not.toContain("gh:")
+    expect(withoutPat.message).not.toContain("glab:")
+  })
+
+  test("requires all three Forge requirements for a mixed fleet", () => {
+    const missing = checkHostTools(
+      (command) => ["git", "gh", "glab"].includes(command),
+      {
+        repositoryForges: ["github", "gitlab", "azure-devops"],
+        hasEnvVar: () => false,
+      },
+    )
+    expect(missing.ok).toBe(false)
+    if (missing.ok) return
+    expect(missing.missing.map((tool) => tool.name)).toEqual([
+      "AZURE_DEVOPS_EXT_PAT",
+    ])
+
+    const allSatisfied = checkHostTools(
+      (command) => ["git", "gh", "glab"].includes(command),
+      {
+        repositoryForges: ["github", "gitlab", "azure-devops"],
+        hasEnvVar: () => true,
+      },
+    )
+    expect(allSatisfied).toEqual({ ok: true })
+  })
 })
