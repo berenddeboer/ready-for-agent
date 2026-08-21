@@ -13,7 +13,7 @@ The hostname of the Forge instance serving a Repository — `github.com` for Git
 _Avoid_: Instance URL, server, domain
 
 **Project Path**:
-The Forge's own slash-separated path addressing the project within its Forge Host — `owner/name` for GitHub, a group or nested subgroup path for GitLab (e.g., `project/oauth_client`). Case-insensitive identity; display casing preserved.
+The Forge's own slash-separated path addressing the project within its Forge Host — `owner/name` for GitHub, a group or nested subgroup path for GitLab (e.g., `project/oauth_client`), and `<organization>/<project>` for Azure DevOps, with an optional third segment (`<organization>/<project>/<repository>`) when the Git repository's name differs from its project's. Case-insensitive identity; display casing preserved.
 _Avoid_: Owner/repo pair (cannot express nested GitLab paths), clone URL (too many spellings for one project)
 
 **Repository**:

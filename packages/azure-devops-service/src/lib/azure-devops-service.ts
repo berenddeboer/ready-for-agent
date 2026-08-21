@@ -74,17 +74,27 @@ export interface AzureDevOpsServiceShape {
   readonly hasAmbientCredentials: (
     repository: AzureDevOpsRepository,
   ) => Effect.Effect<boolean, AzureDevOpsRequestError>
-  /** Hard lookup of an open pull request for the exact source branch. Not yet implemented. */
+  /**
+   * Hard lookup of an open pull request for the exact source branch.
+   * Fails when no open pull request exists.
+   */
   readonly getOpenPullRequestNumber: (
     repository: AzureDevOpsRepository,
     headRefName: string,
   ) => Effect.Effect<number, AzureDevOpsServiceError>
-  /** Soft lookup of an open pull request for the exact source branch. Not yet implemented. */
+  /**
+   * Soft lookup of an open pull request for the exact source branch.
+   * Returns null when none exists (does not fail).
+   */
   readonly findOpenPullRequestNumber: (
     repository: AzureDevOpsRepository,
     headRefName: string,
   ) => Effect.Effect<number | null, AzureDevOpsServiceError>
-  /** Create a draft pull request for head against the project default base. Not yet implemented. */
+  /**
+   * Create a draft pull request for head against the project default base
+   * (or an explicit base). Returns the new pull request id. Does not push
+   * the head branch; the caller must ensure the remote head exists.
+   */
   readonly createDraftPullRequest: (
     repository: AzureDevOpsRepository,
     input: {
@@ -94,7 +104,13 @@ export interface AzureDevOpsServiceShape {
       readonly baseRefName?: string
     },
   ) => Effect.Effect<number, AzureDevOpsServiceError>
-  /** Set an open draft pull request's title/description. Not yet implemented. */
+  /**
+   * When an open draft pull request exists for the exact source branch, set
+   * its title and description to the provided values. Non-draft open pull
+   * requests are left unchanged. The copy update is best-effort: the open
+   * draft's identity remains valid even if the PATCH fails. Returns the open
+   * pull request id when one exists, otherwise null.
+   */
   readonly updateOpenDraftPullRequestCopy: (
     repository: AzureDevOpsRepository,
     headRefName: string,
@@ -103,7 +119,10 @@ export interface AzureDevOpsServiceShape {
       readonly body: string
     },
   ) => Effect.Effect<number | null, AzureDevOpsServiceError>
-  /** Count currently open, non-draft pull requests for the project. Not yet implemented. */
+  /**
+   * Count currently open, non-draft pull requests for the project.
+   * Not yet implemented: fails with `AzureDevOpsNotImplementedError`.
+   */
   readonly countOpenNonDraftPullRequests: (
     repository: AzureDevOpsRepository,
   ) => Effect.Effect<number, AzureDevOpsServiceError>

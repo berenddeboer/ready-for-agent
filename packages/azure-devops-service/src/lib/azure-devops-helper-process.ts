@@ -12,11 +12,12 @@ export const INTERNAL_AZURE_DEVOPS_HELPER_ARG =
 /**
  * CLI-backed operations. `hasCredentials`/`hasAmbientCredentials` are
  * synchronous local checks (no vault secret needed) and never need a
- * subprocess, matching GitLab's helper operation set. The remaining 14
- * PR/merge-state-machine methods are not yet wired to a CLI helper — they
- * fail with `AzureDevOpsNotImplementedError` on the service itself, and gain
- * a helper operation (and Keymaxxer child-spawn wiring) in the tickets that
- * implement them.
+ * subprocess, matching GitLab's helper operation set. The remaining 16
+ * service methods are not yet wired to a CLI helper: only
+ * `countOpenNonDraftPullRequests` still fails with
+ * `AzureDevOpsNotImplementedError` on the service itself, while the rest are
+ * implemented against the live REST API in-process. Each gains a helper
+ * operation (and Keymaxxer child-spawn wiring) in later tickets.
  */
 export const AZURE_DEVOPS_HELPER_OPERATIONS = [
   "verify-project",
