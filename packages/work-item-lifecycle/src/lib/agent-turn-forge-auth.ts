@@ -183,9 +183,9 @@ export const AGENT_TURN_GITLAB_VAULT_METADATA_BUDGET = Duration.seconds(
 )
 
 /**
- * Keymaxxer vault account for an Azure DevOps Repository (`<organization>/<project>`,
- * i.e. Project Path). Same formatter as harness forge ops — re-export, not a
- * parallel implementation.
+ * Keymaxxer vault account for an Azure DevOps Repository (the full Project
+ * Path: `<organization>/<project>` or `<organization>/<project>/<repository>`).
+ * Same formatter as harness forge ops — re-export, not a parallel implementation.
  */
 export const agentTurnAzureDevOpsVaultAccount = azureDevOpsVaultAccount
 

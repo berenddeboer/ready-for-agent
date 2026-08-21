@@ -17,7 +17,7 @@ The Forge's own slash-separated path addressing the project within its Forge Hos
 _Avoid_: Owner/repo pair (cannot express nested GitLab paths), clone URL (too many spellings for one project)
 
 **Repository**:
-A project on a Forge the harness is configured to work on, identified by Forge, Forge Host, and Project Path (case-insensitive identity; display casing preserved). One row per project; the harness keeps a single local clone of it (bare or working). Displayed as its Project Path — no separate display label. Forge, Forge Host, and Project Path are guessed from the local clone's remote when the Repository is added, verified against the Forge API, and may be corrected in Repository settings; changing them is rejected while any Work Item exists for the Repository.
+A project on a Forge the harness is configured to work on, identified by Forge, Forge Host, and Project Path (case-insensitive identity; display casing preserved). One row per configured Repository identity; the harness keeps a single local clone of it (bare or working). Displayed as its Project Path — no separate display label. Forge, Forge Host, and Project Path are guessed from the local clone's remote when the Repository is added, verified against the Forge API, and may be corrected in Repository settings; changing them is rejected while any Work Item exists for the Repository.
 _Avoid_: Repo (in formal docs), target, project, checkout
 
 **End-to-End Fixture Repository**:
