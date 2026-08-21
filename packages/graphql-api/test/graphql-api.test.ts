@@ -5535,8 +5535,85 @@ describe("GraphQL API", () => {
             lifecycleLabels: [
               {
                 phase: "GITHUB_STATUS_CHECKS",
-                label: "Status checks: Needs human",
+                label: "Addressing status check findings: Needs human",
                 status: "NEEDS_HUMAN",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
+  test("labels investigating status-check activity Addressing status check findings", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const investigating = {
+      ...workItem,
+      state: "investigate_pr_status_checks",
+      stepRuns: [
+        { ...baseRun, step: "implement", status: "succeeded" },
+        { ...baseRun, step: "review", status: "succeeded" },
+        {
+          ...baseRun,
+          step: "watch_pr_status_checks",
+          status: "succeeded",
+        },
+        {
+          ...baseRun,
+          step: "investigate_pr_status_checks",
+          status: "running",
+          finishedAt: null,
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([investigating]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            state stateLabel status statusLabel
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            state: "INVESTIGATE_PR_STATUS_CHECKS",
+            stateLabel: "Addressing status check findings",
+            status: "RUNNING",
+            statusLabel: "Running",
+            lifecycleLabels: [
+              {
+                phase: "IMPLEMENT",
+                label: "Build: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "REVIEW",
+                label: "Review: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "GITHUB_STATUS_CHECKS",
+                label: "Addressing status check findings: Running",
+                status: "RUNNING",
               },
             ],
           },
@@ -5813,7 +5890,7 @@ describe("GraphQL API", () => {
         workItems: [
           {
             state: "INVESTIGATE_PR_STATUS_CHECKS",
-            stateLabel: "Status checks",
+            stateLabel: "Addressing status check findings",
             status: "NEEDS_HUMAN_REVIEW",
             statusLabel: "Needs human review",
             statusMessage: reason,
@@ -5828,7 +5905,7 @@ describe("GraphQL API", () => {
               },
               {
                 phase: "GITHUB_STATUS_CHECKS",
-                label: "Status checks: Succeeded",
+                label: "Addressing status check findings: Succeeded",
                 status: "SUCCEEDED",
               },
             ],

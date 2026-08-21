@@ -61,6 +61,36 @@ describe("WorkItemLifecycleStatus", () => {
     expect(html).not.toContain("Explicit Work Item Execution Profile")
   })
 
+  test("renders Addressing status check findings while investigating", () => {
+    const investigating = {
+      ...waitingForGitHubWorkItem,
+      state: "INVESTIGATE_PR_STATUS_CHECKS",
+      stateLabel: "Addressing status check findings",
+      status: "RUNNING",
+      statusLabel: "Running",
+      statusMessage: null,
+      postponedUntil: null,
+      hasActiveStepRun: true,
+      lifecycleLabels: [
+        {
+          phase: "GITHUB_STATUS_CHECKS",
+          label: "Addressing status check findings: Running",
+          status: "RUNNING",
+          durationMs: 45_000,
+        },
+      ],
+    } satisfies WorkItem
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkItemLifecycleStatus workItem={investigating} compact />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain("Addressing status check findings: Running")
+    expect(html).not.toContain("Status checks")
+    expect(html).not.toContain(">Retry<")
+  })
+
   test("shows an Explicit Work Item Execution Profile on Work Item detail", () => {
     const profiled = {
       ...waitingForGitHubWorkItem,

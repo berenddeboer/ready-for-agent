@@ -10,6 +10,7 @@ import {
   workItemLatestStepRunDetail,
   workItemLatestStepRunReason,
   workItemPostponedUntil,
+  workItemStateLabel,
   workItemStatus,
   workItemStatusMessage,
 } from "../src/lib/work-item-projection.js"
@@ -290,6 +291,175 @@ describe("Postponed Step Run projection", () => {
         label: "Status checks: Queued",
         status: "QUEUED",
         durationMs: 2_315_000,
+      },
+    ])
+  })
+})
+
+describe("status-checks phase labels", () => {
+  const watchRun = {
+    ...baseStepRun,
+    id: "srun-watch",
+    step: "watch_pr_status_checks" as const,
+    status: "running" as const,
+    finishedAt: null,
+    executionDurationMs: 12_000,
+  } satisfies WorkItemRecord["stepRuns"][number]
+
+  const investigateRun = {
+    ...baseStepRun,
+    id: "srun-investigate",
+    step: "investigate_pr_status_checks" as const,
+    status: "running" as const,
+    finishedAt: null,
+    executionDurationMs: 45_000,
+  } satisfies WorkItemRecord["stepRuns"][number]
+
+  test.each([
+    ["running", "Running", "RUNNING"],
+    ["succeeded", "Succeeded", "SUCCEEDED"],
+    ["failed", "Failed", "FAILED"],
+    ["queued", "Queued", "QUEUED"],
+  ] as const)(
+    "labels the chip Addressing status check findings when the latest phase run is investigate (%s)",
+    (status, outcome, statusCode) => {
+      const workItem = workItemWith({
+        state: "investigate_pr_status_checks",
+        stepRuns: [
+          {
+            ...investigateRun,
+            status,
+            finishedAt:
+              status === "running" || status === "queued"
+                ? null
+                : new Date("2026-07-14T08:38:36.000Z"),
+          },
+        ],
+      })
+
+      expect(lifecycleLabels(workItem)).toEqual([
+        {
+          phase: "GITHUB_STATUS_CHECKS",
+          label: `Addressing status check findings: ${outcome}`,
+          status: statusCode,
+          durationMs: 45_000,
+        },
+      ])
+    },
+  )
+
+  test("keeps the Status checks chip when the latest phase run is watch", () => {
+    const workItem = workItemWith({
+      state: "watch_pr_status_checks",
+      stepRuns: [watchRun],
+    })
+
+    expect(lifecycleLabels(workItem)).toEqual([
+      {
+        phase: "GITHUB_STATUS_CHECKS",
+        label: "Status checks: Running",
+        status: "RUNNING",
+        durationMs: 12_000,
+      },
+    ])
+    expect(workItemStateLabel(workItem)).toBe("Status checks")
+  })
+
+  test("uses the latest run in the collapsed phase after watch then investigate", () => {
+    const workItem = workItemWith({
+      state: "investigate_pr_status_checks",
+      stepRuns: [
+        {
+          ...watchRun,
+          status: "succeeded",
+          finishedAt: new Date("2026-07-14T08:10:00.000Z"),
+          executionDurationMs: 12_000,
+        },
+        investigateRun,
+      ],
+    })
+
+    expect(lifecycleLabels(workItem)).toEqual([
+      {
+        phase: "GITHUB_STATUS_CHECKS",
+        label: "Addressing status check findings: Running",
+        status: "RUNNING",
+        durationMs: 12_000 + 45_000,
+      },
+    ])
+  })
+
+  test("returns to Status checks when a later watch run follows investigate", () => {
+    const workItem = workItemWith({
+      state: "watch_pr_status_checks",
+      stepRuns: [
+        {
+          ...investigateRun,
+          status: "succeeded",
+          finishedAt: new Date("2026-07-14T08:20:00.000Z"),
+          executionDurationMs: 45_000,
+        },
+        {
+          ...watchRun,
+          id: "srun-watch-2",
+          status: "queued",
+          finishedAt: null,
+          executionDurationMs: null,
+        },
+      ],
+    })
+
+    expect(lifecycleLabels(workItem)).toEqual([
+      {
+        phase: "GITHUB_STATUS_CHECKS",
+        label: "Status checks: Queued",
+        status: "QUEUED",
+        durationMs: 45_000,
+      },
+    ])
+    expect(workItemStateLabel(workItem)).toBe("Status checks")
+  })
+
+  test("standalone investigate state label reads Addressing status check findings", () => {
+    expect(
+      workItemStateLabel(
+        workItemWith({
+          state: "investigate_pr_status_checks",
+          stepRuns: [investigateRun],
+        }),
+      ),
+    ).toBe("Addressing status check findings")
+  })
+
+  test("keeps postponed history on Status checks when latest run is investigate", () => {
+    const postponedUntil = new Date("2026-08-07T12:00:00.000Z")
+    const workItem = workItemWith({
+      state: "investigate_pr_status_checks",
+      holdsWorkerSlot: true,
+      stepRuns: [
+        {
+          ...watchRun,
+          status: "postponed",
+          finishedAt: new Date("2026-08-07T11:00:00.000Z"),
+          postponedUntil,
+          executionDurationMs: 2_315_000,
+        },
+        investigateRun,
+      ],
+    })
+
+    expect(lifecycleLabels(workItem)).toEqual([
+      {
+        phase: "GITHUB_STATUS_CHECKS",
+        label: "Status checks: Postponed (1 prior attempt)",
+        status: "POSTPONED",
+        durationMs: null,
+      },
+      {
+        phase: "GITHUB_STATUS_CHECKS",
+        label: "Addressing status check findings: Running",
+        status: "RUNNING",
+        durationMs: 2_315_000 + 45_000,
       },
     ])
   })
