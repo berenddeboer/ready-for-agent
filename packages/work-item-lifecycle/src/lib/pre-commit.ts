@@ -10,6 +10,7 @@ import {
   PreCommitStageError,
   PreCommitWorktreeContextMissingError,
 } from "./pre-commit-errors.js"
+import { repositoryProcessOptions } from "./repository-process-environment.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
@@ -64,6 +65,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const command = ChildProcess.make("git", args, {
       cwd,
+      ...repositoryProcessOptions(),
       stdin: "ignore",
     })
 

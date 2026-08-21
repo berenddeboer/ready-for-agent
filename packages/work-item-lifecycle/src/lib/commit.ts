@@ -30,6 +30,7 @@ import {
   publicationCopyFromCommitMessage,
 } from "./publication-copy.js"
 import { rewritePublicationCopyAttachments } from "./publication-copy-attachments.js"
+import { repositoryProcessOptions } from "./repository-process-environment.js"
 import {
   classifyUnparsedResult,
   formatResultLineFailure,
@@ -117,6 +118,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const command = ChildProcess.make("git", args, {
       cwd,
+      ...repositoryProcessOptions(),
       stdin: "ignore",
     })
 

@@ -39,6 +39,10 @@ import {
   publicationCopyFromCommitMessage,
 } from "./publication-copy.js"
 import {
+  SANITIZED_REPOSITORY_SHELL_PREFIX,
+  repositoryProcessOptions,
+} from "./repository-process-environment.js"
+import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleStepCompletion,
 } from "./types.js"
@@ -136,6 +140,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const command = ChildProcess.make("git", args, {
       cwd,
+      ...repositoryProcessOptions(),
       stdin: "ignore",
     })
 
@@ -394,6 +399,7 @@ const attemptNativePush = (
     const command = [
       `GH_TOKEN="$${tokenName}"`,
       `GITHUB_TOKEN="$${tokenName}"`,
+      SANITIZED_REPOSITORY_SHELL_PREFIX,
       "git",
       "-C",
       shellQuote(worktreePath),
@@ -462,6 +468,7 @@ const attemptGitLabHttpsPush = (
       const command = [
         `BASIC="$(printf 'oauth2:%s' "$${tokenName}" | (base64 -w0 2>/dev/null || base64 | tr -d '\\n'))"`,
         "&&",
+        SANITIZED_REPOSITORY_SHELL_PREFIX,
         "git",
         "-C",
         shellQuote(worktreePath),

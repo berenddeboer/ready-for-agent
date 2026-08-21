@@ -11,6 +11,7 @@ import {
 } from "./assess-changes-errors.js"
 import { GitCommandError } from "./create-worktree-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
+import { repositoryProcessOptions } from "./repository-process-environment.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
 export type AssessChangesResult =
@@ -83,6 +84,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const command = ChildProcess.make("git", args, {
       cwd,
+      ...repositoryProcessOptions(),
       stdin: "ignore",
     })
 

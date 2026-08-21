@@ -375,8 +375,8 @@ describe("createPr", () => {
       )
       expect(pushCommand).not.toContain(" origin ")
       expect(pushCommand).toContain("Authorization: Basic $BASIC")
-      // Real shell assignment before git — not BASIC=… git … $BASIC prefix form.
-      expect(pushCommand).toContain(')" && git ')
+      // Real shell assignment before sanitized git — not BASIC=… git … $BASIC.
+      expect(pushCommand).toContain(')" && env -u SQLITE_DATABASE_PATH ')
     }))
   it("reuses an existing exact-branch open GitLab MR without creation", () =>
     withTemp(async (root) => {
@@ -714,6 +714,7 @@ describe("createPr", () => {
       expect(continueCalls).toBe(0)
       expect(secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
       expect(pushCommand).toContain('GH_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS"')
+      expect(pushCommand).toContain("env -u SQLITE_DATABASE_PATH")
       expect(pushCommand).toContain("git")
       expect(pushCommand).toContain("push")
       // Secret-name expansion in the header (not $GH_TOKEN): bash does not

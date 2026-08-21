@@ -1,4 +1,11 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
@@ -565,6 +572,73 @@ describe("commit", () => {
       expect(message).toContain("Closes #2039")
       expect(message).not.toContain("Automated draft pull request")
       expect(await git(root, ["status", "--porcelain"])).toBe("")
+    }))
+
+  it("does not expose Harness-owned environment to commit hooks", () =>
+    withTempRepo(async (root, startingOid) => {
+      const databaseRoot = await mkdtemp(join(tmpdir(), "rfa-commit-db-"))
+      const databasePath = join(databaseRoot, "harness.db")
+      const observedEnvironmentPath = join(databaseRoot, "commit-environment")
+      const hooks = join(root, ".git", "hooks")
+      await mkdir(hooks, { recursive: true })
+      const hookPath = join(hooks, "pre-commit")
+      await writeFile(
+        hookPath,
+        [
+          "#!/usr/bin/env bash",
+          "set -eo pipefail",
+          'printf "%s" "$RFA_COMMIT_TEST_VALUE" > "$RFA_COMMIT_OBSERVED_PATH"',
+          'if [[ -n "$SQLITE_DATABASE_PATH" ]]; then',
+          '  rm -f "$SQLITE_DATABASE_PATH" "$SQLITE_DATABASE_PATH-shm" "$SQLITE_DATABASE_PATH-wal"',
+          "fi",
+          "",
+        ].join("\n"),
+      )
+      await chmod(hookPath, 0o755)
+      await writeFile(databasePath, "live harness data\n")
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+
+      const originalDatabasePath = process.env["SQLITE_DATABASE_PATH"]
+      const originalTestValue = process.env["RFA_COMMIT_TEST_VALUE"]
+      const originalObservedPath = process.env["RFA_COMMIT_OBSERVED_PATH"]
+      process.env["SQLITE_DATABASE_PATH"] = databasePath
+      process.env["RFA_COMMIT_TEST_VALUE"] = "preserved"
+      process.env["RFA_COMMIT_OBSERVED_PATH"] = observedEnvironmentPath
+      try {
+        const result = await run(
+          commit(
+            baseContext(root, {
+              startingCommitOid: startingOid,
+              publicationTitle: "fix: protect harness environment",
+              publicationBody:
+                "Keeps Harness state outside repository hooks.\n\nCloses #91",
+            }),
+          ),
+        )
+
+        expect(result.completion).toBe("native")
+        expect(await readFile(databasePath, "utf8")).toBe("live harness data\n")
+        expect(await readFile(observedEnvironmentPath, "utf8")).toBe(
+          "preserved",
+        )
+      } finally {
+        if (originalDatabasePath === undefined) {
+          delete process.env["SQLITE_DATABASE_PATH"]
+        } else {
+          process.env["SQLITE_DATABASE_PATH"] = originalDatabasePath
+        }
+        if (originalTestValue === undefined) {
+          delete process.env["RFA_COMMIT_TEST_VALUE"]
+        } else {
+          process.env["RFA_COMMIT_TEST_VALUE"] = originalTestValue
+        }
+        if (originalObservedPath === undefined) {
+          delete process.env["RFA_COMMIT_OBSERVED_PATH"]
+        } else {
+          process.env["RFA_COMMIT_OBSERVED_PATH"] = originalObservedPath
+        }
+        await rm(databaseRoot, { recursive: true, force: true })
+      }
     }))
 
   it("generates publication copy once then commits natively", () =>

@@ -197,6 +197,48 @@ describe("preCommit", () => {
       expect(continues).toBe(0)
     }))
 
+  it("does not expose Harness-owned environment to repository hooks", () =>
+    withTempGit(async (root) => {
+      const databasePath = join(root, "harness.db")
+      const observedEnvironmentPath = join(root, ".pre-commit-environment")
+      await writeFile(databasePath, "live harness data\n")
+      await writeHook(
+        root,
+        [
+          "#!/usr/bin/env bash",
+          "set -eo pipefail",
+          'printf "%s" "$RFA_PRE_COMMIT_TEST_VALUE" > ".pre-commit-environment"',
+          'if [[ -n "$SQLITE_DATABASE_PATH" ]]; then',
+          '  rm -f "$SQLITE_DATABASE_PATH" "$SQLITE_DATABASE_PATH-shm" "$SQLITE_DATABASE_PATH-wal"',
+          "fi",
+          "",
+        ].join("\n"),
+      )
+
+      const originalDatabasePath = process.env["SQLITE_DATABASE_PATH"]
+      const originalTestValue = process.env["RFA_PRE_COMMIT_TEST_VALUE"]
+      process.env["SQLITE_DATABASE_PATH"] = databasePath
+      process.env["RFA_PRE_COMMIT_TEST_VALUE"] = "preserved"
+      try {
+        await run(preCommit(baseContext(root)))
+        expect(await readFile(databasePath, "utf8")).toBe("live harness data\n")
+        expect(await readFile(observedEnvironmentPath, "utf8")).toBe(
+          "preserved",
+        )
+      } finally {
+        if (originalDatabasePath === undefined) {
+          delete process.env["SQLITE_DATABASE_PATH"]
+        } else {
+          process.env["SQLITE_DATABASE_PATH"] = originalDatabasePath
+        }
+        if (originalTestValue === undefined) {
+          delete process.env["RFA_PRE_COMMIT_TEST_VALUE"]
+        } else {
+          process.env["RFA_PRE_COMMIT_TEST_VALUE"] = originalTestValue
+        }
+      }
+    }))
+
   it("asks OpenCode to fix then re-runs until the hook succeeds", () =>
     withTempGit(async (root) => {
       const diagnostic = "format failed: needs fix"

@@ -6,8 +6,8 @@ const isGitHubTokenEnvName = (name: string) =>
 const isGitLabTokenEnvName = (name: string) => name.startsWith("GITLAB_TOKEN")
 
 /**
- * Harness operational names that must never reach an Agent Turn or Interactive
- * Session Continuation. Always stripped, independent of Forge-token options.
+ * Harness operational names that must never reach repository-controlled child
+ * processes. Always stripped, independent of Forge-token options.
  */
 export const HARNESS_OWNED_ENVIRONMENT_NAMES = [
   "SQLITE_DATABASE_PATH",
