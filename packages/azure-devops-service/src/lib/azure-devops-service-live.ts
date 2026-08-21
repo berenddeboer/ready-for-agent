@@ -939,8 +939,17 @@ export const makeAzureDevOpsService = (options: {
    * Load branch policy evaluations (including build validation) and pull
    * request statuses for a pull request, and reduce them to the same
    * terminal-check + aggregate shape Watch/Merge already expect from
-   * GitHub/GitLab. A 404 on either endpoint is treated as an empty list (the
-   * pull request itself already loaded successfully).
+   * GitHub/GitLab.
+   *
+   * Observation failures are never folded into "no checks" (ADR 0061
+   * fail-safe): a missing project GUID fails because branch-policy
+   * evaluation cannot be observed at all, and a policy-endpoint error
+   * (including a 404, which may mean the unverified `artifactId` format is
+   * wrong) propagates instead of masquerading as an empty evaluation list —
+   * otherwise a green status or `acceptNoChecks` could permit merging a
+   * gated pull request that was never observed. Only the statuses endpoint
+   * treats 404 as empty: statuses are optional decorations, and an empty
+   * result there still reduces to the fail-safe `no_checks` aggregate.
    */
   const loadPrChecks = (
     repository: AzureDevOpsRepository,
@@ -955,32 +964,32 @@ export const makeAzureDevOpsService = (options: {
   > =>
     Effect.gen(function* () {
       const projectId = pr.repository?.project?.id?.trim() ?? ""
+      if (projectId === "") {
+        // Without the project GUID the policy-evaluations artifactId cannot
+        // be constructed, so branch policies would be silently unobserved —
+        // fail closed rather than reduce to "no checks" (ADR 0061).
+        return yield* new AzureDevOpsRequestError({
+          message: `Azure DevOps did not identify the project for pull request ${pr.pullRequestId} on ${repository.projectPath}; branch-policy evaluations cannot be observed`,
+        })
+      }
       const evaluations: readonly AzureDevOpsPolicyEvaluation[] =
-        projectId === ""
-          ? []
-          : yield* requestUnknown(
-              identity.organization,
-              policyEvaluationsPath(identity, projectId, pr.pullRequestId),
-              `Failed to load policy evaluations for pull request ${pr.pullRequestId} on ${repository.projectPath}`,
-              { apiVersion: POLICY_EVALUATIONS_API_VERSION },
-            ).pipe(
-              Effect.flatMap((value) =>
-                Effect.try({
-                  try: () => decode(PolicyEvaluationListSchema, value).value,
-                  catch: (cause) =>
-                    requestError(
-                      `Azure DevOps returned invalid policy evaluations for ${repository.projectPath}`,
-                      cause,
-                    ),
-                }),
-              ),
-              Effect.catch((error) =>
-                error instanceof AzureDevOpsRequestError &&
-                error.statusCode === 404
-                  ? Effect.succeed([] as readonly AzureDevOpsPolicyEvaluation[])
-                  : Effect.fail(error),
-              ),
-            )
+        yield* requestUnknown(
+          identity.organization,
+          policyEvaluationsPath(identity, projectId, pr.pullRequestId),
+          `Failed to load policy evaluations for pull request ${pr.pullRequestId} on ${repository.projectPath}`,
+          { apiVersion: POLICY_EVALUATIONS_API_VERSION },
+        ).pipe(
+          Effect.flatMap((value) =>
+            Effect.try({
+              try: () => decode(PolicyEvaluationListSchema, value).value,
+              catch: (cause) =>
+                requestError(
+                  `Azure DevOps returned invalid policy evaluations for ${repository.projectPath}`,
+                  cause,
+                ),
+            }),
+          ),
+        )
       const statuses = yield* requestUnknown(
         identity.organization,
         prStatusesPath(identity, pr.pullRequestId),

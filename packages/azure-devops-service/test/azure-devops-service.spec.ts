@@ -525,9 +525,12 @@ describe("Azure DevOps getPullRequestCheckStatus", () => {
                 isDraft: false,
                 mergeStatus,
                 lastMergeSourceCommit: { commitId: "abc123" },
+                repository: { project: { id: "proj-1" } },
               },
             ],
           },
+          "/acme/widgets/_apis/policy/evaluations?artifactId=vstfs%3A%2F%2F%2FCodeReview%2FCodeReviewId%2Fproj-1%2F42&api-version=7.1-preview":
+            { value: [] },
           "/acme/widgets/_apis/git/repositories/widgets/pullrequests/42/statuses?api-version=7.1":
             { value: [] },
           "/acme/widgets/_apis/git/repositories/widgets/commits/abc123?api-version=7.1":
@@ -553,9 +556,12 @@ describe("Azure DevOps getPullRequestCheckStatus", () => {
               isDraft: false,
               mergeStatus: "conflicts",
               lastMergeSourceCommit: { commitId: "abc123" },
+              repository: { project: { id: "proj-1" } },
             },
           ],
         },
+        "/acme/widgets/_apis/policy/evaluations?artifactId=vstfs%3A%2F%2F%2FCodeReview%2FCodeReviewId%2Fproj-1%2F42&api-version=7.1-preview":
+          { value: [] },
         "/acme/widgets/_apis/git/repositories/widgets/pullrequests/42/statuses?api-version=7.1":
           { value: [] },
         "/acme/widgets/_apis/git/repositories/widgets/commits/abc123?api-version=7.1":
@@ -627,6 +633,79 @@ describe("Azure DevOps getPullRequestCheckStatus", () => {
         { externalId: "azure-status:7", name: "ci/lint", outcome: "red" },
       ])
     }
+  })
+
+  test("fails closed when the policy evaluations endpoint errors (ADR 0061 fail-safe)", async () => {
+    // A policy-endpoint failure (including a 404, which may mean the
+    // unverified artifactId format is wrong) must surface as an error —
+    // never fold into "no checks", which a green status or acceptNoChecks
+    // could then merge on.
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        [activePullRequestListPath]: {
+          value: [
+            {
+              pullRequestId: 42,
+              status: "active",
+              isDraft: false,
+              mergeStatus: "succeeded",
+              lastMergeSourceCommit: { commitId: "abc123" },
+              repository: { project: { id: "proj-1" } },
+            },
+          ],
+        },
+        "/acme/widgets/_apis/policy/evaluations?artifactId=vstfs%3A%2F%2F%2FCodeReview%2FCodeReviewId%2Fproj-1%2F42&api-version=7.1-preview":
+          new Response("not found", { status: 404 }),
+        "/acme/widgets/_apis/git/repositories/widgets/pullrequests/42/statuses?api-version=7.1":
+          {
+            value: [{ id: 7, state: "succeeded", context: { name: "ci" } }],
+          },
+      }),
+    )
+    const result = await Effect.runPromise(
+      service
+        .getPullRequestCheckStatus(repository, "feature")
+        .pipe(Effect.result),
+    )
+    if (!Result.isFailure(result)) {
+      throw new Error("expected the check status observation to fail")
+    }
+    expect(result.failure).toBeInstanceOf(AzureDevOpsRequestError)
+    expect(result.failure.message).toContain("policy evaluations")
+  })
+
+  test("fails closed when the pull request response omits the project GUID", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        [activePullRequestListPath]: {
+          value: [
+            {
+              pullRequestId: 42,
+              status: "active",
+              isDraft: false,
+              mergeStatus: "succeeded",
+              lastMergeSourceCommit: { commitId: "abc123" },
+            },
+          ],
+        },
+        "/acme/widgets/_apis/git/repositories/widgets/pullrequests/42/statuses?api-version=7.1":
+          {
+            value: [{ id: 7, state: "succeeded", context: { name: "ci" } }],
+          },
+      }),
+    )
+    const result = await Effect.runPromise(
+      service
+        .getPullRequestCheckStatus(repository, "feature")
+        .pipe(Effect.result),
+    )
+    if (!Result.isFailure(result)) {
+      throw new Error("expected the check status observation to fail")
+    }
+    expect(result.failure).toBeInstanceOf(AzureDevOpsRequestError)
+    expect(result.failure.message).toContain("cannot be observed")
   })
 
   test("reports succeeded and forces mergeable when the pull request is completed", async () => {
@@ -873,9 +952,12 @@ describe("Azure DevOps mergePullRequest", () => {
               isDraft: false,
               mergeStatus: "succeeded",
               lastMergeSourceCommit: { commitId: "sha-1" },
+              repository: { project: { id: "proj-1" } },
             },
           ],
         },
+        "/acme/widgets/_apis/policy/evaluations?artifactId=vstfs%3A%2F%2F%2FCodeReview%2FCodeReviewId%2Fproj-1%2F42&api-version=7.1-preview":
+          { value: [] },
         "/acme/widgets/_apis/git/repositories/widgets/pullrequests/42/statuses?api-version=7.1":
           { value: [] },
       }),
