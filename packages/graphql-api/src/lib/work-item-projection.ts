@@ -89,7 +89,10 @@ const lifecyclePhase = (step: OperationalLifecycleStep): LifecyclePhase => {
   return step
 }
 
-const lifecyclePhaseLabel = (phase: LifecyclePhase): string => {
+const lifecyclePhaseLabel = (
+  phase: LifecyclePhase,
+  latestStep?: OperationalLifecycleStep,
+): string => {
   switch (phase) {
     case "implement":
       return "Build"
@@ -100,8 +103,11 @@ const lifecyclePhaseLabel = (phase: LifecyclePhase): string => {
     case "resolve_pr_merge_conflict":
       return "Resolve PR merge conflict"
     case "github_status_checks":
-      // Forge-neutral: same Watch phase for GitHub checks and GitLab pipeline jobs.
-      return "Status checks"
+      // Same collapsed phase for Watch and Investigate; Investigate uses a
+      // distinct chip. Forge-neutral for GitHub checks and GitLab jobs.
+      return latestStep === "investigate_pr_status_checks"
+        ? "Addressing status check findings"
+        : "Status checks"
     case "mark_pr_ready_for_review":
       return "Mark PR ready for review"
     case "decide_pr_merge":
@@ -385,7 +391,7 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
               : statusLabel(status)
     const latestLabel = {
       phase: phase.toUpperCase(),
-      label: `${lifecyclePhaseLabel(phase)}: ${outcome}`,
+      label: `${lifecyclePhaseLabel(phase, stepRun.step)}: ${outcome}`,
       status: status.toUpperCase(),
       durationMs: cumulativeExecutionDurationMs(runsByPhase.get(phase) ?? []),
     }
@@ -411,7 +417,6 @@ export const workItemStateLabel = (workItem: WorkItemRecord): string => {
   if (workItemIsTerminal(workItem)) {
     return statusLabel(workItem.state)
   }
-  return lifecyclePhaseLabel(
-    lifecyclePhase(workItem.state as OperationalLifecycleStep),
-  )
+  const step = workItem.state as OperationalLifecycleStep
+  return lifecyclePhaseLabel(lifecyclePhase(step), step)
 }
