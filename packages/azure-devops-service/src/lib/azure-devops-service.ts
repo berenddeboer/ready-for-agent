@@ -25,9 +25,10 @@ export type AzureDevOpsServiceError =
 
 /**
  * Same 18-method surface as {@link @ready-for-agent/gitlab-service#GitLabServiceShape}.
- * Only `countOpenNonDraftPullRequests` still fails with
- * `AzureDevOpsNotImplementedError`; every other method is implemented
- * against the real Azure DevOps REST API (see method-level docs).
+ * 15 methods perform live Azure DevOps REST requests,
+ * `hasCredentials`/`hasAmbientCredentials` are local credential checks, and
+ * only `countOpenNonDraftPullRequests` still fails with
+ * `AzureDevOpsNotImplementedError` (see method-level docs).
  */
 export interface AzureDevOpsServiceShape {
   /**

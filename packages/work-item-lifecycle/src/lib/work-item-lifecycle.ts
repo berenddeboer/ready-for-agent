@@ -3082,12 +3082,6 @@ export const makeWorkItemLifecycleLive = (
                 headRefName,
               )
             case "azure-devops":
-              // Not yet implemented against the real Azure DevOps REST API
-              // (PR/merge state machine, a later ticket); the outer catch
-              // below already treats any lookup failure — including
-              // AzureDevOpsNotImplementedError — as an owned-PR lifecycle
-              // unknown, logging and failing closed to a visible pause
-              // rather than silently clearing it.
               return yield* azureDevOps.getPullRequestLifecycleStatus(
                 repository,
                 headRefName,
