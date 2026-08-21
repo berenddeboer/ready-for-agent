@@ -13,6 +13,7 @@ import {
   WorktreeContextMissingError,
 } from "./install-dependencies-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
+import { repositoryProcessOptions } from "./repository-process-environment.js"
 import { promptUserContentSection } from "./sanitize-prompt-user-content.js"
 
 const STDERR_DIAGNOSTIC_LIMIT = 4_000
@@ -62,6 +63,7 @@ const runInstallCommand = (cwd: string, install: InstallCommand) =>
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const command = ChildProcess.make(install.command, install.args, {
       cwd,
+      ...repositoryProcessOptions(),
       stdin: "ignore",
       stdout: "ignore",
     })

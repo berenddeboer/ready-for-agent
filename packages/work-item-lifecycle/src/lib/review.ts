@@ -11,6 +11,7 @@ import { DbService } from "@ready-for-agent/db-service"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { preCommit } from "./pre-commit.js"
+import { repositoryProcessOptions } from "./repository-process-environment.js"
 import {
   classifyUnparsedResult,
   formatResultLineFailure,
@@ -420,6 +421,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const command = ChildProcess.make("git", args, {
       cwd,
+      ...repositoryProcessOptions(),
       stdin: "ignore",
     })
 

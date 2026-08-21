@@ -1,6 +1,7 @@
 import { Effect, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { GitCommandError } from "./create-worktree-errors.js"
+import { repositoryProcessOptions } from "./repository-process-environment.js"
 
 export type GitRepository = {
   readonly localPath: string
@@ -20,6 +21,7 @@ export const runGit = (
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const fullArgs = [...repositoryPrefix(repository), ...args]
     const command = ChildProcess.make("git", fullArgs, {
+      ...repositoryProcessOptions(),
       stdin: "ignore",
     })
 
@@ -69,6 +71,7 @@ export const gitExitCode = (
     const fullArgs = [...repositoryPrefix(repository), ...args]
     const code = yield* spawner.exitCode(
       ChildProcess.make("git", fullArgs, {
+        ...repositoryProcessOptions(),
         stdin: "ignore",
         stdout: "ignore",
         stderr: "ignore",
