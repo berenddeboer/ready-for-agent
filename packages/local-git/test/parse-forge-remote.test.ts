@@ -166,4 +166,27 @@ describe("parseForgeRemote", () => {
       projectPath: "acme/widgets",
     })
   })
+
+  test("decodes percent-encoded URL remotes exactly once", () => {
+    // URL.pathname preserves percent-encoding; Forge API and clone URL
+    // builders re-encode each segment, so escapes must be decoded here or
+    // names with spaces double-encode (`%2520`). SCP spellings carry raw
+    // names and are unaffected.
+    expectRemote("https://dev.azure.com/acme/My%20Project/_git/My%20Repo", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/My Project/My Repo",
+    })
+    expectRemote("https://gitlab.example/group/my%20app.git", {
+      forge: "gitlab",
+      forgeHost: "gitlab.example",
+      projectPath: "group/my app",
+    })
+    // Malformed escapes stay as-is rather than throwing.
+    expectRemote("https://gitlab.example/group/app%ZZ.git", {
+      forge: "gitlab",
+      forgeHost: "gitlab.example",
+      projectPath: "group/app%ZZ",
+    })
+  })
 })

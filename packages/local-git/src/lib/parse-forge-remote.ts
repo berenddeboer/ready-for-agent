@@ -17,6 +17,20 @@ const parseScpRemote = (
   return { host: match[1], path: match[2] }
 }
 
+/**
+ * Percent-encoding is decoded exactly once here, at the URL boundary:
+ * `URL.pathname` preserves it, and Forge API/clone URL builders re-encode
+ * each Project Path segment, so keeping escapes would double-encode names
+ * containing e.g. spaces (`%2520`). Malformed escapes stay as-is.
+ */
+const decodePercentEncoding = (value: string): string => {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 const parseUrlRemote = (
   value: string,
 ): { readonly host: string; readonly path: string } | undefined => {
@@ -31,7 +45,7 @@ const parseUrlRemote = (
     const includePort =
       (url.protocol === "http:" || url.protocol === "https:") && url.port !== ""
     const host = includePort ? `${url.hostname}:${url.port}` : url.hostname
-    return { host, path: url.pathname }
+    return { host, path: decodePercentEncoding(url.pathname) }
   } catch {
     return undefined
   }
