@@ -1075,6 +1075,29 @@ describe("Azure DevOps ensureIssueCompletedWithSummary", () => {
     ])
   })
 
+  test("fails a schema-invalid Work Item body in the typed error channel, not a defect", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      // Schema-invalid Work Item body (missing the required fields map):
+      // must surface as an AzureDevOpsRequestError failure so callers'
+      // mapError can handle it, never an unhandled thrown defect.
+      (() => json({ id: 1 })) as unknown as typeof fetch,
+    )
+
+    const result = await Effect.runPromise(
+      service
+        .ensureIssueCompletedWithSummary(repository, 1, "wi-1", "All done")
+        .pipe(Effect.result),
+    )
+    if (!Result.isFailure(result)) {
+      throw new Error("expected the close-out to fail")
+    }
+    expect(result.failure).toBeInstanceOf(AzureDevOpsRequestError)
+    expect(result.failure.message).toBe(
+      "Azure DevOps returned an invalid Work Item for acme/widgets#1",
+    )
+  })
+
   test("does not repost when a marked comment already exists", async () => {
     let posted = false
     const service = makeAzureDevOpsServiceFromToken("test-pat", (async (

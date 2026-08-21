@@ -525,6 +525,21 @@ const decode = <S extends { readonly Type: unknown }>(
   value: unknown,
 ): S["Type"] => Schema.decodeUnknownSync(schema)(value)
 
+/**
+ * Decode a response body with failures landing in the typed error channel
+ * instead of being thrown as a defect, so downstream mapError /
+ * Effect.result can observe and handle them (see {@link requestError}).
+ */
+const decodeOrRequestError = <S extends { readonly Type: unknown }>(
+  schema: S & Parameters<typeof Schema.decodeUnknownSync>[0],
+  message: string,
+  value: unknown,
+): Effect.Effect<S["Type"], AzureDevOpsRequestError> =>
+  Effect.try({
+    try: () => decode(schema, value),
+    catch: (cause) => requestError(message, cause),
+  })
+
 const organizationApiBase = (organization: string): string =>
   `https://${AZURE_DEVOPS_FORGE_HOST}/${encodeURIComponent(organization)}`
 
@@ -1021,7 +1036,13 @@ export const makeAzureDevOpsService = (options: {
           repositoryMetaPath(identity),
           `Failed to resolve the default branch for ${repository.projectPath}`,
         ).pipe(
-          Effect.map((value) => decode(RepositoryMetaSchema, value)),
+          Effect.flatMap((value) =>
+            decodeOrRequestError(
+              RepositoryMetaSchema,
+              `Azure DevOps returned invalid repository metadata for ${repository.projectPath}`,
+              value,
+            ),
+          ),
           Effect.mapError((error) =>
             error instanceof AzureDevOpsRequestError
               ? error
@@ -1925,7 +1946,13 @@ export const makeAzureDevOpsService = (options: {
           workItemPath(identity, issueNumber),
           `Failed to load Work Item ${issueRef}`,
         ).pipe(
-          Effect.map((value) => decode(WorkItemStateSchema, value)),
+          Effect.flatMap((value) =>
+            decodeOrRequestError(
+              WorkItemStateSchema,
+              `Azure DevOps returned an invalid Work Item for ${issueRef}`,
+              value,
+            ),
+          ),
           Effect.mapError((error) =>
             error instanceof AzureDevOpsRequestError
               ? error
@@ -1945,7 +1972,13 @@ export const makeAzureDevOpsService = (options: {
           `Failed to list comments for Work Item ${issueRef}`,
           { apiVersion: COMMENTS_API_VERSION },
         ).pipe(
-          Effect.map((value) => decode(CommentListSchema, value).comments),
+          Effect.flatMap((value) =>
+            decodeOrRequestError(
+              CommentListSchema,
+              `Azure DevOps returned invalid comments for ${issueRef}`,
+              value,
+            ).pipe(Effect.map((comments) => comments.comments)),
+          ),
           Effect.mapError((error) =>
             error instanceof AzureDevOpsRequestError
               ? error
@@ -1975,7 +2008,13 @@ export const makeAzureDevOpsService = (options: {
               apiVersion: COMMENTS_API_VERSION,
             },
           ).pipe(
-            Effect.map((value) => decode(CommentSchema, value)),
+            Effect.flatMap((value) =>
+              decodeOrRequestError(
+                CommentSchema,
+                `Azure DevOps returned an invalid comment after posting on ${issueRef}`,
+                value,
+              ),
+            ),
             Effect.mapError((error) =>
               error instanceof AzureDevOpsRequestError
                 ? error
@@ -2056,7 +2095,13 @@ export const makeAzureDevOpsService = (options: {
             ],
           },
         ).pipe(
-          Effect.map((value) => decode(WorkItemStateSchema, value)),
+          Effect.flatMap((value) =>
+            decodeOrRequestError(
+              WorkItemStateSchema,
+              `Azure DevOps returned an invalid Work Item after closing ${issueRef}`,
+              value,
+            ),
+          ),
           Effect.mapError((error) =>
             error instanceof AzureDevOpsRequestError
               ? error
