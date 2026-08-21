@@ -26,9 +26,6 @@
   ],
   "references": [
     {
-      "path": "../../packages/azure-devops-service/tsconfig.lib.json"
-    },
-    {
       "path": "../../packages/work-item-lifecycle/tsconfig.lib.json"
     },
     {
@@ -77,13 +74,13 @@
       "path": "../../packages/db/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/azure-devops-service/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/agent-backend/tsconfig.lib.json"
     },
     {
       "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/azure-devops-service/tsconfig.lib.json"
     }
   ]
 }

@@ -20,7 +20,7 @@ const runWithEnv = <A, E>(
     Effect.gen(function* () {
       const service = yield* AzureDevOpsService
       return yield* use(service)
-    }).pipe(Effect.provide(ambientAzureDevOpsLayer(environment))),
+    }).pipe(Effect.provide(ambientAzureDevOpsLayer({ environment }))),
   )
 
 describe("ambientAzureDevOpsLayer", () => {
@@ -49,24 +49,14 @@ describe("ambientAzureDevOpsLayer", () => {
     ).resolves.toBe(false)
   })
 
-  test("defaults to process.env when no environment is provided", async () => {
-    const previous = process.env.AZURE_DEVOPS_EXT_PAT
-    delete process.env.AZURE_DEVOPS_EXT_PAT
-    try {
-      await expect(
-        Effect.runPromise(
-          Effect.gen(function* () {
-            const service = yield* AzureDevOpsService
-            return yield* service.hasCredentials(repository)
-          }).pipe(Effect.provide(ambientAzureDevOpsLayer())),
-        ),
-      ).resolves.toBe(false)
-    } finally {
-      if (previous === undefined) {
-        delete process.env.AZURE_DEVOPS_EXT_PAT
-      } else {
-        process.env.AZURE_DEVOPS_EXT_PAT = previous
-      }
-    }
+  test("reports no credentials when no environment option is provided", async () => {
+    await expect(
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const service = yield* AzureDevOpsService
+          return yield* service.hasCredentials(repository)
+        }).pipe(Effect.provide(ambientAzureDevOpsLayer({}))),
+      ),
+    ).resolves.toBe(false)
   })
 })
