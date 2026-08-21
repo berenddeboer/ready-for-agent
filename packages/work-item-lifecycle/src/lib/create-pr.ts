@@ -439,13 +439,16 @@ const gitlabHttpsRemoteUrl = (repository: RepositoryRecord): string =>
 
 /**
  * Azure DevOps clone URL: `https://<forge-host>/<org>/<project>/_git/<repo>`.
- * The repo segment is always the project name (one Git repository per
- * project — see `splitAzureDevOpsProjectPath` doc).
+ * The repo segment is the Git repository's own name, which is usually but
+ * not always the project name — see `splitAzureDevOpsProjectPath` doc.
  */
 const azureDevOpsHttpsRemoteUrl = (repository: RepositoryRecord): string => {
   const identity = splitAzureDevOpsProjectPath(repository.projectPath)
-  const project = identity?.project ?? repository.projectPath
-  return `https://${repository.forgeHost}/${repository.projectPath}/_git/${project}`
+  if (identity === null) {
+    return `https://${repository.forgeHost}/${repository.projectPath}/_git/${repository.projectPath}`
+  }
+  const repositoryName = identity.repository ?? identity.project
+  return `https://${repository.forgeHost}/${identity.organization}/${identity.project}/_git/${repositoryName}`
 }
 
 /**

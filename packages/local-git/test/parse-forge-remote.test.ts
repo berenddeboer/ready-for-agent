@@ -128,4 +128,42 @@ describe("parseForgeRemote", () => {
       projectPath: "acme/widgets",
     })
   })
+
+  test("folds a distinct Git repository name into a third Project Path segment", () => {
+    // A project ("Default") containing a differently-named Git repository
+    // ("gantry") — the real-world pattern from issue #15. All three clone
+    // URL spellings must capture `gantry`, not silently assume it equals
+    // the project name.
+    expectRemote("https://dev.azure.com/MSD-Production/Default/_git/gantry", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "MSD-Production/Default/gantry",
+    })
+    expectRemote("git@ssh.dev.azure.com:v3/MSD-Production/Default/gantry", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "MSD-Production/Default/gantry",
+    })
+    expectRemote("https://acme.visualstudio.com/Default/_git/gantry", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/Default/gantry",
+    })
+    expectRemote(
+      "https://acme.visualstudio.com/DefaultCollection/Default/_git/gantry",
+      {
+        forge: "azure-devops",
+        forgeHost: "dev.azure.com",
+        projectPath: "acme/Default/gantry",
+      },
+    )
+  })
+
+  test("keeps the two-segment Project Path when the repo name matches the project name (unchanged common case)", () => {
+    expectRemote("https://dev.azure.com/acme/widgets/_git/widgets", {
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    })
+  })
 })

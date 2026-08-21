@@ -66,6 +66,31 @@ branch's current `objectId` (`GET .../refs?filter=heads/<branch>`), since
 Azure DevOps's ref-update API requires the caller-supplied `oldObjectId` to
 match the current tip.
 
+**The Git repository name is not always the project name (issue #15).**
+Azure DevOps Pull Requests, refs, and commits are REST resources scoped by
+Git repository (`_apis/git/repositories/{repositoryId}`), a distinct concept
+from the project (`_apis/projects/{project}`) that can contain several
+differently-named Git repositories — a common real-world pattern (e.g. one
+shared "Default" project holding many distinctly-named repos). Rather than
+add a new field or a DB migration, Project Path folds the Git repository
+name in as an optional third segment — `<organization>/<project>` (common
+case, repository name equals project name) or
+`<organization>/<project>/<repository>` (the two names differ) — mirroring
+how GitLab already folds a variable-depth namespace into its own Project
+Path. `splitAzureDevOpsProjectPath` parses either shape;
+`azureDevOpsRepositoryName` resolves the `{repositoryId}` path segment
+(explicit repository segment if present, else the project name, preserving
+existing behavior for every already-persisted two-segment Project Path).
+`parseAzureDevOpsRemote` captures the repo segment already present in every
+clone URL shape (`_git/{repo}` / SCP `v3/{org}/{project}/{repo}`) instead of
+discarding it, and only emits the third segment when it differs from the
+project name so existing matching-name Repositories keep their exact
+Project Path spelling. `verifyProject` remains project-scoped only (it
+canonicalizes org/project casing via `GET _apis/projects/{project}`) and
+passes an explicit repository segment through unvalidated — it does not
+call the Git-repository-scoped endpoints, so it cannot itself confirm the
+repository exists or canonicalize its casing.
+
 ## Considered Options
 
 Using only `.../pullrequests/{id}/statuses` and skipping the policy
@@ -109,3 +134,9 @@ correct than the literal alone when it succeeds.
   whichever state has category `Completed` (typically "Done"), not a
   hardcoded "Closed" — this is a deliberate improvement over always writing
   the literal.
+- A Repository whose Git repository name differs from its Azure DevOps
+  project name (Project Path's optional third segment) works through the
+  full PR lifecycle (create, find-by-branch, mark ready, merge, close,
+  delete branch) without any REST path assuming the two strings match; a
+  Repository where they match keeps its existing two-segment Project Path
+  and REST paths unchanged.

@@ -50,42 +50,49 @@ const pathSegments = (rawPath: string): string[] =>
     .map((segment) => segment.replace(/\.git$/i, ""))
 
 /**
- * Match an Azure DevOps org/project identity from a clone remote's host and
- * path. Handles the canonical `dev.azure.com` host (HTTPS `/{org}/{project}/_git/{repo}`
- * and the `ssh.dev.azure.com` SCP form `v3/{org}/{project}/{repo}`) and legacy
- * per-org `*.visualstudio.com` hosts (`/{project}/_git/{repo}`, optionally
- * under `/DefaultCollection/`). Always resolves to the canonical
- * `dev.azure.com` Forge Host so both spellings share one Repository identity
- * — the ADO analogue of preferring GitLab's canonical `web_url` host over the
- * SSH/remote guess.
+ * Match an Azure DevOps org/project/repository identity from a clone
+ * remote's host and path. Handles the canonical `dev.azure.com` host (HTTPS
+ * `/{org}/{project}/_git/{repo}` and the `ssh.dev.azure.com` SCP form
+ * `v3/{org}/{project}/{repo}`) and legacy per-org `*.visualstudio.com` hosts
+ * (`/{project}/_git/{repo}`, optionally under `/DefaultCollection/`).
+ * Always resolves to the canonical `dev.azure.com` Forge Host so both
+ * spellings share one Repository identity — the ADO analogue of preferring
+ * GitLab's canonical `web_url` host over the SSH/remote guess. The `repo`
+ * segment (a project can contain multiple, differently-named Git
+ * repositories) is captured here rather than discarded, since it's not
+ * always the same string as `project`.
  */
 const parseAzureDevOpsRemote = (
   hostNoPort: string,
   rawPath: string,
-): { readonly org: string; readonly project: string } | undefined => {
+):
+  | { readonly org: string; readonly project: string; readonly repo: string }
+  | undefined => {
   if (hostNoPort === AZURE_DEVOPS_SSH_HOST) {
     const segments = pathSegments(rawPath)
-    const [v3, org, project] = segments
+    const [v3, org, project, repo] = segments
     if (
       segments.length >= 4 &&
       v3?.toLowerCase() === "v3" &&
       org !== undefined &&
-      project !== undefined
+      project !== undefined &&
+      repo !== undefined
     ) {
-      return { org, project }
+      return { org, project, repo }
     }
     return undefined
   }
   if (hostNoPort === AZURE_DEVOPS_CANONICAL_HOST) {
     const segments = pathSegments(rawPath)
-    const [org, project, gitSegment] = segments
+    const [org, project, gitSegment, repo] = segments
     if (
       segments.length >= 4 &&
       org !== undefined &&
       project !== undefined &&
-      gitSegment?.toLowerCase() === "_git"
+      gitSegment?.toLowerCase() === "_git" &&
+      repo !== undefined
     ) {
-      return { org, project }
+      return { org, project, repo }
     }
     return undefined
   }
@@ -97,13 +104,14 @@ const parseAzureDevOpsRemote = (
       segments[0]?.toLowerCase() === "defaultcollection"
         ? segments.slice(1)
         : segments
-    const [project, gitSegment] = withoutCollection
+    const [project, gitSegment, repo] = withoutCollection
     if (
       withoutCollection.length >= 3 &&
       project !== undefined &&
-      gitSegment?.toLowerCase() === "_git"
+      gitSegment?.toLowerCase() === "_git" &&
+      repo !== undefined
     ) {
-      return { org, project }
+      return { org, project, repo }
     }
     return undefined
   }
@@ -138,10 +146,17 @@ export const parseForgeRemote = (
 
   const azureDevOps = parseAzureDevOpsRemote(hostNoPort, parsed.path)
   if (azureDevOps !== undefined) {
+    // Fold the repo segment into Project Path only when it differs from the
+    // project name, keeping the common case's two-segment spelling
+    // unchanged (see AzureDevOpsRepository.projectPath doc).
+    const projectPath =
+      azureDevOps.repo === azureDevOps.project
+        ? `${azureDevOps.org}/${azureDevOps.project}`
+        : `${azureDevOps.org}/${azureDevOps.project}/${azureDevOps.repo}`
     return Option.some({
       forge: "azure-devops",
       forgeHost: AZURE_DEVOPS_CANONICAL_HOST,
-      projectPath: `${azureDevOps.org}/${azureDevOps.project}`,
+      projectPath,
     })
   }
 
