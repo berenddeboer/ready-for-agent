@@ -580,7 +580,7 @@ const workItemTypeStatesPath = (
  * `vstfs:///CodeReview/CodeReviewId/{projectId}/{pullRequestId}`, the artifact
  * id policy evaluations are scoped to. This exact format, and the
  * `repository.project.id` plumbing it depends on (see {@link loadPrChecks}),
- * are unverified against a live Azure DevOps instance — see ADR 0060's
+ * are unverified against a live Azure DevOps instance — see ADR 0061's
  * "Considered Options" for the known risk and its fail-safe failure mode.
  */
 const codeReviewArtifactId = (
