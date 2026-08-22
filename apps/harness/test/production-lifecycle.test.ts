@@ -163,6 +163,32 @@ describe("production lifecycle process behavior", () => {
     expect(disposed).toEqual(["server", "application"])
   })
 
+  test("fails fast without starting Sidecar/application/HTTP when migrations reject", async () => {
+    await expect(
+      startProductionLifecycle({
+        ...baseOptions(),
+        applyMigrations: async () => {
+          throw new Error(
+            "This build of ready-for-agent is older than the database it is pointed at: " +
+              "the database has 1 migration(s) this binary does not recognize " +
+              "(20260819000000_future_migration), but this binary only knows about 28 migration(s). " +
+              "Upgrade or reinstall ready-for-agent, or point it at a fresh database.",
+          )
+        },
+        createApplication: async () => {
+          throw new Error("should not create application")
+        },
+      }),
+    ).rejects.toThrow(
+      "This build of ready-for-agent is older than the database",
+    )
+
+    // No downstream lifecycle events fired: startup failed before the Scope,
+    // Sidecar, application, or HTTP server were ever created (no retry loop).
+    expect(events).toEqual([])
+    expect(applicationEnvs).toEqual([])
+  })
+
   test("readiness log includes non-placeholder version and listening URL", async () => {
     const handle = await startProductionLifecycle({
       ...baseOptions(),
