@@ -1,0 +1,3 @@
+interface:
+  display_name: "Ready for Agent"
+  short_description: "Operate the Harness and report Work Item progress"
