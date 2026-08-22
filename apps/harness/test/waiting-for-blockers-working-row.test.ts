@@ -56,6 +56,20 @@ describe("Waiting for blockers Working-row polish", () => {
     expect(pauseFn).toContain("interruptWorkItem")
   })
 
+  test("Pause control warns that pausing does not stop a running Step Run", () => {
+    // Issue #26: Pause Work Item only blocks the next Step Run; it does not
+    // interrupt one already running. Surface that on the button itself.
+    const source = homeSource()
+    const pauseFnStart = source.indexOf("function WorkItemPauseButton(")
+    const pauseFnEnd = source.indexOf(
+      "function WorkItemLifecycleStatus(",
+      pauseFnStart,
+    )
+    const pauseFn = source.slice(pauseFnStart, pauseFnEnd)
+    expect(pauseFn).toContain('control.kind === "pause"')
+    expect(pauseFn).toContain("does not stop the running Step Run")
+  })
+
   test("held Working row offers Reset and withholds Retry", () => {
     const source = homeSource()
     const lifecycleStart = source.indexOf("function WorkItemLifecycleStatus(")
