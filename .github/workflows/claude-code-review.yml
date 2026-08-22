@@ -1,0 +1,61 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    # Optional: Only run on specific file changes
+    # paths:
+    #   - "src/**/*.ts"
+    #   - "src/**/*.tsx"
+    #   - "src/**/*.js"
+    #   - "src/**/*.jsx"
+
+jobs:
+  claude-review:
+    timeout-minutes: 25
+    # Automatic reviews only for trusted members (owner, collaborators,
+    # members). First-time contributors and outside collaborators must ask
+    # for a review manually with `@claude review`.
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'berenddeboer' &&
+      contains('OWNER,MEMBER,COLLABORATOR', github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    env:
+      # Headless runs exit when the parent finishes, terminating background
+      # review agents before their findings can be aggregated.
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      issues: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout pull request revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@9d7150bc8a3dae8149739a88019d192b579ad90c # v1.0.193
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Automatic PR reviews often run as github-actions[bot] (e.g. after
+          # workflow re-runs). Explicit allowlist — not '*' — so only this
+          # trusted platform bot can trigger the review action.
+          allowed_bots: github-actions
+          track_progress: true
+          additional_permissions: |
+            actions: read
+          # The action restores .claude/ from the trusted base before Claude
+          # starts, so this resolves to the repository's reviewed local skill.
+          prompt: '/code-review origin/${{ github.event.pull_request.base.ref }}'
+          # Permit only the local review skill, its required sub-agent, and
+          # read-only repository inspection commands.
+          claude_args: |
+            --allowedTools "Read,Glob,Grep,Skill(code-review),Agent(general-purpose),Bash(ls:*),Bash(cat:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git rev-parse:*),Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),mcp__github_inline_comment__create_inline_comment"
+            --disallowedTools "Write,Edit,NotebookEdit,WebFetch,WebSearch"
