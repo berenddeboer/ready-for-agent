@@ -1926,7 +1926,7 @@ rfa:ReviewFixRound
 rfa:RepairFallback
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Repair Fallback"@en ;
-  skos:definition "The shared recovery behavior a Lifecycle Step uses when its native, harness-owned attempt does not establish the step's postcondition: the step continues the Work Item's canonical Session for one bounded Agent Turn asking the agent to finish the step, then independently re-checks the postcondition rather than trusting that Agent Turn's own report. Commit and Create PR are its two current users, each supplying its own native attempt, postcondition check, agent prompt, and any step-specific pre-check such as Create PR's Forge credential resolution."@en ;
+  skos:definition "The shared recovery behavior a Lifecycle Step uses when its native, harness-owned attempt does not establish the step's postcondition: the step continues the Work Item's canonical Session for one bounded Agent Turn asking the agent to finish the step, then independently re-checks the postcondition rather than trusting that Agent Turn's own report. Commit, Create PR, and Mark PR Ready for Review are its current users, each supplying its own native attempt, postcondition check, agent prompt, and any step-specific pre-check such as Create PR's Forge credential resolution."@en ;
   skos:hiddenLabel "Fallback"@en, "recovery loop"@en, "Retry"@en .
 
 [

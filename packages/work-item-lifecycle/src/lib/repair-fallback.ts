@@ -84,8 +84,8 @@ export interface RepairFallbackConfig<V, Prepared, E, R> {
  * the step completes natively. Otherwise it continues the Work Item's Agent
  * Session for exactly one Agent Turn asking the agent to finish the step,
  * then independently re-checks the postcondition — the Agent Turn's own
- * report is never trusted. Commit and Create PR are its two current callers;
- * see ADR-0011 and ADR-0012.
+ * report is never trusted. Commit, Create PR, and Mark PR Ready for Review
+ * are its current callers; see ADR-0011, ADR-0012, and ADR-0014.
  */
 export const repairFallback = <V, Prepared, E, R>(
   config: RepairFallbackConfig<V, Prepared, E, R>,

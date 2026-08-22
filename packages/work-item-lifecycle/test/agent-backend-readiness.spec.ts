@@ -62,7 +62,7 @@ const successfulSteps: LifecycleStepsShape = {
   resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
   investigatePrStatusChecks: () =>
     Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-  markPrReadyForReview: () => Effect.void,
+  markPrReadyForReview: () => Effect.succeed({ completion: "native" as const }),
   decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
   mergePr: () => Effect.succeed({ _tag: "merged" }),
   closeIssue: () => Effect.void,
