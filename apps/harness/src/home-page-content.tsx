@@ -3462,7 +3462,13 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
         pause.mutate()
       }}
       aria-label={pending ? `${label} in progress` : label}
-      title={failed ? `Could not ${label.toLowerCase()}. Try again.` : label}
+      title={
+        failed
+          ? `Could not ${label.toLowerCase()}. Try again.`
+          : control.kind === "pause"
+            ? `${label} — does not stop the running Step Run. Interrupt after pausing before editing the worktree.`
+            : label
+      }
     >
       {pending ? (
         <svg
