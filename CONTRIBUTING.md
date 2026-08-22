@@ -158,6 +158,14 @@ bunx nx run harness:start
 `SQLITE_DATABASE_PATH` always overrides. Fully stop the harness before opening
 the file with external write tooling (single-process WAL).
 
+## Manually editing a Work Item's worktree
+
+Resolving a merge conflict or applying a hotfix by hand in a Work Item's
+worktree while the harness could still resume driving it? Follow
+[docs/manual-worktree-edits.md](docs/manual-worktree-edits.md) first: check
+`hasActiveStepRun`, Pause Work Item, and Interrupt Work Item if a Step Run is
+still running, before you start editing.
+
 # Architecture
 
 This repo is an [Nx monorepo](https://nx.dev/). Your agent will know

@@ -138,7 +138,8 @@ describe("WorkItemLifecycle", () => {
     resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
     investigatePrStatusChecks: () =>
       Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-    markPrReadyForReview: () => Effect.void,
+    markPrReadyForReview: () =>
+      Effect.succeed({ completion: "native" as const }),
     decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
     mergePr: () => Effect.succeed({ _tag: "merged" }),
     closeIssue: () => Effect.void,
@@ -3301,7 +3302,7 @@ describe("WorkItemLifecycle", () => {
             }),
           markPrReadyForReview: () => {
             prIsDraft = false
-            return Effect.void
+            return Effect.succeed({ completion: "native" as const })
           },
           mergePr: () => {
             mergeCalls += 1
@@ -3392,7 +3393,7 @@ describe("WorkItemLifecycle", () => {
             }),
           markPrReadyForReview: () => {
             prIsDraft = false
-            return Effect.void
+            return Effect.succeed({ completion: "native" as const })
           },
           mergePr: () => {
             mergeCalls += 1
@@ -3441,6 +3442,82 @@ describe("WorkItemLifecycle", () => {
                   )
                 }
                 expect(mergeCalls).toBe(0)
+              }),
+              makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+            ),
+          ),
+        )
+      })
+
+      it("does not attribute a reobserved closed pull request to how Mark PR Ready for Review itself completed", () => {
+        let prIsDraft = true
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () =>
+            Effect.succeed({
+              _tag: prIsDraft ? ("no_checks" as const) : ("closed" as const),
+              createdAt: new Date(0),
+              headSha: "closed-after-mark-ready",
+              headPushedAt: new Date(0),
+              isDraft: prIsDraft,
+            }),
+          // Native mark-ready needed the shared Repair Fallback's Agent Turn
+          // this time; the reobserved "closed" branch below must still carry
+          // its own ontology-declared reason rather than "agent_fallback".
+          markPrReadyForReview: () => {
+            prIsDraft = false
+            return Effect.succeed({ completion: "agent_fallback" as const })
+          },
+        }
+
+        return Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                yield* TestClock.setTime(1_000_000)
+                const lifecycle = yield* WorkItemLifecycle
+                const { repository, issue } = yield* seedActionableIssue
+                yield* enableRepositoryAutoMerge(repository, {
+                  waitForReadyForReviewChecks: false,
+                })
+                yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+
+                for (let index = 0; index < 8; index += 1) {
+                  yield* TestClock.adjust(1_000)
+                  yield* claimAndRunPending
+                }
+                yield* TestClock.adjust(1_000)
+                const afterDraftWatch = yield* claimAndRunPending
+                expect(afterDraftWatch._tag).toBe("processed")
+                if (afterDraftWatch._tag === "processed") {
+                  expect(afterDraftWatch.workItem.state).toBe(
+                    "mark_pr_ready_for_review",
+                  )
+                }
+
+                const afterMarkReady = yield* claimAndRunPending
+                expect(afterMarkReady._tag).toBe("processed")
+                if (afterMarkReady._tag === "processed") {
+                  expect(afterMarkReady.workItem.state).toBe("needs_human")
+                  expect(afterMarkReady.workItem.failureMessage).toBe(
+                    "The pull request was closed before its status checks succeeded",
+                  )
+                  const markReadyStepRun =
+                    afterMarkReady.workItem.stepRuns.at(-1)
+                  expect(markReadyStepRun).toMatchObject({
+                    step: "mark_pr_ready_for_review",
+                    status: "succeeded",
+                  })
+                  // Reobserving a closed pull request is not "how the native
+                  // mark-ready mutation completed" — it must not be stamped
+                  // native/agent_fallback (ontology: HandlerFailedReason).
+                  expect(markReadyStepRun?.reasonCode).not.toBe(
+                    STEP_RUN_REASON.native,
+                  )
+                  expect(markReadyStepRun?.reasonCode).not.toBe(
+                    STEP_RUN_REASON.agentFallback,
+                  )
+                }
               }),
               makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
             ),
@@ -4263,7 +4340,7 @@ describe("WorkItemLifecycle", () => {
         markPrReadyForReview: () => {
           markReadyCalls += 1
           prIsDraft = false
-          return Effect.void
+          return Effect.succeed({ completion: "native" as const })
         },
       }
 
@@ -4360,7 +4437,7 @@ describe("WorkItemLifecycle", () => {
         markPrReadyForReview: () => {
           markReadyCalls += 1
           prIsDraft = false
-          return Effect.void
+          return Effect.succeed({ completion: "native" as const })
         },
       }
 
@@ -4748,7 +4825,7 @@ describe("WorkItemLifecycle", () => {
         markPrReadyForReview: () => {
           markReadyCalls += 1
           prIsDraft = false
-          return Effect.void
+          return Effect.succeed({ completion: "native" as const })
         },
       }
 
@@ -5386,7 +5463,7 @@ describe("WorkItemLifecycle", () => {
         markPrReadyForReview: () => {
           markReadyCalls += 1
           prIsDraft = false
-          return Effect.void
+          return Effect.succeed({ completion: "native" as const })
         },
       }
 
@@ -6636,7 +6713,7 @@ describe("WorkItemLifecycle", () => {
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
         markPrReadyForReview: (context) => {
           seen.push(context)
-          return Effect.void
+          return Effect.succeed({ completion: "native" as const })
         },
         decidePrMerge: (context) => {
           seen.push(context)

@@ -1,3 +1,10 @@
+## Communication style
+
+Talk to the user like a product owner: decisions, outcomes, and trade-offs, not
+implementation mechanics. Skip file paths, function names, and generated-code
+internals unless the user asks for them directly — save that detail for the
+code and commit messages, not the conversation.
+
 ## Agent skills
 
 Skill content lives under `.agents/skills/<name>/SKILL.md` — the shared,

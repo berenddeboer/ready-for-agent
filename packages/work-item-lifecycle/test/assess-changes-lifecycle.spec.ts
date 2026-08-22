@@ -105,7 +105,8 @@ describe("Assess Changes lifecycle routes", () => {
         resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
         investigatePrStatusChecks: () =>
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-        markPrReadyForReview: () => Effect.void,
+        markPrReadyForReview: () =>
+          Effect.succeed({ completion: "native" as const }),
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
         mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => Effect.void,
@@ -266,7 +267,8 @@ describe("Assess Changes lifecycle routes", () => {
         resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
         investigatePrStatusChecks: () =>
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-        markPrReadyForReview: () => Effect.void,
+        markPrReadyForReview: () =>
+          Effect.succeed({ completion: "native" as const }),
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
         mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => Effect.void,
@@ -397,7 +399,8 @@ describe("Assess Changes lifecycle routes", () => {
         resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
         investigatePrStatusChecks: () =>
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-        markPrReadyForReview: () => Effect.void,
+        markPrReadyForReview: () =>
+          Effect.succeed({ completion: "native" as const }),
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
         mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => Effect.void,
@@ -555,7 +558,8 @@ describe("Assess Changes lifecycle routes", () => {
         resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
         investigatePrStatusChecks: () =>
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-        markPrReadyForReview: () => Effect.void,
+        markPrReadyForReview: () =>
+          Effect.succeed({ completion: "native" as const }),
         decidePrMerge: () => {
           decidePrMergeCalls += 1
           return Effect.succeed({ _tag: "clanker_merge" })
@@ -1002,7 +1006,8 @@ describe("Assess Changes lifecycle routes", () => {
           resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
           investigatePrStatusChecks: () =>
             Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-          markPrReadyForReview: () => Effect.void,
+          markPrReadyForReview: () =>
+            Effect.succeed({ completion: "native" as const }),
           decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
           mergePr: () => Effect.succeed({ _tag: "merged" }),
           closeIssue: () => Effect.die("close issue must not run"),
@@ -1143,7 +1148,8 @@ describe("Assess Changes lifecycle routes", () => {
         resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
         investigatePrStatusChecks: () =>
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-        markPrReadyForReview: () => Effect.void,
+        markPrReadyForReview: () =>
+          Effect.succeed({ completion: "native" as const }),
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
         mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => Effect.die("close issue must not run"),
@@ -1277,7 +1283,8 @@ describe("Assess Changes lifecycle routes", () => {
         resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
         investigatePrStatusChecks: () =>
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-        markPrReadyForReview: () => Effect.void,
+        markPrReadyForReview: () =>
+          Effect.succeed({ completion: "native" as const }),
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
         mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => {
@@ -1414,7 +1421,8 @@ describe("Assess Changes lifecycle routes", () => {
         resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
         investigatePrStatusChecks: () =>
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-        markPrReadyForReview: () => Effect.void,
+        markPrReadyForReview: () =>
+          Effect.succeed({ completion: "native" as const }),
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
         mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => {
@@ -1579,7 +1587,8 @@ describe("Assess Changes lifecycle routes", () => {
         resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
         investigatePrStatusChecks: () =>
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-        markPrReadyForReview: () => Effect.void,
+        markPrReadyForReview: () =>
+          Effect.succeed({ completion: "native" as const }),
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
         mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: (context) =>

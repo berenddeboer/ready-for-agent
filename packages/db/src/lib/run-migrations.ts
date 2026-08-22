@@ -26,6 +26,7 @@ const rawSql = (query: string) => Object.assign([query], { raw: [query] })
 
 const MigrationAppliedRow = Schema.Struct({
   hash: Schema.String,
+  name: Schema.NullOr(Schema.String),
 })
 
 export type MigrationSource = {
@@ -80,6 +81,42 @@ export class MigrationReadError extends Schema.TaggedErrorClass<MigrationReadErr
   { cause: Schema.Defect() },
 ) {}
 
+/** Singular/plural "N migration(s)" phrasing, matching {@link migrationsAppliedLogMessage}. */
+const pluralizeMigrationCount = (count: number): string =>
+  count === 1 ? "1 migration" : `${count} migrations`
+
+/**
+ * The database has migrations recorded in `__drizzle_migrations` that this
+ * binary's embedded/on-disk migration set does not know about — i.e. the
+ * running binary is *older* than the database it is pointed at (see
+ * ready-for-agent#18/#21). Continuing would otherwise re-run the same failing
+ * queries against a schema this binary doesn't understand, forever.
+ */
+export class StaleBinaryMigrationError extends Schema.TaggedErrorClass<StaleBinaryMigrationError>()(
+  "StaleBinaryMigrationError",
+  {
+    /** Names (or hashes, if unnamed) of DB migrations this binary doesn't recognize. */
+    unrecognizedMigrationNames: Schema.Array(Schema.String),
+    /** How many migrations this binary's embedded/on-disk set knows about. */
+    knownMigrationCount: Schema.Finite,
+  },
+) {
+  override get message() {
+    const names = this.unrecognizedMigrationNames.join(", ")
+    const unrecognizedCount = pluralizeMigrationCount(
+      this.unrecognizedMigrationNames.length,
+    )
+    const knownCount = pluralizeMigrationCount(this.knownMigrationCount)
+    return (
+      `This build of ready-for-agent is older than the database it is pointed at: ` +
+      `the database has ${unrecognizedCount} this binary does not recognize (${names}), ` +
+      `but this binary only knows about ${knownCount}. ` +
+      `Upgrade or reinstall ready-for-agent to a version built after those migrations, ` +
+      `or point it at a fresh database (e.g. set SQLITE_DATABASE_PATH to a new file).`
+    )
+  }
+}
+
 const toMigrationRecords = (
   sources: ReadonlyArray<MigrationSource>,
 ): ReadonlyArray<MigrationRecord> =>
@@ -128,12 +165,30 @@ const applyMigrationRecords = Effect.fn("applyMigrationRecords")(function* (
     )
   `
 
-  const appliedRows = yield* sql`SELECT hash FROM __drizzle_migrations`.pipe(
-    Effect.flatMap(
-      Schema.decodeUnknownEffect(Schema.Array(MigrationAppliedRow)),
-    ),
-  )
+  const appliedRows =
+    yield* sql`SELECT hash, name FROM __drizzle_migrations`.pipe(
+      Effect.flatMap(
+        Schema.decodeUnknownEffect(Schema.Array(MigrationAppliedRow)),
+      ),
+    )
   const appliedHashes = new Set(appliedRows.map((row) => row.hash))
+
+  // Fail fast, before applying anything, if the database was migrated by a
+  // build that knows about migrations this binary's embedded/on-disk set
+  // doesn't (stale binary vs. newer database).
+  const knownHashes = new Set(migrations.map((migration) => migration.hash))
+  const unrecognizedRows = appliedRows.filter(
+    (row) => !knownHashes.has(row.hash),
+  )
+  if (unrecognizedRows.length > 0) {
+    return yield* new StaleBinaryMigrationError({
+      unrecognizedMigrationNames: unrecognizedRows.map(
+        (row) => row.name ?? row.hash,
+      ),
+      knownMigrationCount: migrations.length,
+    })
+  }
+
   const newlyApplied: Array<AppliedMigration> = []
 
   for (const migration of migrations) {

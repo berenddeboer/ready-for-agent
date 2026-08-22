@@ -141,6 +141,67 @@ describe("runMigrations", () => {
     )
   })
 
+  it("fails fast when the database has migrations this binary doesn't recognize", async () => {
+    // Simulates a stale binary: the DB (migrated by a newer build) has two
+    // recorded migrations, but this binary's embedded/on-disk set only knows
+    // about the first one (a strict subset of what's recorded).
+    const knownSql = "CREATE TABLE known_table (id integer);"
+    const knownHash = createHash("sha256").update(knownSql).digest("hex")
+    const unknownSql = "CREATE TABLE unrecognized_table (id integer);"
+    const unknownHash = createHash("sha256").update(unknownSql).digest("hex")
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`
+          CREATE TABLE __drizzle_migrations (
+            id INTEGER PRIMARY KEY,
+            hash text NOT NULL,
+            created_at numeric,
+            name text,
+            applied_at TEXT
+          )
+        `
+        yield* sql`
+          INSERT INTO __drizzle_migrations (hash, created_at, name, applied_at)
+          VALUES
+            (${knownHash}, ${20260101000000}, ${"20260101000000_known"}, ${"2026-01-01T00:00:00.000Z"}),
+            (${unknownHash}, ${20260102000000}, ${"20260102000000_unrecognized"}, ${"2026-01-02T00:00:00.000Z"})
+        `
+
+        const error = yield* runMigrationsFromSources([
+          { name: "20260101000000_known", sql: knownSql },
+        ]).pipe(Effect.flip)
+
+        expect(error._tag).toBe("StaleBinaryMigrationError")
+        expect(error.unrecognizedMigrationNames).toEqual([
+          "20260102000000_unrecognized",
+        ])
+        expect(error.knownMigrationCount).toBe(1)
+        expect(error.message).toContain(
+          "This build of ready-for-agent is older than the database",
+        )
+        expect(error.message).toContain("20260102000000_unrecognized")
+        // Singular counts read "1 migration", not "1 migration(s)".
+        expect(error.message).toBe(
+          "This build of ready-for-agent is older than the database it is pointed at: " +
+            "the database has 1 migration this binary does not recognize (20260102000000_unrecognized), " +
+            "but this binary only knows about 1 migration. " +
+            "Upgrade or reinstall ready-for-agent to a version built after those migrations, " +
+            "or point it at a fresh database (e.g. set SQLITE_DATABASE_PATH to a new file).",
+        )
+
+        // Nothing else should have run: the known migration was not (re-)applied
+        // and no other table was created before the fail-fast check ran.
+        const tables = yield* sql`
+          SELECT name FROM sqlite_master
+          WHERE type = 'table' AND name IN ('known_table', 'unrecognized_table')
+        `
+        expect(tables).toEqual([])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
   it("rolls back all statements when a migration fails", async () => {
     const folder = await migrationFolder(
       "20260714120000_broken",

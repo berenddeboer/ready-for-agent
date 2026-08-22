@@ -30,7 +30,7 @@ describe("generated lifecycle state", () => {
     expect(WorkItemState.literals).toEqual(WORK_ITEM_STATES)
   })
 
-  it("preserves the previous agent-free Lifecycle Step classification", () => {
+  it("emits the current agent-free Lifecycle Step classification", () => {
     expect(LIFECYCLE_STEP_AGENT_FREE).toEqual({
       assess_changes: false,
       close_issue: true,
@@ -42,7 +42,7 @@ describe("generated lifecycle state", () => {
       install_dependencies: false,
       investigate_pr_status_checks: false,
       local_cleanup: true,
-      mark_pr_ready_for_review: true,
+      mark_pr_ready_for_review: false,
       merge_pr: true,
       pre_commit: false,
       resolve_pr_merge_conflict: false,

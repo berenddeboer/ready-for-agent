@@ -1923,10 +1923,40 @@ rfa:ReviewFixRound
   rfa:avoidanceRationale "CONTEXT.md prefers Review Fix Round for this concept."@en ;
 ] .
 
+rfa:RepairFallback
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Repair Fallback"@en ;
+  skos:definition "The shared recovery behavior a Lifecycle Step uses when its native, harness-owned attempt does not establish the step's postcondition: the step continues the Work Item's canonical Session for one bounded Agent Turn asking the agent to finish the step, then independently re-checks the postcondition rather than trusting that Agent Turn's own report. Commit, Create PR, and Mark PR Ready for Review are its current users, each supplying its own native attempt, postcondition check, agent prompt, and any step-specific pre-check such as Create PR's Forge credential resolution."@en ;
+  skos:hiddenLabel "Fallback"@en, "recovery loop"@en, "Retry"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RepairFallback ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Fallback"@en ;
+  rfa:avoidanceRationale "ambiguous without Repair"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RepairFallback ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "recovery loop"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Repair Fallback for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RepairFallback ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Retry"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Repair Fallback for this concept."@en ;
+] .
+
 rfa:Commit
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Commit"@en ;
-  skos:definition "The Lifecycle Step after successful Review that creates the local git commit for the Work Item's changes. Before the first native mutation it continues the Work Item Session for one publication-copy Agent Turn (unless canonical copy is already persisted or can be seeded from an existing commit) and one format-correction turn if needed; if both are malformed it persists harness fallback copy from the Issue identity rather than failing. After a valid agent copy is normalized and before it is persisted, local markdown image links that resolve inside the Work Item attachment directory are rewritten to GitHub user-attachment URLs; that post-rewrite body is the canonical publication copy. It then stages and commits with that copy; it does not implement Review Findings or other rework. The harness attempts a native git commit with the persisted copy and continues the Session only as a repair fallback when the native path does not establish the postcondition; repair may re-seed copy from the actual final commit message."@en ;
+  skos:definition "The Lifecycle Step after successful Review that creates the local git commit for the Work Item's changes. Before the first native mutation it continues the Work Item Session for one publication-copy Agent Turn (unless canonical copy is already persisted or can be seeded from an existing commit) and one format-correction turn if needed; if both are malformed it persists harness fallback copy from the Issue identity rather than failing. After a valid agent copy is normalized and before it is persisted, local markdown image links that resolve inside the Work Item attachment directory are rewritten to GitHub user-attachment URLs; that post-rewrite body is the canonical publication copy. It then stages and commits with that copy; it does not implement Review Findings or other rework. The harness attempts a native git commit with the persisted copy and uses Repair Fallback only when the native path does not establish the postcondition; repair may re-seed copy from the actual final commit message."@en ;
   skos:hiddenLabel "Create PR"@en, "git commit hook"@en, "Pre-Commit"@en .
 
 [

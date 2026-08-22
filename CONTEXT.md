@@ -295,8 +295,12 @@ _Avoid_: Clean review, deferred finding, fixed finding
 One build-model pass that interprets Review Findings and changes the worktree, possibly while deferring other findings, followed by Pre-Commit and either a Review Rerun Assessment or a mandatory reviewing pass. An apply-findings turn that changes the worktree but leaves an unparseable outcome after one verdict-repair turn also counts as a round and is revalidated the same way. A Review Step Run allows at most five rounds; exhausting the limit without a clean, deferred, or Accepted Review Outcome is Needs Human.
 _Avoid_: Implement redo, unbounded fix loop
 
+**Repair Fallback**:
+The shared recovery behavior a Lifecycle Step uses when its native, harness-owned attempt does not establish the step's postcondition: the step continues the Work Item's canonical Session for one bounded Agent Turn asking the agent to finish the step, then independently re-checks the postcondition rather than trusting that Agent Turn's own report. Commit, Create PR, and Mark PR Ready for Review are its current users, each supplying its own native attempt, postcondition check, agent prompt, and any step-specific pre-check such as Create PR's Forge credential resolution.
+_Avoid_: Fallback (ambiguous without Repair), recovery loop, Retry
+
 **Commit**:
-The Lifecycle Step after successful Review that creates the local git commit for the Work Item's changes. Before the first native mutation it continues the Work Item Session for one publication-copy Agent Turn (unless canonical copy is already persisted or can be seeded from an existing commit) and one format-correction turn if needed; if both are malformed it persists harness fallback copy from the Issue identity rather than failing. After a valid agent copy is normalized and before it is persisted, local markdown image links that resolve inside the Work Item attachment directory are rewritten to GitHub user-attachment URLs; that post-rewrite body is the canonical publication copy. It then stages and commits with that copy; it does not implement Review Findings or other rework. The harness attempts a native git commit with the persisted copy and continues the Session only as a repair fallback when the native path does not establish the postcondition; repair may re-seed copy from the actual final commit message.
+The Lifecycle Step after successful Review that creates the local git commit for the Work Item's changes. Before the first native mutation it continues the Work Item Session for one publication-copy Agent Turn (unless canonical copy is already persisted or can be seeded from an existing commit) and one format-correction turn if needed; if both are malformed it persists harness fallback copy from the Issue identity rather than failing. After a valid agent copy is normalized and before it is persisted, local markdown image links that resolve inside the Work Item attachment directory are rewritten to GitHub user-attachment URLs; that post-rewrite body is the canonical publication copy. It then stages and commits with that copy; it does not implement Review Findings or other rework. The harness attempts a native git commit with the persisted copy and uses Repair Fallback only when the native path does not establish the postcondition; repair may re-seed copy from the actual final commit message.
 _Avoid_: Create PR, git commit hook, Pre-Commit
 
 **Close Issue**:
@@ -370,7 +374,7 @@ The Lifecycle Step that creates the Work Item's isolated Git worktree and record
 The Lifecycle Step that installs the Repository dependencies required to work on the Work Item.
 
 **Create PR**:
-The Lifecycle Step that pushes committed Work Item changes and creates their draft pull request.
+The Lifecycle Step that reuses an existing open pull request for the Work Item branch when one is found, or else pushes committed Work Item changes and creates their draft pull request through the harness-owned Forge service. It uses Repair Fallback, with Forge credential guidance for the Agent Turn, only when native push or create does not establish that open pull request.
 
 **Watch PR Status Checks**:
 The Lifecycle Step that observes the Work Item PR for merge conflicts, Status Check Handoffs, and settled completion conditions. A draft advances to Mark PR Ready for Review only on an all-green aggregate, or on `no_checks` or only Expected PR Status Checks at or after the Check-Start Deadline; red checks on a draft go to Investigate PR Status Checks while the PR stays draft. After the Check-Start Deadline, a ready PR whose effective Merge Policy is Always and whose aggregate is `no_checks` advances to Merge PR; Always still does not treat Expected PR Status Checks as green; Classify and `off` enter Needs Human for `no_checks` or only Expected PR Status Checks.
@@ -382,7 +386,7 @@ The Lifecycle Step that asks the Work Item's Implement Session to rebase a confl
 The Lifecycle Step that processes a durable Status Check Handoff in the Work Item's Implement Session.
 
 **Mark PR Ready for Review**:
-The Lifecycle Step that changes a Work Item PR from draft to ready for review after Watch observes all-green draft checks, or a check-less draft at or after the Check-Start Deadline. Red draft checks are investigated while the PR stays draft and do not reach this step.
+The Lifecycle Step that changes a Work Item PR from draft to ready for review after Watch observes all-green draft checks, or a check-less draft at or after the Check-Start Deadline. Red draft checks are investigated while the PR stays draft and do not reach this step. It uses Repair Fallback, triggered by any failure the Forge's handler for this step reports, only when native mark-ready does not establish that the pull/merge request is no longer a draft.
 
 **Decide PR Merge**:
 The Lifecycle Step that decides whether a settled Work Item PR may be merged by the harness or requires a human.

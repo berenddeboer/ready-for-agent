@@ -1,7 +1,12 @@
 import { Effect, FileSystem, Stream } from "effect"
+import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
-import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import {
+  type ActiveAgentBackend,
+  AgentBackend,
+  agentBackendLabel,
+} from "@ready-for-agent/agent-backend"
 import {
   AZURE_DEVOPS_PAT_ENV_VAR,
   type AzureDevOpsRepository,
@@ -13,6 +18,7 @@ import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
 import {
   type GitHubRepository,
   GitHubService,
+  type GitHubThrottledError,
   isGitHubThrottledError,
   logErrorAnnotations,
 } from "@ready-for-agent/github-service"
@@ -23,14 +29,17 @@ import {
 } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
+  type AgentTurnForgeAuth,
   AgentTurnForgeCredentialMissingError,
   InvalidCapturedAgentBackendError,
   agentTurnForgeCredentialGuidance,
+  forgeDisplayName,
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import {
   CreatePrCredentialError,
+  type CreatePrError,
   CreatePrInvalidWorktreeContextError,
   CreatePrLookupError,
   CreatePrOpenCodeError,
@@ -45,6 +54,7 @@ import {
   normalizePublicationCopy,
   publicationCopyFromCommitMessage,
 } from "./publication-copy.js"
+import { repairFallback } from "./repair-fallback.js"
 import {
   SANITIZED_REPOSITORY_SHELL_PREFIX,
   repositoryProcessOptions,
@@ -57,22 +67,6 @@ import { workItemBranchName } from "./worktree-names.js"
 
 const DIAGNOSTIC_CHAR_LIMIT = 4_000
 const NATIVE_PUSH_TIMEOUT_MS = 60_000
-
-/** Human-readable Forge name for error messages and Agent Turn prompts. */
-const forgeDisplayName = (forge: RepositoryRecord["forge"]): string => {
-  switch (forge) {
-    case "github":
-      return "GitHub"
-    case "gitlab":
-      return "GitLab"
-    case "azure-devops":
-      return "Azure DevOps"
-    default: {
-      const _exhaustive: never = forge
-      return _exhaustive
-    }
-  }
-}
 
 /** Agent Turn credential-guidance access-scope phrase, per Forge. */
 const nativeCredentialAccessScope = (
@@ -408,8 +402,12 @@ const nativePushVaultAccount = (repository: RepositoryRecord): string => {
 }
 
 /**
- * Vault secret name for native push when Keymaxxer is enabled; null for ambient
- * (Keymaxxer disabled) or when no repository secret is configured.
+ * Vault secret name for native push when Keymaxxer is enabled; null for
+ * ambient (Keymaxxer disabled, no repository secret configured, or a
+ * Keymaxxer failure resolving the secret). Vault-first with ambient
+ * fallback on failure — mirrors `resolveAgentTurnForgeAuth`'s
+ * vault-first/ambient-fallback behavior rather than raising a fatal
+ * credential error while the ambient token may still work.
  */
 const resolveNativePushTokenName = (repository: RepositoryRecord) =>
   Effect.gen(function* () {
@@ -423,13 +421,17 @@ const resolveNativePushTokenName = (repository: RepositoryRecord) =>
         account: nativePushVaultAccount(repository),
       })
       .pipe(
-        Effect.mapError(
-          (cause) =>
-            new CreatePrCredentialError({
+        Effect.catchTag("KeymaxxerError", (cause) =>
+          Effect.logWarning(
+            "Keymaxxer lookup failed for native push; falling back to ambient credential",
+            {
+              step: "create_pr",
               repositoryId: repository.id,
-              message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential for native push`,
-              cause,
-            }),
+              projectPath: repository.projectPath,
+              forge: repository.forge,
+              ...logErrorAnnotations(cause),
+            },
+          ).pipe(Effect.as(null)),
         ),
       )
   })
@@ -1083,12 +1085,34 @@ const resolveRepositoryRecord = (context: LifecycleStepContext) =>
   })
 
 /**
+ * Independent lookup used as both the post-native soft-verify (an
+ * indeterminate create must not duplicate, and a successful create is
+ * confirmed rather than trusted) and the pre-fallback re-lookup. Reconciles
+ * draft copy when a PR/MR identity is found.
+ */
+const recheckOpenPr = (
+  context: LifecycleStepContext,
+  repository: RepositoryRecord,
+  branch: string,
+  copy: PublicationCopy,
+  fallbackToClaimed: number | null,
+) =>
+  Effect.gen(function* () {
+    const found = yield* softFindExistingOpenPr(context, repository, branch)
+    const pullRequestNumber = found ?? fallbackToClaimed
+    if (pullRequestNumber !== null) {
+      yield* softReconcileDraftCopy(repository, branch, copy, pullRequestNumber)
+    }
+    return pullRequestNumber
+  })
+
+/**
  * Production Create PR Lifecycle Step.
  * Looks up an existing open PR/MR for the exact Work Item branch (reconciling
  * draft title/body to canonical copy), otherwise pushes (harness credential
  * path) and creates a draft through the harness-owned Forge service with the
  * same publication copy as Commit. Continues the Implement Session only when
- * the native path does not establish the postcondition (repair fallback).
+ * the native path does not establish the postcondition, via Repair Fallback.
  * Success requires resolving the open PR/MR identity for persistence.
  */
 export const createPr = (context: LifecycleStepContext) =>
@@ -1102,145 +1126,180 @@ export const createPr = (context: LifecycleStepContext) =>
     })
     const copy = yield* resolvePublicationCopyForCreatePr(context, worktreePath)
 
-    // Reuse an existing exact-branch open PR/MR (also covers Retry / indeterminate).
-    // Hard-fail only on lookup: without a reliable answer we must not create a
-    // duplicate. Draft title/body reconcile is best-effort and must not fail
-    // the step when an open PR already exists.
-    const existing = yield* findExistingOpenPr(context, repository, branch)
-    if (existing !== null) {
-      yield* softReconcileDraftCopy(repository, branch, copy, existing)
-      return toCreatePrResult(existing, "native", copy)
-    }
+    // Native create claims a number on success; the independent re-check
+    // trusts that claim only when its own lookup cannot yet see the PR.
+    let claimedPullRequestNumber: number | null = null
 
-    const pushTokenName = yield* resolveNativePushTokenName(repository)
-    const push = yield* attemptNativePush(
-      worktreePath,
-      branch,
-      repository,
-      pushTokenName,
-    )
-    let nativeDiagnostics: string | null = push.ok ? null : push.diagnostics
+    const outcome = yield* repairFallback<
+      number,
+      { readonly auth: AgentTurnForgeAuth; readonly sessionId: string },
+      CreatePrError | GitHubThrottledError | PlatformError,
+      | AzureDevOpsService
+      | GitHubService
+      | GitLabService
+      | KeymaxxerService
+      | ChildProcessSpawner.ChildProcessSpawner
+      | DbService
+      | SqlClient.SqlClient
+      | AgentBackend
+      | ActiveAgentBackend
+    >({
+      // Reuse an existing exact-branch open PR/MR (also covers Retry / indeterminate).
+      // Hard-fail only on lookup: without a reliable answer we must not create a
+      // duplicate. Draft title/body reconcile is best-effort and must not fail
+      // the step when an open PR already exists.
+      checkAlreadySatisfied: Effect.gen(function* () {
+        const existing = yield* findExistingOpenPr(context, repository, branch)
+        if (existing !== null) {
+          yield* softReconcileDraftCopy(repository, branch, copy, existing)
+        }
+        return existing
+      }),
+      attemptNative: Effect.gen(function* () {
+        const pushTokenName = yield* resolveNativePushTokenName(repository)
+        const push = yield* attemptNativePush(
+          worktreePath,
+          branch,
+          repository,
+          pushTokenName,
+        )
+        if (!push.ok) {
+          return { ok: false, diagnostics: push.diagnostics } as const
+        }
 
-    if (push.ok) {
-      const created = yield* attemptNativeCreateDraft(repository, branch, copy)
-      if (created.ok) {
-        // Soft-verify only: a successful create already establishes identity.
-        // Transient lookup failure must not fail the Step Run or drop the number.
-        const verified = yield* softFindExistingOpenPr(
+        const created = yield* attemptNativeCreateDraft(
+          repository,
+          branch,
+          copy,
+        )
+        if (!created.ok) {
+          return { ok: false, diagnostics: created.diagnostics } as const
+        }
+
+        claimedPullRequestNumber = created.pullRequestNumber
+        return { ok: true } as const
+      }),
+      // Soft re-lookup before agent fallback so an indeterminate create does not
+      // duplicate, and so lookup transport errors still allow one repair turn.
+      // Also the soft-verify for a successful create: an independent lookup,
+      // not the native call's own report, falling back to the claimed number
+      // only when that lookup itself cannot see the PR yet.
+      checkAfterNative: () =>
+        recheckOpenPr(
+          context,
+          repository,
+          branch,
+          copy,
+          claimedPullRequestNumber,
+        ),
+      buildDiagnosticsAfterNative: (native) =>
+        Effect.succeed(
+          boundDiagnostics(
+            native.ok
+              ? "Native Create PR did not establish an open pull request for the Work Item branch"
+              : native.diagnostics,
+          ),
+        ),
+      prepareAgentFallback: Effect.gen(function* () {
+        const auth = yield* resolveAgentTurnForgeAuth(repository).pipe(
+          Effect.mapError((cause) => {
+            if (
+              cause instanceof AgentTurnForgeCredentialMissingError ||
+              cause instanceof InvalidCapturedAgentBackendError
+            ) {
+              return new CreatePrCredentialError({
+                repositoryId: context.repositoryId,
+                message: cause.message,
+              })
+            }
+            return new CreatePrCredentialError({
+              repositoryId: context.repositoryId,
+              message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential`,
+              cause,
+            })
+          }),
+        )
+        const sessionId = yield* resolveSessionId(context)
+        return { auth, sessionId }
+      }),
+      askAgentToFinish: (diagnostics, prepared) =>
+        Effect.gen(function* () {
+          const timeout =
+            context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.create_pr
+          const agentBackend = yield* AgentBackend
+          yield* agentBackend
+            .continueTurn({
+              sessionId: prepared.sessionId,
+              prompt: buildCreatePrFallbackPromptWithCopy({
+                issueNumber: context.issueNumber,
+                branch,
+                title: copy.title,
+                body: copy.body,
+                credentialGuidance: agentTurnForgeCredentialGuidance(
+                  repository,
+                  prepared.auth,
+                  nativeCredentialAccessScope(repository.forge),
+                ),
+                diagnostics,
+              }),
+              cwd: worktreePath,
+              model: context.model,
+              thinkingLevel: context.thinkingLevel,
+              timeout,
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new CreatePrOpenCodeError({
+                    message: `${agentBackendLabel(context.agentBackend)} failed to create a pull request`,
+                    worktreePath,
+                    sessionId: prepared.sessionId,
+                    cause,
+                  }),
+              ),
+            )
+        }),
+      // After fallback, soft-lookup first so a successful create with a flaky
+      // required lookup still succeeds; then require the open PR identity.
+      checkAfterFallback: Effect.gen(function* () {
+        const afterFallback = yield* softFindExistingOpenPr(
           context,
           repository,
           branch,
         )
-        const pullRequestNumber = verified ?? created.pullRequestNumber
-        yield* softReconcileDraftCopy(
-          repository,
-          branch,
-          copy,
-          pullRequestNumber,
-        )
-        return toCreatePrResult(pullRequestNumber, "native", copy)
-      }
-      nativeDiagnostics = created.diagnostics
-    }
-
-    // Soft re-lookup before agent fallback so an indeterminate create does not
-    // duplicate, and so lookup transport errors still allow one repair turn.
-    const afterNative = yield* softFindExistingOpenPr(
-      context,
-      repository,
-      branch,
-    )
-    if (afterNative !== null) {
-      yield* softReconcileDraftCopy(repository, branch, copy, afterNative)
-      return toCreatePrResult(afterNative, "native", copy)
-    }
-
-    const auth = yield* resolveAgentTurnForgeAuth(repository).pipe(
-      Effect.mapError((cause) => {
-        if (
-          cause instanceof AgentTurnForgeCredentialMissingError ||
-          cause instanceof InvalidCapturedAgentBackendError
-        ) {
-          return new CreatePrCredentialError({
-            repositoryId: context.repositoryId,
-            message: cause.message,
-          })
+        if (afterFallback !== null) {
+          yield* softReconcileDraftCopy(repository, branch, copy, afterFallback)
+          return afterFallback
         }
-        return new CreatePrCredentialError({
-          repositoryId: context.repositoryId,
-          message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential`,
-          cause,
-        })
-      }),
-    )
 
-    const sessionId = yield* resolveSessionId(context)
-    const diagnostics = boundDiagnostics(
-      nativeDiagnostics ??
-        "Native Create PR did not establish an open pull request for the Work Item branch",
-    )
-    const timeout =
-      context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.create_pr
-    const agentBackend = yield* AgentBackend
-    yield* agentBackend
-      .continueTurn({
-        sessionId,
-        prompt: buildCreatePrFallbackPromptWithCopy({
-          issueNumber: context.issueNumber,
-          branch,
-          title: copy.title,
-          body: copy.body,
-          credentialGuidance: agentTurnForgeCredentialGuidance(
+        const required = yield* Effect.result(
+          resolveRequiredOpenPr(context, repository, branch),
+        )
+        if (required._tag === "Success") {
+          yield* softReconcileDraftCopy(
             repository,
-            auth,
-            nativeCredentialAccessScope(repository.forge),
-          ),
+            branch,
+            copy,
+            required.success,
+          )
+          return required.success
+        }
+
+        if (isGitHubThrottledError(required.failure)) {
+          return yield* required.failure
+        }
+
+        return null
+      }),
+      buildDiagnosticsAfterFallback: (diagnosticsAfterNative) =>
+        Effect.succeed(diagnosticsAfterNative),
+      onPersistentFailure: (diagnostics) =>
+        new CreatePrPostconditionError({
+          repositoryId: context.repositoryId,
+          message: `No open pull request found for ${repository.projectPath}:${branch} after native attempt and agent fallback`,
           diagnostics,
         }),
-        cwd: worktreePath,
-        model: context.model,
-        thinkingLevel: context.thinkingLevel,
-        timeout,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new CreatePrOpenCodeError({
-              message: `${agentBackendLabel(context.agentBackend)} failed to create a pull request`,
-              worktreePath,
-              sessionId,
-              cause,
-            }),
-        ),
-      )
-
-    // After fallback, soft-lookup first so a successful create with a flaky
-    // required lookup still succeeds; then require the open PR identity.
-    const afterFallback = yield* softFindExistingOpenPr(
-      context,
-      repository,
-      branch,
-    )
-    if (afterFallback !== null) {
-      yield* softReconcileDraftCopy(repository, branch, copy, afterFallback)
-      return toCreatePrResult(afterFallback, "agent_fallback", copy)
-    }
-
-    const required = yield* Effect.result(
-      resolveRequiredOpenPr(context, repository, branch),
-    )
-    if (required._tag === "Success") {
-      yield* softReconcileDraftCopy(repository, branch, copy, required.success)
-      return toCreatePrResult(required.success, "agent_fallback", copy)
-    }
-
-    if (isGitHubThrottledError(required.failure)) {
-      return yield* required.failure
-    }
-
-    return yield* new CreatePrPostconditionError({
-      repositoryId: context.repositoryId,
-      message: `No open pull request found for ${repository.projectPath}:${branch} after native attempt and agent fallback`,
-      diagnostics,
     })
+
+    return toCreatePrResult(outcome.value, outcome.completion, copy)
   })
