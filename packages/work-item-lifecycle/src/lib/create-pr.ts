@@ -33,6 +33,7 @@ import {
   AgentTurnForgeCredentialMissingError,
   InvalidCapturedAgentBackendError,
   agentTurnForgeCredentialGuidance,
+  forgeDisplayName,
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
@@ -66,22 +67,6 @@ import { workItemBranchName } from "./worktree-names.js"
 
 const DIAGNOSTIC_CHAR_LIMIT = 4_000
 const NATIVE_PUSH_TIMEOUT_MS = 60_000
-
-/** Human-readable Forge name for error messages and Agent Turn prompts. */
-const forgeDisplayName = (forge: RepositoryRecord["forge"]): string => {
-  switch (forge) {
-    case "github":
-      return "GitHub"
-    case "gitlab":
-      return "GitLab"
-    case "azure-devops":
-      return "Azure DevOps"
-    default: {
-      const _exhaustive: never = forge
-      return _exhaustive
-    }
-  }
-}
 
 /** Agent Turn credential-guidance access-scope phrase, per Forge. */
 const nativeCredentialAccessScope = (
@@ -417,8 +402,12 @@ const nativePushVaultAccount = (repository: RepositoryRecord): string => {
 }
 
 /**
- * Vault secret name for native push when Keymaxxer is enabled; null for ambient
- * (Keymaxxer disabled) or when no repository secret is configured.
+ * Vault secret name for native push when Keymaxxer is enabled; null for
+ * ambient (Keymaxxer disabled, no repository secret configured, or a
+ * Keymaxxer failure resolving the secret). Vault-first with ambient
+ * fallback on failure — mirrors `resolveAgentTurnForgeAuth`'s
+ * vault-first/ambient-fallback behavior rather than raising a fatal
+ * credential error while the ambient token may still work.
  */
 const resolveNativePushTokenName = (repository: RepositoryRecord) =>
   Effect.gen(function* () {
@@ -432,13 +421,17 @@ const resolveNativePushTokenName = (repository: RepositoryRecord) =>
         account: nativePushVaultAccount(repository),
       })
       .pipe(
-        Effect.mapError(
-          (cause) =>
-            new CreatePrCredentialError({
+        Effect.catchTag("KeymaxxerError", (cause) =>
+          Effect.logWarning(
+            "Keymaxxer lookup failed for native push; falling back to ambient credential",
+            {
+              step: "create_pr",
               repositoryId: repository.id,
-              message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential for native push`,
-              cause,
-            }),
+              projectPath: repository.projectPath,
+              forge: repository.forge,
+              ...logErrorAnnotations(cause),
+            },
+          ).pipe(Effect.as(null)),
         ),
       )
   })
