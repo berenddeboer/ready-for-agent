@@ -1,10 +1,12 @@
 import { Effect, FileSystem, Stream } from "effect"
+import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import {
+  type CommitError,
   CommitInvalidWorktreeContextError,
   CommitOpenCodeError,
   CommitPostconditionError,
@@ -30,6 +32,8 @@ import {
   publicationCopyFromCommitMessage,
 } from "./publication-copy.js"
 import { rewritePublicationCopyAttachments } from "./publication-copy-attachments.js"
+import type { NativeAttemptOutcome } from "./repair-fallback.js"
+import { repairFallback } from "./repair-fallback.js"
 import { repositoryProcessOptions } from "./repository-process-environment.js"
 import {
   classifyUnparsedResult,
@@ -660,13 +664,33 @@ const toResult = (
 })
 
 /**
+ * Independent re-check of the commit postcondition, aligning canonical copy
+ * with the actual HEAD commit message when it holds. Shared by the
+ * post-native and post-fallback checks: neither trusts a native or agent
+ * report on its own. The already-satisfied (Retry) check instead reuses the
+ * copy already resolved by `resolvePublicationCopy` before this Step runs.
+ */
+const recheckCommitPostcondition = (
+  context: LifecycleStepContext,
+  worktreePath: string,
+  startingCommitOid: string,
+  preferred: PublicationCopy,
+) =>
+  Effect.gen(function* () {
+    if (yield* commitPostconditionMet(worktreePath, startingCommitOid)) {
+      return yield* alignCopyWithHeadCommit(context, worktreePath, preferred)
+    }
+    return null
+  })
+
+/**
  * Production Commit Lifecycle Step.
  *
  * Generates shared publication copy (or reuses/seeds persisted copy), then
  * attempts a harness-owned native git commit. After one bounded format-correction
  * turn, malformed publication copy falls back to harness-owned Issue-identity
  * copy rather than failing Commit. Continues the Implement Session only when
- * the native attempt does not establish the postcondition (repair fallback).
+ * the native attempt does not establish the postcondition, via Repair Fallback.
  * Success requires a commit after the Work Item starting OID with
  * implementation changes committed.
  */
@@ -675,74 +699,84 @@ export const commit = (context: LifecycleStepContext) =>
     const worktreePath = yield* resolveWorktreePath(context)
     const startingCommitOid = yield* resolveStartingCommitOid(context)
 
+    // Operator Retry / indeterminate prior attempt: re-check before mutating.
     const alreadyCommitted = yield* commitPostconditionMet(
       worktreePath,
       startingCommitOid,
     )
 
-    // Operator Retry / indeterminate prior attempt: re-check before mutating.
     // Still ensure canonical publication copy exists (seed from commit if needed).
-    if (alreadyCommitted) {
-      const resolved = yield* resolvePublicationCopy(context, worktreePath, {
-        postconditionAlreadyMet: true,
-      })
-      return toResult("native", resolved.copy, resolved.source)
-    }
-
     const resolved = yield* resolvePublicationCopy(context, worktreePath, {
-      postconditionAlreadyMet: false,
+      postconditionAlreadyMet: alreadyCommitted,
     })
     const copy = resolved.copy
     const message = formatPublicationCommitMessage(copy)
-    const native = yield* attemptNativeCommit(worktreePath, message)
 
-    // Always re-check after the native attempt: a successful commit with a lost
-    // process response must not fall through to a duplicate agent commit.
-    if (yield* commitPostconditionMet(worktreePath, startingCommitOid)) {
-      // prepare-commit-msg (or similar) may rewrite the message on success.
-      const aligned = yield* alignCopyWithHeadCommit(
+    const outcome = yield* repairFallback<
+      PublicationCopy,
+      string,
+      CommitError | PlatformError,
+      | ChildProcessSpawner.ChildProcessSpawner
+      | DbService
+      | SqlClient.SqlClient
+      | AgentBackend
+    >({
+      checkAlreadySatisfied: alreadyCommitted
+        ? Effect.succeed(copy)
+        : Effect.succeed(null),
+      attemptNative: attemptNativeCommit(worktreePath, message).pipe(
+        Effect.map(
+          (result): NativeAttemptOutcome =>
+            result.ok
+              ? { ok: true }
+              : { ok: false, diagnostics: result.diagnostics },
+        ),
+      ),
+      checkAfterNative: () =>
+        recheckCommitPostcondition(
+          context,
+          worktreePath,
+          startingCommitOid,
+          copy,
+        ),
+      buildDiagnosticsAfterNative: (native) =>
+        Effect.gen(function* () {
+          const gitState = yield* collectGitStateDiagnostics(worktreePath)
+          return native.ok
+            ? boundDiagnostics(
+                `Native commit command reported success but postcondition is absent.\n${gitState}`,
+              )
+            : boundDiagnostics(`${native.diagnostics}\n\n${gitState}`)
+        }),
+      prepareAgentFallback: resolveSessionId(context),
+      askAgentToFinish: (diagnostics, sessionId) =>
+        askAgentToRepairCommit(
+          context,
+          worktreePath,
+          sessionId,
+          copy,
+          diagnostics,
+        ),
+      checkAfterFallback: recheckCommitPostcondition(
         context,
         worktreePath,
+        startingCommitOid,
         copy,
-      )
-      return toResult("native", aligned, publicationCopySourceOf(aligned))
-    }
-
-    const gitState = yield* collectGitStateDiagnostics(worktreePath)
-    const diagnostics = native.ok
-      ? boundDiagnostics(
-          `Native commit command reported success but postcondition is absent.\n${gitState}`,
-        )
-      : boundDiagnostics(`${native.diagnostics}\n\n${gitState}`)
-
-    const sessionId = yield* resolveSessionId(context)
-    yield* askAgentToRepairCommit(
-      context,
-      worktreePath,
-      sessionId,
-      copy,
-      diagnostics,
-    )
-
-    if (yield* commitPostconditionMet(worktreePath, startingCommitOid)) {
-      // Agent may have rewritten the message for policy; re-seed so Create PR matches.
-      const finalCopy = yield* alignCopyWithHeadCommit(
-        context,
-        worktreePath,
-        copy,
-      )
-      return toResult(
-        "agent_fallback",
-        finalCopy,
-        publicationCopySourceOf(finalCopy),
-      )
-    }
-
-    const afterFallback = yield* collectGitStateDiagnostics(worktreePath)
-    return yield* new CommitPostconditionError({
-      message:
-        "Commit postcondition is still absent after native attempt and agent fallback",
-      worktreePath,
-      diagnostics: afterFallback,
+      ),
+      buildDiagnosticsAfterFallback: () =>
+        collectGitStateDiagnostics(worktreePath),
+      onPersistentFailure: (diagnostics) =>
+        new CommitPostconditionError({
+          message:
+            "Commit postcondition is still absent after native attempt and agent fallback",
+          worktreePath,
+          diagnostics,
+        }),
     })
+
+    return toResult(
+      outcome.completion,
+      outcome.value,
+      publicationCopySourceOf(outcome.value),
+    )
   })
