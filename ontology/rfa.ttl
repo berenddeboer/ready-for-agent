@@ -537,7 +537,7 @@ rfa:CreatePr
   rfa:retryable true ;
   skos:prefLabel "Create PR"@en ;
   skos:definition
-    "The Lifecycle Step that pushes committed Work Item changes and creates their draft pull request."@en .
+    "The Lifecycle Step that reuses an existing open pull request for the Work Item branch when one is found, or else pushes committed Work Item changes and creates their draft pull request through the harness-owned Forge service. It uses Repair Fallback, with Forge credential guidance for the Agent Turn, only when native push or create does not establish that open pull request."@en .
 
 rfa:WatchPrStatusChecks
   a owl:Class, owl:NamedIndividual, skos:Concept,
