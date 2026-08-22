@@ -42,7 +42,8 @@ import type {
 } from "./errors.js"
 import type { ImplementError } from "./implement-errors.js"
 import type { InstallDependenciesError } from "./install-dependencies-errors.js"
-import type { MarkPrReadyForReviewContextError } from "./mark-pr-ready-for-review.js"
+import type { MarkPrReadyForReviewResult } from "./mark-pr-ready-for-review.js"
+import type { MarkPrReadyForReviewError } from "./mark-pr-ready-for-review-errors.js"
 import type { MergePrContextError } from "./merge-pr.js"
 import type {
   PrStatusCheckInvestigationResult,
@@ -135,7 +136,7 @@ export type LifecycleStepError =
   | PrStatusChecksUnresolvedError
   | ResolvePrMergeConflictContextError
   | ResolvePrMergeConflictOpenCodeError
-  | MarkPrReadyForReviewContextError
+  | MarkPrReadyForReviewError
   | MergePrContextError
   | LifecycleStepFailedError
   | DatabaseError
@@ -199,7 +200,7 @@ export interface LifecycleStepsShape {
   ) => Effect.Effect<PrStatusCheckInvestigationResult, LifecycleStepError>
   readonly markPrReadyForReview: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<void, LifecycleStepError>
+  ) => Effect.Effect<MarkPrReadyForReviewResult, LifecycleStepError>
   readonly decidePrMerge: (
     context: LifecycleStepContext,
   ) => Effect.Effect<DecidePrMergeResult, LifecycleStepError>

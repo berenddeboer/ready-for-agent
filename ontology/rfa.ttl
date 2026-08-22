@@ -580,12 +580,12 @@ rfa:MarkPrReadyForReview
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "mark_pr_ready_for_review" ;
-  rfa:agentFree true ;
+  rfa:agentFree false ;
   rfa:maximumDuration "PT5M"^^xsd:dayTimeDuration ;
   rfa:retryable true ;
   skos:prefLabel "Mark PR Ready for Review"@en ;
   skos:definition
-    "The Lifecycle Step that changes a Work Item PR from draft to ready for review after Watch observes all-green draft checks, or a check-less draft at or after the Check-Start Deadline. Red draft checks are investigated while the PR stays draft and do not reach this step."@en .
+    "The Lifecycle Step that changes a Work Item PR from draft to ready for review after Watch observes all-green draft checks, or a check-less draft at or after the Check-Start Deadline. Red draft checks are investigated while the PR stays draft and do not reach this step. It uses Repair Fallback, triggered by any failure the Forge's handler for this step reports, only when native mark-ready does not establish that the pull/merge request is no longer a draft."@en .
 
 rfa:DecidePrMerge
   a owl:Class, owl:NamedIndividual, skos:Concept,
@@ -672,6 +672,7 @@ rfa:InvestigateGreenOnlyTransition a rfa:Transition ; rfa:fromStep rfa:Investiga
 rfa:InvestigateNeedsHumanTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:NeedsHuman ; rfa:guard "handoff_needs_human" ; rfa:reasonCode rfa:HandlerFailedReason .
 
 rfa:MarkReadyWaitTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "ready_phase_wait_enabled" ; rfa:reasonCode rfa:NativeReason .
+rfa:MarkReadyAgentFallbackTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "agent_fallback_completion" ; rfa:reasonCode rfa:AgentFallbackReason .
 rfa:MarkReadyConflictTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:ResolvePrMergeConflict ; rfa:guard "reobserved_merge_conflict" ; rfa:reasonCode rfa:NativeReason .
 rfa:MarkReadyHandoffTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:InvestigatePrStatusChecks ; rfa:guard "reobserved_status_check_handoff" ; rfa:reasonCode rfa:NativeReason .
 rfa:MarkReadyClosedTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:NeedsHuman ; rfa:guard "reobserved_closed_pull_request" ; rfa:reasonCode rfa:HandlerFailedReason .

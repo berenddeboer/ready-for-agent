@@ -170,7 +170,7 @@ export const LIFECYCLE_STEP_AGENT_FREE = {
   install_dependencies: false,
   investigate_pr_status_checks: false,
   local_cleanup: true,
-  mark_pr_ready_for_review: true,
+  mark_pr_ready_for_review: false,
   merge_pr: true,
   pre_commit: false,
   resolve_pr_merge_conflict: false,
@@ -659,6 +659,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "resolve_pr_merge_conflict",
     guard: "reobserved_merge_conflict",
     reasonCode: "native",
+  },
+  {
+    from: "mark_pr_ready_for_review",
+    to: "watch_pr_status_checks",
+    guard: "agent_fallback_completion",
+    reasonCode: "agent_fallback",
   },
   {
     from: "mark_pr_ready_for_review",

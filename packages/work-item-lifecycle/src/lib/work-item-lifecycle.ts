@@ -2838,7 +2838,7 @@ export const makeWorkItemLifecycleLive = (
             )
           case "mark_pr_ready_for_review":
             return steps.markPrReadyForReview(context).pipe(
-              Effect.flatMap(() =>
+              Effect.flatMap((markReadyResult) =>
                 Effect.gen(function* () {
                   const waitForReadyForReviewChecks =
                     yield* loadWaitForReadyForReviewChecks(
@@ -2930,7 +2930,39 @@ export const makeWorkItemLifecycleLive = (
                       nextState: "watch_pr_status_checks" as const,
                     },
                   }
-                }),
+                }).pipe(
+                  Effect.map((branch) => {
+                    const withReasonCode = branch as typeof branch & {
+                      readonly stepRunReasonCode?: StepRunReasonCode
+                    }
+                    // Only the branches that return to Watch PR Status Checks
+                    // are declared in the ontology under both a native and an
+                    // agent-fallback reason for this exact (fromStep, toStep)
+                    // pair (`MarkReadyWaitTransition` /
+                    // `MarkReadyAgentFallbackTransition` /
+                    // `MarkReadyContinueWatchingTransition`). Every other
+                    // branch (merge conflict, Status Check Handoff, closed,
+                    // settled ready-for-merge) already carries its own
+                    // ontology-declared reason — or, for
+                    // `missingSuccessfulChecksHandoff`, its own explicit
+                    // `stepRunReasonCode` — that must not be overwritten by
+                    // how the native mark-ready mutation itself completed.
+                    if (
+                      withReasonCode.stepRunReasonCode !== undefined ||
+                      withReasonCode.transition?.nextState !==
+                        "watch_pr_status_checks"
+                    ) {
+                      return withReasonCode
+                    }
+                    return {
+                      ...withReasonCode,
+                      stepRunReasonCode:
+                        markReadyResult.completion === "native"
+                          ? STEP_RUN_REASON.native
+                          : STEP_RUN_REASON.agentFallback,
+                    }
+                  }),
+                ),
               ),
             )
           case "decide_pr_merge":

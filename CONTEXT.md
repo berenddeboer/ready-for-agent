@@ -296,7 +296,7 @@ One build-model pass that interprets Review Findings and changes the worktree, p
 _Avoid_: Implement redo, unbounded fix loop
 
 **Repair Fallback**:
-The shared recovery behavior a Lifecycle Step uses when its native, harness-owned attempt does not establish the step's postcondition: the step continues the Work Item's canonical Session for one bounded Agent Turn asking the agent to finish the step, then independently re-checks the postcondition rather than trusting that Agent Turn's own report. Commit and Create PR are its two current users, each supplying its own native attempt, postcondition check, agent prompt, and any step-specific pre-check such as Create PR's Forge credential resolution.
+The shared recovery behavior a Lifecycle Step uses when its native, harness-owned attempt does not establish the step's postcondition: the step continues the Work Item's canonical Session for one bounded Agent Turn asking the agent to finish the step, then independently re-checks the postcondition rather than trusting that Agent Turn's own report. Commit, Create PR, and Mark PR Ready for Review are its current users, each supplying its own native attempt, postcondition check, agent prompt, and any step-specific pre-check such as Create PR's Forge credential resolution.
 _Avoid_: Fallback (ambiguous without Repair), recovery loop, Retry
 
 **Commit**:
@@ -386,7 +386,7 @@ The Lifecycle Step that asks the Work Item's Implement Session to rebase a confl
 The Lifecycle Step that processes a durable Status Check Handoff in the Work Item's Implement Session.
 
 **Mark PR Ready for Review**:
-The Lifecycle Step that changes a Work Item PR from draft to ready for review after Watch observes all-green draft checks, or a check-less draft at or after the Check-Start Deadline. Red draft checks are investigated while the PR stays draft and do not reach this step.
+The Lifecycle Step that changes a Work Item PR from draft to ready for review after Watch observes all-green draft checks, or a check-less draft at or after the Check-Start Deadline. Red draft checks are investigated while the PR stays draft and do not reach this step. It uses Repair Fallback, triggered by any failure the Forge's handler for this step reports, only when native mark-ready does not establish that the pull/merge request is no longer a draft.
 
 **Decide PR Merge**:
 The Lifecycle Step that decides whether a settled Work Item PR may be merged by the harness or requires a human.

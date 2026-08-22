@@ -125,7 +125,6 @@ describe("Agent-free Lifecycle Step classification", () => {
     for (const step of [
       "create_worktree",
       "watch_pr_status_checks",
-      "mark_pr_ready_for_review",
       "merge_pr",
       "close_issue",
       "local_cleanup",
@@ -146,6 +145,7 @@ describe("Agent-free Lifecycle Step classification", () => {
       "create_pr",
       "resolve_pr_merge_conflict",
       "investigate_pr_status_checks",
+      "mark_pr_ready_for_review",
       "decide_pr_merge",
     ]) {
       expect(isAgentDependentLifecycleStep(step)).toBe(true)
