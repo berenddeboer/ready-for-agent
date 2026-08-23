@@ -1,21 +1,19 @@
 import { Effect } from "effect"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
-import {
-  type AzureDevOpsRepository,
-  AzureDevOpsService,
-} from "@ready-for-agent/azure-devops-service"
+import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
 import {
-  type GitHubRepository,
   GitHubService,
   type GitHubThrottledError,
   isGitHubThrottledError,
   logErrorAnnotations,
 } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
-  type GitLabRepository,
-  GitLabService,
-} from "@ready-for-agent/gitlab-service"
+  toAzureDevOpsRepository,
+  toGitHubRepository,
+  toGitLabRepository,
+} from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   MarkPrReadyForReviewContextError,
@@ -54,30 +52,6 @@ const boundDiagnostics = (text: string): string => {
   }
   return `${trimmed.slice(0, DIAGNOSTIC_CHAR_LIMIT)}\n…(truncated)`
 }
-
-const toGitHubRepository = (
-  repository: RepositoryRecord,
-): GitHubRepository => ({
-  forge: repository.forge,
-  forgeHost: repository.forgeHost,
-  projectPath: repository.projectPath,
-})
-
-const toGitLabRepository = (
-  repository: RepositoryRecord,
-): GitLabRepository => ({
-  forge: repository.forge,
-  forgeHost: repository.forgeHost,
-  projectPath: repository.projectPath,
-})
-
-const toAzureDevOpsRepository = (
-  repository: RepositoryRecord,
-): AzureDevOpsRepository => ({
-  forge: repository.forge,
-  forgeHost: repository.forgeHost,
-  projectPath: repository.projectPath,
-})
 
 const resolveWorktreePath = (context: LifecycleStepContext) => {
   const worktreePath = context.worktreePath

@@ -9,21 +9,18 @@ import {
 } from "@ready-for-agent/agent-backend"
 import {
   AZURE_DEVOPS_PAT_ENV_VAR,
-  type AzureDevOpsRepository,
   AzureDevOpsService,
   azureDevOpsVaultAccount,
   splitAzureDevOpsProjectPath,
 } from "@ready-for-agent/azure-devops-service"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
 import {
-  type GitHubRepository,
   GitHubService,
   type GitHubThrottledError,
   isGitHubThrottledError,
   logErrorAnnotations,
 } from "@ready-for-agent/github-service"
 import {
-  type GitLabRepository,
   GitLabService,
   resolveGlabHostToken,
 } from "@ready-for-agent/gitlab-service"
@@ -35,6 +32,9 @@ import {
   agentTurnForgeCredentialGuidance,
   forgeDisplayName,
   resolveAgentTurnForgeAuth,
+  toAzureDevOpsRepository,
+  toGitHubRepository,
+  toGitLabRepository,
 } from "./agent-turn-forge-auth.js"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import {
@@ -992,30 +992,6 @@ const softReconcileDraftCopy = (
       }
     }
   })
-
-const toGitHubRepository = (
-  repository: RepositoryRecord,
-): GitHubRepository => ({
-  forge: repository.forge,
-  forgeHost: repository.forgeHost,
-  projectPath: repository.projectPath,
-})
-
-const toGitLabRepository = (
-  repository: RepositoryRecord,
-): GitLabRepository => ({
-  forge: repository.forge,
-  forgeHost: repository.forgeHost,
-  projectPath: repository.projectPath,
-})
-
-const toAzureDevOpsRepository = (
-  repository: RepositoryRecord,
-): AzureDevOpsRepository => ({
-  forge: repository.forge,
-  forgeHost: repository.forgeHost,
-  projectPath: repository.projectPath,
-})
 
 const resolvePublicationCopyForCreatePr = (
   context: LifecycleStepContext,

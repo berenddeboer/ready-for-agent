@@ -8,10 +8,13 @@ import {
 } from "@ready-for-agent/agent-backend"
 import {
   AZURE_DEVOPS_VAULT_METADATA_BUDGET_SECONDS,
+  type AzureDevOpsRepository,
   azureDevOpsVaultAccount,
 } from "@ready-for-agent/azure-devops-service"
+import type { GitHubRepository } from "@ready-for-agent/github-service"
 import {
   GITLAB_VAULT_METADATA_BUDGET_SECONDS,
+  type GitLabRepository,
   gitlabVaultAccount,
 } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
@@ -55,6 +58,30 @@ export type AgentTurnForgeRepository = {
   readonly forgeHost: string
   readonly projectPath: string
 }
+
+const forgeRepositoryIdentity = (
+  repository: AgentTurnForgeRepository,
+): {
+  readonly forge: string
+  readonly forgeHost: string
+  readonly projectPath: string
+} => ({
+  forge: repository.forge,
+  forgeHost: repository.forgeHost,
+  projectPath: repository.projectPath,
+})
+
+export const toGitHubRepository = (
+  repository: AgentTurnForgeRepository,
+): GitHubRepository => forgeRepositoryIdentity(repository)
+
+export const toGitLabRepository = (
+  repository: AgentTurnForgeRepository,
+): GitLabRepository => forgeRepositoryIdentity(repository)
+
+export const toAzureDevOpsRepository = (
+  repository: AgentTurnForgeRepository,
+): AzureDevOpsRepository => forgeRepositoryIdentity(repository)
 
 export class AgentTurnForgeCredentialMissingError extends Schema.TaggedErrorClass<AgentTurnForgeCredentialMissingError>()(
   "AgentTurnForgeCredentialMissingError",
