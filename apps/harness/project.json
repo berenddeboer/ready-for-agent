@@ -97,7 +97,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun --conditions @ready-for-agent/source test test/keymaxxer-uninitialized-e2e.test.ts"
+        "command": "bun --conditions=@ready-for-agent/source test test/keymaxxer-uninitialized-e2e.test.ts"
       },
       "inputs": ["default", "^production"],
       "cache": true,

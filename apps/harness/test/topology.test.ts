@@ -137,7 +137,7 @@ describe("single application server topology", () => {
       harness.targets["e2e-no-vault"]?.options?.env?.KEYMAXXER_ENABLED,
     ).toBeUndefined()
     expect(harness.targets["e2e-no-vault"]?.options?.command).toContain(
-      "keymaxxer-uninitialized-e2e",
+      "bun --conditions=@ready-for-agent/source test test/keymaxxer-uninitialized-e2e.test.ts",
     )
     // Vault-free @no-backend suite: soft-disable Keymaxxer, clear ambient
     // master keys so fixture mode cannot win, and strip OpenCode.
