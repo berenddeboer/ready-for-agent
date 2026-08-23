@@ -1,6 +1,6 @@
 ---
 name: ready-for-agent
-description: Operate and report on the Ready for Agent harness — the local metaharness that turns `ready-for-agent`-labelled GitHub/GitLab issues into merged PRs by driving a coding agent (OpenCode, Codex, Grok Build, Claude Code) through a Work Item lifecycle. Use this whenever the user asks what the harness is doing, how their issues/work items/PRs are progressing, why something is stuck, blocked, failed, or needs human attention, or wants to start, retry, reset, pause, or reconfigure work — and also when they just say things like "what's running", "check the queue", "how's the pipeline", "is it done yet", "why did #123 fail", "how many PRs this week", or mention the kanban board, lanes, work items, agent backends, or localhost:6056, even if they never say "ready-for-agent" by name.
+description: Operate and report on the Ready for Agent harness — the local metaharness that turns `ready-for-agent`-labelled issues (GitHub, GitLab, or Azure DevOps Boards) into merged PRs by driving a coding agent (OpenCode, Codex, Grok Build, Claude Code) through a Work Item lifecycle. Use this whenever the user asks what the harness is doing, how their issues/work items/PRs are progressing, why something is stuck, blocked, failed, or needs human attention, or wants to start, retry, reset, pause, or reconfigure work — and also when they just say things like "what's running", "check the queue", "how's the pipeline", "is it done yet", "why did #123 fail", "how many PRs this week", or mention the kanban board, lanes, work items, agent backends, or localhost:6056, even if they never say "ready-for-agent" by name.
 ---
 
 # Ready for Agent
@@ -22,6 +22,17 @@ answers which question.
 An **Issue** labelled `ready-for-agent` on the forge is the source of truth. The
 harness projects it locally and, when started, creates a **Work Item**: one
 attempt to carry that issue through the lifecycle.
+
+**Forge** here is not GitHub-only. GitHub, GitLab, and Azure DevOps are all
+working, first-class integrations — a repository's `forge` field reports
+`github`, `gitlab`, or `azure-devops`, and everything in this skill (status,
+retry, intake, reset, …) operates the same way regardless of which one a
+repository uses. Azure DevOps repositories carry `forgeHost: "dev.azure.com"`
+and a `projectPath` shaped `<organization>/<project>/<repository>` (e.g.
+`MSD-Production/Default/gantry`) instead of GitHub's `owner/repo`; on Azure
+DevOps the tracked "Issue" is an Azure Boards work item. Most guidance below is
+forge-general — the few spots that are genuinely GitHub-specific are called out
+where they occur.
 
 A Work Item has a **state** (where it is in the lifecycle: `IMPLEMENT`,
 `REVIEW`, `COMMIT`, `MERGE_PR`, …) and a **status** (how that step is going:
@@ -180,7 +191,9 @@ Pause does not interrupt a step that is already running.
 
 Repository selectors accept `github.com/owner/repo`, `owner/repo`, or just a
 unique final segment like `repo` — the short form is fine and much easier to
-read.
+read. The same shapes work for other forges: an Azure DevOps repository
+matches on `dev.azure.com/org/project/repo`, `org/project/repo`, or its unique
+final segment.
 
 ## Triage playbook
 
@@ -196,7 +209,7 @@ your job is to translate them into an action rather than re-deriving them.
 | `agent_backend_unavailable` / `agent_backend_auth_rejected` | CLI missing from PATH, or not authenticated | Fix the CLI, then Recheck in Settings |
 | `agent_model_not_in_catalog` | Configured model is gone from the backend catalog | Pick a current model in Settings |
 | `missing_successful_checks` | Autonomous merge wanted green CI and did not get it | Retryable — returns to watching checks |
-| `github_throttled` | Rate limited; stopped cleanly at GitHub's retry time | Wait for `retryAt`; do not hammer it |
+| `github_throttled` (**GitHub-only** — no dedicated GitLab/Azure DevOps reason code exists yet) | Rate limited; stopped cleanly at GitHub's retry time | Wait for `retryAt`; do not hammer it |
 | Paused | An operator held it | Start (Retry is rejected while paused) |
 
 ### The "unowned PR" message is not self-explanatory
@@ -205,10 +218,18 @@ your job is to translate them into an action rather than re-deriving them.
 often wrong. The message is captured when the PR is observed and **goes stale**:
 by the time you read it the PR has usually been merged, so "Open PR #N" may
 describe something that closed days ago. Check the PR's real state and, more
-importantly, its head branch:
+importantly, its head branch. On GitHub:
 
 ```bash
 gh pr view <N> --repo <owner/repo> --json number,state,headRefName,mergedAt
+```
+
+This `gh` snippet is **GitHub-only**. On Azure DevOps the equivalent is the
+`az repos pr` extension (or the harness's own GraphQL `repositories`/Work Item
+queries, which are forge-general):
+
+```bash
+az repos pr show --id <N> --org https://dev.azure.com/<organization> --output json
 ```
 
 The harness names its own branches `rfa/<owner>-<repo>/<issue>/<work-item-id>`.
