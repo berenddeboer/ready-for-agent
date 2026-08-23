@@ -177,8 +177,9 @@ const settingsCorrection =
 /**
  * Reject explicit Agent Models and applicable Thinking Levels that the next
  * backend's current catalog does not offer. Empty and omitted values carry no
- * assertion about a model and are left alone — Harness Config's own "build
- * model required" rule and Repository inheritance both keep working.
+ * assertion about a model and are left alone — a null/omitted defaultModel is
+ * a valid "inherit backend default" resting state on both Harness Config and
+ * Repository settings (issue #33), and Repository inheritance keeps working.
  *
  * Dormant Repository Thinking Levels are not rejected. An unrelated Repository
  * save with no explicit catalog assertion and no applicable Thinking Level

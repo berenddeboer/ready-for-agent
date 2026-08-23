@@ -849,8 +849,9 @@ export const DbServiceLive = Layer.effect(
       // Ensure config row exists (fresh DBs) before the write transaction.
       yield* readConfigRow
 
-      // Normalize model fields once; emptiness is enforced against the in-txn
-      // backend-change flag so concurrent switches cannot clear a build model.
+      // Normalize model fields once. Null/whitespace-only means "inherit
+      // backend default" and is a valid resting state on every update,
+      // whether or not selectedAgentBackend is also changing (issue #33).
       const defaultModel = yield* normalizeOptionalConfigSetting(
         input.defaultModel,
       )
@@ -898,13 +899,11 @@ export const DbServiceLive = Layer.effect(
                 now,
                 selectedAgentBackend,
               ).pipe(Effect.mapError(toDatabaseError))
-            } else if (defaultModel === null) {
-              // Same-backend update requires a build model (in-txn authoritative).
-              return yield* new InvalidConfigInputError({
-                field: "defaultModel",
-                message: "defaultModel cannot be empty",
-              })
             }
+            // Same-backend updates may set defaultModel to null: that is the
+            // valid "inherit backend default" resting state also returned by
+            // getConfig, so the write side must accept what the read side
+            // can return (issue #33).
             // Merge prefs from the in-txn row so concurrent writers do not
             // clobber each other's per-backend map entries.
             const prefsMap = parseBackendModelPrefsMap(latest.backendModelPrefs)

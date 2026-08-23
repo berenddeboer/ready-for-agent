@@ -990,8 +990,10 @@ input AddRepositoryInput {
 input UpdateConfigInput {
   selectedAgentBackend: String!
   """
-  Required when not changing Agent Backend. Optional on backend change
-  (empty is allowed, same as first-run).
+  Optional. Null (or omitted) means "no explicit override — inherit the
+  Agent Backend's default", the same resting state Config.defaultModel can
+  return from a read. Valid whether or not selectedAgentBackend is also
+  changing in this same call.
   """
   defaultModel: String
   """
