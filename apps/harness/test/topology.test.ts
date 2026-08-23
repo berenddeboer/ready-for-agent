@@ -131,6 +131,14 @@ describe("single application server topology", () => {
     expect(
       harness.targets["e2e-no-backend"]?.options?.env?.E2E_HARNESS_WORKERS,
     ).toBeUndefined()
+    // Uninitialized-Keymaxxer live e2e must not force KEYMAXXER_ENABLED=false
+    // (that is the hole the suite exists to close; issue #1195).
+    expect(
+      harness.targets["e2e-no-vault"]?.options?.env?.KEYMAXXER_ENABLED,
+    ).toBeUndefined()
+    expect(harness.targets["e2e-no-vault"]?.options?.command).toContain(
+      "keymaxxer-uninitialized-e2e",
+    )
     // Vault-free @no-backend suite: soft-disable Keymaxxer, clear ambient
     // master keys so fixture mode cannot win, and strip OpenCode.
     expect(
@@ -154,6 +162,7 @@ describe("single application server topology", () => {
       "utf8",
     )
     expect(runnerScript).toContain("export KEYMAXXER_ENABLED=false")
+    expect(runnerScript).toContain("keymaxxer-uninitialized-e2e.test.ts")
   })
 
   test("an inherited KEYMAXXER_ENABLED=true cannot override the unit-test runner's export", async () => {

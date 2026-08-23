@@ -2984,136 +2984,132 @@ describe("Job worker", () => {
       }),
   )
 
-  it.live("auto-heal retries with backoff until Keymaxxer succeeds", () =>
-    Effect.gen(function* () {
-      const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-      const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
-      let findSecretCalls = 0
-      const keymaxxer = Layer.succeed(KeymaxxerService, {
-        initialize: Effect.void,
-        findSecret: ({ account, provider }) =>
-          Effect.gen(function* () {
-            findSecretCalls += 1
-            if (findSecretCalls < 3) {
+  it.live(
+    "auto-heal treats KeymaxxerError as ambient and does not ERROR-loop",
+    () =>
+      Effect.gen(function* () {
+        const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+        const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+        let findSecretCalls = 0
+        const keymaxxer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () =>
+            Effect.gen(function* () {
+              findSecretCalls += 1
               return yield* new KeymaxxerError({
                 operation: "findSecret",
-                message: "Keymaxxer unavailable",
+                message: "Keymaxxer list failed",
               })
-            }
-            return provider === "github" &&
-              account === `${repository.projectPath}`
-              ? `GITHUB_TOKEN`
-              : null
-          }),
-        findSecrets: () => Effect.die("not used"),
-        hasSecret: () => Effect.die("not used"),
-        addSecret: () => Effect.die("not used"),
-        runWithSecrets: () => Effect.die("not used"),
-      })
-      const lifecycle = Layer.succeed(WorkItemLifecycle, {
-        maxDurations: {
-          create_worktree: Duration.minutes(5),
-          install_dependencies: Duration.minutes(15),
-          implement: Duration.hours(2),
-          assess_changes: Duration.minutes(5),
-          pre_commit: Duration.hours(2),
-          review: Duration.hours(1),
-          commit: Duration.minutes(5),
-          create_pr: Duration.minutes(10),
-          watch_pr_status_checks: Duration.minutes(5),
-          resolve_pr_merge_conflict: Duration.hours(2),
-          investigate_pr_status_checks: Duration.hours(2),
-          mark_pr_ready_for_review: Duration.minutes(5),
-          decide_pr_merge: Duration.minutes(15),
-          merge_pr: Duration.minutes(5),
-          close_issue: Duration.minutes(5),
-          local_cleanup: Duration.minutes(5),
-        },
-        implementNow: unused,
-        implementWith: unused,
-        implementLocally: unused,
-        implementAllWithAutoMerge: unused,
-        queue: unused,
-        recoverOrphanedStepRuns: Effect.succeed(0),
-        interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
-        runStep: () => Effect.succeed({ _tag: "noop" as const }),
-        wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
-        retry: unused,
-        pause: unused,
-        interrupt: unused,
-        start: unused,
-        abandon: unused,
-        reset: unused,
-        getWorkItem: unused,
-        listWorkItemsForIssue: unused,
-        listWorkItemsForRepository: () => Effect.succeed([]),
-        listCompletedWorkItems: () =>
-          Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
-        ownsSessionId: () => Effect.succeed(false),
-        findWorkItemBySessionId: unused,
-        countCommittedPullRequests: () => Effect.succeed(0),
-        continueAfterHumanPrOutcome: unused,
-        stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
-        admitWaitingWorkItems: Effect.succeed(0),
-        releaseWaitingForBlockers: () => Effect.succeed(0),
-      })
-
-      yield* Effect.gen(function* () {
-        const db = yield* DbService
-        const service = yield* QueueService
-        const added = yield* db.addRepository({
-          forge: repository.forge,
-          forgeHost: repository.forgeHost,
-          projectPath: repository.projectPath,
-          localPath: repository.localPath,
-          isBare: true,
+            }),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () => Effect.die("not used"),
+        })
+        const lifecycle = Layer.succeed(WorkItemLifecycle, {
+          maxDurations: {
+            create_worktree: Duration.minutes(5),
+            install_dependencies: Duration.minutes(15),
+            implement: Duration.hours(2),
+            assess_changes: Duration.minutes(5),
+            pre_commit: Duration.hours(2),
+            review: Duration.hours(1),
+            commit: Duration.minutes(5),
+            create_pr: Duration.minutes(10),
+            watch_pr_status_checks: Duration.minutes(5),
+            resolve_pr_merge_conflict: Duration.hours(2),
+            investigate_pr_status_checks: Duration.hours(2),
+            mark_pr_ready_for_review: Duration.minutes(5),
+            decide_pr_merge: Duration.minutes(15),
+            merge_pr: Duration.minutes(5),
+            close_issue: Duration.minutes(5),
+            local_cleanup: Duration.minutes(5),
+          },
+          implementNow: unused,
+          implementWith: unused,
+          implementLocally: unused,
+          implementAllWithAutoMerge: unused,
+          queue: unused,
+          recoverOrphanedStepRuns: Effect.succeed(0),
+          interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
+          runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
+          retry: unused,
+          pause: unused,
+          interrupt: unused,
+          start: unused,
+          abandon: unused,
+          reset: unused,
+          getWorkItem: unused,
+          listWorkItemsForIssue: unused,
+          listWorkItemsForRepository: () => Effect.succeed([]),
+          listCompletedWorkItems: () =>
+            Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
+          ownsSessionId: () => Effect.succeed(false),
+          findWorkItemBySessionId: unused,
+          countCommittedPullRequests: () => Effect.succeed(0),
+          continueAfterHumanPrOutcome: unused,
+          stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
+          admitWaitingWorkItems: Effect.succeed(0),
+          releaseWaitingForBlockers: () => Effect.succeed(0),
         })
 
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            yield* startJobWorker({
-              idlePollInterval: Duration.zero,
-              samplePollingDelay: Effect.succeed(Duration.seconds(120)),
-              sampleAutoHealBackoff: Effect.succeed(Duration.zero),
-            })
-            while ((yield* service.listKeyed(ISSUE_POLL_QUEUE)).length < 1) {
-              yield* Effect.sleep("5 millis")
-            }
-          }),
-        )
+        yield* Effect.gen(function* () {
+          const db = yield* DbService
+          const service = yield* QueueService
+          const added = yield* db.addRepository({
+            forge: repository.forge,
+            forgeHost: repository.forgeHost,
+            projectPath: repository.projectPath,
+            localPath: repository.localPath,
+            isBare: true,
+          })
 
-        const schedules = yield* service.listKeyed(ISSUE_POLL_QUEUE)
-        expect(schedules).toHaveLength(1)
-        expect(schedules[0]?.key).toBe(added.id)
-        expect(findSecretCalls).toBeGreaterThanOrEqual(3)
-        const autoHeal = yield* service.listKeyed(ISSUE_REFRESH_QUEUE)
-        expect(
-          autoHeal.filter((entry) => entry.key === POLLING_AUTO_HEAL_KEY),
-        ).toHaveLength(0)
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            defaultGithubLayer,
-            database,
-            queue,
-            Layer.succeed(IssueReconciler, {
-              reconcile: () =>
-                Effect.succeed({
-                  fetched: 0,
-                  inserted: 0,
-                  updated: 0,
-                  deleted: 0,
-                  unchanged: 0,
-                  competingObservations: [],
-                }),
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* startJobWorker({
+                idlePollInterval: Duration.zero,
+                samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+                sampleAutoHealBackoff: Effect.succeed(Duration.zero),
+              })
+              while ((yield* service.listKeyed(ISSUE_POLL_QUEUE)).length < 1) {
+                yield* Effect.sleep("5 millis")
+              }
             }),
-            keymaxxer,
-            lifecycle,
+          )
+
+          const schedules = yield* service.listKeyed(ISSUE_POLL_QUEUE)
+          expect(schedules).toHaveLength(1)
+          expect(schedules[0]?.key).toBe(added.id)
+          expect(findSecretCalls).toBe(1)
+          const autoHeal = yield* service.listKeyed(ISSUE_REFRESH_QUEUE)
+          expect(
+            autoHeal.filter((entry) => entry.key === POLLING_AUTO_HEAL_KEY),
+          ).toHaveLength(0)
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              defaultGithubLayer,
+              database,
+              queue,
+              Layer.succeed(IssueReconciler, {
+                reconcile: () =>
+                  Effect.succeed({
+                    fetched: 0,
+                    inserted: 0,
+                    updated: 0,
+                    deleted: 0,
+                    unchanged: 0,
+                    competingObservations: [],
+                  }),
+              }),
+              keymaxxer,
+              lifecycle,
+            ),
           ),
-        ),
-        Effect.orDie,
-      )
-    }),
+          Effect.orDie,
+        )
+      }),
   )
 
   it.live(

@@ -29,6 +29,7 @@ import {
   POLLING_AUTO_HEAL_BACKOFF,
   POLLING_AUTO_HEAL_KEY,
   enqueuePollingAutoHealJob,
+  githubRepositoryHasCredential,
   issuePollFailureBackoff,
   repairPollingSchedules,
   sampleIssuePollingDelay,
@@ -128,11 +129,7 @@ const repositoryHasGitHubCredential = Effect.fn(
 )(function* (projectPath: string) {
   const keymaxxer = yield* KeymaxxerService
   if (keymaxxer.enabled === false) return true
-  const credential = yield* keymaxxer.findSecret({
-    provider: "github",
-    account: projectPath,
-  })
-  return credential !== null
+  return yield* githubRepositoryHasCredential(keymaxxer, projectPath)
 })
 
 const repositoryHasCredential = Effect.fn("JobWorker.repositoryHasCredential")(

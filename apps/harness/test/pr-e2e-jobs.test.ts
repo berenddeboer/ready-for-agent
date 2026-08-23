@@ -177,6 +177,16 @@ describe("PR live e2e jobs (issue #999)", () => {
     expect(uiHistory?.needs ?? []).not.toContain("harness-e2e-live-forge")
   })
 
+  test("the uninitialized-Keymaxxer suite still runs on a fork-safe job", async () => {
+    const workflow = await loadPrWorkflow()
+    const uiHistory = workflow.jobs?.["harness-e2e-ui-history"]
+    expect(
+      uiHistory?.steps?.some((step) =>
+        step.run?.includes("harness:e2e-no-vault"),
+      ),
+    ).toBe(true)
+  })
+
   test("same-repo PRs fail closed when the live-Forge vault secret is missing", async () => {
     const workflow = await loadPrWorkflow()
     const steps = workflow.jobs?.["harness-e2e-live-forge"]?.steps

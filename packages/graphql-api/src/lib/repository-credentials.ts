@@ -210,6 +210,21 @@ const probeVaultSecret = (
   )
 }
 
+/**
+ * GitHub credential for Issue Polling: a vault secret, or ambient `gh` when
+ * Keymaxxer is unavailable. A clean vault miss is not credentialed.
+ */
+export const githubRepositoryHasCredential = (
+  keymaxxer: KeymaxxerServiceShape,
+  projectPath: string,
+  metadataTimeout?: Duration.Duration,
+): Effect.Effect<boolean> =>
+  probeVaultSecret(
+    keymaxxer,
+    { provider: "github", account: projectPath },
+    metadataTimeout,
+  ).pipe(Effect.map((probe) => probe.kind !== "miss"))
+
 /** Activate durable Issue Polling only when this repository has forge credentials. */
 export const activatePollingIfCredentialed = Effect.fn(
   "graphql-api.activatePollingIfCredentialed",
@@ -288,25 +303,20 @@ export const activatePollingIfCredentialed = Effect.fn(
       }
       return
     }
-    // "github" and any unrecognized/legacy forge value both preserve the
-    // historical GitHub-first fallback (fail-closed vault-first, no ambient
-    // check, matching GitHub's existing posture rather than GitLab's/Azure
-    // DevOps's permissive one).
+    // "github" and any unrecognized/legacy forge value: vault-first when
+    // Keymaxxer can list secrets; a KeymaxxerError is unavailable and falls
+    // back to ambient `gh`, matching GraphQL probeVaultSecret and the
+    // disabled-Keymaxxer path. A clean miss still does not activate.
     default: {
-      const lookup = keymaxxer.findSecret({
-        provider: "github",
-        account: repository.projectPath,
-      })
-      const credential =
-        options?.metadataTimeout === undefined
-          ? yield* lookup
-          : yield* withKeymaxxerMetadataTimeout(
-              lookup,
-              options.metadataTimeout,
-              "findSecret",
-            )
-      if (credential === null) return
-      yield* activateRepositoryPolling(repository.id)
+      if (
+        yield* githubRepositoryHasCredential(
+          keymaxxer,
+          repository.projectPath,
+          options?.metadataTimeout,
+        )
+      ) {
+        yield* activateRepositoryPolling(repository.id)
+      }
       return
     }
   }

@@ -1,5 +1,6 @@
 export * from "./lib/add-repository-command.js"
 export * from "./lib/graphql-api.js"
 export * from "./lib/issue-polling.js"
+export { githubRepositoryHasCredential } from "./lib/repository-credentials.js"
 export * from "./lib/repository-intake.js"
 export * from "./lib/repository-retry.js"

@@ -559,18 +559,91 @@ describe("MCP process configuration", () => {
     ).toBe(false)
   })
 
-  test("reports Keymaxxer available from either source", () => {
+  test("reports Keymaxxer unavailable when a binary is on PATH but no vault exists", () => {
     expect(
       isKeymaxxerAvailable(
-        { KEYMAXXER_ENTRYPOINT: "/custom/keymaxxer/index.ts" },
+        { HOME: "/home/operator" },
+        () => false,
         () => true,
+      ),
+    ).toBe(false)
+  })
+
+  test("reports Keymaxxer unavailable when ENTRYPOINT exists but no vault exists", () => {
+    expect(
+      isKeymaxxerAvailable(
+        {
+          HOME: "/home/operator",
+          KEYMAXXER_ENTRYPOINT: "/custom/keymaxxer/index.ts",
+        },
+        (path) => path === "/custom/keymaxxer/index.ts",
+        () => false,
+      ),
+    ).toBe(false)
+  })
+
+  test("reports Keymaxxer available when a vault and PATH binary exist", () => {
+    expect(
+      isKeymaxxerAvailable(
+        { HOME: "/home/operator" },
+        (path) => path === "/home/operator/.keymaxxer/vault.db",
+        () => true,
+      ),
+    ).toBe(true)
+  })
+
+  test("reports Keymaxxer available when a vault and ENTRYPOINT exist", () => {
+    expect(
+      isKeymaxxerAvailable(
+        {
+          HOME: "/home/operator",
+          KEYMAXXER_ENTRYPOINT: "/custom/keymaxxer/index.ts",
+        },
+        (path) =>
+          path === "/custom/keymaxxer/index.ts" ||
+          path === "/home/operator/.keymaxxer/vault.db",
         () => false,
       ),
     ).toBe(true)
+  })
+
+  test("reports Keymaxxer available when KEYMAXXER_DB_DIR has a vault", () => {
     expect(
       isKeymaxxerAvailable(
-        {},
-        () => false,
+        { KEYMAXXER_DB_DIR: "/var/keymaxxer", HOME: "/home/operator" },
+        (path) => path === "/var/keymaxxer/vault.db",
+        () => true,
+      ),
+    ).toBe(true)
+  })
+
+  test("does not fall back to HOME when KEYMAXXER_DB_DIR is set without a vault", () => {
+    expect(
+      isKeymaxxerAvailable(
+        { KEYMAXXER_DB_DIR: "/var/empty", HOME: "/home/operator" },
+        (path) => path === "/home/operator/.keymaxxer/vault.db",
+        () => true,
+      ),
+    ).toBe(false)
+  })
+
+  test("reports Keymaxxer available from an XDG vault directory", () => {
+    expect(
+      isKeymaxxerAvailable(
+        { XDG_CONFIG_HOME: "/xdg", HOME: "/home/operator" },
+        (path) =>
+          path === "/xdg/keymaxxer" || path === "/xdg/keymaxxer/vault.db",
+        () => true,
+      ),
+    ).toBe(true)
+  })
+
+  test("falls back to a HOME vault when the XDG keymaxxer directory is absent", () => {
+    expect(
+      isKeymaxxerAvailable(
+        { XDG_CONFIG_HOME: "/xdg", HOME: "/home/operator" },
+        (path) =>
+          path === "/xdg" || path === "/home/operator/.keymaxxer/vault.db",
         () => true,
       ),
     ).toBe(true)

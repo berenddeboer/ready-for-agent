@@ -93,6 +93,16 @@
         }
       ]
     },
+    "e2e-no-vault": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source test test/keymaxxer-uninitialized-e2e.test.ts"
+      },
+      "inputs": ["default", "^production"],
+      "cache": true,
+      "dependsOn": ["^build"]
+    },
     "e2e-no-backend": {
       "executor": "nx:run-commands",
       "options": {

@@ -23,9 +23,12 @@ effect_ignore=(
   "**/application-runtime-disposal.test.ts"
   "**/production-sse-idle-timeout.test.ts"
 )
-# Also exclude the slow SSE suite from the default bun path (historical).
+# Also exclude the slow SSE suite from the default bun path (historical)
+# and the Keymaxxer uninitialized live e2e (must not inherit this runner's
+# KEYMAXXER_ENABLED=false; run via harness:e2e-no-vault).
 bun_ignore=(
   "**/production-sse-idle-timeout.test.ts"
+  "**/keymaxxer-uninitialized-e2e.test.ts"
   "${effect_ignore[@]}"
 )
 

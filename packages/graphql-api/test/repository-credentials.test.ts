@@ -105,6 +105,138 @@ const ambientOnlyKeymaxxer: KeymaxxerServiceShape = {
   runWithSecrets: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
 }
 
+describe("activatePollingIfCredentialed (GitHub)", () => {
+  test("activates polling when Keymaxxer is disabled", async () => {
+    const activated: string[] = []
+    const runtime = makeRuntime(
+      ambientOnlyKeymaxxer,
+      stubQueueService({
+        enqueue: (queueName, payload) =>
+          Effect.sync(() => {
+            if (queueName === ISSUE_REFRESH_QUEUE) {
+              activated.push((payload as { repositoryId: string }).repositoryId)
+            }
+            return "job-1" as never
+          }),
+        ensureKeyed: () =>
+          Effect.succeed({ jobId: "job-1" as never, created: true }),
+      }),
+    )
+    try {
+      await runtime.runPromise(
+        activatePollingIfCredentialed(githubRepo).pipe(Random.withSeed(1)),
+      )
+      expect(activated).toEqual([githubRepo.id])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  test("activates polling from a vault secret when Keymaxxer is effective", async () => {
+    const findSecretCalls: { provider: string; account: string }[] = []
+    const activated: string[] = []
+    const runtime = makeRuntime(
+      {
+        initialize: Effect.void,
+        hasSecret: () => Effect.succeed(true),
+        findSecret: (input) => {
+          findSecretCalls.push(input)
+          return Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS")
+        },
+        findSecrets: () => Effect.succeed([]),
+        addSecret: () => Effect.succeed(true),
+        runWithSecrets: () =>
+          Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+      } satisfies KeymaxxerServiceShape,
+      stubQueueService({
+        enqueue: (_queueName, payload) =>
+          Effect.sync(() => {
+            activated.push((payload as { repositoryId: string }).repositoryId)
+            return "job-1" as never
+          }),
+        ensureKeyed: () =>
+          Effect.succeed({ jobId: "job-1" as never, created: true }),
+      }),
+    )
+    try {
+      await runtime.runPromise(
+        activatePollingIfCredentialed(githubRepo).pipe(Random.withSeed(1)),
+      )
+      expect(findSecretCalls).toEqual([
+        { provider: "github", account: "acme/widgets" },
+      ])
+      expect(activated).toEqual([githubRepo.id])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  test("does not activate polling on a clean vault miss", async () => {
+    const activated: string[] = []
+    const runtime = makeRuntime(
+      {
+        initialize: Effect.void,
+        hasSecret: () => Effect.succeed(false),
+        findSecret: () => Effect.succeed(null),
+        findSecrets: () => Effect.succeed([]),
+        addSecret: () => Effect.succeed(true),
+        runWithSecrets: () =>
+          Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+      } satisfies KeymaxxerServiceShape,
+      stubQueueService({
+        enqueue: (_queueName, payload) =>
+          Effect.sync(() => {
+            activated.push((payload as { repositoryId: string }).repositoryId)
+            return "job-1" as never
+          }),
+        ensureKeyed: () =>
+          Effect.succeed({ jobId: "job-1" as never, created: true }),
+      }),
+    )
+    try {
+      await runtime.runPromise(
+        activatePollingIfCredentialed(githubRepo).pipe(Random.withSeed(1)),
+      )
+      expect(activated).toEqual([])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  test("activates polling from ambient credentials when the vault errors", async () => {
+    const activated: string[] = []
+    const runtime = makeRuntime(
+      {
+        initialize: Effect.void,
+        hasSecret: () => Effect.succeed(true),
+        findSecret: () =>
+          Effect.fail(keymaxxerError("findSecret", "Keymaxxer list failed")),
+        findSecrets: () => Effect.succeed([]),
+        addSecret: () => Effect.succeed(true),
+        runWithSecrets: () =>
+          Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+      } satisfies KeymaxxerServiceShape,
+      stubQueueService({
+        enqueue: (_queueName, payload) =>
+          Effect.sync(() => {
+            activated.push((payload as { repositoryId: string }).repositoryId)
+            return "job-1" as never
+          }),
+        ensureKeyed: () =>
+          Effect.succeed({ jobId: "job-1" as never, created: true }),
+      }),
+    )
+    try {
+      await runtime.runPromise(
+        activatePollingIfCredentialed(githubRepo).pipe(Random.withSeed(1)),
+      )
+      expect(activated).toEqual([githubRepo.id])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+})
+
 describe("activatePollingIfCredentialed (Azure DevOps)", () => {
   test("activates polling from the ambient AZURE_DEVOPS_EXT_PAT when Keymaxxer is disabled", async () => {
     const previous = process.env.AZURE_DEVOPS_EXT_PAT
