@@ -3,6 +3,8 @@ import type { Duration } from "effect"
 /** One OpenCode model id with its supported thinking-level (variant) keys. */
 export interface OpencodeModel {
   readonly id: string
+  /** Operator-facing display name from `opencode models --verbose`, when present. */
+  readonly name?: string
   readonly variants: ReadonlyArray<string>
 }
 

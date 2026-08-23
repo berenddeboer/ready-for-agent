@@ -76,21 +76,24 @@ export const formatAgentModelKindLabel = (
  * Examples:
  * - `US Anthropic Claude Sonnet 4.6 · System · us.anthropic.claude-sonnet-4-6`
  * - `My Org Sonnet · Application · arn:aws:bedrock:…:application-inference-profile/…`
+ * - `opencode/x-preview-f-free (Ox Alpha Free (Unlimited))` — a name without
+ *   kind metadata keeps the id first and appends the name in parentheses
  * - plain `haiku` when no name/kind metadata is present
  */
 export const formatAgentModelLabel = (model: AgentModelOption): string => {
   const name = model.name?.trim() ?? ""
   const kindLabel = formatAgentModelKindLabel(model.kind)
+  if (kindLabel === null) {
+    if (name.length > 0 && name !== model.id) {
+      return `${model.id} (${name})`
+    }
+    return model.id
+  }
   const parts: string[] = []
   if (name.length > 0 && name !== model.id) {
     parts.push(name)
   }
-  if (kindLabel !== null) {
-    parts.push(kindLabel)
-  }
-  if (parts.length === 0) {
-    return model.id
-  }
+  parts.push(kindLabel)
   return `${parts.join(" · ")} · ${model.id}`
 }
 

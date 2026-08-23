@@ -813,6 +813,7 @@ describe("Opencode AgentBackend adapter", () => {
         'if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then',
         `  printf '%s\\n' 'xai/grok-4.5'`,
         `  printf '%s\\n' '{'`,
+        `  printf '%s\\n' '  "name": "Grok 4.5",'`,
         `  printf '%s\\n' '  "variants": {'`,
         `  printf '%s\\n' '    "low": {},'`,
         `  printf '%s\\n' '    "medium": {},'`,
@@ -852,6 +853,7 @@ describe("Opencode AgentBackend adapter", () => {
         expect(result.models).toEqual([
           {
             id: "xai/grok-4.5",
+            name: "Grok 4.5",
             thinkingLevels: ["low", "medium", "high"],
           },
           {

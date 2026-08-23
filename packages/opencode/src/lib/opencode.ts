@@ -86,6 +86,7 @@ export const Opencode = {
             backend: OPENCODE_BACKEND,
             models: parsed.models.map((model) => ({
               id: model.id,
+              ...(model.name !== undefined ? { name: model.name } : {}),
               thinkingLevels: model.variants,
             })),
           }
