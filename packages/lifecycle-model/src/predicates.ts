@@ -246,6 +246,27 @@ export const isTerminalWorkItemState = (
 ): state is TerminalWorkItemState =>
   (TERMINAL_WORK_ITEM_STATES as readonly WorkItemState[]).includes(state)
 
+/**
+ * Work Items already in `complete` — the terminal, successfully-completed
+ * state — among the given Work Items for one Issue.
+ *
+ * This is a sibling check to {@link evaluateUnfinishedWorkItem}, kept
+ * independent of Issue-level facts on purpose: Intake Candidate
+ * classification must veto an Issue whose Work Item already shipped even
+ * when the forge Issue's own state or label still looks startable (for
+ * example, a forge close that silently failed or lagged behind the
+ * harness's own completion record).
+ *
+ * Named `shippedWorkItems` (rather than `completedWorkItems`) to avoid
+ * colliding with the unrelated GraphQL `Query.completedWorkItems` field,
+ * which paginates historical Complete/Abandoned Work Items across every
+ * Repository for the Jobs UI.
+ */
+export const shippedWorkItems = (
+  workItems: readonly WorkItemPredicateShape[],
+): readonly WorkItemPredicateShape[] =>
+  workItems.filter((workItem) => workItem.state === "complete")
+
 export const evaluateActionableIssue = (
   issue: IssuePredicateShape | null | undefined,
   workItems: readonly WorkItemPredicateShape[],

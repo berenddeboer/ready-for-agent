@@ -340,11 +340,11 @@ An explicit operator request that creates a Work Item for a Relevant, open Leaf 
 _Avoid_: Implement Now, enqueue Issue, schedule, defer
 
 **Repository Intake**:
-An explicit operator request that considers every Relevant, open Leaf Issue in one Repository's current Issue projection, sends Implement Now for each Actionable Issue, and sends Queue for each blocked Issue eligible for Queue. Each Issue request is independent: a candidate-local failure does not roll back successful requests for other Issues or prevent later candidates from being attempted. Parent Issues and Issues with unfinished Work Items are left unchanged. Repository Intake neither refreshes Issues nor creates a durable aggregate or changes Harness or Repository settings. Created Work Items leave Work Item Merge Policy unset.
+An explicit operator request that considers every Relevant, open Leaf Issue in one Repository's current Issue projection, sends Implement Now for each Actionable Issue, and sends Queue for each blocked Issue eligible for Queue. Each Issue request is independent: a candidate-local failure does not roll back successful requests for other Issues or prevent later candidates from being attempted. Parent Issues, Issues with unfinished Work Items, and Issues with a completed Work Item are left unchanged. Repository Intake neither refreshes Issues nor creates a durable aggregate or changes Harness or Repository settings. Created Work Items leave Work Item Merge Policy unset.
 _Avoid_: Queue all, batch run, Parent Issue intake
 
 **Intake Candidate**:
-A Relevant, open Leaf Issue in one Repository's current Issue projection that would receive Implement Now or Queue if Repository Intake considered it now. The classification includes the intended request, so a caller does not need to interpret Issue hierarchy, blockers, or unfinished Work Items.
+A Relevant, open Leaf Issue in one Repository's current Issue projection that would receive Implement Now or Queue if Repository Intake considered it now. The classification includes the intended request, so a caller does not need to interpret Issue hierarchy, blockers, or unfinished Work Items. An Issue with a completed Work Item is never a candidate, independent of the Issue's own forge state, so a forge close that silently failed or lagged cannot make already-shipped work look startable again.
 _Avoid_: Relevant Issue (broader), Intake Plan, Intake member
 
 **Implement Locally**:

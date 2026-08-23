@@ -108,19 +108,40 @@ describe("classifyIntakeCandidates", () => {
     ])
   })
 
-  it("treats finished Work Items as non-blocking for candidates", () => {
+  it("treats failed and abandoned Work Items as non-blocking for candidates", () => {
     const candidates = classifyIntakeCandidates(
-      [issue({ issueNumber: 8 })],
+      [issue({ issueNumber: 8 }), issue({ issueNumber: 9 })],
+      [
+        workItem({ issueNumber: 8, state: "failed" }),
+        workItem({ issueNumber: 9, state: "abandoned" }),
+      ],
+    )
+    expect(candidates.map((c) => c.issueNumber)).toEqual([8, 9])
+  })
+
+  it("never offers an Issue with a completed Work Item, even when the forge Issue still looks open and ready-labeled", () => {
+    // Regression for #42: the forge issue close can silently fail, leaving
+    // the Issue open (and still ready-for-agent labeled) even though its
+    // Work Item already reached `complete`. Candidate evaluation must
+    // exclude it regardless of that stale forge state.
+    const candidates = classifyIntakeCandidates(
+      [issue({ issueNumber: 8, state: "OPEN" })],
       [workItem({ issueNumber: 8, state: "complete" })],
     )
-    expect(candidates).toEqual([
-      {
-        issueNumber: 8,
-        title: "Issue 8",
-        url: "https://github.com/acme/widgets/issues/8",
-        action: "IMPLEMENT_NOW",
-      },
-    ])
+    expect(candidates).toEqual([])
+  })
+
+  it("never offers a blocked Issue with a completed Work Item as QUEUE", () => {
+    const candidates = classifyIntakeCandidates(
+      [
+        issue({
+          issueNumber: 8,
+          blockedBy: [{ issueNumber: 1, issueUrl: "https://example/1" }],
+        }),
+      ],
+      [workItem({ issueNumber: 8, state: "complete" })],
+    )
+    expect(candidates).toEqual([])
   })
 
   it("returns empty for an empty Issue projection", () => {

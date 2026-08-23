@@ -9,6 +9,7 @@ import {
   evaluateRelevantIssue,
   evaluateUnfinishedWorkItem,
   formatCompetingIssueClosingPullRequestMessage,
+  shippedWorkItems,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -114,6 +115,18 @@ describe("shared lifecycle predicates", () => {
     expect(
       evaluateUnfinishedWorkItem({ state: "failed", canRetry: true }),
     ).toEqual({ _tag: "match" })
+  })
+
+  it("finds shipped Work Items independently of Issue-level facts", () => {
+    expect(
+      shippedWorkItems([
+        { id: "wi-1", state: "complete", canRetry: false },
+        { id: "wi-2", state: "failed", canRetry: false },
+        { id: "wi-3", state: "abandoned", canRetry: false },
+        { id: "wi-4", state: "implement", canRetry: false },
+      ]),
+    ).toEqual([{ id: "wi-1", state: "complete", canRetry: false }])
+    expect(shippedWorkItems([])).toEqual([])
   })
 
   it("defines Relevant Issue hierarchy failures", () => {

@@ -3,6 +3,7 @@ import {
   evaluateActionableIssue,
   evaluateImplementableIssue,
   evaluateUnfinishedWorkItem,
+  shippedWorkItems,
 } from "./predicates.js"
 
 /** Intended operator request for one Intake Candidate. */
@@ -10,8 +11,8 @@ export type IntakeCandidateAction = "IMPLEMENT_NOW" | "QUEUE"
 
 /**
  * One Issue that Repository Intake would currently send Implement Now or
- * Queue for. Parents, closed/irrelevant Issues, and Issues with unfinished
- * Work Items are never returned.
+ * Queue for. Parents, closed/irrelevant Issues, Issues with unfinished Work
+ * Items, and Issues with a completed Work Item are never returned.
  */
 export type IntakeCandidate = {
   readonly issueNumber: number
@@ -44,6 +45,12 @@ export type IntakeCandidateWorkItemInput = WorkItemPredicateShape & {
  *
  * Uses the same leaf / implementable / actionable / unfinished predicates as
  * Implement Now and Queue so candidate listing cannot drift from admission.
+ *
+ * Before either check, an Issue with a completed Work Item is vetoed
+ * outright and never offered, independent of what the Issue's own forge
+ * state currently reports. This is a defense-in-depth guard: it must hold
+ * even when the forge Issue looks open and startable because its close
+ * never landed (see `shippedWorkItems`).
  */
 export const classifyIntakeCandidates = (
   issues: readonly IntakeCandidateIssueInput[],
@@ -64,6 +71,9 @@ export const classifyIntakeCandidates = (
 
   for (const issue of issues) {
     const issueWorkItems = workItemsByIssue.get(issue.issueNumber) ?? []
+    if (shippedWorkItems(issueWorkItems).length > 0) {
+      continue
+    }
     const predicateIssue = {
       isCurrentIssue: true as const,
       state: issue.state,
