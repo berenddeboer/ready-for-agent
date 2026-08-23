@@ -21,7 +21,7 @@ Project-instruction file conventions are backend-native rather than part of this
 
 The startup window is enforced only until the first stdout output arrives, then disarmed for the rest of the turn: a legitimate long-running tool call (build, test suite) may produce no output for many minutes, so a mid-turn inactivity bound would be unsafe. Adapters may also disarm via a backend-specific `observeStartup` side channel when the outer stream is legitimately silent while the turn is already progressing (OpenCode's parent JSONL stays quiet while a `/review` task subagent runs; the OpenCode adapter polls its session store for that activity). A turn that never starts fails with a distinct never-started error rather than the overall turn timeout, so the failure is diagnosable as a broken CLI, bad auth, or bad configuration instead of exhausted time.
 
-The shared `maxConcurrentAgentTurns` limit defaults to two and bounds in-flight CLI turns rather than durable Sessions. CI uses fake-CLI conformance suites and generic lifecycle tests; authenticated live adapter tests remain opt-in.
+The shared `maxConcurrentAgentTurns` limit defaults to two and bounds in-flight CLI turns rather than durable Sessions. Admission under that limit is repository-aware and fair by default (ADR 0065). CI uses fake-CLI conformance suites and generic lifecycle tests; authenticated live adapter tests remain opt-in.
 
 ## Consequences
 

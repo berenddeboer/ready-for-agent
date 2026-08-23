@@ -1,4 +1,4 @@
-import { Context, Duration, Effect, Option, Semaphore } from "effect"
+import { Context, Duration, Effect, Option, Ref } from "effect"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
 import type {
   AgentBackendError,
@@ -60,12 +60,125 @@ type SavedStepRunReason = {
 }
 
 /**
+ * Bucket used for calls made with no ambient Step Run context (for example
+ * direct/test calls). Grouped as a single "repository" so admission among
+ * them is unaffected by repository-aware fairness (matches prior behavior).
+ */
+const NO_REPOSITORY = "@ready-for-agent/work-item-lifecycle/no-repository"
+
+/**
+ * Admission state for the repository-aware fair-share gate. `lastGranted`
+ * tracks, per repository, the sequence number of the most recent permit it
+ * was granted (absent = never granted, treated as the least-recently-serviced
+ * of all). `waiting` tracks, per repository, how many callers are currently
+ * blocked trying to acquire a permit (pending demand); a repository absent
+ * from `waiting` (or with a count of `0`) has no pending demand and is not
+ * considered when ranking who goes next.
+ */
+type FairGateState = {
+  readonly capacity: number
+  readonly active: number
+  readonly seq: number
+  readonly lastGranted: ReadonlyMap<string, number>
+  readonly waiting: ReadonlyMap<string, number>
+}
+
+const initialFairGateState = (capacity: number): FairGateState => ({
+  capacity,
+  active: 0,
+  seq: 0,
+  lastGranted: new Map(),
+  waiting: new Map(),
+})
+
+const recencyOf = (state: FairGateState, repositoryId: string): number =>
+  state.lastGranted.get(repositoryId) ?? Number.NEGATIVE_INFINITY
+
+/**
+ * Attempt to admit `repositoryId` for one permit. Admits immediately when
+ * capacity is free and no other repository with pending demand is more
+ * deserving (least-recently-granted wins); otherwise leaves the state
+ * unchanged so the caller registers as waiting and retries.
+ */
+const tryAdmit =
+  (repositoryId: string) =>
+  (state: FairGateState): [boolean, FairGateState] => {
+    if (state.active >= state.capacity) {
+      return [false, state]
+    }
+    const contenders = new Set([repositoryId])
+    for (const [otherRepositoryId, count] of state.waiting) {
+      if (count > 0) {
+        contenders.add(otherRepositoryId)
+      }
+    }
+    const myRecency = recencyOf(state, repositoryId)
+    let leastRecent = myRecency
+    for (const contender of contenders) {
+      leastRecent = Math.min(leastRecent, recencyOf(state, contender))
+    }
+    if (myRecency > leastRecent) {
+      // Another repository with pending demand has gone longer without a
+      // permit; let it be considered first.
+      return [false, state]
+    }
+    const lastGranted = new Map(state.lastGranted)
+    lastGranted.set(repositoryId, state.seq + 1)
+    return [
+      true,
+      { ...state, active: state.active + 1, seq: state.seq + 1, lastGranted },
+    ]
+  }
+
+const registerWaiting =
+  (repositoryId: string) =>
+  (state: FairGateState): FairGateState => {
+    const waiting = new Map(state.waiting)
+    waiting.set(repositoryId, (waiting.get(repositoryId) ?? 0) + 1)
+    return { ...state, waiting }
+  }
+
+const unregisterWaiting =
+  (repositoryId: string) =>
+  (state: FairGateState): FairGateState => {
+    const count = state.waiting.get(repositoryId) ?? 0
+    if (count <= 0) {
+      return state
+    }
+    const waiting = new Map(state.waiting)
+    if (count <= 1) {
+      waiting.delete(repositoryId)
+    } else {
+      waiting.set(repositoryId, count - 1)
+    }
+    return { ...state, waiting }
+  }
+
+const releasePermit = (state: FairGateState): FairGateState => ({
+  ...state,
+  active: Math.max(0, state.active - 1),
+})
+
+/**
  * Cap concurrent lifecycle Agent Turn processes using the current harness
- * Config value. `inspect` is not wrapped.
+ * Config value, admitting repositories fairly under contention. `inspect` is
+ * not wrapped.
  *
- * Re-reads Config on each acquire attempt and resizes the semaphore so raising
- * the limit frees capacity promptly and lowering it does not interrupt
- * in-flight processes (they finish; new acquires wait until taken drops).
+ * Re-reads Config on each acquire attempt and resizes the gate's capacity so
+ * raising the limit frees capacity promptly and lowering it does not
+ * interrupt in-flight processes (they finish; new acquires wait until taken
+ * drops).
+ *
+ * Admission is repository-aware and fair by default: when a permit is free
+ * and more than one repository has pending demand (an ambient
+ * {@link CurrentStepRun} tagging the caller with a `repositoryId`), the
+ * repository that has gone longest without being granted a permit is
+ * admitted next. A repository with no pending demand does not affect
+ * ordering for the repositories that do, and a single repository (or no
+ * contention at all) is admitted immediately exactly as before this
+ * repository-aware admission was introduced. Calls with no ambient Step Run
+ * context are grouped into one bucket, so their relative admission order is
+ * unaffected by this fairness rule.
  *
  * While waiting for a permit, marks the ambient Step Run with
  * `waiting_for_agent_turn` so GraphQL can show **Queued** instead of
@@ -80,7 +193,9 @@ export const limitAgentTurns = (
   sql: Pick<SqlClient, "unsafe">,
 ): Effect.Effect<AgentBackendService> =>
   Effect.gen(function* () {
-    const semaphore = yield* Semaphore.make(DEFAULT_MAX_CONCURRENT_AGENT_TURNS)
+    const gate = yield* Ref.make(
+      initialFairGateState(DEFAULT_MAX_CONCURRENT_AGENT_TURNS),
+    )
 
     const currentMax = db.getConfig.pipe(
       Effect.map((config) => Math.max(1, config.maxConcurrentAgentTurns)),
@@ -210,30 +325,98 @@ export const limitAgentTurns = (
       effect: Effect.Effect<A, E, R>,
     ): Effect.Effect<A, E, R> =>
       Effect.gen(function* () {
+        const current = yield* CurrentStepRun
+        const repositoryId = current?.repositoryId ?? NO_REPOSITORY
+
         let markedWaiting = false
         let savedReason: SavedStepRunReason | null = null
-        for (;;) {
-          const max = yield* currentMax
-          yield* semaphore.resize(max)
-          const result = yield* semaphore.withPermitsIfAvailable(1)(
-            Effect.gen(function* () {
-              if (markedWaiting) {
-                yield* clearWaiting(savedReason)
-                markedWaiting = false
-                savedReason = null
-              }
-              return yield* effect
-            }),
-          )
-          if (Option.isSome(result)) {
-            return result.value
+        let registeredWaiting = false
+
+        const cleanupWaiting = Effect.gen(function* () {
+          if (registeredWaiting) {
+            yield* Ref.update(gate, unregisterWaiting(repositoryId))
+            registeredWaiting = false
           }
-          if (!markedWaiting) {
-            savedReason = yield* markWaiting()
-            markedWaiting = true
+          if (markedWaiting) {
+            yield* clearWaiting(savedReason)
+            markedWaiting = false
+            savedReason = null
           }
-          yield* Effect.sleep(CONFIG_RECHECK_INTERVAL)
-        }
+        })
+
+        // Admitting this caller and pairing its permit with a guaranteed
+        // release must never straddle an interruption boundary: an interrupt
+        // that lands between "permit taken" and "release wired up" would
+        // leak that permit for the rest of the process's life. This mirrors
+        // how Effect's own `Semaphore.withPermitsIfAvailable` couples taking
+        // a permit with registering its release inside one uninterruptible
+        // region. Only the admission attempt itself (the `Ref.modify` below)
+        // must be uninterruptible; everything else — the config re-check and
+        // the waiting bookkeeping in the loop below, and the wait-state reset
+        // (including `clearWaiting`'s best-effort SQL write) and the turn
+        // itself here — stays freely interruptible exactly as it was before
+        // repository-aware fairness, all covered by the same guaranteed
+        // release. So a Step Run that is merely queued — never admitted —
+        // can still be cancelled promptly by Pause, Interrupt Work Item, or
+        // a productive timeout even if the database is slow, and a Step Run
+        // that was just admitted keeps that same promptness through its
+        // wait-state reset.
+        const tryRunTurn: Effect.Effect<
+          Option.Option<A>,
+          E,
+          R
+        > = Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const admitted = yield* Ref.modify(gate, tryAdmit(repositoryId))
+            if (!admitted) {
+              return Option.none()
+            }
+            const result = yield* restore(
+              Effect.ensuring(
+                Effect.gen(function* () {
+                  if (registeredWaiting) {
+                    yield* Ref.update(gate, unregisterWaiting(repositoryId))
+                    registeredWaiting = false
+                  }
+                  if (markedWaiting) {
+                    yield* clearWaiting(savedReason)
+                    markedWaiting = false
+                    savedReason = null
+                  }
+                  return yield* effect
+                }),
+                Ref.update(gate, releasePermit),
+              ),
+            )
+            return Option.some(result)
+          }),
+        )
+
+        const runTurn = Effect.gen(function* () {
+          for (;;) {
+            const max = yield* currentMax
+            yield* Ref.update(gate, (state) => ({ ...state, capacity: max }))
+            const result = yield* tryRunTurn
+            if (Option.isSome(result)) {
+              return result.value
+            }
+            if (!registeredWaiting) {
+              yield* Ref.update(gate, registerWaiting(repositoryId))
+              registeredWaiting = true
+            }
+            if (!markedWaiting) {
+              savedReason = yield* markWaiting()
+              markedWaiting = true
+            }
+            yield* Effect.sleep(CONFIG_RECHECK_INTERVAL)
+          }
+        })
+
+        // Belt-and-braces: if this fiber is interrupted while merely waiting,
+        // the waiting bookkeeping and Step Run "waiting" marking are still
+        // cleared. A no-op once the success branch above has already reset
+        // both flags.
+        return yield* runTurn.pipe(Effect.onExit(() => cleanupWaiting))
       })
 
     return AgentBackend.of({
