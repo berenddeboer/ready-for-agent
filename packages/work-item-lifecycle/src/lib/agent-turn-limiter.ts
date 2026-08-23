@@ -469,15 +469,7 @@ export const limitAgentTurns = (
             const result = yield* restore(
               Effect.ensuring(
                 Effect.gen(function* () {
-                  if (registeredWaiting) {
-                    yield* Ref.update(gate, unregisterWaiting(repositoryId))
-                    registeredWaiting = false
-                  }
-                  if (markedWaiting) {
-                    yield* clearWaiting(savedReason)
-                    markedWaiting = false
-                    savedReason = null
-                  }
+                  yield* cleanupWaiting
                   return yield* effect
                 }),
                 Ref.update(gate, releasePermit(repositoryId)),
