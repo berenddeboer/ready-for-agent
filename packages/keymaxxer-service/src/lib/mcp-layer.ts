@@ -1,4 +1,6 @@
 import { accessSync, constants, existsSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { Config, Effect, Layer } from "effect"
@@ -109,13 +111,56 @@ export const keymaxxerMcpCommand = (
   return { command: "keymaxxer", args: ["serve"] }
 }
 
+/** Operator vault directory used by Keymaxxer 0.2.x. */
+const keymaxxerVaultDirectory = (
+  environment: Partial<Record<string, string | undefined>> = process.env,
+  pathExists: (path: string) => boolean = existsSync,
+): string => {
+  const dbDir = environment.KEYMAXXER_DB_DIR?.trim()
+  if (dbDir !== undefined && dbDir !== "") {
+    return dbDir
+  }
+  const xdg = environment.XDG_CONFIG_HOME?.trim()
+  if (xdg !== undefined && xdg !== "") {
+    const xdgDir = join(xdg, "keymaxxer")
+    if (pathExists(xdgDir)) {
+      return xdgDir
+    }
+  }
+  const home = environment.HOME?.trim()
+  return join(
+    home !== undefined && home !== "" ? home : homedir(),
+    ".keymaxxer",
+  )
+}
+
+/**
+ * True when an on-disk vault is present. File presence only — never runs
+ * `keymaxxer list`, which would prompt for a passphrase when a vault exists.
+ */
+const isKeymaxxerVaultPresent = (
+  environment: Partial<Record<string, string | undefined>> = process.env,
+  pathExists: (path: string) => boolean = existsSync,
+): boolean => {
+  const directory = keymaxxerVaultDirectory(environment, pathExists)
+  return (
+    pathExists(join(directory, "vault.db")) ||
+    pathExists(join(directory, "vault.meta.json"))
+  )
+}
+
 export const isKeymaxxerAvailable = (
   environment: Partial<Record<string, string | undefined>> = process.env,
   pathExists: (path: string) => boolean = existsSync,
   commandExists: (command: string) => boolean = (command) =>
-    Bun.which(command) !== null,
+    Bun.which(command, {
+      PATH: environment.PATH ?? process.env.PATH,
+    }) !== null,
   isExecutable: (path: string) => boolean = isExecutableKeymaxxerEntrypoint,
 ) => {
+  if (!isKeymaxxerVaultPresent(environment, pathExists)) {
+    return false
+  }
   const entrypoint = environment.KEYMAXXER_ENTRYPOINT?.trim()
   if (entrypoint && pathExists(entrypoint)) return true
   const command = keymaxxerMcpCommand(environment, pathExists, isExecutable)

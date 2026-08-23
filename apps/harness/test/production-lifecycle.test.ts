@@ -1,6 +1,15 @@
 import { spawn } from "node:child_process"
 import { EventEmitter } from "node:events"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { createServer } from "node:net"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { createInterface } from "node:readline"
 import { fileURLToPath } from "node:url"
 import {
@@ -127,6 +136,28 @@ describe("production lifecycle keymaxxer mode", () => {
     expect(resolveKeymaxxerMode({}, () => true)).toEqual({
       kind: "spawn-sidecar",
     })
+  })
+
+  test("disables when a keymaxxer binary is on PATH but no vault exists", () => {
+    const runDir = mkdtempSync(join(tmpdir(), "rfa-keymaxxer-mode-"))
+    try {
+      const home = join(runDir, "home")
+      const binDir = join(runDir, "bin")
+      mkdirSync(home)
+      mkdirSync(binDir)
+      const binary = join(binDir, "keymaxxer")
+      writeFileSync(binary, "#!/bin/sh\nexit 1\n")
+      chmodSync(binary, 0o755)
+      expect(Bun.which("keymaxxer", { PATH: binDir })).toBe(binary)
+      expect(
+        resolveKeymaxxerMode({
+          HOME: home,
+          PATH: binDir,
+        }),
+      ).toEqual({ kind: "disabled" })
+    } finally {
+      rmSync(runDir, { recursive: true, force: true })
+    }
   })
 })
 

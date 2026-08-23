@@ -142,6 +142,10 @@ jobs:
       - name: Harness dev smoke
         run: bunx nx run harness:smoke
 
+      - name: Live Harness e2e (uninitialized Keymaxxer)
+        id: live-e2e-no-vault
+        run: bunx nx run harness:e2e-no-vault
+
       # Chromium once for both live suites.
       - name: Install Playwright Chromium
         working-directory: apps/harness
