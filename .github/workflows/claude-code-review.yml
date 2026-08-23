@@ -1,25 +1,20 @@
 name: Claude Code Review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
   claude-review:
     timeout-minutes: 25
-    # Automatic reviews only for trusted members (owner, collaborators,
-    # members). First-time contributors and outside collaborators must ask
-    # for a review manually with `@claude review`.
+    # pull_request_target always runs (with secrets), even for first-time
+    # fork authors — GitHub's workflow-approval gate does not apply. Skip
+    # first-timers here. After a merged commit/PR they become CONTRIBUTOR
+    # and later PRs are reviewed automatically, matching when other checks
+    # already run without approval.
     if: |
-      github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login != 'berenddeboer' &&
-      contains('OWNER,MEMBER,COLLABORATOR', github.event.pull_request.author_association)
+      !contains(fromJSON('["FIRST_TIME_CONTRIBUTOR","FIRST_TIMER","NONE"]'), github.event.pull_request.author_association)
     runs-on: ubuntu-latest
     env:
       # Headless runs exit when the parent finishes, terminating background
@@ -33,11 +28,20 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Checkout pull request revision
+      - name: Checkout base repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out pull request head
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "pull/${PR_NUMBER}/head"
+          git checkout --detach "${HEAD_SHA}"
 
       - name: Run Claude Code Review
         id: claude-review
