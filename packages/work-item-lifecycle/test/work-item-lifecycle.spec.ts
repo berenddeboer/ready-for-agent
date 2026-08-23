@@ -8911,8 +8911,27 @@ describe("WorkItemLifecycle", () => {
                 ),
               ).toEqual([])
 
-              const retryError = yield* Effect.flip(lifecycle.retry(created.id))
-              expect(retryError).toBeInstanceOf(WorkItemTerminalError)
+              if (testCase.failureCode === "issue_not_found") {
+                // The tracked Issue is still open/present in the Issue store
+                // in this fixture (only the mocked Close Issue handler
+                // reported "issue_not_found"). retryWorkItem's issue-closed
+                // exception re-checks the Issue's live state and finds it
+                // valid, so the Work Item becomes retryable back into Close
+                // Issue rather than staying terminal.
+                const retried = yield* lifecycle.retry(created.id)
+                expect(retried.state).toBe("close_issue")
+                expect(retried.failureCode).toBeNull()
+                expect(retried.failureMessage).toBeNull()
+                expect(retried.stepRuns.at(-1)).toMatchObject({
+                  step: "close_issue",
+                  status: "queued",
+                })
+              } else {
+                const retryError = yield* Effect.flip(
+                  lifecycle.retry(created.id),
+                )
+                expect(retryError).toBeInstanceOf(WorkItemTerminalError)
+              }
             }).pipe(Effect.provide(makeTestLayer(steps)))
           }
         }),
@@ -10154,6 +10173,337 @@ describe("WorkItemLifecycle", () => {
         }),
       )
     })
+
+    it("recovers a Work Item Failed because its Issue was deleted, once the Issue is restored", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
+          const failed = yield* claimAndRunPending
+          expect(failed._tag).toBe("processed")
+          if (failed._tag === "processed") {
+            expect(failed.workItem.state).toBe("failed")
+            expect(failed.workItem.failureCode).toBe("issue_not_found")
+          }
+
+          // Issue still missing: retryWorkItem's issue-closed exception
+          // re-checks live state and finds nothing, so it stays terminal.
+          const stillMissing = yield* Effect.flip(lifecycle.retry(created.id))
+          expect(stillMissing).toBeInstanceOf(WorkItemTerminalError)
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: issue.issueNumber,
+            ...sampleIssueFields,
+          })
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("install_dependencies")
+          expect(retried.failureCode).toBeNull()
+          expect(retried.failureMessage).toBeNull()
+          expect(retried.stepRuns.at(-1)).toMatchObject({
+            step: "install_dependencies",
+            status: "queued",
+          })
+        }),
+      ))
+
+    it("keeps a Work Item Failed for a closed Issue terminal while the Issue is still closed", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: issue.issueNumber,
+            ...sampleIssueFields,
+            state: "CLOSED",
+          })
+          const failed = yield* claimAndRunPending
+          expect(failed._tag).toBe("processed")
+          if (failed._tag === "processed") {
+            expect(failed.workItem.state).toBe("failed")
+            expect(failed.workItem.failureCode).toBe("issue_not_open")
+          }
+
+          const stillClosed = yield* Effect.flip(lifecycle.retry(created.id))
+          expect(stillClosed).toBeInstanceOf(WorkItemTerminalError)
+          if (stillClosed instanceof WorkItemTerminalError) {
+            expect(stillClosed.state).toBe("failed")
+          }
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: issue.issueNumber,
+            ...sampleIssueFields,
+            state: "OPEN",
+          })
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("install_dependencies")
+          expect(retried.failureCode).toBeNull()
+        }),
+      ))
+
+    it("does not broaden retry eligibility for an unrelated terminal failure reason, even once the Issue is fixed", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: issue.issueNumber,
+            ...sampleIssueFields,
+            hasChildren: true,
+          })
+          const failed = yield* claimAndRunPending
+          expect(failed._tag).toBe("processed")
+          if (failed._tag === "processed") {
+            expect(failed.workItem.state).toBe("failed")
+            expect(failed.workItem.failureCode).toBe("issue_is_parent")
+          }
+
+          // The Issue's eligibility problem is fixed (no longer a Parent), but
+          // "issue_is_parent" is not one of the two gated failure reasons, so
+          // retry must remain refused exactly as before this feature.
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: issue.issueNumber,
+            ...sampleIssueFields,
+            hasChildren: false,
+          })
+
+          const retryError = yield* Effect.flip(lifecycle.retry(created.id))
+          expect(retryError).toBeInstanceOf(WorkItemTerminalError)
+          if (retryError instanceof WorkItemTerminalError) {
+            expect(retryError.state).toBe("failed")
+          }
+        }),
+      ))
+
+    it("re-runs Review rather than skipping into Commit when a needs_human Review succeeded the moment the Issue closed", () => {
+      const reason = "auth bypass remains open"
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        review: () =>
+          Effect.succeed({
+            _tag: "needs_human" as const,
+            reason,
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          // Reach Review pending (create_worktree, install_dependencies,
+          // implement, assess_changes, pre_commit) before closing the Issue,
+          // so Review itself is the Step Run whose success races the closure.
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: issue.issueNumber,
+            ...sampleIssueFields,
+            state: "CLOSED",
+          })
+
+          const afterReview = yield* claimAndRunPending
+          expect(afterReview._tag).toBe("processed")
+          if (afterReview._tag === "processed") {
+            // Review's own needs_human outcome is superseded by the Issue
+            // revalidation failure: the Work Item Fails, not Needs Human.
+            expect(afterReview.workItem.state).toBe("failed")
+            expect(afterReview.workItem.failureCode).toBe("issue_not_open")
+            const reviewRun = afterReview.workItem.stepRuns.find(
+              (run) => run.step === "review",
+            )
+            expect(reviewRun?.status).toBe("succeeded")
+          }
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: issue.issueNumber,
+            ...sampleIssueFields,
+          })
+
+          // Must re-run Review (which would again land on needs_human) rather
+          // than assume the linear default and jump straight to Commit,
+          // silently bypassing the human-review gate.
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("review")
+          expect(retried.failureCode).toBeNull()
+          expect(retried.stepRuns.at(-1)).toMatchObject({
+            step: "review",
+            status: "queued",
+          })
+        }),
+      )
+    })
+
+    it("re-runs Assess Changes rather than assuming has-changes when a NO_CHANGES outcome succeeded the moment the Issue was deleted", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        assessChanges: () =>
+          Effect.succeed({
+            _tag: "no_changes",
+            completionSummary: "Done without file changes",
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          // Reach Assess Changes pending (create_worktree,
+          // install_dependencies, implement) before deleting the Issue.
+          // "issue_not_found" is not covered by the NO_CHANGES -> Close Issue
+          // carve-out (that only applies to "issue_not_open"), so this still
+          // Fails the Work Item.
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
+
+          const afterAssess = yield* claimAndRunPending
+          expect(afterAssess._tag).toBe("processed")
+          if (afterAssess._tag === "processed") {
+            expect(afterAssess.workItem.state).toBe("failed")
+            expect(afterAssess.workItem.failureCode).toBe("issue_not_found")
+            const assessRun = afterAssess.workItem.stepRuns.find(
+              (run) => run.step === "assess_changes",
+            )
+            expect(assessRun?.status).toBe("succeeded")
+          }
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: issue.issueNumber,
+            ...sampleIssueFields,
+          })
+
+          // Must re-run Assess Changes (which re-derives NO_CHANGES -> Close
+          // Issue) rather than assume the linear has-changes default and jump
+          // straight to Pre-Commit for a Work Item with nothing to commit.
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("assess_changes")
+          expect(retried.failureCode).toBeNull()
+          expect(retried.stepRuns.at(-1)).toMatchObject({
+            step: "assess_changes",
+            status: "queued",
+          })
+        }),
+      )
+    })
+
+    it("recovers a Work Item Failed while Waiting for blockers once its Issue is restored", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository } = yield* seedActionableIssue
+
+          const blockerIssue = yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 43,
+            ...sampleIssueFields,
+            state: "CLOSED",
+          })
+          const heldIssue = yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 44,
+            ...sampleIssueFields,
+            blockedBy: [
+              {
+                issueNumber: blockerIssue.issueNumber,
+                issueUrl: "https://github.com/acme/widgets/issues/43",
+              },
+            ],
+          })
+
+          const created = yield* lifecycle.queue(
+            repository.id,
+            heldIssue.issueNumber,
+          )
+          expect(created.waitingForBlockers).toBe(true)
+          expect(created.worktreePath).toBeNull()
+          expect(created.stepRuns).toHaveLength(0)
+
+          // The blocking Issue vanishes entirely rather than merely staying
+          // blocked, and the held Issue is deleted out from under the Work
+          // Item — classifyHeldIssue Fails it with issue_not_found, exactly
+          // the same terminal shape as the mid-flight revalidation path, with
+          // no worktree and no Step Run ever having existed.
+          yield* db.deleteIssue(repository.id, heldIssue.issueNumber)
+          yield* lifecycle.releaseWaitingForBlockers(repository.id)
+
+          const failed = yield* lifecycle.getWorkItem(created.id)
+          expect(failed.state).toBe("failed")
+          expect(failed.failureCode).toBe("issue_not_found")
+          expect(failed.waitingForBlockers).toBe(false)
+          expect(failed.stepRuns).toHaveLength(0)
+
+          const stillMissing = yield* Effect.flip(lifecycle.retry(created.id))
+          expect(stillMissing).toBeInstanceOf(WorkItemTerminalError)
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: heldIssue.issueNumber,
+            ...sampleIssueFields,
+          })
+
+          // No Step Run ever ran: retry must resume at the very first
+          // operational Step rather than assume any prior Step succeeded.
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("create_worktree")
+          expect(retried.failureCode).toBeNull()
+          expect(retried.stepRuns.at(-1)).toMatchObject({
+            step: "create_worktree",
+            status: "queued",
+          })
+        }),
+      ))
   })
 
   describe("delivery safety and interruption", () => {
