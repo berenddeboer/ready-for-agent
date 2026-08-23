@@ -30,6 +30,7 @@ import {
 import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
+  AUTO_MERGE_DISABLED_FOR_REPOSITORY,
   ActiveStepRunExistsError,
   BuildModelNotConfiguredError,
   CHECK_START_DEADLINE_MS,
@@ -6942,7 +6943,7 @@ describe("WorkItemLifecycle", () => {
         decidePrMerge: () =>
           Effect.succeed({
             _tag: "needs_human",
-            reason: "Auto-merge is disabled for this repository",
+            reason: AUTO_MERGE_DISABLED_FOR_REPOSITORY,
           }),
         mergePr: () =>
           Effect.die("merge must not run after human merge resume"),
@@ -8077,7 +8078,7 @@ describe("WorkItemLifecycle", () => {
         decidePrMerge: () =>
           Effect.succeed({
             _tag: "needs_human",
-            reason: "Auto-merge is disabled for this repository",
+            reason: AUTO_MERGE_DISABLED_FOR_REPOSITORY,
           }),
         localCleanup: () => {
           cleanupCalls += 1
@@ -8118,7 +8119,7 @@ describe("WorkItemLifecycle", () => {
         decidePrMerge: () =>
           Effect.succeed({
             _tag: "needs_human",
-            reason: "Auto-merge is disabled for this repository",
+            reason: AUTO_MERGE_DISABLED_FOR_REPOSITORY,
           }),
         localCleanup: () =>
           Effect.fail(
@@ -8149,7 +8150,7 @@ describe("WorkItemLifecycle", () => {
           const stillNeedsHuman = yield* lifecycle.getWorkItem(created.id)
           expect(stillNeedsHuman.state).toBe("needs_human")
           expect(stillNeedsHuman.failureMessage).toBe(
-            "Auto-merge is disabled for this repository",
+            AUTO_MERGE_DISABLED_FOR_REPOSITORY,
           )
         }),
       )
@@ -8161,7 +8162,7 @@ describe("WorkItemLifecycle", () => {
         decidePrMerge: () =>
           Effect.succeed({
             _tag: "needs_human",
-            reason: "Auto-merge is disabled for this repository",
+            reason: AUTO_MERGE_DISABLED_FOR_REPOSITORY,
           }),
       }
 

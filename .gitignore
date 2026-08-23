@@ -57,6 +57,10 @@ testem.log
 .DS_Store
 Thumbs.db
 
+# OS/runtime crash dumps (e.g. a segfaulting test runner writing core.<pid>)
+core
+core.[0-9]*
+
 .nx/cache
 .nx/workspace-data
 .nx/migrate-runs

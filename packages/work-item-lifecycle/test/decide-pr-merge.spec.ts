@@ -9,6 +9,8 @@ import {
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
 import {
+  AUTO_MERGE_DISABLED_FOR_REPOSITORY,
+  AUTO_MERGE_DISABLED_FOR_WORK_ITEM,
   type LifecycleStepContext,
   decidePrMerge,
   decodeWorkItemMergePolicy,
@@ -413,7 +415,7 @@ describe("decidePrMerge", () => {
     expect(continued).toBe(false)
     expect(result).toEqual({
       _tag: "needs_human",
-      reason: "Auto-merge is disabled for this repository",
+      reason: AUTO_MERGE_DISABLED_FOR_REPOSITORY,
     })
   })
 
@@ -451,7 +453,7 @@ describe("decidePrMerge", () => {
     expect(continued).toBe(false)
     expect(result).toEqual({
       _tag: "needs_human",
-      reason: "Auto-merge is disabled for this Work Item",
+      reason: AUTO_MERGE_DISABLED_FOR_WORK_ITEM,
     })
   })
 
