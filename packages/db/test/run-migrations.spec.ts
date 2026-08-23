@@ -282,6 +282,7 @@ describe("runMigrations", () => {
           { name: "20260815120000_work_item_auto_merge_override" },
           { name: "20260815180000_autonomous_retry_budget" },
           { name: "20260818120000_repository_merge_policy" },
+          { name: "20260819120000_repository_guaranteed_min_agent_turns" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

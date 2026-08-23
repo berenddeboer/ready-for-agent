@@ -29,7 +29,8 @@ export interface AgentBackendService {
 
 /**
  * Ambient Step Run identity for the fiber executing a Lifecycle Step handler.
- * Used by the Agent Turn limiter to project mid-run wait state.
+ * Used by the Agent Turn limiter to project mid-run wait state and to admit
+ * Agent Turns fairly per Repository.
  */
 export type CurrentStepRunValue = {
   readonly stepRunId: string
@@ -67,13 +68,20 @@ type SavedStepRunReason = {
 const NO_REPOSITORY = "@ready-for-agent/work-item-lifecycle/no-repository"
 
 /**
- * Admission state for the repository-aware fair-share gate. `lastGranted`
+ * Admission state for the repository-aware fair-share gate, extended with an
+ * optional per-repository guaranteed-minimum priority claim. `lastGranted`
  * tracks, per repository, the sequence number of the most recent permit it
  * was granted (absent = never granted, treated as the least-recently-serviced
  * of all). `waiting` tracks, per repository, how many callers are currently
  * blocked trying to acquire a permit (pending demand); a repository absent
  * from `waiting` (or with a count of `0`) has no pending demand and is not
- * considered when ranking who goes next.
+ * considered when ranking who goes next. `activeByRepository` tracks, per
+ * repository, how many permits it currently holds — used only to evaluate
+ * whether `guaranteedMins` is still unmet for that repository.
+ * `guaranteedMins` is refreshed opportunistically by each waiting caller from
+ * that caller's own Repository settings (mirroring how `capacity` is kept
+ * current from Harness Config below), so it converges to the live setting for
+ * every repository with active demand without a central scheduler.
  */
 type FairGateState = {
   readonly capacity: number
@@ -81,6 +89,8 @@ type FairGateState = {
   readonly seq: number
   readonly lastGranted: ReadonlyMap<string, number>
   readonly waiting: ReadonlyMap<string, number>
+  readonly activeByRepository: ReadonlyMap<string, number>
+  readonly guaranteedMins: ReadonlyMap<string, number>
 }
 
 const initialFairGateState = (capacity: number): FairGateState => ({
@@ -89,16 +99,43 @@ const initialFairGateState = (capacity: number): FairGateState => ({
   seq: 0,
   lastGranted: new Map(),
   waiting: new Map(),
+  activeByRepository: new Map(),
+  guaranteedMins: new Map(),
 })
 
 const recencyOf = (state: FairGateState, repositoryId: string): number =>
   state.lastGranted.get(repositoryId) ?? Number.NEGATIVE_INFINITY
 
+const activeOf = (state: FairGateState, repositoryId: string): number =>
+  state.activeByRepository.get(repositoryId) ?? 0
+
+const guaranteedMinOf = (state: FairGateState, repositoryId: string): number =>
+  state.guaranteedMins.get(repositoryId) ?? 0
+
+const setGuaranteedMin =
+  (repositoryId: string, guaranteedMin: number) =>
+  (state: FairGateState): FairGateState => {
+    if (guaranteedMinOf(state, repositoryId) === guaranteedMin) {
+      return state
+    }
+    const guaranteedMins = new Map(state.guaranteedMins)
+    guaranteedMins.set(repositoryId, guaranteedMin)
+    return { ...state, guaranteedMins }
+  }
+
 /**
  * Attempt to admit `repositoryId` for one permit. Admits immediately when
  * capacity is free and no other repository with pending demand is more
- * deserving (least-recently-granted wins); otherwise leaves the state
- * unchanged so the caller registers as waiting and retries.
+ * deserving; otherwise leaves the state unchanged so the caller registers as
+ * waiting and retries.
+ *
+ * A repository with an unmet guaranteed minimum (its currently-held permits
+ * below its configured `guaranteedMins` floor) is a priority claim ahead of
+ * ordinary fair-share rotation: when any contender has an unmet guarantee,
+ * only contenders with an unmet guarantee are considered for this permit;
+ * otherwise every contender is considered as before. Within whichever pool
+ * applies, the least-recently-granted contender wins, so no repository can
+ * starve another simply by having steadier demand.
  */
 const tryAdmit =
   (repositoryId: string) =>
@@ -112,21 +149,37 @@ const tryAdmit =
         contenders.add(otherRepositoryId)
       }
     }
+    const isUnmet = (id: string) =>
+      guaranteedMinOf(state, id) > activeOf(state, id)
+    const unmet = new Set([...contenders].filter(isUnmet))
+    const pool = unmet.size > 0 ? unmet : contenders
+    if (!pool.has(repositoryId)) {
+      // Another repository's unmet guarantee takes priority over me.
+      return [false, state]
+    }
     const myRecency = recencyOf(state, repositoryId)
     let leastRecent = myRecency
-    for (const contender of contenders) {
+    for (const contender of pool) {
       leastRecent = Math.min(leastRecent, recencyOf(state, contender))
     }
     if (myRecency > leastRecent) {
-      // Another repository with pending demand has gone longer without a
+      // Another repository in the same pool has gone longer without a
       // permit; let it be considered first.
       return [false, state]
     }
     const lastGranted = new Map(state.lastGranted)
     lastGranted.set(repositoryId, state.seq + 1)
+    const activeByRepository = new Map(state.activeByRepository)
+    activeByRepository.set(repositoryId, activeOf(state, repositoryId) + 1)
     return [
       true,
-      { ...state, active: state.active + 1, seq: state.seq + 1, lastGranted },
+      {
+        ...state,
+        active: state.active + 1,
+        seq: state.seq + 1,
+        lastGranted,
+        activeByRepository,
+      },
     ]
   }
 
@@ -154,10 +207,22 @@ const unregisterWaiting =
     return { ...state, waiting }
   }
 
-const releasePermit = (state: FairGateState): FairGateState => ({
-  ...state,
-  active: Math.max(0, state.active - 1),
-})
+const releasePermit =
+  (repositoryId: string) =>
+  (state: FairGateState): FairGateState => {
+    const next = Math.max(0, activeOf(state, repositoryId) - 1)
+    const activeByRepository = new Map(state.activeByRepository)
+    if (next === 0) {
+      activeByRepository.delete(repositoryId)
+    } else {
+      activeByRepository.set(repositoryId, next)
+    }
+    return {
+      ...state,
+      active: Math.max(0, state.active - 1),
+      activeByRepository,
+    }
+  }
 
 /**
  * Cap concurrent lifecycle Agent Turn processes using the current harness
@@ -178,7 +243,12 @@ const releasePermit = (state: FairGateState): FairGateState => ({
  * contention at all) is admitted immediately exactly as before this
  * repository-aware admission was introduced. Calls with no ambient Step Run
  * context are grouped into one bucket, so their relative admission order is
- * unaffected by this fairness rule.
+ * unaffected by this fairness rule. A repository's optional
+ * guaranteed-minimum concurrent Agent Turns (Repository setting
+ * `guaranteedMinConcurrentAgentTurns`) is honored as a priority claim ahead
+ * of fair-share rotation while that repository has an unmet guarantee and
+ * pending demand — an idle, unmet guarantee never withholds capacity from
+ * other repositories.
  *
  * While waiting for a permit, marks the ambient Step Run with
  * `waiting_for_agent_turn` so GraphQL can show **Queued** instead of
@@ -201,6 +271,31 @@ export const limitAgentTurns = (
       Effect.map((config) => Math.max(1, config.maxConcurrentAgentTurns)),
       Effect.orElseSucceed(() => DEFAULT_MAX_CONCURRENT_AGENT_TURNS),
     )
+
+    /** Live Repository guaranteed-minimum concurrent Agent Turns. Missing/null → 0 (fully fair-share). */
+    const loadGuaranteedMin = (repositoryId: string): Effect.Effect<number> =>
+      repositoryId === NO_REPOSITORY
+        ? Effect.succeed(0)
+        : sql
+            .unsafe(
+              `SELECT guaranteed_min_concurrent_agent_turns AS guaranteedMin
+               FROM repository WHERE id = ?`,
+              [repositoryId],
+            )
+            .pipe(
+              Effect.map((rows) => {
+                const row = (
+                  rows as readonly { readonly guaranteedMin: number | null }[]
+                )[0]
+                const raw = row?.guaranteedMin
+                return typeof raw === "number" &&
+                  Number.isFinite(raw) &&
+                  raw > 0
+                  ? raw
+                  : 0
+              }),
+              Effect.orElseSucceed(() => 0),
+            )
 
     const markWaiting = (): Effect.Effect<SavedStepRunReason | null> =>
       Effect.gen(function* () {
@@ -385,7 +480,7 @@ export const limitAgentTurns = (
                   }
                   return yield* effect
                 }),
-                Ref.update(gate, releasePermit),
+                Ref.update(gate, releasePermit(repositoryId)),
               ),
             )
             return Option.some(result)
@@ -395,7 +490,13 @@ export const limitAgentTurns = (
         const runTurn = Effect.gen(function* () {
           for (;;) {
             const max = yield* currentMax
-            yield* Ref.update(gate, (state) => ({ ...state, capacity: max }))
+            const guaranteedMin = yield* loadGuaranteedMin(repositoryId)
+            yield* Ref.update(gate, (state) =>
+              setGuaranteedMin(
+                repositoryId,
+                guaranteedMin,
+              )({ ...state, capacity: max }),
+            )
             const result = yield* tryRunTurn
             if (Option.isSome(result)) {
               return result.value

@@ -52,6 +52,13 @@ export const RepositoryRecord = Schema.Struct({
   reviewModel: Schema.NullOr(Schema.String),
   reviewThinkingLevel: Schema.NullOr(Schema.String),
   mergePolicy: MergePolicy,
+  /**
+   * Optional guaranteed-minimum concurrent Agent Turns floor. Null means no
+   * guarantee (fully fair-share).
+   */
+  guaranteedMinConcurrentAgentTurns: Schema.NullOr(
+    Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  ),
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
   issuesReconciledAt: Schema.NullOr(Schema.Date),
@@ -76,6 +83,14 @@ export const UpdateRepositorySettingsInput = Schema.Struct({
   reviewModel: Schema.NullOr(Schema.String),
   reviewThinkingLevel: Schema.NullOr(Schema.String),
   mergePolicy: MergePolicy,
+  /**
+   * Null clears the guarantee (fully fair-share). Omitted leaves the stored
+   * guarantee unchanged so callers that do not yet send the field do not
+   * clear it.
+   */
+  guaranteedMinConcurrentAgentTurns: Schema.optionalKey(
+    Schema.NullOr(Schema.Finite),
+  ),
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
 })
@@ -191,6 +206,7 @@ export const RepositorySqlRow = Schema.Struct({
   reviewThinkingLevel: Schema.NullOr(Schema.String),
   backendModelPrefs: Schema.String,
   mergePolicy: MergePolicy,
+  guaranteedMinConcurrentAgentTurns: Schema.NullOr(Schema.Int),
   includeAllIssueAuthors: SqlBoolean,
   waitForReadyForReviewChecks: SqlBoolean,
   issuesReconciledAt: Schema.NullOr(Schema.DateFromMillis),
@@ -208,6 +224,7 @@ export const RepositorySqlRow = Schema.Struct({
     reviewThinkingLevel: "review_thinking_level",
     backendModelPrefs: "backend_model_prefs",
     mergePolicy: "merge_policy",
+    guaranteedMinConcurrentAgentTurns: "guaranteed_min_concurrent_agent_turns",
     includeAllIssueAuthors: "include_all_issue_authors",
     waitForReadyForReviewChecks: "wait_for_ready_for_review_checks",
     issuesReconciledAt: "issues_reconciled_at",

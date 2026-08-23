@@ -60,6 +60,30 @@ const seedRunningStepRun = (input: {
     )
   })
 
+/** Seed a bare Repository row with an optional guaranteed-minimum floor. */
+const seedRepositoryGuarantee = (input: {
+  readonly repositoryId: string
+  readonly guaranteedMin: number | null
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const now = Date.now()
+    yield* sql.unsafe(
+      `INSERT INTO repository (
+         id, forge, forge_host, project_path, local_path, is_bare, paused,
+         guaranteed_min_concurrent_agent_turns,
+         issues_reconciled_at, created_at, updated_at
+       ) VALUES (?, 'github', 'github.com', 'o/r', ?, 1, 0, ?, NULL, ?, ?)`,
+      [
+        input.repositoryId,
+        `/tmp/${input.repositoryId}`,
+        input.guaranteedMin,
+        now,
+        now,
+      ],
+    )
+  })
+
 describe("limitAgentTurns", () => {
   it("caps concurrent start/continue to Config max and queues the rest", () =>
     runTest(
@@ -822,6 +846,203 @@ describe("limitAgentTurns", () => {
           .pipe(Effect.timeout("2 seconds"))
         expect(third.sessionId).toBe("ses_2")
         expect(callCount).toBe(2)
+      }),
+    ))
+
+  it("honors a Repository's guaranteed-minimum ahead of fair-share, even against heavier demand from another Repository", () =>
+    runTest(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const sql = yield* SqlClient.SqlClient
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "low",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
+          maxConcurrentWorkItems: 5,
+        })
+
+        const repoGuaranteed = "repo-guaranteed-a"
+        const repoOrdinary = "repo-ordinary-a"
+        yield* seedRepositoryGuarantee({
+          repositoryId: repoGuaranteed,
+          guaranteedMin: 1,
+        })
+
+        const admitted = [
+          yield* Deferred.make<void>(),
+          yield* Deferred.make<void>(),
+          yield* Deferred.make<void>(),
+          yield* Deferred.make<void>(),
+        ]
+        const releases = [
+          yield* Deferred.make<void>(),
+          yield* Deferred.make<void>(),
+          yield* Deferred.make<void>(),
+          yield* Deferred.make<void>(),
+        ]
+        const order: string[] = []
+        let nextIndex = 0
+
+        const inner = AgentBackend.of({
+          startTurn: () =>
+            Effect.gen(function* () {
+              const current = yield* CurrentStepRun
+              const index = nextIndex
+              nextIndex += 1
+              order.push(current?.repositoryId ?? "unknown")
+              yield* Deferred.succeed(admitted[index]!, undefined)
+              yield* Deferred.await(releases[index]!)
+              return { sessionId: `ses_${index}`, assistantText: "" }
+            }),
+          continueTurn: () =>
+            Effect.succeed({ sessionId: "ses_x", assistantText: "" }),
+          inspect: () =>
+            Effect.succeed({
+              backend: { id: "opencode" as const, label: "OpenCode" },
+              models: [],
+            }),
+        })
+        const limited = yield* limitAgentTurns(inner, db, sql)
+
+        const startFor = (repositoryId: string, stepRunId: string) =>
+          limited.startTurn(startInput).pipe(
+            Effect.provideService(CurrentStepRun, {
+              stepRunId,
+              repositoryId,
+            }),
+            Effect.forkChild,
+          )
+
+        // Both permits are free and no contention yet: Ordinary's first two
+        // requests are admitted immediately, unchanged from today.
+        const o1 = yield* startFor(repoOrdinary, "srun-guar-o1")
+        const o2 = yield* startFor(repoOrdinary, "srun-guar-o2")
+        yield* Deferred.await(admitted[0]!)
+        yield* Deferred.await(admitted[1]!)
+        expect(order).toEqual([repoOrdinary, repoOrdinary])
+
+        // A third Ordinary request and the Guaranteed repository's first
+        // request now both queue behind the two held permits.
+        const o3 = yield* startFor(repoOrdinary, "srun-guar-o3")
+        const g1 = yield* startFor(repoGuaranteed, "srun-guar-g1")
+        yield* Effect.sleep("50 millis")
+        expect(nextIndex).toBe(2)
+
+        // Freeing a permit must go to the Guaranteed repository: its floor
+        // of 1 is unmet, which outranks Ordinary's older queued waiter.
+        yield* Deferred.succeed(releases[0]!, undefined)
+        yield* Deferred.await(admitted[2]!)
+        expect(order[2]).toBe(repoGuaranteed)
+
+        // With its guarantee now met, the remaining permit goes to Ordinary's
+        // longest-waiting request as usual.
+        yield* Deferred.succeed(releases[1]!, undefined)
+        yield* Deferred.await(admitted[3]!)
+        expect(order[3]).toBe(repoOrdinary)
+
+        yield* Deferred.succeed(releases[2]!, undefined)
+        yield* Deferred.succeed(releases[3]!, undefined)
+        yield* Fiber.join(o1)
+        yield* Fiber.join(o2)
+        yield* Fiber.join(o3)
+        yield* Fiber.join(g1)
+      }),
+    ))
+
+  it("does not let an idle guaranteed-minimum withhold capacity, and reclaims it once demand returns", () =>
+    runTest(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const sql = yield* SqlClient.SqlClient
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "low",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 1,
+          maxConcurrentWorkItems: 5,
+        })
+
+        const repoGuaranteed = "repo-guaranteed-idle"
+        const repoOrdinary = "repo-ordinary-idle"
+        yield* seedRepositoryGuarantee({
+          repositoryId: repoGuaranteed,
+          guaranteedMin: 1,
+        })
+
+        const admitted = [
+          yield* Deferred.make<void>(),
+          yield* Deferred.make<void>(),
+          yield* Deferred.make<void>(),
+        ]
+        const releases = [
+          yield* Deferred.make<void>(),
+          yield* Deferred.make<void>(),
+          yield* Deferred.make<void>(),
+        ]
+        const order: string[] = []
+        let nextIndex = 0
+
+        const inner = AgentBackend.of({
+          startTurn: () =>
+            Effect.gen(function* () {
+              const current = yield* CurrentStepRun
+              const index = nextIndex
+              nextIndex += 1
+              order.push(current?.repositoryId ?? "unknown")
+              yield* Deferred.succeed(admitted[index]!, undefined)
+              yield* Deferred.await(releases[index]!)
+              return { sessionId: `ses_${index}`, assistantText: "" }
+            }),
+          continueTurn: () =>
+            Effect.succeed({ sessionId: "ses_x", assistantText: "" }),
+          inspect: () =>
+            Effect.succeed({
+              backend: { id: "opencode" as const, label: "OpenCode" },
+              models: [],
+            }),
+        })
+        const limited = yield* limitAgentTurns(inner, db, sql)
+
+        const startFor = (repositoryId: string, stepRunId: string) =>
+          limited.startTurn(startInput).pipe(
+            Effect.provideService(CurrentStepRun, {
+              stepRunId,
+              repositoryId,
+            }),
+            Effect.forkChild,
+          )
+
+        // repoGuaranteed has a configured floor but no pending demand yet:
+        // Ordinary's first request is admitted immediately, unblocked by the
+        // idle guarantee.
+        const o1 = yield* startFor(repoOrdinary, "srun-idle-o1")
+        yield* Deferred.await(admitted[0]!)
+        expect(order[0]).toBe(repoOrdinary)
+
+        const o2 = yield* startFor(repoOrdinary, "srun-idle-o2")
+        const g1 = yield* startFor(repoGuaranteed, "srun-idle-g1")
+        yield* Effect.sleep("50 millis")
+        expect(nextIndex).toBe(1)
+
+        // repoGuaranteed now has demand again and reclaims its floor ahead
+        // of Ordinary's own next waiter.
+        yield* Deferred.succeed(releases[0]!, undefined)
+        yield* Deferred.await(admitted[1]!)
+        expect(order[1]).toBe(repoGuaranteed)
+
+        yield* Deferred.succeed(releases[1]!, undefined)
+        yield* Deferred.await(admitted[2]!)
+        expect(order[2]).toBe(repoOrdinary)
+
+        yield* Deferred.succeed(releases[2]!, undefined)
+        yield* Fiber.join(o1)
+        yield* Fiber.join(o2)
+        yield* Fiber.join(g1)
       }),
     ))
 })

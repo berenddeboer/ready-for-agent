@@ -111,8 +111,25 @@ export class InvalidRepositorySettingsError extends Schema.TaggedErrorClass<Inva
       "defaultThinkingLevel",
       "reviewModel",
       "reviewThinkingLevel",
+      "guaranteedMinConcurrentAgentTurns",
     ]),
     message: Schema.String,
+  },
+) {}
+
+/**
+ * Rejects a Config or Repository settings write that would make the sum of
+ * all Repositories' guaranteed-minimum concurrent Agent Turns exceed the
+ * effective harness-wide `maxConcurrentAgentTurns` cap — whether the write
+ * raises/adds a Repository guarantee or lowers the global cap below the
+ * current total of guarantees.
+ */
+export class GuaranteedMinAgentTurnsExceedsCapError extends Schema.TaggedErrorClass<GuaranteedMinAgentTurnsExceedsCapError>()(
+  "GuaranteedMinAgentTurnsExceedsCapError",
+  {
+    message: Schema.String,
+    maxConcurrentAgentTurns: Schema.Int,
+    sumOfGuaranteedMinConcurrentAgentTurns: Schema.Int,
   },
 ) {}
 
