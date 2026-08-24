@@ -34,14 +34,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Check out pull request head
+      # The action fetches `pull/$n/head:<head.ref>`. Fork PRs whose head
+      # branch is also `main` collide with the local base branch.
+      - name: Drop local branch colliding with the PR head
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
-          git fetch --no-tags origin "pull/${PR_NUMBER}/head"
-          git checkout --detach "${HEAD_SHA}"
+          git checkout --detach
+          if git show-ref --verify --quiet "refs/heads/${HEAD_REF}"; then
+            git branch -D "${HEAD_REF}"
+          fi
 
       - name: Run Claude Code Review
         id: claude-review
