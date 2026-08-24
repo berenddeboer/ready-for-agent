@@ -183,15 +183,24 @@ frequently comes back `MISSING` with null fields — that is expected, not a bug
 
 ## Input shapes
 
+`updateConfig` is a full-replace mutation, not a partial patch:
+`selectedAgentBackend`, `maxConcurrentAgentTurns`, and
+`maxConcurrentWorkItems` are all mandatory on every call, even when you only
+mean to change one of them — read `config` first and echo back the fields
+you don't intend to change. `defaultModel` (and the other model/thinking
+fields) are the exception: `null` or omitted means "no explicit override —
+inherit the Agent Backend's default," which is a valid resting state on
+every call, whether or not `selectedAgentBackend` is also changing.
+
 ```graphql
 input UpdateConfigInput {
-  selectedAgentBackend: String
+  selectedAgentBackend: String!
   defaultModel: String
   defaultThinkingLevel: String
   reviewModel: String
   reviewThinkingLevel: String
-  maxConcurrentAgentTurns: Int
-  maxConcurrentWorkItems: Int
+  maxConcurrentAgentTurns: Int!
+  maxConcurrentWorkItems: Int!
 }
 
 input UpdateRepositorySettingsInput {
@@ -199,7 +208,7 @@ input UpdateRepositorySettingsInput {
   forge: String
   forgeHost: String
   projectPath: String
-  paused: Boolean
+  paused: Boolean!
   selectedAgentBackend: String
   defaultModel: String
   defaultThinkingLevel: String

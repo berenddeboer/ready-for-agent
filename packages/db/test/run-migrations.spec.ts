@@ -15,6 +15,101 @@ import { afterEach, describe, expect, it } from "bun:test"
 
 const temporaryDirectories: Array<string> = []
 
+const preSquashMigrations = [
+  [
+    "20260712233736_harsh_sunspot",
+    "9cf413f08da24870cea628db84ef7260bf371f9e349483c5ec6e11cae29f506c",
+  ],
+  [
+    "20260713001702_conscious_maggott",
+    "b3c2d0ed339f767e772183805b721ab41674e4220ec9970a0fd10e6ca9ff68eb",
+  ],
+  [
+    "20260713055248_youthful_toxin",
+    "8890a0238e7b86bc833eb538c5fcabbc60a92f2ff182767a757282f1d6830d54",
+  ],
+  [
+    "20260713073802_parallel_shiver_man",
+    "d109933eb76c32d05a415d3e744d6832501a7f4e4e511c2fe30b17c7189d58bc",
+  ],
+  [
+    "20260713093925_dear_mother_askani",
+    "9f09a945bc35786056731e5f54af266f68357d3814a5d61aae9208553d47dfca",
+  ],
+  [
+    "20260713095502_bitter_slayback",
+    "20ecdcdbe2bde5195c72b3765d8df0b55e59a12b190576c4ef931584b40be341",
+  ],
+  [
+    "20260713215850_opposite_the_enforcers",
+    "de37925c66885dc2d862079ee2f7c52a8e4b8eda62902d9dcc738d494d6713cd",
+  ],
+  [
+    "20260714011733_hard_umar",
+    "dfc8738cdf804eb14af424a40c634087d9b1ba657b54c885f87bb352c5da2efa",
+  ],
+  [
+    "20260714015155_military_goblin_queen",
+    "712789515f0e41c8da6d58de327d5740c90cd25055dbe5af99f29a4b1c205db8",
+  ],
+  [
+    "20260714041109_luxuriant_selene",
+    "bf8529a5918695ec851b289700cc6779bfd09195ec8841be267953718d5529a7",
+  ],
+  [
+    "20260714234648_cynical_hairball",
+    "7ad0cdd3c4151dc83dece6582128a54b10b0059357d3644529e7d994a10f1a0e",
+  ],
+  [
+    "20260715034956_familiar_randall_flagg",
+    "81b1c8ca4d6fe6ed24d3e7b01c3d85f86fb753d0dc3941015f65dc23ade671c2",
+  ],
+  [
+    "20260715212153_lame_celestials",
+    "3cab5c243043427e0ecfa57fa381760dea543dd388e5f32bab8232afe3344f16",
+  ],
+  [
+    "20260715224622_cheerful_the_phantom",
+    "e8490e9260a06e3ccf2d502a7b90784095170310c8021abe761698f9366e8e04",
+  ],
+  [
+    "20260715233120_busy_owl",
+    "6df2779aca329fb59eaef9b3de5ede0ad821d59307abf32176a2f78356f057ee",
+  ],
+  [
+    "20260716055050_abandoned_luminals",
+    "21566482629a4c2b2d1257a81670732c83f5198b413c9444841fc860f4c013d0",
+  ],
+  [
+    "20260716065104_uneven_wallow",
+    "13e83a871ea626600c1878751edf5d83f2ae1b4d5ef6497670d59f69d3061d25",
+  ],
+  [
+    "20260716214425_simple_gideon",
+    "1e11e01a9c7649acaf848eb7c6856a96938b85b26fc69fbb62b2b649361d9ef3",
+  ],
+  [
+    "20260717120000_needs_human_unfinished",
+    "0f745571e11f1d7cf3ac2652c9cdf3f4f37a36a0e07e7a523632949e9b02fb40",
+  ],
+  [
+    "20260717180000_max_concurrent_opencode_sessions",
+    "c4f1e1ec693197ce15d37d6c83a2b5c7872e7ed00363eaa279c3628c1d38aef9",
+  ],
+  [
+    "20260717190000_max_concurrent_work_items",
+    "86ab6fc540a7d87c7325c1b74fbf666f55d47ee50aa7643bd00488ff576c81f3",
+  ],
+  [
+    "20260718120000_nullable_config_build_model",
+    "0c34034cea56f31e303e2c41c7f3a8dc85cc986282ae5d23e3308660b50ca1db",
+  ],
+  [
+    "20260718140000_assess_changes_starting_commit",
+    "fb21bd4e53d06811dac158267cdc43b307d6e49137e186a24205ce369661007e",
+  ],
+] as const
+
 const migrationFolder = async (name: string, migrationSql: string) => {
   const root = await mkdtemp(join(tmpdir(), "db-migrations-"))
   temporaryDirectories.push(root)
@@ -141,6 +236,67 @@ describe("runMigrations", () => {
     )
   })
 
+  it("fails fast when the database has migrations this binary doesn't recognize", async () => {
+    // Simulates a stale binary: the DB (migrated by a newer build) has two
+    // recorded migrations, but this binary's embedded/on-disk set only knows
+    // about the first one (a strict subset of what's recorded).
+    const knownSql = "CREATE TABLE known_table (id integer);"
+    const knownHash = createHash("sha256").update(knownSql).digest("hex")
+    const unknownSql = "CREATE TABLE unrecognized_table (id integer);"
+    const unknownHash = createHash("sha256").update(unknownSql).digest("hex")
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`
+          CREATE TABLE __drizzle_migrations (
+            id INTEGER PRIMARY KEY,
+            hash text NOT NULL,
+            created_at numeric,
+            name text,
+            applied_at TEXT
+          )
+        `
+        yield* sql`
+          INSERT INTO __drizzle_migrations (hash, created_at, name, applied_at)
+          VALUES
+            (${knownHash}, ${20260101000000}, ${"20260101000000_known"}, ${"2026-01-01T00:00:00.000Z"}),
+            (${unknownHash}, ${20260102000000}, ${"20260102000000_unrecognized"}, ${"2026-01-02T00:00:00.000Z"})
+        `
+
+        const error = yield* runMigrationsFromSources([
+          { name: "20260101000000_known", sql: knownSql },
+        ]).pipe(Effect.flip)
+
+        expect(error._tag).toBe("StaleBinaryMigrationError")
+        expect(error.unrecognizedMigrationNames).toEqual([
+          "20260102000000_unrecognized",
+        ])
+        expect(error.knownMigrationCount).toBe(1)
+        expect(error.message).toContain(
+          "This build of ready-for-agent is older than the database",
+        )
+        expect(error.message).toContain("20260102000000_unrecognized")
+        // Singular counts read "1 migration", not "1 migration(s)".
+        expect(error.message).toBe(
+          "This build of ready-for-agent is older than the database it is pointed at: " +
+            "the database has 1 migration this binary does not recognize (20260102000000_unrecognized), " +
+            "but this binary only knows about 1 migration. " +
+            "Upgrade or reinstall ready-for-agent to a version built after those migrations, " +
+            "or point it at a fresh database (e.g. set SQLITE_DATABASE_PATH to a new file).",
+        )
+
+        // Nothing else should have run: the known migration was not (re-)applied
+        // and no other table was created before the fail-fast check ran.
+        const tables = yield* sql`
+          SELECT name FROM sqlite_master
+          WHERE type = 'table' AND name IN ('known_table', 'unrecognized_table')
+        `
+        expect(tables).toEqual([])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
   it("rolls back all statements when a migration fails", async () => {
     const folder = await migrationFolder(
       "20260714120000_broken",
@@ -221,7 +377,58 @@ describe("runMigrations", () => {
           { name: "20260815120000_work_item_auto_merge_override" },
           { name: "20260815180000_autonomous_retry_budget" },
           { name: "20260818120000_repository_merge_policy" },
+          { name: "20260819120000_repository_guaranteed_min_agent_turns" },
         ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("accepts pre-squash history after the baseline was adopted", async () => {
+    const baselineName = "20260718055957_baseline"
+    const baselineSql = await readFile(
+      join(
+        import.meta.dir,
+        `../../db-schema/drizzle/${baselineName}/migration.sql`,
+      ),
+      "utf8",
+    )
+    const baselineHash = createHash("sha256").update(baselineSql).digest("hex")
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        for (const statement of baselineSql.split("--> statement-breakpoint")) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+        yield* sql`
+          CREATE TABLE __drizzle_migrations (
+            id INTEGER PRIMARY KEY,
+            hash text NOT NULL,
+            created_at numeric,
+            name text,
+            applied_at TEXT
+          )
+        `
+        for (const [name, hash] of [
+          ...preSquashMigrations,
+          [baselineName, baselineHash] as const,
+        ]) {
+          yield* sql`
+            INSERT INTO __drizzle_migrations (hash, created_at, name, applied_at)
+            VALUES (${hash}, ${Number(name.slice(0, 14))}, ${name}, ${"2026-07-18T06:00:00.000Z"})
+          `
+        }
+
+        const result = yield* runMigrations(defaultMigrationsFolder)
+
+        expect(result.applied.map((migration) => migration.name)).not.toContain(
+          baselineName,
+        )
+        expect(
+          yield* sql`SELECT count(*) AS count FROM __drizzle_migrations WHERE name IN (${baselineName}, ${preSquashMigrations[0][0]}, ${preSquashMigrations[22][0]})`,
+        ).toEqual([{ count: 3 }])
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

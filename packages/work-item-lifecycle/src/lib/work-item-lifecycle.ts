@@ -802,6 +802,18 @@ const nextOperationalStep = (
   }
 }
 
+/**
+ * Operational Lifecycle Steps whose successful completion picks between more
+ * than one next state (Assess Changes: has-changes vs. NO_CHANGES -> Close
+ * Issue; Review: accepted vs. needs_human). That choice is not persisted
+ * anywhere the retry path can recover it, so a retry that finds these Steps
+ * are the last-succeeded run must re-run the Step itself rather than assume
+ * {@link nextOperationalStep}'s linear default — otherwise it risks silently
+ * skipping Close Issue, or worse, bypassing a needs_human human-review gate.
+ */
+const BRANCHY_SUCCESS_OUTCOME_STEPS: ReadonlySet<OperationalLifecycleStep> =
+  new Set(["assess_changes", "review"])
+
 export type ImplementNowError =
   | IssueNotFoundError
   | IssueNotOpenError
@@ -887,6 +899,8 @@ export type RetryError =
   | WorkItemLifecycleDatabaseError
   | EnqueueError
   | InvalidQueueNameError
+  | RepositoryNotFoundError
+  | DatabaseError
 
 export type AbandonError =
   | WorkItemNotFoundError
@@ -2838,7 +2852,7 @@ export const makeWorkItemLifecycleLive = (
             )
           case "mark_pr_ready_for_review":
             return steps.markPrReadyForReview(context).pipe(
-              Effect.flatMap(() =>
+              Effect.flatMap((markReadyResult) =>
                 Effect.gen(function* () {
                   const waitForReadyForReviewChecks =
                     yield* loadWaitForReadyForReviewChecks(
@@ -2930,7 +2944,39 @@ export const makeWorkItemLifecycleLive = (
                       nextState: "watch_pr_status_checks" as const,
                     },
                   }
-                }),
+                }).pipe(
+                  Effect.map((branch) => {
+                    const withReasonCode = branch as typeof branch & {
+                      readonly stepRunReasonCode?: StepRunReasonCode
+                    }
+                    // Only the branches that return to Watch PR Status Checks
+                    // are declared in the ontology under both a native and an
+                    // agent-fallback reason for this exact (fromStep, toStep)
+                    // pair (`MarkReadyWaitTransition` /
+                    // `MarkReadyAgentFallbackTransition` /
+                    // `MarkReadyContinueWatchingTransition`). Every other
+                    // branch (merge conflict, Status Check Handoff, closed,
+                    // settled ready-for-merge) already carries its own
+                    // ontology-declared reason — or, for
+                    // `missingSuccessfulChecksHandoff`, its own explicit
+                    // `stepRunReasonCode` — that must not be overwritten by
+                    // how the native mark-ready mutation itself completed.
+                    if (
+                      withReasonCode.stepRunReasonCode !== undefined ||
+                      withReasonCode.transition?.nextState !==
+                        "watch_pr_status_checks"
+                    ) {
+                      return withReasonCode
+                    }
+                    return {
+                      ...withReasonCode,
+                      stepRunReasonCode:
+                        markReadyResult.completion === "native"
+                          ? STEP_RUN_REASON.native
+                          : STEP_RUN_REASON.agentFallback,
+                    }
+                  }),
+                ),
               ),
             )
           case "decide_pr_merge":
@@ -6578,10 +6624,59 @@ export const makeWorkItemLifecycleLive = (
           retryableReviewFixLimitNeedsHuman ||
           retryableMissingSuccessfulChecksNeedsHuman
 
+        // Narrow, reason-gated exception for a Work Item Failed specifically
+        // because its tracked Issue was found closed or missing (with no PR
+        // owned yet — the owned-PR case Pauses instead of Failing). Revalidate
+        // the Issue's live state; only an Issue confirmed open/present again
+        // makes the Work Item retryable. Any other terminal reason, or the
+        // Issue still closed/missing, is unaffected.
+        const issueClosedOrMissingFailure =
+          workItem.state === "failed" &&
+          (workItem.failure_code === "issue_not_found" ||
+            workItem.failure_code === "issue_not_open")
+        const issueRevalidation = issueClosedOrMissingFailure
+          ? yield* revalidateIssue(
+              workItem.repository_id,
+              workItem.issue_number,
+            )
+          : null
+        // Resume where the lifecycle left off: if the last Step Run succeeded
+        // and only the post-step Issue revalidation blocked progress, advance
+        // to the step that would have run next; if the last Step Run itself
+        // failed (e.g. Close Issue's own eligibility check), retry that same
+        // step; a held-for-blockers Work Item never ran a Step Run at all, so
+        // resume at the very first operational step.
+        //
+        // Assess Changes and Review have a branchy successful outcome (Assess
+        // Changes: has-changes vs. NO_CHANGES -> Close Issue; Review: accepted
+        // vs. needs_human) that Issue revalidation's terminal Failed transition
+        // does not preserve. Guessing the linear default next step here could
+        // silently skip Close Issue for a NO_CHANGES outcome, or worse, bypass
+        // a needs_human human-review gate straight into Commit. Re-run the
+        // Step itself instead, so it re-derives the correct branch once the
+        // Issue is confirmed reopened.
+        const issueClosedOrMissingResumeStep: OperationalLifecycleStep | null =
+          !issueClosedOrMissingFailure
+            ? null
+            : latest === undefined
+              ? "create_worktree"
+              : latest.status !== "succeeded" ||
+                  BRANCHY_SUCCESS_OUTCOME_STEPS.has(latest.step)
+                ? latest.step
+                : ((): OperationalLifecycleStep | null => {
+                    const next = nextOperationalStep(latest.step)
+                    return next === "complete" ? null : next
+                  })()
+        const retryableIssueClosedOrMissingFailure =
+          issueClosedOrMissingFailure &&
+          issueClosedOrMissingResumeStep !== null &&
+          issueRevalidation?.ok === true
+
         if (
           isTerminalWorkItemState(workItem.state) &&
           !recoverableStatusCheckFailure &&
-          !retryableNeedsHumanHandoff
+          !retryableNeedsHumanHandoff &&
+          !retryableIssueClosedOrMissingFailure
         ) {
           return yield* new WorkItemTerminalError({
             workItemId,
@@ -6605,7 +6700,9 @@ export const makeWorkItemLifecycleLive = (
                 ? "review"
                 : retryableMissingSuccessfulChecksNeedsHuman
                   ? "watch_pr_status_checks"
-                  : (workItem.state as OperationalLifecycleStep)
+                  : retryableIssueClosedOrMissingFailure
+                    ? (issueClosedOrMissingResumeStep as OperationalLifecycleStep)
+                    : (workItem.state as OperationalLifecycleStep)
 
         const activeRows = (yield* sql
           .unsafe(
@@ -6628,7 +6725,11 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
-        if (!recoverableStatusCheckFailure && !retryableNeedsHumanHandoff) {
+        if (
+          !recoverableStatusCheckFailure &&
+          !retryableNeedsHumanHandoff &&
+          !retryableIssueClosedOrMissingFailure
+        ) {
           const latestPendingRows = (yield* sql
             .unsafe(
               `SELECT ${STEP_RUN_SELECT_COLUMNS}
@@ -6693,7 +6794,37 @@ export const makeWorkItemLifecycleLive = (
         yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              if (recoverableStatusCheckFailure || retryableNeedsHumanHandoff) {
+              if (
+                recoverableStatusCheckFailure ||
+                retryableNeedsHumanHandoff ||
+                retryableIssueClosedOrMissingFailure
+              ) {
+                const newerRows = (yield* sql.unsafe(
+                  `SELECT newer.id
+                   FROM work_item AS current
+                   JOIN work_item AS newer
+                     ON newer.repository_id = current.repository_id
+                    AND newer.issue_number = current.issue_number
+                   WHERE current.id = ?
+                     AND newer.id != current.id
+                     AND (
+                       newer.created_at > current.created_at
+                       OR (
+                         newer.created_at = current.created_at
+                         AND newer.rowid > current.rowid
+                       )
+                     )
+                   ORDER BY newer.created_at ASC, newer.rowid ASC
+                   LIMIT 1`,
+                  [workItemId],
+                )) as readonly { readonly id: string }[]
+                if (newerRows.length > 0) {
+                  return yield* new RetryNotEligibleError({
+                    workItemId,
+                    reason: "newer_work_item_exists",
+                  })
+                }
+
                 // Retryable unresolved-check failures may predate Check-Start
                 // Anchor columns; give them a conservative anchor before Watch.
                 yield* sql.unsafe(
@@ -6773,7 +6904,9 @@ export const makeWorkItemLifecycleLive = (
                 [now, workItemId],
               )
             }).pipe((mutation) =>
-              recoverableStatusCheckFailure || retryableNeedsHumanHandoff
+              recoverableStatusCheckFailure ||
+              retryableNeedsHumanHandoff ||
+              retryableIssueClosedOrMissingFailure
                 ? applyLifecycleTransition(
                     workItemId,
                     pendingStep,
@@ -6795,6 +6928,9 @@ export const makeWorkItemLifecycleLive = (
                 return Effect.fail(error)
               }
               if (error instanceof AutonomousRetryLimitReachedError) {
+                return Effect.fail(error)
+              }
+              if (error instanceof RetryNotEligibleError) {
                 return Effect.fail(error)
               }
               if (

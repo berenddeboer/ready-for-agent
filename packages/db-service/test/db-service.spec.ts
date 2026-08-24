@@ -5,9 +5,11 @@ import {
   DatabaseError,
   DbService,
   DbServiceLive,
+  GuaranteedMinAgentTurnsExceedsCapError,
   InvalidConfigInputError,
   InvalidIssueInputError,
   InvalidRepositoryInputError,
+  InvalidRepositorySettingsError,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
   RepositoryHasRunningStepError,
@@ -660,14 +662,14 @@ describe("DbService", () => {
         }),
       ))
 
-    it("rejects empty values", () =>
+    it("rejects a whitespace-only selectedAgentBackend", () =>
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
           const error = yield* Effect.flip(
             db.updateConfig({
-              selectedAgentBackend: "opencode",
-              defaultModel: " ",
+              selectedAgentBackend: "  ",
+              defaultModel: "anthropic/claude-sonnet-4-5",
               defaultThinkingLevel: "high",
               reviewModel: null,
               reviewThinkingLevel: null,
@@ -676,6 +678,64 @@ describe("DbService", () => {
             }),
           )
           expect(error).toBeInstanceOf(InvalidConfigInputError)
+          expect(error).toMatchObject({ field: "selectedAgentBackend" })
+        }),
+      ))
+
+    it("accepts a same-backend update with defaultModel null (inherit)", () =>
+      // Issue #33: getConfig can return defaultModel: null as a valid resting
+      // state ("no explicit override"), so updateConfig must accept writing
+      // that same state back when selectedAgentBackend is unchanged, without
+      // requiring an unrelated concrete model value.
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+
+          const updated = yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: null,
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 6,
+            maxConcurrentWorkItems: 5,
+          })
+          expect(updated).toMatchObject({
+            selectedAgentBackend: "opencode",
+            defaultModel: null,
+            maxConcurrentAgentTurns: 6,
+          })
+          expect(yield* db.getConfig).toMatchObject({
+            selectedAgentBackend: "opencode",
+            defaultModel: null,
+            maxConcurrentAgentTurns: 6,
+          })
+        }),
+      ))
+
+    it("treats a whitespace-only defaultModel the same as null on a same-backend update", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const updated = yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: " ",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          expect(updated.defaultModel).toBeNull()
         }),
       ))
 
@@ -726,6 +786,94 @@ describe("DbService", () => {
           }
         }),
       ))
+
+    it("rejects lowering maxConcurrentAgentTurns below the sum of Repository guarantees", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repoA = yield* db.addRepository(sampleInput)
+          const repoB = yield* db.addRepository({
+            ...sampleInput,
+            projectPath: "acme/other",
+            localPath: "/repos/acme/other.git",
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: repoA.id,
+            paused: true,
+            guaranteedMinConcurrentAgentTurns: 1,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: repoB.id,
+            paused: true,
+            guaranteedMinConcurrentAgentTurns: 1,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+
+          const error = yield* Effect.flip(
+            db.updateConfig({
+              selectedAgentBackend: "opencode",
+              defaultModel: "anthropic/claude-sonnet-4-5",
+              defaultThinkingLevel: "high",
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              maxConcurrentAgentTurns: 1,
+              maxConcurrentWorkItems: 5,
+            }),
+          )
+          expect(error).toBeInstanceOf(GuaranteedMinAgentTurnsExceedsCapError)
+          expect(error).toMatchObject({
+            maxConcurrentAgentTurns: 1,
+            sumOfGuaranteedMinConcurrentAgentTurns: 2,
+          })
+
+          // The rejected write did not persist.
+          expect((yield* db.getConfig).maxConcurrentAgentTurns).toBe(2)
+        }),
+      ))
+
+    it("allows lowering maxConcurrentAgentTurns down to exactly the sum of Repository guarantees", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            guaranteedMinConcurrentAgentTurns: 1,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+
+          const updated = yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 1,
+            maxConcurrentWorkItems: 5,
+          })
+          expect(updated.maxConcurrentAgentTurns).toBe(1)
+        }),
+      ))
   })
 
   describe("addRepository", () => {
@@ -766,6 +914,7 @@ describe("DbService", () => {
           expect(repo.reviewModel).toBeNull()
           expect(repo.reviewThinkingLevel).toBeNull()
           expect(repo.mergePolicy).toBe("off")
+          expect(repo.guaranteedMinConcurrentAgentTurns).toBeNull()
           expect(repo.includeAllIssueAuthors).toBe(false)
           expect(repo.waitForReadyForReviewChecks).toBe(true)
           expect(repo.issuesReconciledAt).toBeNull()
@@ -1106,6 +1255,180 @@ describe("DbService", () => {
           })
           expect(preserved.selectedAgentBackend).toBe("grok")
           expect(preserved.paused).toBe(false)
+        }),
+      ))
+
+    it("sets and clears a Repository guaranteed-minimum Agent Turns floor (null is fully fair-share)", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          expect(repo.guaranteedMinConcurrentAgentTurns).toBeNull()
+
+          const withGuarantee = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            guaranteedMinConcurrentAgentTurns: 1,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+          expect(withGuarantee.guaranteedMinConcurrentAgentTurns).toBe(1)
+
+          const cleared = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            guaranteedMinConcurrentAgentTurns: null,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+          expect(cleared.guaranteedMinConcurrentAgentTurns).toBeNull()
+
+          // Omitting the field leaves the stored guarantee unchanged.
+          yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            guaranteedMinConcurrentAgentTurns: 2,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+          const preserved = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: false,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+          expect(preserved.guaranteedMinConcurrentAgentTurns).toBe(2)
+        }),
+      ))
+
+    it("rejects a negative guaranteed-minimum Agent Turns floor", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          const error = yield* Effect.flip(
+            db.updateRepositorySettings({
+              repositoryId: repo.id,
+              paused: true,
+              guaranteedMinConcurrentAgentTurns: -1,
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              mergePolicy: "off",
+              includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
+            }),
+          )
+          expect(error).toBeInstanceOf(InvalidRepositorySettingsError)
+          expect(error).toMatchObject({
+            field: "guaranteedMinConcurrentAgentTurns",
+          })
+        }),
+      ))
+
+    it("rejects raising a Repository's guarantee when the sum would exceed maxConcurrentAgentTurns", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          // Harness default maxConcurrentAgentTurns is 2 (fresh config row).
+          const repoA = yield* db.addRepository(sampleInput)
+          const repoB = yield* db.addRepository({
+            ...sampleInput,
+            projectPath: "acme/other",
+            localPath: "/repos/acme/other.git",
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: repoA.id,
+            paused: true,
+            guaranteedMinConcurrentAgentTurns: 2,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+
+          const error = yield* Effect.flip(
+            db.updateRepositorySettings({
+              repositoryId: repoB.id,
+              paused: true,
+              guaranteedMinConcurrentAgentTurns: 1,
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              mergePolicy: "off",
+              includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
+            }),
+          )
+          expect(error).toBeInstanceOf(GuaranteedMinAgentTurnsExceedsCapError)
+          expect(error).toMatchObject({
+            maxConcurrentAgentTurns: 2,
+            sumOfGuaranteedMinConcurrentAgentTurns: 3,
+          })
+
+          // The rejected write did not persist.
+          expect(
+            (yield* db.listRepositories).find((r) => r.id === repoB.id)
+              ?.guaranteedMinConcurrentAgentTurns,
+          ).toBeNull()
+        }),
+      ))
+
+    it("allows lowering a Repository's own guarantee even at the cap", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            guaranteedMinConcurrentAgentTurns: 2,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+          const lowered = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            guaranteedMinConcurrentAgentTurns: 1,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+          expect(lowered.guaranteedMinConcurrentAgentTurns).toBe(1)
         }),
       ))
 

@@ -24,8 +24,37 @@ export const MigrationsFolderConfig = Config.string("MIGRATIONS_FOLDER").pipe(
 
 const rawSql = (query: string) => Object.assign([query], { raw: [query] })
 
+// These migrations were replaced by 20260718055957_baseline in 231baf1.
+// Upgraded databases retain their history rows after adopting the baseline.
+const retiredMigrationHashes = new Set([
+  "9cf413f08da24870cea628db84ef7260bf371f9e349483c5ec6e11cae29f506c",
+  "b3c2d0ed339f767e772183805b721ab41674e4220ec9970a0fd10e6ca9ff68eb",
+  "8890a0238e7b86bc833eb538c5fcabbc60a92f2ff182767a757282f1d6830d54",
+  "d109933eb76c32d05a415d3e744d6832501a7f4e4e511c2fe30b17c7189d58bc",
+  "9f09a945bc35786056731e5f54af266f68357d3814a5d61aae9208553d47dfca",
+  "20ecdcdbe2bde5195c72b3765d8df0b55e59a12b190576c4ef931584b40be341",
+  "de37925c66885dc2d862079ee2f7c52a8e4b8eda62902d9dcc738d494d6713cd",
+  "dfc8738cdf804eb14af424a40c634087d9b1ba657b54c885f87bb352c5da2efa",
+  "712789515f0e41c8da6d58de327d5740c90cd25055dbe5af99f29a4b1c205db8",
+  "bf8529a5918695ec851b289700cc6779bfd09195ec8841be267953718d5529a7",
+  "7ad0cdd3c4151dc83dece6582128a54b10b0059357d3644529e7d994a10f1a0e",
+  "81b1c8ca4d6fe6ed24d3e7b01c3d85f86fb753d0dc3941015f65dc23ade671c2",
+  "3cab5c243043427e0ecfa57fa381760dea543dd388e5f32bab8232afe3344f16",
+  "e8490e9260a06e3ccf2d502a7b90784095170310c8021abe761698f9366e8e04",
+  "6df2779aca329fb59eaef9b3de5ede0ad821d59307abf32176a2f78356f057ee",
+  "21566482629a4c2b2d1257a81670732c83f5198b413c9444841fc860f4c013d0",
+  "13e83a871ea626600c1878751edf5d83f2ae1b4d5ef6497670d59f69d3061d25",
+  "1e11e01a9c7649acaf848eb7c6856a96938b85b26fc69fbb62b2b649361d9ef3",
+  "0f745571e11f1d7cf3ac2652c9cdf3f4f37a36a0e07e7a523632949e9b02fb40",
+  "c4f1e1ec693197ce15d37d6c83a2b5c7872e7ed00363eaa279c3628c1d38aef9",
+  "86ab6fc540a7d87c7325c1b74fbf666f55d47ee50aa7643bd00488ff576c81f3",
+  "0c34034cea56f31e303e2c41c7f3a8dc85cc986282ae5d23e3308660b50ca1db",
+  "fb21bd4e53d06811dac158267cdc43b307d6e49137e186a24205ce369661007e",
+])
+
 const MigrationAppliedRow = Schema.Struct({
   hash: Schema.String,
+  name: Schema.NullOr(Schema.String),
 })
 
 export type MigrationSource = {
@@ -80,6 +109,42 @@ export class MigrationReadError extends Schema.TaggedErrorClass<MigrationReadErr
   { cause: Schema.Defect() },
 ) {}
 
+/** Singular/plural "N migration(s)" phrasing, matching {@link migrationsAppliedLogMessage}. */
+const pluralizeMigrationCount = (count: number): string =>
+  count === 1 ? "1 migration" : `${count} migrations`
+
+/**
+ * The database has migrations recorded in `__drizzle_migrations` that this
+ * binary's embedded/on-disk migration set does not know about — i.e. the
+ * running binary is *older* than the database it is pointed at (see
+ * ready-for-agent#18/#21). Continuing would otherwise re-run the same failing
+ * queries against a schema this binary doesn't understand, forever.
+ */
+export class StaleBinaryMigrationError extends Schema.TaggedErrorClass<StaleBinaryMigrationError>()(
+  "StaleBinaryMigrationError",
+  {
+    /** Names (or hashes, if unnamed) of DB migrations this binary doesn't recognize. */
+    unrecognizedMigrationNames: Schema.Array(Schema.String),
+    /** How many migrations this binary's embedded/on-disk set knows about. */
+    knownMigrationCount: Schema.Finite,
+  },
+) {
+  override get message() {
+    const names = this.unrecognizedMigrationNames.join(", ")
+    const unrecognizedCount = pluralizeMigrationCount(
+      this.unrecognizedMigrationNames.length,
+    )
+    const knownCount = pluralizeMigrationCount(this.knownMigrationCount)
+    return (
+      `This build of ready-for-agent is older than the database it is pointed at: ` +
+      `the database has ${unrecognizedCount} this binary does not recognize (${names}), ` +
+      `but this binary only knows about ${knownCount}. ` +
+      `Upgrade or reinstall ready-for-agent to a version built after those migrations, ` +
+      `or point it at a fresh database (e.g. set SQLITE_DATABASE_PATH to a new file).`
+    )
+  }
+}
+
 const toMigrationRecords = (
   sources: ReadonlyArray<MigrationSource>,
 ): ReadonlyArray<MigrationRecord> =>
@@ -128,12 +193,31 @@ const applyMigrationRecords = Effect.fn("applyMigrationRecords")(function* (
     )
   `
 
-  const appliedRows = yield* sql`SELECT hash FROM __drizzle_migrations`.pipe(
-    Effect.flatMap(
-      Schema.decodeUnknownEffect(Schema.Array(MigrationAppliedRow)),
-    ),
-  )
+  const appliedRows =
+    yield* sql`SELECT hash, name FROM __drizzle_migrations`.pipe(
+      Effect.flatMap(
+        Schema.decodeUnknownEffect(Schema.Array(MigrationAppliedRow)),
+      ),
+    )
   const appliedHashes = new Set(appliedRows.map((row) => row.hash))
+
+  // Fail fast, before applying anything, if the database was migrated by a
+  // build that knows about migrations this binary's embedded/on-disk set
+  // doesn't (stale binary vs. newer database).
+  const knownHashes = new Set(migrations.map((migration) => migration.hash))
+  const unrecognizedRows = appliedRows.filter(
+    (row) =>
+      !knownHashes.has(row.hash) && !retiredMigrationHashes.has(row.hash),
+  )
+  if (unrecognizedRows.length > 0) {
+    return yield* new StaleBinaryMigrationError({
+      unrecognizedMigrationNames: unrecognizedRows.map(
+        (row) => row.name ?? row.hash,
+      ),
+      knownMigrationCount: migrations.length,
+    })
+  }
+
   const newlyApplied: Array<AppliedMigration> = []
 
   for (const migration of migrations) {

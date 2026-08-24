@@ -1037,6 +1037,115 @@ describe("createPr", () => {
       expect(pushCommand).not.toContain("bearer $GH_TOKEN")
     }))
 
+  it("falls back to the ambient token when Keymaxxer fails to resolve the native push secret", () =>
+    withTemp(async (root) => {
+      const bare = await mkdtemp(join(tmpdir(), "rfa-create-pr-bare-"))
+      try {
+        const initBare = Bun.spawn(
+          ["git", "init", "--bare", "-b", "main", bare],
+          { stdout: "pipe", stderr: "pipe" },
+        )
+        await initBare.exited
+        await Bun.spawn(["git", "remote", "add", "origin", bare], {
+          cwd: root,
+          stdout: "pipe",
+          stderr: "pipe",
+        }).exited
+
+        const context = baseContext(root, { issueNumber: 512 })
+        const branch = workItemBranchName({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          issueNumber: 512,
+          workItemId: context.workItemId,
+        })
+        for (const args of [
+          ["config", "user.email", "test@example.com"],
+          ["config", "user.name", "Test"],
+          ["add", "README.md"],
+          ["commit", "--no-verify", "-m", "init"],
+          ["checkout", "-b", branch],
+        ] as const) {
+          await Bun.spawn(["git", "-c", "commit.gpgsign=false", ...args], {
+            cwd: root,
+            stdout: "pipe",
+            stderr: "pipe",
+          }).exited
+        }
+
+        let continueCalls = 0
+        let runWithSecretsCalls = 0
+        const logs: unknown[] = []
+        const logger = Logger.make(({ message }) => {
+          logs.push(message)
+        })
+
+        const result = await Effect.runPromise(
+          createPr(context).pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                stubDb,
+                stubGitHub({
+                  findOpenPullRequestNumber: () => Effect.succeed(null),
+                  createDraftPullRequest: () => Effect.succeed(512),
+                }),
+                stubGitLab(),
+                stubAzureDevOps(),
+                stubKeymaxxer({
+                  // Native push secret lookup fails outright (vault down),
+                  // yet the ambient path (plain push to the configured
+                  // remote) still works — the fallback must use it instead
+                  // of raising a fatal credential error.
+                  findSecret: () =>
+                    Effect.fail(
+                      new KeymaxxerError({
+                        operation: "findSecret",
+                        message: "vault sidecar unreachable",
+                      }),
+                    ),
+                  runWithSecrets: () => {
+                    runWithSecretsCalls += 1
+                    return Effect.succeed({
+                      exitCode: 0,
+                      stdout: "",
+                      stderr: "",
+                    })
+                  },
+                }),
+                stubOpencode({
+                  continueTurn: () => {
+                    continueCalls += 1
+                    return Effect.succeed({
+                      sessionId: "ses",
+                      assistantText: "",
+                    })
+                  },
+                }),
+                stubActiveAgentBackendLayer(),
+                Logger.layer([logger]),
+              ),
+            ),
+            Effect.provide(PlatformLayer),
+          ),
+        )
+
+        expect(result.pullRequestNumber).toBe(512)
+        expect(result.completion).toBe("native")
+        expect(continueCalls).toBe(0)
+        expect(runWithSecretsCalls).toBe(0)
+        expect(logs).toContainEqual([
+          "Keymaxxer lookup failed for native push; falling back to ambient credential",
+          expect.objectContaining({
+            step: "create_pr",
+            forge: "github",
+          }),
+        ])
+      } finally {
+        await rm(bare, { recursive: true, force: true })
+      }
+    }))
+
   it("accepts create number when post-create soft lookup fails", () =>
     withTemp(async (root) => {
       let continueCalls = 0

@@ -12,6 +12,7 @@ import {
 import { QueueService } from "@ready-for-agent/queue-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
+  AUTO_MERGE_DISABLED_FOR_REPOSITORY,
   LifecycleSteps,
   type LifecycleStepsShape,
   WORK_ITEM_LIFECYCLE_QUEUE,
@@ -61,11 +62,12 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
     investigatePrStatusChecks: () =>
       Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
-    markPrReadyForReview: () => Effect.void,
+    markPrReadyForReview: () =>
+      Effect.succeed({ completion: "native" as const }),
     decidePrMerge: () =>
       Effect.succeed({
         _tag: "needs_human",
-        reason: "Auto-merge is disabled for this repository",
+        reason: AUTO_MERGE_DISABLED_FOR_REPOSITORY,
       }),
     mergePr: () => Effect.die("merge must not run"),
     localCleanup: () => Effect.void,

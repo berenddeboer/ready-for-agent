@@ -1,5 +1,8 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderToStaticMarkup } from "react-dom/server"
+import { type WorkItem, WorkItemPauseButton } from "../src/home-page-content.js"
 import { describe, expect, test } from "bun:test"
 
 const homeSource = () =>
@@ -13,6 +16,33 @@ const chromeSource = () =>
 
 const uiSource = () =>
   readFileSync(join(import.meta.dir, "../src/ui.ts"), "utf8")
+
+const runningWorkItem = {
+  id: "wi-01J00000000000000000000000",
+  repositoryId: "repo-1",
+  issueNumber: 26,
+  issueTitle: "Pause a running Work Item",
+  pullRequestNumber: null,
+  agentBackend: { id: "opencode", label: "OpenCode" },
+  state: "IMPLEMENT",
+  stateLabel: "Build",
+  status: "RUNNING",
+  statusLabel: "Running",
+  statusMessage: null,
+  latestStepRunDetail: null,
+  postponedUntil: null,
+  paused: false,
+  hasActiveStepRun: true,
+  canRetry: false,
+  isTerminal: false,
+  failureCode: null,
+  sessionId: null,
+  worktreePath: "/tmp/worktree",
+  completionSummary: null,
+  createdAt: "2026-08-07T11:00:00.000Z",
+  stateReadyAt: "2026-08-07T11:00:00.000Z",
+  lifecycleLabels: [],
+} satisfies WorkItem
 
 describe("Waiting for blockers Working-row polish", () => {
   test("badge chrome uses Interchange hold tags for blockers and worker slot", () => {
@@ -54,6 +84,19 @@ describe("Waiting for blockers Working-row polish", () => {
     expect(pauseFn).toContain('control.kind === "hidden"')
     expect(pauseFn).toContain("return null")
     expect(pauseFn).toContain("interruptWorkItem")
+  })
+
+  test("Pause control warns that pausing does not stop a running Step Run", () => {
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkItemPauseButton workItem={runningWorkItem} />
+      </QueryClientProvider>,
+    )
+
+    expect(html).toContain('aria-label="Pause job"')
+    expect(html).toContain(
+      'title="Pause job — does not stop the running Step Run. Interrupt after pausing before editing the worktree."',
+    )
   })
 
   test("held Working row offers Reset and withholds Retry", () => {

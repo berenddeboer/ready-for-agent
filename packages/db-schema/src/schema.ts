@@ -48,6 +48,16 @@ export const repository = snakeCase.table(
     mergePolicy: text({ enum: ["off", "classify", "always"] })
       .notNull()
       .default("off"),
+    /**
+     * Optional guaranteed-minimum concurrent Agent Turns floor. Null means no
+     * guarantee — fully fair-share, identical to ordinary contention-based
+     * admission. When set, this Repository is admitted up to this many
+     * concurrent Agent Turns ahead of fair-share rotation whenever it has
+     * pending demand. Honored as a priority claim under contention, not
+     * reserved idle capacity: an unmet guarantee with no pending demand does
+     * not withhold capacity from other Repositories.
+     */
+    guaranteedMinConcurrentAgentTurns: integer({ mode: "number" }),
     includeAllIssueAuthors: integer({ mode: "boolean" })
       .notNull()
       .default(false),
