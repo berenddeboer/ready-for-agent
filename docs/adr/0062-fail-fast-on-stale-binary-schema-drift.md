@@ -23,10 +23,13 @@ recognized and startup proceeds exactly as before.
 
 This detection assumes migration history is append-only and content-hash
 identity is stable once a migration is merged (migration files are never
-edited after being shipped). Under that assumption an unrecognized recorded
-hash can only mean the database saw a later migration than this binary knows
+edited after being shipped). The one historical exception is the migration
+squash in commit `231baf1`: the runner explicitly recognizes the exact hashes
+of the 23 migrations retired by that squash because upgraded databases retain
+those rows after adopting the replacement baseline. Any other unrecognized
+recorded hash means the database saw a later migration than this binary knows
 about, matching the "stale binary" diagnosis the message gives. The remedy it
-suggests (upgrade/reinstall, or point at a fresh database) stays correct
-advice even in the atypical case of two divergent branches sharing one local
-database, so the fail-fast behavior is safe either way even where the exact
-wording of the diagnosis might not fit.
+suggests (upgrade/reinstall, or point at a fresh database) stays correct advice
+even in the atypical case of two divergent branches sharing one local database,
+so the fail-fast behavior is safe either way even where the exact wording of
+the diagnosis might not fit.
