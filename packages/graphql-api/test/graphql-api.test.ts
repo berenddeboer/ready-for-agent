@@ -5830,6 +5830,208 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("projects paused unfinished work item with a running Step Run as Draining", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const draining = {
+      ...workItem,
+      state: "implement",
+      paused: true,
+      pauseBeforeStep: null,
+      stepRuns: [
+        { ...baseRun, step: "create_worktree", status: "succeeded" },
+        { ...baseRun, step: "install_dependencies", status: "succeeded" },
+        {
+          ...baseRun,
+          step: "implement",
+          status: "running",
+          finishedAt: null,
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([draining]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            state status statusLabel paused isTerminal canRetry hasActiveStepRun
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            state: "IMPLEMENT",
+            status: "NEEDS_HUMAN_REVIEW",
+            statusLabel: "Draining",
+            paused: true,
+            isTerminal: false,
+            canRetry: false,
+            hasActiveStepRun: true,
+            lifecycleLabels: [
+              {
+                phase: "CREATE_WORKTREE",
+                label: "Create worktree: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "INSTALL_DEPENDENCIES",
+                label: "Install dependencies: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "IMPLEMENT",
+                label: "Build: Running",
+                status: "RUNNING",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
+  test("projects paused Implement Locally work item with a running Step Run as Draining", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const drainingLocally = {
+      ...workItem,
+      state: "review",
+      paused: true,
+      pauseBeforeStep: "commit",
+      stepRuns: [
+        { ...baseRun, step: "create_worktree", status: "succeeded" },
+        { ...baseRun, step: "install_dependencies", status: "succeeded" },
+        { ...baseRun, step: "implement", status: "succeeded" },
+        { ...baseRun, step: "pre_commit", status: "succeeded" },
+        {
+          ...baseRun,
+          step: "review",
+          status: "running",
+          finishedAt: null,
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([drainingLocally]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            state status statusLabel paused isTerminal
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            state: "REVIEW",
+            status: "NEEDS_HUMAN_REVIEW",
+            statusLabel: "Draining",
+            paused: true,
+            isTerminal: false,
+          },
+        ],
+      },
+    })
+  })
+
+  test("projects paused closed-Issue stop with a running Step Run as Draining", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const reason =
+      "Issue #42 is closed or no longer present while pull request #101 is still open. Reopen the issue if you want to continue, then Start job."
+    const drainingClosedIssue = {
+      ...workItem,
+      state: "watch_pr_status_checks",
+      paused: true,
+      pauseBeforeStep: null,
+      pullRequestNumber: 101,
+      failureCode: null,
+      failureMessage: reason,
+      holdsWorkerSlot: true,
+      stepRuns: [
+        { ...baseRun, step: "create_worktree", status: "succeeded" },
+        {
+          ...baseRun,
+          step: "watch_pr_status_checks",
+          status: "running",
+          finishedAt: null,
+          reasonCode: "issue_closed_while_pr_open",
+          reasonMessage: reason,
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([drainingClosedIssue]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            state status statusLabel statusMessage paused isTerminal canRetry
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            state: "WATCH_PR_STATUS_CHECKS",
+            status: "NEEDS_HUMAN_REVIEW",
+            statusLabel: "Draining",
+            statusMessage: reason,
+            paused: true,
+            isTerminal: false,
+            canRetry: false,
+          },
+        ],
+      },
+    })
+  })
+
   test("projects paused closed-Issue + open-PR stop as Needs human review with reason, not Succeeded", async () => {
     const baseRun = workItem.stepRuns[0]!
     const reason =

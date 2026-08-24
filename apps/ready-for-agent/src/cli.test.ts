@@ -1608,6 +1608,7 @@ describe("operator binary CLI seam", () => {
             issueTitle: "Retryable implement failure",
             state: "IMPLEMENT",
             status: "FAILED",
+            statusLabel: "Failed",
             statusMessage:
               "Claude Code failed to implement the Work Item issue",
             paused: false,
@@ -1640,6 +1641,7 @@ describe("operator binary CLI seam", () => {
             issueTitle: "Terminal close failure",
             state: "FAILED",
             status: "FAILED",
+            statusLabel: "Failed",
             statusMessage: "Issue is not open",
             paused: false,
             canRetry: false,
@@ -1662,6 +1664,7 @@ describe("operator binary CLI seam", () => {
             issueTitle: "Retryable review handoff",
             state: "NEEDS_HUMAN",
             status: "NEEDS_HUMAN",
+            statusLabel: "Needs human",
             statusMessage: "Human must review findings",
             paused: false,
             canRetry: true,
@@ -1684,6 +1687,7 @@ describe("operator binary CLI seam", () => {
             issueTitle: "Interrupted without detail",
             state: "IMPLEMENT",
             status: "INTERRUPTED",
+            statusLabel: "Interrupted",
             statusMessage:
               "Lifecycle Step was interrupted before an outcome could be established",
             paused: false,

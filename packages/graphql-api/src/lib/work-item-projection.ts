@@ -234,6 +234,18 @@ export const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
   return stepRunDisplayStatus(latest)
 }
 
+/**
+ * Operator-visible status badge. Drain is Pause plus an active Step Run, not
+ * a lifecycle state: machine status stays Needs human review.
+ */
+export const workItemStatusLabel = (workItem: WorkItemRecord): string => {
+  const status = workItemStatus(workItem)
+  if (status === "needs_human_review" && workItemHasActiveStepRun(workItem)) {
+    return "Draining"
+  }
+  return statusLabel(status)
+}
+
 const REVIEW_IN_PROGRESS_CHIP_MESSAGES = new Set<string>([
   REVIEW_REVIEWING_MESSAGE,
   REVIEW_APPLYING_FINDINGS_MESSAGE,

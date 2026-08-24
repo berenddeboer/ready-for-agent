@@ -1480,6 +1480,7 @@ describe("operator binary finite-command process contract", () => {
           issueTitle: "Retryable implement failure",
           state: "IMPLEMENT",
           status: "FAILED",
+          statusLabel: "Failed",
           statusMessage: "Claude Code failed to implement the Work Item issue",
           paused: false,
           canRetry: true,
@@ -1513,6 +1514,7 @@ describe("operator binary finite-command process contract", () => {
           issueTitle: "Terminal close failure",
           state: "FAILED",
           status: "FAILED",
+          statusLabel: "Failed",
           statusMessage: "Issue is not open",
           paused: false,
           canRetry: false,
@@ -1537,6 +1539,7 @@ describe("operator binary finite-command process contract", () => {
           issueTitle: "Retryable review handoff",
           state: "NEEDS_HUMAN",
           status: "NEEDS_HUMAN",
+          statusLabel: "Needs human",
           statusMessage: "Human must review findings",
           paused: false,
           canRetry: true,
@@ -1561,6 +1564,7 @@ describe("operator binary finite-command process contract", () => {
           issueTitle: "Interrupted without detail",
           state: "IMPLEMENT",
           status: "INTERRUPTED",
+          statusLabel: "Interrupted",
           statusMessage:
             "Lifecycle Step was interrupted before an outcome could be established",
           paused: false,
@@ -1572,6 +1576,26 @@ describe("operator binary finite-command process contract", () => {
             detail: null,
             retryAt: null,
           },
+          pullRequestNumber: null,
+          createdAt: "2026-08-12T10:00:00.000Z",
+          updatedAt: "2026-08-12T10:00:00.000Z",
+          stateReadyAt: "2026-08-12T10:00:00.000Z",
+          postponedUntil: null,
+        },
+      },
+      {
+        repository,
+        workItem: {
+          id: "wi-draining",
+          issueNumber: 14,
+          issueTitle: "Paused while Build is still running",
+          state: "IMPLEMENT",
+          status: "NEEDS_HUMAN_REVIEW",
+          statusLabel: "Draining",
+          statusMessage: null,
+          paused: true,
+          canRetry: false,
+          latestStepRunReason: null,
           pullRequestNumber: null,
           createdAt: "2026-08-12T10:00:00.000Z",
           updatedAt: "2026-08-12T10:00:00.000Z",
@@ -1640,6 +1664,7 @@ describe("operator binary finite-command process contract", () => {
       expect(
         seenBodies.some((body) => body.includes("latestStepRunReason")),
       ).toBe(true)
+      expect(seenBodies.some((body) => body.includes("statusLabel"))).toBe(true)
       const document = parseExactlyOneJsonDocument(result.stdout)
       expect(document).toEqual(
         buildStatusSuccessDocument({
