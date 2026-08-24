@@ -6,6 +6,7 @@ import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import {
   CurrentStepRun,
   limitAgentTurns,
+  pruneIdleRepositoryState,
 } from "../src/lib/agent-turn-limiter.js"
 import {
   REVIEW_PRE_COMMIT_MESSAGE,
@@ -85,6 +86,49 @@ const seedRepositoryGuarantee = (input: {
   })
 
 describe("limitAgentTurns", () => {
+  it("prunes grant history and guarantees once a Repository becomes idle", () => {
+    const repositoryId = "repo-pruned"
+    const otherRepositoryId = "repo-active"
+    const state = {
+      capacity: 2,
+      active: 1,
+      seq: 4,
+      lastGranted: new Map([
+        [repositoryId, 3],
+        [otherRepositoryId, 4],
+      ]),
+      waiting: new Map<string, number>(),
+      activeByRepository: new Map([[otherRepositoryId, 1]]),
+      guaranteedMins: new Map([
+        [repositoryId, 1],
+        [otherRepositoryId, 1],
+      ]),
+    }
+
+    const pruned = pruneIdleRepositoryState(repositoryId)(state)
+
+    expect(pruned.lastGranted.has(repositoryId)).toBe(false)
+    expect(pruned.guaranteedMins.has(repositoryId)).toBe(false)
+    expect(pruned.lastGranted.get(otherRepositoryId)).toBe(4)
+    expect(pruned.guaranteedMins.get(otherRepositoryId)).toBe(1)
+
+    const waiting = {
+      ...state,
+      waiting: new Map([[repositoryId, 1]]),
+    }
+    expect(pruneIdleRepositoryState(repositoryId)(waiting)).toBe(waiting)
+
+    const active = {
+      ...state,
+      active: 2,
+      activeByRepository: new Map([
+        [repositoryId, 1],
+        [otherRepositoryId, 1],
+      ]),
+    }
+    expect(pruneIdleRepositoryState(repositoryId)(active)).toBe(active)
+  })
+
   it("caps concurrent start/continue to Config max and queues the rest", () =>
     runTest(
       Effect.gen(function* () {

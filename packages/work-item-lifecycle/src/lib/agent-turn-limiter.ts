@@ -112,6 +112,31 @@ const activeOf = (state: FairGateState, repositoryId: string): number =>
 const guaranteedMinOf = (state: FairGateState, repositoryId: string): number =>
   state.guaranteedMins.get(repositoryId) ?? 0
 
+export const pruneIdleRepositoryState =
+  (repositoryId: string) =>
+  (state: FairGateState): FairGateState => {
+    if (
+      activeOf(state, repositoryId) > 0 ||
+      (state.waiting.get(repositoryId) ?? 0) > 0
+    ) {
+      return state
+    }
+    if (
+      !state.lastGranted.has(repositoryId) &&
+      !state.activeByRepository.has(repositoryId) &&
+      !state.guaranteedMins.has(repositoryId)
+    ) {
+      return state
+    }
+    const lastGranted = new Map(state.lastGranted)
+    const activeByRepository = new Map(state.activeByRepository)
+    const guaranteedMins = new Map(state.guaranteedMins)
+    lastGranted.delete(repositoryId)
+    activeByRepository.delete(repositoryId)
+    guaranteedMins.delete(repositoryId)
+    return { ...state, lastGranted, activeByRepository, guaranteedMins }
+  }
+
 const setGuaranteedMin =
   (repositoryId: string, guaranteedMin: number) =>
   (state: FairGateState): FairGateState => {
@@ -217,11 +242,11 @@ const releasePermit =
     } else {
       activeByRepository.set(repositoryId, next)
     }
-    return {
+    return pruneIdleRepositoryState(repositoryId)({
       ...state,
       active: Math.max(0, state.active - 1),
       activeByRepository,
-    }
+    })
   }
 
 /**
@@ -520,6 +545,7 @@ export const limitAgentTurns = (
           Effect.onExit(() =>
             Effect.gen(function* () {
               yield* unregisterWaitingIfNeeded
+              yield* Ref.update(gate, pruneIdleRepositoryState(repositoryId))
               yield* clearMarkedWaitingIfNeeded.pipe(Effect.interruptible)
             }),
           ),
