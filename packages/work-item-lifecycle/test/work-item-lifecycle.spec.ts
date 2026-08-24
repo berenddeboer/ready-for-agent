@@ -10026,6 +10026,87 @@ describe("WorkItemLifecycle", () => {
         }),
       ))
 
+    it("rejects terminal recovery when a newer Work Item exists for the Issue", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          yield* seedHarnessBuildModel
+          const repository = yield* db.addRepository(sampleRepository)
+          const now = Date.now()
+
+          for (const [issueNumber, newerState] of [
+            [41, "create_worktree"],
+            [42, "complete"],
+          ] as const) {
+            yield* db.storeIssue({
+              repositoryId: repository.id,
+              issueNumber,
+              ...sampleIssueFields,
+              url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+            })
+            const obsolete = yield* lifecycle.implementNow(
+              repository.id,
+              issueNumber,
+            )
+            yield* sql.unsafe(`DELETE FROM job_queue`)
+            yield* sql.unsafe(
+              `UPDATE step_run
+               SET status = 'succeeded', started_at = ?, finished_at = ?, updated_at = ?
+               WHERE id = ?`,
+              [now, now, now, obsolete.stepRuns[0]!.id],
+            )
+            yield* sql.unsafe(
+              `UPDATE work_item
+               SET state = 'complete', holds_worker_slot = 0, updated_at = ?
+               WHERE id = ?`,
+              [now, obsolete.id],
+            )
+
+            const newer = yield* lifecycle.implementNow(
+              repository.id,
+              issueNumber,
+            )
+            yield* sql.unsafe(
+              `UPDATE work_item
+               SET state = 'failed',
+                   failure_code = 'pr_status_checks_unresolved',
+                   failure_message = 'Legacy unresolved checks',
+                   updated_at = ?
+               WHERE id = ?`,
+              [now, obsolete.id],
+            )
+            if (newerState === "complete") {
+              yield* sql.unsafe(`DELETE FROM job_queue`)
+              yield* sql.unsafe(
+                `UPDATE step_run
+                 SET status = 'cancelled', finished_at = ?, updated_at = ?
+                 WHERE work_item_id = ? AND status IN ('queued', 'running')`,
+                [now, now, newer.id],
+              )
+              yield* sql.unsafe(
+                `UPDATE work_item
+                 SET state = 'complete', holds_worker_slot = 0, updated_at = ?
+                 WHERE id = ?`,
+                [now, newer.id],
+              )
+            }
+
+            const error = yield* Effect.flip(lifecycle.retry(obsolete.id))
+            expect(error).toBeInstanceOf(RetryNotEligibleError)
+            if (error instanceof RetryNotEligibleError) {
+              expect(error.reason).toBe("newer_work_item_exists")
+            }
+
+            const unchanged = yield* lifecycle.getWorkItem(obsolete.id)
+            expect(unchanged.state).toBe("failed")
+            expect(unchanged.failureCode).toBe("pr_status_checks_unresolved")
+            expect(unchanged.stepRuns).toHaveLength(1)
+          }
+        }),
+      ))
+
     it("rejects retry for Queued, Running, terminal, and never-failed Work Items", () =>
       runTest(
         Effect.gen(function* () {

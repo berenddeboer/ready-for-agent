@@ -6799,6 +6799,32 @@ export const makeWorkItemLifecycleLive = (
                 retryableNeedsHumanHandoff ||
                 retryableIssueClosedOrMissingFailure
               ) {
+                const newerRows = (yield* sql.unsafe(
+                  `SELECT newer.id
+                   FROM work_item AS current
+                   JOIN work_item AS newer
+                     ON newer.repository_id = current.repository_id
+                    AND newer.issue_number = current.issue_number
+                   WHERE current.id = ?
+                     AND newer.id != current.id
+                     AND (
+                       newer.created_at > current.created_at
+                       OR (
+                         newer.created_at = current.created_at
+                         AND newer.rowid > current.rowid
+                       )
+                     )
+                   ORDER BY newer.created_at ASC, newer.rowid ASC
+                   LIMIT 1`,
+                  [workItemId],
+                )) as readonly { readonly id: string }[]
+                if (newerRows.length > 0) {
+                  return yield* new RetryNotEligibleError({
+                    workItemId,
+                    reason: "newer_work_item_exists",
+                  })
+                }
+
                 // Retryable unresolved-check failures may predate Check-Start
                 // Anchor columns; give them a conservative anchor before Watch.
                 yield* sql.unsafe(
@@ -6902,6 +6928,9 @@ export const makeWorkItemLifecycleLive = (
                 return Effect.fail(error)
               }
               if (error instanceof AutonomousRetryLimitReachedError) {
+                return Effect.fail(error)
+              }
+              if (error instanceof RetryNotEligibleError) {
                 return Effect.fail(error)
               }
               if (
