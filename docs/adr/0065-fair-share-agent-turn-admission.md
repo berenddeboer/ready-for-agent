@@ -68,5 +68,9 @@ already makes safe to interrupt.
 Worker Slot admission (`maxConcurrentWorkItems`, ADR 0022) is unaffected — it
 remains the separate, harness-wide FIFO mechanism it was before.
 
-An optional per-repository guaranteed-minimum Agent Turn floor, layered on
-top of this fair-share default, is out of scope here and tracked separately.
+An optional per-repository guaranteed-minimum Agent Turn floor layers on top
+of this fair-share default. While a Repository has pending demand and fewer
+active Agent Turns than its configured floor, it has priority over ordinary
+fair-share contenders; an idle Repository never reserves capacity. An absent
+floor remains fully fair-share. Configuration changes are rejected when the
+sum of all Repository floors would exceed `maxConcurrentAgentTurns`.
