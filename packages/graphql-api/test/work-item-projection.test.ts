@@ -12,6 +12,7 @@ import {
   workItemPostponedUntil,
   workItemStateLabel,
   workItemStatus,
+  workItemStatusLabel,
   workItemStatusMessage,
 } from "../src/lib/work-item-projection.js"
 import { describe, expect, test } from "bun:test"
@@ -202,6 +203,14 @@ describe("Postponed Step Run projection", () => {
       ),
     ).toBe("needs_human_review")
     expect(
+      workItemStatusLabel(
+        workItemWith({
+          paused: true,
+          stepRuns: [{ ...baseStepRun, status: "running", finishedAt: null }],
+        }),
+      ),
+    ).toBe("Draining")
+    expect(
       workItemCanRetry(
         workItemWith({ waitingSince: new Date("2026-07-14T08:05:00.000Z") }),
       ),
@@ -293,6 +302,94 @@ describe("Postponed Step Run projection", () => {
         durationMs: 2_315_000,
       },
     ])
+  })
+})
+
+describe("paused Work Item statusLabel drain", () => {
+  test("labels a paused Work Item with a running Step Run as Draining", () => {
+    const draining = workItemWith({
+      paused: true,
+      stepRuns: [{ ...baseStepRun, status: "running", finishedAt: null }],
+    })
+    expect(workItemStatus(draining)).toBe("needs_human_review")
+    expect(workItemStatusLabel(draining)).toBe("Draining")
+    expect(lifecycleLabels(draining)).toEqual([
+      {
+        phase: "REVIEW",
+        label: "Review: reviewing",
+        status: "RUNNING",
+        durationMs: 2_315_000,
+      },
+    ])
+  })
+
+  test("labels a paused Work Item with a queued Step Run as Draining", () => {
+    const draining = workItemWith({
+      paused: true,
+      stepRuns: [
+        {
+          ...baseStepRun,
+          status: "queued",
+          startedAt: null,
+          finishedAt: null,
+          executionDurationMs: null,
+        },
+      ],
+    })
+    expect(workItemStatus(draining)).toBe("needs_human_review")
+    expect(workItemStatusLabel(draining)).toBe("Draining")
+  })
+
+  test("keeps idle paused Work Items as Needs human review", () => {
+    const idlePaused = workItemWith({
+      paused: true,
+      stepRuns: [{ ...baseStepRun, status: "succeeded" }],
+    })
+    expect(workItemStatus(idlePaused)).toBe("needs_human_review")
+    expect(workItemStatusLabel(idlePaused)).toBe("Needs human review")
+  })
+
+  test("restores the live Step Run label after Start during drain", () => {
+    const startedDuringDrain = workItemWith({
+      paused: false,
+      stepRuns: [{ ...baseStepRun, status: "running", finishedAt: null }],
+    })
+    expect(workItemStatus(startedDuringDrain)).toBe("running")
+    expect(workItemStatusLabel(startedDuringDrain)).toBe("Running")
+  })
+
+  test("does not relabel waiting-for-blockers or waiting-for-worker-slot over Pause", () => {
+    const pausedWaitingForBlockers = workItemWith({
+      paused: true,
+      waitingForBlockers: true,
+      stepRuns: [{ ...baseStepRun, status: "running", finishedAt: null }],
+    })
+    expect(workItemStatus(pausedWaitingForBlockers)).toBe(
+      "waiting_for_blockers",
+    )
+    expect(workItemStatusLabel(pausedWaitingForBlockers)).toBe(
+      "Waiting for blockers",
+    )
+
+    const pausedWaitingForSlot = workItemWith({
+      paused: true,
+      waitingSince: new Date("2026-07-14T08:05:00.000Z"),
+      stepRuns: [{ ...baseStepRun, status: "running", finishedAt: null }],
+    })
+    expect(workItemStatus(pausedWaitingForSlot)).toBe("waiting_for_worker_slot")
+    expect(workItemStatusLabel(pausedWaitingForSlot)).toBe(
+      "Waiting for worker slot",
+    )
+  })
+
+  test("keeps terminal Needs human distinct from drain", () => {
+    const needsHuman = workItemWith({
+      state: "needs_human",
+      paused: false,
+      stepRuns: [{ ...baseStepRun, status: "succeeded" }],
+    })
+    expect(workItemStatus(needsHuman)).toBe("needs_human")
+    expect(workItemStatusLabel(needsHuman)).toBe("Needs human")
   })
 })
 

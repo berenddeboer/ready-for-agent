@@ -84,7 +84,6 @@ import { toGraphQLError } from "./to-graphql-error.js"
 import { validateAgentModelsAgainstCatalog } from "./validate-agent-models.js"
 import {
   lifecycleLabels,
-  statusLabel,
   workIssueProjection,
   workItemCanRetry,
   workItemHasActiveStepRun,
@@ -94,6 +93,7 @@ import {
   workItemPostponedUntil,
   workItemStateLabel,
   workItemStatus,
+  workItemStatusLabel,
   workItemStatusMessage,
 } from "./work-item-projection.js"
 
@@ -1329,7 +1329,7 @@ export const createGraphqlApi = <R>(
           status: (workItem: WorkItemRecord) =>
             workItemStatus(workItem).toUpperCase(),
           statusLabel: (workItem: WorkItemRecord) =>
-            statusLabel(workItemStatus(workItem)),
+            workItemStatusLabel(workItem),
           statusMessage: async (
             workItem: WorkItemRecord,
             _args: unknown,

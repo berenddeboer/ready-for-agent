@@ -159,6 +159,7 @@ type GraphqlStatusWorkItem = {
   readonly issueTitle: string | null
   readonly state: string
   readonly status: string
+  readonly statusLabel: string
   readonly statusMessage: string | null
   readonly paused: boolean
   readonly canRetry: boolean
@@ -212,6 +213,7 @@ const toStatusWorkItemRow = (row: {
   issueTitle: row.workItem.issueTitle,
   state: row.workItem.state,
   status: row.workItem.status,
+  statusLabel: row.workItem.statusLabel,
   statusMessage: row.workItem.statusMessage,
   paused: row.workItem.paused,
   canRetry: row.workItem.canRetry,
@@ -863,6 +865,7 @@ export class GraphqlApi extends Context.Service<
                         issueTitle: true,
                         state: true,
                         status: true,
+                        statusLabel: true,
                         statusMessage: true,
                         paused: true,
                         canRetry: true,

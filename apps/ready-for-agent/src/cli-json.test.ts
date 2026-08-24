@@ -62,6 +62,7 @@ describe("finite CLI JSON contract", () => {
               issueTitle: "Blocked follow-up",
               state: "CREATE_WORKTREE",
               status: "WAITING_FOR_BLOCKERS",
+              statusLabel: "Waiting for blockers",
               statusMessage: "Waiting for blocking Issues",
               paused: false,
               canRetry: false,
@@ -88,9 +89,61 @@ describe("finite CLI JSON contract", () => {
     expect(doc.lanes[0]?.workItems[0]?.pullRequestNumber).toBeNull()
     expect(doc.lanes[0]?.workItems[0]?.canRetry).toBe(false)
     expect(doc.lanes[0]?.workItems[0]?.latestStepRunReason).toBeNull()
+    expect(doc.lanes[0]?.workItems[0]?.statusLabel).toBe("Waiting for blockers")
     expect(encodeCompactJson(doc)).toContain('"command":"status"')
     expect(encodeCompactJson(doc)).toContain('"pullRequestNumber":null')
     expect(encodeCompactJson(doc)).toContain('"canRetry":false')
+    expect(encodeCompactJson(doc)).toContain(
+      '"statusLabel":"Waiting for blockers"',
+    )
+  })
+
+  test("status rows carry Draining statusLabel while machine status stays Needs human review", () => {
+    const doc = buildStatusSuccessDocument({
+      repository: null,
+      lanes: [
+        {
+          id: "ATTENTION",
+          label: "Attention",
+          count: 1,
+          workItems: [
+            {
+              repository: {
+                id: "repo-1",
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "owner/repo",
+              },
+              id: "wi-draining",
+              issueNumber: 42,
+              issueTitle: "Paused while Build is still running",
+              state: "IMPLEMENT",
+              status: "NEEDS_HUMAN_REVIEW",
+              statusLabel: "Draining",
+              statusMessage: null,
+              paused: true,
+              canRetry: false,
+              latestStepRunReason: null,
+              pullRequestNumber: null,
+              createdAt: "2026-08-12T10:00:00.000Z",
+              updatedAt: "2026-08-12T10:00:00.000Z",
+              stateReadyAt: "2026-08-12T10:00:00.000Z",
+              postponedUntil: null,
+            },
+          ],
+        },
+        { id: "QUEUE", label: "Queue", count: 0, workItems: [] },
+        { id: "BUILD", label: "Build", count: 0, workItems: [] },
+        { id: "REVIEW", label: "Review", count: 0, workItems: [] },
+        { id: "PR", label: "PR", count: 0, workItems: [] },
+        { id: "MERGED", label: "Merged", count: 0, workItems: [] },
+      ],
+    })
+    expect(doc.schemaVersion).toBe(1)
+    expect(doc.lanes[0]?.workItems[0]?.status).toBe("NEEDS_HUMAN_REVIEW")
+    expect(doc.lanes[0]?.workItems[0]?.statusLabel).toBe("Draining")
+    expect(encodeCompactJson(doc)).toContain('"statusLabel":"Draining"')
+    expect(encodeCompactJson(doc)).toContain('"status":"NEEDS_HUMAN_REVIEW"')
   })
 
   test("status rows carry canRetry and latest Step Run reason additively on schemaVersion 1", () => {
@@ -114,6 +167,7 @@ describe("finite CLI JSON contract", () => {
               issueTitle: "Retryable implement failure",
               state: "IMPLEMENT",
               status: "FAILED",
+              statusLabel: "Failed",
               statusMessage:
                 "Claude Code failed to implement the Work Item issue",
               paused: false,
@@ -152,6 +206,7 @@ describe("finite CLI JSON contract", () => {
               issueTitle: "Terminal close failure",
               state: "FAILED",
               status: "FAILED",
+              statusLabel: "Failed",
               statusMessage: "Issue is not open",
               paused: false,
               canRetry: false,
@@ -179,6 +234,7 @@ describe("finite CLI JSON contract", () => {
               issueTitle: "Retryable review handoff",
               state: "NEEDS_HUMAN",
               status: "NEEDS_HUMAN",
+              statusLabel: "Needs human",
               statusMessage: "Human must review findings",
               paused: false,
               canRetry: true,
@@ -206,6 +262,7 @@ describe("finite CLI JSON contract", () => {
               issueTitle: "Interrupted without detail",
               state: "IMPLEMENT",
               status: "INTERRUPTED",
+              statusLabel: "Interrupted",
               statusMessage:
                 "Lifecycle Step was interrupted before an outcome could be established",
               paused: false,

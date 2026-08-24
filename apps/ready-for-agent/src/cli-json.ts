@@ -192,6 +192,7 @@ export type StatusWorkItemRow = {
   readonly issueTitle: string | null
   readonly state: string
   readonly status: string
+  readonly statusLabel: string
   readonly statusMessage: string | null
   readonly paused: boolean
   readonly canRetry: boolean
