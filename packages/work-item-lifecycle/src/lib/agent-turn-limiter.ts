@@ -1,4 +1,4 @@
-import { Context, Duration, Effect, Option, Ref } from "effect"
+import { Context, Duration, Effect, Option, Ref, Schema } from "effect"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
 import type {
   AgentBackendError,
@@ -66,6 +66,12 @@ type SavedStepRunReason = {
  * them is unaffected by repository-aware fairness (matches prior behavior).
  */
 const NO_REPOSITORY = "@ready-for-agent/work-item-lifecycle/no-repository"
+
+const GuaranteedMinSqlRow = Schema.Struct({
+  guaranteedMin: Schema.NullOr(
+    Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  ),
+})
 
 /**
  * Admission state for the repository-aware fair-share gate, extended with an
@@ -308,17 +314,10 @@ export const limitAgentTurns = (
               [repositoryId],
             )
             .pipe(
-              Effect.map((rows) => {
-                const row = (
-                  rows as readonly { readonly guaranteedMin: number | null }[]
-                )[0]
-                const raw = row?.guaranteedMin
-                return typeof raw === "number" &&
-                  Number.isFinite(raw) &&
-                  raw > 0
-                  ? raw
-                  : 0
-              }),
+              Effect.flatMap(
+                Schema.decodeUnknownEffect(Schema.Array(GuaranteedMinSqlRow)),
+              ),
+              Effect.map((rows) => rows[0]?.guaranteedMin ?? 0),
               Effect.orElseSucceed(() => 0),
             )
 

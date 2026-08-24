@@ -255,6 +255,28 @@ export const ConfigSqlRow = Schema.Struct({
 )
 export type ConfigSqlRow = typeof ConfigSqlRow.Type
 
+export const GuaranteedMinSumSqlRow = Schema.Struct({
+  sum: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+})
+export type GuaranteedMinSumSqlRow = typeof GuaranteedMinSumSqlRow.Type
+
+export const RepositorySettingsConfigSqlRow = Schema.Struct({
+  selectedAgentBackend: Schema.String,
+  maxConcurrentAgentTurns: Schema.Int,
+})
+export type RepositorySettingsConfigSqlRow =
+  typeof RepositorySettingsConfigSqlRow.Type
+
+export const RepositorySettingsSqlRow = Schema.Struct({
+  forge: Forge,
+  forgeHost: Schema.String,
+  projectPath: Schema.String,
+  selectedAgentBackend: Schema.NullOr(Schema.String),
+  backendModelPrefs: Schema.String,
+  guaranteedMinConcurrentAgentTurns: Schema.NullOr(Schema.Int),
+})
+export type RepositorySettingsSqlRow = typeof RepositorySettingsSqlRow.Type
+
 export const IssueSqlRow = Schema.Struct({
   id: Schema.String,
   repositoryId: RepositoryId,

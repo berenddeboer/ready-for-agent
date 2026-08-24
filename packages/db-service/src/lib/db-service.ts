@@ -22,12 +22,15 @@ import {
   type BackendModelPrefs,
   ConfigRecord,
   ConfigSqlRow,
+  GuaranteedMinSumSqlRow,
   type IssueDependency,
   IssueDependencySqlRow,
   IssueRecord,
   IssueSqlRow,
   RepositoryId,
   RepositoryRecord,
+  RepositorySettingsConfigSqlRow,
+  RepositorySettingsSqlRow,
   RepositorySqlRow,
   RunningStepSqlRow,
   type StoreIssueInput,
@@ -269,6 +272,18 @@ const decodeRepositoryRows = (rows: ReadonlyArray<unknown>) =>
   )
 const decodeConfigRows = (rows: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.Array(ConfigSqlRow))(rows).pipe(
+    Effect.mapError(toSchemaDatabaseError),
+  )
+const decodeGuaranteedMinSumRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(GuaranteedMinSumSqlRow))(rows).pipe(
+    Effect.mapError(toSchemaDatabaseError),
+  )
+const decodeRepositorySettingsConfigRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(RepositorySettingsConfigSqlRow))(
+    rows,
+  ).pipe(Effect.mapError(toSchemaDatabaseError))
+const decodeRepositorySettingsRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(RepositorySettingsSqlRow))(rows).pipe(
     Effect.mapError(toSchemaDatabaseError),
   )
 const decodeIssueRows = (rows: ReadonlyArray<unknown>) =>
@@ -932,15 +947,15 @@ export const DbServiceLive = Layer.effect(
             }
             if (maxConcurrentAgentTurns < latest.maxConcurrentAgentTurns) {
               // Only lowering the cap can newly oversubscribe guarantees.
-              const guaranteedSumRows = (yield* sql
+              const guaranteedSumResult = yield* sql
                 .unsafe(
                   `SELECT COALESCE(SUM(guaranteed_min_concurrent_agent_turns), 0) AS sum
-                   FROM repository
-                   WHERE guaranteed_min_concurrent_agent_turns IS NOT NULL`,
+                    FROM repository
+                    WHERE guaranteed_min_concurrent_agent_turns IS NOT NULL`,
                 )
-                .pipe(Effect.mapError(toDatabaseError))) as readonly {
-                readonly sum: number
-              }[]
+                .pipe(Effect.mapError(toDatabaseError))
+              const guaranteedSumRows =
+                yield* decodeGuaranteedMinSumRows(guaranteedSumResult)
               const guaranteedSum = guaranteedSumRows[0]?.sum ?? 0
               if (guaranteedSum > maxConcurrentAgentTurns) {
                 return yield* new GuaranteedMinAgentTurnsExceedsCapError({
@@ -1192,12 +1207,9 @@ export const DbServiceLive = Layer.effect(
                  FROM config WHERE id = 'default'`,
               )
               .pipe(Effect.mapError(toDatabaseError))
-            const configRow = configRows[0] as
-              | {
-                  readonly selectedAgentBackend: string
-                  readonly maxConcurrentAgentTurns: number
-                }
-              | undefined
+            const decodedConfigRows =
+              yield* decodeRepositorySettingsConfigRows(configRows)
+            const configRow = decodedConfigRows[0]
             const harnessDefault = configRow?.selectedAgentBackend ?? "opencode"
             const maxConcurrentAgentTurns =
               configRow?.maxConcurrentAgentTurns ?? 2
@@ -1213,16 +1225,9 @@ export const DbServiceLive = Layer.effect(
                 [input.repositoryId],
               )
               .pipe(Effect.mapError(toDatabaseError))
-            const existing = existingRows[0] as
-              | {
-                  readonly selectedAgentBackend: string | null
-                  readonly backendModelPrefs: string
-                  readonly forge: RepositoryRecord["forge"]
-                  readonly forgeHost: string
-                  readonly projectPath: string
-                  readonly guaranteedMinConcurrentAgentTurns: number | null
-                }
-              | undefined
+            const decodedExistingRows =
+              yield* decodeRepositorySettingsRows(existingRows)
+            const existing = decodedExistingRows[0]
             if (!existing) {
               return yield* new RepositoryNotFoundError({
                 repositoryId: input.repositoryId,
@@ -1308,7 +1313,7 @@ export const DbServiceLive = Layer.effect(
             const guaranteedMinRaised =
               (nextGuaranteedMin ?? 0) > (previousGuaranteedMin ?? 0)
             if (guaranteedMinRaised) {
-              const otherRepoSumRows = (yield* sql
+              const otherRepoSumResult = yield* sql
                 .unsafe(
                   `SELECT COALESCE(SUM(guaranteed_min_concurrent_agent_turns), 0) AS sum
                    FROM repository
@@ -1316,9 +1321,9 @@ export const DbServiceLive = Layer.effect(
                      AND guaranteed_min_concurrent_agent_turns IS NOT NULL`,
                   [input.repositoryId],
                 )
-                .pipe(Effect.mapError(toDatabaseError))) as readonly {
-                readonly sum: number
-              }[]
+                .pipe(Effect.mapError(toDatabaseError))
+              const otherRepoSumRows =
+                yield* decodeGuaranteedMinSumRows(otherRepoSumResult)
               const otherRepoSum = otherRepoSumRows[0]?.sum ?? 0
               const totalGuaranteed = otherRepoSum + (nextGuaranteedMin ?? 0)
               if (totalGuaranteed > maxConcurrentAgentTurns) {
