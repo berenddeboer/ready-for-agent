@@ -798,8 +798,21 @@ describe("limitAgentTurns", () => {
           maxConcurrentWorkItems: 5,
         })
 
+        const repositoryId = "repo-limiter-interrupt-wait"
+        const workItemId = "wi-01JLIMITERINTR000000000001"
+        const stepRunId = "srun-01JLIMITERINTR00000000001"
+        yield* seedRunningStepRun({
+          stepRunId,
+          workItemId,
+          repositoryId,
+        })
+
         const releaseFirst = yield* Deferred.make<void>()
         const firstStarted = yield* Deferred.make<void>()
+        const waitingMarked = yield* Deferred.make<void>()
+        const cleanupStarted = yield* Deferred.make<void>()
+        const releaseCleanup = yield* Deferred.make<void>()
+        const interruptionFinished = yield* Deferred.make<void>()
         let callCount = 0
 
         const inner = AgentBackend.of({
@@ -820,20 +833,68 @@ describe("limitAgentTurns", () => {
               models: [],
             }),
         })
-        const limited = yield* limitAgentTurns(inner, db, sql)
+        const stalledSql = new Proxy(sql, {
+          get(target, property, receiver) {
+            if (property !== "unsafe") {
+              return Reflect.get(target, property, receiver)
+            }
+            return (query: string, params?: ReadonlyArray<unknown>) => {
+              if (
+                query.includes(
+                  "SELECT session_wait_started_at, session_wait_ms",
+                )
+              ) {
+                return Effect.gen(function* () {
+                  yield* Deferred.succeed(cleanupStarted, undefined)
+                  yield* Deferred.await(releaseCleanup)
+                  return yield* target.unsafe(query, params)
+                })
+              }
+              const statement = target.unsafe(query, params)
+              return query.includes("SET reason_code = ?") &&
+                params?.[0] === STEP_RUN_REASON.waitingForAgentTurn
+                ? statement.pipe(
+                    Effect.tap(() =>
+                      Deferred.succeed(waitingMarked, undefined),
+                    ),
+                  )
+                : statement
+            }
+          },
+        })
+        const limited = yield* limitAgentTurns(inner, db, stalledSql)
 
         const first = yield* limited
           .startTurn(startInput)
           .pipe(Effect.forkChild)
         yield* Deferred.await(firstStarted)
 
-        // Second request is capacity-blocked and only queues; interrupt it
-        // while it is still merely waiting (never admitted).
-        const second = yield* limited
-          .startTurn(startInput)
-          .pipe(Effect.forkChild)
-        yield* Effect.sleep("50 millis")
-        yield* Fiber.interrupt(second)
+        // Second request is capacity-blocked and marked waiting in SQL.
+        const second = yield* limited.startTurn(startInput).pipe(
+          Effect.provideService(CurrentStepRun, {
+            stepRunId,
+            repositoryId,
+          }),
+          Effect.forkChild,
+        )
+        yield* Deferred.await(waitingMarked)
+
+        // Its wait-state cleanup query never returns. Interrupt must still
+        // finish promptly rather than waiting inside an uninterruptible
+        // finalizer. Race the two deterministic outcomes, then release the
+        // artificial stall so a failing assertion cannot strand the test.
+        const interruptFiber = yield* Fiber.interrupt(second).pipe(
+          Effect.ensuring(Deferred.succeed(interruptionFinished, undefined)),
+          Effect.forkChild,
+        )
+        yield* Effect.race(
+          Deferred.await(interruptionFinished),
+          Deferred.await(cleanupStarted),
+        )
+        yield* Effect.yieldNow
+        const interruptedPromptly = yield* Deferred.isDone(interruptionFinished)
+        yield* Deferred.succeed(releaseCleanup, undefined)
+        yield* Fiber.join(interruptFiber)
 
         // Release the first turn; a fresh third request should be admitted
         // immediately, proving the interrupted, never-admitted second
@@ -846,6 +907,7 @@ describe("limitAgentTurns", () => {
           .pipe(Effect.timeout("2 seconds"))
         expect(third.sessionId).toBe("ses_2")
         expect(callCount).toBe(2)
+        expect(interruptedPromptly).toBe(true)
       }),
     ))
 

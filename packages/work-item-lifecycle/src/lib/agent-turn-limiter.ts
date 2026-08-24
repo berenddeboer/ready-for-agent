@@ -427,16 +427,24 @@ export const limitAgentTurns = (
         let savedReason: SavedStepRunReason | null = null
         let registeredWaiting = false
 
-        const cleanupWaiting = Effect.gen(function* () {
+        const unregisterWaitingIfNeeded = Effect.gen(function* () {
           if (registeredWaiting) {
             yield* Ref.update(gate, unregisterWaiting(repositoryId))
             registeredWaiting = false
           }
+        })
+
+        const clearMarkedWaitingIfNeeded = Effect.gen(function* () {
           if (markedWaiting) {
             yield* clearWaiting(savedReason)
             markedWaiting = false
             savedReason = null
           }
+        })
+
+        const cleanupWaiting = Effect.gen(function* () {
+          yield* unregisterWaitingIfNeeded
+          yield* clearMarkedWaitingIfNeeded
         })
 
         // Admitting this caller and pairing its permit with a guaranteed
@@ -505,11 +513,17 @@ export const limitAgentTurns = (
           }
         })
 
-        // Belt-and-braces: if this fiber is interrupted while merely waiting,
-        // the waiting bookkeeping and Step Run "waiting" marking are still
-        // cleared. A no-op once the success branch above has already reset
-        // both flags.
-        return yield* runTurn.pipe(Effect.onExit(() => cleanupWaiting))
+        // If interrupted while merely waiting, always remove in-memory demand.
+        // Restoring interruptibility around the best-effort SQL cleanup keeps
+        // a stalled database from blocking Pause/Interrupt indefinitely.
+        return yield* runTurn.pipe(
+          Effect.onExit(() =>
+            Effect.gen(function* () {
+              yield* unregisterWaitingIfNeeded
+              yield* clearMarkedWaitingIfNeeded.pipe(Effect.interruptible)
+            }),
+          ),
+        )
       })
 
     return AgentBackend.of({
