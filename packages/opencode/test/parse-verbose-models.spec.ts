@@ -62,6 +62,34 @@ describe("parseVerboseModelsOutput", () => {
     ])
   })
 
+  it("extracts the operator-facing name when the JSON blob carries one", () => {
+    const stdout = [
+      "opencode/x-preview-f-free",
+      "{",
+      '  "id": "x-preview-f-free",',
+      '  "providerID": "opencode",',
+      '  "name": "Ox Alpha Free (Unlimited)",',
+      '  "variants": {',
+      '    "high": {},',
+      '    "max": {}',
+      "  }",
+      "}",
+      "opencode/unnamed",
+      "{",
+      '  "variants": {}',
+      "}",
+    ].join("\n")
+
+    expect(parseVerboseModelsOutput(stdout)).toEqual([
+      {
+        id: "opencode/x-preview-f-free",
+        name: "Ox Alpha Free (Unlimited)",
+        variants: ["high", "max"],
+      },
+      { id: "opencode/unnamed", variants: [] },
+    ])
+  })
+
   it("skips blank lines and treats missing variants as empty", () => {
     const stdout = [
       "",

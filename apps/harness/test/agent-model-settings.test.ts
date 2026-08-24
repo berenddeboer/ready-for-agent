@@ -430,6 +430,24 @@ describe("Agent Model presentation (issue #821)", () => {
     ).toBe("sonnet")
   })
 
+  test("formatAgentModelLabel appends a kind-less name after the id in parentheses", () => {
+    expect(
+      formatAgentModelLabel({
+        id: "opencode/x-preview-f-free",
+        thinkingLevels: ["high", "max"],
+        name: "Ox Alpha Free (Unlimited)",
+      }),
+    ).toBe("opencode/x-preview-f-free (Ox Alpha Free (Unlimited))")
+    // A name equal to the id adds no information.
+    expect(
+      formatAgentModelLabel({
+        id: "opencode/gpt-5",
+        thinkingLevels: [],
+        name: "opencode/gpt-5",
+      }),
+    ).toBe("opencode/gpt-5")
+  })
+
   test("findCatalogModel matches by executable id only", () => {
     const catalog = [systemModel, applicationModel]
     expect(findCatalogModel(catalog, systemModel.id)).toEqual(systemModel)

@@ -70,7 +70,14 @@ export const parseVerboseModelsOutputDetailed = (
       const parsed: unknown = JSON.parse(jsonLines.join("\n"))
       const variantsValue = isRecord(parsed) ? parsed.variants : undefined
       const variants = isRecord(variantsValue) ? Object.keys(variantsValue) : []
-      models.push({ id, variants })
+      const rawName = isRecord(parsed) ? parsed.name : undefined
+      const name =
+        typeof rawName === "string" && rawName.trim().length > 0
+          ? rawName.trim()
+          : undefined
+      models.push(
+        name === undefined ? { id, variants } : { id, name, variants },
+      )
     } catch {
       complete = false
       models.push({ id, variants: [] })
