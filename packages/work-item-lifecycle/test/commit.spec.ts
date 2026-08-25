@@ -27,12 +27,15 @@ import {
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CommitInvalidWorktreeContextError,
+  CommitNoChangeConfirmationError,
   CommitOpenCodeError,
   CommitPostconditionError,
+  type CommitResult,
   CommitSessionContextMissingError,
   CommitStartingCommitMissingError,
   CommitWorktreeContextMissingError,
   buildHarnessPublicationFallbackCopy,
+  buildNoChangeConfirmationPrompt,
   commit,
   formatPublicationCommitMessage,
   makeWorkItemId,
@@ -237,6 +240,14 @@ const withTempRepo = async (
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+}
+
+const committedOf = (result: CommitResult) => {
+  expect(result._tag).toBe("committed")
+  if (result._tag !== "committed") {
+    throw new Error("expected committed")
+  }
+  return result
 }
 
 const publicationResultLine = (title: string, body: string) =>
@@ -531,27 +542,29 @@ describe("commit", () => {
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
 
       let continued = 0
-      const result = await run(
-        commit(
-          baseContext(root, {
-            startingCommitOid: startingOid,
-            sessionId: "ses_from_implement",
-            issueNumber: 2039,
-            issueTitle: "Fix the widgets path",
-            publicationTitle: "fix: widgets path",
-            publicationBody:
-              "Corrects the widgets route used by the API.\n\nCloses #2039",
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              startingCommitOid: startingOid,
+              sessionId: "ses_from_implement",
+              issueNumber: 2039,
+              issueTitle: "Fix the widgets path",
+              publicationTitle: "fix: widgets path",
+              publicationBody:
+                "Corrects the widgets route used by the API.\n\nCloses #2039",
+            }),
+          ),
+          stubOpencode({
+            continueTurn: () => {
+              continued += 1
+              return Effect.succeed({
+                sessionId: "ses_from_implement",
+                assistantText: "",
+              })
+            },
           }),
         ),
-        stubOpencode({
-          continueTurn: () => {
-            continued += 1
-            return Effect.succeed({
-              sessionId: "ses_from_implement",
-              assistantText: "",
-            })
-          },
-        }),
       )
 
       expect(result.completion).toBe("native")
@@ -605,14 +618,16 @@ describe("commit", () => {
       process.env["RFA_COMMIT_TEST_VALUE"] = "preserved"
       process.env["RFA_COMMIT_OBSERVED_PATH"] = observedEnvironmentPath
       try {
-        const result = await run(
-          commit(
-            baseContext(root, {
-              startingCommitOid: startingOid,
-              publicationTitle: "fix: protect harness environment",
-              publicationBody:
-                "Keeps Harness state outside repository hooks.\n\nCloses #91",
-            }),
+        const result = committedOf(
+          await run(
+            commit(
+              baseContext(root, {
+                startingCommitOid: startingOid,
+                publicationTitle: "fix: protect harness environment",
+                publicationBody:
+                  "Keeps Harness state outside repository hooks.\n\nCloses #91",
+              }),
+            ),
           ),
         )
 
@@ -647,27 +662,29 @@ describe("commit", () => {
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
       const prompts: string[] = []
 
-      const result = await run(
-        commit(
-          baseContext(root, {
-            workItemId,
-            startingCommitOid: startingOid,
-            issueNumber: 42,
-            sessionId: "ses_from_implement",
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              workItemId,
+              startingCommitOid: startingOid,
+              issueNumber: 42,
+              sessionId: "ses_from_implement",
+            }),
+          ),
+          stubOpencode({
+            continueTurn: (input) => {
+              prompts.push(input.prompt)
+              return Effect.succeed({
+                sessionId: input.sessionId,
+                assistantText: publicationResultLine(
+                  "feat: implement widgets",
+                  "Implements widgets as requested.\n\nVerified via local checks.",
+                ),
+              })
+            },
           }),
         ),
-        stubOpencode({
-          continueTurn: (input) => {
-            prompts.push(input.prompt)
-            return Effect.succeed({
-              sessionId: input.sessionId,
-              assistantText: publicationResultLine(
-                "feat: implement widgets",
-                "Implements widgets as requested.\n\nVerified via local checks.",
-              ),
-            })
-          },
-        }),
       )
 
       expect(result.completion).toBe("native")
@@ -701,14 +718,16 @@ describe("commit", () => {
             repositoryId: repository.id,
             issueNumber: 42,
           })
-          const outcome = yield* commit(
-            baseContext(root, {
-              workItemId,
-              repositoryId: repository.id,
-              startingCommitOid: startingOid,
-              issueNumber: 42,
-              sessionId: "ses_from_implement",
-            }),
+          const outcome = committedOf(
+            yield* commit(
+              baseContext(root, {
+                workItemId,
+                repositoryId: repository.id,
+                startingCommitOid: startingOid,
+                issueNumber: 42,
+                sessionId: "ses_from_implement",
+              }),
+            ),
           )
           const persisted = yield* readPersistedPublicationCopy(workItemId)
           return { outcome, persisted }
@@ -770,32 +789,34 @@ describe("commit", () => {
       let continued = 0
       let uploads = 0
 
-      const result = await run(
-        commit(
-          baseContext(root, {
-            workItemId,
-            startingCommitOid: startingOid,
-            publicationTitle: "feat: already persisted",
-            publicationBody: persistedBody,
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              workItemId,
+              startingCommitOid: startingOid,
+              publicationTitle: "feat: already persisted",
+              publicationBody: persistedBody,
+            }),
+          ),
+          stubOpencode({
+            continueTurn: () => {
+              continued += 1
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText: "",
+              })
+            },
+          }),
+          stubGitHubServiceLayer({
+            uploadUserAttachment: () => {
+              uploads += 1
+              return Effect.succeed(
+                "https://github.com/user-attachments/assets/11111111-2222-3333-4444-555555555555",
+              )
+            },
           }),
         ),
-        stubOpencode({
-          continueTurn: () => {
-            continued += 1
-            return Effect.succeed({
-              sessionId: "ses_implement_session",
-              assistantText: "",
-            })
-          },
-        }),
-        stubGitHubServiceLayer({
-          uploadUserAttachment: () => {
-            uploads += 1
-            return Effect.succeed(
-              "https://github.com/user-attachments/assets/11111111-2222-3333-4444-555555555555",
-            )
-          },
-        }),
       )
 
       expect(result.completion).toBe("native")
@@ -816,39 +837,41 @@ describe("commit", () => {
       const failedPath = await writeAttachment(workItemId, "failed.png")
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
 
-      const result = await run(
-        Effect.gen(function* () {
-          const repository = yield* seedRepository(root)
-          return yield* commit(
-            baseContext(root, {
-              workItemId,
-              repositoryId: repository.id,
-              startingCommitOid: startingOid,
-              issueNumber: 42,
-              sessionId: "ses_from_implement",
-            }),
-          )
-        }),
-        stubOpencode({
-          continueTurn: (input) =>
-            Effect.succeed({
-              sessionId: input.sessionId,
-              assistantText: publicationResultLine(
-                "feat: implement widgets",
-                `Shows ![missing](${missingPath}) and ![failed](${failedPath}).`,
-              ),
-            }),
-        }),
-        stubGitHubServiceLayer({
-          uploadUserAttachment: () =>
-            Effect.fail(
-              new GitHubRequestError({
-                message: "Failed to upload user attachment",
-                statusCode: 404,
-                retryable: false,
+      const result = committedOf(
+        await run(
+          Effect.gen(function* () {
+            const repository = yield* seedRepository(root)
+            return yield* commit(
+              baseContext(root, {
+                workItemId,
+                repositoryId: repository.id,
+                startingCommitOid: startingOid,
+                issueNumber: 42,
+                sessionId: "ses_from_implement",
               }),
-            ),
-        }),
+            )
+          }),
+          stubOpencode({
+            continueTurn: (input) =>
+              Effect.succeed({
+                sessionId: input.sessionId,
+                assistantText: publicationResultLine(
+                  "feat: implement widgets",
+                  `Shows ![missing](${missingPath}) and ![failed](${failedPath}).`,
+                ),
+              }),
+          }),
+          stubGitHubServiceLayer({
+            uploadUserAttachment: () =>
+              Effect.fail(
+                new GitHubRequestError({
+                  message: "Failed to upload user attachment",
+                  statusCode: 404,
+                  retryable: false,
+                }),
+              ),
+          }),
+        ),
       )
 
       expect(result.completion).toBe("native")
@@ -868,37 +891,39 @@ describe("commit", () => {
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
       let uploads = 0
 
-      const result = await run(
-        Effect.gen(function* () {
-          const repository = yield* seedRepository(root)
-          return yield* commit(
-            baseContext(root, {
-              workItemId,
-              repositoryId: repository.id,
-              startingCommitOid: startingOid,
-              issueNumber: 42,
-              sessionId: "ses_from_implement",
-            }),
-          )
-        }),
-        stubOpencode({
-          continueTurn: (input) =>
-            Effect.succeed({
-              sessionId: input.sessionId,
-              assistantText: publicationResultLine(
-                "feat: implement widgets",
-                `Must not read ![outside](${outsidePath}).`,
-              ),
-            }),
-        }),
-        stubGitHubServiceLayer({
-          uploadUserAttachment: () => {
-            uploads += 1
-            return Effect.succeed(
-              "https://github.com/user-attachments/assets/11111111-2222-3333-4444-555555555555",
+      const result = committedOf(
+        await run(
+          Effect.gen(function* () {
+            const repository = yield* seedRepository(root)
+            return yield* commit(
+              baseContext(root, {
+                workItemId,
+                repositoryId: repository.id,
+                startingCommitOid: startingOid,
+                issueNumber: 42,
+                sessionId: "ses_from_implement",
+              }),
             )
-          },
-        }),
+          }),
+          stubOpencode({
+            continueTurn: (input) =>
+              Effect.succeed({
+                sessionId: input.sessionId,
+                assistantText: publicationResultLine(
+                  "feat: implement widgets",
+                  `Must not read ![outside](${outsidePath}).`,
+                ),
+              }),
+          }),
+          stubGitHubServiceLayer({
+            uploadUserAttachment: () => {
+              uploads += 1
+              return Effect.succeed(
+                "https://github.com/user-attachments/assets/11111111-2222-3333-4444-555555555555",
+              )
+            },
+          }),
+        ),
       )
 
       expect(result.completion).toBe("native")
@@ -914,37 +939,39 @@ describe("commit", () => {
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
       const uploads: string[] = []
 
-      const result = await run(
-        Effect.gen(function* () {
-          const repository = yield* seedRepository(root)
-          return yield* commit(
-            baseContext(root, {
-              workItemId,
-              repositoryId: repository.id,
-              startingCommitOid: startingOid,
-              issueNumber: 42,
-              sessionId: "ses_from_implement",
-            }),
-          )
-        }),
-        stubOpencode({
-          continueTurn: (input) =>
-            Effect.succeed({
-              sessionId: input.sessionId,
-              assistantText: publicationResultLine(
-                "feat: implement widgets",
-                `Only this shot: ![before](${referenced}).`,
-              ),
-            }),
-        }),
-        stubGitHubServiceLayer({
-          uploadUserAttachment: (_repository, input) => {
-            uploads.push(input.filePath)
-            return Effect.succeed(
-              "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      const result = committedOf(
+        await run(
+          Effect.gen(function* () {
+            const repository = yield* seedRepository(root)
+            return yield* commit(
+              baseContext(root, {
+                workItemId,
+                repositoryId: repository.id,
+                startingCommitOid: startingOid,
+                issueNumber: 42,
+                sessionId: "ses_from_implement",
+              }),
             )
-          },
-        }),
+          }),
+          stubOpencode({
+            continueTurn: (input) =>
+              Effect.succeed({
+                sessionId: input.sessionId,
+                assistantText: publicationResultLine(
+                  "feat: implement widgets",
+                  `Only this shot: ![before](${referenced}).`,
+                ),
+              }),
+          }),
+          stubGitHubServiceLayer({
+            uploadUserAttachment: (_repository, input) => {
+              uploads.push(input.filePath)
+              return Effect.succeed(
+                "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+              )
+            },
+          }),
+        ),
       )
 
       expect(result.completion).toBe("native")
@@ -960,41 +987,43 @@ describe("commit", () => {
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
       let uploads = 0
 
-      const result = await run(
-        Effect.gen(function* () {
-          const repository = yield* seedRepository(root, {
-            forge: "gitlab",
-            forgeHost: "gitlab.example.com",
-            projectPath: "acme/widgets",
-          })
-          return yield* commit(
-            baseContext(root, {
-              workItemId,
-              repositoryId: repository.id,
-              startingCommitOid: startingOid,
-              issueNumber: 42,
-              sessionId: "ses_from_implement",
-            }),
-          )
-        }),
-        stubOpencode({
-          continueTurn: (input) =>
-            Effect.succeed({
-              sessionId: input.sessionId,
-              assistantText: publicationResultLine(
-                "feat: implement widgets",
-                `GitLab shot ![before](${imagePath}).`,
-              ),
-            }),
-        }),
-        stubGitHubServiceLayer({
-          uploadUserAttachment: () => {
-            uploads += 1
-            return Effect.succeed(
-              "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      const result = committedOf(
+        await run(
+          Effect.gen(function* () {
+            const repository = yield* seedRepository(root, {
+              forge: "gitlab",
+              forgeHost: "gitlab.example.com",
+              projectPath: "acme/widgets",
+            })
+            return yield* commit(
+              baseContext(root, {
+                workItemId,
+                repositoryId: repository.id,
+                startingCommitOid: startingOid,
+                issueNumber: 42,
+                sessionId: "ses_from_implement",
+              }),
             )
-          },
-        }),
+          }),
+          stubOpencode({
+            continueTurn: (input) =>
+              Effect.succeed({
+                sessionId: input.sessionId,
+                assistantText: publicationResultLine(
+                  "feat: implement widgets",
+                  `GitLab shot ![before](${imagePath}).`,
+                ),
+              }),
+          }),
+          stubGitHubServiceLayer({
+            uploadUserAttachment: () => {
+              uploads += 1
+              return Effect.succeed(
+                "https://github.com/user-attachments/assets/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+              )
+            },
+          }),
+        ),
       )
 
       expect(result.completion).toBe("native")
@@ -1009,27 +1038,29 @@ describe("commit", () => {
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
       const workItemId = makeWorkItemId()
       let calls = 0
-      const result = await run(
-        commit(
-          baseContext(root, {
-            workItemId,
-            startingCommitOid: startingOid,
-            issueNumber: 9,
-            issueTitle: "Ship the widgets",
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              workItemId,
+              startingCommitOid: startingOid,
+              issueNumber: 9,
+              issueTitle: "Ship the widgets",
+            }),
+          ),
+          stubOpencode({
+            continueTurn: () => {
+              calls += 1
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  calls === 1
+                    ? "not a valid result"
+                    : "`READY_FOR_AGENT_RESULT: PASS`",
+              })
+            },
           }),
         ),
-        stubOpencode({
-          continueTurn: () => {
-            calls += 1
-            return Effect.succeed({
-              sessionId: "ses_implement_session",
-              assistantText:
-                calls === 1
-                  ? "not a valid result"
-                  : "`READY_FOR_AGENT_RESULT: PASS`",
-            })
-          },
-        }),
       )
       const expected = buildHarnessPublicationFallbackCopy({
         issueNumber: 9,
@@ -1061,24 +1092,26 @@ describe("commit", () => {
         workItemId,
       })
       let continued = 0
-      const result = await run(
-        commit(
-          baseContext(root, {
-            workItemId,
-            startingCommitOid: startingOid,
-            publicationTitle: fallback.title,
-            publicationBody: fallback.body,
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              workItemId,
+              startingCommitOid: startingOid,
+              publicationTitle: fallback.title,
+              publicationBody: fallback.body,
+            }),
+          ),
+          stubOpencode({
+            continueTurn: () => {
+              continued += 1
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText: "",
+              })
+            },
           }),
         ),
-        stubOpencode({
-          continueTurn: () => {
-            continued += 1
-            return Effect.succeed({
-              sessionId: "ses_implement_session",
-              assistantText: "",
-            })
-          },
-        }),
       )
       expect(continued).toBe(0)
       expect(result.publicationCopySource).toBe("harness_fallback")
@@ -1111,36 +1144,38 @@ fi
         workItemId,
       })
       let repairPrompt = ""
-      const result = await run(
-        commit(
-          baseContext(root, {
-            workItemId,
-            startingCommitOid: startingOid,
-            sessionId: "ses_from_implement",
-            issueNumber: 2039,
-            publicationTitle: fallback.title,
-            publicationBody: fallback.body,
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              workItemId,
+              startingCommitOid: startingOid,
+              sessionId: "ses_from_implement",
+              issueNumber: 2039,
+              publicationTitle: fallback.title,
+              publicationBody: fallback.body,
+            }),
+          ),
+          stubOpencode({
+            continueTurn: (input) =>
+              Effect.gen(function* () {
+                repairPrompt = input.prompt
+                yield* Effect.tryPromise({
+                  try: async () => {
+                    await git(root, ["add", "feature.ts"])
+                    await git(root, [
+                      "commit",
+                      "--no-verify",
+                      "-m",
+                      "feat: add widgets\n\nPolicy-fixed body\n\nCloses #2039",
+                    ])
+                  },
+                  catch: (cause) => cause as Error,
+                })
+                return { sessionId: input.sessionId, assistantText: "" }
+              }).pipe(Effect.orDie),
           }),
         ),
-        stubOpencode({
-          continueTurn: (input) =>
-            Effect.gen(function* () {
-              repairPrompt = input.prompt
-              yield* Effect.tryPromise({
-                try: async () => {
-                  await git(root, ["add", "feature.ts"])
-                  await git(root, [
-                    "commit",
-                    "--no-verify",
-                    "-m",
-                    "feat: add widgets\n\nPolicy-fixed body\n\nCloses #2039",
-                  ])
-                },
-                catch: (cause) => cause as Error,
-              })
-              return { sessionId: input.sessionId, assistantText: "" }
-            }).pipe(Effect.orDie),
-        }),
       )
       expect(result.completion).toBe("agent_fallback")
       expect(repairPrompt).toContain("commitlint")
@@ -1155,16 +1190,18 @@ fi
       await mkdir(join(root, ".ready-for-agent"), { recursive: true })
       await writeFile(join(root, ".ready-for-agent", "noise.log"), "harness\n")
 
-      const result = await run(
-        commit(
-          baseContext(root, {
-            startingCommitOid: startingOid,
-            issueNumber: 2039,
-            ...sampleCopy,
-            publicationBody:
-              "Corrects the widgets route used by the API.\n\nCloses #2039",
-            publicationTitle: "fix: widgets path",
-          }),
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              startingCommitOid: startingOid,
+              issueNumber: 2039,
+              ...sampleCopy,
+              publicationBody:
+                "Corrects the widgets route used by the API.\n\nCloses #2039",
+              publicationTitle: "fix: widgets path",
+            }),
+          ),
         ),
       )
 
@@ -1181,15 +1218,17 @@ fi
       await writeFile(join(root, ".ready-for-agent", "noise.log"), "harness\n")
       await git(root, ["add", "-A"])
 
-      const result = await run(
-        commit(
-          baseContext(root, {
-            startingCommitOid: startingOid,
-            issueNumber: 12,
-            publicationTitle: "chore: keep diagnostics out",
-            publicationBody:
-              "Ensures harness artifacts stay uncommitted.\n\nCloses #12",
-          }),
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              startingCommitOid: startingOid,
+              issueNumber: 12,
+              publicationTitle: "chore: keep diagnostics out",
+              publicationBody:
+                "Ensures harness artifacts stay uncommitted.\n\nCloses #12",
+            }),
+          ),
         ),
       )
 
@@ -1214,21 +1253,23 @@ fi
       const headBefore = await git(root, ["rev-parse", "HEAD"])
 
       let continued = 0
-      const result = await run(
-        commit(
-          baseContext(root, {
-            startingCommitOid: startingOid,
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              startingCommitOid: startingOid,
+            }),
+          ),
+          stubOpencode({
+            continueTurn: () => {
+              continued += 1
+              return Effect.succeed({
+                sessionId: "ses",
+                assistantText: "",
+              })
+            },
           }),
         ),
-        stubOpencode({
-          continueTurn: () => {
-            continued += 1
-            return Effect.succeed({
-              sessionId: "ses",
-              assistantText: "",
-            })
-          },
-        }),
       )
 
       expect(result.completion).toBe("native")
@@ -1250,13 +1291,15 @@ fi
         "feat: actual head message\n\nPolicy-fixed body\n\nCloses #91",
       ])
 
-      const result = await run(
-        commit(
-          baseContext(root, {
-            startingCommitOid: startingOid,
-            publicationTitle: "stale title from mid-persist",
-            publicationBody: "Stale body that must not win.\n\nCloses #91",
-          }),
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              startingCommitOid: startingOid,
+              publicationTitle: "stale title from mid-persist",
+              publicationBody: "Stale body that must not win.\n\nCloses #91",
+            }),
+          ),
         ),
       )
 
@@ -1291,42 +1334,44 @@ fi
       } | null = null
       let agentCalls = 0
 
-      const result = await run(
-        commit(
-          baseContext(root, {
-            startingCommitOid: startingOid,
-            sessionId: "ses_from_implement",
-            issueNumber: 2039,
-            publicationTitle: "Add feature without conventional prefix",
-            publicationBody: "Adds the feature file.\n\nCloses #2039",
-            model: "opencode/commit-model",
-            thinkingLevel: "max",
-            maxDuration: Duration.minutes(10),
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              startingCommitOid: startingOid,
+              sessionId: "ses_from_implement",
+              issueNumber: 2039,
+              publicationTitle: "Add feature without conventional prefix",
+              publicationBody: "Adds the feature file.\n\nCloses #2039",
+              model: "opencode/commit-model",
+              thinkingLevel: "max",
+              maxDuration: Duration.minutes(10),
+            }),
+          ),
+          stubOpencode({
+            continueTurn: (input) =>
+              Effect.gen(function* () {
+                agentCalls += 1
+                continued = input
+                yield* Effect.tryPromise({
+                  try: async () => {
+                    await git(root, ["add", "feature.ts"])
+                    await git(root, [
+                      "commit",
+                      "--no-verify",
+                      "-m",
+                      "feat: add feature\n\nPolicy-fixed body\n\nCloses #2039",
+                    ])
+                  },
+                  catch: (cause) => cause as Error,
+                })
+                return {
+                  sessionId: input.sessionId,
+                  assistantText: "",
+                }
+              }).pipe(Effect.orDie),
           }),
         ),
-        stubOpencode({
-          continueTurn: (input) =>
-            Effect.gen(function* () {
-              agentCalls += 1
-              continued = input
-              yield* Effect.tryPromise({
-                try: async () => {
-                  await git(root, ["add", "feature.ts"])
-                  await git(root, [
-                    "commit",
-                    "--no-verify",
-                    "-m",
-                    "feat: add feature\n\nPolicy-fixed body\n\nCloses #2039",
-                  ])
-                },
-                catch: (cause) => cause as Error,
-              })
-              return {
-                sessionId: input.sessionId,
-                assistantText: "",
-              }
-            }).pipe(Effect.orDie),
-        }),
       )
 
       expect(result.completion).toBe("agent_fallback")
@@ -1357,23 +1402,25 @@ fi
       ])
 
       let continued = 0
-      const result = await run(
-        commit(
-          baseContext(root, {
-            startingCommitOid: startingOid,
-            publicationTitle: "already committed",
-            publicationBody: "Seeded.\n\nCloses #91",
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              startingCommitOid: startingOid,
+              publicationTitle: "already committed",
+              publicationBody: "Seeded.\n\nCloses #91",
+            }),
+          ),
+          stubOpencode({
+            continueTurn: () => {
+              continued += 1
+              return Effect.succeed({
+                sessionId: "ses",
+                assistantText: "",
+              })
+            },
           }),
         ),
-        stubOpencode({
-          continueTurn: () => {
-            continued += 1
-            return Effect.succeed({
-              sessionId: "ses",
-              assistantText: "",
-            })
-          },
-        }),
       )
 
       expect(result.completion).toBe("native")
@@ -1562,5 +1609,262 @@ exit 1
         ),
       )
       expect(error).toBeInstanceOf(CommitOpenCodeError)
+    }))
+
+  it("confirms a late No-Change Outcome when nothing remains to publish", () =>
+    withTempRepo(async (root, startingOid) => {
+      const prompts: string[] = []
+      const result = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+            sessionId: "ses_from_implement",
+          }),
+        ),
+        stubOpencode({
+          continueTurn: (input) => {
+            prompts.push(input.prompt)
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText:
+                "Investigated without edits.\nREADY_FOR_AGENT_RESULT: NO_CHANGES",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({
+        _tag: "no_changes",
+        completionSummary: "Investigated without edits.",
+      })
+      expect(prompts).toEqual([buildNoChangeConfirmationPrompt()])
+      expect(
+        await git(root, ["rev-list", "--count", `${startingOid}..HEAD`]),
+      ).toBe("0")
+    }))
+
+  it("treats harness-only dirt as nothing to publish and confirms No-Change", () =>
+    withTempRepo(async (root, startingOid) => {
+      await mkdir(join(root, ".ready-for-agent"), { recursive: true })
+      await writeFile(join(root, ".ready-for-agent", "noise.log"), "harness\n")
+      const prompts: string[] = []
+      const result = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+          }),
+        ),
+        stubOpencode({
+          continueTurn: (input) => {
+            prompts.push(input.prompt)
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText:
+                "Diagnostics only.\nREADY_FOR_AGENT_RESULT: NO_CHANGES",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({
+        _tag: "no_changes",
+        completionSummary: "Diagnostics only.",
+      })
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toBe(buildNoChangeConfirmationPrompt())
+      const tree = await git(root, ["ls-tree", "-r", "--name-only", "HEAD"])
+      expect(tree).not.toContain(".ready-for-agent")
+    }))
+
+  it("fails retryably when nothing to publish and the Session reports CHANGES", () =>
+    withTempRepo(async (root, startingOid) => {
+      let continued = 0
+      const error = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+            publicationTitle: "feat: leftover copy",
+            publicationBody: "Must not be used.\n\nCloses #91",
+          }),
+        ).pipe(Effect.flip),
+        stubOpencode({
+          continueTurn: (input) => {
+            continued += 1
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "READY_FOR_AGENT_RESULT: CHANGES",
+            })
+          },
+        }),
+      )
+
+      expect(error).toBeInstanceOf(CommitNoChangeConfirmationError)
+      expect((error as CommitNoChangeConfirmationError).message).toContain(
+        "did not confirm a No-Change Outcome",
+      )
+      expect(continued).toBe(1)
+      expect(
+        await git(root, ["rev-list", "--count", `${startingOid}..HEAD`]),
+      ).toBe("0")
+    }))
+
+  it("fails retryably when nothing to publish and the confirmation result is malformed", () =>
+    withTempRepo(async (root, startingOid) => {
+      const error = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+          }),
+        ).pipe(Effect.flip),
+        stubOpencode({
+          continueTurn: (input) =>
+            Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "READY_FOR_AGENT_RESULT: NO_CHANGES",
+            }),
+        }),
+      )
+
+      expect(error).toBeInstanceOf(CommitNoChangeConfirmationError)
+      expect((error as CommitNoChangeConfirmationError).message).toContain(
+        "did not return a valid READY_FOR_AGENT_RESULT",
+      )
+    }))
+
+  it("asks again on retry after a CHANGES confirmation", () =>
+    withTempRepo(async (root, startingOid) => {
+      let continued = 0
+      const first = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+          }),
+        ).pipe(Effect.flip),
+        stubOpencode({
+          continueTurn: (input) => {
+            continued += 1
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "READY_FOR_AGENT_RESULT: CHANGES",
+            })
+          },
+        }),
+      )
+      expect(first).toBeInstanceOf(CommitNoChangeConfirmationError)
+
+      const second = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+          }),
+        ),
+        stubOpencode({
+          continueTurn: (input) => {
+            continued += 1
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText:
+                "Objective is complete.\nREADY_FOR_AGENT_RESULT: NO_CHANGES",
+            })
+          },
+        }),
+      )
+      expect(second).toEqual({
+        _tag: "no_changes",
+        completionSummary: "Objective is complete.",
+      })
+      expect(continued).toBe(2)
+    }))
+
+  it("does not confirm No-Change when a commit already exists after the starting commit", () =>
+    withTempRepo(async (root, startingOid) => {
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      await git(root, ["add", "feature.ts"])
+      await git(root, [
+        "commit",
+        "--no-verify",
+        "-m",
+        "already committed\n\nCloses #91",
+      ])
+
+      let continued = 0
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              startingCommitOid: startingOid,
+              publicationTitle: "already committed",
+              publicationBody: "Seeded.\n\nCloses #91",
+            }),
+          ),
+          stubOpencode({
+            continueTurn: () => {
+              continued += 1
+              return Effect.succeed({
+                sessionId: "ses",
+                assistantText:
+                  "Investigated without edits.\nREADY_FOR_AGENT_RESULT: NO_CHANGES",
+              })
+            },
+          }),
+        ),
+      )
+
+      expect(result.completion).toBe("native")
+      expect(result.publicationTitle).toBe("already committed")
+      expect(continued).toBe(0)
+    }))
+
+  it("keeps Repair Fallback when a native hook fails with real staged files", () =>
+    withTempRepo(async (root, startingOid) => {
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      const hooks = join(root, ".git", "hooks")
+      await mkdir(hooks, { recursive: true })
+      await writeFile(
+        join(hooks, "commit-msg"),
+        `#!/bin/sh
+echo hook failed >&2
+exit 1
+`,
+      )
+      await chmod(join(hooks, "commit-msg"), 0o755)
+
+      const prompts: string[] = []
+      const error = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+            publicationTitle: "feat: always fail",
+            publicationBody: "Will not commit.\n\nCloses #91",
+          }),
+        ).pipe(Effect.flip),
+        stubOpencode({
+          continueTurn: (input) => {
+            prompts.push(input.prompt)
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "",
+            })
+          },
+        }),
+      )
+
+      expect(error).toBeInstanceOf(CommitPostconditionError)
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toContain("Bounded native failure diagnostics")
+      expect(prompts[0]).not.toBe(buildNoChangeConfirmationPrompt())
+    }))
+
+  it("requires Session context to confirm nothing to publish", () =>
+    withTempRepo(async (root, startingOid) => {
+      const error = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+            sessionId: null,
+          }),
+        ).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(CommitSessionContextMissingError)
     }))
 })

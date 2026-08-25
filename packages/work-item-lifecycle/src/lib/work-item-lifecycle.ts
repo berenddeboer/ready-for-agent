@@ -805,14 +805,15 @@ const nextOperationalStep = (
 /**
  * Operational Lifecycle Steps whose successful completion picks between more
  * than one next state (Assess Changes: has-changes vs. NO_CHANGES -> Close
- * Issue; Review: accepted vs. needs_human). That choice is not persisted
- * anywhere the retry path can recover it, so a retry that finds these Steps
- * are the last-succeeded run must re-run the Step itself rather than assume
+ * Issue; Commit: publication vs. late No-Change -> Close Issue; Review:
+ * accepted vs. needs_human). That choice is not persisted anywhere the retry
+ * path can recover it, so a retry that finds these Steps are the last-succeeded
+ * run must re-run the Step itself rather than assume
  * {@link nextOperationalStep}'s linear default — otherwise it risks silently
  * skipping Close Issue, or worse, bypassing a needs_human human-review gate.
  */
 const BRANCHY_SUCCESS_OUTCOME_STEPS: ReadonlySet<OperationalLifecycleStep> =
-  new Set(["assess_changes", "review"])
+  new Set(["assess_changes", "commit", "review"])
 
 export type ImplementNowError =
   | IssueNotFoundError
@@ -2847,18 +2848,33 @@ export const makeWorkItemLifecycleLive = (
             )
           case "commit":
             return steps.commit(context).pipe(
-              Effect.map((result) => ({
-                publicationTitle: result.publicationTitle,
-                publicationBody: result.publicationBody,
-                stepRunReasonCode:
-                  result.completion === "native"
-                    ? STEP_RUN_REASON.native
-                    : STEP_RUN_REASON.agentFallback,
-                stepRunNote:
-                  result.publicationCopySource === "harness_fallback"
-                    ? "Harness publication-copy fallback"
-                    : undefined,
-              })),
+              Effect.map((result) => {
+                if (result._tag === "no_changes") {
+                  return {
+                    completionSummary: result.completionSummary,
+                    pauseBeforeStep:
+                      workItem.pause_before_step === "commit"
+                        ? ("close_issue" as const)
+                        : undefined,
+                    transition: {
+                      nextState: "close_issue" as const,
+                    },
+                    stepRunReasonCode: STEP_RUN_REASON.native,
+                  }
+                }
+                return {
+                  publicationTitle: result.publicationTitle,
+                  publicationBody: result.publicationBody,
+                  stepRunReasonCode:
+                    result.completion === "native"
+                      ? STEP_RUN_REASON.native
+                      : STEP_RUN_REASON.agentFallback,
+                  stepRunNote:
+                    result.publicationCopySource === "harness_fallback"
+                      ? "Harness publication-copy fallback"
+                      : undefined,
+                }
+              }),
             )
           case "create_pr":
             return steps.createPr(context).pipe(
@@ -3655,15 +3671,15 @@ export const makeWorkItemLifecycleLive = (
             : null
           const nextStep =
             transition?.nextState ?? nextOperationalStep(stepRun.step)
-          // Assess Changes NO_CHANGES intentionally routes to Close Issue, which
-          // accepts already-closed Issues. When the agent closed the Issue during
-          // Implement (tracker/decision work), post-step revalidation sees
-          // issue_not_open — allow that transition only; missing/blocked/parent
-          // still fail terminally.
+          // Assess Changes or late Commit NO_CHANGES intentionally routes to
+          // Close Issue, which accepts already-closed Issues. When the agent
+          // closed the Issue during Implement (tracker/decision work), post-step
+          // revalidation sees issue_not_open — allow that transition only;
+          // missing/blocked/parent still fail terminally.
           const allowClosedIssueForNoChangeClose =
             !revalidation.ok &&
             revalidation.failureCode === "issue_not_open" &&
-            stepRun.step === "assess_changes" &&
+            (stepRun.step === "assess_changes" || stepRun.step === "commit") &&
             transition?.nextState === "close_issue"
           const revalidationBlocksProgress =
             !revalidation.ok && !allowClosedIssueForNoChangeClose
@@ -7062,14 +7078,14 @@ export const makeWorkItemLifecycleLive = (
         // step; a held-for-blockers Work Item never ran a Step Run at all, so
         // resume at the very first operational step.
         //
-        // Assess Changes and Review have a branchy successful outcome (Assess
-        // Changes: has-changes vs. NO_CHANGES -> Close Issue; Review: accepted
-        // vs. needs_human) that Issue revalidation's terminal Failed transition
-        // does not preserve. Guessing the linear default next step here could
-        // silently skip Close Issue for a NO_CHANGES outcome, or worse, bypass
-        // a needs_human human-review gate straight into Commit. Re-run the
-        // Step itself instead, so it re-derives the correct branch once the
-        // Issue is confirmed reopened.
+        // Assess Changes, Commit, and Review have a branchy successful outcome
+        // (Assess Changes / Commit: has-changes vs. NO_CHANGES -> Close Issue;
+        // Review: accepted vs. needs_human) that Issue revalidation's terminal
+        // Failed transition does not preserve. Guessing the linear default next
+        // step here could silently skip Close Issue for a NO_CHANGES outcome,
+        // or worse, bypass a needs_human human-review gate straight into
+        // Commit. Re-run the Step itself instead, so it re-derives the correct
+        // branch once the Issue is confirmed reopened.
         const issueClosedOrMissingResumeStep: OperationalLifecycleStep | null =
           !issueClosedOrMissingFailure
             ? null

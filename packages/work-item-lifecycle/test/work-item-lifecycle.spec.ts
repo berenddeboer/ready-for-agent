@@ -124,6 +124,7 @@ describe("WorkItemLifecycle", () => {
     review: () => Effect.succeed({ _tag: "clean" as const }),
     commit: () =>
       Effect.succeed({
+        _tag: "committed" as const,
         completion: "native" as const,
         publicationTitle: "feat: test",
         publicationBody: "Why\n\nCloses #1",

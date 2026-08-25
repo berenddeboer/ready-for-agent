@@ -320,6 +320,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "commit",
+    to: "close_issue",
+    guard: "no_change_outcome",
+    reasonCode: "native",
+  },
+  {
+    from: "commit",
     to: "create_pr",
     guard: "agent_fallback_completion",
     reasonCode: "agent_fallback",

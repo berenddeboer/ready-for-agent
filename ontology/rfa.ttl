@@ -646,6 +646,7 @@ rfa:ReviewAcceptedTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:to
 rfa:ReviewNeedsHumanTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:NeedsHuman ; rfa:guard "review_needs_human" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:CommitNativeTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:CreatePr ; rfa:guard "native_completion" ; rfa:reasonCode rfa:NativeReason .
 rfa:CommitAgentFallbackTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:CreatePr ; rfa:guard "agent_fallback_completion" ; rfa:reasonCode rfa:AgentFallbackReason .
+rfa:CommitNoChangeTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:CloseIssue ; rfa:guard "no_change_outcome" ; rfa:reasonCode rfa:NativeReason .
 rfa:CreatePrNativeTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "native_completion" ; rfa:reasonCode rfa:NativeReason .
 rfa:CreatePrAgentFallbackTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "agent_fallback_completion" ; rfa:reasonCode rfa:AgentFallbackReason .
 

@@ -170,4 +170,20 @@ describe("generated lifecycle state", () => {
     )
     expect(fromStates).not.toContain("local_cleanup")
   })
+
+  it("declares Commit's confirmed No-Change Outcome to Close Issue", () => {
+    const commitNoChange = LIFECYCLE_TRANSITIONS.filter(
+      (transition) =>
+        transition.from === "commit" && transition.to === "close_issue",
+    )
+
+    expect(commitNoChange).toEqual([
+      {
+        from: "commit",
+        to: "close_issue",
+        guard: "no_change_outcome",
+        reasonCode: "native",
+      },
+    ])
+  })
 })
