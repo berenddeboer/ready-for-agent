@@ -161,7 +161,9 @@ export interface AzureDevOpsServiceShape {
   ) => Effect.Effect<PullRequestLifecycleStatus, AzureDevOpsServiceError>
   /**
    * Merge the open pull request on the exact source branch
-   * (`PATCH .../pullrequests/{id}` with `status: "completed"`). Implemented.
+   * (`PATCH .../pullrequests/{id}` with `status: "completed"`). A complete
+   * response that is still `active` with `mergeStatus: queued` is in-flight
+   * completion (ADR 0066), not a rejected merge. Implemented.
    */
   readonly mergePullRequest: (
     repository: AzureDevOpsRepository,

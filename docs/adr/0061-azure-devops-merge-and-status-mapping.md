@@ -44,7 +44,10 @@ PR description remains the published implementation summary. Azure DevOps
 rejects a stale `lastMergeSourceCommit` the same way GitLab's `sha` merge
 parameter guards against a concurrent push, so `400`/`409`/`422` are treated
 as "handled, re-classify" (mirroring GitLab's `405`/`406`/`409`/`422`), and any
-other status code is a hard failure.
+other status code is a hard failure. A successful complete body that is still
+`active` with `mergeStatus: queued` is in-flight completion, not unknown
+mergeability or a rejected mergeable PR (ADR 0066): Merge PR re-fetches until
+the PR is `completed` or a bounded wait elapses.
 
 **Work item close-out is a `System.State` transition plus a marked comment.**
 `ensureIssueCompletedWithSummary` posts a hidden-marker comment via the
