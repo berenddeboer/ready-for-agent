@@ -771,6 +771,25 @@ rfa:MergeRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; r
 rfa:CloseIssueRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
 rfa:NeedsHumanRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
 
+# Refresh (and Retry/Start on the same parked item) may Complete Attention
+# Work Items that do not own a Work Item PR once the Issue is no longer Relevant.
+rfa:CreateWorktreeRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:InstallDependenciesRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:ImplementRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:AssessChangesRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:PreCommitRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:PreCommit ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:ReviewRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:CommitRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:CreatePrRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:ResolveRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:ResolvePrMergeConflict ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:InvestigateRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:MarkReadyRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:DecideRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:MergeRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:CloseIssueRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+rfa:NeedsHumanRefreshIssueGoneTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_issue_no_longer_relevant_without_owned_pr" ; rfa:reasonCode rfa:NativeReason .
+
 # Refresh may stop pre-cleanup operational work when a competing Issue-closing PR appears.
 rfa:CreateWorktreeRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .
 rfa:InstallDependenciesRefreshUnownedClosingPrTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:NeedsHuman ; rfa:guard "refresh_observed_unowned_issue_closing_pull_request" ; rfa:reasonCode rfa:NativeReason .

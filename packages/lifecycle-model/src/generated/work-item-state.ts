@@ -255,6 +255,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "assess_changes",
     to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
+  },
+  {
+    from: "assess_changes",
+    to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
   },
@@ -286,6 +292,12 @@ export const LIFECYCLE_TRANSITIONS = [
     from: "close_issue",
     to: "local_cleanup",
     guard: "issue_closed",
+    reasonCode: "native",
+  },
+  {
+    from: "close_issue",
+    to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
     reasonCode: "native",
   },
   {
@@ -327,6 +339,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "commit",
     to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
+  },
+  {
+    from: "commit",
+    to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
   },
@@ -353,6 +371,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "owned_pull_request_merged",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "create_pr",
+    to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
   },
   {
     from: "create_pr",
@@ -405,6 +429,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "create_worktree",
     to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
+  },
+  {
+    from: "create_worktree",
+    to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
   },
@@ -431,6 +461,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "owned_pull_request_merged",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "decide_pr_merge",
+    to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
   },
   {
     from: "decide_pr_merge",
@@ -543,6 +579,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "implement",
     to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
+  },
+  {
+    from: "implement",
+    to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
   },
@@ -568,6 +610,12 @@ export const LIFECYCLE_TRANSITIONS = [
     from: "install_dependencies",
     to: "implement",
     guard: "step_succeeded",
+    reasonCode: "native",
+  },
+  {
+    from: "install_dependencies",
+    to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
     reasonCode: "native",
   },
   {
@@ -599,6 +647,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "owned_pull_request_merged",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "investigate_pr_status_checks",
+    to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
   },
   {
     from: "investigate_pr_status_checks",
@@ -681,6 +735,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "mark_pr_ready_for_review",
     to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
+  },
+  {
+    from: "mark_pr_ready_for_review",
+    to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
   },
@@ -759,6 +819,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "merge_pr",
     to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
+  },
+  {
+    from: "merge_pr",
+    to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
   },
@@ -807,6 +873,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "needs_human",
     to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
+  },
+  {
+    from: "needs_human",
+    to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
   },
@@ -849,6 +921,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "pre_commit",
     to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
+  },
+  {
+    from: "pre_commit",
+    to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
   },
@@ -881,6 +959,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "owned_pull_request_merged",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "resolve_pr_merge_conflict",
+    to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
   },
   {
     from: "resolve_pr_merge_conflict",
@@ -945,6 +1029,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "review",
     to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
+  },
+  {
+    from: "review",
+    to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
   },
@@ -995,6 +1085,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "owned_pull_request_merged",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "watch_pr_status_checks",
+    to: "local_cleanup",
+    guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
+    reasonCode: "native",
   },
   {
     from: "watch_pr_status_checks",

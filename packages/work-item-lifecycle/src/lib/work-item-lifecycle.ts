@@ -1160,6 +1160,22 @@ export interface WorkItemLifecycleShape {
     | DatabaseError
     | RepositoryNotFoundError
   >
+  /**
+   * After Issue reconciliation: unfinished Attention Work Items that do not
+   * own a Work Item PR and whose Issue is no longer Relevant advance local
+   * cleanup toward Complete. Running Step Runs, owned-PR items, competing
+   * Issue-closing PR stops, and Waiting for blockers are left alone.
+   */
+  readonly completeParkedAttentionWhenIssueNoLongerRelevant: (
+    repositoryId: string,
+  ) => Effect.Effect<
+    number,
+    | WorkItemLifecycleDatabaseError
+    | EnqueueError
+    | InvalidQueueNameError
+    | DatabaseError
+    | RepositoryNotFoundError
+  >
 }
 
 export class WorkItemLifecycle extends Context.Service<
@@ -1183,6 +1199,84 @@ export const formatIssueClosedPrStatusIndeterminateMessage = (
   pullRequestNumber: number,
 ): string =>
   `Issue #${issueNumber} is closed or no longer present while pull request #${pullRequestNumber} appears still open or its status could not be confirmed. Reopen the issue if you want to continue, then Start job.`
+
+/**
+ * Parked Attention with no owned Work Item PR: failed/interrupted latest Step
+ * Run, paused, or Needs Human — excluding competing-PR stops, holds, running
+ * work, and local cleanup itself.
+ */
+export const isParkedAttentionWithoutOwnedPr = (input: {
+  readonly state: WorkItemState
+  readonly paused: boolean
+  readonly waitingForBlockers: boolean
+  readonly waitingSince: Date | number | null
+  readonly pullRequestNumber: number | null
+  readonly failureCode: string | null
+  readonly latestStatus: string | undefined
+  readonly hasActiveStepRun: boolean
+}): boolean => {
+  if (
+    input.state === "complete" ||
+    input.state === "failed" ||
+    input.state === "abandoned" ||
+    input.state === "local_cleanup"
+  ) {
+    return false
+  }
+  if (input.waitingForBlockers) {
+    return false
+  }
+  if (input.waitingSince !== null) {
+    return false
+  }
+  if (input.pullRequestNumber !== null) {
+    return false
+  }
+  if (input.failureCode === "issue_closing_pull_request_unowned") {
+    return false
+  }
+  if (input.hasActiveStepRun) {
+    return false
+  }
+  if (input.paused) {
+    return true
+  }
+  if (input.state === "needs_human") {
+    return true
+  }
+  return input.latestStatus === "failed" || input.latestStatus === "interrupted"
+}
+
+export const issueIsNoLongerRelevant = (
+  issues: readonly {
+    readonly issueNumber: number
+    readonly state: string
+  }[],
+  issueNumber: number,
+): boolean => {
+  const issue = issues.find(
+    (candidate) => candidate.issueNumber === issueNumber,
+  )
+  return issue === undefined || issue.state !== "OPEN"
+}
+
+export const shouldCompleteParkedAttentionWhenIssueNoLongerRelevant = (input: {
+  readonly state: WorkItemState
+  readonly paused: boolean
+  readonly waitingForBlockers: boolean
+  readonly waitingSince: Date | number | null
+  readonly pullRequestNumber: number | null
+  readonly failureCode: string | null
+  readonly latestStatus: string | undefined
+  readonly hasActiveStepRun: boolean
+  readonly issueNumber: number
+  readonly issues: readonly {
+    readonly issueNumber: number
+    readonly state: string
+  }[]
+}): boolean =>
+  isParkedAttentionWithoutOwnedPr(input) &&
+  issueIsNoLongerRelevant(input.issues, input.issueNumber)
 
 /** Operator-visible reason when Issue is closed/missing and PR was closed unmerged. */
 export const formatIssueClosedPrClosedUnmergedMessage = (
@@ -2258,6 +2352,279 @@ export const makeWorkItemLifecycleLive = (
         return changed
       })
 
+      const parkedAttentionEligibilityFromRow = (
+        workItem: WorkItemRow,
+        latest: {
+          readonly status: string
+        } | null,
+        hasActiveStepRun: boolean,
+        issues: readonly {
+          readonly issueNumber: number
+          readonly state: string
+        }[],
+      ): boolean =>
+        shouldCompleteParkedAttentionWhenIssueNoLongerRelevant({
+          state: workItem.state,
+          paused: Boolean(workItem.paused),
+          waitingForBlockers: Boolean(workItem.waiting_for_blockers),
+          waitingSince: workItem.waiting_since,
+          pullRequestNumber: workItem.pull_request_number,
+          failureCode: workItem.failure_code,
+          latestStatus: latest?.status,
+          hasActiveStepRun,
+          issueNumber: workItem.issue_number,
+          issues,
+        })
+
+      const loadLatestStepRunRow = (
+        workItemId: string,
+      ): Effect.Effect<StepRunRow | null, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT ${STEP_RUN_SELECT_COLUMNS}
+               FROM step_run
+               WHERE work_item_id = ?
+               ORDER BY queued_at DESC, rowid DESC
+               LIMIT 1`,
+              [workItemId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
+          return rows[0] ?? null
+        })
+
+      const loadHasActiveStepRun = (
+        workItemId: string,
+      ): Effect.Effect<boolean, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT id FROM step_run
+               WHERE work_item_id = ?
+                 AND status IN ('queued', 'running')
+               LIMIT 1`,
+              [workItemId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly id: string
+          }[]
+          return rows[0] !== undefined
+        })
+
+      const advanceParkedAttentionWhenIssueNoLongerRelevant = Effect.fn(
+        "WorkItemLifecycle.advanceParkedAttentionWhenIssueNoLongerRelevant",
+      )(function* (workItemId: string) {
+        const workItem = yield* loadWorkItemRow(workItemId)
+        if (!workItem) {
+          return yield* new WorkItemNotFoundError({ workItemId })
+        }
+
+        const issues = yield* db.listIssues(workItem.repository_id).pipe(
+          Effect.mapError(
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Failed reading Issue store: ${String(error)}`,
+                cause: error,
+              }),
+          ),
+        )
+        const latest = yield* loadLatestStepRunRow(workItemId)
+        const hasActiveStepRun = yield* loadHasActiveStepRun(workItemId)
+        if (
+          !parkedAttentionEligibilityFromRow(
+            workItem,
+            latest,
+            hasActiveStepRun,
+            issues,
+          )
+        ) {
+          return yield* getWorkItem(workItemId)
+        }
+
+        const now = yield* Clock.currentTimeMillis
+
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const current = yield* loadWorkItemRow(workItemId)
+              if (!current) {
+                return yield* new WorkItemNotFoundError({ workItemId })
+              }
+              const currentLatest = yield* loadLatestStepRunRow(workItemId)
+              const currentActive = yield* loadHasActiveStepRun(workItemId)
+              const currentIssues = yield* db
+                .listIssues(current.repository_id)
+                .pipe(
+                  Effect.mapError(
+                    (error) =>
+                      new WorkItemLifecycleDatabaseError({
+                        message: `Failed reading Issue store: ${String(error)}`,
+                        cause: error,
+                      }),
+                  ),
+                )
+              if (
+                !parkedAttentionEligibilityFromRow(
+                  current,
+                  currentLatest,
+                  currentActive,
+                  currentIssues,
+                )
+              ) {
+                return false
+              }
+
+              const updated = (yield* sql.unsafe(
+                `UPDATE work_item
+                 SET state = 'local_cleanup',
+                     state_ready_at = ?,
+                     paused = 0,
+                     pause_before_step = NULL,
+                     failure_code = NULL,
+                     failure_message = NULL,
+                     updated_at = ?
+                 WHERE id = ?
+                   AND state NOT IN ('complete', 'failed', 'abandoned', 'local_cleanup')
+                   AND pull_request_number IS NULL
+                 RETURNING id`,
+                [now, now, workItemId],
+              )) as readonly { readonly id: string }[]
+
+              if (!updated[0]) {
+                return false
+              }
+
+              const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+              if (!acquired) {
+                return true
+              }
+
+              const stillActive = (yield* sql.unsafe(
+                `SELECT id FROM step_run
+                 WHERE work_item_id = ?
+                   AND status IN ('queued', 'running')
+                 LIMIT 1`,
+                [workItemId],
+              )) as readonly { readonly id: string }[]
+              if (stillActive[0]) {
+                return true
+              }
+
+              yield* enqueueStepRunForWorkItem(workItemId, "local_cleanup", now)
+              return true
+            }).pipe((mutation) =>
+              applyLifecycleTransition(
+                workItemId,
+                "local_cleanup",
+                mutation,
+                (applied) => applied === true,
+              ),
+            ),
+          )
+          .pipe(
+            Effect.catch(
+              (
+                error,
+              ): Effect.Effect<
+                never,
+                | WorkItemNotFoundError
+                | WorkItemLifecycleDatabaseError
+                | EnqueueError
+                | InvalidQueueNameError
+              > => {
+                if (
+                  error instanceof WorkItemNotFoundError ||
+                  error instanceof WorkItemLifecycleDatabaseError ||
+                  error instanceof EnqueueError ||
+                  error instanceof InvalidQueueNameError
+                ) {
+                  return Effect.fail(error)
+                }
+                if (
+                  typeof error === "object" &&
+                  error !== null &&
+                  "_tag" in error &&
+                  (error as { _tag: string })._tag === "SqlError"
+                ) {
+                  return Effect.fail(toDatabaseError(error as SqlError))
+                }
+                return Effect.fail(
+                  new WorkItemLifecycleDatabaseError({
+                    message: `Failed to advance parked Attention Work Item after Issue left the store: ${String(error)}`,
+                    cause: error,
+                  }),
+                )
+              },
+            ),
+          )
+
+        const advanced = yield* getWorkItem(workItemId).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after Issue-gone cleanup advance: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
+        )
+        yield* notifyWorkItemsChanged(advanced.repositoryId)
+        return advanced
+      })
+
+      const completeParkedAttentionWhenIssueNoLongerRelevant = Effect.fn(
+        "WorkItemLifecycle.completeParkedAttentionWhenIssueNoLongerRelevant",
+      )(function* (repositoryId: string) {
+        const workItems = yield* listWorkItemsForRepository(repositoryId)
+        const issues = yield* db.listIssues(repositoryId)
+        let advanced = 0
+
+        for (const workItem of workItems) {
+          const latest = workItem.stepRuns.at(-1)
+          if (
+            !shouldCompleteParkedAttentionWhenIssueNoLongerRelevant({
+              state: workItem.state,
+              paused: workItem.paused,
+              waitingForBlockers: workItem.waitingForBlockers,
+              waitingSince: workItem.waitingSince,
+              pullRequestNumber: workItem.pullRequestNumber,
+              failureCode: workItem.failureCode,
+              latestStatus: latest?.status,
+              hasActiveStepRun: workItem.stepRuns.some(
+                (stepRun) =>
+                  stepRun.status === "queued" || stepRun.status === "running",
+              ),
+              issueNumber: workItem.issueNumber,
+              issues,
+            })
+          ) {
+            continue
+          }
+
+          const didAdvance =
+            yield* advanceParkedAttentionWhenIssueNoLongerRelevant(
+              workItem.id,
+            ).pipe(
+              Effect.map((updated) => updated.state === "local_cleanup"),
+              Effect.catch((error) =>
+                Effect.logWarning(
+                  "Failed completing parked Attention after Issue left the store; continuing pass",
+                  {
+                    workItemId: workItem.id,
+                    repositoryId,
+                    error: String(error),
+                  },
+                ).pipe(Effect.as(false)),
+              ),
+            )
+          if (didAdvance) {
+            advanced += 1
+          }
+        }
+
+        return advanced
+      })
+
       const revalidateIssue = (
         repositoryId: string,
         issueNumber: number,
@@ -3049,9 +3416,12 @@ export const makeWorkItemLifecycleLive = (
           case "close_issue":
             return steps.closeIssue(context).pipe(Effect.as({}))
           case "local_cleanup":
-            return steps
-              .localCleanup(context)
-              .pipe(Effect.as({ worktreePath: null }))
+            return steps.localCleanup(context).pipe(
+              Effect.as({
+                worktreePath: null,
+                stepRunReasonCode: STEP_RUN_REASON.native,
+              }),
+            )
         }
       }
 
@@ -5183,6 +5553,31 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
+        const startIssues = yield* db.listIssues(workItem.repository_id).pipe(
+          Effect.mapError(
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Failed reading Issue store: ${String(error)}`,
+                cause: error,
+              }),
+          ),
+        )
+        const startLatest = yield* loadLatestStepRunRow(workItemId)
+        const startHasActive = yield* loadHasActiveStepRun(workItemId)
+        if (
+          Boolean(workItem.paused) &&
+          parkedAttentionEligibilityFromRow(
+            workItem,
+            startLatest,
+            startHasActive,
+            startIssues,
+          )
+        ) {
+          return yield* advanceParkedAttentionWhenIssueNoLongerRelevant(
+            workItemId,
+          )
+        }
+
         const now = yield* Clock.currentTimeMillis
         if (!workItem.paused) {
           const latestRows = yield* sql
@@ -6607,6 +7002,26 @@ export const makeWorkItemLifecycleLive = (
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
         const latest = latestRows[0]
+        const retryIssues = yield* db.listIssues(workItem.repository_id)
+        const retryHasActive = yield* loadHasActiveStepRun(workItemId)
+        if (
+          parkedAttentionEligibilityFromRow(
+            workItem,
+            latest ?? null,
+            retryHasActive,
+            retryIssues,
+          )
+        ) {
+          if (options?.autonomous !== undefined) {
+            return yield* new RetryNotEligibleError({
+              workItemId,
+              reason: "issue_no_longer_relevant",
+            })
+          }
+          return yield* advanceParkedAttentionWhenIssueNoLongerRelevant(
+            workItemId,
+          )
+        }
         const retryableInvestigateNeedsHuman =
           workItem.state === "needs_human" &&
           latest?.step === "investigate_pr_status_checks" &&
@@ -7884,6 +8299,7 @@ export const makeWorkItemLifecycleLive = (
         stopForCompetingIssueClosingPullRequests,
         admitWaitingWorkItems,
         releaseWaitingForBlockers,
+        completeParkedAttentionWhenIssueNoLongerRelevant,
       })
     }),
   )

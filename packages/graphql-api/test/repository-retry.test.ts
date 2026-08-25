@@ -282,6 +282,23 @@ describe("snapshotRetryTargets", () => {
     ])
   })
 
+  test("all-retryable skips parked Attention cards whose Issue is no longer Relevant", () => {
+    const snapshot = snapshotRetryTargets({
+      selector: { kind: "all-retryable" },
+      repositoryId: "repo-1",
+      workItems: all,
+      relevantIssueNumbers: new Set([22, 23]),
+    })
+    expect(Array.isArray(snapshot)).toBe(true)
+    if (!Array.isArray(snapshot)) {
+      throw new Error("expected snapshot list")
+    }
+    expect(snapshot.map((item) => item.id)).toEqual([
+      "wi-nh-review",
+      "wi-legacy-failed",
+    ])
+  })
+
   test("issue selector targets the current unfinished Work Item", () => {
     const older = workItemWith({
       id: "wi-old",
