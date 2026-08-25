@@ -188,6 +188,10 @@ const stubAzureDevOps = (
     getOpenPullRequestNumber: () => Effect.succeed(321),
     findOpenPullRequestNumber: () => Effect.succeed(null),
     createDraftPullRequest: () => Effect.succeed(321),
+    ensurePullRequestLinkedToIssue: () =>
+      Effect.die(
+        "Azure Boards Issue association is Azure DevOps Create PR only",
+      ),
     updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
     countOpenNonDraftPullRequests: () => Effect.succeed(0),
     getPullRequestCheckStatus: () =>
@@ -496,6 +500,10 @@ describe("createPr", () => {
         title: string
         body: string
       } | null = null
+      const linked: Array<{
+        pullRequestNumber: number
+        issueNumber: number
+      }> = []
       const pushCommands: string[] = []
       let agentCalls = 0
       const azureDevOpsDb = stubDbServiceLayer({
@@ -537,6 +545,14 @@ describe("createPr", () => {
             created = input
             return Effect.succeed(91)
           },
+          ensurePullRequestLinkedToIssue: (
+            _repository,
+            pullRequestNumber,
+            issueNumber,
+          ) =>
+            Effect.sync(() => {
+              linked.push({ pullRequestNumber, issueNumber })
+            }),
           updateOpenDraftPullRequestCopy: () => Effect.succeed(91),
         }),
         keymaxxer: stubKeymaxxer({
@@ -575,6 +591,7 @@ describe("createPr", () => {
         title: "feat: refresh tokens",
         body: "Implements refresh.\n\nCloses #3601642",
       })
+      expect(linked).toEqual([{ pullRequestNumber: 91, issueNumber: 3601642 }])
       expect(githubCalls).toBe(0)
       expect(agentCalls).toBe(0)
       expect(pushCommands).toHaveLength(1)
@@ -595,6 +612,10 @@ describe("createPr", () => {
       let createCalls = 0
       let githubCalls = 0
       let reconciled: { title: string; body: string } | null = null
+      const linked: Array<{
+        pullRequestNumber: number
+        issueNumber: number
+      }> = []
       const azureDevOpsDb = stubDbServiceLayer({
         listRepositories: Effect.succeed([
           makeRepositoryRecord({
@@ -625,6 +646,14 @@ describe("createPr", () => {
             createCalls += 1
             return Effect.succeed(91)
           },
+          ensurePullRequestLinkedToIssue: (
+            _repository,
+            pullRequestNumber,
+            issueNumber,
+          ) =>
+            Effect.sync(() => {
+              linked.push({ pullRequestNumber, issueNumber })
+            }),
           updateOpenDraftPullRequestCopy: (_repository, _branch, input) => {
             reconciled = input
             return Effect.succeed(77)
@@ -650,6 +679,7 @@ describe("createPr", () => {
       })
       expect(createCalls).toBe(0)
       expect(githubCalls).toBe(0)
+      expect(linked).toEqual([{ pullRequestNumber: 77, issueNumber: 3601642 }])
       expect(reconciled).toEqual({
         title: "feat: refresh tokens",
         body: "Implements refresh.\n\nCloses #3601642",
@@ -686,6 +716,7 @@ describe("createPr", () => {
         azureDevOps: stubAzureDevOps({
           findOpenPullRequestNumber: () =>
             Effect.succeed(agentRan ? 654 : null),
+          ensurePullRequestLinkedToIssue: () => Effect.void,
         }),
         keymaxxer: stubKeymaxxer({
           enabled: false,
@@ -871,6 +902,7 @@ describe("createPr", () => {
               createCalls += 1
               return Effect.succeed(999)
             },
+            ensurePullRequestLinkedToIssue: () => Effect.void,
           }),
         },
       )

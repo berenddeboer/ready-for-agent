@@ -1277,5 +1277,25 @@ export const createPr = (context: LifecycleStepContext) =>
         }),
     })
 
+    if (repository.forge === "azure-devops") {
+      const azureDevOps = yield* AzureDevOpsService
+      yield* azureDevOps
+        .ensurePullRequestLinkedToIssue(
+          toAzureDevOpsRepository(repository),
+          outcome.value,
+          context.issueNumber,
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new CreatePrPostconditionError({
+                repositoryId: context.repositoryId,
+                message: `Failed to associate Azure Boards Issue #${context.issueNumber} with pull request ${outcome.value}`,
+                diagnostics: boundDiagnostics(errorMessage(cause)),
+              }),
+          ),
+        )
+    }
+
     return toCreatePrResult(outcome.value, outcome.completion, copy)
   })

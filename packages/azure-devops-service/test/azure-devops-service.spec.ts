@@ -1479,6 +1479,161 @@ describe("Azure DevOps createDraftPullRequest", () => {
   })
 })
 
+describe("Azure DevOps ensurePullRequestLinkedToIssue", () => {
+  const artifactId =
+    "vstfs:///Git/PullRequestId/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa%2fbbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb%2f7"
+
+  test("associates the Boards Issue with the pull request when missing", async () => {
+    let patch: {
+      readonly contentType: string | null
+      readonly body: unknown
+      readonly path: string
+    } | null = null
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (method === "PATCH") {
+        const headers = (init?.headers ?? {}) as Record<string, string>
+        patch = {
+          contentType: headers["Content-Type"] ?? null,
+          body: JSON.parse(String(init?.body)),
+          path: url.pathname,
+        }
+        return json({
+          id: 1,
+          relations: [
+            {
+              rel: "ArtifactLink",
+              url: artifactId,
+            },
+          ],
+        })
+      }
+      if (url.pathname.endsWith("/workitems")) {
+        return json({ value: [] })
+      }
+      if (url.pathname.endsWith("/pullrequests/7")) {
+        return json({
+          pullRequestId: 7,
+          status: "active",
+          isDraft: true,
+          artifactId,
+        })
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`)
+    }) as unknown as typeof fetch)
+
+    await Effect.runPromise(
+      service.ensurePullRequestLinkedToIssue(repository, 7, 1),
+    )
+    expect(patch).toEqual({
+      contentType: "application/json-patch+json",
+      path: "/acme/widgets/_apis/wit/workitems/1",
+      body: [
+        {
+          op: "add",
+          path: "/relations/-",
+          value: {
+            rel: "ArtifactLink",
+            url: artifactId,
+            attributes: { name: "Pull Request" },
+          },
+        },
+      ],
+    })
+  })
+
+  test("does not add a duplicate relation when the Issue is already linked", async () => {
+    let patchCalled = false
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (method === "PATCH") {
+        patchCalled = true
+        return json({ id: 1, relations: [] })
+      }
+      if (url.pathname.endsWith("/workitems")) {
+        return json({
+          value: [
+            {
+              id: "1",
+              url: "https://dev.azure.com/acme/_apis/wit/workItems/1",
+            },
+          ],
+        })
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`)
+    }) as unknown as typeof fetch)
+
+    await Effect.runPromise(
+      service.ensurePullRequestLinkedToIssue(repository, 7, 1),
+    )
+    expect(patchCalled).toBe(false)
+  })
+
+  test("constructs the ArtifactLink from repository metadata when the pull request omits artifactId", async () => {
+    let patchBody: unknown = null
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (method === "PATCH") {
+        patchBody = JSON.parse(String(init?.body))
+        return json({
+          id: 42,
+          relations: [
+            {
+              rel: "ArtifactLink",
+              url: "vstfs:///Git/PullRequestId/proj-guid%2frepo-guid%2f9",
+            },
+          ],
+        })
+      }
+      if (url.pathname.endsWith("/workitems")) {
+        return json({ value: [] })
+      }
+      if (url.pathname.endsWith("/pullrequests/9")) {
+        return json({
+          pullRequestId: 9,
+          status: "active",
+          isDraft: true,
+        })
+      }
+      if (url.pathname.endsWith("/repositories/widgets")) {
+        return json({
+          id: "repo-guid",
+          project: { id: "proj-guid" },
+          defaultBranch: "refs/heads/main",
+        })
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`)
+    }) as unknown as typeof fetch)
+
+    await Effect.runPromise(
+      service.ensurePullRequestLinkedToIssue(repository, 9, 42),
+    )
+    expect(patchBody).toEqual([
+      {
+        op: "add",
+        path: "/relations/-",
+        value: {
+          rel: "ArtifactLink",
+          url: "vstfs:///Git/PullRequestId/proj-guid%2frepo-guid%2f9",
+          attributes: { name: "Pull Request" },
+        },
+      },
+    ])
+  })
+})
+
 describe("Azure DevOps updateOpenDraftPullRequestCopy", () => {
   test("updates title and description of an open draft pull request", async () => {
     let updateBody: unknown = null

@@ -16,7 +16,7 @@ import type {
 } from "./types.js"
 
 /**
- * Hand-written fake for the Azure DevOps service surface: the 15 REST-backed
+ * Hand-written fake for the Azure DevOps service surface: the 16 REST-backed
  * methods plus the two local credential checks (`hasCredentials`/
  * `hasAmbientCredentials`). Mirrors
  * `gitlab-service-test.ts`'s in-memory `Map`-keyed `Layer.succeed` pattern:
@@ -147,6 +147,8 @@ export const makeAzureDevOpsServiceTest = (
         state.openPullRequestByBranch[input.headRefName] = pullRequestNumber
         return Effect.succeed(pullRequestNumber)
       }),
+    ensurePullRequestLinkedToIssue: (repository) =>
+      failOr(repository, () => Effect.void),
     updateOpenDraftPullRequestCopy: (repository, headRefName) =>
       failOr(repository, (state) =>
         Effect.succeed(state.openPullRequestByBranch[headRefName] ?? null),

@@ -12,8 +12,8 @@ export const INTERNAL_AZURE_DEVOPS_HELPER_ARG =
 /**
  * CLI-backed operations. `hasCredentials`/`hasAmbientCredentials` are
  * synchronous local checks (no vault secret needed) and never need a
- * subprocess, matching GitLab's helper operation set. Of the 18-method
- * surface that leaves 14 future helper candidates: 13 are already
+ * subprocess, matching GitLab's helper operation set. Of the 19-method
+ * surface that leaves 15 future helper candidates: 14 are already
  * implemented against the live REST API in-process, while
  * `countOpenNonDraftPullRequests` still fails with
  * `AzureDevOpsNotImplementedError`. Each gains a helper operation (and
