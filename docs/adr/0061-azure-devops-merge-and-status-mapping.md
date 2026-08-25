@@ -40,7 +40,12 @@ request. `mergePullRequest` completes via `PATCH .../pullrequests/{id}` with
 `lastMergeSourceCommit: {commitId: <expected head>}`, and
 `completionOptions: {transitionWorkItems: true}`. The completion option asks
 Azure DevOps to transition linked work items to their next logical state; the
-PR description remains the published implementation summary. Azure DevOps
+PR description remains the published implementation summary. Create PR
+associates the Forge Issue with that pull request as a Boards ArtifactLink
+(`ensurePullRequestLinkedToIssue`) so the option has a link to act on —
+Azure DevOps does not treat `Closes #N` in the description as a Boards
+association. The link is idempotent: reuse of an already-open Work Item PR
+adds it only when missing. Azure DevOps
 rejects a stale `lastMergeSourceCommit` the same way GitLab's `sha` merge
 parameter guards against a concurrent push, so `400`/`409`/`422` are treated
 as "handled, re-classify" (mirroring GitLab's `405`/`406`/`409`/`422`), and any

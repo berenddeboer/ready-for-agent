@@ -263,6 +263,7 @@ const defaultAzureDevOpsShape = {
   getOpenPullRequestNumber: () => Effect.succeed(1),
   findOpenPullRequestNumber: () => Effect.succeed(null),
   createDraftPullRequest: () => Effect.succeed(1),
+  ensurePullRequestLinkedToIssue: () => Effect.void,
   updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
   countOpenNonDraftPullRequests: () => Effect.succeed(0),
   getPullRequestCheckStatus: () =>

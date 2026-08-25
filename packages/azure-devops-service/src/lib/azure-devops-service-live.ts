@@ -115,6 +115,7 @@ const ProjectRefSchema = Schema.Struct({
 })
 
 const RepositoryRefSchema = Schema.Struct({
+  id: Schema.optional(Schema.NullOr(Schema.String)),
   project: Schema.optional(Schema.NullOr(ProjectRefSchema)),
 })
 
@@ -130,6 +131,13 @@ const PullRequestSchema = Schema.Struct({
   mergeStatus: Schema.optional(Schema.NullOr(Schema.String)),
   lastMergeSourceCommit: Schema.optional(Schema.NullOr(CommitRefSchema)),
   creationDate: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Canonical ArtifactLink URI for this pull request
+   * (`vstfs:///Git/PullRequestId/{projectId}%2f{repositoryId}%2f{pullRequestId}`).
+   * Used to associate Boards work items; prefer this over constructing the
+   * URI from GUIDs.
+   */
+  artifactId: Schema.optional(Schema.NullOr(Schema.String)),
   /** Present on the full PR resource; used to build the policy artifact id. */
   repository: Schema.optional(Schema.NullOr(RepositoryRefSchema)),
 })
@@ -140,8 +148,23 @@ const PullRequestListSchema = Schema.Struct({
 })
 
 const RepositoryMetaSchema = Schema.Struct({
+  id: Schema.optional(RequiredString),
   defaultBranch: Schema.optional(Schema.NullOr(Schema.String)),
+  project: Schema.optional(Schema.NullOr(ProjectRefSchema)),
 })
+
+const PullRequestWorkItemRefSchema = Schema.Struct({
+  id: Schema.optional(Schema.Union([Schema.String, Schema.Int])),
+  url: Schema.optional(Schema.NullOr(Schema.String)),
+})
+const PullRequestWorkItemListSchema = Schema.Struct({
+  value: Schema.optional(Schema.Array(PullRequestWorkItemRefSchema)),
+})
+
+/** ArtifactLink relation type Boards uses for Development / PR links. */
+const ARTIFACT_LINK_REL = "ArtifactLink"
+/** Case-sensitive Boards display name for a pull-request ArtifactLink. */
+const PULL_REQUEST_LINK_NAME = "Pull Request"
 
 /** One `GET .../policy/evaluations` entry (branch policy, including build validation). */
 const PolicyEvaluationSchema = Schema.Struct({
@@ -429,6 +452,11 @@ const WorkItemRelationSchema = Schema.Struct({
   url: RequiredString,
 })
 
+const WorkItemWithRelationsSchema = Schema.Struct({
+  id: Schema.Int,
+  relations: Schema.optional(Schema.Array(WorkItemRelationSchema)),
+})
+
 const WorkItemFieldsSchema = Schema.Struct({
   "System.Title": Schema.optional(Schema.String),
   "System.Description": Schema.optional(Schema.NullOr(Schema.String)),
@@ -602,6 +630,40 @@ const codeReviewArtifactId = (
   projectId: string,
   pullRequestId: number,
 ): string => `vstfs:///CodeReview/CodeReviewId/${projectId}/${pullRequestId}`
+
+/**
+ * Boards ArtifactLink URI for a Git pull request. `%2f` between GUIDs is
+ * required for the link to show on both the PR work-item list and the
+ * Boards item's Development links (a literal `/` creates a one-way link).
+ */
+const gitPullRequestArtifactId = (
+  projectId: string,
+  repositoryId: string,
+  pullRequestId: number,
+): string =>
+  `vstfs:///Git/PullRequestId/${projectId}%2f${repositoryId}%2f${pullRequestId}`
+
+const normalizeArtifactUrl = (url: string): string =>
+  decodeURIComponent(url.trim()).toLowerCase()
+
+const parseWorkItemRefId = (ref: {
+  readonly id?: string | number | undefined
+  readonly url?: string | null | undefined
+}): number | null => {
+  if (
+    typeof ref.id === "number" &&
+    Number.isSafeInteger(ref.id) &&
+    ref.id > 0
+  ) {
+    return ref.id
+  }
+  if (typeof ref.id === "string") {
+    const parsed = Number(ref.id.trim())
+    if (Number.isSafeInteger(parsed) && parsed > 0) return parsed
+  }
+  if (typeof ref.url === "string") return workItemIdFromRelationUrl(ref.url)
+  return null
+}
 
 const policyEvaluationsPath = (
   identity: AzureDevOpsProjectIdentity,
@@ -1303,6 +1365,165 @@ export const makeAzureDevOpsService = (options: {
         })
       }
       return created.pullRequestId
+    }),
+    ensurePullRequestLinkedToIssue: Effect.fn(
+      "AzureDevOpsService.ensurePullRequestLinkedToIssue",
+    )(function* (repository, pullRequestNumber, issueNumber) {
+      if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber <= 0) {
+        return yield* new AzureDevOpsRequestError({
+          message: `Invalid pull request number for ${repository.projectPath}: ${String(pullRequestNumber)}`,
+        })
+      }
+      if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+        return yield* new AzureDevOpsRequestError({
+          message: `Invalid Issue number for ${repository.projectPath}: ${String(issueNumber)}`,
+        })
+      }
+      const identity = splitAzureDevOpsProjectPath(repository.projectPath)
+      if (identity === null) {
+        return yield* invalidProjectPath(repository)
+      }
+      const issueRef = `${repository.projectPath}#${issueNumber}`
+      const prRef = `${repository.projectPath} PR ${pullRequestNumber}`
+
+      const listLinkedIssueIds = (): Effect.Effect<
+        readonly number[],
+        AzureDevOpsRequestError
+      > =>
+        requestUnknown(
+          identity.organization,
+          pullRequestsPath(identity, `/${pullRequestNumber}/workitems`),
+          `Failed to list work items linked to ${prRef}`,
+        ).pipe(
+          Effect.flatMap((value) =>
+            decodeOrRequestError(
+              PullRequestWorkItemListSchema,
+              `Azure DevOps returned invalid linked work items for ${prRef}`,
+              value,
+            ),
+          ),
+          Effect.map((listed) =>
+            (listed.value ?? [])
+              .map(parseWorkItemRefId)
+              .filter((id): id is number => id !== null),
+          ),
+          Effect.catch((error) =>
+            error instanceof AzureDevOpsRequestError && error.statusCode === 404
+              ? Effect.succeed([] as const)
+              : Effect.fail(error),
+          ),
+        )
+
+      const alreadyLinked = (ids: readonly number[]): boolean =>
+        ids.includes(issueNumber)
+
+      const initial = yield* listLinkedIssueIds()
+      if (alreadyLinked(initial)) {
+        return
+      }
+
+      const pr = yield* requestUnknown(
+        identity.organization,
+        pullRequestsPath(identity, `/${pullRequestNumber}`),
+        `Failed to load ${prRef}`,
+      ).pipe(
+        Effect.flatMap((value) =>
+          decodePullRequest(value, `Azure DevOps returned an invalid ${prRef}`),
+        ),
+      )
+
+      const artifactIdFromPr = pr.artifactId?.trim() ?? ""
+      let artifactId = artifactIdFromPr
+      if (artifactId === "") {
+        const repositoryId = pr.repository?.id?.trim() ?? ""
+        const projectId = pr.repository?.project?.id?.trim() ?? ""
+        if (repositoryId !== "" && projectId !== "") {
+          artifactId = gitPullRequestArtifactId(
+            projectId,
+            repositoryId,
+            pullRequestNumber,
+          )
+        }
+      }
+      if (artifactId === "") {
+        const meta = yield* requestUnknown(
+          identity.organization,
+          repositoryMetaPath(identity),
+          `Failed to resolve repository identity for ${prRef}`,
+        ).pipe(
+          Effect.flatMap((value) =>
+            decodeOrRequestError(
+              RepositoryMetaSchema,
+              `Azure DevOps returned invalid repository metadata for ${repository.projectPath}`,
+              value,
+            ),
+          ),
+        )
+        const repositoryId = meta.id?.trim() ?? ""
+        const projectId = meta.project?.id?.trim() ?? ""
+        if (repositoryId === "" || projectId === "") {
+          return yield* new AzureDevOpsRequestError({
+            message: `Azure DevOps did not identify the pull request artifact for ${prRef}`,
+          })
+        }
+        artifactId = gitPullRequestArtifactId(
+          projectId,
+          repositoryId,
+          pullRequestNumber,
+        )
+      }
+
+      const patched = yield* requestUnknown(
+        identity.organization,
+        `${workItemPath(identity, issueNumber)}?$expand=relations`,
+        `Failed to associate ${issueRef} with ${prRef}`,
+        {
+          method: "PATCH",
+          contentType: "application/json-patch+json",
+          body: [
+            {
+              op: "add",
+              path: "/relations/-",
+              value: {
+                rel: ARTIFACT_LINK_REL,
+                url: artifactId,
+                attributes: { name: PULL_REQUEST_LINK_NAME },
+              },
+            },
+          ],
+        },
+      ).pipe(
+        Effect.flatMap((value) =>
+          decodeOrRequestError(
+            WorkItemWithRelationsSchema,
+            `Azure DevOps returned an invalid Work Item after linking ${issueRef} to ${prRef}`,
+            value,
+          ),
+        ),
+        Effect.result,
+      )
+
+      if (Result.isSuccess(patched)) {
+        const linked = (patched.success.relations ?? []).some(
+          (relation) =>
+            relation.rel === ARTIFACT_LINK_REL &&
+            normalizeArtifactUrl(relation.url) ===
+              normalizeArtifactUrl(artifactId),
+        )
+        if (linked) {
+          return
+        }
+      } else if (patched.failure.statusCode !== 400) {
+        return yield* patched.failure
+      }
+
+      const after = yield* listLinkedIssueIds()
+      if (alreadyLinked(after)) {
+        return
+      }
+      return yield* new AzureDevOpsRequestError({
+        message: `Azure DevOps did not associate ${issueRef} with ${prRef}`,
+      })
     }),
     updateOpenDraftPullRequestCopy: Effect.fn(
       "AzureDevOpsService.updateOpenDraftPullRequestCopy",

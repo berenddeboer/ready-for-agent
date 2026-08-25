@@ -24,10 +24,11 @@ export type AzureDevOpsServiceError =
   | AzureDevOpsNotImplementedError
 
 /**
- * Same 18-method surface as {@link @ready-for-agent/gitlab-service#GitLabServiceShape}.
- * 15 methods perform live Azure DevOps REST requests,
- * `hasCredentials`/`hasAmbientCredentials` are local credential checks, and
- * only `countOpenNonDraftPullRequests` still fails with
+ * GitLab's 18-method surface plus {@link AzureDevOpsServiceShape.ensurePullRequestLinkedToIssue}:
+ * Azure Boards does not honor `Closes #N` as a PR association, so Create PR
+ * must write an ArtifactLink. 16 methods perform live Azure DevOps REST
+ * requests, `hasCredentials`/`hasAmbientCredentials` are local credential
+ * checks, and only `countOpenNonDraftPullRequests` still fails with
  * `AzureDevOpsNotImplementedError` (see method-level docs).
  */
 export interface AzureDevOpsServiceShape {
@@ -105,6 +106,18 @@ export interface AzureDevOpsServiceShape {
       readonly baseRefName?: string
     },
   ) => Effect.Effect<number, AzureDevOpsServiceError>
+  /**
+   * Associate the Forge Issue (Azure Boards work item) with an existing
+   * pull request as an ArtifactLink, so Azure's "transition linked work
+   * items" option on merge has something to act on. Idempotent: a missing
+   * link is added; an already-present link is left unchanged. `Closes #N`
+   * in publication copy is not this association.
+   */
+  readonly ensurePullRequestLinkedToIssue: (
+    repository: AzureDevOpsRepository,
+    pullRequestNumber: number,
+    issueNumber: number,
+  ) => Effect.Effect<void, AzureDevOpsServiceError>
   /**
    * When an open draft pull request exists for the exact source branch, set
    * its title and description to the provided values. Non-draft open pull
