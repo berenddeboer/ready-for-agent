@@ -163,7 +163,7 @@ Notes on the modelling:
 
 ## The lifecycle state space
 
-16 operational Lifecycle Steps, 4 terminal Work Item states, and 130 declared
+16 operational Lifecycle Steps, 4 terminal Work Item states, and 141 declared
 transitions, each carrying a named guard and one Step Run reason code from the
 generated vocabulary.
 The happy path:
@@ -179,6 +179,7 @@ stateDiagram-v2
   pre_commit --> review
   review --> commit
   commit --> create_pr
+  commit --> close_issue : no_change_outcome
   create_pr --> watch_pr_status_checks
   watch_pr_status_checks --> resolve_pr_merge_conflict : merge_conflict_observed
   resolve_pr_merge_conflict --> watch_pr_status_checks : conflict_processed

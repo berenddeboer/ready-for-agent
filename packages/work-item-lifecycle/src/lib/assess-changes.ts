@@ -172,23 +172,27 @@ export const parseAssessChangesResult = (
   return null
 }
 
+/** Shared confirmation prompt for Assess Changes and late Commit No-Change. */
+export const buildNoChangeConfirmationPrompt = (): string =>
+  [
+    "The worktree and branch appear unchanged since this Work Item started.",
+    "Confirm whether that absence of repository changes is intentional.",
+    "Do not edit files, commit, push, open pull requests, or perform other repository work during this classification.",
+    "If repository changes are still required or you believe changes exist, end with READY_FOR_AGENT_RESULT: CHANGES.",
+    "If the Issue objective is complete without repository changes, write a concise Markdown completion summary for the Issue (include links to any follow-up Issues you created), then end with READY_FOR_AGENT_RESULT: NO_CHANGES.",
+    "End your final response with exactly one machine-readable result line:",
+    "READY_FOR_AGENT_RESULT: CHANGES",
+    "or",
+    "READY_FOR_AGENT_RESULT: NO_CHANGES",
+  ].join("\n")
+
 const confirmNoObservableChange = (
   context: LifecycleStepContext,
   worktreePath: string,
   sessionId: string,
 ) =>
   Effect.gen(function* () {
-    const prompt = [
-      "The worktree and branch appear unchanged since this Work Item started.",
-      "Confirm whether that absence of repository changes is intentional.",
-      "Do not edit files, commit, push, open pull requests, or perform other repository work during this classification.",
-      "If repository changes are still required or you believe changes exist, end with READY_FOR_AGENT_RESULT: CHANGES.",
-      "If the Issue objective is complete without repository changes, write a concise Markdown completion summary for the Issue (include links to any follow-up Issues you created), then end with READY_FOR_AGENT_RESULT: NO_CHANGES.",
-      "End your final response with exactly one machine-readable result line:",
-      "READY_FOR_AGENT_RESULT: CHANGES",
-      "or",
-      "READY_FOR_AGENT_RESULT: NO_CHANGES",
-    ].join("\n")
+    const prompt = buildNoChangeConfirmationPrompt()
 
     const agentBackend = yield* AgentBackend
     const result = yield* agentBackend

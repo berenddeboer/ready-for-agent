@@ -6,8 +6,13 @@ import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import {
+  buildNoChangeConfirmationPrompt,
+  parseAssessChangesResult,
+} from "./assess-changes.js"
+import {
   type CommitError,
   CommitInvalidWorktreeContextError,
+  CommitNoChangeConfirmationError,
   CommitOpenCodeError,
   CommitPostconditionError,
   CommitPublicationCopyError,
@@ -50,12 +55,18 @@ import { workItemAttachmentDirectory } from "./work-item-attachment-directory.js
 const DIAGNOSTIC_CHAR_LIMIT = 4_000
 const HARNESS_ARTIFACT_PATHSPEC = ":(exclude).ready-for-agent"
 
-export type CommitResult = {
-  readonly completion: LifecycleStepCompletion
-  readonly publicationTitle: string
-  readonly publicationBody: string
-  readonly publicationCopySource?: PublicationCopySource
-}
+export type CommitResult =
+  | {
+      readonly _tag: "committed"
+      readonly completion: LifecycleStepCompletion
+      readonly publicationTitle: string
+      readonly publicationBody: string
+      readonly publicationCopySource?: PublicationCopySource
+    }
+  | {
+      readonly _tag: "no_changes"
+      readonly completionSummary: string
+    }
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -110,7 +121,7 @@ const resolveSessionId = (context: LifecycleStepContext) => {
       new CommitSessionContextMissingError({
         workItemId: context.workItemId,
         message:
-          "Commit requires a Session ID persisted by a successful Implement Step Run for publication copy and agent repair",
+          "Commit requires a Session ID persisted by a successful Implement Step Run for publication copy, No-Change confirmation, and agent repair",
       }),
     )
   }
@@ -175,6 +186,36 @@ const hasCommitsAfterStartingOid = (
       return Number.isFinite(count) && count > 0
     }),
   )
+
+/**
+ * Implementation files that the native commit path would stage, after the
+ * same harness-artifact exclusion used by `git add`. Status failure is treated
+ * as commitable so a broken inspect cannot skip into No-Change.
+ */
+const hasCommitableChanges = (worktreePath: string) =>
+  runGitInWorktree(worktreePath, [
+    "status",
+    "--porcelain",
+    "--",
+    ".",
+    HARNESS_ARTIFACT_PATHSPEC,
+  ]).pipe(
+    Effect.map(
+      (result) => result.exitCode !== 0 || result.stdout.trim().length > 0,
+    ),
+  )
+
+/**
+ * Late No-Change gate: no commit after the starting OID, and nothing
+ * commitable after excluding harness-owned artifacts.
+ */
+const hasNothingToPublish = (worktreePath: string, startingCommitOid: string) =>
+  Effect.gen(function* () {
+    if (yield* hasCommitsAfterStartingOid(worktreePath, startingCommitOid)) {
+      return false
+    }
+    return !(yield* hasCommitableChanges(worktreePath))
+  })
 
 /**
  * Postcondition: at least one commit exists after the Work Item starting
@@ -657,11 +698,59 @@ const toResult = (
   copy: PublicationCopy,
   source: PublicationCopySource,
 ): CommitResult => ({
+  _tag: "committed",
   completion,
   publicationTitle: copy.title,
   publicationBody: copy.body,
   publicationCopySource: source,
 })
+
+const confirmLateNoChange = (
+  context: LifecycleStepContext,
+  worktreePath: string,
+) =>
+  Effect.gen(function* () {
+    const sessionId = yield* resolveSessionId(context)
+    const agentBackend = yield* AgentBackend
+    const result = yield* agentBackend
+      .continueTurn({
+        sessionId,
+        prompt: buildNoChangeConfirmationPrompt(),
+        cwd: worktreePath,
+        model: context.model,
+        thinkingLevel: context.thinkingLevel,
+        timeout: context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.commit,
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new CommitOpenCodeError({
+              message: `${agentBackendLabel(context.agentBackend)} failed while confirming a No-Change Outcome`,
+              worktreePath,
+              sessionId,
+              cause,
+            }),
+        ),
+      )
+
+    const parsed = parseAssessChangesResult(result.assistantText)
+    if (parsed === null) {
+      return yield* new CommitNoChangeConfirmationError({
+        workItemId: context.workItemId,
+        message: `${agentBackendLabel(context.agentBackend)} did not return a valid READY_FOR_AGENT_RESULT: CHANGES or NO_CHANGES with a non-blank summary when required`,
+      })
+    }
+    if (parsed._tag === "changes") {
+      return yield* new CommitNoChangeConfirmationError({
+        workItemId: context.workItemId,
+        message: `${agentBackendLabel(context.agentBackend)} did not confirm a No-Change Outcome`,
+      })
+    }
+    return {
+      _tag: "no_changes" as const,
+      completionSummary: parsed.completionSummary,
+    }
+  })
 
 /**
  * Independent re-check of the commit postcondition, aligning canonical copy
@@ -686,13 +775,17 @@ const recheckCommitPostcondition = (
 /**
  * Production Commit Lifecycle Step.
  *
- * Generates shared publication copy (or reuses/seeds persisted copy), then
- * attempts a harness-owned native git commit. After one bounded format-correction
- * turn, malformed publication copy falls back to harness-owned Issue-identity
- * copy rather than failing Commit. Continues the Implement Session only when
- * the native attempt does not establish the postcondition, via Repair Fallback.
- * Success requires a commit after the Work Item starting OID with
- * implementation changes committed.
+ * When the commit postcondition is already met, reuses or seeds publication
+ * copy and advances toward Create PR. When nothing remains to publish, asks
+ * the Implement Session to confirm a No-Change Outcome and does not generate
+ * publication copy, native-commit, or use Repair Fallback. Otherwise generates
+ * shared publication copy (or reuses/seeds persisted copy), then attempts a
+ * harness-owned native git commit. After one bounded format-correction turn,
+ * malformed publication copy falls back to harness-owned Issue-identity copy
+ * rather than failing Commit. Continues the Implement Session only when the
+ * native attempt does not establish the postcondition, via Repair Fallback.
+ * Publication-path success requires a commit after the Work Item starting OID
+ * with implementation changes committed.
  */
 export const commit = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -704,6 +797,13 @@ export const commit = (context: LifecycleStepContext) =>
       worktreePath,
       startingCommitOid,
     )
+
+    if (
+      !alreadyCommitted &&
+      (yield* hasNothingToPublish(worktreePath, startingCommitOid))
+    ) {
+      return yield* confirmLateNoChange(context, worktreePath)
+    }
 
     // Still ensure canonical publication copy exists (seed from commit if needed).
     const resolved = yield* resolvePublicationCopy(context, worktreePath, {

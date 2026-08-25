@@ -23,7 +23,7 @@ export const closeIssue = (context: LifecycleStepContext) =>
       return yield* new CloseIssueSummaryMissingError({
         workItemId: context.workItemId,
         message:
-          "Close Issue requires a non-blank completion summary persisted by Assess Changes",
+          "Close Issue requires a non-blank completion summary persisted by the confirming step",
       })
     }
 
