@@ -138,4 +138,36 @@ describe("generated lifecycle state", () => {
       "green_checks_on_draft",
     ])
   })
+
+  it("declares Attention-to-cleanup transitions when Refresh observes a gone Issue with no owned PR", () => {
+    const fromStates = LIFECYCLE_TRANSITIONS.filter(
+      (transition) =>
+        transition.guard ===
+          "refresh_observed_issue_no_longer_relevant_without_owned_pr" &&
+        transition.to === "local_cleanup" &&
+        transition.reasonCode === "native",
+    ).map((transition) => transition.from)
+
+    expect([...fromStates].sort()).toEqual(
+      [
+        "assess_changes",
+        "close_issue",
+        "commit",
+        "create_pr",
+        "create_worktree",
+        "decide_pr_merge",
+        "implement",
+        "install_dependencies",
+        "investigate_pr_status_checks",
+        "mark_pr_ready_for_review",
+        "merge_pr",
+        "needs_human",
+        "pre_commit",
+        "resolve_pr_merge_conflict",
+        "review",
+        "watch_pr_status_checks",
+      ].sort(),
+    )
+    expect(fromStates).not.toContain("local_cleanup")
+  })
 })

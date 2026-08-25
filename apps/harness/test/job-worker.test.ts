@@ -378,6 +378,7 @@ const queueLayer = (
       stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
       admitWaitingWorkItems: Effect.succeed(0),
       releaseWaitingForBlockers: () => Effect.succeed(0),
+      completeParkedAttentionWhenIssueNoLongerRelevant: () => Effect.succeed(0),
     }),
   )
 
@@ -2378,6 +2379,8 @@ describe("Job worker", () => {
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
+          completeParkedAttentionWhenIssueNoLongerRelevant: () =>
+            Effect.succeed(0),
         })
 
         yield* Effect.gen(function* () {
@@ -2622,6 +2625,8 @@ describe("Job worker", () => {
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
+          completeParkedAttentionWhenIssueNoLongerRelevant: () =>
+            Effect.succeed(0),
         })
 
         yield* Effect.scoped(
@@ -2702,6 +2707,8 @@ describe("Job worker", () => {
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
+          completeParkedAttentionWhenIssueNoLongerRelevant: () =>
+            Effect.succeed(0),
         })
         // Block Keymaxxer so auto-heal cannot finish during startup.
         const blockedKeymaxxer = Layer.succeed(KeymaxxerService, {
@@ -2851,6 +2858,8 @@ describe("Job worker", () => {
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
+          completeParkedAttentionWhenIssueNoLongerRelevant: () =>
+            Effect.succeed(0),
         })
 
         yield* Effect.gen(function* () {
@@ -3052,6 +3061,8 @@ describe("Job worker", () => {
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
+          completeParkedAttentionWhenIssueNoLongerRelevant: () =>
+            Effect.succeed(0),
         })
 
         yield* Effect.gen(function* () {
@@ -3179,6 +3190,8 @@ describe("Job worker", () => {
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
           releaseWaitingForBlockers: () => Effect.succeed(0),
+          completeParkedAttentionWhenIssueNoLongerRelevant: () =>
+            Effect.succeed(0),
         })
 
         yield* Effect.gen(function* () {

@@ -110,6 +110,13 @@ describe("refreshLoadedRepository", () => {
                   return 1
                 }),
               admitWaitingWorkItems: Effect.succeed(0),
+              completeParkedAttentionWhenIssueNoLongerRelevant: (
+                repositoryId,
+              ) =>
+                Effect.sync(() => {
+                  calls.push(`completeParked:${repositoryId}`)
+                  return 0
+                }),
               releaseWaitingForBlockers: (repositoryId) =>
                 Effect.sync(() => {
                   calls.push(`release:${repositoryId}`)
@@ -123,6 +130,7 @@ describe("refreshLoadedRepository", () => {
       expect(calls).toEqual([
         "reconcile",
         `stop:${repository.id}:1049`,
+        `completeParked:${repository.id}`,
         `release:${repository.id}`,
         `notify:${repository.id}`,
       ])

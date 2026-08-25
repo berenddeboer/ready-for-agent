@@ -140,6 +140,12 @@ const issue = {
   ],
 }
 
+const openIssue = (issueNumber: number) => ({
+  ...issue,
+  id: `issue-${String(issueNumber)}`,
+  issueNumber,
+})
+
 const workItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: repository.id,
@@ -299,6 +305,7 @@ const makeRuntime = (
     listSelectedOrInUseBackendIds: Effect.succeed([
       config.selectedAgentBackend,
     ]),
+    listIssues: () => Effect.succeed([issue]),
     ...dbOverrides,
   })
   const keymaxxer: KeymaxxerServiceShape = {
@@ -360,6 +367,7 @@ const makeRuntime = (
     stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
     admitWaitingWorkItems: Effect.succeed(0),
     releaseWaitingForBlockers: () => Effect.succeed(0),
+    completeParkedAttentionWhenIssueNoLongerRelevant: () => Effect.succeed(0),
     ...lifecycleOverrides,
   }
   const readyRuntime = readyRuntimeStatus()
@@ -9528,7 +9536,10 @@ describe("GraphQL API", () => {
     const callOrder: string[] = []
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
+      {
+        listIssues: () =>
+          Effect.succeed([openIssue(10), openIssue(11), openIssue(12)]),
+      },
       {},
       {},
       {
@@ -9710,7 +9721,10 @@ describe("GraphQL API", () => {
     const callOrder: string[] = []
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
+      {
+        listIssues: () =>
+          Effect.succeed([openIssue(10), openIssue(11), openIssue(12)]),
+      },
       {},
       {},
       {
@@ -9810,7 +9824,9 @@ describe("GraphQL API", () => {
     const seen: Array<{ id: string; autonomous?: number }> = []
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
+      {
+        listIssues: () => Effect.succeed([openIssue(10), openIssue(11)]),
+      },
       {},
       {},
       {
@@ -10000,7 +10016,9 @@ describe("GraphQL API", () => {
     } as WorkItemRecord
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
+      {
+        listIssues: () => Effect.succeed([openIssue(10), openIssue(11)]),
+      },
       {},
       {},
       {

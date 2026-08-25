@@ -53,6 +53,9 @@ export const refreshLoadedRepository = Effect.fn("refreshLoadedRepository")(
       summary.competingObservations,
     )
     yield* syncNeedsHumanMergeHandoffs(repository.id)
+    yield* lifecycle.completeParkedAttentionWhenIssueNoLongerRelevant(
+      repository.id,
+    )
     // Issue store is current: lift or fail Waiting for blockers Work Items.
     // Lifecycle owns Work Item mutations; reconciler only updates Issues.
     yield* lifecycle.releaseWaitingForBlockers(repository.id)

@@ -15,6 +15,7 @@ import {
   type WorkItemRecord,
   type WorkItemTerminalError,
   isRetryableFailedWorkItem,
+  shouldCompleteParkedAttentionWhenIssueNoLongerRelevant,
 } from "@ready-for-agent/work-item-lifecycle"
 import { toGraphQLError } from "./to-graphql-error.js"
 import { workItemCanAutonomousRetry } from "./work-item-projection.js"
@@ -165,6 +166,7 @@ export const snapshotRetryTargets = (input: {
   readonly selector: RetryWorkItemsSelector
   readonly repositoryId: string
   readonly workItems: readonly WorkItemRecord[]
+  readonly relevantIssueNumbers?: ReadonlySet<number>
 }):
   | readonly WorkItemRecord[]
   | WorkItemNotInRepositoryError
@@ -173,7 +175,34 @@ export const snapshotRetryTargets = (input: {
   switch (selector.kind) {
     case "all-retryable":
       return input.workItems
-        .filter((workItem) => workItemCanAutonomousRetry(workItem))
+        .filter((workItem) => {
+          if (!workItemCanAutonomousRetry(workItem)) {
+            return false
+          }
+          const relevantIssueNumbers = input.relevantIssueNumbers
+          if (relevantIssueNumbers === undefined) {
+            return true
+          }
+          const latest = workItem.stepRuns.at(-1)
+          return !shouldCompleteParkedAttentionWhenIssueNoLongerRelevant({
+            state: workItem.state,
+            paused: workItem.paused,
+            waitingForBlockers: workItem.waitingForBlockers,
+            waitingSince: workItem.waitingSince,
+            pullRequestNumber: workItem.pullRequestNumber,
+            failureCode: workItem.failureCode,
+            latestStatus: latest?.status,
+            hasActiveStepRun: workItem.stepRuns.some(
+              (stepRun) =>
+                stepRun.status === "queued" || stepRun.status === "running",
+            ),
+            issueNumber: workItem.issueNumber,
+            issues: [...relevantIssueNumbers].map((issueNumber) => ({
+              issueNumber,
+              state: "OPEN",
+            })),
+          })
+        })
         .slice()
         .sort(compareRetryTargets)
     case "work-item": {
@@ -358,10 +387,22 @@ export const retryWorkItems = (
             )
           : yield* lifecycle.listWorkItemsForRepository(repository.id)
 
+    const issues =
+      selector.kind === "all-retryable"
+        ? yield* db.listIssues(repository.id)
+        : []
     const snapshot = snapshotRetryTargets({
       selector,
       repositoryId: repository.id,
       workItems,
+      relevantIssueNumbers:
+        selector.kind === "all-retryable"
+          ? new Set(
+              issues
+                .filter((issue) => issue.state === "OPEN")
+                .map((issue) => issue.issueNumber),
+            )
+          : undefined,
     })
     if (
       snapshot instanceof WorkItemNotInRepositoryError ||
