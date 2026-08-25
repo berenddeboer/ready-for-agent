@@ -1,4 +1,5 @@
-import { Effect, Result } from "effect"
+import { Effect, Fiber, Result } from "effect"
+import { TestClock } from "effect/testing"
 import {
   AzureDevOpsNotImplementedError,
   AzureDevOpsProjectUnavailableError,
@@ -892,6 +893,376 @@ describe("Azure DevOps mergePullRequest", () => {
       lastMergeSourceCommit: { commitId: "sha-1" },
       completionOptions: { transitionWorkItems: true },
     })
+  })
+
+  test("treats a complete response of active+queued as in-flight and merges once a later GET is completed", async () => {
+    let patchBody: unknown = null
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (method === "PATCH") {
+        patchBody = JSON.parse(String(init?.body))
+        return json({
+          pullRequestId: 42,
+          status: "active",
+          isDraft: false,
+          mergeStatus: "queued",
+          lastMergeSourceCommit: { commitId: "sha-1" },
+          repository: { project: { id: "proj-1" } },
+        })
+      }
+      if (method === "GET" && /\/pullrequests\/42$/.test(url.pathname)) {
+        return json({
+          pullRequestId: 42,
+          status: "completed",
+          isDraft: false,
+          mergeStatus: "succeeded",
+          lastMergeSourceCommit: { commitId: "sha-1" },
+          repository: { project: { id: "proj-1" } },
+        })
+      }
+      if (url.pathname.endsWith("/statuses")) {
+        return json({ value: [] })
+      }
+      if (url.pathname.includes("/policy/evaluations")) {
+        return json({ value: [{ evaluationId: "e1", status: "approved" }] })
+      }
+      return json({
+        value: [
+          {
+            pullRequestId: 42,
+            status: "active",
+            isDraft: false,
+            mergeStatus: "succeeded",
+            lastMergeSourceCommit: { commitId: "sha-1" },
+            repository: { project: { id: "proj-1" } },
+          },
+        ],
+      })
+    }) as unknown as typeof fetch)
+
+    const result = await Effect.runPromise(
+      service.mergePullRequest(repository, "feature"),
+    )
+    expect(result).toEqual({ _tag: "merged" })
+    expect(patchBody).toEqual({
+      status: "completed",
+      lastMergeSourceCommit: { commitId: "sha-1" },
+      completionOptions: { transitionWorkItems: true },
+    })
+  })
+
+  test("merges when a queued complete later becomes completed on poll", async () => {
+    let getByIdCalls = 0
+    let resolveFirstQueuedGet: () => void = () => undefined
+    const firstQueuedGet = new Promise<void>((resolve) => {
+      resolveFirstQueuedGet = resolve
+    })
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (method === "PATCH") {
+        return json({
+          pullRequestId: 42,
+          status: "active",
+          isDraft: false,
+          mergeStatus: "queued",
+          lastMergeSourceCommit: { commitId: "sha-1" },
+          repository: { project: { id: "proj-1" } },
+        })
+      }
+      if (method === "GET" && /\/pullrequests\/42$/.test(url.pathname)) {
+        getByIdCalls += 1
+        if (getByIdCalls === 1) {
+          resolveFirstQueuedGet()
+          return json({
+            pullRequestId: 42,
+            status: "active",
+            isDraft: false,
+            mergeStatus: "queued",
+            lastMergeSourceCommit: { commitId: "sha-1" },
+            repository: { project: { id: "proj-1" } },
+          })
+        }
+        return json({
+          pullRequestId: 42,
+          status: "completed",
+          isDraft: false,
+          mergeStatus: "succeeded",
+          lastMergeSourceCommit: { commitId: "sha-1" },
+          repository: { project: { id: "proj-1" } },
+        })
+      }
+      if (url.pathname.endsWith("/statuses")) {
+        return json({ value: [] })
+      }
+      if (url.pathname.includes("/policy/evaluations")) {
+        return json({ value: [{ evaluationId: "e1", status: "approved" }] })
+      }
+      return json({
+        value: [
+          {
+            pullRequestId: 42,
+            status: "active",
+            isDraft: false,
+            mergeStatus: "succeeded",
+            lastMergeSourceCommit: { commitId: "sha-1" },
+            repository: { project: { id: "proj-1" } },
+          },
+        ],
+      })
+    }) as unknown as typeof fetch)
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* service
+            .mergePullRequest(repository, "feature")
+            .pipe(Effect.forkChild)
+          yield* Effect.promise(() => firstQueuedGet)
+          yield* Effect.yieldNow
+          yield* TestClock.adjust("1 second")
+          return yield* Fiber.join(fiber)
+        }),
+      ).pipe(Effect.provide(TestClock.layer())),
+    )
+    expect(result).toEqual({ _tag: "merged" })
+    expect(getByIdCalls).toBe(2)
+  })
+
+  test("fails retryably when completion stays queued past the wait bound", async () => {
+    let resolveFirstQueuedGet: () => void = () => undefined
+    const firstQueuedGet = new Promise<void>((resolve) => {
+      resolveFirstQueuedGet = resolve
+    })
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (method === "PATCH") {
+        return json({
+          pullRequestId: 42,
+          status: "active",
+          isDraft: false,
+          mergeStatus: "queued",
+          lastMergeSourceCommit: { commitId: "sha-1" },
+          repository: { project: { id: "proj-1" } },
+        })
+      }
+      if (method === "GET" && /\/pullrequests\/42$/.test(url.pathname)) {
+        resolveFirstQueuedGet()
+        return json({
+          pullRequestId: 42,
+          status: "active",
+          isDraft: false,
+          mergeStatus: "queued",
+          lastMergeSourceCommit: { commitId: "sha-1" },
+          repository: { project: { id: "proj-1" } },
+        })
+      }
+      if (url.pathname.endsWith("/statuses")) {
+        return json({ value: [] })
+      }
+      if (url.pathname.includes("/policy/evaluations")) {
+        return json({ value: [{ evaluationId: "e1", status: "approved" }] })
+      }
+      return json({
+        value: [
+          {
+            pullRequestId: 42,
+            status: "active",
+            isDraft: false,
+            mergeStatus: "succeeded",
+            lastMergeSourceCommit: { commitId: "sha-1" },
+            repository: { project: { id: "proj-1" } },
+          },
+        ],
+      })
+    }) as unknown as typeof fetch)
+
+    const result = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fiber = yield* service
+            .mergePullRequest(repository, "feature")
+            .pipe(Effect.result, Effect.forkChild)
+          yield* Effect.promise(() => firstQueuedGet)
+          yield* Effect.yieldNow
+          yield* TestClock.adjust("20 seconds")
+          return yield* Fiber.join(fiber)
+        }),
+      ).pipe(Effect.provide(TestClock.layer())),
+    )
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(AzureDevOpsRequestError)
+      expect(result.failure.message).toContain("completion is still queued")
+      expect(result.failure.message).not.toContain("rejected")
+    }
+  })
+
+  test("routes conflicts after a queued complete to mergeability revalidation", async () => {
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (method === "PATCH") {
+        return json({
+          pullRequestId: 42,
+          status: "active",
+          isDraft: false,
+          mergeStatus: "queued",
+          lastMergeSourceCommit: { commitId: "sha-1" },
+          repository: { project: { id: "proj-1" } },
+        })
+      }
+      if (method === "GET" && /\/pullrequests\/42$/.test(url.pathname)) {
+        return json({
+          pullRequestId: 42,
+          status: "active",
+          isDraft: false,
+          mergeStatus: "conflicts",
+          lastMergeSourceCommit: { commitId: "sha-1" },
+          repository: { project: { id: "proj-1" } },
+        })
+      }
+      if (url.pathname.endsWith("/statuses")) {
+        return json({ value: [] })
+      }
+      if (url.pathname.includes("/policy/evaluations")) {
+        return json({ value: [{ evaluationId: "e1", status: "approved" }] })
+      }
+      return json({
+        value: [
+          {
+            pullRequestId: 42,
+            status: "active",
+            isDraft: false,
+            mergeStatus: "succeeded",
+            lastMergeSourceCommit: { commitId: "sha-1" },
+            repository: { project: { id: "proj-1" } },
+          },
+        ],
+      })
+    }) as unknown as typeof fetch)
+
+    const result = await Effect.runPromise(
+      service.mergePullRequest(repository, "feature"),
+    )
+    expect(result).toEqual({
+      _tag: "revalidation",
+      reason: "mergeability_changed",
+      message:
+        "Pull request mergeability changed while merging acme/widgets:feature",
+    })
+  })
+
+  test("revalidates rejectedByPolicy after a queued complete instead of merge_rejected", async () => {
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (method === "PATCH") {
+        return json({
+          pullRequestId: 42,
+          status: "active",
+          isDraft: false,
+          mergeStatus: "queued",
+          lastMergeSourceCommit: { commitId: "sha-1" },
+          repository: { project: { id: "proj-1" } },
+        })
+      }
+      if (method === "GET" && /\/pullrequests\/42$/.test(url.pathname)) {
+        return json({
+          pullRequestId: 42,
+          status: "active",
+          isDraft: false,
+          mergeStatus: "rejectedByPolicy",
+          lastMergeSourceCommit: { commitId: "sha-1" },
+          repository: { project: { id: "proj-1" } },
+        })
+      }
+      if (url.pathname.endsWith("/statuses")) {
+        return json({ value: [] })
+      }
+      if (url.pathname.includes("/policy/evaluations")) {
+        return json({ value: [{ evaluationId: "e1", status: "approved" }] })
+      }
+      return json({
+        value: [
+          {
+            pullRequestId: 42,
+            status: "active",
+            isDraft: false,
+            mergeStatus: "succeeded",
+            lastMergeSourceCommit: { commitId: "sha-1" },
+            repository: { project: { id: "proj-1" } },
+          },
+        ],
+      })
+    }) as unknown as typeof fetch)
+
+    const result = await Effect.runPromise(
+      service.mergePullRequest(repository, "feature"),
+    )
+    expect(result).toEqual({
+      _tag: "revalidation",
+      reason: "mergeability_changed",
+      message:
+        "Pull request mergeability changed while merging acme/widgets:feature",
+    })
+  })
+
+  test("keeps credential and 5xx failures operational", async () => {
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (method === "PATCH") {
+        return new Response("unauthorized", { status: 401 })
+      }
+      if (url.pathname.endsWith("/statuses")) {
+        return json({ value: [] })
+      }
+      if (url.pathname.includes("/policy/evaluations")) {
+        return json({ value: [{ evaluationId: "e1", status: "approved" }] })
+      }
+      return json({
+        value: [
+          {
+            pullRequestId: 42,
+            status: "active",
+            isDraft: false,
+            mergeStatus: "succeeded",
+            lastMergeSourceCommit: { commitId: "sha-1" },
+            repository: { project: { id: "proj-1" } },
+          },
+        ],
+      })
+    }) as unknown as typeof fetch)
+
+    const result = await Effect.runPromise(
+      Effect.result(service.mergePullRequest(repository, "feature")),
+    )
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(AzureDevOpsRequestError)
+      expect(result.failure.statusCode).toBe(401)
+    }
   })
 
   test("re-fetches and reclassifies after a 422 merge precondition rejection", async () => {

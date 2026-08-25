@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import {
+  Clock,
   Config,
   Duration,
   Effect,
@@ -39,6 +40,13 @@ import {
 } from "./types.js"
 
 const REQUEST_TIMEOUT = Duration.seconds(30)
+/**
+ * Azure's complete call commonly returns the PR still `active` with
+ * `mergeStatus: queued`, then flips to `completed` a moment later. Merge PR
+ * waits this long for that flip before failing retryably.
+ */
+const QUEUED_COMPLETION_WAIT = Duration.seconds(15)
+const QUEUED_COMPLETION_POLL_INTERVAL = Duration.seconds(1)
 /** Azure DevOps REST API version pinned for stable response shapes. */
 const API_VERSION = "7.1"
 /**
@@ -344,6 +352,19 @@ const mapAzureDevOpsMergeability = (
   if (normalized === "conflicts") return "conflicting"
   return "unknown"
 }
+
+const isActivePullRequest = (pr: AzureDevOpsPullRequest): boolean =>
+  pr.status === "active" || pr.status === undefined
+
+/**
+ * After a complete request, `active` + `queued` means Azure accepted the
+ * merge and is finishing it — not unknown Watch mergeability, and not a
+ * rejected mergeable PR. Watch-time `queued` (merge not yet computed) still
+ * maps to `unknown` via {@link mapAzureDevOpsMergeability}.
+ */
+const isQueuedCompletionInFlight = (pr: AzureDevOpsPullRequest): boolean =>
+  isActivePullRequest(pr) &&
+  (pr.mergeStatus ?? "").trim().toLowerCase() === "queued"
 
 const policyEvaluationTerminalChecks = (
   evaluations: readonly AzureDevOpsPolicyEvaluation[],
@@ -2034,6 +2055,49 @@ export const makeAzureDevOpsService = (options: {
           Effect.result,
         )
 
+        const loadPullRequestById = (
+          pullRequestId: number,
+        ): Effect.Effect<AzureDevOpsPullRequest, AzureDevOpsRequestError> =>
+          requestUnknown(
+            identity.organization,
+            pullRequestsPath(identity, `/${pullRequestId}`),
+            `Failed to re-fetch pull request ${pullRequestId} after merge for ${repository.projectPath}`,
+          ).pipe(
+            Effect.flatMap((value) =>
+              decodePullRequest(
+                value,
+                `Azure DevOps returned an invalid pull request after merge for ${repository.projectPath}:${headRefName}`,
+              ),
+            ),
+          )
+
+        /**
+         * Azure accepted the complete request but has not finished it.
+         * Poll the pull request until it leaves `queued`, or fail retryably
+         * once the wait bound elapses — never `merge_rejected`.
+         */
+        const waitForQueuedCompletion = (
+          pullRequestId: number,
+        ): Effect.Effect<AzureDevOpsPullRequest, AzureDevOpsServiceError> =>
+          Effect.gen(function* () {
+            const deadline =
+              (yield* Clock.currentTimeMillis) +
+              Duration.toMillis(QUEUED_COMPLETION_WAIT)
+            for (;;) {
+              const current = yield* loadPullRequestById(pullRequestId)
+              if (!isQueuedCompletionInFlight(current)) {
+                return current
+              }
+              if ((yield* Clock.currentTimeMillis) >= deadline) {
+                return yield* new AzureDevOpsRequestError({
+                  message: `Azure DevOps completion is still queued for ${repository.projectPath}:${headRefName}`,
+                })
+              }
+              yield* Effect.sleep(QUEUED_COMPLETION_POLL_INTERVAL)
+            }
+          })
+
+        let queuedObservation: AzureDevOpsPullRequest | null = null
         if (Result.isSuccess(mergeResult)) {
           const merged = mergeResult.success
           if (merged.status === "completed") {
@@ -2044,6 +2108,21 @@ export const makeAzureDevOpsService = (options: {
               _tag: "needs_human" as const,
               reason: "closed_unmerged" as const,
               message: `Pull request for ${repository.projectPath}:${headRefName} was concurrently closed without merging`,
+            }
+          }
+          if (isQueuedCompletionInFlight(merged)) {
+            queuedObservation = yield* waitForQueuedCompletion(
+              merged.pullRequestId,
+            )
+            if (queuedObservation.status === "completed") {
+              return { _tag: "merged" } as const
+            }
+            if (queuedObservation.status === "abandoned") {
+              return {
+                _tag: "needs_human" as const,
+                reason: "closed_unmerged" as const,
+                message: `Pull request for ${repository.projectPath}:${headRefName} was concurrently closed without merging`,
+              }
             }
           }
           // Unexpected non-completed success body (e.g. still active after a
@@ -2064,11 +2143,13 @@ export const makeAzureDevOpsService = (options: {
           }
         }
 
-        const refreshed = yield* resolvePullRequestForBranch(
-          repository,
-          identity,
-          headRefName,
-        )
+        const refreshed =
+          queuedObservation ??
+          (yield* resolvePullRequestForBranch(
+            repository,
+            identity,
+            headRefName,
+          ))
         if (refreshed === null) {
           return yield* new AzureDevOpsRequestError({
             message: `Azure DevOps did not return a pull request after merge for ${repository.projectPath}:${headRefName}`,
