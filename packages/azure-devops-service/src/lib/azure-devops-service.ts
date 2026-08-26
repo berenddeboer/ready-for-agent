@@ -35,7 +35,9 @@ export type AzureDevOpsServiceError =
 export interface AzureDevOpsServiceShape {
   /**
    * Verify Organization + Project against Azure DevOps before persistence
-   * (`GET _apis/projects/{project}`). Implemented.
+   * (`GET _apis/projects/{project}`), then the Git repository itself
+   * (`GET .../git/repositories/{repository}`). Rejects when the Git repo
+   * has no default branch (empty / uninitialized). Implemented.
    */
   readonly verifyProject: (
     repository: AzureDevOpsRepository,

@@ -258,6 +258,20 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         error.message ?? "GitLab request failed",
         "GITLAB_REQUEST_FAILED",
       )
+    case "AzureDevOpsProjectUnavailableError":
+      return gql(
+        `Azure DevOps project ${error.projectPath} was not found on ${error.forgeHost}. Check the organization, project, and repository, then try again.`,
+        "AZURE_DEVOPS_PROJECT_UNAVAILABLE",
+        {
+          forgeHost: error.forgeHost,
+          projectPath: error.projectPath,
+        },
+      )
+    case "AzureDevOpsRequestError":
+      return gql(
+        error.message ?? "Azure DevOps request failed",
+        "AZURE_DEVOPS_REQUEST_FAILED",
+      )
     case "GitHubThrottledError": {
       const retryAt = error.retryAt
       const retryTime =

@@ -136,4 +136,39 @@ describe("toGraphQLError", () => {
       reason: "not_paused",
     })
   })
+
+  test("maps AzureDevOpsRequestError to AZURE_DEVOPS_REQUEST_FAILED", () => {
+    const error = {
+      _tag: "AzureDevOpsRequestError" as const,
+      message:
+        "Repository acme/widgets has no default branch; push an initial commit first",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toBe(
+      "Repository acme/widgets has no default branch; push an initial commit first",
+    )
+    expect(gqlError.extensions).toMatchObject({
+      code: "AZURE_DEVOPS_REQUEST_FAILED",
+    })
+  })
+
+  test("maps AzureDevOpsProjectUnavailableError to AZURE_DEVOPS_PROJECT_UNAVAILABLE", () => {
+    const error = {
+      _tag: "AzureDevOpsProjectUnavailableError" as const,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toContain("acme/widgets")
+    expect(gqlError.extensions).toMatchObject({
+      code: "AZURE_DEVOPS_PROJECT_UNAVAILABLE",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    })
+  })
 })

@@ -48,6 +48,9 @@ describe("Azure DevOps verifyProject", () => {
           id: "11111111-1111-1111-1111-111111111111",
           name: "Widgets",
         },
+        "/acme/Widgets/_apis/git/repositories/Widgets?api-version=7.1": {
+          defaultBranch: "refs/heads/main",
+        },
       }),
     )
 
@@ -68,7 +71,7 @@ describe("Azure DevOps verifyProject", () => {
     ) => {
       const headers = (init?.headers ?? {}) as Record<string, string>
       authorization = headers.Authorization ?? null
-      return json({ name: "widgets" })
+      return json({ name: "widgets", defaultBranch: "refs/heads/main" })
     }) as typeof fetch)
     await Effect.runPromise(service.verifyProject(repository))
     expect(authorization).toBe(
@@ -117,6 +120,9 @@ describe("Azure DevOps verifyProject", () => {
           id: "11111111-1111-1111-1111-111111111111",
           name: "Default",
         },
+        "/acme/Default/_apis/git/repositories/gantry?api-version=7.1": {
+          defaultBranch: "refs/heads/main",
+        },
       }),
     )
 
@@ -132,6 +138,83 @@ describe("Azure DevOps verifyProject", () => {
       forgeHost: "dev.azure.com",
       projectPath: "acme/Default/gantry",
     })
+  })
+
+  test("rejects a Git repository with no default branch", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "/acme/_apis/projects/widgets?api-version=7.1": {
+          id: "11111111-1111-1111-1111-111111111111",
+          name: "widgets",
+        },
+        "/acme/widgets/_apis/git/repositories/widgets?api-version=7.1": {
+          defaultBranch: null,
+        },
+      }),
+    )
+    const error = await Effect.runPromise(
+      service.verifyProject(repository).pipe(Effect.flip),
+    )
+    expect(error).toBeInstanceOf(AzureDevOpsRequestError)
+    expect(error.message).toBe(
+      "Repository acme/widgets has no default branch; push an initial commit first",
+    )
+  })
+
+  test("accepts a Git repository whose name differs from the project when it has a default branch", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "/acme/_apis/projects/Default?api-version=7.1": {
+          id: "11111111-1111-1111-1111-111111111111",
+          name: "Default",
+        },
+        "/acme/Default/_apis/git/repositories/gantry?api-version=7.1": {
+          defaultBranch: "refs/heads/main",
+        },
+      }),
+    )
+
+    await expect(
+      Effect.runPromise(
+        service.verifyProject({
+          ...repository,
+          projectPath: "acme/Default/gantry",
+        }),
+      ),
+    ).resolves.toEqual({
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/Default/gantry",
+    })
+  })
+
+  test("rejects a differently-named Git repository with no default branch", async () => {
+    const service = makeAzureDevOpsServiceFromToken(
+      "test-pat",
+      fakeFetch({
+        "/acme/_apis/projects/Default?api-version=7.1": {
+          id: "11111111-1111-1111-1111-111111111111",
+          name: "Default",
+        },
+        "/acme/Default/_apis/git/repositories/gantry?api-version=7.1": {
+          defaultBranch: null,
+        },
+      }),
+    )
+    const error = await Effect.runPromise(
+      service
+        .verifyProject({
+          ...repository,
+          projectPath: "acme/Default/gantry",
+        })
+        .pipe(Effect.flip),
+    )
+    expect(error).toBeInstanceOf(AzureDevOpsRequestError)
+    expect(error.message).toBe(
+      "Repository acme/Default/gantry has no default branch; push an initial commit first",
+    )
   })
 })
 

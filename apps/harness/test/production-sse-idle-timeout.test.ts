@@ -10,6 +10,10 @@ import {
   missingSessionTelemetry,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
+import {
+  AzureDevOpsService,
+  type AzureDevOpsServiceShape,
+} from "@ready-for-agent/azure-devops-service"
 import { DbService, RepositoryId } from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
@@ -118,6 +122,39 @@ const defaultGitlab: GitLabServiceShape = {
   getOpenPullRequestNumber: () => Effect.succeed(1),
   findOpenPullRequestNumber: () => Effect.succeed(null),
   createDraftPullRequest: () => Effect.succeed(1),
+  updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+  countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  getPullRequestCheckStatus: () =>
+    Effect.succeed({
+      _tag: "succeeded",
+      terminalChecks: [],
+      mergeability: "mergeable",
+      baseRefName: "main",
+      headPushedAt: null,
+      headSha: null,
+      createdAt: null,
+      isDraft: null,
+    }),
+  getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+  markPullRequestReadyForReview: () => Effect.void,
+  getPullRequestLifecycleStatus: () =>
+    Effect.succeed({ _tag: "open" as const }),
+  mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+  ensureIssueCompletedWithSummary: () => Effect.void,
+  closeOpenPullRequestsForBranch: () => Effect.void,
+  deleteBranch: () => Effect.void,
+}
+
+const defaultAzureDevOps: AzureDevOpsServiceShape = {
+  verifyProject: (repository) => Effect.succeed(repository),
+  getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+  listReadyIssues: () => Effect.succeed([]),
+  hasCredentials: () => Effect.succeed(true),
+  hasAmbientCredentials: () => Effect.succeed(true),
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  findOpenPullRequestNumber: () => Effect.succeed(null),
+  createDraftPullRequest: () => Effect.succeed(1),
+  ensurePullRequestLinkedToIssue: () => Effect.void,
   updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
   countOpenNonDraftPullRequests: () => Effect.succeed(0),
   getPullRequestCheckStatus: () =>
@@ -416,6 +453,7 @@ describe("production GraphQL SSE idle timeout", () => {
           Layer.succeed(WorkItemLifecycle, lifecycle),
           Layer.succeed(GitHubService, defaultGithub),
           Layer.succeed(GitLabService, defaultGitlab),
+          Layer.succeed(AzureDevOpsService, defaultAzureDevOps),
           Layer.succeed(LocalGit, {
             inspect: () => Effect.die("unused"),
           }),

@@ -1108,19 +1108,16 @@ export const makeAzureDevOpsService = (options: {
     })
 
   /**
-   * Resolve the base branch for a new draft pull request: an explicit
-   * `baseRefName` when provided, otherwise the Git repository's default
-   * branch (Azure DevOps project metadata has no default-branch field —
-   * that lives on the repository resource, unlike GitLab's project).
+   * Load the Git repository's default branch. Azure DevOps project metadata
+   * has no default-branch field — that lives on the repository resource
+   * (unlike GitLab's project). Empty / uninitialized repos report
+   * `defaultBranch: null`.
    */
-  const resolveBaseRefName = (
+  const loadDefaultBranch = (
     repository: AzureDevOpsRepository,
     identity: AzureDevOpsProjectIdentity,
-    explicitBaseRefName: string | undefined,
   ): Effect.Effect<string, AzureDevOpsServiceError> =>
     Effect.gen(function* () {
-      const trimmed = explicitBaseRefName?.trim() ?? ""
-      if (trimmed !== "") return trimmed
       const meta = yield* unavailableOn404(
         repository,
         requestUnknown(
@@ -1148,10 +1145,26 @@ export const makeAzureDevOpsService = (options: {
       const defaultBranch = meta.defaultBranch?.trim() ?? ""
       if (defaultBranch === "") {
         return yield* new AzureDevOpsRequestError({
-          message: `Repository ${repository.projectPath} has no default base branch`,
+          message: `Repository ${repository.projectPath} has no default branch; push an initial commit first`,
         })
       }
       return branchFromRefName(defaultBranch)
+    })
+
+  /**
+   * Resolve the base branch for a new draft pull request: an explicit
+   * `baseRefName` when provided, otherwise the Git repository's default
+   * branch.
+   */
+  const resolveBaseRefName = (
+    repository: AzureDevOpsRepository,
+    identity: AzureDevOpsProjectIdentity,
+    explicitBaseRefName: string | undefined,
+  ): Effect.Effect<string, AzureDevOpsServiceError> =>
+    Effect.gen(function* () {
+      const trimmed = explicitBaseRefName?.trim() ?? ""
+      if (trimmed !== "") return trimmed
+      return yield* loadDefaultBranch(repository, identity)
     })
 
   return {
@@ -1174,20 +1187,25 @@ export const makeAzureDevOpsService = (options: {
           catch: (cause) =>
             requestError("Azure DevOps returned an invalid project", cause),
         })
-        // Project verification only canonicalizes the org/project segments
-        // (e.g. case correction); an explicit repository segment (present
-        // when the Git repository name differs from the project name) is
-        // carried through unchanged — this method is intentionally
-        // project-scoped only and never validates the Git repository name.
+        // Canonicalize org/project casing from the project resource; an
+        // explicit repository segment (Git name differs from the project)
+        // is carried through unchanged, then the Git repository itself is
+        // verified so an empty repo cannot persist.
         const projectPath =
           identity.repository === undefined
             ? `${identity.organization}/${project.name}`
             : `${identity.organization}/${project.name}/${identity.repository}`
-        return {
+        const resolved = {
           forge: repository.forge,
           forgeHost: repository.forgeHost,
           projectPath,
         } satisfies AzureDevOpsRepository
+        yield* loadDefaultBranch(resolved, {
+          organization: identity.organization,
+          project: project.name,
+          repository: identity.repository,
+        })
+        return resolved
       },
     ),
     getAuthenticatedUserLogin: Effect.fn(
