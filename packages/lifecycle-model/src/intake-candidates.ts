@@ -50,7 +50,10 @@ export type IntakeCandidateWorkItemInput = WorkItemPredicateShape & {
  * outright and never offered, independent of what the Issue's own forge
  * state currently reports. This is a defense-in-depth guard: it must hold
  * even when the forge Issue looks open and startable because its close
- * never landed (see `shippedWorkItems`).
+ * never landed (see `shippedWorkItems`). Failed and Abandoned history does
+ * not trigger this veto; Needs Human remains unfinished and is omitted by
+ * the ordinary unfinished-Work-Item rule. The same guard applies for every
+ * Forge (GitHub, GitLab, and Azure DevOps).
  */
 export const classifyIntakeCandidates = (
   issues: readonly IntakeCandidateIssueInput[],
