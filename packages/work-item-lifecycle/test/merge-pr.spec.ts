@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect"
 import {
+  AzureDevOpsRequestError,
   AzureDevOpsService,
   type AzureDevOpsServiceShape,
 } from "@ready-for-agent/azure-devops-service"
@@ -340,6 +341,7 @@ describe("mergePr", () => {
         expect(options).toBeUndefined()
         return Effect.succeed({ _tag: "merged" as const })
       },
+      ensureIssueCompletedWithSummary: () => Effect.void,
     } as AzureDevOpsServiceShape)
 
     await Effect.runPromise(
@@ -373,6 +375,7 @@ describe("mergePr", () => {
         seenOptions = options
         return Effect.succeed({ _tag: "merged" as const })
       },
+      ensureIssueCompletedWithSummary: () => Effect.void,
     } as AzureDevOpsServiceShape)
 
     await Effect.runPromise(
@@ -382,5 +385,272 @@ describe("mergePr", () => {
     )
 
     expect(seenOptions).toEqual({ acceptNoChecks: true })
+  })
+
+  it("completes a still-open Azure Boards Issue after merge", async () => {
+    const closeOutCalls: Array<{
+      issueNumber: number
+      workItemId: string
+      summary: string
+      projectPath: string
+    }> = []
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/widgets",
+    })
+    const azureDevOpsDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () =>
+        Effect.die("GitHub must not merge an Azure DevOps repo"),
+      ensureIssueCompletedWithSummary: () =>
+        Effect.die("GitHub must not close an Azure DevOps Issue"),
+    } as GitHubServiceShape)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+      ensureIssueCompletedWithSummary: (
+        forgeRepository,
+        issueNumber,
+        workItemId,
+        summaryMarkdown,
+      ) =>
+        Effect.sync(() => {
+          closeOutCalls.push({
+            issueNumber,
+            workItemId,
+            summary: summaryMarkdown,
+            projectPath: forgeRepository.projectPath,
+          })
+        }),
+    } as AzureDevOpsServiceShape)
+
+    const result = await Effect.runPromise(
+      mergePr(context).pipe(
+        Effect.provide(Layer.mergeAll(azureDevOpsDb, github, azureDevOps)),
+      ),
+    )
+
+    expect(result).toEqual({ _tag: "merged" })
+    expect(closeOutCalls).toEqual([
+      {
+        issueNumber: 42,
+        workItemId: context.workItemId,
+        summary: "Completed after the pull request merged.",
+        projectPath: "acme/widgets",
+      },
+    ])
+  })
+
+  it("posts the persisted completion summary when Merge PR already has one", async () => {
+    const summaries: string[] = []
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/widgets",
+    })
+    const azureDevOpsDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () =>
+        Effect.die("GitHub must not merge an Azure DevOps repo"),
+    } as GitHubServiceShape)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+      ensureIssueCompletedWithSummary: (
+        _forgeRepository,
+        _issueNumber,
+        _workItemId,
+        summaryMarkdown,
+      ) =>
+        Effect.sync(() => {
+          summaries.push(summaryMarkdown)
+        }),
+    } as AzureDevOpsServiceShape)
+
+    await Effect.runPromise(
+      mergePr({
+        ...context,
+        completionSummary: "Findings complete.",
+      }).pipe(
+        Effect.provide(Layer.mergeAll(azureDevOpsDb, github, azureDevOps)),
+      ),
+    )
+
+    expect(summaries).toEqual(["Findings complete."])
+  })
+
+  it("still asks Azure to complete the Boards Issue when merge already linked it", async () => {
+    const calls: string[] = []
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/widgets",
+    })
+    const azureDevOpsDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () =>
+        Effect.die("GitHub must not merge an Azure DevOps repo"),
+    } as GitHubServiceShape)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      mergePullRequest: () =>
+        Effect.sync(() => {
+          calls.push("merge")
+          return { _tag: "merged" as const }
+        }),
+      ensureIssueCompletedWithSummary: () =>
+        Effect.sync(() => {
+          calls.push("close-out")
+        }),
+    } as AzureDevOpsServiceShape)
+
+    await Effect.runPromise(
+      mergePr(context).pipe(
+        Effect.provide(Layer.mergeAll(azureDevOpsDb, github, azureDevOps)),
+      ),
+    )
+
+    expect(calls).toEqual(["merge", "close-out"])
+  })
+
+  it("does not complete an Azure Boards Issue when merge is not yet merged", async () => {
+    let closeOutCalls = 0
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/widgets",
+    })
+    const azureDevOpsDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () =>
+        Effect.die("GitHub must not merge an Azure DevOps repo"),
+    } as GitHubServiceShape)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      mergePullRequest: () =>
+        Effect.succeed({
+          _tag: "needs_human" as const,
+          reason: "merge_rejected" as const,
+          message: "Azure DevOps rejected the merge",
+        }),
+      ensureIssueCompletedWithSummary: () =>
+        Effect.sync(() => {
+          closeOutCalls += 1
+        }),
+    } as AzureDevOpsServiceShape)
+
+    const result = await Effect.runPromise(
+      mergePr(context).pipe(
+        Effect.provide(Layer.mergeAll(azureDevOpsDb, github, azureDevOps)),
+      ),
+    )
+
+    expect(result._tag).toBe("needs_human")
+    expect(closeOutCalls).toBe(0)
+  })
+
+  it("fails Merge PR when Azure close-out fails after a successful merge", async () => {
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/widgets",
+    })
+    const azureDevOpsDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () =>
+        Effect.die("GitHub must not merge an Azure DevOps repo"),
+    } as GitHubServiceShape)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+      ensureIssueCompletedWithSummary: () =>
+        Effect.fail(
+          new AzureDevOpsRequestError({
+            message:
+              "Failed to complete Azure Boards Issue #42 for acme/widgets",
+            statusCode: 401,
+          }),
+        ),
+    } as AzureDevOpsServiceShape)
+
+    const error = await Effect.runPromise(
+      mergePr(context).pipe(
+        Effect.provide(Layer.mergeAll(azureDevOpsDb, github, azureDevOps)),
+        Effect.flip,
+      ),
+    )
+
+    expect(error).toBeInstanceOf(AzureDevOpsRequestError)
+  })
+
+  it("does not close a GitHub Issue after merge", async () => {
+    let closeOutCalls = 0
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+      ensureIssueCompletedWithSummary: () =>
+        Effect.sync(() => {
+          closeOutCalls += 1
+        }),
+    } as GitHubServiceShape)
+
+    await Effect.runPromise(
+      mergePr(context).pipe(Effect.provide(Layer.merge(db, github))),
+    )
+
+    expect(closeOutCalls).toBe(0)
+  })
+
+  it("does not close a GitLab Issue after merge", async () => {
+    let githubCloseOut = 0
+    let gitlabCloseOut = 0
+    const gitlabRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/widgets",
+      localPath: "/repos/widgets",
+    })
+    const gitlabDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([gitlabRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () => Effect.die("GitHub must not merge a GitLab repo"),
+      ensureIssueCompletedWithSummary: () =>
+        Effect.sync(() => {
+          githubCloseOut += 1
+        }),
+    } as GitHubServiceShape)
+    const gitlab = Layer.succeed(GitLabService, {
+      mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+      ensureIssueCompletedWithSummary: () =>
+        Effect.sync(() => {
+          gitlabCloseOut += 1
+        }),
+    } as GitLabServiceShape)
+
+    await Effect.runPromise(
+      mergePr(context).pipe(
+        Effect.provide(Layer.mergeAll(gitlabDb, github, gitlab)),
+      ),
+    )
+
+    expect(githubCloseOut).toBe(0)
+    expect(gitlabCloseOut).toBe(0)
   })
 })

@@ -392,7 +392,7 @@ The Lifecycle Step that changes a Work Item PR from draft to ready for review af
 The Lifecycle Step that decides whether a settled Work Item PR may be merged by the harness or requires a human.
 
 **Merge PR**:
-The Lifecycle Step that revalidates and merges an approved Work Item PR through its Forge. On Azure DevOps, a complete request that is still queued is in-flight merge work, not a Merge Revalidation Outcome or a rejected merge.
+The Lifecycle Step that revalidates and merges an approved Work Item PR through its Forge. On Azure DevOps, a complete request that is still queued is in-flight merge work, not a Merge Revalidation Outcome or a rejected merge. After a successful merge on Azure DevOps, if the Forge Issue is still open, Merge PR completes it to that type's Completed-category state and posts the hidden-marker completion summary once; an already completed Boards item is left in state.
 
 
 **local cleanup**:

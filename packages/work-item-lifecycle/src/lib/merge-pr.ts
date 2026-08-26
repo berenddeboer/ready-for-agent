@@ -14,12 +14,27 @@ export class MergePrContextError extends Schema.TaggedErrorClass<MergePrContextE
   },
 ) {}
 
+const AZURE_BOARDS_MERGE_COMPLETION_SUMMARY =
+  "Completed after the pull request merged."
+
+const azureBoardsMergeCompletionSummary = (
+  context: LifecycleStepContext,
+): string => {
+  const persisted = context.completionSummary?.trim()
+  if (persisted !== undefined && persisted !== "") {
+    return persisted
+  }
+  return AZURE_BOARDS_MERGE_COMPLETION_SUMMARY
+}
+
 /**
  * Production Merge PR Lifecycle Step.
  * After Decide PR Merge chooses clanker merge, merges the open PR/MR on the
  * Work Item branch via the Forge API (token-backed; expected head SHA).
  * GitHub squash-merges; GitLab and Azure DevOps defer merge method to
- * project/repository settings.
+ * project/repository settings. On Azure DevOps, a successful merge then
+ * completes the Boards Issue if it is still open (harness-owned backup for
+ * `transitionWorkItems`).
  */
 export const mergePr = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -57,7 +72,20 @@ export const mergePr = (context: LifecycleStepContext) =>
       }
       case "azure-devops": {
         const azureDevOps = yield* AzureDevOpsService
-        return yield* azureDevOps.mergePullRequest(repository, branch, options)
+        const result = yield* azureDevOps.mergePullRequest(
+          repository,
+          branch,
+          options,
+        )
+        if (result._tag === "merged") {
+          yield* azureDevOps.ensureIssueCompletedWithSummary(
+            repository,
+            context.issueNumber,
+            context.workItemId,
+            azureBoardsMergeCompletionSummary(context),
+          )
+        }
+        return result
       }
       case "github": {
         const github = yield* GitHubService

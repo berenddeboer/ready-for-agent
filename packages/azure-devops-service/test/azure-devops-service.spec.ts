@@ -1729,6 +1729,41 @@ describe("Azure DevOps ensureIssueCompletedWithSummary", () => {
     )
     expect(posted).toBe(false)
   })
+
+  test("leaves an already completed Boards item in state", async () => {
+    const methods: string[] = []
+    const service = makeAzureDevOpsServiceFromToken("test-pat", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      methods.push(`${method} ${url.pathname}`)
+      if (url.pathname.endsWith("/comments")) {
+        if (method === "POST") {
+          const posted = JSON.parse(String(init?.body)) as { text: string }
+          return json({ text: posted.text })
+        }
+        return json({ comments: [] })
+      }
+      return json({
+        id: 1,
+        fields: { "System.State": "Done", "System.WorkItemType": "Issue" },
+      })
+    }) as unknown as typeof fetch)
+
+    await Effect.runPromise(
+      service.ensureIssueCompletedWithSummary(
+        repository,
+        1,
+        "wi-1",
+        "All done",
+      ),
+    )
+
+    expect(methods.some((entry) => entry.startsWith("PATCH "))).toBe(false)
+    expect(methods.some((entry) => entry.startsWith("POST "))).toBe(true)
+  })
 })
 
 describe("Azure DevOps closeOpenPullRequestsForBranch", () => {

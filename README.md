@@ -296,8 +296,8 @@ Azure DevOps is a first-class Forge. Ready discovery is a Boards tag
 `AZURE_DEVOPS_EXT_PAT` environment variable until credential UX
 ships. A repo with no default branch is not usable until `main` (or
 equivalent) exists. Default Merge Policy is Off; Always is required to
-auto-merge a no-CI Azure repo. Boards close-out is not yet at parity
-with GitHub and GitLab.
+auto-merge a no-CI Azure repo. After a successful merge, if the Boards
+item is still open the harness completes it.
 
 Details: [docs/azure-devops.md](docs/azure-devops.md). Token scopes:
 [issue #1213](https://github.com/berenddeboer/ready-for-agent/issues/1213).

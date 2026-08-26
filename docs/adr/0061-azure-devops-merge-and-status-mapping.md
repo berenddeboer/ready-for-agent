@@ -67,6 +67,19 @@ for any reason (network error, unexpected 404, decode failure) or finds no
 Completed-category state — matching the existing `CLOSED_STATE_NAMES`
 read-side heuristic used to classify Ready Issues' open/closed state.
 
+**Merge PR runs that close-out as a harness-owned backup after merge.**
+Linking the Boards item at Create PR plus `transitionWorkItems: true` on
+complete make Azure's own transition *possible*, but project board settings
+can refuse it and leave a tagged To Do item that would recandidate. After
+Merge PR observes `completed`, it calls `ensureIssueCompletedWithSummary`
+so a still-open Boards item reaches that type's Completed-category state
+and the hidden-marker comment is posted once. An item already Done/Closed
+is left in state. GitHub and GitLab close-out on merge is unchanged
+(`Closes #N`). Close-out stays inside Merge PR rather than routing through
+Close Issue so it uses the live Boards item (not the local Issue store)
+and so a close-out failure after a successful merge remains a retryable
+Merge PR Step Run — retry sees the PR already merged and repeats close-out.
+
 **Close-out cleanup is two separate calls, matching GitLab's shape.**
 `closeOpenPullRequestsForBranch` (`PATCH .../pullrequests/{id}` with
 `status: "abandoned"`) and `deleteBranch` (`POST .../refs` with a zero
