@@ -1,6 +1,21 @@
 import type { Effect } from "effect"
 import { runAzureDevOpsCli } from "../bin/cli.js"
+import { closeOpenPullRequestsForBranchProgram } from "../bin/close-open-pull-requests-for-branch.js"
+import { countOpenNonDraftPullRequestsProgram } from "../bin/count-open-non-draft-pull-requests.js"
+import { createDraftPullRequestProgram } from "../bin/create-draft-pull-request.js"
+import { deleteBranchProgram } from "../bin/delete-branch.js"
+import { ensureIssueCompletedWithSummaryProgram } from "../bin/ensure-issue-completed-with-summary.js"
+import { ensurePullRequestLinkedToIssueProgram } from "../bin/ensure-pull-request-linked-to-issue.js"
+import { findOpenPullRequestNumberProgram } from "../bin/find-open-pull-request-number.js"
 import { getAuthenticatedUserLoginProgram } from "../bin/get-authenticated-user-login.js"
+import { getOpenPullRequestNumberProgram } from "../bin/get-open-pull-request-number.js"
+import { getPrCheckStatusProgram } from "../bin/get-pr-check-status.js"
+import { getPrLifecycleStatusProgram } from "../bin/get-pr-lifecycle-status.js"
+import { getPrStatusCheckDiagnosticsProgram } from "../bin/get-pr-status-check-diagnostics.js"
+import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
+import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
+import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
+import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
 import { verifyProjectProgram } from "../bin/verify-project.js"
 import { azureDevOpsServiceBinScriptPath } from "../bin-script-path.js"
 import type { AzureDevOpsService } from "./azure-devops-service.js"
@@ -12,16 +27,29 @@ export const INTERNAL_AZURE_DEVOPS_HELPER_ARG =
 /**
  * CLI-backed operations. `hasCredentials`/`hasAmbientCredentials` are
  * synchronous local checks (no vault secret needed) and never need a
- * subprocess, matching GitLab's helper operation set. Of the 19-method
- * surface that leaves 15 future helper candidates: 14 are already
- * implemented against the live REST API in-process, while
+ * subprocess, matching GitLab's helper operation set.
  * `countOpenNonDraftPullRequests` still fails with
- * `AzureDevOpsNotImplementedError`. Each gains a helper operation (and
- * Keymaxxer child-spawn wiring) in later tickets.
+ * `AzureDevOpsNotImplementedError` inside the helper the same way the
+ * in-process Live layer does.
  */
 export const AZURE_DEVOPS_HELPER_OPERATIONS = [
-  "verify-project",
+  "list-ready-issues",
   "get-authenticated-user-login",
+  "verify-project",
+  "get-open-pull-request-number",
+  "find-open-pull-request-number",
+  "create-draft-pull-request",
+  "ensure-pull-request-linked-to-issue",
+  "update-open-draft-pull-request-copy",
+  "count-open-non-draft-pull-requests",
+  "get-pr-check-status",
+  "get-pr-status-check-diagnostics",
+  "mark-pr-ready-for-review",
+  "get-pr-lifecycle-status",
+  "merge-pull-request",
+  "ensure-issue-completed-with-summary",
+  "close-open-pull-requests-for-branch",
+  "delete-branch",
 ] as const
 
 export type AzureDevOpsHelperOperation =
@@ -117,8 +145,23 @@ const programs: Record<
     args: ReadonlyArray<string>,
   ) => Effect.Effect<void, unknown, AzureDevOpsService>
 > = {
-  "verify-project": verifyProjectProgram,
+  "list-ready-issues": listReadyIssuesProgram,
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
+  "verify-project": verifyProjectProgram,
+  "get-open-pull-request-number": getOpenPullRequestNumberProgram,
+  "find-open-pull-request-number": findOpenPullRequestNumberProgram,
+  "create-draft-pull-request": createDraftPullRequestProgram,
+  "ensure-pull-request-linked-to-issue": ensurePullRequestLinkedToIssueProgram,
+  "update-open-draft-pull-request-copy": updateOpenDraftPullRequestCopyProgram,
+  "count-open-non-draft-pull-requests": countOpenNonDraftPullRequestsProgram,
+  "get-pr-check-status": getPrCheckStatusProgram,
+  "get-pr-status-check-diagnostics": getPrStatusCheckDiagnosticsProgram,
+  "mark-pr-ready-for-review": markPrReadyForReviewProgram,
+  "get-pr-lifecycle-status": getPrLifecycleStatusProgram,
+  "merge-pull-request": mergePullRequestProgram,
+  "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
+  "close-open-pull-requests-for-branch": closeOpenPullRequestsForBranchProgram,
+  "delete-branch": deleteBranchProgram,
 }
 
 /**

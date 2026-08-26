@@ -17,6 +17,7 @@ effect_ignore=(
   "**/job-worker.test.ts"
   "**/keymaxxer-github-layer.test.ts"
   "**/keymaxxer-gitlab-layer.test.ts"
+  "**/keymaxxer-azure-devops-layer.test.ts"
   "**/ambient-github-layer.test.ts"
   "**/ambient-gitlab-layer.test.ts"
   "**/application-config.test.ts"

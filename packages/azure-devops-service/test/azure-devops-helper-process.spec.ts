@@ -56,7 +56,7 @@ describe("internal Azure DevOps helper mode", () => {
 
   test("uses workspace bin scripts under a Bun source runtime", () => {
     const spawnPlan = resolveAzureDevOpsHelperChildSpawn({
-      operation: "get-authenticated-user-login",
+      operation: "list-ready-issues",
       args: ["azure-devops", "dev.azure.com", "acme/widgets"],
       execPath: "/usr/bin/bun",
       argv: ["/usr/bin/bun", "/repo/apps/harness/server.ts"],
@@ -64,14 +64,14 @@ describe("internal Azure DevOps helper mode", () => {
     expect(spawnPlan.command).toBe("/usr/bin/bun")
     expect(spawnPlan.args[0]).toBe("--conditions")
     expect(spawnPlan.args[1]).toBe("@ready-for-agent/source")
-    expect(spawnPlan.args[2]).toMatch(/get-authenticated-user-login\.ts$/)
+    expect(spawnPlan.args[2]).toMatch(/list-ready-issues\.ts$/)
     expect(spawnPlan.args.slice(3)).toEqual([
       "azure-devops",
       "dev.azure.com",
       "acme/widgets",
     ])
     expect(formatAzureDevOpsHelperShellCommand(spawnPlan)).toContain(
-      "get-authenticated-user-login.ts",
+      "list-ready-issues.ts",
     )
     expect(formatAzureDevOpsHelperShellCommand(spawnPlan)).not.toContain(
       INTERNAL_AZURE_DEVOPS_HELPER_ARG,

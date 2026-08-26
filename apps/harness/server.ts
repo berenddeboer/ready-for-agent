@@ -1,4 +1,8 @@
 import {
+  isInternalAzureDevOpsHelperMode,
+  runAzureDevOpsHelperProcess,
+} from "@ready-for-agent/azure-devops-service"
+import {
   isInternalGitHubHelperMode,
   runGitHubHelperProcess,
 } from "@ready-for-agent/github-service"
@@ -17,6 +21,8 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
   runGitHubHelperProcess()
 } else if (isInternalGitLabHelperMode(process.argv)) {
   runGitLabHelperProcess()
+} else if (isInternalAzureDevOpsHelperMode(process.argv)) {
+  runAzureDevOpsHelperProcess()
 } else {
   const { startProductionLifecycle } = await import(
     "./src/server/production-lifecycle.js"

@@ -53,6 +53,7 @@ const INTERNAL_TOKENS = [
   "--no-no-open",
   "--ready-for-agent-internal-github-helper",
   "--ready-for-agent-internal-gitlab-helper",
+  "--ready-for-agent-internal-azure-devops-helper",
   "--ready-for-agent-internal-keymaxxer-sidecar",
 ] as const
 
@@ -316,6 +317,9 @@ describe("Usage-generated operator CLI completions", () => {
         "--ready-for-agent-internal-gitlab-helper",
       )
       expect(script, shell).not.toContain(
+        "--ready-for-agent-internal-azure-devops-helper",
+      )
+      expect(script, shell).not.toContain(
         "--ready-for-agent-internal-keymaxxer-sidecar",
       )
     }
@@ -427,6 +431,9 @@ describe("Usage-generated operator CLI completions", () => {
         )
         expect(result.stdout, shell).not.toContain(
           "--ready-for-agent-internal-gitlab-helper",
+        )
+        expect(result.stdout, shell).not.toContain(
+          "--ready-for-agent-internal-azure-devops-helper",
         )
         expect(result.stdout, shell).not.toContain(
           "--ready-for-agent-internal-keymaxxer-sidecar",

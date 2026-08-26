@@ -161,5 +161,15 @@ describe("source process Usage metadata emission", () => {
     expect(helperWithUsage.stdout).not.toBe(checkedInUsageContract)
     expect(helperWithUsage.stderr).toContain("Unknown GitHub helper operation")
     expect(helperWithUsage.status).not.toBe(0)
+
+    const azureHelper = runSourceCli([
+      "--ready-for-agent-internal-azure-devops-helper",
+    ])
+    expect(azureHelper.stdout).not.toBe(checkedInUsageContract)
+    expect(azureHelper.stdout).not.toContain('min_usage_version "5.1.0"')
+    expect(azureHelper.stderr).toContain(
+      "Unknown Azure DevOps helper operation",
+    )
+    expect(azureHelper.status).not.toBe(0)
   })
 })

@@ -24,6 +24,7 @@ import {
   listSelectableAgentBackendInfos,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
+import { azureDevOpsVaultAccount } from "@ready-for-agent/azure-devops-service"
 import {
   DbService,
   type Forge,
@@ -71,9 +72,11 @@ import {
 import {
   RepositoryCredentialError,
   activatePollingIfCredentialed,
+  azureDevOpsTokenSecretName,
   githubTokenSecretName,
   gitlabHasAmbientCredentialsBounded,
   gitlabTokenSecretName,
+  hasAzureDevOpsAmbientCredential,
   repositoryCredential,
   withKeymaxxerMetadataTimeout,
 } from "./repository-credentials.js"
@@ -626,6 +629,9 @@ export const createGraphqlApi = <R>(
                 const gitlabRepositories = repositories.filter(
                   ({ forge }) => forge === "gitlab",
                 )
+                const azureDevOpsRepositories = repositories.filter(
+                  ({ forge }) => forge === "azure-devops",
+                )
                 const githubTokenNames = ambientAuthentication
                   ? githubRepositories.map(() => null)
                   : githubRepositories.length === 0
@@ -663,6 +669,31 @@ export const createGraphqlApi = <R>(
                           ),
                         ),
                       )
+                // Azure DevOps vault batch: on timeout/error, treat every repo
+                // as a vault miss and fall through to ambient PAT so
+                // ambient-only Azure stays usable when the vault is locked.
+                const azureDevOpsTokenNames = ambientAuthentication
+                  ? azureDevOpsRepositories.map(() => null)
+                  : azureDevOpsRepositories.length === 0
+                    ? []
+                    : yield* withKeymaxxerMetadataTimeout(
+                        keymaxxer.findSecrets(
+                          azureDevOpsRepositories.map((repository) => ({
+                            provider: "azure-devops",
+                            account: azureDevOpsVaultAccount(repository),
+                          })),
+                        ),
+                        keymaxxerMetadataTimeout,
+                        "findSecrets",
+                      ).pipe(
+                        Effect.catchTag("KeymaxxerError", () =>
+                          Effect.succeed(
+                            azureDevOpsRepositories.map(
+                              () => null as string | null,
+                            ),
+                          ),
+                        ),
+                      )
                 // Keyed by Repository id (not positional index): repositories
                 // may include Forges other than github/gitlab (e.g. Azure
                 // DevOps), so a shared running counter over the unfiltered
@@ -678,6 +709,12 @@ export const createGraphqlApi = <R>(
                   gitlabRepositories.map((repository, index) => [
                     repository.id,
                     gitlabTokenNames[index] ?? null,
+                  ]),
+                )
+                const azureDevOpsTokenNameById = new Map(
+                  azureDevOpsRepositories.map((repository, index) => [
+                    repository.id,
+                    azureDevOpsTokenNames[index] ?? null,
                   ]),
                 )
                 return yield* Effect.forEach(
@@ -717,12 +754,31 @@ export const createGraphqlApi = <R>(
                         ),
                       )
                     }
-                    // Any other Forge (currently only Azure DevOps) has no
-                    // batched vault probe wired into this aggregate query yet
-                    // (its own credential machinery is a separate, later
-                    // ticket) — report unconfigured unless Keymaxxer is
-                    // disabled entirely, rather than borrowing another
-                    // Repository's github/gitlab probe result.
+                    if (repository.forge === "azure-devops") {
+                      const vaultTokenName =
+                        azureDevOpsTokenNameById.get(repository.id) ?? null
+                      if (vaultTokenName !== null) {
+                        return Effect.succeed(
+                          repositoryCredential(
+                            repository,
+                            vaultTokenName,
+                            true,
+                          ),
+                        )
+                      }
+                      // Ambient-only: vault already probed (batch miss or
+                      // timeout) — do not re-enter findSecret.
+                      return Effect.succeed(
+                        repositoryCredential(
+                          repository,
+                          null,
+                          hasAzureDevOpsAmbientCredential(),
+                        ),
+                      )
+                    }
+                    // Unrecognized/legacy forge: report unconfigured unless
+                    // Keymaxxer is disabled entirely, rather than borrowing
+                    // another Repository's github/gitlab/azure probe result.
                     return Effect.succeed(
                       repositoryCredential(
                         repository,
@@ -2058,6 +2114,108 @@ export const createGraphqlApi = <R>(
                   }),
                 )
                 .pipe(Effect.withSpan("graphql-api.addRepositoryGitLabToken")),
+              context,
+            ),
+          addRepositoryAzureDevOpsToken: async (
+            _parent: unknown,
+            args: RepositoryCredentialArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              tokenProvisioning
+                .withPermits(1)(
+                  Effect.gen(function* () {
+                    const db = yield* DbService
+                    const repositories = yield* db.listRepositories
+                    const repository = repositories.find(
+                      ({ id }) => id === args.repositoryId,
+                    )
+                    if (repository === undefined) {
+                      return yield* new RepositoryNotFoundError({
+                        repositoryId: args.repositoryId,
+                      })
+                    }
+                    if (repository.forge !== "azure-devops") {
+                      return yield* new RepositoryCredentialError({
+                        message:
+                          "addRepositoryAzureDevOpsToken is only valid for Azure DevOps Repositories",
+                      })
+                    }
+
+                    const keymaxxer = yield* KeymaxxerService
+                    const account = azureDevOpsVaultAccount(repository)
+                    const existingToken = yield* withKeymaxxerMetadataTimeout(
+                      keymaxxer.findSecret({
+                        provider: "azure-devops",
+                        account,
+                      }),
+                      keymaxxerMetadataTimeout,
+                      "findSecret",
+                    )
+                    let tokenName = existingToken
+                    if (tokenName === null) {
+                      tokenName = azureDevOpsTokenSecretName(repository)
+                      if (
+                        yield* withKeymaxxerMetadataTimeout(
+                          keymaxxer.hasSecret(tokenName),
+                          keymaxxerMetadataTimeout,
+                          "hasSecret",
+                        )
+                      ) {
+                        return yield* new RepositoryCredentialError({
+                          message: `Keymaxxer secret ${tokenName} already exists for another account`,
+                        })
+                      }
+                      // Interactive secret entry/approval: intentionally not
+                      // wrapped in the short metadata timeout. Holds
+                      // tokenProvisioning until the operator finishes or cancels.
+                      const added = yield* keymaxxer.addSecret({
+                        name: tokenName,
+                        provider: "azure-devops",
+                        account,
+                        environment: "prod",
+                        access: "read-write",
+                        description: `Azure DevOps personal access token for Ready for Agent on ${account}`,
+                        tags: "ready-for-agent,harness,azure-devops",
+                      })
+                      if (!added) {
+                        return yield* new RepositoryCredentialError({
+                          message:
+                            "Keymaxxer Azure DevOps token setup was cancelled",
+                        })
+                      }
+                      tokenName = yield* withKeymaxxerMetadataTimeout(
+                        keymaxxer.findSecret({
+                          provider: "azure-devops",
+                          account,
+                        }),
+                        keymaxxerMetadataTimeout,
+                        "findSecret",
+                      )
+                      if (tokenName === null) {
+                        return yield* new RepositoryCredentialError({
+                          message:
+                            "The saved Keymaxxer secret does not match this Azure DevOps repository",
+                        })
+                      }
+                    }
+                    yield* activateRepositoryPolling(repository.id).pipe(
+                      Effect.catch((error) =>
+                        Effect.logWarning(
+                          "Automatic Repository polling was not activated",
+                          {
+                            repositoryId: repository.id,
+                            error,
+                          },
+                        ),
+                      ),
+                    )
+                    return repositoryCredential(repository, tokenName)
+                  }),
+                )
+                .pipe(
+                  Effect.withSpan("graphql-api.addRepositoryAzureDevOpsToken"),
+                ),
               context,
             ),
           removeRepository: async (

@@ -41,6 +41,7 @@ const REPOSITORY_SELECTOR_FORMS = [
 const INTERNAL_TOKENS = [
   "--ready-for-agent-internal-github-helper",
   "--ready-for-agent-internal-gitlab-helper",
+  "--ready-for-agent-internal-azure-devops-helper",
   "--ready-for-agent-internal-keymaxxer-sidecar",
 ] as const
 

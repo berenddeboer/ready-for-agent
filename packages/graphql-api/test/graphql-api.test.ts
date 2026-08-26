@@ -1451,6 +1451,7 @@ describe("GraphQL API", () => {
         findSecrets: (inputs) =>
           Effect.succeed(
             inputs.map(({ provider, account }) => {
+              if (provider === "azure-devops") return null
               if (provider !== "github") {
                 throw new Error(`Unexpected vault probe for ${provider}`)
               }
@@ -3658,6 +3659,280 @@ describe("GraphQL API", () => {
       tags: "ready-for-agent,harness,gitlab",
     })
     expect(ensured).toEqual([repository.id])
+  })
+
+  test("reports ambient Azure DevOps credential status when no vault secret exists", async () => {
+    const previous = process.env.AZURE_DEVOPS_EXT_PAT
+    process.env.AZURE_DEVOPS_EXT_PAT = "pat-value"
+    const azureDevOpsRepository = {
+      ...repository,
+      forge: "azure-devops" as const,
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([azureDevOpsRepository]),
+      },
+      {
+        findSecrets: (inputs) =>
+          Effect.succeed(
+            inputs.map(({ provider }) => {
+              if (provider === "github") {
+                throw new Error(
+                  "must not inspect GitHub credentials for Azure DevOps",
+                )
+              }
+              return null
+            }),
+          ),
+      },
+    )
+
+    try {
+      const response = await createGraphqlApi(runtime).fetch(
+        graphqlRequest({
+          query: `query {
+            repositoryCredentials {
+              repositoryId configured githubTokenSecretName githubTokenCreationUrl
+            }
+          }`,
+        }),
+      )
+      const body = (await response.json()) as {
+        data: { repositoryCredentials: Array<Record<string, unknown>> }
+      }
+
+      expect(body.data.repositoryCredentials).toEqual([
+        {
+          repositoryId: repository.id,
+          configured: true,
+          githubTokenSecretName: "AZURE_DEVOPS_TOKEN_ACME_WIDGETS",
+          githubTokenCreationUrl:
+            "https://dev.azure.com/acme/_usersSettings/tokens",
+        },
+      ])
+    } finally {
+      if (previous === undefined) delete process.env.AZURE_DEVOPS_EXT_PAT
+      else process.env.AZURE_DEVOPS_EXT_PAT = previous
+    }
+  })
+
+  test("reports unconfigured Azure DevOps when neither vault nor ambient PAT is usable", async () => {
+    const previous = process.env.AZURE_DEVOPS_EXT_PAT
+    delete process.env.AZURE_DEVOPS_EXT_PAT
+    const azureDevOpsRepository = {
+      ...repository,
+      forge: "azure-devops" as const,
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([azureDevOpsRepository]),
+      },
+      {
+        findSecrets: () => Effect.succeed([null]),
+      },
+    )
+
+    try {
+      const response = await createGraphqlApi(runtime).fetch(
+        graphqlRequest({
+          query: `query {
+            repositoryCredentials { repositoryId configured }
+          }`,
+        }),
+      )
+
+      expect(await response.json()).toEqual({
+        data: {
+          repositoryCredentials: [
+            { repositoryId: repository.id, configured: false },
+          ],
+        },
+      })
+    } finally {
+      if (previous === undefined) delete process.env.AZURE_DEVOPS_EXT_PAT
+      else process.env.AZURE_DEVOPS_EXT_PAT = previous
+    }
+  })
+
+  test("reports vault-backed Azure DevOps credential status", async () => {
+    const previous = process.env.AZURE_DEVOPS_EXT_PAT
+    delete process.env.AZURE_DEVOPS_EXT_PAT
+    const azureDevOpsRepository = {
+      ...repository,
+      forge: "azure-devops" as const,
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([azureDevOpsRepository]),
+      },
+      {
+        findSecrets: (inputs) =>
+          Effect.succeed(
+            inputs.map(({ provider, account }) =>
+              provider === "azure-devops" && account === "acme/widgets"
+                ? "AZURE_DEVOPS_TOKEN_CUSTOM"
+                : null,
+            ),
+          ),
+      },
+    )
+
+    try {
+      const response = await createGraphqlApi(runtime).fetch(
+        graphqlRequest({
+          query: `query {
+            repositoryCredentials {
+              repositoryId configured githubTokenSecretName githubTokenCreationUrl
+            }
+          }`,
+        }),
+      )
+
+      expect(await response.json()).toEqual({
+        data: {
+          repositoryCredentials: [
+            {
+              repositoryId: repository.id,
+              configured: true,
+              githubTokenSecretName: "AZURE_DEVOPS_TOKEN_CUSTOM",
+              githubTokenCreationUrl:
+                "https://dev.azure.com/acme/_usersSettings/tokens",
+            },
+          ],
+        },
+      })
+    } finally {
+      if (previous === undefined) delete process.env.AZURE_DEVOPS_EXT_PAT
+      else process.env.AZURE_DEVOPS_EXT_PAT = previous
+    }
+  })
+
+  test("opens Keymaxxer setup for a missing Azure DevOps repository token", async () => {
+    const azureDevOpsRepository = {
+      ...repository,
+      forge: "azure-devops" as const,
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    }
+    let tokenName: string | null = null
+    let addCalls = 0
+    let addedInput: Parameters<KeymaxxerServiceShape["addSecret"]>[0] | null =
+      null
+    const ensured: string[] = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([azureDevOpsRepository]),
+      },
+      {
+        findSecret: () => Effect.succeed(tokenName),
+        addSecret: (input) =>
+          Effect.sleep("10 millis").pipe(
+            Effect.map(() => {
+              addCalls += 1
+              addedInput = input
+              tokenName = "RENAMED_AZURE_DEVOPS_TOKEN"
+              return true
+            }),
+          ),
+      },
+      {
+        ensureKeyed: (_queue, key) =>
+          Effect.sync(() => {
+            ensured.push(key)
+            return { jobId: makeJobId(), created: true }
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation AddToken($repositoryId: ID!) {
+          addRepositoryAzureDevOpsToken(repositoryId: $repositoryId) {
+            repositoryId configured githubTokenSecretName
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        addRepositoryAzureDevOpsToken: {
+          repositoryId: repository.id,
+          configured: true,
+          githubTokenSecretName: "RENAMED_AZURE_DEVOPS_TOKEN",
+        },
+      },
+    })
+    expect(addCalls).toBe(1)
+    expect(addedInput).toEqual({
+      name: "AZURE_DEVOPS_TOKEN_ACME_WIDGETS",
+      provider: "azure-devops",
+      account: "acme/widgets",
+      environment: "prod",
+      access: "read-write",
+      description:
+        "Azure DevOps personal access token for Ready for Agent on acme/widgets",
+      tags: "ready-for-agent,harness,azure-devops",
+    })
+    expect(ensured).toEqual([repository.id])
+  })
+
+  test("Azure DevOps repositoryCredentials falls through to ambient when vault never resolves", async () => {
+    const previous = process.env.AZURE_DEVOPS_EXT_PAT
+    process.env.AZURE_DEVOPS_EXT_PAT = "pat-value"
+    const azureDevOpsRepository = {
+      ...repository,
+      forge: "azure-devops" as const,
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([azureDevOpsRepository]),
+      },
+      {
+        findSecrets: () => Effect.never,
+      },
+    )
+
+    try {
+      const started = Date.now()
+      const response = await createGraphqlApi(runtime, {
+        keymaxxerMetadataTimeout: Duration.millis(50),
+      }).fetch(
+        graphqlRequest({
+          query: `query {
+            repositoryCredentials { repositoryId configured }
+          }`,
+        }),
+      )
+      const elapsedMs = Date.now() - started
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        data: {
+          repositoryCredentials: [
+            { repositoryId: repository.id, configured: true },
+          ],
+        },
+      })
+      expect(elapsedMs).toBeLessThan(2_000)
+    } finally {
+      if (previous === undefined) delete process.env.AZURE_DEVOPS_EXT_PAT
+      else process.env.AZURE_DEVOPS_EXT_PAT = previous
+    }
   })
 
   test("pullRequestCount uses GitHub open non-draft PRs including external ones", async () => {
