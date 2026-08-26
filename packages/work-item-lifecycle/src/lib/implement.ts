@@ -119,13 +119,36 @@ const resolveIssueNumber = (context: LifecycleStepContext) => {
 const implementAccessScope = (repository: AgentTurnForgeRepository): string => {
   switch (repository.forge) {
     case "gitlab":
-      return "GitLab Issue or API access"
+      return "read of the GitLab Issue"
     case "azure-devops":
-      return "Azure DevOps Work Item or REST API access"
+      return "read of the Azure DevOps Issue"
     case "github":
-      return "GitHub Issue or API access"
+      return "read of the GitHub Issue"
     default: {
       const _exhaustive: never = repository.forge
+      return _exhaustive
+    }
+  }
+}
+
+const implementTheIssuePromptLine =
+  "Do not merely propose a plan; implement the requested changes in this worktree for that exact issue."
+
+/** Implement may inspect the tracker Issue; the harness closes it after merge. */
+const trackerIssueStayOpenPromptLine = (
+  forge: AgentTurnForgeRepository["forge"],
+): string => {
+  const leaveOpen =
+    "Leave the tracker Issue open; the harness closes it after merge."
+  switch (forge) {
+    case "github":
+      return `${leaveOpen} Do not close, complete, or change its state, including \`gh issue close\`.`
+    case "gitlab":
+      return `${leaveOpen} Do not close, complete, or change its state, including \`glab issue close\` or an API state change.`
+    case "azure-devops":
+      return `${leaveOpen} You may GET the Work Item to inspect it. Do not close, complete, or change its state, including PATCH of \`System.State\`.`
+    default: {
+      const _exhaustive: never = forge
       return _exhaustive
     }
   }
@@ -154,8 +177,9 @@ const buildImplementPrompt = (
     ? [
         `Implement GitHub issue ${repository.projectPath}#${issueNumber}.`,
         "Inspect the current GitHub Issue and this Repository's agent/project instructions.",
+        trackerIssueStayOpenPromptLine(repository.forge),
         "Make the implementation in this worktree and run appropriate verification.",
-        "Do not merely propose a plan; complete the implementation work for that exact issue.",
+        implementTheIssuePromptLine,
         ...visualEvidencePromptLines(workItemId),
       ].join("\n")
     : [
@@ -166,8 +190,9 @@ const buildImplementPrompt = (
           forgeAuth,
           implementAccessScope(repository),
         ),
+        trackerIssueStayOpenPromptLine(repository.forge),
         "Make the implementation in this worktree and run appropriate verification.",
-        "Do not merely propose a plan; complete the implementation work for that exact issue.",
+        implementTheIssuePromptLine,
         ...visualEvidencePromptLines(workItemId),
       ].join("\n")
 
@@ -182,8 +207,9 @@ const buildContinueImplementPrompt = (
         `Continue implementing GitHub issue ${repository.projectPath}#${issueNumber}.`,
         "A previous Implement attempt was interrupted or failed; resume from the existing session and worktree state.",
         "Inspect the current GitHub Issue, this Repository's agent/project instructions, and any partial work already present.",
+        trackerIssueStayOpenPromptLine(repository.forge),
         "Finish the implementation in this worktree and run appropriate verification.",
-        "Do not merely propose a plan; complete the implementation work for that exact issue.",
+        implementTheIssuePromptLine,
         ...visualEvidencePromptLines(workItemId),
       ].join("\n")
     : [
@@ -195,8 +221,9 @@ const buildContinueImplementPrompt = (
           forgeAuth,
           implementAccessScope(repository),
         ),
+        trackerIssueStayOpenPromptLine(repository.forge),
         "Finish the implementation in this worktree and run appropriate verification.",
-        "Do not merely propose a plan; complete the implementation work for that exact issue.",
+        implementTheIssuePromptLine,
         ...visualEvidencePromptLines(workItemId),
       ].join("\n")
 
