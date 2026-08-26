@@ -182,6 +182,35 @@ const expectVisualEvidencePrompt = (prompt: string, workItemId: string) => {
   expect(prompt).toMatch(/[Dd]o not open or edit a pull request/)
 }
 
+const expectImplementLeavesTrackerIssueOpen = (
+  prompt: string,
+  forge: "github" | "gitlab" | "azure-devops",
+) => {
+  expect(prompt).toContain("Leave the tracker Issue open")
+  expect(prompt).toMatch(/[Dd]o not close, complete, or change/)
+  switch (forge) {
+    case "github":
+      expect(prompt).toContain("gh issue close")
+      break
+    case "gitlab":
+      expect(prompt).toContain("glab issue close")
+      expect(prompt).not.toMatch(/\bgh\b/i)
+      break
+    case "azure-devops":
+      expect(prompt).toContain("read of the Azure DevOps Issue")
+      expect(prompt).toMatch(
+        /Do not close, complete, or change its state, including PATCH of `System\.State`/,
+      )
+      expect(prompt).not.toContain("Work Item or REST API access")
+      expect(prompt).not.toMatch(/\bgh\b/i)
+      break
+    default: {
+      const _exhaustive: never = forge
+      return _exhaustive
+    }
+  }
+}
+
 const seedRepository = (
   localPath: string,
   identity: {
@@ -295,6 +324,7 @@ describe("implement", () => {
       expect(started!.prompt).toContain("Inspect the current GitHub Issue")
       expect(started!.prompt).toContain("run appropriate verification")
       expect(started!.prompt).toContain("Do not merely propose a plan")
+      expectImplementLeavesTrackerIssueOpen(started!.prompt, "github")
       expectVisualEvidencePrompt(started!.prompt, workItemId)
       expect(continued).toBe(false)
     }))
@@ -355,6 +385,7 @@ describe("implement", () => {
       expect(prompt).not.toContain("curl")
       expect(prompt).not.toMatch(/\bgh\b/i)
       expect(prompt).not.toContain("GitHub")
+      expectImplementLeavesTrackerIssueOpen(prompt, "gitlab")
       expectVisualEvidencePrompt(prompt, workItemId)
     }))
 
@@ -429,6 +460,7 @@ describe("implement", () => {
       expect(prompt).not.toContain("PRIVATE-TOKEN")
       expect(prompt).not.toContain("ambient GITLAB_TOKEN")
       expect(prompt).not.toMatch(/\bgh\b/i)
+      expectImplementLeavesTrackerIssueOpen(prompt, "gitlab")
     }))
 
   it("starts an Azure DevOps Implement turn with REST API ambient guidance and no glab or gh guidance", () =>
@@ -468,10 +500,11 @@ describe("implement", () => {
       expect(prompt).toContain("Inspect the current Azure DevOps Issue")
       expect(prompt).toContain("AZURE_DEVOPS_EXT_PAT")
       expect(prompt).toContain("https://dev.azure.com/acme/widgets")
-      expect(prompt).toContain("Azure DevOps Work Item or REST API access")
+      expect(prompt).toContain("read of the Azure DevOps Issue")
       expect(prompt).not.toContain("glab")
       expect(prompt).not.toMatch(/\bgh\b/i)
       expect(prompt).not.toContain("GitLab")
+      expectImplementLeavesTrackerIssueOpen(prompt, "azure-devops")
       expectVisualEvidencePrompt(prompt, workItemId)
     }))
 
@@ -533,6 +566,7 @@ describe("implement", () => {
       expect(prompt).toContain('"$AZURE_DEVOPS_PAT_ACME_WIDGETS"')
       expect(prompt).not.toContain("glab")
       expect(prompt).not.toContain("GITLAB_TOKEN")
+      expectImplementLeavesTrackerIssueOpen(prompt, "azure-devops")
     }))
 
   it("starts a fresh Session when session_id is blank", () =>
@@ -635,7 +669,76 @@ describe("implement", () => {
       expect(continued!.prompt).toContain("acme/widgets#80")
       expect(continued!.prompt).toContain("interrupted or failed")
       expect(continued!.prompt).toContain("partial work")
+      expectImplementLeavesTrackerIssueOpen(continued!.prompt, "github")
       expectVisualEvidencePrompt(continued!.prompt, workItemId)
+    }))
+
+  it("continues a GitLab Implement turn without inviting Issue close", () =>
+    withTemp(async (root) => {
+      let prompt = ""
+      await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root, {
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+          })
+          return yield* implement(
+            baseContext(root, {
+              repositoryId: repository.id,
+              issueNumber: 3601642,
+              sessionId: "ses_gitlab_continue_implement",
+            }),
+          )
+        }),
+        stubOpencode({
+          continueTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "",
+            })
+          },
+        }),
+      )
+
+      expect(prompt).toContain("Continue implementing")
+      expect(prompt).toContain("glab")
+      expectImplementLeavesTrackerIssueOpen(prompt, "gitlab")
+    }))
+
+  it("continues an Azure DevOps Implement turn with read-only Issue guidance and no System.State PATCH invite", () =>
+    withTemp(async (root) => {
+      let prompt = ""
+      await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root, {
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+          })
+          return yield* implement(
+            baseContext(root, {
+              repositoryId: repository.id,
+              issueNumber: 4021,
+              sessionId: "ses_azure_devops_continue_implement",
+            }),
+          )
+        }),
+        stubOpencode({
+          continueTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "",
+            })
+          },
+        }),
+      )
+
+      expect(prompt).toContain("Continue implementing")
+      expect(prompt).toContain("Inspect the current Azure DevOps Issue")
+      expectImplementLeavesTrackerIssueOpen(prompt, "azure-devops")
     }))
 
   it("continues after a failed Build when session_id exists", () =>
