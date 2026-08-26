@@ -514,7 +514,7 @@ const addCommand = Command.make(
     }),
 ).pipe(
   Command.withDescription(
-    "Inspect and add a local repository; inferred GitLab identity can be corrected with flags",
+    "Inspect and add a local GitHub, GitLab, or Azure DevOps repository; inferred identity can be corrected with flags",
   ),
 )
 

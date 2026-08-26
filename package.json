@@ -8,6 +8,7 @@
     "developer-tools",
     "github",
     "gitlab",
+    "azure-devops",
     "issue-tracker",
     "pull-request",
     "worktree"
