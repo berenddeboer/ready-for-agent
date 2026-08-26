@@ -2,8 +2,8 @@
 
 Azure DevOps is a first-class Forge: add a local clone the same way as
 GitHub or GitLab. The harness lists Ready Issues, implements in a
-worktree, opens a pull request, watches status checks, and can merge.
-Boards close-out is not yet at parity with GitHub and GitLab.
+worktree, opens a pull request, watches status checks, can merge, and
+completes the Boards item after merge if Azure left it open.
 
 ## Ready discovery is a Boards tag
 
@@ -51,6 +51,9 @@ Pending, failed, and Expected checks still block Always.
 ## Boards close-out
 
 Create PR links the Boards work item to the PR so Azure can complete
-it on merge. That is not full close-out parity: a merged PR can leave
-the tagged item in To Do, and it would recandidate. Completing the
-Boards item after merge is still being finished.
+it on merge. After Merge PR reports the PR merged, if the Boards item
+is still open the harness completes it itself: that work-item type's
+Completed-category state (Done on Basic, Closed on Agile) plus the
+hidden-marker completion summary, posted once. An item already Done or
+Closed is left in state. Local cleanup then runs and the Work Item
+reaches Complete.

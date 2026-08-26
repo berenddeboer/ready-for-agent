@@ -42,16 +42,16 @@ full loop.
 | Create PR | **Pull requests:** Read and write | `api` | **Code:** Read & write. **Work Items:** Read & write (Boards ArtifactLink) |
 | Mark PR Ready for Review | **Pull requests:** Read and write | `api` | **Code:** Read & write |
 | Watch / status checks | **Actions:** Read and write (job logs and workflow reruns). **Commit statuses:** Read-only | `read_api` | **Code:** Read. **Build:** Read (logs). **Policy:** Read (branch policy evaluations) |
-| Merge PR | **Pull requests:** Read and write | `api` | **Code:** Read & write (same REST floor as Create PR). **Work Items:** Read & write (`transitionWorkItems` on complete — extra versus git + Create PR) |
+| Merge PR | **Pull requests:** Read and write | `api` | **Code:** Read & write (same REST floor as Create PR). **Work Items:** Read & write (`transitionWorkItems` on complete, plus harness close-out if the Boards item is still open) |
 | close-out | **Issues:** Read and write | `api` | **Work Items:** Read & write (comment + Completed-category state) |
 
 ### Azure DevOps: Merge PR needs more than git + Create PR
 
 Git fetch/push and Create PR succeed with **Code (Read & write)**
 alone. Completing the pull request does not: MERGE_PR PATCHes the PR
-to `completed` with `transitionWorkItems: true`, and close-out writes
-a Boards comment and Completed-category state. Those need
-**Work Items (Read & write)** as well.
+to `completed` with `transitionWorkItems: true`, then close-out writes
+a Boards comment and Completed-category state if the item is still
+open. Those need **Work Items (Read & write)** as well.
 
 Azure REST documents both create and complete as **Code (Read & write)**.
 Do not mint **Code (Read, write, & manage)** for Merge PR — that

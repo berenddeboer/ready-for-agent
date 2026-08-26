@@ -1,7 +1,7 @@
 /**
  * Operator-facing Azure DevOps docs: README Features / Requirements / add,
  * Boards tags, ambient PAT, empty default branch, Merge Policy Always for
- * no-CI, and no un-qualified Boards close-out claim.
+ * no-CI, and harness-owned Boards close-out after merge.
  */
 
 import { existsSync, readFileSync } from "node:fs"
@@ -91,12 +91,16 @@ describe("Azure DevOps operator documentation", () => {
     expect(readme).toMatch(/Boards tag/)
   })
 
-  test("operator docs qualify Boards close-out instead of claiming parity", () => {
+  test("operator docs describe harness-owned Boards close-out after merge", () => {
     const azureDoc = readFileSync(azureOperatorDocPath, "utf8")
+    const readme = readFileSync(publicReadmePath, "utf8")
     expect(azureDoc).toMatch(/close-out/)
-    expect(azureDoc).toMatch(/not yet|not at parity|still being finished/)
+    expect(azureDoc).toMatch(/still open/)
+    expect(azureDoc).toMatch(/Completed-category|Done on Basic|Closed on Agile/)
+    expect(azureDoc).not.toMatch(/not yet at parity|still being finished/)
     expect(azureDoc).not.toMatch(
       /work item close-out with a completion summary are all implemented/,
     )
+    expect(readme).not.toMatch(/Boards close-out is not yet at parity/)
   })
 })
