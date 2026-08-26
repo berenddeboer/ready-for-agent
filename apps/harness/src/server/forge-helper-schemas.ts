@@ -1,6 +1,6 @@
 /**
  * Shared wire-format schemas and helpers for Keymaxxer-backed forge helper
- * processes (GitHub and GitLab).
+ * processes (GitHub, GitLab, and Azure DevOps).
  *
  * Producer helpers JSON.stringify domain values; these schemas decode stdout
  * back into typed service shapes so both layers cannot drift.

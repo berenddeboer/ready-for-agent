@@ -11,7 +11,10 @@ import {
   shouldOpenBrowser,
 } from "../browser-open.ts"
 import { checkForgeTlsTrust } from "../forge-tls-preflight.ts"
-import { checkHostTools } from "../host-tools-preflight.ts"
+import {
+  checkHostTools,
+  keymaxxerCanResolveVault,
+} from "../host-tools-preflight.ts"
 import {
   peekForgeApiEndpoints,
   peekRepositoryForges,
@@ -97,6 +100,7 @@ export class StartHarness extends Context.Service<
           (command) => Bun.which(command) !== null,
           {
             repositoryForges,
+            keymaxxerEnabled: keymaxxerCanResolveVault(process.env),
           },
         )
         if (!result.ok) {

@@ -55,6 +55,7 @@ import {
 } from "./application-config.js"
 import { GitHubOperationCoordinatorLive } from "./github-operation-coordinator.js"
 import { JobWorkerLive } from "./job-worker.js"
+import { keymaxxerAzureDevOpsLayer } from "./keymaxxer-azure-devops-layer.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
 import { keymaxxerGitLabLayer } from "./keymaxxer-gitlab-layer.js"
 import { inspectBackendsAtStartup } from "./startup-backend-inspection.js"
@@ -154,10 +155,13 @@ export const createApplication = async (
           workspaceRoot: toolCwd,
           environment,
         }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
-  // Ambient-only regardless of sidecarUrl: Azure DevOps has no
-  // Keymaxxer-vault-backed Harness-side path yet (see
-  // ambient-azure-devops-layer.ts).
-  const azureDevOpsLayer = ambientAzureDevOpsLayer({ environment })
+  const azureDevOpsLayer =
+    sidecarUrl === undefined
+      ? ambientAzureDevOpsLayer({ environment })
+      : keymaxxerAzureDevOpsLayer({
+          workspaceRoot: toolCwd,
+          environment,
+        }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
   const reconcilerLayer = IssueReconcilerLive.pipe(
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),

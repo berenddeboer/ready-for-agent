@@ -27,8 +27,9 @@ export type AzureDevOpsServiceError =
  * GitLab's 18-method surface plus {@link AzureDevOpsServiceShape.ensurePullRequestLinkedToIssue}:
  * Azure Boards does not honor `Closes #N` as a PR association, so Create PR
  * must write an ArtifactLink. 16 methods perform live Azure DevOps REST
- * requests, `hasCredentials`/`hasAmbientCredentials` are local credential
- * checks, and only `countOpenNonDraftPullRequests` still fails with
+ * requests (and have matching Keymaxxer helper operations),
+ * `hasCredentials`/`hasAmbientCredentials` are local credential checks, and
+ * only `countOpenNonDraftPullRequests` still fails with
  * `AzureDevOpsNotImplementedError` (see method-level docs).
  */
 export interface AzureDevOpsServiceShape {

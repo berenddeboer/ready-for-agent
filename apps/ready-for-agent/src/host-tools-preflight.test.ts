@@ -1,4 +1,7 @@
-import { checkHostTools } from "./host-tools-preflight.ts"
+import {
+  checkHostTools,
+  keymaxxerCanResolveVault,
+} from "./host-tools-preflight.ts"
 import { describe, expect, test } from "bun:test"
 
 describe("host tools preflight", () => {
@@ -109,6 +112,51 @@ describe("host tools preflight", () => {
     expect(withoutPat.message).toContain("AZURE_DEVOPS_EXT_PAT")
     expect(withoutPat.message).not.toContain("gh:")
     expect(withoutPat.message).not.toContain("glab:")
+  })
+
+  test("allows Azure DevOps start without the ambient PAT when Keymaxxer is enabled", () => {
+    const vaultOnly = checkHostTools((command) => command === "git", {
+      repositoryForges: ["azure-devops"],
+      hasEnvVar: () => false,
+      keymaxxerEnabled: true,
+    })
+    expect(vaultOnly).toEqual({ ok: true })
+  })
+
+  test("still fails closed for Azure DevOps when neither vault nor ambient PAT can resolve", () => {
+    const missing = checkHostTools((command) => command === "git", {
+      repositoryForges: ["azure-devops"],
+      hasEnvVar: () => false,
+      keymaxxerEnabled: false,
+    })
+    expect(missing.ok).toBe(false)
+    if (missing.ok) return
+    expect(missing.missing.map((tool) => tool.name)).toEqual([
+      "AZURE_DEVOPS_EXT_PAT",
+    ])
+  })
+
+  test("keymaxxerCanResolveVault requires a sidecar URL or an available Keymaxxer", () => {
+    expect(
+      keymaxxerCanResolveVault({ KEYMAXXER_ENABLED: "false" }, () => true),
+    ).toBe(false)
+    expect(
+      keymaxxerCanResolveVault(
+        { KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:6057/cap/mcp" },
+        () => false,
+      ),
+    ).toBe(true)
+    expect(keymaxxerCanResolveVault({}, () => true)).toBe(true)
+    expect(keymaxxerCanResolveVault({}, () => false)).toBe(false)
+    expect(
+      keymaxxerCanResolveVault(
+        {
+          KEYMAXXER_ENABLED: "false",
+          KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:6057/cap/mcp",
+        },
+        () => true,
+      ),
+    ).toBe(false)
   })
 
   test("requires all three Forge requirements for a mixed fleet", () => {

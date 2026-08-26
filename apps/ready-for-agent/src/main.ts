@@ -14,6 +14,8 @@ if (isExactUsageMetadataInvocation(process.argv.slice(2))) {
   const { isInternalGitLabHelperMode, runGitLabHelperProcess } = await import(
     "@ready-for-agent/gitlab-service"
   )
+  const { isInternalAzureDevOpsHelperMode, runAzureDevOpsHelperProcess } =
+    await import("@ready-for-agent/azure-devops-service")
   const { isInternalKeymaxxerSidecarMode, runKeymaxxerSidecarProcess } =
     await import("@ready-for-agent/keymaxxer-service")
   const { READY_FOR_AGENT_VERSION } = await import("./generated/version.ts")
@@ -24,6 +26,8 @@ if (isExactUsageMetadataInvocation(process.argv.slice(2))) {
     runGitHubHelperProcess()
   } else if (isInternalGitLabHelperMode(process.argv)) {
     runGitLabHelperProcess()
+  } else if (isInternalAzureDevOpsHelperMode(process.argv)) {
+    runAzureDevOpsHelperProcess()
   } else {
     const { BunRuntime, BunServices } = await import("@effect/platform-bun")
     const { Effect, Layer } = await import("effect")

@@ -1,3 +1,5 @@
+import { isKeymaxxerAvailable } from "@ready-for-agent/keymaxxer-service"
+
 type HostTool = {
   readonly name: string
   readonly installHint: string
@@ -47,6 +49,13 @@ export type HostToolsPreflightOptions = {
   readonly repositoryForges?: ReadonlyArray<string>
   /** Injectable for tests; defaults to reading `process.env`. */
   readonly hasEnvVar?: (name: string) => boolean
+  /**
+   * When true, Keymaxxer can actually run (existing sidecar URL or
+   * available entrypoint), so a vault secret may already exist or be
+   * stored from the repo card. When false/omitted, an Azure Repository
+   * still requires `AZURE_DEVOPS_EXT_PAT`.
+   */
+  readonly keymaxxerEnabled?: boolean
 }
 
 export type HostToolsPreflightResult =
@@ -91,6 +100,27 @@ const defaultHasEnvVar = (name: string): boolean => {
   return typeof value === "string" && value.trim() !== ""
 }
 
+/**
+ * Whether Keymaxxer will actually run for this process: not explicitly
+ * disabled, and either a sidecar URL is already set or Keymaxxer is
+ * available to spawn one. Same predicate as production lifecycle mode.
+ */
+export const keymaxxerCanResolveVault = (
+  environment: Partial<Record<string, string | undefined>> = process.env,
+  keymaxxerAvailable: (
+    environment: Partial<Record<string, string | undefined>>,
+  ) => boolean = isKeymaxxerAvailable,
+): boolean => {
+  const explicitlyDisabled =
+    environment.KEYMAXXER_ENABLED?.trim().toLowerCase() === "false"
+  const existingUrl = environment.KEYMAXXER_SIDECAR_URL?.trim()
+  return (
+    !explicitlyDisabled &&
+    ((existingUrl !== undefined && existingUrl !== "") ||
+      keymaxxerAvailable(environment))
+  )
+}
+
 export const checkHostTools = (
   commandExists: (command: string) => boolean,
   options: HostToolsPreflightOptions = {},
@@ -108,9 +138,10 @@ export const checkHostTools = (
     (tool) => !commandExists(tool.name),
   )
 
+  const azureDevOpsCredentialResolved =
+    hasEnvVar(AZURE_DEVOPS_PAT_ENV_VAR) || options.keymaxxerEnabled === true
   const missingEnvRequirements: ReadonlyArray<HostTool> =
-    repositoryForges.includes("azure-devops") &&
-    !hasEnvVar(AZURE_DEVOPS_PAT_ENV_VAR)
+    repositoryForges.includes("azure-devops") && !azureDevOpsCredentialResolved
       ? [AZURE_DEVOPS_ENV_REQUIREMENT]
       : []
 

@@ -844,6 +844,7 @@ function RepositoryCard({
   >(() => {})
   const [githubTokenCreated, setGithubTokenCreated] = useState(false)
   const [gitlabTokenCreated, setGitlabTokenCreated] = useState(false)
+  const [azureDevOpsTokenCreated, setAzureDevOpsTokenCreated] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [awaitingRefresh, setAwaitingRefresh] = useState(false)
   const issuesChangeCountOnRefresh = useRef(issuesChangeCount)
@@ -1767,6 +1768,32 @@ function RepositoryCard({
         },
       })
       return result.addRepositoryGitLabToken
+    },
+    onSuccess: (credential) => {
+      queryClient.setQueryData<readonly Repository[]>(
+        repositoriesQuery.queryKey,
+        (repositories) =>
+          repositories?.map((candidate) =>
+            candidate.id === repository.id
+              ? { ...candidate, credential }
+              : candidate,
+          ),
+      )
+    },
+  })
+
+  const addAzureDevOpsToken = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        addRepositoryAzureDevOpsToken: {
+          __args: { repositoryId: repository.id },
+          repositoryId: true,
+          configured: true,
+          githubTokenSecretName: true,
+          githubTokenCreationUrl: true,
+        },
+      })
+      return result.addRepositoryAzureDevOpsToken
     },
     onSuccess: (credential) => {
       queryClient.setQueryData<readonly Repository[]>(
@@ -2746,6 +2773,83 @@ function RepositoryCard({
                       Keymaxxer setup was cancelled or failed. Use ambient{" "}
                       <code className={ui.guidanceCode}>GITLAB_TOKEN</code> or{" "}
                       <code className={ui.guidanceCode}>glab auth login</code>{" "}
+                      and restart the Harness if Keymaxxer is unavailable.
+                    </p>
+                  ) : null}
+                </Banner>
+              )}
+            {!repository.credential.configured &&
+              repository.forge === "azure-devops" && (
+                <Banner
+                  className="mt-5"
+                  tone="alarm"
+                  tag="Attention"
+                  role={addAzureDevOpsToken.isError ? "alert" : "status"}
+                  action={
+                    azureDevOpsTokenCreated ? (
+                      <button
+                        type="button"
+                        className={ui.platePrimary}
+                        disabled={addAzureDevOpsToken.isPending}
+                        aria-busy={addAzureDevOpsToken.isPending || undefined}
+                        onClick={() => addAzureDevOpsToken.mutate()}
+                      >
+                        {addAzureDevOpsToken.isPending
+                          ? "Waiting for Keymaxxer"
+                          : "Store in Keymaxxer"}
+                      </button>
+                    ) : (
+                      <a
+                        className={ui.platePrimary}
+                        href={repository.credential.githubTokenCreationUrl}
+                        onClick={() => setAzureDevOpsTokenCreated(true)}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Create Azure DevOps token
+                      </a>
+                    )
+                  }
+                >
+                  <p className="m-0 font-semibold">
+                    Azure DevOps authentication required
+                  </p>
+                  <p className="m-0 mt-1">
+                    {azureDevOpsTokenCreated ? (
+                      <>
+                        Store the generated token as{" "}
+                        <code className={ui.guidanceCode}>
+                          {repository.credential.githubTokenSecretName}
+                        </code>{" "}
+                        in Keymaxxer when available (provider{" "}
+                        <code className={ui.guidanceCode}>azure-devops</code>,
+                        account{" "}
+                        <code className={ui.guidanceCode}>
+                          {repository.projectPath}
+                        </code>
+                        ). Or set ambient auth without Keymaxxer:{" "}
+                      </>
+                    ) : (
+                      <>
+                        Create a personal access token for{" "}
+                        <code className={ui.guidanceCode}>
+                          {repository.projectPath}
+                        </code>
+                        . Store it in Keymaxxer when available, or set ambient
+                        auth:{" "}
+                      </>
+                    )}
+                    <code className={ui.guidanceCode}>
+                      AZURE_DEVOPS_EXT_PAT
+                    </code>{" "}
+                    before starting the Harness.
+                  </p>
+                  {addAzureDevOpsToken.isError ? (
+                    <p className="m-0 mt-1">
+                      Keymaxxer setup was cancelled or failed. Use ambient{" "}
+                      <code className={ui.guidanceCode}>
+                        AZURE_DEVOPS_EXT_PAT
+                      </code>{" "}
                       and restart the Harness if Keymaxxer is unavailable.
                     </p>
                   ) : null}

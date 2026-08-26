@@ -72,6 +72,7 @@ export default defineConfig({
       "test/job-worker.test.ts",
       "test/keymaxxer-github-layer.test.ts",
       "test/keymaxxer-gitlab-layer.test.ts",
+      "test/keymaxxer-azure-devops-layer.test.ts",
       "test/ambient-github-layer.test.ts",
       "test/github-operation-coordinator.test.ts",
       "test/ambient-gitlab-layer.test.ts",

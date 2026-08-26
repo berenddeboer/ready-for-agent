@@ -2,7 +2,9 @@ import { Layer } from "effect"
 import {
   AZURE_DEVOPS_PAT_ENV_VAR,
   AzureDevOpsService,
+  type AzureDevOpsServiceShape,
   makeAzureDevOpsService,
+  makeAzureDevOpsServiceFromToken,
 } from "@ready-for-agent/azure-devops-service"
 
 /**
@@ -19,19 +21,23 @@ import {
  * This layer instead reads the PAT from the same `environment` record the
  * ambient GitHub/GitLab layers already thread through (so tests can inject
  * it), tolerating an absent PAT the same way `hasCredentials` already
- * reports `false` rather than throwing. There is no Keymaxxer-vault variant
- * yet: the harness's own reads stay ambient-PAT only. Agent Turns are
- * unaffected — they resolve vault-first credentials with ambient fallback
- * through `agent-turn-forge-auth.ts`, not through this layer.
+ * reports `false` rather than throwing. When Keymaxxer is enabled the
+ * vault-first sibling (`keymaxxer-azure-devops-layer.ts`) wraps this as
+ * the ambient fallback.
  */
 export const ambientAzureDevOpsLayer = (options: {
   readonly environment?: Partial<Record<string, string | undefined>>
+  readonly makeService?: (token: string) => AzureDevOpsServiceShape
+  readonly makeAnonymousService?: () => AzureDevOpsServiceShape
 }): Layer.Layer<AzureDevOpsService> => {
   const token = options.environment?.[AZURE_DEVOPS_PAT_ENV_VAR]?.trim()
+  const makeService = options.makeService ?? makeAzureDevOpsServiceFromToken
+  const makeAnonymousService =
+    options.makeAnonymousService ?? (() => makeAzureDevOpsService({}))
   return Layer.succeed(
     AzureDevOpsService,
-    makeAzureDevOpsService(
-      token === undefined || token === "" ? {} : { token },
-    ),
+    token === undefined || token === ""
+      ? makeAnonymousService()
+      : makeService(token),
   )
 }
