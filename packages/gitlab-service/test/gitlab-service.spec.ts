@@ -1,5 +1,9 @@
 import { Effect, Result } from "effect"
 import {
+  buildReasonDetail,
+  formatUserFacingError,
+} from "@ready-for-agent/github-service"
+import {
   GitLabProjectUnavailableError,
   GitLabRequestError,
   makeGitLabServiceFromToken,
@@ -2644,6 +2648,12 @@ describe("GitLab PR status checks and ready-for-review", () => {
     expect(Result.isFailure(result)).toBe(true)
     if (Result.isFailure(result)) {
       expect(result.failure).toBeInstanceOf(GitLabRequestError)
+      expect(result.failure.statusCode).toBe(403)
+      const flattened = formatUserFacingError(result.failure)
+      expect(flattened).toContain("HTTP 403")
+      const detail = buildReasonDetail(result.failure)
+      expect(detail).not.toBeNull()
+      expect(detail?.causeChain.length).toBeGreaterThan(1)
     }
   })
 

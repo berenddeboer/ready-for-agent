@@ -1,6 +1,10 @@
 import { Effect, Fiber, Result } from "effect"
 import { TestClock } from "effect/testing"
 import {
+  buildReasonDetail,
+  formatUserFacingError,
+} from "@ready-for-agent/github-service"
+import {
   AzureDevOpsNotImplementedError,
   AzureDevOpsProjectUnavailableError,
   AzureDevOpsRequestError,
@@ -1262,6 +1266,15 @@ describe("Azure DevOps mergePullRequest", () => {
     if (Result.isFailure(result)) {
       expect(result.failure).toBeInstanceOf(AzureDevOpsRequestError)
       expect(result.failure.statusCode).toBe(401)
+      const flattened = formatUserFacingError(result.failure)
+      expect(flattened).toContain("Failed to merge pull request 42")
+      expect(flattened).toContain("HTTP 401")
+      const detail = buildReasonDetail(result.failure)
+      expect(detail).not.toBeNull()
+      expect(detail?.causeChain.length).toBeGreaterThan(1)
+      expect(
+        detail?.causeChain.some((link) => link.message?.includes("HTTP 401")),
+      ).toBe(true)
     }
   })
 

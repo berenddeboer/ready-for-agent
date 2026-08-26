@@ -22,6 +22,7 @@ import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
+  formatUserFacingError,
 } from "@ready-for-agent/github-service"
 import {
   GitLabService,
@@ -1431,7 +1432,16 @@ describe("createPr", () => {
           findOpenPullRequestNumber: () => Effect.succeed(null),
           createDraftPullRequest: () =>
             Effect.fail(
-              new GitHubRequestError({ message: "create unavailable" }),
+              new GitHubRequestError({
+                message: "Failed to create draft pull request for acme/widgets",
+                statusCode: 401,
+                cause: Object.assign(
+                  new Error(
+                    "Failed to create draft pull request for acme/widgets: Unauthorized: Bad credentials",
+                  ),
+                  { statusCode: 401 },
+                ),
+              }),
             ),
           getOpenPullRequestNumber: () =>
             Effect.fail(
@@ -1447,6 +1457,9 @@ describe("createPr", () => {
         }),
       })
       expect(error).toBeInstanceOf(CreatePrPostconditionError)
+      const flattened = formatUserFacingError(error)
+      expect(flattened).toContain("HTTP 401")
+      expect(error.diagnostics).toContain("HTTP 401")
     }))
 
   it("requires Session context only for agent fallback", () =>

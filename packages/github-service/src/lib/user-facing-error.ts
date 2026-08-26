@@ -45,36 +45,136 @@ export const sanitizeUserFacingText = (
   return cleaned
 }
 
+/** Operator-facing labels for statuses the board must distinguish. */
+const HTTP_SHORT_CAUSE: Readonly<Record<number, string>> = {
+  401: "Unauthorized",
+  403: "Forbidden",
+  409: "Conflict",
+  422: "Unprocessable Entity",
+  429: "Too Many Requests",
+}
+
+const readProp = (value: unknown, key: string): unknown =>
+  typeof value === "object" && value !== null
+    ? Reflect.get(value, key)
+    : undefined
+
+const readHttpStatusCode = (value: unknown): number | undefined => {
+  const status = readProp(value, "statusCode")
+  if (
+    typeof status === "number" &&
+    Number.isInteger(status) &&
+    status >= 100 &&
+    status <= 599
+  ) {
+    return status
+  }
+  return undefined
+}
+
+const httpStatusFromText = (text: string): number | undefined => {
+  let fallback: number | undefined
+  for (const match of text.matchAll(/\bHTTP\s+(\d{3})\b/gi)) {
+    const status = Number(match[1])
+    if (status >= 400 && status <= 599) {
+      return status
+    }
+    if (fallback === undefined && status >= 100 && status <= 599) {
+      fallback = status
+    }
+  }
+  return fallback
+}
+
+const nextCause = (value: unknown): unknown => {
+  const cause = readProp(value, "cause")
+  if (cause !== undefined) {
+    return cause
+  }
+  const errors = readProp(value, "errors")
+  if (Array.isArray(errors) && errors.length > 0) {
+    return errors[0]
+  }
+  return undefined
+}
+
+/**
+ * Prefer the typed `statusCode` field, then `HTTP NNN` in messages or
+ * postcondition `diagnostics`. Never copies nested response bodies.
+ */
+const extractHttpStatus = (error: unknown): number | undefined => {
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  let fromText: number | undefined
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current)
+    const fromField = readHttpStatusCode(current)
+    if (fromField !== undefined) {
+      return fromField
+    }
+    if (fromText === undefined) {
+      const message = readProp(current, "message")
+      if (typeof message === "string") {
+        fromText = httpStatusFromText(message)
+      }
+    }
+    if (fromText === undefined) {
+      const diagnostics = readProp(current, "diagnostics")
+      if (typeof diagnostics === "string") {
+        fromText = httpStatusFromText(diagnostics)
+      }
+    }
+    current = nextCause(current)
+  }
+  return fromText
+}
+
+const httpSuffix = (status: number, message: string): string => {
+  const label = `HTTP ${status}`
+  if (message.includes(label)) {
+    return ""
+  }
+  const cause = HTTP_SHORT_CAUSE[status]
+  if (
+    cause !== undefined &&
+    !message.toLowerCase().includes(cause.toLowerCase())
+  ) {
+    return `: ${label} ${cause}`
+  }
+  return `: ${label}`
+}
+
 export const formatUserFacingError = (
   error: unknown,
   fallback = "Unknown error",
   maxLength?: number,
 ): string => {
   const finish = (value: string): string => {
-    const cleaned = sanitizeUserFacingText(value, maxLength)
-    return cleaned.length > 0 ? cleaned : fallback
+    const base = sanitizeUserFacingText(value)
+    const usable = base.length > 0 ? base : fallback
+    const status = extractHttpStatus(error)
+    const suffix = status === undefined ? "" : httpSuffix(status, usable)
+    const combined = `${usable}${suffix}`
+    if (maxLength === undefined || combined.length <= maxLength) {
+      return combined
+    }
+    if (suffix.length === 0) {
+      return combined.slice(0, maxLength)
+    }
+    const budget = Math.max(0, maxLength - suffix.length)
+    return `${usable.slice(0, budget)}${suffix}`
   }
 
   if (typeof error === "string") {
     return finish(error)
   }
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof (error as { message: unknown }).message === "string" &&
-    (error as { message: string }).message.trim().length > 0
-  ) {
-    return finish((error as { message: string }).message)
+  const message = readProp(error, "message")
+  if (typeof message === "string" && message.trim().length > 0) {
+    return finish(message)
   }
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "_tag" in error &&
-    typeof (error as { _tag: unknown })._tag === "string" &&
-    (error as { _tag: string })._tag.trim().length > 0
-  ) {
-    return finish((error as { _tag: string })._tag)
+  const tag = readProp(error, "_tag")
+  if (typeof tag === "string" && tag.trim().length > 0) {
+    return finish(tag)
   }
   if (typeof error === "number" || typeof error === "boolean") {
     return finish(String(error))

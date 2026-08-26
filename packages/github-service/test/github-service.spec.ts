@@ -239,6 +239,63 @@ describe("GitHubService live implementation", () => {
     }),
   )
 
+  it("surfaces HTTP 401 on merge in the flattened failure message", async () => {
+    const secret = "ghp_this_must_never_appear_in_user_facing_text"
+    const service = makeGitHubServiceFromToken(
+      "expired-token",
+      async (_input, init) => {
+        const query = graphqlQueryText(init)
+        if (query.includes("mergePullRequest")) {
+          return new Response(`Bad credentials ${secret}`, {
+            status: 401,
+            statusText: "Unauthorized",
+          })
+        }
+        return jsonGraphqlResponse({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    id: "PR_kwDOOpen",
+                    state: "OPEN",
+                    merged: false,
+                    headRefOid: "abc123",
+                    mergeable: "MERGEABLE",
+                    statusCheckRollup: { state: "SUCCESS" },
+                  },
+                ],
+              },
+            },
+          },
+        })
+      },
+    )
+
+    const error = await Effect.runPromise(
+      service.mergePullRequest(repository, "branch").pipe(Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(GitHubRequestError)
+    expect((error as GitHubRequestError).statusCode).toBe(401)
+    const flattened = formatUserFacingError(error)
+    expect(flattened).toContain("Failed to merge pull request")
+    expect(flattened).toContain("HTTP 401")
+    expect(flattened).not.toContain(secret)
+    const detail = buildReasonDetail(error)
+    expect(detail).not.toBeNull()
+    expect(detail?.causeChain.length).toBeGreaterThan(1)
+    expect(
+      detail?.causeChain.some((link) =>
+        link.message?.includes("Failed to merge pull request"),
+      ),
+    ).toBe(true)
+    expect(
+      detail?.causeChain.some((link) => link.message?.includes("Unauthorized")),
+    ).toBe(true)
+    expect(JSON.stringify(detail)).not.toContain(secret)
+  })
+
   it.effect(
     "classifies GraphQL repository NOT_FOUND as unavailable and names the token identity",
     () =>
@@ -4478,6 +4535,79 @@ describe("user-facing error formatting", () => {
     expect(formatUserFacingError(error, "fallback")).toBe(
       "Failed to get pull request check status for acme/widgets",
     )
+  })
+
+  it("includes HTTP status and a short cause from a Forge HTTP error", () => {
+    const secret = "ghp_this_must_never_appear_in_user_facing_text"
+    const httpCause = Object.assign(
+      new Error(`Unauthorized: Bad credentials ${secret}`),
+      { statusCode: 401 },
+    )
+    const error = new GitHubRequestError({
+      message: "Failed to merge pull request for acme/widgets:branch",
+      cause: httpCause,
+      statusCode: 401,
+    })
+
+    const flattened = formatUserFacingError(error)
+    expect(flattened).toContain(
+      "Failed to merge pull request for acme/widgets:branch",
+    )
+    expect(flattened).toContain("HTTP 401")
+    expect(flattened).toContain("Unauthorized")
+    expect(flattened).not.toContain(secret)
+    expect(flattened).not.toContain("Bad credentials")
+  })
+
+  it("lets the operator tell auth, permission, conflict, and transport apart", () => {
+    const mergeMessage = "Failed to merge pull request for acme/widgets:branch"
+    expect(
+      formatUserFacingError(
+        new GitHubRequestError({ message: mergeMessage, statusCode: 401 }),
+      ),
+    ).toContain("HTTP 401")
+    expect(
+      formatUserFacingError(
+        new GitHubRequestError({ message: mergeMessage, statusCode: 403 }),
+      ),
+    ).toContain("HTTP 403")
+    expect(
+      formatUserFacingError(
+        new GitHubRequestError({ message: mergeMessage, statusCode: 409 }),
+      ),
+    ).toContain("HTTP 409")
+
+    const transport = new GitHubRequestError({
+      message: mergeMessage,
+      code: "ENOTFOUND",
+      cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.github.com"), {
+        code: "ENOTFOUND",
+      }),
+    })
+    expect(formatUserFacingError(transport)).toBe(mergeMessage)
+    expect(formatUserFacingError(transport)).not.toMatch(/HTTP \d{3}/)
+  })
+
+  it("lifts HTTP status out of postcondition diagnostics", () => {
+    const flattened = formatUserFacingError({
+      _tag: "CreatePrPostconditionError",
+      message:
+        "No open pull request found for acme/widgets:branch after native attempt and agent fallback",
+      diagnostics:
+        "createDraftPullRequest failed: Failed to create draft pull request for acme/widgets:branch: HTTP 401 Unauthorized",
+    })
+    expect(flattened).toContain("HTTP 401")
+    expect(flattened).toContain("No open pull request found")
+  })
+
+  it("does not duplicate an HTTP status already in the message", () => {
+    const error = new GitHubRequestError({
+      message:
+        "Failed to merge pull request 42 for acme/widgets: Azure DevOps returned HTTP 401",
+      statusCode: 401,
+    })
+    const flattened = formatUserFacingError(error)
+    expect(flattened.match(/HTTP 401/g)).toEqual(["HTTP 401"])
   })
 })
 
