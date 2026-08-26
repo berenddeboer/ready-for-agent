@@ -30,7 +30,7 @@ An Intake Candidate is a Relevant, open Leaf Issue with no unfinished Work Item 
 - `IMPLEMENT_NOW`: the Issue is Actionable.
 - `QUEUE`: the Issue is blocked and otherwise eligible for Queue.
 
-Parent Issues, closed or irrelevant Issues, and Issues with unfinished Work Items are absent. Callers never need to inspect hierarchy, blockers, or Work Item state to decide what Intake would attempt.
+Parent Issues, closed or irrelevant Issues, Issues with unfinished Work Items, and Issues with a completed Work Item are absent — including when the forge Issue is still open and ready-labeled because close-out missed. Callers never need to inspect hierarchy, blockers, or Work Item state to decide what Intake would attempt.
 
 When classification returns no candidates, `candidates` succeeds with an empty list and does not run backend/model preflight. When candidates exist, the query applies the same Repository-scoped effective Agent Backend and resolved build/review Agent Model preflight as Intake before returning them. A caller therefore knows that every listed candidate passed shared Repository-level admission checks at query time, while ordinary per-Issue revalidation still occurs during a later Intake.
 
@@ -54,7 +54,7 @@ Repository Intake is a synchronous best-effort operation, not an entity:
 - Repository disappearance, database/lifecycle storage failures, enqueue failures, invalid queue configuration, and unexpected defects are operation-level failures. They stop processing and surface as GraphQL errors. Work Items already committed by earlier candidates remain.
 - A concurrent Issue or Work Item change is revalidated and, when it matches a candidate-local case, reported as that candidate's failure.
 - The GraphQL HTTP request's abort signal must interrupt the Intake Effect. Processing then stops; already-created Work Items remain. This requires extending the current GraphQL Effect runner, which does not yet propagate request cancellation.
-- Re-running the command is safe enough for this workflow because Issues with unfinished Work Items are no longer candidates.
+- Re-running the command is safe enough for this workflow because Issues with unfinished Work Items or a completed Work Item are no longer candidates.
 - Zero candidates is a successful no-op and bypasses backend/model preflight.
 - When candidates exist, one Repository-scoped preflight runs before any candidate is attempted. It applies the ordinary creation requirements to the effective Agent Backend and current resolved build and review Agent Model selections, including catalog membership when the backend reports a catalog. A failed preflight is a command-level failure and creates no Work Items.
 - Repository Paused is not changed and does not block this explicit operator request, matching Implement Now and Queue.

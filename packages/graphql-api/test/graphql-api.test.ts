@@ -8282,6 +8282,223 @@ describe("GraphQL API", () => {
     expect(requireAgentTurnsCalls).toBe(1)
   })
 
+  test("intakeCandidates omits Complete-and-still-tagged Issues and keeps no-Work-Item and Failed", async () => {
+    const completeIssue = {
+      ...issue,
+      id: "issue-complete",
+      issueNumber: 8,
+      title: "Shipped but still tagged",
+      url: "https://github.com/acme/widgets/issues/8",
+      blockedBy: [],
+    }
+    const noWorkItemIssue = {
+      ...issue,
+      id: "issue-fresh",
+      issueNumber: 9,
+      title: "No Work Item yet",
+      url: "https://github.com/acme/widgets/issues/9",
+      blockedBy: [],
+    }
+    const failedIssue = {
+      ...issue,
+      id: "issue-failed",
+      issueNumber: 10,
+      title: "Failed with Issue still Ready",
+      url: "https://gitlab.example.com/acme/widgets/-/issues/10",
+      blockedBy: [],
+    }
+    const abandonedIssue = {
+      ...issue,
+      id: "issue-abandoned",
+      issueNumber: 15,
+      title: "Abandoned with Issue still Ready",
+      url: "https://github.com/acme/widgets/issues/15",
+      blockedBy: [],
+    }
+    const needsHumanIssue = {
+      ...issue,
+      id: "issue-needs-human",
+      issueNumber: 11,
+      title: "Needs Human",
+      url: "https://github.com/acme/widgets/issues/11",
+      blockedBy: [],
+    }
+    const gitlabCompleteIssue = {
+      ...issue,
+      id: "issue-gitlab-complete",
+      issueNumber: 12,
+      title: "GitLab shipped but still tagged",
+      url: "https://gitlab.example.com/acme/widgets/-/issues/12",
+      blockedBy: [],
+    }
+    const terminal = (
+      issueNumber: number,
+      state: WorkItemRecord["state"],
+    ): WorkItemRecord =>
+      ({
+        ...workItem,
+        id: `wi-${state}-${String(issueNumber)}`,
+        issueNumber,
+        issueTitle: `Issue ${String(issueNumber)}`,
+        state,
+        holdsWorkerSlot: false,
+        waitingForBlockers: false,
+        waitingSince: null,
+        stepRuns: [],
+      }) as WorkItemRecord
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () =>
+          Effect.succeed([
+            completeIssue,
+            noWorkItemIssue,
+            failedIssue,
+            abandonedIssue,
+            needsHumanIssue,
+            gitlabCompleteIssue,
+          ]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed([
+            terminal(completeIssue.issueNumber, "complete"),
+            terminal(failedIssue.issueNumber, "failed"),
+            terminal(abandonedIssue.issueNumber, "abandoned"),
+            terminal(needsHumanIssue.issueNumber, "needs_human"),
+            terminal(gitlabCompleteIssue.issueNumber, "complete"),
+          ]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query IntakeCandidates($repositoryId: ID!) {
+          intakeCandidates(repositoryId: $repositoryId) {
+            candidates {
+              issueNumber
+              title
+              url
+              action
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        intakeCandidates: {
+          candidates: [
+            {
+              issueNumber: 9,
+              title: "No Work Item yet",
+              url: "https://github.com/acme/widgets/issues/9",
+              action: "IMPLEMENT_NOW",
+            },
+            {
+              issueNumber: 10,
+              title: "Failed with Issue still Ready",
+              url: "https://gitlab.example.com/acme/widgets/-/issues/10",
+              action: "IMPLEMENT_NOW",
+            },
+            {
+              issueNumber: 15,
+              title: "Abandoned with Issue still Ready",
+              url: "https://github.com/acme/widgets/issues/15",
+              action: "IMPLEMENT_NOW",
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("intakeCandidates restores IMPLEMENT_NOW after the Complete Work Item is erased", async () => {
+    const stillReady = {
+      ...issue,
+      issueNumber: 14,
+      title: "Ready after Reset",
+      url: "https://github.com/acme/widgets/issues/14",
+      blockedBy: [],
+    }
+    const complete = {
+      ...workItem,
+      id: "wi-complete-14",
+      issueNumber: 14,
+      issueTitle: stillReady.title,
+      state: "complete",
+      holdsWorkerSlot: false,
+      waitingForBlockers: false,
+      waitingSince: null,
+      stepRuns: [],
+    } as WorkItemRecord
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([stillReady]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([complete]),
+      },
+    )
+
+    const beforeReset = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query IntakeCandidates($repositoryId: ID!) {
+          intakeCandidates(repositoryId: $repositoryId) {
+            candidates { issueNumber action }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+    expect(await beforeReset.json()).toEqual({
+      data: {
+        intakeCandidates: {
+          candidates: [],
+        },
+      },
+    })
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([stillReady]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([]),
+      },
+    )
+
+    const afterReset = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query IntakeCandidates($repositoryId: ID!) {
+          intakeCandidates(repositoryId: $repositoryId) {
+            candidates { issueNumber action }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+    expect(await afterReset.json()).toEqual({
+      data: {
+        intakeCandidates: {
+          candidates: [{ issueNumber: 14, action: "IMPLEMENT_NOW" }],
+        },
+      },
+    })
+  })
+
   test("empty Intake Candidates skip Agent Backend preflight", async () => {
     let requireAgentTurnsCalls = 0
     await runtime.dispose()
@@ -8525,6 +8742,95 @@ describe("GraphQL API", () => {
     })
     expect(requireAgentTurnsCalls).toBe(0)
     expect(implementCalls).toBe(0)
+  })
+
+  test("startRepositoryIntake does not Implement Now a Complete-and-still-tagged Issue", async () => {
+    const shipped = {
+      ...issue,
+      id: "issue-shipped",
+      issueNumber: 8,
+      title: "Shipped but still tagged",
+      url: "https://github.com/acme/widgets/issues/8",
+      blockedBy: [],
+    }
+    const fresh = {
+      ...issue,
+      id: "issue-fresh-intake",
+      issueNumber: 9,
+      title: "No Work Item yet",
+      url: "https://gitlab.example.com/acme/widgets/-/issues/9",
+      blockedBy: [],
+    }
+    const createdFresh = {
+      ...workItem,
+      id: "wi-fresh-9",
+      issueNumber: 9,
+      issueTitle: fresh.title,
+    } as WorkItemRecord
+    const complete = {
+      ...workItem,
+      id: "wi-complete-8",
+      issueNumber: 8,
+      issueTitle: shipped.title,
+      state: "complete",
+      holdsWorkerSlot: false,
+      waitingForBlockers: false,
+      waitingSince: null,
+      stepRuns: [],
+    } as WorkItemRecord
+    const implementCalls: number[] = []
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([shipped, fresh]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([complete]),
+        implementNow: (_repositoryId, issueNumber) =>
+          Effect.sync(() => {
+            implementCalls.push(issueNumber)
+            return createdFresh
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation StartIntake($repositoryId: ID!) {
+          startRepositoryIntake(repositoryId: $repositoryId) {
+            results {
+              __typename
+              ... on RepositoryIntakeCreated {
+                issueNumber
+                action
+                workItem { id }
+              }
+              ... on RepositoryIntakeFailed { issueNumber }
+            }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(implementCalls).toEqual([9])
+    expect(await response.json()).toEqual({
+      data: {
+        startRepositoryIntake: {
+          results: [
+            {
+              __typename: "RepositoryIntakeCreated",
+              issueNumber: 9,
+              action: "IMPLEMENT_NOW",
+              workItem: { id: createdFresh.id },
+            },
+          ],
+        },
+      },
+    })
   })
 
   test("startRepositoryIntake processes candidates sequentially and routes Queue", async () => {
