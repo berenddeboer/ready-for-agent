@@ -10,6 +10,11 @@ import {
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
 import {
+  AzureDevOpsRequestError,
+  AzureDevOpsService,
+  type AzureDevOpsServiceShape,
+} from "@ready-for-agent/azure-devops-service"
+import {
   AgentBackendChangeBlockedError,
   DbService,
   type DbServiceShape,
@@ -260,6 +265,39 @@ const defaultGitlab: GitLabServiceShape = {
   deleteBranch: () => Effect.void,
 }
 
+const defaultAzureDevOps: AzureDevOpsServiceShape = {
+  verifyProject: (repository) => Effect.succeed(repository),
+  getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+  listReadyIssues: () => Effect.succeed([]),
+  hasCredentials: () => Effect.succeed(true),
+  hasAmbientCredentials: () => Effect.succeed(true),
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  findOpenPullRequestNumber: () => Effect.succeed(null),
+  createDraftPullRequest: () => Effect.succeed(1),
+  ensurePullRequestLinkedToIssue: () => Effect.void,
+  updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+  countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  getPullRequestCheckStatus: () =>
+    Effect.succeed({
+      _tag: "succeeded",
+      terminalChecks: [],
+      mergeability: "mergeable",
+      baseRefName: "main",
+      headPushedAt: null,
+      headSha: null,
+      createdAt: null,
+      isDraft: null,
+    }),
+  getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+  markPullRequestReadyForReview: () => Effect.void,
+  getPullRequestLifecycleStatus: () =>
+    Effect.succeed({ _tag: "open" as const }),
+  mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+  ensureIssueCompletedWithSummary: () => Effect.void,
+  closeOpenPullRequestsForBranch: () => Effect.void,
+  deleteBranch: () => Effect.void,
+}
+
 const makeRuntime = (
   dbOverrides: Partial<DbServiceShape> = {},
   keymaxxerOverrides: Partial<KeymaxxerServiceShape> = {},
@@ -271,6 +309,7 @@ const makeRuntime = (
   }> = {},
   githubOverrides: Partial<GitHubServiceShape> = {},
   gitlabOverrides: Partial<GitLabServiceShape> = {},
+  azureDevOpsOverrides: Partial<AzureDevOpsServiceShape> = {},
 ) => {
   const db = stubDbService({
     getConfig: Effect.succeed(config),
@@ -457,6 +496,10 @@ const makeRuntime = (
       Layer.succeed(GitLabService, {
         ...defaultGitlab,
         ...gitlabOverrides,
+      }),
+      Layer.succeed(AzureDevOpsService, {
+        ...defaultAzureDevOps,
+        ...azureDevOpsOverrides,
       }),
       localGit,
       directoryPicker,
@@ -750,6 +793,167 @@ describe("GraphQL API", () => {
     expect(addRepositoryCalled).toBe(false)
   })
 
+  test("verifies an Azure DevOps project before adding the repository", async () => {
+    const actions: string[] = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        addRepository: (input) => {
+          actions.push(`add:${input.forgeHost}/${input.projectPath}`)
+          return Effect.succeed({ ...repository, ...input })
+        },
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        verifyProject: (identity) =>
+          Effect.sync(() => {
+            actions.push(`verify:${identity.forgeHost}/${identity.projectPath}`)
+            return identity
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation AddRepository($input: AddRepositoryInput!) {
+          addRepository(input: $input) { id }
+        }`,
+        variables: {
+          input: {
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: "/tmp/acme-widgets",
+            isBare: false,
+          },
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        addRepository: {
+          id: repository.id,
+        },
+      },
+    })
+    expect(actions).toEqual([
+      "verify:dev.azure.com/acme/widgets",
+      "add:dev.azure.com/acme/widgets",
+    ])
+  })
+
+  test("rejects an Azure DevOps repository with no default branch before saving", async () => {
+    let addRepositoryCalled = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        addRepository: () => {
+          addRepositoryCalled = true
+          return Effect.succeed(repository)
+        },
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        verifyProject: (identity) =>
+          Effect.fail(
+            new AzureDevOpsRequestError({
+              message: `Repository ${identity.projectPath} has no default branch; push an initial commit first`,
+            }),
+          ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation AddRepository($input: AddRepositoryInput!) {
+          addRepository(input: $input) { id }
+        }`,
+        variables: {
+          input: {
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: "/tmp/acme-widgets",
+            isBare: false,
+          },
+        },
+      }),
+    )
+
+    expect(await response.json()).toMatchObject({
+      errors: [
+        {
+          message:
+            "Repository acme/widgets has no default branch; push an initial commit first",
+          extensions: { code: "AZURE_DEVOPS_REQUEST_FAILED" },
+        },
+      ],
+    })
+    expect(addRepositoryCalled).toBe(false)
+  })
+
+  test("accepts an Azure DevOps repository whose Git name differs from the project when it has a default branch", async () => {
+    let addedPath: string | null = null
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        addRepository: (input) => {
+          addedPath = input.projectPath
+          return Effect.succeed({ ...repository, ...input })
+        },
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        verifyProject: (identity) => Effect.succeed(identity),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation AddRepository($input: AddRepositoryInput!) {
+          addRepository(input: $input) { projectPath }
+        }`,
+        variables: {
+          input: {
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/Default/gantry",
+            localPath: "/tmp/gantry",
+            isBare: false,
+          },
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        addRepository: {
+          projectPath: "acme/Default/gantry",
+        },
+      },
+    })
+    expect(addedPath).toBe("acme/Default/gantry")
+  })
+
   test("suggests add repository command with npx when operator binary is not on PATH", async () => {
     const response = await createGraphqlApi(runtime, {
       commandExists: () => false,
@@ -896,6 +1100,67 @@ describe("GraphQL API", () => {
         },
       })
       expect(addRepositoryCalled).toBe(false)
+    } finally {
+      await inspectRuntime.dispose()
+    }
+  })
+
+  test("inspectLocalRepository returns Azure DevOps identity without Forge verification", async () => {
+    let verifyCalled = false
+    const inspectRuntime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        inspect: (path) =>
+          Effect.succeed({
+            forge: "azure-devops" as const,
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: path,
+            isBare: false,
+            paused: true as const,
+          }),
+      },
+      {},
+      {},
+      {
+        verifyProject: (identity) => {
+          verifyCalled = true
+          return Effect.fail(
+            new AzureDevOpsRequestError({
+              message: `Repository ${identity.projectPath} has no default branch; push an initial commit first`,
+            }),
+          )
+        },
+      },
+    )
+
+    try {
+      const response = await createGraphqlApi(inspectRuntime).fetch(
+        graphqlRequest({
+          query: `mutation {
+            inspectLocalRepository(path: "/tmp/empty-azure-repo") {
+              forge
+              forgeHost
+              projectPath
+            }
+          }`,
+        }),
+      )
+
+      expect(await response.json()).toEqual({
+        data: {
+          inspectLocalRepository: {
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+          },
+        },
+      })
+      expect(verifyCalled).toBe(false)
     } finally {
       await inspectRuntime.dispose()
     }

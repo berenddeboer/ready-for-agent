@@ -24,7 +24,10 @@ import {
   listSelectableAgentBackendInfos,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
-import { azureDevOpsVaultAccount } from "@ready-for-agent/azure-devops-service"
+import {
+  AzureDevOpsService,
+  azureDevOpsVaultAccount,
+} from "@ready-for-agent/azure-devops-service"
 import {
   DbService,
   type Forge,
@@ -423,6 +426,7 @@ export type GraphqlServices =
   | DbService
   | GitHubService
   | GitLabService
+  | AzureDevOpsService
   | KeymaxxerService
   | ActiveAgentBackend
   | QueueService
@@ -446,19 +450,10 @@ const isSameOriginRequest = (request: Request): boolean => {
 }
 
 /**
- * Resolution of the "does this file need an Azure DevOps branch?" open
- * question carried over from the Azure DevOps detection/auth ticket: this
- * file's three `forge`-aware call sites (`verifyRepositoryIdentity` below,
- * the `repositoryCredentials` resolver's vault-probe branch, and
- * `Repository.pullRequestCount`) are GraphQL-only internals for project
- * verification, vault-credential display, and PR count — none of them read
- * or relate to `listReadyIssues`. Azure DevOps has no GraphQL API of its
- * own, so its Ready Issue listing and blocking-link reads (ticket: "List
- * and reconcile Azure DevOps work items as the ready-for-agent frontier")
- * are consumed entirely inside `@ready-for-agent/issue-reconciler`, which
- * never routes through this file. No `listReadyIssues`-related branch is
- * needed here; each of the three sites already has its own explicit,
- * deliberate (if temporary) Azure DevOps posture documented inline below.
+ * Forge identity verification at add / identity-change time. GitLab and
+ * Azure DevOps revalidate against their APIs before persistence; GitHub
+ * still passes through like the identity-defaulting posture below.
+ * Ready Issue listing stays in `@ready-for-agent/issue-reconciler`.
  */
 const verifyRepositoryIdentity = Effect.fn(
   "graphql-api.verifyRepositoryIdentity",
@@ -467,17 +462,25 @@ const verifyRepositoryIdentity = Effect.fn(
   readonly forgeHost: string
   readonly projectPath: string
 }) {
-  // Azure DevOps project verification is not wired here yet (out of scope
-  // for the detection/auth ticket that widened this type) — pass through
-  // unverified like GitHub, matching the identity-defaulting posture below.
-  if (identity.forge !== "gitlab") return identity
-  const gitlab = yield* GitLabService
-  const resolved = yield* gitlab.verifyProject(identity)
-  return {
-    forge: identity.forge,
-    forgeHost: resolved.forgeHost,
-    projectPath: resolved.projectPath,
+  if (identity.forge === "gitlab") {
+    const gitlab = yield* GitLabService
+    const resolved = yield* gitlab.verifyProject(identity)
+    return {
+      forge: identity.forge,
+      forgeHost: resolved.forgeHost,
+      projectPath: resolved.projectPath,
+    }
   }
+  if (identity.forge === "azure-devops") {
+    const azureDevOps = yield* AzureDevOpsService
+    const resolved = yield* azureDevOps.verifyProject(identity)
+    return {
+      forge: identity.forge,
+      forgeHost: resolved.forgeHost,
+      projectPath: resolved.projectPath,
+    }
+  }
+  return identity
 })
 
 const toNativeResponse = (response: unknown): Response => {

@@ -1069,6 +1069,8 @@ describe("Job worker", () => {
               Layer.succeed(ActiveAgentBackend, stubActiveAgentBackend()),
               sessionStore,
               defaultGithubLayer,
+              defaultGitlabLayer,
+              defaultAzureDevOpsLayer,
               localGit,
               directoryPicker,
             ),
