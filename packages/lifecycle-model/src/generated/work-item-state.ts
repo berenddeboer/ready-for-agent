@@ -56,6 +56,7 @@ export const STEP_RUN_REASONS = [
   "agent_model_not_in_catalog",
   "build_model_not_configured",
   "copy_generation",
+  "forge_auth_rejected",
   "github_throttled",
   "green-no-review-evidence",
   "handler_defect",
@@ -101,6 +102,8 @@ export const STEP_RUN_REASON = {
   buildModelNotConfigured: "build_model_not_configured",
   /** Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt. */
   copyGeneration: "copy_generation",
+  /** The Step Run ended because the Forge rejected credentials or permission with HTTP 401 or 403. Deterministic; not retryable and does not consume Autonomous Retry Budget. */
+  forgeAuthRejected: "forge_auth_rejected",
   /** Watch PR Status Checks stopped cleanly at GitHub's explicit retry time. */
   githubThrottled: "github_throttled",
   /** A green-only Status Check Handoff completed without an Agent Turn because harness-owned GitHub observation found no positive automated-review evidence. */

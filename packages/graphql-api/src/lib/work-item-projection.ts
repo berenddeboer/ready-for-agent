@@ -217,7 +217,12 @@ export const workItemCanRetry = (workItem: WorkItemRecord): boolean => {
     return false
   }
 
-  const latestStatus = latestStepRun(workItem)?.status
+  const latest = latestStepRun(workItem)
+  if (latest?.reasonCode === STEP_RUN_REASON.forgeAuthRejected) {
+    return false
+  }
+
+  const latestStatus = latest?.status
   return latestStatus === "failed" || latestStatus === "interrupted"
 }
 

@@ -37,6 +37,7 @@ import {
   type PullRequestLifecycleStatus,
   buildReasonDetail,
   formatUserFacingError,
+  isDeterministicForgeAuthFailure,
   isGitHubThrottledError,
   logErrorAnnotations,
   parseReasonDetail,
@@ -360,6 +361,12 @@ const classifyHandlerFailure = (
       return {
         reasonCode: STEP_RUN_REASON.prStatusChecksUnresolved,
         reasonMessage: error.message,
+      }
+    }
+    if (isDeterministicForgeAuthFailure(error)) {
+      return {
+        reasonCode: STEP_RUN_REASON.forgeAuthRejected,
+        reasonMessage: handlerFailureMessage(error),
       }
     }
     return {
@@ -5581,7 +5588,7 @@ export const makeWorkItemLifecycleLive = (
         const startLatest = yield* loadLatestStepRunRow(workItemId)
         const startHasActive = yield* loadHasActiveStepRun(workItemId)
         if (
-          Boolean(workItem.paused) &&
+          workItem.paused &&
           parkedAttentionEligibilityFromRow(
             workItem,
             startLatest,
@@ -7198,6 +7205,15 @@ export const makeWorkItemLifecycleLive = (
           return yield* new RetryNotEligibleError({
             workItemId,
             reason: "paused",
+          })
+        }
+        if (
+          autonomous !== undefined &&
+          latest?.reason_code === STEP_RUN_REASON.forgeAuthRejected
+        ) {
+          return yield* new RetryNotEligibleError({
+            workItemId,
+            reason: STEP_RUN_REASON.forgeAuthRejected,
           })
         }
         if (autonomous !== undefined) {
