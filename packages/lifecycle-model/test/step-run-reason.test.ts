@@ -57,6 +57,7 @@ describe("generated STEP_RUN_REASON", () => {
     expect(STEP_RUN_REASON.agentBackendAuthRejected).toBe(
       "agent_backend_auth_rejected",
     )
+    expect(STEP_RUN_REASON.forgeAuthRejected).toBe("forge_auth_rejected")
     expect(STEP_RUN_REASON.waitingForAgentTurn).toBe("waiting_for_agent_turn")
     expect(STEP_RUN_REASON.issueClosedPrClosedUnmerged).toBe(
       "issue_closed_pr_closed_unmerged",

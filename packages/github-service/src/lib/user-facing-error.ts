@@ -102,7 +102,7 @@ const nextCause = (value: unknown): unknown => {
  * Prefer the typed `statusCode` field, then `HTTP NNN` in messages or
  * postcondition `diagnostics`. Never copies nested response bodies.
  */
-const extractHttpStatus = (error: unknown): number | undefined => {
+export const extractHttpStatus = (error: unknown): number | undefined => {
   const seen = new Set<unknown>()
   let current: unknown = error
   let fromText: number | undefined
@@ -127,6 +127,15 @@ const extractHttpStatus = (error: unknown): number | undefined => {
     current = nextCause(current)
   }
   return fromText
+}
+
+/** HTTP 401 and 403 are deterministic Forge auth/permission failures. */
+export const isDeterministicForgeAuthHttpStatus = (status: number): boolean =>
+  status === 401 || status === 403
+
+export const isDeterministicForgeAuthFailure = (error: unknown): boolean => {
+  const status = extractHttpStatus(error)
+  return status !== undefined && isDeterministicForgeAuthHttpStatus(status)
 }
 
 const httpSuffix = (status: number, message: string): string => {

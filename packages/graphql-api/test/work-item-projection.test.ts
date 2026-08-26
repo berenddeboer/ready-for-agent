@@ -880,6 +880,32 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
     ],
   })
 
+  test("Forge HTTP 401/403 Step Run is not retryable, including Autonomous Retry", () => {
+    const mergePrAuthRejected = workItemWith({
+      state: "merge_pr",
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "merge_pr",
+          status: "failed",
+          reasonCode: STEP_RUN_REASON.forgeAuthRejected,
+          reasonMessage:
+            "Failed to merge pull request 42 for acme/widgets: HTTP 401 Unauthorized",
+          reasonDetail: null,
+        },
+      ],
+    })
+    expect(workItemCanRetry(mergePrAuthRejected)).toBe(false)
+    expect(workItemCanAutonomousRetry(mergePrAuthRejected)).toBe(false)
+    expect(workItemLatestStepRunReason(mergePrAuthRejected)).toEqual({
+      code: "forge_auth_rejected",
+      message:
+        "Failed to merge pull request 42 for acme/widgets: HTTP 401 Unauthorized",
+      retryAt: null,
+      detail: null,
+    })
+  })
+
   test("retryable failed Step Run keeps canRetry and structured reason with detail", () => {
     expect(workItemCanRetry(implementFailedWithDetail)).toBe(true)
     expect(workItemStatus(implementFailedWithDetail)).toBe("failed")

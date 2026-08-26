@@ -4,6 +4,7 @@ import {
   AutonomousRetryDeferredError,
   AutonomousRetryLimitReachedError,
   RetryNotEligibleError,
+  STEP_RUN_REASON,
   type WorkItemRecord,
   WorkItemTerminalError,
 } from "@ready-for-agent/work-item-lifecycle"
@@ -235,6 +236,21 @@ describe("snapshotRetryTargets", () => {
     waitingForBlockers: true,
     stepRuns: [],
   })
+  const forgeAuthRejected = workItemWith({
+    id: "wi-forge-auth",
+    issueNumber: 33,
+    state: "merge_pr",
+    stepRuns: [
+      {
+        ...baseStepRun,
+        step: "merge_pr",
+        status: "failed",
+        reasonCode: STEP_RUN_REASON.forgeAuthRejected,
+        reasonMessage:
+          "Failed to merge pull request 42 for acme/widgets: HTTP 401 Unauthorized",
+      },
+    ],
+  })
   const terminalFailed = workItemWith({
     id: "wi-terminal-failed",
     issueNumber: 30,
@@ -280,6 +296,19 @@ describe("snapshotRetryTargets", () => {
       "wi-nh-review",
       "wi-legacy-failed",
     ])
+  })
+
+  test("all-retryable skips deterministic Forge 401/403 so Autonomous Retry Budget is not spent", () => {
+    const snapshot = snapshotRetryTargets({
+      selector: { kind: "all-retryable" },
+      repositoryId: "repo-1",
+      workItems: [forgeAuthRejected, failedInterrupted],
+    })
+    expect(Array.isArray(snapshot)).toBe(true)
+    if (!Array.isArray(snapshot)) {
+      throw new Error("expected snapshot list")
+    }
+    expect(snapshot.map((item) => item.id)).toEqual(["wi-failed"])
   })
 
   test("all-retryable skips parked Attention cards whose Issue is no longer Relevant", () => {

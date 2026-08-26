@@ -308,6 +308,12 @@ rfa:CopyGenerationReason
   skos:definition
     "Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt."@en .
 
+rfa:ForgeAuthRejectedReason
+  a rfa:StepRunReason ;
+  skos:notation "forge_auth_rejected" ;
+  skos:definition
+    "The Step Run ended because the Forge rejected credentials or permission with HTTP 401 or 403. Deterministic; not retryable and does not consume Autonomous Retry Budget."@en .
+
 rfa:GitHubThrottledReason
   a rfa:StepRunReason ;
   skos:notation "github_throttled" ;

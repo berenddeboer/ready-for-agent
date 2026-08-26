@@ -17,7 +17,10 @@ import {
   buildReasonDetail,
   extractCauseChain,
   extractErrorCode,
+  extractHttpStatus,
   formatUserFacingError,
+  isDeterministicForgeAuthFailure,
+  isDeterministicForgeAuthHttpStatus,
   logErrorAnnotations,
   makeGitHubServiceFromToken,
   makeGitHubServiceTest,
@@ -4598,6 +4601,51 @@ describe("user-facing error formatting", () => {
     })
     expect(flattened).toContain("HTTP 401")
     expect(flattened).toContain("No open pull request found")
+  })
+
+  it("treats 401 and 403 as deterministic Forge auth failures, not 503", () => {
+    expect(
+      isDeterministicForgeAuthFailure(
+        new GitHubRequestError({
+          message: "Failed to merge pull request for acme/widgets:branch",
+          statusCode: 401,
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      isDeterministicForgeAuthFailure(
+        new GitHubRequestError({
+          message: "Failed to merge pull request for acme/widgets:branch",
+          statusCode: 403,
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      isDeterministicForgeAuthFailure(
+        new GitHubRequestError({
+          message: "Failed to merge pull request for acme/widgets:branch",
+          statusCode: 503,
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      isDeterministicForgeAuthFailure({
+        _tag: "CreatePrPostconditionError",
+        message: "No open pull request found",
+        diagnostics: "createDraftPullRequest failed: HTTP 401 Unauthorized",
+      }),
+    ).toBe(true)
+    expect(isDeterministicForgeAuthHttpStatus(401)).toBe(true)
+    expect(isDeterministicForgeAuthHttpStatus(403)).toBe(true)
+    expect(isDeterministicForgeAuthHttpStatus(503)).toBe(false)
+    expect(
+      extractHttpStatus(
+        new GitHubRequestError({
+          message: "Failed to merge pull request for acme/widgets:branch",
+          statusCode: 503,
+        }),
+      ),
+    ).toBe(503)
   })
 
   it("does not duplicate an HTTP status already in the message", () => {
