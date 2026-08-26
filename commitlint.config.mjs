@@ -12,5 +12,9 @@ export default {
   ],
   rules: {
     "scope-not-ci": [2, "always"],
+    // Canonical publication copy is reviewer Markdown, not wrapped 72/100-column
+    // commit prose. Semantic Conventional Commit rules stay in force.
+    "body-max-line-length": [0],
+    "footer-max-line-length": [0],
   },
 }

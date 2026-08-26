@@ -8,18 +8,20 @@
     "test": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "bun test tool-pins.test.ts fix-bun-typescript-for-nx.test.ts",
+        "command": "bun test tool-pins.test.ts fix-bun-typescript-for-nx.test.ts commitlint-policy.test.ts",
         "cwd": "{projectRoot}"
       },
       "inputs": [
         "{workspaceRoot}/mise.toml",
         "{workspaceRoot}/hk.pkl",
+        "{workspaceRoot}/commitlint.config.mjs",
         "{workspaceRoot}/.github/**/*.yml",
         "{workspaceRoot}/.github/**/*.yaml",
         "{projectRoot}/tool-pins.test.ts",
         "{projectRoot}/run-pinned-usage.sh",
         "{projectRoot}/fix-bun-typescript-for-nx.mjs",
-        "{projectRoot}/fix-bun-typescript-for-nx.test.ts"
+        "{projectRoot}/fix-bun-typescript-for-nx.test.ts",
+        "{projectRoot}/commitlint-policy.test.ts"
       ],
       "cache": true
     }

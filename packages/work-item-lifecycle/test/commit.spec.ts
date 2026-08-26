@@ -217,6 +217,59 @@ const git = async (cwd: string, args: ReadonlyArray<string>) => {
   return stdout.trim()
 }
 
+const workspaceRoot = join(import.meta.dir, "../../..")
+
+const longPublicationLine = (prefix: string): string =>
+  `${prefix}${"x".repeat(120)}`.slice(0, 120)
+
+const canonicalMarkdownPublicationCopy = {
+  title: "feat: cache the widgets list endpoint",
+  body: [
+    "## Why this change exists",
+    "",
+    longPublicationLine(
+      "Adds cached widgets responses so the dashboard reuses prior results. ",
+    ),
+    "",
+    longPublicationLine(
+      "BREAKING CHANGE: clients must send If-None-Match on widgets list. ",
+    ),
+    "",
+    "Closes #91",
+  ].join("\n"),
+}
+
+const installWorkspaceCommitlintHook = async (root: string) => {
+  const hooks = join(root, ".git", "hooks")
+  await mkdir(hooks, { recursive: true })
+  await writeFile(
+    join(hooks, "commit-msg"),
+    `#!/bin/sh
+edit=$1
+case "$edit" in
+  /*) ;;
+  *) edit="$PWD/$edit" ;;
+esac
+exec bun run --cwd ${JSON.stringify(workspaceRoot)} commitlint -- --edit "$edit"
+`,
+  )
+  await chmod(join(hooks, "commit-msg"), 0o755)
+}
+
+const persistCopyOnWorkItem = (
+  workItemId: string,
+  copy: { readonly title: string; readonly body: string },
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql.unsafe(
+      `UPDATE work_item
+       SET publication_title = ?, publication_body = ?, updated_at = ?
+       WHERE id = ?`,
+      [copy.title, copy.body, Date.now(), workItemId],
+    )
+  })
+
 const initWorktree = async (root: string) => {
   await git(root, ["init", "-b", "main"])
   await git(root, ["config", "user.email", "test@example.com"])
@@ -1209,6 +1262,99 @@ fi
       const status = await git(root, ["status", "--porcelain"])
       expect(status).toContain(".ready-for-agent/")
       expect(status).not.toContain("feature.ts")
+    }))
+
+  it("preserves Markdown headings on the native commit path when git would strip comments", () =>
+    withTempRepo(async (root, startingOid) => {
+      await git(root, ["config", "commit.cleanup", "strip"])
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      const copy = canonicalMarkdownPublicationCopy
+      expect(copy.body).toContain("## Why this change exists")
+
+      let continued = 0
+      const result = committedOf(
+        await run(
+          commit(
+            baseContext(root, {
+              startingCommitOid: startingOid,
+              publicationTitle: copy.title,
+              publicationBody: copy.body,
+            }),
+          ),
+          stubOpencode({
+            continueTurn: () => {
+              continued += 1
+              return Effect.succeed({
+                sessionId: "ses_commit_default",
+                assistantText: "",
+              })
+            },
+          }),
+        ),
+      )
+
+      expect(result.completion).toBe("native")
+      expect(continued).toBe(0)
+      const message = await git(root, ["log", "-1", "--pretty=%B"])
+      expect(message).toBe(formatPublicationCommitMessage(copy))
+      expect(message).toContain("## Why this change exists")
+      expect(result.publicationTitle).toBe(copy.title)
+      expect(result.publicationBody).toBe(copy.body)
+    }))
+
+  it("commits long-line Markdown publication copy through this repository's Commitlint policy without Repair Fallback", () =>
+    withTempRepo(async (root, startingOid) => {
+      await git(root, ["config", "commit.cleanup", "strip"])
+      await installWorkspaceCommitlintHook(root)
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      const copy = canonicalMarkdownPublicationCopy
+      const workItemId = makeWorkItemId()
+      expect(copy.body.split("\n").some((line) => line.length > 100)).toBe(true)
+
+      let continued = 0
+      const result = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          yield* seedWorkItem({
+            workItemId,
+            repositoryId: repository.id,
+            issueNumber: 91,
+          })
+          yield* persistCopyOnWorkItem(workItemId, copy)
+          const outcome = committedOf(
+            yield* commit(
+              baseContext(root, {
+                workItemId,
+                repositoryId: repository.id,
+                startingCommitOid: startingOid,
+                publicationTitle: copy.title,
+                publicationBody: copy.body,
+              }),
+            ),
+          )
+          const persisted = yield* readPersistedPublicationCopy(workItemId)
+          return { outcome, persisted }
+        }),
+        stubOpencode({
+          continueTurn: () => {
+            continued += 1
+            return Effect.succeed({
+              sessionId: "ses_commit_default",
+              assistantText: "",
+            })
+          },
+        }),
+      )
+
+      expect(result.outcome.completion).toBe("native")
+      expect(continued).toBe(0)
+      const message = await git(root, ["log", "-1", "--pretty=%B"])
+      expect(message).toBe(formatPublicationCommitMessage(copy))
+      expect(message).toContain("## Why this change exists")
+      expect(result.outcome.publicationTitle).toBe(copy.title)
+      expect(result.outcome.publicationBody).toBe(copy.body)
+      expect(result.persisted?.publication_title).toBe(copy.title)
+      expect(result.persisted?.publication_body).toBe(copy.body)
     }))
 
   it("excludes harness artifacts even when Pre-Commit already staged them", () =>
