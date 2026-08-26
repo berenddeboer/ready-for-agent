@@ -33,6 +33,10 @@ export class RepositoryCredentialError extends Data.TaggedError(
   "RepositoryCredentialError",
 )<{ readonly message: string }> {}
 
+/** Published operator list of minimum Forge token scopes per lifecycle step. */
+const FORGE_TOKEN_SCOPES_DOC_URL =
+  "https://github.com/berenddeboer/ready-for-agent/blob/main/docs/forge-token-scopes.md"
+
 export const githubTokenSecretName = (repository: Repository) =>
   `GITHUB_TOKEN_${repository.projectPath}`
     .replace(/[^A-Za-z0-9_]/g, "_")
@@ -71,7 +75,7 @@ const githubTokenCreationUrl = (repository: Repository) => {
   url.searchParams.set("name", `rfa - ${name}`)
   url.searchParams.set(
     "description",
-    `Ready For Agent token for ${repository.projectPath}`,
+    `Ready For Agent token for ${repository.projectPath}. Minimum scopes: ${FORGE_TOKEN_SCOPES_DOC_URL}`,
   )
   url.searchParams.set("target_name", owner)
   url.searchParams.set("expires_in", "90")
@@ -89,8 +93,18 @@ const githubTokenCreationUrl = (repository: Repository) => {
 }
 
 /** Instance-correct GitLab personal access token creation page. */
-const gitlabTokenCreationUrl = (repository: Repository) =>
-  `https://${repository.forgeHost}/-/user_settings/personal_access_tokens`
+const gitlabTokenCreationUrl = (repository: Repository) => {
+  const url = new URL(
+    `https://${repository.forgeHost}/-/user_settings/personal_access_tokens`,
+  )
+  url.searchParams.set("name", `rfa - ${repository.projectPath}`)
+  url.searchParams.set(
+    "description",
+    `Ready For Agent token for ${repository.forgeHost}/${repository.projectPath}. Minimum scopes: ${FORGE_TOKEN_SCOPES_DOC_URL}`,
+  )
+  url.searchParams.set("scopes", "api,write_repository")
+  return url.toString()
+}
 
 /** Organization-scoped Azure DevOps personal access token creation page. */
 const azureDevOpsTokenCreationUrl = (repository: Repository) => {

@@ -1390,6 +1390,9 @@ describe("GraphQL API", () => {
     expect(creationUrl.searchParams.get("workflows")).toBe("write")
     expect(creationUrl.searchParams.get("statuses")).toBe("read")
     expect(creationUrl.searchParams.get("checks")).toBeNull()
+    expect(creationUrl.searchParams.get("description")).toContain(
+      "docs/forge-token-scopes.md",
+    )
   })
 
   test("reports ambient GitHub authentication as configured", async () => {
@@ -3516,8 +3519,9 @@ describe("GraphQL API", () => {
         configured: true,
         githubTokenSecretName:
           "GITLAB_TOKEN_GIT_DRUPALCODE_ORG_PROJECT_OAUTH_CLIENT",
-        githubTokenCreationUrl:
+        githubTokenCreationUrl: expect.stringContaining(
           "https://git.drupalcode.org/-/user_settings/personal_access_tokens",
+        ),
       },
     ])
   })
@@ -3575,8 +3579,9 @@ describe("GraphQL API", () => {
             repositoryId: repository.id,
             configured: true,
             githubTokenSecretName: "GITLAB_TOKEN_CUSTOM",
-            githubTokenCreationUrl:
+            githubTokenCreationUrl: expect.stringContaining(
               "https://git.drupalcode.org/-/user_settings/personal_access_tokens",
+            ),
           },
         ],
       },

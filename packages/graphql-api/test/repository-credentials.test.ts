@@ -49,6 +49,10 @@ describe("repositoryCredential", () => {
       githubTokenSecretName(githubRepo),
     )
     expect(credential.githubTokenCreationUrl).toContain("github.com")
+    const creationUrl = new URL(credential.githubTokenCreationUrl)
+    expect(creationUrl.searchParams.get("description")).toContain(
+      "docs/forge-token-scopes.md",
+    )
   })
 
   test("suggests a GitLab token secret name and instance-scoped creation URL", () => {
@@ -56,8 +60,13 @@ describe("repositoryCredential", () => {
     expect(credential.githubTokenSecretName).toBe(
       gitlabTokenSecretName(gitlabRepo),
     )
-    expect(credential.githubTokenCreationUrl).toBe(
+    const creationUrl = new URL(credential.githubTokenCreationUrl)
+    expect(`${creationUrl.origin}${creationUrl.pathname}`).toBe(
       "https://git.example.com/-/user_settings/personal_access_tokens",
+    )
+    expect(creationUrl.searchParams.get("scopes")).toBe("api,write_repository")
+    expect(creationUrl.searchParams.get("description")).toContain(
+      "docs/forge-token-scopes.md",
     )
   })
 

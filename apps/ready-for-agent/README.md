@@ -107,6 +107,14 @@ Stop the harness completely before opening that database with external write
 tooling (CLI, GUI, or a second process). The harness uses single-process default
 WAL; concurrent writers are not supported.
 
+### Forge token scopes
+
+Minimum GitHub, GitLab, and Azure DevOps token scopes per lifecycle
+step (poll, push, Create PR, Mark PR Ready for Review, Watch, Merge
+PR, close-out):
+[docs/forge-token-scopes.md](../../docs/forge-token-scopes.md). Azure
+complete/merge needs more than git + Create PR.
+
 ### Add a repository
 
 For interactive first-run setup, prefer the blank-slate UI after `start`
@@ -151,13 +159,14 @@ offers the existing Create GitHub token / Store in Keymaxxer flow.
 
 ### Upgrade an existing GitHub token
 
-New repository token links preselect **Actions: Read and write** (workflow
-reruns and CI job logs) and **Workflows: Read and write** (push or update
-`.github/workflows/**`), plus Issues, Contents, Pull requests (write), and
-Commit statuses (read). Already-created tokens are **not** upgraded
-automatically when the harness changes its requested permissions. Edit the
-fine-grained token on GitHub (or recreate it), then replace the secret in
-Keymaxxer — or remove the secret and use Create GitHub token again.
+New repository token links preselect the GitHub column of
+[docs/forge-token-scopes.md](../../docs/forge-token-scopes.md)
+(**Actions** and **Workflows** Read and write, plus Issues, Contents,
+Pull requests write, and Commit statuses read). Already-created tokens
+are **not** upgraded automatically when the harness changes its
+requested permissions. Edit the fine-grained token on GitHub (or
+recreate it), then replace the secret in Keymaxxer — or remove the
+secret and use Create GitHub token again.
 
 ### Help
 
