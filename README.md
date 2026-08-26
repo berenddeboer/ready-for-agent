@@ -17,6 +17,7 @@ action.
 
 - [Quick start](#quick-start)
 - [Requirements](#requirements)
+- [Forge token scopes](docs/forge-token-scopes.md)
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
@@ -101,6 +102,12 @@ uses that Forge):
 - [GitHub CLI (`gh`)](https://cli.github.com/) for GitHub repositories
 - [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) for GitLab repositories.
   Authenticate `glab` for each repository's Forge Host.
+
+Forge tokens need specific scopes for poll, push, Create PR, Watch,
+Merge PR, and close-out. Azure DevOps in particular: git push and
+Create PR can succeed with a narrower PAT than Merge PR — that split
+is how a “working” token still fails every ticket at merge. See
+[Forge token scopes](docs/forge-token-scopes.md).
 
 **Coding agents** are soft prerequisites: they are inspected after
 the harness starts and never block the process or UI from starting. A
@@ -740,6 +747,12 @@ export NODE_EXTRA_CA_CERTS=/path/to/corp-root-ca.pem
 Set the variable in your shell profile (or the service unit that
 starts the harness) so it applies on every launch, then restart
 `ready-for-agent`.
+
+### Merge PR fails on Azure DevOps with 401/403
+
+Git fetch/push and Create PR can succeed with a narrower PAT than
+complete. See [Forge token scopes](docs/forge-token-scopes.md) for
+the extra scopes Merge PR needs.
 
 ### What if an item fails with an error message?
 

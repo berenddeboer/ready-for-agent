@@ -137,6 +137,9 @@ import { WorkItemResetButton } from "./work-item-reset-button.js"
 export type { Repository } from "./repositories-query.js"
 export { repositoriesQuery } from "./repositories-query.js"
 
+const FORGE_TOKEN_SCOPES_DOC_URL =
+  "https://github.com/berenddeboer/ready-for-agent/blob/main/docs/forge-token-scopes.md"
+
 const graphql = createHarnessGraphqlClient({ batch: true })
 // Long-lived host folder dialog must not pin co-batched GraphQL operations.
 
@@ -2662,7 +2665,16 @@ function RepositoryCard({
                       <code className={ui.guidanceCode}>
                         .github/workflows/**
                       </code>
-                      ). Already-created tokens are not upgraded automatically —
+                      ). See{" "}
+                      <a
+                        href={FORGE_TOKEN_SCOPES_DOC_URL}
+                        className="text-ink underline underline-offset-2 hover:decoration-signal hover:decoration-2"
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        required scopes
+                      </a>
+                      . Already-created tokens are not upgraded automatically —
                       edit or recreate them if Workflows is missing, then
                       replace the secret in Keymaxxer.
                     </p>
@@ -2731,6 +2743,20 @@ function RepositoryCard({
                         <code className={ui.guidanceCode}>
                           {repository.projectPath}
                         </code>
+                        . Prefills <code className={ui.guidanceCode}>api</code>{" "}
+                        and{" "}
+                        <code className={ui.guidanceCode}>
+                          write_repository
+                        </code>
+                        ; see{" "}
+                        <a
+                          href={FORGE_TOKEN_SCOPES_DOC_URL}
+                          className="text-ink underline underline-offset-2 hover:decoration-signal hover:decoration-2"
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          required scopes
+                        </a>
                         . Store it in Keymaxxer when available, or set ambient
                         auth:{" "}
                       </>

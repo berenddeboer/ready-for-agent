@@ -107,6 +107,7 @@ describe("host tools preflight", () => {
       "AZURE_DEVOPS_EXT_PAT",
     ])
     expect(withoutPat.message).toContain("AZURE_DEVOPS_EXT_PAT")
+    expect(withoutPat.message).toContain("docs/forge-token-scopes.md")
     expect(withoutPat.message).not.toContain("gh:")
     expect(withoutPat.message).not.toContain("glab:")
   })

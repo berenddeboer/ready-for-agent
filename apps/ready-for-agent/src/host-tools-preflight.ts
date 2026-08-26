@@ -32,7 +32,7 @@ const AZURE_DEVOPS_PAT_ENV_VAR = "AZURE_DEVOPS_EXT_PAT"
 const AZURE_DEVOPS_ENV_REQUIREMENT: HostTool = {
   name: AZURE_DEVOPS_PAT_ENV_VAR,
   installHint:
-    "Set the AZURE_DEVOPS_EXT_PAT environment variable to an Azure DevOps Personal Access Token: https://learn.microsoft.com/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate",
+    "Set the AZURE_DEVOPS_EXT_PAT environment variable to an Azure DevOps Personal Access Token: https://learn.microsoft.com/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate — required scopes (Merge PR needs more than git + Create PR): https://github.com/berenddeboer/ready-for-agent/blob/main/docs/forge-token-scopes.md",
 }
 
 type RepositoryForge = "github" | "gitlab" | "azure-devops"

@@ -18,6 +18,12 @@ When adding a new skill under `.agents/skills/`, add the matching symlink:
 
 Issues live in GitHub Issues for berenddeboer/ready-for-agent (via `gh`). See `docs/agents/issue-tracker.md`.
 
+### Forge token scopes
+
+Minimum token scopes per Forge and lifecycle step (poll, push, Create
+PR, Mark PR Ready for Review, Watch, Merge PR, close-out) live in
+[docs/forge-token-scopes.md](docs/forge-token-scopes.md).
+
 ### GitHub API notes
 
 Fine-grained GitHub PATs cannot call the Checks API (including GraphQL
