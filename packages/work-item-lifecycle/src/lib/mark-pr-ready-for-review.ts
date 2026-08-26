@@ -5,6 +5,7 @@ import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
 import {
   GitHubService,
   type GitHubThrottledError,
+  formatUserFacingError,
   isGitHubThrottledError,
   logErrorAnnotations,
 } from "@ready-for-agent/github-service"
@@ -38,12 +39,7 @@ export type MarkPrReadyForReviewResult = {
 }
 
 const errorMessage = (cause: unknown): string =>
-  cause &&
-  typeof cause === "object" &&
-  "message" in cause &&
-  typeof cause.message === "string"
-    ? cause.message
-    : String(cause)
+  formatUserFacingError(cause, "Unknown error")
 
 const boundDiagnostics = (text: string): string => {
   const trimmed = text.trim()

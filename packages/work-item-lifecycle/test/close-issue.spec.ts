@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect"
 import {
+  AzureDevOpsRequestError,
   AzureDevOpsService,
   type AzureDevOpsServiceShape,
 } from "@ready-for-agent/azure-devops-service"
@@ -10,6 +11,7 @@ import {
 import {
   GitHubService,
   type GitHubServiceShape,
+  formatUserFacingError,
 } from "@ready-for-agent/github-service"
 import {
   GitLabService,
@@ -280,6 +282,58 @@ describe("closeIssue", () => {
         projectPath: "acme/widgets",
       },
     ])
+  })
+
+  it("surfaces HTTP 401 from Azure close-out in the flattened failure message", async () => {
+    const azureDevOpsRepository = makeRepositoryRecord({
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/acme-widgets",
+    })
+    const db = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+      listIssues: () =>
+        Effect.succeed([
+          {
+            ...openLeaf,
+            repositoryId: azureDevOpsRepository.id,
+            url: "https://dev.azure.com/acme/widgets/_workitems/edit/42",
+          },
+        ]),
+    })
+    const github = Layer.succeed(GitHubService, unusedGithub)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      ensureIssueCompletedWithSummary: () =>
+        Effect.fail(
+          new AzureDevOpsRequestError({
+            message:
+              "Failed to complete Azure Boards Issue #42 for acme/widgets",
+            statusCode: 401,
+            cause: Object.assign(
+              new Error(
+                "Failed to complete Azure Boards Issue #42 for acme/widgets: Azure DevOps returned HTTP 401",
+              ),
+              { statusCode: 401 },
+            ),
+          }),
+        ),
+    } as AzureDevOpsServiceShape)
+
+    const error = await Effect.runPromise(
+      closeIssue({
+        ...context,
+        repositoryId: azureDevOpsRepository.id,
+      }).pipe(
+        Effect.provide(Layer.mergeAll(db, github, azureDevOps)),
+        Effect.flip,
+      ),
+    )
+
+    expect(error).toBeInstanceOf(AzureDevOpsRequestError)
+    const flattened = formatUserFacingError(error)
+    expect(flattened).toContain("HTTP 401")
+    expect(flattened).not.toMatch(/ghp_|glpat-|Bearer /)
   })
 
   it("rejects an open parent Issue before mutation", async () => {

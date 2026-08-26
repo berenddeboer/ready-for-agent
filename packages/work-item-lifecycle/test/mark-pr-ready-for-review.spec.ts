@@ -13,6 +13,7 @@ import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
+  formatUserFacingError,
 } from "@ready-for-agent/github-service"
 import {
   GitLabRequestError,
@@ -256,7 +257,14 @@ describe("markPrReadyForReview", () => {
     const github = Layer.succeed(GitHubService, {
       markPullRequestReadyForReview: () =>
         Effect.fail(
-          new GitHubRequestError({ message: "mark ready unavailable" }),
+          new GitHubRequestError({
+            message:
+              "Failed to mark pull request ready for review for acme/widgets:branch",
+            statusCode: 401,
+            cause: Object.assign(new Error("Unauthorized: Bad credentials"), {
+              statusCode: 401,
+            }),
+          }),
         ),
       getPullRequestCheckStatus: () => Effect.succeed(stillDraftStatus),
     } as GitHubServiceShape)
@@ -272,6 +280,9 @@ describe("markPrReadyForReview", () => {
     )
 
     expect(error).toBeInstanceOf(MarkPrReadyForReviewPostconditionError)
+    const flattened = formatUserFacingError(error)
+    expect(flattened).toContain("HTTP 401")
+    expect(error.diagnostics).toContain("HTTP 401")
   })
 
   it("never trusts the native call's own report: a native success that leaves the PR draft still falls back to the agent", async () => {
