@@ -8,8 +8,9 @@ covers monorepo development of Ready for Agent.
 ## Prerequisites
 
 Product host tools from the product README: `git`, plus `gh` for GitHub
-Repositories and `glab` for GitLab Repositories. Authenticate each Forge CLI
-for the Repository's Forge Host.
+Repositories, `glab` for GitLab Repositories, and `AZURE_DEVOPS_EXT_PAT` for
+Azure DevOps Repositories. Authenticate each Forge CLI for the Repository's
+Forge Host.
 
 Also needed to run or test the harness:
 

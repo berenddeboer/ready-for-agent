@@ -1,11 +1,12 @@
 # Ready for Agent: Clanker Harness for 150+ PRs a week
 
-Ready for Agent turns GitHub (or GitLab) issues into merged pull
-requests. You create issues and label them `ready-for-agent`; the
-harness hands each one to your preferred coding agent, which
-implements it, reviews the code, opens a PR, and merges when
-allowed. You design, you architect, you verify where needed — the
-harness removes the babysitting between issue and merged PR.
+Ready for Agent turns GitHub, GitLab, or Azure DevOps issues into
+merged pull requests. You mark them `ready-for-agent` (a label on
+GitHub and GitLab, a Boards tag on Azure DevOps). The harness hands
+each one to your preferred coding agent, which implements it, reviews
+the code, opens a PR, and merges when allowed. You design, you
+architect, you verify where needed — the harness removes the
+babysitting between issue and merged PR.
 
 <img src="ready-for-agent.png" alt="Ready for Agent" width="90%" />
 
@@ -20,6 +21,7 @@ action.
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
+- [Azure DevOps](#azure-devops)
 - [Command reference](#command-reference)
 - [Shell completions](#shell-completions)
 - [Troubleshooting](#troubleshooting)
@@ -63,15 +65,19 @@ action.
    <img src="docs/add-repository-blank-slate.png" alt="Blank slate: add a repository from the UI (Browse, path field, or CLI)" width="75%" />
 
    Advanced: once the harness is running, you can also add from a
-   shell:
+   shell. The path must be a git repository with a GitHub, GitLab, or
+   Azure DevOps remote:
 
    ```bash
    ready-for-agent add /path/to/local/repo
    ```
 
-4. Label a GitHub issue with `ready-for-agent`. It shows up in the UI
-   shortly. By default only issues you authored are listed — see
-   [Troubleshooting](#troubleshooting).
+4. Mark a Ready Issue: label a GitHub or GitLab issue
+   `ready-for-agent`, or tag an Azure Boards work item
+   `ready-for-agent`. It shows up in the UI shortly. By default only
+   issues you authored are listed — see
+   [Troubleshooting](#troubleshooting). Azure specifics (PAT, empty
+   repos, Merge Policy) are in [Azure DevOps](#azure-devops).
 
 5. Go to the `/repos` page to see your issues:
 
@@ -101,6 +107,9 @@ uses that Forge):
 - [GitHub CLI (`gh`)](https://cli.github.com/) for GitHub repositories
 - [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) for GitLab repositories.
   Authenticate `glab` for each repository's Forge Host.
+- Azure DevOps: no CLI. Set `AZURE_DEVOPS_EXT_PAT` to a personal
+  access token. See [Azure DevOps](#azure-devops) and the
+  [token scopes ticket](https://github.com/berenddeboer/ready-for-agent/issues/1213).
 
 **Coding agents** are soft prerequisites: they are inspected after
 the harness starts and never block the process or UI from starting. A
@@ -151,18 +160,18 @@ issues that come with running compute in the cloud.
   spend, no environment drift.
 - Works with your existing Claude (or other) subscription rather than
   metered API billing.
-- GitHub and GitLab support.
+- GitHub, GitLab, and Azure DevOps support.
 - Human in the loop where you want it: you design, you architect, you
   verify.
 
 ## How it works
 
-The harness is a loop around issues labelled `ready-for-agent`: it
-only shows those, you pick the ones to work on, and it autonomously
-completes them using your selected coding agent. For each issue it
-creates a fresh worktree, installs packages, and asks the headless
-agent to implement the issue, review the code, create a PR, and merge
-if allowed.
+The harness is a loop around issues marked `ready-for-agent` (a GitHub
+or GitLab label, or an Azure Boards tag): it only shows those, you
+pick the ones to work on, and it autonomously completes them using
+your selected coding agent. For each issue it creates a fresh
+worktree, installs packages, and asks the headless agent to implement
+the issue, review the code, create a PR, and merge if allowed.
 
 Steps 1 to 3 are you. Steps 4 and 5 are the harness.
 
@@ -181,8 +190,8 @@ tickets (`/to-tickets`). These tickets will be labeled with
 [Skills for Real Engineers](https://github.com/mattpocock/skills) to
 get started with this kind of workflow.
 
-But as long as an issue has the `ready-for-agent` label, this tool
-can work on it.
+But as long as an issue has the `ready-for-agent` label (or Azure
+Boards tag), this tool can work on it.
 
 ### Working on issues
 
@@ -255,7 +264,9 @@ READY_FOR_AGENT_GRAPHQL_URL=http://<reachable-host>:<port>/graphql \
 Each repo can override the harness-wide coding agent and build/review
 models, and set a Merge Policy (Off, Classify, or Always). This allows
 you to configure more expensive models for more complex code, and
-cheaper models for others.
+cheaper models for others. New Repositories default to Off. For a
+no-CI Azure DevOps repo, Always is the unattended merge setting — see
+[Azure DevOps](#azure-devops).
 
 ### KeyMaxxer
 
@@ -270,6 +281,19 @@ Disable with:
 ```bash
 KEYMAXXER_ENABLED=false npx ready-for-agent@latest
 ```
+
+## Azure DevOps
+
+Azure DevOps is a first-class Forge. Ready discovery is a Boards tag
+`ready-for-agent`, not a label. Auth is the ambient
+`AZURE_DEVOPS_EXT_PAT` environment variable until credential UX
+ships. A repo with no default branch is not usable until `main` (or
+equivalent) exists. Default Merge Policy is Off; Always is required to
+auto-merge a no-CI Azure repo. Boards close-out is not yet at parity
+with GitHub and GitLab.
+
+Details: [docs/azure-devops.md](docs/azure-devops.md). Token scopes:
+[issue #1213](https://github.com/berenddeboer/ready-for-agent/issues/1213).
 
 ## Command reference
 
@@ -450,7 +474,7 @@ ready-for-agent start --host
 - **Usage**: `ready-for-agent add [--forge-host <host>] [--project-path <project-path>] <path>`
 - **Effect**: modifies state
 
-Inspect and add a local repository; inferred GitLab identity can be corrected with flags
+Inspect and add a local GitHub, GitLab, or Azure DevOps repository; inferred identity can be corrected with flags
 
 ### Arguments
 
@@ -678,10 +702,11 @@ usage generate completion powershell ready-for-agent \
 
 ### Startup fails with "Required host tools are missing from PATH"
 
-Install the listed tools. Only `git` and the Forge tool for your
-repositories (`gh` for GitHub, `glab` for GitLab) block startup. A
-missing coding agent never does — it shows as Unavailable instead
-(see below).
+Install the listed tools. Only `git` and the Forge requirement for
+your repositories (`gh` for GitHub, `glab` for GitLab,
+`AZURE_DEVOPS_EXT_PAT` for Azure DevOps) block startup. A missing
+coding agent never does — it shows as Unavailable instead (see
+below).
 
 ### Startup fails with SIGILL / "Illegal instruction"
 
@@ -702,8 +727,9 @@ unaffected (`bun run ready-for-agent`).
 
 ### A labelled issue does not show up
 
-- The issue must carry the `ready-for-agent` label — the harness only
-  shows those.
+- GitHub and GitLab: the issue must carry the `ready-for-agent` label.
+  Azure DevOps: the Boards work item must carry the `ready-for-agent`
+  tag — not a GitHub-style label. The harness only shows those.
 - By default only issues **you** authored are listed. If someone else's
   `ready-for-agent` issue is missing, enable **Include all Issue Authors**
   in the repo settings to include issues created by any author.
@@ -768,9 +794,11 @@ backend's current catalog, never typed in.
 
 2. Does the harness support a Forge other than GitHub?
 
-Yes. GitLab repository identity, issue reconciliation, and local
-agent work through review are supported. GitLab pull request
-lifecycle operations are being delivered in later phases.
+Yes. GitLab and Azure DevOps are first-class Forges. Azure Boards
+Ready discovery is a Boards tag `ready-for-agent` (not a label), auth
+is `AZURE_DEVOPS_EXT_PAT`, and Merge Policy Always is the unattended
+setting when the Azure repo has no CI. See
+[Azure DevOps](#azure-devops).
 
 3. Can I use my Claude subscription?
 
@@ -806,8 +834,8 @@ with finding work, they are not explorer work or creating work.
   agent doing the work.
 - **Harness** — this tool: the deterministic loop that steers
   clankers from issue to merged PR.
-- **Forge** — the code-hosting platform for a repository: GitHub or
-  GitLab.
+- **Forge** — the code-hosting platform for a repository: GitHub,
+  GitLab, or Azure DevOps.
 - **Agent Backend** — the coding-agent CLI the harness drives:
   OpenCode, Codex, Grok Build, or Claude Code.
 - **Work Item** — one attempt to complete an issue through the work
@@ -854,5 +882,5 @@ Contributions welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
   well](https://x.com/victorsavkin/status/2085381771516846093),
   although we disagree on whether the tooling is always personal, or
   can be generalised a bit. Obviously my take is that with regards to
-  GitHub/GitLab systems, and a single programmer a tool like
-  ready-for-agent can give a significant productivity boost.
+  GitHub/GitLab/Azure DevOps systems, and a single programmer a tool
+  like ready-for-agent can give a significant productivity boost.

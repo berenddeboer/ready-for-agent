@@ -62,7 +62,9 @@ This boots the full Harness (UI + backend) on the existing monorepo dev path
 Before start, the binary checks that required host tools are on `PATH`: `git`,
 plus `gh` when a GitHub Repository exists and
 [`glab`](https://docs.gitlab.com/cli/) when a GitLab Repository exists.
-Install and authenticate `glab` for the Repository's Forge Host. Selected Agent
+Install and authenticate `glab` for the Repository's Forge Host. Azure DevOps
+needs no CLI; set `AZURE_DEVOPS_EXT_PAT` when an Azure DevOps Repository exists.
+See [Azure DevOps](../../docs/azure-devops.md). Selected Agent
 Backend executables are inspected after start; a missing or broken CLI marks
 that backend Unavailable and opens Settings, but never blocks the process or UI
 from starting. The AWS CLI is **not** required for Claude Code Bedrock profile
@@ -120,8 +122,9 @@ bun run ready-for-agent add /path/to/local/repo
 
 The command inspects the local git repository, calls the harness GraphQL
 endpoint at `http://127.0.0.1:6056/graphql`, and prints the persisted Repository
-id, local path, and bare flag. The path must be a git repository with a GitHub
-or GitLab remote. `add` does not start the Harness.
+id, local path, and bare flag. The path must be a git repository with a GitHub,
+GitLab, or Azure DevOps remote. An Azure Repos clone with no default branch is
+not usable until `main` (or equivalent) exists. `add` does not start the Harness.
 
 Override the endpoint when the harness is available elsewhere (non-default port
 or non-loopback bind):

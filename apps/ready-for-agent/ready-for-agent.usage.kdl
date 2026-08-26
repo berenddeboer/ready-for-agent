@@ -53,7 +53,7 @@ cmd "start" help="Start the full Harness (UI + backend); opens the browser unles
   example "ready-for-agent start --host" header="Start on all interfaces" help="Bind 0.0.0.0 instead of loopback"
 }
 
-cmd "add" help="Inspect and add a local repository; inferred GitLab identity can be corrected with flags" effect="write" {
+cmd "add" help="Inspect and add a local GitHub, GitLab, or Azure DevOps repository; inferred identity can be corrected with flags" effect="write" {
   arg "<path>" help="Path to a local git repository"
   complete "path" type="dir"
   flag "--forge-host <host>" help="Correct the forge host inferred from the repository remote"
