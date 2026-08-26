@@ -639,10 +639,13 @@ const attemptNativeCommit = (worktreePath: string, message: string) =>
     // Respect repository hooks and commit-message validation; do not bypass
     // hooks. Disable GPG signing for this harness-owned non-interactive commit
     // so a global commit.gpgsign=true cannot hang waiting for pinentry.
+    // Verbatim cleanup keeps Markdown headings (`##`) in canonical publication
+    // copy; strip/comment cleanup treats `#` as git commentary.
     const commitResult = yield* runGitInWorktree(worktreePath, [
       "-c",
       "commit.gpgsign=false",
       "commit",
+      "--cleanup=verbatim",
       "-m",
       message,
     ])
