@@ -1,7 +1,7 @@
 # Per-Repository Agent Backend selection
 
 > Spec ready for GitHub issue with label `ready-for-agent`.
-> Domain: `CONTEXT.md`, ADR 0037 (supersedes 0032; supersedes instance-wide portions of 0035).
+> Domain: `CONTEXT.md`, ADR 0037 (supersedes instance-wide portions of 0035).
 > Historical scope note: ADR 0052 later adds the deliberately separate Implement With path; the ordinary per-Repository behavior specified here remains unchanged.
 
 ## Problem Statement
@@ -12,7 +12,7 @@ Operators can only choose one Agent Backend for the entire Harness instance. Tea
 
 Keep a Harness-wide **default** Agent Backend, and let each Repository optionally **override** it (or inherit the default). Multiple backends may be Active concurrently. Changing a repo’s backend is blocked only while that repo has unfinished Work Items; changing the global default is blocked only while unfinished Work Items inherit the default. Health, recheck, create, and Agent Turns are scoped to the backend that work actually needs.
 
-Domain and decision records: `CONTEXT.md`, ADR 0037 (supersedes 0032; supersedes instance-wide single-backend / fleet-wide idle gate in 0035).
+Domain and decision records: `CONTEXT.md`, ADR 0037 (supersedes instance-wide single-backend / fleet-wide idle gate in 0035).
 
 ## User Stories
 
@@ -65,7 +65,7 @@ Domain and decision records: `CONTEXT.md`, ADR 0037 (supersedes 0032; supersedes
 
 ## Implementation Decisions
 
-- **ADR / domain**: Implement against ADR 0037 and updated `CONTEXT.md`. Treat ADR 0032 as superseded. Keep ADR 0035 hot-activate, Preview, and per-backend model prefs; do not keep single-backend or fleet-wide idle gate.
+- **ADR / domain**: Implement against ADR 0037 and updated `CONTEXT.md`. Keep ADR 0035 hot-activate, Preview, and per-backend model prefs; do not keep single-backend or fleet-wide idle gate.
 - **Schema**: Add nullable Repository Agent Backend override (null = inherit). Migrate existing rows to null. Harness Config retains default `selectedAgentBackend`.
 - **Effective selection**: `repository.override ?? config.default`.
 - **Gates**: Unfinished = non-terminal (includes Needs Human, paused, Waiting for Worker Slot). Repo override change: any unfinished WI on that repo. Global default change: unfinished WIs only on inheriting repos. Errors carry **blocking** count and scope (global vs repository). Keep total unfinished count if still useful for fleet visibility; do not overload it as the gate.
@@ -78,7 +78,7 @@ Domain and decision records: `CONTEXT.md`, ADR 0037 (supersedes 0032; supersedes
 - **UI**: Repository settings: backend select with “Harness default (label)”, above models; Preview when draft backend differs; disable Save/change with scoped reason. Global Settings: default backend, multi health, recheck by id, scoped gate for default. First-run banner tied to default backend build model, not a hard global freeze of configured overrides.
 - **Host preflight**: Peek union of config default and distinct non-null repository overrides; check host tools for those backends.
 - **Concurrency**: Keep instance-wide `maxConcurrentAgentTurns` and `maxConcurrentWorkItems`.
-- **Docs already landed with this ticket’s prep**: ADR 0037, ADR 0032/0035 status updates, `CONTEXT.md` vocabulary — implementers should align code to those, not re-litigate product.
+- **Docs already landed with this ticket’s prep**: ADR 0037, ADR 0035 status updates, `CONTEXT.md` vocabulary — implementers should align code to those, not re-litigate product.
 
 ## Testing Decisions
 

@@ -1,6 +1,6 @@
 # Hot-activate Agent Backend without Harness restart
 
-Status: accepted (supersedes the restart-boundary portions of ADR 0032; instance-wide single-backend and fleet-wide idle gate superseded by ADR 0037)
+Status: accepted (instance-wide single-backend and fleet-wide idle gate superseded by ADR 0037)
 
 Agent Backend change does not require a Harness process restart. When a change is allowed by the applicable idle gate, Save hot-activates the new backend immediately; inspect failure yields Agent Backend Unavailable on that backend rather than Selected≠Active limbo. Settings may Agent Backend Preview a not-yet-saved backend’s model catalog so build/review picks happen in one Save. Build and review model selections (Harness and Repository) are remembered per backend instead of cleared on every switch.
 
