@@ -1944,6 +1944,8 @@ const runCliOnPty = (
 const startJumpGraphqlServer = (options: {
   readonly backendId?: string
   readonly worktreePath?: string | null
+  readonly agentModel?: string | null
+  readonly thinkingLevel?: string | null
   readonly error?: { readonly code: string; readonly message: string }
 }): Promise<{
   readonly url: string
@@ -1989,6 +1991,8 @@ const startJumpGraphqlServer = (options: {
                 },
                 sessionId: jumpSessionId,
                 worktreePath: options.worktreePath ?? null,
+                agentModel: options.agentModel ?? null,
+                thinkingLevel: options.thinkingLevel ?? null,
               },
             },
           }),
@@ -2343,6 +2347,49 @@ if (args[0] === "split-window" && args.includes("-P")) {
         ["select-layout", "-t", "@1", "even-horizontal"],
         ["select-pane", "-t", "%1"],
         ["select-window", "-t", "@1"],
+      ])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("jump pins the Work Item Agent Model on the OpenCode pane command", async () => {
+    const worktree = join(tempRoot, "worktree-model")
+    mkdirSync(worktree)
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: worktree,
+      agentModel: "amazon-bedrock/au.anthropic.claude-sonnet-5",
+      thinkingLevel: "high",
+    })
+    try {
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv(),
+      )
+
+      expect(result.status).toBe(0)
+      const invocations = parseTmuxArgvLog(tmuxLog)
+      const opencode = join(binDir, "opencode")
+      expect(invocations.map(withoutTmuxEnvFlags)).toContainEqual([
+        "new-window",
+        "-d",
+        "-P",
+        "-F",
+        "#{window_id} #{pane_id}",
+        "-n",
+        "rfa:85312e9f",
+        "-c",
+        worktree,
+        "--",
+        opencode,
+        worktree,
+        "--session",
+        jumpSessionId,
+        "--auto",
+        "-m",
+        "amazon-bedrock/au.anthropic.claude-sonnet-5",
       ])
     } finally {
       await graphql.close()

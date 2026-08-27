@@ -460,6 +460,8 @@ const jumpWorkflow = Effect.fn("Cli.jump")(function* (sessionId: string) {
     backendId: found.agentBackend.id,
     sessionId: found.sessionId,
     workingDirectory,
+    agentModel: found.agentModel,
+    thinkingLevel: found.thinkingLevel,
   })
   if (resume === null) {
     return yield* new JumpFailed({

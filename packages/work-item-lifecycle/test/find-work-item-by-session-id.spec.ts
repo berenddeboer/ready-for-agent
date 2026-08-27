@@ -183,6 +183,8 @@ describe("findWorkItemBySessionId", () => {
           agentBackend: "grok",
           sessionId,
           worktreePath: "/tmp/worktrees/acme-widgets-7",
+          agentModel: null,
+          thinkingLevel: null,
         })
       }),
     ))
@@ -221,6 +223,151 @@ describe("findWorkItemBySessionId", () => {
         if (error._tag === "SessionIdAmbiguousError") {
           expect(error.sessionId).toBe(sessionId)
         }
+      }),
+    ))
+
+  it("pins the Explicit Work Item Execution Profile build Agent Model for Jump", () =>
+    runTest(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        yield* seedRepository("repo-profile", now)
+        yield* seedWorkItem({
+          workItemId: "wi-profile",
+          repositoryId: "repo-profile",
+          issueNumber: 107,
+          agentBackend: "opencode",
+          sessionId,
+          worktreePath: "/tmp/worktrees/openwork-poc",
+          now,
+        })
+        yield* sql.unsafe(
+          `UPDATE work_item
+           SET execution_profile_present = 1,
+               execution_profile_build_model = ?,
+               execution_profile_build_thinking_level = ?,
+               execution_profile_review_same_as_build = 1
+           WHERE id = ?`,
+          ["amazon-bedrock/au.anthropic.claude-sonnet-5", "high", "wi-profile"],
+        )
+
+        const found = yield* lifecycle.findWorkItemBySessionId(sessionId)
+
+        expect(found).toEqual({
+          agentBackend: "opencode",
+          sessionId,
+          worktreePath: "/tmp/worktrees/openwork-poc",
+          agentModel: "amazon-bedrock/au.anthropic.claude-sonnet-5",
+          thinkingLevel: "high",
+        })
+      }),
+    ))
+
+  it("pins the review Agent Model while a Review Step Run is running", () =>
+    runTest(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        yield* seedRepository("repo-review", now)
+        yield* seedWorkItem({
+          workItemId: "wi-review",
+          repositoryId: "repo-review",
+          issueNumber: 9,
+          agentBackend: "opencode",
+          sessionId,
+          worktreePath: "/tmp/worktrees/review",
+          now,
+        })
+        yield* sql.unsafe(
+          `UPDATE work_item
+           SET state = 'review',
+               execution_profile_present = 1,
+               execution_profile_build_model = ?,
+               execution_profile_build_thinking_level = ?,
+               execution_profile_review_same_as_build = 0,
+               execution_profile_review_model = ?,
+               execution_profile_review_thinking_level = ?
+           WHERE id = ?`,
+          [
+            "amazon-bedrock/au.anthropic.claude-sonnet-5",
+            "high",
+            "anthropic/claude-opus-4-6",
+            "xhigh",
+            "wi-review",
+          ],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO step_run (
+             id, work_item_id, step, status, queue_job_id, queued_at,
+             started_at, finished_at, reason_code, reason_message,
+             created_at, updated_at
+           ) VALUES (?, ?, 'review', 'running', NULL, ?, ?, NULL, NULL, NULL, ?, ?)`,
+          ["sr-review", "wi-review", now, now, now, now],
+        )
+
+        const found = yield* lifecycle.findWorkItemBySessionId(sessionId)
+
+        expect(found.agentModel).toBe("anthropic/claude-opus-4-6")
+        expect(found.thinkingLevel).toBe("xhigh")
+      }),
+    ))
+
+  it("pins the build Agent Model while Review is applying findings", () =>
+    runTest(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        yield* seedRepository("repo-apply", now)
+        yield* seedWorkItem({
+          workItemId: "wi-apply",
+          repositoryId: "repo-apply",
+          issueNumber: 10,
+          agentBackend: "opencode",
+          sessionId,
+          worktreePath: "/tmp/worktrees/apply",
+          now,
+        })
+        yield* sql.unsafe(
+          `UPDATE work_item
+           SET state = 'review',
+               execution_profile_present = 1,
+               execution_profile_build_model = ?,
+               execution_profile_build_thinking_level = ?,
+               execution_profile_review_same_as_build = 0,
+               execution_profile_review_model = ?,
+               execution_profile_review_thinking_level = ?
+           WHERE id = ?`,
+          [
+            "amazon-bedrock/au.anthropic.claude-sonnet-5",
+            "high",
+            "anthropic/claude-opus-4-6",
+            "xhigh",
+            "wi-apply",
+          ],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO step_run (
+             id, work_item_id, step, status, queue_job_id, queued_at,
+             started_at, finished_at, reason_code, reason_message,
+             created_at, updated_at
+           ) VALUES (?, ?, 'review', 'running', NULL, ?, ?, NULL, ?, NULL, ?, ?)`,
+          [
+            "sr-apply",
+            "wi-apply",
+            now,
+            now,
+            "review_applying_findings",
+            now,
+            now,
+          ],
+        )
+
+        const found = yield* lifecycle.findWorkItemBySessionId(sessionId)
+
+        expect(found.agentModel).toBe(
+          "amazon-bedrock/au.anthropic.claude-sonnet-5",
+        )
+        expect(found.thinkingLevel).toBe("high")
       }),
     ))
 })

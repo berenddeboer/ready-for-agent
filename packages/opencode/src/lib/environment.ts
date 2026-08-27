@@ -63,12 +63,13 @@ export const makeOpencodeEnvironment = Effect.fn("makeOpencodeEnvironment")(
           ...(config.mcp === undefined ? {} : { mcp: mcpWithoutKeymaxxer }),
         }
 
-    return {
+    const inherited: Record<string, string> = {
       ...sanitizeInheritedEnvironment(environment, {
         stripGitHubTokens: vaultMcpConfigured,
         stripGitLabTokens: vaultMcpConfigured,
       }),
       OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig),
     }
+    return inherited
   },
 )

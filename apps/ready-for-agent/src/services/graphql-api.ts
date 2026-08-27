@@ -121,6 +121,8 @@ export type SessionWorkItemLookup = {
   }
   readonly sessionId: string
   readonly worktreePath: string | null
+  readonly agentModel: string | null
+  readonly thinkingLevel: string | null
 }
 
 const isStatusLaneId = (value: string): value is StatusLaneId => {
@@ -922,6 +924,8 @@ export class GraphqlApi extends Context.Service<
                     },
                     sessionId: true,
                     worktreePath: true,
+                    agentModel: true,
+                    thinkingLevel: true,
                   },
                 })
                 const payload = result.workItemBySessionId
@@ -935,6 +939,8 @@ export class GraphqlApi extends Context.Service<
                   },
                   sessionId: payload.sessionId,
                   worktreePath: payload.worktreePath ?? null,
+                  agentModel: payload.agentModel ?? null,
+                  thinkingLevel: payload.thinkingLevel ?? null,
                 }
               }),
             catch: mapFailure,

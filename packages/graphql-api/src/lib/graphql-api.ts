@@ -1160,6 +1160,8 @@ export const createGraphqlApi = <R>(
                   ),
                   sessionId: found.sessionId,
                   worktreePath: found.worktreePath,
+                  agentModel: found.agentModel,
+                  thinkingLevel: found.thinkingLevel,
                 }
               }).pipe(Effect.withSpan("graphql-api.workItemBySessionId")),
               context,
