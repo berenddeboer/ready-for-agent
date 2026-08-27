@@ -348,6 +348,81 @@ describe("Opencode AgentBackend adapter", () => {
     )
   })
 
+  it("re-asserts the configured Agent Model after startTurn reports a Session ID", async () => {
+    const fixtureDir = mkdtempSync(join(tmpdir(), "opencode-start-model-"))
+    const dbPath = join(fixtureDir, "opencode.db")
+    const db = new Database(dbPath)
+    db.exec(`
+      CREATE TABLE session (
+        id text PRIMARY KEY,
+        model text,
+        time_created integer NOT NULL,
+        time_updated integer NOT NULL
+      )
+    `)
+    db.query(
+      `INSERT INTO session (id, model, time_created, time_updated) VALUES (?, ?, ?, ?)`,
+    ).run(
+      "ses_first",
+      JSON.stringify({
+        id: "gpt-5.6-sol",
+        providerID: "azure",
+        variant: null,
+      }),
+      Date.now(),
+      Date.now(),
+    )
+    db.close()
+
+    try {
+      await withExecutable(
+        [
+          `printf '%s\\n' '{"type":"step_start","sessionID":"ses_first"}'`,
+          "sleep 0.4",
+          `printf '%s\\n' '{"type":"text","part":{"type":"text","text":"done"}}'`,
+        ].join("\n"),
+        async (binary) => {
+          await Effect.runPromise(
+            Effect.gen(function* () {
+              const backend = yield* AgentBackend
+              return yield* backend.startTurn({
+                cwd: process.cwd(),
+                prompt: "test",
+                model: "amazon-bedrock/au.anthropic.claude-sonnet-5",
+                thinkingLevel: "high",
+                timeout: "5 seconds",
+              })
+            }).pipe(
+              Effect.provide(
+                Opencode.layer({
+                  binary,
+                  keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+                  // Production first Build does not inject a DB path; the
+                  // observer must locate OpenCode's session store via rules
+                  // (OPENCODE_DB / data dir), not only a startup-probe cache.
+                  environment: { OPENCODE_DB: dbPath },
+                }).pipe(Layer.provide(BunServices.layer)),
+              ),
+            ),
+          )
+
+          const live = new Database(dbPath, { readonly: true })
+          const row = live
+            .query(`SELECT model FROM session WHERE id = ?`)
+            .get("ses_first") as { readonly model: string }
+          live.close()
+          expect(JSON.parse(row.model)).toEqual({
+            id: "au.anthropic.claude-sonnet-5",
+            providerID: "amazon-bedrock",
+            variant: "high",
+          })
+        },
+      )
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true })
+    }
+  })
+
   it("returns the /review child task result and ignores resumed parent text", async () => {
     const childText = [
       "## Review Findings",

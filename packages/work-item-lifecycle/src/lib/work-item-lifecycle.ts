@@ -109,6 +109,7 @@ import {
   resolveExecutionProfileSelection,
   validateExecutionProfileCatalog,
 } from "./execution-profile.js"
+import { selectJumpAgentModel } from "./jump-agent-model.js"
 import {
   type LifecycleStepContext,
   LifecycleSteps,
@@ -132,6 +133,7 @@ import {
 } from "./pre-commit-errors.js"
 import {
   type AgentModelSelection,
+  resolveAgentModelSelection,
   resolveAgentModelsForBackend,
   resolvedSelectionCatalogViolation,
 } from "./resolve-agent-models.js"
@@ -441,8 +443,18 @@ type WorkItemRow = {
   readonly updated_at: number
 }
 
+type ExecutionProfileColumns = {
+  readonly agent_backend: string
+  readonly execution_profile_present: boolean | number | null
+  readonly execution_profile_build_model: string | null
+  readonly execution_profile_build_thinking_level: string | null
+  readonly execution_profile_review_same_as_build: boolean | number | null
+  readonly execution_profile_review_model: string | null
+  readonly execution_profile_review_thinking_level: string | null
+}
+
 const decodeExecutionProfile = (
-  row: WorkItemRow,
+  row: ExecutionProfileColumns,
 ): ExplicitWorkItemExecutionProfile | null => {
   if (!row.execution_profile_present) return null
   const buildModel = row.execution_profile_build_model
@@ -871,13 +883,15 @@ export type GetWorkItemError =
 export type ListWorkItemsError = WorkItemLifecycleDatabaseError
 
 /**
- * Captured Agent Backend, canonical Session ID, and worktree for a Session
- * owned by exactly one Work Item.
+ * Captured Agent Backend, canonical Session ID, worktree, and Agent Model
+ * Jump must pin for a Session owned by exactly one Work Item.
  */
 export type WorkItemSessionLookup = {
   readonly agentBackend: string
   readonly sessionId: string
   readonly worktreePath: string | null
+  readonly agentModel: string | null
+  readonly thinkingLevel: string | null
 }
 
 export type FindWorkItemBySessionIdError =
@@ -1630,15 +1644,32 @@ export const makeWorkItemLifecycleLive = (
       )(function* (sessionId: string) {
         const rows = (yield* sql
           .unsafe(
-            `SELECT agent_backend, worktree_path
+            `SELECT id, repository_id, agent_backend, worktree_path, state,
+                    execution_profile_present, execution_profile_build_model,
+                    execution_profile_build_thinking_level,
+                    execution_profile_review_same_as_build,
+                    execution_profile_review_model,
+                    execution_profile_review_thinking_level
              FROM work_item
              WHERE session_id = ?
              LIMIT 2`,
             [sessionId],
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly id: string
+          readonly repository_id: string
           readonly agent_backend: string
           readonly worktree_path: string | null
+          readonly state: WorkItemState
+          readonly execution_profile_present: boolean | number | null
+          readonly execution_profile_build_model: string | null
+          readonly execution_profile_build_thinking_level: string | null
+          readonly execution_profile_review_same_as_build:
+            | boolean
+            | number
+            | null
+          readonly execution_profile_review_model: string | null
+          readonly execution_profile_review_thinking_level: string | null
         }[]
 
         const row = rows[0]
@@ -1649,10 +1680,54 @@ export const makeWorkItemLifecycleLive = (
           return yield* new SessionIdAmbiguousError({ sessionId })
         }
 
+        const runningStepRows = (yield* sql
+          .unsafe(
+            `SELECT step, reason_code
+             FROM step_run
+             WHERE work_item_id = ? AND status = 'running'
+             LIMIT 1`,
+            [row.id],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly step: string
+          readonly reason_code: string | null
+        }[]
+
+        const explicitProfile = decodeExecutionProfile(row)
+        const selection =
+          explicitProfile !== null
+            ? resolveExecutionProfileSelection(explicitProfile)
+            : yield* Effect.gen(function* () {
+                const repoPrefs = yield* db
+                  .getRepositoryBackendModelPrefs(
+                    row.repository_id,
+                    row.agent_backend,
+                  )
+                  .pipe(
+                    Effect.catchTag("RepositoryNotFoundError", () =>
+                      Effect.succeed(null),
+                    ),
+                  )
+                const harnessPrefs = yield* db.getBackendModelPrefs(
+                  row.agent_backend,
+                )
+                return resolveAgentModelSelection(repoPrefs, harnessPrefs)
+              }).pipe(
+                Effect.catchTag("DatabaseError", () => Effect.succeed(null)),
+              )
+        const jumpModel = selectJumpAgentModel({
+          runningStep: runningStepRows[0]?.step ?? null,
+          runningStepReason: runningStepRows[0]?.reason_code ?? null,
+          workItemState: row.state,
+          selection,
+        })
+
         return {
           agentBackend: row.agent_backend,
           sessionId,
           worktreePath: row.worktree_path,
+          agentModel: jumpModel?.model ?? null,
+          thinkingLevel: jumpModel?.thinkingLevel ?? null,
         } satisfies WorkItemSessionLookup
       })
 

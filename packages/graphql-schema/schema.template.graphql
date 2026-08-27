@@ -155,6 +155,16 @@ type SessionWorkItem {
   Persisted worktree path. Null when unset or already cleaned up.
   """
   worktreePath: String
+  """
+  Agent Model Jump must pin on Interactive Session Continuation, in the
+  backend's provider/model form. Null when none can be resolved.
+  """
+  agentModel: String
+  """
+  Thinking Level to pin with the Agent Model. Null when the model default
+  should be used, or when agentModel is null.
+  """
+  thinkingLevel: String
 }
 
 type SessionModel {

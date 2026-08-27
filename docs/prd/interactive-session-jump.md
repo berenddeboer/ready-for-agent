@@ -28,21 +28,24 @@ This is an Interactive Session Continuation, not an Agent Turn or Lifecycle Step
 ## Session Resolution
 
 - The argument is only an opaque backend Session ID. V1 does not accept a Work Item ID.
-- The CLI is a thin GraphQL client. A simple query resolves the Session ID to exactly one Work Item and returns the captured Agent Backend, canonical Session ID, and worktree path.
+- The CLI is a thin GraphQL client. A simple query resolves the Session ID to exactly one Work Item and returns the captured Agent Backend, canonical Session ID, worktree path, and the Agent Model/Thinking Level Jump must pin.
 - No match and multiple matches both fail. The current database does not enforce Session ID uniqueness, so ambiguity must not select an arbitrary Work Item.
-- The Work Item's captured Agent Backend and exact Session identity are sufficient provenance. V1 does not add persisted executable version, Agent Model, Thinking Level, provider/auth mode, or backend persona.
-- Jump does not inspect running Step Runs, backend Session files, Active Agent Backend readiness, or any other preflight beyond what is listed below. The operator decides when it is safe to jump.
+- The Work Item's captured Agent Backend and exact Session identity are sufficient provenance. V1 does not add persisted executable version, provider/auth mode, or backend persona.
+- Jump resolves the Agent Model and Thinking Level the next (or currently running) Agent Turn would use — Explicit Work Item Execution Profile when present, otherwise current settings — and pins them on the interactive resume command. This is a launch-scoped argv pin, not a new persisted Jump field. It prevents an OpenCode attach from writing the operator's ambient default into the shared Session model that an in-flight Step Run re-reads.
+- Jump does not refuse a running Step Run, inspect backend Session files, or check Active Agent Backend readiness. The operator decides when it is safe to jump. A concurrent attach is still the operator's responsibility; pinning the Agent Model is what stops that attach from silently hijacking the in-flight turn's model. Model resolution may look at a running Step Run only to choose build vs review.
 
 ## Interactive Backend Commands
 
 The agent process uses the exact, non-forking interactive continuation supported by the captured Agent Backend, anchored to the working directory, with that backend's native full permission-bypass mode so tool use does not wait for approval prompts:
 
 ```text
-opencode <dir> --session <session-id> --auto
-grok --cwd <dir> --resume <session-id> --permission-mode bypassPermissions
-codex resume --dangerously-bypass-approvals-and-sandbox -C <dir> <session-id>
-claude --resume <session-id> --dangerously-skip-permissions            # child cwd is <dir>
+opencode <dir> --session <session-id> --auto -m <model>
+grok --cwd <dir> --resume <session-id> --permission-mode bypassPermissions -m <model> [--reasoning-effort <level>]
+codex resume --dangerously-bypass-approvals-and-sandbox -C <dir> -m <model> [-c model_reasoning_effort=<level>] <session-id>
+claude --resume <session-id> --dangerously-skip-permissions --model <model> [--effort <level>]            # child cwd is <dir>
 ```
+
+`<model>` and Thinking Level flags are omitted when the Harness cannot resolve a pin. OpenCode's interactive TUI has no `--variant` flag; Thinking Level for OpenCode is re-asserted on the Session record by the in-flight Agent Turn, not by Jump argv.
 
 Where `<dir>` is the persisted worktree when it exists, otherwise the CLI process's current directory.
 
@@ -78,7 +81,7 @@ Jump continues the canonical Session; it does not fork a human-only copy. It nev
 
 ## Safety And Failures
 
-Jump is lifecycle-neutral: it does not Pause, Start, Retry, Reset, or otherwise transition the Work Item. It does not check for running Step Runs or attempt to exclude concurrent Harness Agent Turns. The operator is responsible for deciding when it is safe to jump.
+Jump is lifecycle-neutral: it does not Pause, Start, Retry, Reset, or otherwise transition the Work Item. It does not refuse a running Step Run or attempt to exclude concurrent Harness Agent Turns. The operator is responsible for deciding when it is safe to jump. An in-flight OpenCode Agent Turn re-asserts its configured Agent Model on the Session record so a concurrent attach cannot silently redirect that turn onto another model.
 
 All prerequisites are checked before a tmux window is created or a direct agent process is started. The command fails when:
 
@@ -100,7 +103,7 @@ Jump is outside the finite JSON command protocol. In tmux, success is silent bec
 
 ## Implementation Seams
 
-1. **GraphQL query**: a simple lookup that matches `work_item.session_id` and returns the captured backend, session ID, and worktree path. No jump tracking, no elaborate error codes, no lifecycle state inspection.
+1. **GraphQL query**: a simple lookup that matches `work_item.session_id` and returns the captured backend, session ID, worktree path, and the Agent Model/Thinking Level Jump must pin. No jump tracking, no elaborate error codes. Model resolution inspects a running Step Run only to choose build vs review; it does not refuse the Jump.
 2. **CLI command**: `jumpCommand` in `cli.ts`, registered alongside existing subcommands. Selects tmux or direct mode, checks local prerequisites, resolves the session through GraphQL, and launches the continuation.
 3. **Backend executable resolution**: resolve the captured backend's CLI binary to an absolute path on the CLI process's `PATH` before creating a tmux window or starting a direct process, so either mode launches the exact executable.
 4. **tmux service**: a new thin service under `apps/ready-for-agent/src/services/` that owns tmux window creation, tagging, duplicate detection, split layout, and client switching.
@@ -110,7 +113,7 @@ Jump is outside the finite JSON command protocol. In tmux, success is silent bec
 
 - Creating or attaching a tmux server from a normal terminal
 - Forking Sessions
-- Choosing another Agent Backend, worktree, Agent Model, Thinking Level, provider, or persona
+- Choosing another Agent Backend, worktree, Agent Model, Thinking Level, provider, or persona (Jump pins the Work Item's configured selection; it does not offer a picker)
 - Restoring missing worktrees or backend-owned remote code
 - Looking up by Work Item ID
 - Direct Harness database access

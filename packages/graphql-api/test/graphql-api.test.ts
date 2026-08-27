@@ -11926,7 +11926,7 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("workItemBySessionId returns backend, Session ID, and worktree for one match", async () => {
+  test("workItemBySessionId returns backend, Session ID, worktree, and Agent Model for one match", async () => {
     runtime = makeRuntime(
       {},
       {},
@@ -11937,6 +11937,8 @@ describe("GraphQL API", () => {
             agentBackend: "grok",
             sessionId,
             worktreePath: "/tmp/worktrees/acme-widgets-7",
+            agentModel: "amazon-bedrock/au.anthropic.claude-sonnet-5",
+            thinkingLevel: "high",
           }),
       },
     )
@@ -11948,6 +11950,8 @@ describe("GraphQL API", () => {
             agentBackend { id label }
             sessionId
             worktreePath
+            agentModel
+            thinkingLevel
           }
         }`,
         variables: { sessionId: "85312e9f-9c57-42ef-9757-b2512cee57cd" },
@@ -11961,6 +11965,8 @@ describe("GraphQL API", () => {
           agentBackend: { id: "grok", label: "Grok Build" },
           sessionId: "85312e9f-9c57-42ef-9757-b2512cee57cd",
           worktreePath: "/tmp/worktrees/acme-widgets-7",
+          agentModel: "amazon-bedrock/au.anthropic.claude-sonnet-5",
+          thinkingLevel: "high",
         },
       },
     })

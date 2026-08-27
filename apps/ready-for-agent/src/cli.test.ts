@@ -1994,10 +1994,14 @@ describe("operator binary jump command", () => {
     readonly backendId: string
     readonly worktreePath: string | null
     readonly sessionId?: string
+    readonly agentModel?: string | null
+    readonly thinkingLevel?: string | null
   }) => ({
     agentBackend: { id: options.backendId, label: options.backendId },
     sessionId: options.sessionId ?? sessionId,
     worktreePath: options.worktreePath,
+    agentModel: options.agentModel ?? null,
+    thinkingLevel: options.thinkingLevel ?? null,
   })
 
   const successfulJumpLayer = (options: {
@@ -2402,6 +2406,43 @@ describe("operator binary jump command", () => {
             backendId,
           })
         }
+      } finally {
+        rmSync(worktree, { recursive: true, force: true })
+      }
+    }),
+  )
+
+  it.live("jump pins the Work Item Agent Model on OpenCode resume", () =>
+    Effect.gen(function* () {
+      const worktree = mkdtempSync(join(tmpdir(), "rfa-jump-model-"))
+      try {
+        let captured: JumpWindowInput | undefined
+        yield* runOperator(
+          ["jump", sessionId],
+          successfulJumpLayer({
+            workItemBySessionId: () =>
+              Effect.succeed(
+                foundWorkItem({
+                  backendId: "opencode",
+                  worktreePath: worktree,
+                  agentModel: "amazon-bedrock/au.anthropic.claude-sonnet-5",
+                  thinkingLevel: "high",
+                }),
+              ),
+            createJumpWindow: (input) =>
+              Effect.sync(() => {
+                captured = input
+              }),
+          }),
+        )
+        expect(captured?.agentArguments).toEqual([
+          worktree,
+          "--session",
+          sessionId,
+          "--auto",
+          "-m",
+          "amazon-bedrock/au.anthropic.claude-sonnet-5",
+        ])
       } finally {
         rmSync(worktree, { recursive: true, force: true })
       }

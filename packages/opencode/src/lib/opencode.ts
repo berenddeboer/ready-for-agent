@@ -1,4 +1,4 @@
-import { Duration, Effect, Layer, Stream } from "effect"
+import { Deferred, Duration, Effect, Layer, Ref, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   AGENT_BACKEND_IDS,
@@ -19,6 +19,7 @@ import type { OpencodeConfigError } from "./errors.js"
 import {
   type OpencodePathEnv,
   resolveOpencodeDbPath,
+  resolveOpencodeDbPathFromRules,
 } from "./opencode-db-path.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseCommandTaskResultFromLine } from "./parse-command-task-result.js"
@@ -28,6 +29,7 @@ import {
 } from "./parse-error-classification.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
 import { parseVerboseModelsOutputDetailed } from "./parse-verbose-models.js"
+import { observeOpencodeSessionModel } from "./session-model.js"
 import { observeOpencodeStartupActivity } from "./startup-activity.js"
 import type { OpencodeLayerOptions } from "./types.js"
 
@@ -64,6 +66,13 @@ export const Opencode = {
               }),
           ),
         )
+        const pathEnv = {
+          HOME: environment["HOME"],
+          XDG_DATA_HOME: environment["XDG_DATA_HOME"],
+          OPENCODE_DB: environment["OPENCODE_DB"],
+          OPENCODE_DISABLE_CHANNEL_DB:
+            environment["OPENCODE_DISABLE_CHANNEL_DB"],
+        } satisfies OpencodePathEnv
         const inspect = Effect.fn("Opencode.inspect")(function* (
           input: InspectInput,
         ) {
@@ -119,7 +128,7 @@ export const Opencode = {
           lastStartupDbPathResolveAttemptMs = now
           const resolved = resolveOpencodeDbPath({
             binary,
-            env: environment as OpencodePathEnv,
+            env: pathEnv,
           })
           if (resolved !== null) {
             cachedStartupActivityDbPath = resolved
@@ -158,67 +167,123 @@ export const Opencode = {
           const startedAfterMs = Date.now()
           const knownSessionId = input.sessionId
 
-          return runCliTurn({
-            spawner,
-            backend: OPENCODE_BACKEND,
-            binary,
-            args,
-            cwd: input.cwd,
-            env: environment,
-            timeout: input.timeout ?? defaultTimeout,
-            knownSessionId: input.sessionId,
-            ...(input.onSessionId !== undefined
-              ? { onSessionId: input.onSessionId }
-              : {}),
-            ...(options.startupTimeout !== undefined
-              ? { startupTimeout: options.startupTimeout }
-              : {}),
-            // Always attach when the Session is known: resolveDbPath may miss
-            // on the first poll and succeed later (unlike a one-shot null that
-            // dropped the probe for the whole turn).
-            ...(knownSessionId !== undefined
-              ? {
-                  observeStartup: observeOpencodeStartupActivity({
-                    sessionId: knownSessionId,
-                    startedAfterMs,
-                    resolveDbPath: resolveStartupActivityDbPath,
-                  }),
-                }
-              : {}),
-            observerLabel: "OpenCode",
-            parseLine: (line) => {
-              const sessionId = parseSessionIdFromLine(line)
-              const errorClassification = parseErrorClassificationFromLine(line)
-              const retryAt = parseProviderRetryAtFromLine(line)
-              if (commandName !== undefined) {
-                const commandText = parseCommandTaskResultFromLine(
-                  line,
-                  commandName,
+          return Effect.scoped(
+            Effect.gen(function* () {
+              const sessionReady = yield* Deferred.make<string>()
+              const sessionOffered = yield* Ref.make(false)
+              const offerSessionId = (sessionId: string) =>
+                Ref.getAndSet(sessionOffered, true).pipe(
+                  Effect.flatMap((already) =>
+                    already
+                      ? Effect.void
+                      : Deferred.succeed(sessionReady, sessionId).pipe(
+                          Effect.asVoid,
+                        ),
+                  ),
                 )
-                if (commandText !== undefined) {
+              if (knownSessionId !== undefined) {
+                yield* offerSessionId(knownSessionId)
+              }
+
+              yield* Deferred.await(sessionReady).pipe(
+                Effect.flatMap((sessionId) =>
+                  observeOpencodeSessionModel({
+                    sessionId,
+                    model: input.model,
+                    thinkingLevel: input.thinkingLevel,
+                    // Never spawn the turn binary as `opencode db path`: a
+                    // fake/test binary (or a hung CLI) would block spawnSync.
+                    // Prefer the startup-probe cache; on first Build that
+                    // probe never runs, so fall back to OpenCode's path rules.
+                    resolveDbPath: () => {
+                      if (options.startupActivityDbPath !== undefined) {
+                        return options.startupActivityDbPath
+                      }
+                      if (cachedStartupActivityDbPath !== undefined) {
+                        return cachedStartupActivityDbPath
+                      }
+                      const fromRules = resolveOpencodeDbPathFromRules({
+                        env: pathEnv,
+                      })
+                      cachedStartupActivityDbPath = fromRules
+                      return fromRules
+                    },
+                  }),
+                ),
+                Effect.forkScoped,
+              )
+
+              return yield* runCliTurn({
+                spawner,
+                backend: OPENCODE_BACKEND,
+                binary,
+                args,
+                cwd: input.cwd,
+                env: environment,
+                timeout: input.timeout ?? defaultTimeout,
+                knownSessionId: input.sessionId,
+                onSessionId: (sessionId) =>
+                  offerSessionId(sessionId).pipe(
+                    Effect.andThen(
+                      input.onSessionId === undefined
+                        ? Effect.void
+                        : input.onSessionId(sessionId),
+                    ),
+                  ),
+                ...(options.startupTimeout !== undefined
+                  ? { startupTimeout: options.startupTimeout }
+                  : {}),
+                // Always attach when the Session is known: resolveDbPath may miss
+                // on the first poll and succeed later (unlike a one-shot null that
+                // dropped the probe for the whole turn).
+                ...(knownSessionId !== undefined
+                  ? {
+                      observeStartup: observeOpencodeStartupActivity({
+                        sessionId: knownSessionId,
+                        startedAfterMs,
+                        resolveDbPath: resolveStartupActivityDbPath,
+                      }),
+                    }
+                  : {}),
+                observerLabel: "OpenCode",
+                parseLine: (line) => {
+                  const sessionId = parseSessionIdFromLine(line)
+                  const errorClassification =
+                    parseErrorClassificationFromLine(line)
+                  const retryAt = parseProviderRetryAtFromLine(line)
+                  if (commandName !== undefined) {
+                    const commandText = parseCommandTaskResultFromLine(
+                      line,
+                      commandName,
+                    )
+                    if (commandText !== undefined) {
+                      return {
+                        ...(sessionId !== undefined ? { sessionId } : {}),
+                        ...(errorClassification !== undefined
+                          ? { errorClassification }
+                          : {}),
+                        ...(retryAt !== undefined ? { retryAt } : {}),
+                        finalizeText: commandText,
+                      }
+                    }
+                  }
                   return {
                     ...(sessionId !== undefined ? { sessionId } : {}),
                     ...(errorClassification !== undefined
                       ? { errorClassification }
                       : {}),
                     ...(retryAt !== undefined ? { retryAt } : {}),
-                    finalizeText: commandText,
+                    text: parseAssistantTextFromLine(line),
                   }
-                }
-              }
-              return {
-                ...(sessionId !== undefined ? { sessionId } : {}),
-                ...(errorClassification !== undefined
-                  ? { errorClassification }
-                  : {}),
-                ...(retryAt !== undefined ? { retryAt } : {}),
-                text: parseAssistantTextFromLine(line),
-              }
-            },
-            stdin: promptOnStdin
-              ? Stream.fromIterable([new TextEncoder().encode(input.prompt)])
-              : "ignore",
-          })
+                },
+                stdin: promptOnStdin
+                  ? Stream.fromIterable([
+                      new TextEncoder().encode(input.prompt),
+                    ])
+                  : "ignore",
+              })
+            }),
+          )
         }
 
         return AgentBackend.of({

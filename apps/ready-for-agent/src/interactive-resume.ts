@@ -10,11 +10,33 @@ export type InteractiveResumeCommand = {
   readonly arguments: readonly string[]
 }
 
+const pinnedModel = (agentModel: string | null | undefined): string | null => {
+  if (agentModel === undefined || agentModel === null) {
+    return null
+  }
+  const trimmed = agentModel.trim()
+  return trimmed.length === 0 ? null : trimmed
+}
+
+const pinnedThinkingLevel = (
+  thinkingLevel: string | null | undefined,
+): string | null => {
+  if (thinkingLevel === undefined || thinkingLevel === null) {
+    return null
+  }
+  const trimmed = thinkingLevel.trim()
+  return trimmed.length === 0 ? null : trimmed
+}
+
 export const interactiveResumeCommand = (input: {
   readonly backendId: string
   readonly sessionId: string
   readonly workingDirectory: string
+  readonly agentModel?: string | null
+  readonly thinkingLevel?: string | null
 }): InteractiveResumeCommand | null => {
+  const agentModel = pinnedModel(input.agentModel)
+  const thinkingLevel = pinnedThinkingLevel(input.thinkingLevel)
   switch (input.backendId) {
     case "opencode":
       return {
@@ -24,6 +46,7 @@ export const interactiveResumeCommand = (input: {
           "--session",
           input.sessionId,
           "--auto",
+          ...(agentModel === null ? [] : (["-m", agentModel] as const)),
         ],
       }
     case "grok":
@@ -36,6 +59,10 @@ export const interactiveResumeCommand = (input: {
           input.sessionId,
           "--permission-mode",
           "bypassPermissions",
+          ...(agentModel === null ? [] : (["-m", agentModel] as const)),
+          ...(thinkingLevel === null
+            ? []
+            : (["--reasoning-effort", thinkingLevel] as const)),
         ],
       }
     case "codex":
@@ -46,6 +73,10 @@ export const interactiveResumeCommand = (input: {
           "--dangerously-bypass-approvals-and-sandbox",
           "-C",
           input.workingDirectory,
+          ...(agentModel === null ? [] : (["-m", agentModel] as const)),
+          ...(thinkingLevel === null
+            ? []
+            : (["-c", `model_reasoning_effort=${thinkingLevel}`] as const)),
           input.sessionId,
         ],
       }
@@ -56,6 +87,10 @@ export const interactiveResumeCommand = (input: {
           "--resume",
           input.sessionId,
           "--dangerously-skip-permissions",
+          ...(agentModel === null ? [] : (["--model", agentModel] as const)),
+          ...(thinkingLevel === null
+            ? []
+            : (["--effort", thinkingLevel] as const)),
         ],
       }
     default:
