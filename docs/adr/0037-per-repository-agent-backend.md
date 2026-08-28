@@ -1,6 +1,6 @@
 # Per-Repository Agent Backend with concurrent Active backends
 
-Status: accepted (supersedes ADR 0032; supersedes the instance-wide single-backend and fleet-wide idle-gate portions of ADR 0035; per-Work-Item override and affected-work gate portions superseded by ADR 0052)
+Status: accepted (supersedes the instance-wide single-backend and fleet-wide idle-gate portions of ADR 0035; per-Work-Item override and affected-work gate portions superseded by ADR 0052)
 
 Harness Config still selects a **default** Agent Backend (OpenCode by default). Each Repository may optionally override that selection; `null` means inherit the default. New and migrated Repositories leave the override unset. ADR 0052 narrows change gates to unfinished ordinary Work Items whose captured routing depends on that effective selection; Work Items with an Explicit Work Item Execution Profile do not block an unrelated default change.
 
