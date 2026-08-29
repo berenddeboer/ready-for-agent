@@ -1025,12 +1025,17 @@ export interface WorkItemLifecycleShape {
     repositoryId: string,
     issueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
+  /**
+   * Create a Work Item for an Actionable Issue with an Explicit Work Item
+   * Execution Profile. Returns a list whose only element is that Work Item.
+   * A Parent Issue is rejected as not a leaf.
+   */
   readonly implementWith: (
     repositoryId: string,
     issueNumber: number,
     profile: ImplementWithProfileInput,
     options?: ImplementWithOptionsInput,
-  ) => Effect.Effect<WorkItemRecord, ImplementWithError>
+  ) => Effect.Effect<readonly WorkItemRecord[], ImplementWithError>
   readonly implementLocally: (
     repositoryId: string,
     issueNumber: number,
@@ -7876,12 +7881,13 @@ export const makeWorkItemLifecycleLive = (
                   autoMergeOverride: null,
                 }
               : encodeWorkItemMergePolicyPin(options.mergePolicy)
-          return yield* createWorkItem(repositoryId, issueNumber, {
+          const created = yield* createWorkItem(repositoryId, issueNumber, {
             pauseBeforeStep: options.implementLocally ? "commit" : null,
             executionProfile: decoded,
             mergeMode: pin.mergeMode,
             autoMergeOverride: pin.autoMergeOverride,
           })
+          return [created]
         },
       )
 

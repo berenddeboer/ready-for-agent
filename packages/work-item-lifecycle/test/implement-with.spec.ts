@@ -18,6 +18,7 @@ import {
   LifecycleSteps,
   type LifecycleStepsShape,
   AgentBackendUnavailableError as LifecycleUnavailableError,
+  ParentIssueError,
   STEP_RUN_REASON,
   UnfinishedWorkItemExistsError,
   WorkItemLifecycle,
@@ -207,6 +208,93 @@ const advanceToQueued = (
   })
 
 describe("implementWith", () => {
+  it("returns a one-element list containing the created Work Item", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-implement-with-list.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 1)
+        const created = yield* lifecycle.implementWith(
+          repo.id,
+          1,
+          explicitReviewProfile,
+          { mergePolicy: "classify", implementLocally: true },
+        )
+        expect(created).toHaveLength(1)
+        const workItem = created.at(0)
+        expect(workItem).toBeDefined()
+        if (workItem === undefined) return
+        expect(workItem.executionProfile).toEqual({
+          agentBackend: "opencode",
+          build: { model: "build-model", thinkingLevel: "high" },
+          review: {
+            kind: "explicit",
+            model: "review-model",
+            thinkingLevel: "max",
+          },
+        })
+        expect(workItem.mergeMode).toBe("ordinary")
+        expect(workItem.autoMergeOverride).toBe(true)
+        expect(workItem.pauseBeforeStep).toBe("commit")
+        const reloaded = yield* lifecycle.getWorkItem(workItem.id)
+        expect(reloaded.executionProfile).toEqual(workItem.executionProfile)
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
+  it("rejects a Parent Issue as not a leaf", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-implement-with-parent.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* db.storeIssue({
+          repositoryId: repo.id,
+          issueNumber: 30,
+          title: "Parent",
+          body: "body",
+          url: "https://github.com/acme/widgets/issues/30",
+          state: "OPEN",
+          githubCreatedAt: new Date(),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: true,
+          blockedBy: [],
+        })
+        const error = yield* Effect.flip(
+          lifecycle.implementWith(repo.id, 30, sameAsBuildProfile, {
+            mergePolicy: "off",
+            implementLocally: false,
+          }),
+        )
+        expect(error).toBeInstanceOf(ParentIssueError)
+        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 30)).toEqual([])
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
   it("creates a Work Item with a durable complete explicit profile", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -224,7 +312,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 1)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           1,
           explicitReviewProfile,
@@ -262,7 +350,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 2)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           2,
           sameAsBuildProfile,
@@ -358,7 +446,7 @@ describe("implementWith", () => {
         expect(
           yield* backends.getBackendStatus(AGENT_BACKEND_IDS.grok),
         ).toBeNull()
-        const created = yield* lifecycle.implementWith(repo.id, 5, {
+        const [created] = yield* lifecycle.implementWith(repo.id, 5, {
           ...sameAsBuildProfile,
           agentBackendId: "grok",
         })
@@ -471,7 +559,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 7)
-        const first = yield* lifecycle.implementWith(
+        const [first] = yield* lifecycle.implementWith(
           repo.id,
           7,
           sameAsBuildProfile,
@@ -512,7 +600,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 16)
-        const created = yield* lifecycle.implementWith(repo.id, 16, {
+        const [created] = yield* lifecycle.implementWith(repo.id, 16, {
           ...sameAsBuildProfile,
           agentBackendId: "grok",
         })
@@ -567,7 +655,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 8)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           8,
           explicitReviewProfile,
@@ -655,7 +743,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 9)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           9,
           sameAsBuildProfile,
@@ -718,7 +806,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 10)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           10,
           sameAsBuildProfile,
@@ -779,7 +867,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 12)
         const first = yield* lifecycle.implementNow(repo.id, 11)
         expect(first.waitingSince).toBeNull()
-        const waiter = yield* lifecycle.implementWith(
+        const [waiter] = yield* lifecycle.implementWith(
           repo.id,
           12,
           sameAsBuildProfile,
@@ -814,7 +902,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 20)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           20,
           sameAsBuildProfile,
@@ -858,7 +946,7 @@ describe("implementWith", () => {
           waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 21)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           21,
           sameAsBuildProfile,
@@ -902,7 +990,7 @@ describe("implementWith", () => {
           waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 22)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           22,
           sameAsBuildProfile,
@@ -955,7 +1043,7 @@ describe("implementWith", () => {
           waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 25)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           25,
           sameAsBuildProfile,
@@ -987,7 +1075,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 23)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           23,
           explicitReviewProfile,
@@ -1068,7 +1156,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 24)
-        const created = yield* lifecycle.implementWith(
+        const [created] = yield* lifecycle.implementWith(
           repo.id,
           24,
           sameAsBuildProfile,

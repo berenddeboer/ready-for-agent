@@ -156,7 +156,7 @@ frequently comes back `MISSING` with null fields — that is expected, not a bug
 | --- | --- |
 | `implementNow(repositoryId, issueNumber)` | Full run: implement → review → PR → merge if allowed |
 | `implementLocally(repositoryId, issueNumber)` | Stops before commit/PR so a human can inspect |
-| `implementWith(repositoryId, issueNumber, profile, options)` | Run with a pinned backend/model profile |
+| `implementWith(repositoryId, issueNumber, profile, options)` | Run with a pinned backend/model profile; returns a one-element Work Item list |
 | `implementAllWithAutoMerge(repositoryId, issueNumber)` | Parent issue → implements all children, merge policy Always |
 | `queue(repositoryId, issueNumber)` | Enqueue rather than start immediately |
 | `startRepositoryIntake(repositoryId)` | Start **every** current candidate — check `intakeCandidates` first |
