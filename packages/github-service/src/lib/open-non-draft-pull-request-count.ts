@@ -5,11 +5,12 @@
  *
  * Contracts match {@link GitHubService.countOpenNonDraftPullRequests}:
  * paginated OPEN PRs, draft exclusion, 30s request timeout, two retries with
- * 500ms delay (no retry on HTTP 401), repository-unavailable when GitHub
+ * 500ms delay (no retry on HTTP 401 or 403), repository-unavailable when GitHub
  * returns a null repository.
  */
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
+  GITHUB_HELPER_PERMISSION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
   GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
   type GitHubHelperThrottle,
@@ -278,7 +279,7 @@ const withTimeoutAndRetry = async <A>(
         error.statusCode = statusCode
       }
       lastError = error
-      if (statusCode === 401 || attempt >= MAX_RETRIES) {
+      if (statusCode === 401 || statusCode === 403 || attempt >= MAX_RETRIES) {
         throw error
       }
       attempt += 1
@@ -467,7 +468,11 @@ export const runOpenNonDraftPullRequestCountCli = async (
     }
     return {
       exitCode:
-        result.statusCode === 401 ? GITHUB_HELPER_AUTHENTICATION_EXIT_CODE : 1,
+        result.statusCode === 401
+          ? GITHUB_HELPER_AUTHENTICATION_EXIT_CODE
+          : result.statusCode === 403
+            ? GITHUB_HELPER_PERMISSION_EXIT_CODE
+            : 1,
       stdout: "",
       stderr: "Failed to count open pull requests\n",
     }

@@ -10,6 +10,7 @@ import {
 } from "effect"
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
+  GITHUB_HELPER_PERMISSION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
   GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
   type GitHubHelperOperation,
@@ -123,6 +124,17 @@ const authenticationError = (
   new GitHubRequestError({
     message: requestError(repository, operation, detail).message,
     statusCode: 401,
+  })
+
+const permissionError = (
+  repository: GitHubRepository,
+  operation: string,
+  detail?: string,
+) =>
+  new GitHubRequestError({
+    message: requestError(repository, operation, detail).message,
+    statusCode: 403,
+    retryable: false,
   })
 
 const repositoryUnavailable = (repository: GitHubRepository) =>
@@ -321,6 +333,9 @@ export const keymaxxerGitHubLayer = (options: {
                   input.repository,
                   input.describe,
                 )
+              }
+              if (result.exitCode === GITHUB_HELPER_PERMISSION_EXIT_CODE) {
+                return yield* permissionError(input.repository, input.describe)
               }
               if (result.exitCode === GITHUB_HELPER_TLS_TRUST_EXIT_CODE) {
                 const control = parseGitHubHelperControl(result.stderr)

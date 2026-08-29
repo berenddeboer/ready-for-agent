@@ -11,6 +11,8 @@ import {
   type PrStatusCheckDiagnostic,
   type PullRequestCheckStatus,
   type TerminalPrStatusCheck,
+  isGitHubClientRejection,
+  isGitHubPermissionError,
   isGitHubThrottledError,
   isRecognizedAutomatedReviewerName,
   workflowNameFromCheckName,
@@ -158,6 +160,17 @@ export const automatedReviewIncompleteRerunLimitReason = (
   workflowIdentity: string,
 ): string =>
   `Automated review ${workflowIdentity} is still incomplete after autonomous recovery was already used on this workflow run; inspect or run that GitHub review workflow or check manually, then Retry checks.`
+
+/** Published operator list of minimum Forge token scopes. */
+const FORGE_TOKEN_SCOPES_DOC_URL =
+  "https://github.com/berenddeboer/ready-for-agent/blob/main/docs/forge-token-scopes.md"
+
+/**
+ * Operator-facing copy when GitHub refuses a workflow rerun because the
+ * repository token cannot write Actions. Retry checks stays available.
+ */
+export const actionsWriteRequiredRerunReason = (): string =>
+  `The repository token cannot rerun GitHub Actions workflows. Recreate it with Create token so Actions is Read and write, then Retry checks. Minimum scopes: ${FORGE_TOKEN_SCOPES_DOC_URL}`
 
 interface ObservedPrStatusCheckRow {
   readonly id: string
@@ -572,8 +585,11 @@ const reserveAutomatedReviewRerun = (
     return { _tag: "reserved" as const, id }
   })
 
-/** A confirmed GitHub throttle never started the rerun, so it consumes no budget. */
-const releaseThrottledAutomatedReviewRerun = (permitId: string) =>
+/**
+ * A confirmed GitHub rejection never started the rerun, so it consumes no
+ * budget. Used for throttle, 403 permission, and other 4xx client rejections.
+ */
+const releaseReservedAutomatedReviewRerun = (permitId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* sql.unsafe(
@@ -581,6 +597,40 @@ const releaseThrottledAutomatedReviewRerun = (permitId: string) =>
        WHERE id = ? AND status = 'reserved'`,
       [permitId],
     )
+  })
+
+const settleAuthorizedReviewRerunFailure = (
+  permitId: string,
+  failure: unknown,
+  handledCheckIds: readonly string[],
+) =>
+  Effect.gen(function* () {
+    if (isGitHubThrottledError(failure)) {
+      yield* releaseReservedAutomatedReviewRerun(permitId)
+      return yield* failure
+    }
+    if (isGitHubPermissionError(failure)) {
+      yield* releaseReservedAutomatedReviewRerun(permitId)
+      return {
+        _tag: "needs_human" as const,
+        reason: actionsWriteRequiredRerunReason(),
+        handledCheckIds,
+      } satisfies PrStatusCheckInvestigationResult
+    }
+    if (isGitHubClientRejection(failure)) {
+      yield* releaseReservedAutomatedReviewRerun(permitId)
+    }
+    const detail =
+      typeof failure === "object" &&
+      failure !== null &&
+      "message" in failure &&
+      typeof failure.message === "string" &&
+      failure.message.trim() !== ""
+        ? failure.message
+        : "GitHub workflow rerun failed"
+    return yield* new PrStatusChecksUnresolvedError({
+      message: `Manual fixing may be required. ${detail}. Please fix or rerun the checks on GitHub, then click Retry checks.`,
+    })
   })
 
 /** Mark the permit complete and record the Check-Start Anchor together. */
@@ -963,20 +1013,11 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
             github.rerunWorkflowRun(repository, evidence.workflowRunId),
           )
           if (rerunResult._tag === "Failure") {
-            if (isGitHubThrottledError(rerunResult.failure)) {
-              yield* releaseThrottledAutomatedReviewRerun(permit.id)
-              return yield* rerunResult.failure
-            }
-            const detail =
-              "_tag" in rerunResult.failure &&
-              "message" in rerunResult.failure &&
-              typeof rerunResult.failure.message === "string" &&
-              rerunResult.failure.message.trim() !== ""
-                ? rerunResult.failure.message
-                : "GitHub workflow rerun failed"
-            return yield* new PrStatusChecksUnresolvedError({
-              message: `Manual fixing may be required. ${detail}. Please fix or rerun the checks on GitHub, then click Retry checks.`,
-            })
+            return yield* settleAuthorizedReviewRerunFailure(
+              permit.id,
+              rerunResult.failure,
+              handledCheckIds,
+            )
           }
           yield* completeAuthorizedReviewRerun(
             permit.id,
@@ -1264,22 +1305,11 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         github.rerunWorkflowRun(repository, investigation.workflowRunId),
       )
       if (rerunResult._tag === "Failure") {
-        if (isGitHubThrottledError(rerunResult.failure)) {
-          yield* releaseThrottledAutomatedReviewRerun(permit.id)
-          return yield* rerunResult.failure
-        }
-        // Reservation remains so a crash or indeterminate response cannot
-        // unlock unbounded extra GitHub rerun calls after restart.
-        const detail =
-          "_tag" in rerunResult.failure &&
-          "message" in rerunResult.failure &&
-          typeof rerunResult.failure.message === "string" &&
-          rerunResult.failure.message.trim() !== ""
-            ? rerunResult.failure.message
-            : "GitHub workflow rerun failed"
-        return yield* new PrStatusChecksUnresolvedError({
-          message: `Manual fixing may be required. ${detail}. Please fix or rerun the checks on GitHub, then click Retry checks.`,
-        })
+        return yield* settleAuthorizedReviewRerunFailure(
+          permit.id,
+          rerunResult.failure,
+          handledCheckIds,
+        )
       }
       yield* completeAuthorizedReviewRerun(
         permit.id,

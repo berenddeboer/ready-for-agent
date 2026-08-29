@@ -33,6 +33,7 @@ import {
   AUTOMATED_REVIEW_INCOMPLETE_RERUN_LIMIT,
   AUTOMATED_REVIEW_RERUN_LIMIT,
   type LifecycleStepContext,
+  actionsWriteRequiredRerunReason,
   automatedReviewIncompleteRerunLimitReason,
   automatedReviewRerunLimitReason,
   formatAutomatedReviewWorkflowIdentity,
@@ -45,6 +46,10 @@ import {
   watchPrStatusChecks,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
+
+/** Spec-derived operator copy for Actions-write 403 (issue #1237), not recomputed from production. */
+const ACTIONS_WRITE_REQUIRED_RERUN_COPY =
+  "The repository token cannot rerun GitHub Actions workflows. Recreate it with Create token so Actions is Read and write, then Retry checks. Minimum scopes: https://github.com/berenddeboer/ready-for-agent/blob/main/docs/forge-token-scopes.md"
 
 const repository = makeRepositoryRecord({ localPath: "/repos/widgets" })
 const mergeable = {
@@ -2982,6 +2987,9 @@ describe("PR status check steps", () => {
     ).toBe(
       'Automated review workflow "Claude Code Review" is still incomplete after autonomous recovery was already used on this workflow run; inspect or run that GitHub review workflow or check manually, then Retry checks.',
     )
+    expect(actionsWriteRequiredRerunReason()).toBe(
+      ACTIONS_WRITE_REQUIRED_RERUN_COPY,
+    )
     expect(
       automatedReviewRerunLimitReason(
         formatAutomatedReviewWorkflowIdentity("Claude Code Review"),
@@ -3108,6 +3116,158 @@ describe("PR status check steps", () => {
     )
 
     expect(rerunIds).toEqual([workflowRunId])
+  })
+
+  it("hands off a 403 incomplete recovery rerun as a credential problem without spending the budget", async () => {
+    const rerunIds: number[] = []
+    const headSha = "sha-incomplete-403"
+    const workflowRunId = 33232172979
+    const greenStatus = {
+      _tag: "succeeded" as const,
+      ...mergeable,
+      headSha,
+      terminalChecks: [
+        {
+          externalId: "actions-job:review",
+          name: "Claude Code Review/claude-review",
+          outcome: "green" as const,
+        },
+      ],
+    }
+    const incompleteEvidence = {
+      _tag: "incomplete" as const,
+      signature: INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+      workflowRunId,
+      workflowName: "Claude Code Review",
+      detail: "Visibly incomplete automated review comment from claude[bot]",
+    }
+    let acceptRerun = false
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const sql = yield* SqlClient.SqlClient
+        const now = Date.now()
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check (
+             id, work_item_id, external_id, name, outcome,
+             handled_at, observed_at, created_at, updated_at
+           ) VALUES (?, ?, ?, 'Claude Code Review/claude-review', 'green', NULL, ?, ?, ?)`,
+          [
+            "psc-incomplete-403-1",
+            context.workItemId,
+            "actions-job:review-403-1",
+            now,
+            now,
+            now,
+          ],
+        )
+        const first = yield* investigatePrStatusChecks(context)
+        expect(first._tag).toBe("needs_human")
+        if (first._tag === "needs_human") {
+          expect(first.reason).toBe(ACTIONS_WRITE_REQUIRED_RERUN_COPY)
+          expect(first.reason).not.toContain(
+            "fix or rerun the checks on GitHub",
+          )
+          expect(first.reason).not.toContain("Failed to rerun workflow run")
+          expect(first.handledCheckIds).toEqual(["psc-incomplete-403-1"])
+        }
+        const afterDenied = (yield* sql.unsafe(
+          `SELECT COUNT(*) AS count FROM automated_review_rerun
+           WHERE work_item_id = ? AND head_sha = ? AND workflow_run_id = ?`,
+          [context.workItemId, headSha, String(workflowRunId)],
+        )) as readonly { readonly count: number }[]
+        expect(Number(afterDenied[0]?.count)).toBe(0)
+
+        yield* sql.unsafe(
+          `UPDATE pr_status_check
+           SET handled_at = ?, updated_at = ?
+           WHERE id = ?`,
+          [Date.now(), Date.now(), "psc-incomplete-403-1"],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check (
+             id, work_item_id, external_id, name, outcome,
+             handled_at, observed_at, created_at, updated_at
+           ) VALUES (?, ?, ?, 'Claude Code Review/claude-review', 'green', NULL, ?, ?, ?)`,
+          [
+            "psc-incomplete-403-2",
+            context.workItemId,
+            "actions-job:review-403-2",
+            Date.now(),
+            Date.now(),
+            Date.now(),
+          ],
+        )
+        const second = yield* investigatePrStatusChecks(context)
+        expect(second._tag).toBe("needs_human")
+        if (second._tag === "needs_human") {
+          expect(second.reason).toBe(ACTIONS_WRITE_REQUIRED_RERUN_COPY)
+        }
+
+        acceptRerun = true
+        yield* sql.unsafe(
+          `UPDATE pr_status_check
+           SET handled_at = ?, updated_at = ?
+           WHERE id = ?`,
+          [Date.now(), Date.now(), "psc-incomplete-403-2"],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check (
+             id, work_item_id, external_id, name, outcome,
+             handled_at, observed_at, created_at, updated_at
+           ) VALUES (?, ?, ?, 'Claude Code Review/claude-review', 'green', NULL, ?, ?, ?)`,
+          [
+            "psc-incomplete-403-3",
+            context.workItemId,
+            "actions-job:review-403-3",
+            Date.now(),
+            Date.now(),
+            Date.now(),
+          ],
+        )
+        const recovered = yield* investigatePrStatusChecks(context)
+        expect(recovered).toEqual({
+          _tag: "checks_triggered",
+          handledCheckIds: ["psc-incomplete-403-3"],
+          checkStartAnchorRecorded: true,
+        })
+        const permits = (yield* sql.unsafe(
+          `SELECT status FROM automated_review_rerun
+           WHERE work_item_id = ? AND head_sha = ? AND workflow_run_id = ?`,
+          [context.workItemId, headSha, String(workflowRunId)],
+        )) as readonly { readonly status: string }[]
+        expect(permits).toEqual([{ status: "completed" }])
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(greenStatus, {
+              observeAutomatedReviewEvidence: () =>
+                Effect.succeed(incompleteEvidence),
+              rerunWorkflowRun: (_repo, runId) => {
+                rerunIds.push(runId)
+                return acceptRerun
+                  ? Effect.void
+                  : Effect.fail(
+                      new GitHubRequestError({
+                        message:
+                          "Failed to rerun workflow run for acme/widgets",
+                        statusCode: 403,
+                        retryable: false,
+                      }),
+                    )
+              },
+            }),
+            keymaxxer,
+            opencodeWith(["should not run for harness-classified incomplete"]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(rerunIds).toEqual([workflowRunId, workflowRunId, workflowRunId])
   })
 
   it("treats legacy null-signature agent reruns as spent incomplete recovery", async () => {
@@ -3680,6 +3840,144 @@ describe("PR status check steps", () => {
     )
 
     expect(rerunCalls).toBe(AUTOMATED_REVIEW_RERUN_LIMIT + 1)
+  })
+
+  it("hands off a 403 agent RERUN_REVIEW as a credential problem without spending the budget", async () => {
+    const workflowRunId = 33232172979
+    let acceptRerun = false
+    const status = {
+      _tag: "succeeded" as const,
+      ...mergeable,
+      headSha: "sha-agent-403",
+      terminalChecks: [
+        {
+          externalId: "actions-job:review",
+          name: "Claude Code Review/claude-review",
+          outcome: "green" as const,
+        },
+      ],
+    }
+    const rerunVerdict = `READY_FOR_AGENT_RESULT: RERUN_REVIEW: ${workflowRunId} Claude Code Review`
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        const denied = yield* investigatePrStatusChecks(context)
+        expect(denied._tag).toBe("needs_human")
+        if (denied._tag === "needs_human") {
+          expect(denied.reason).toBe(ACTIONS_WRITE_REQUIRED_RERUN_COPY)
+          expect(denied.reason).not.toContain(
+            "fix or rerun the checks on GitHub",
+          )
+        }
+        const afterDenied = (yield* sql.unsafe(
+          `SELECT COUNT(*) AS count FROM automated_review_rerun WHERE work_item_id = ?`,
+          [context.workItemId],
+        )) as readonly { readonly count: number }[]
+        expect(Number(afterDenied[0]?.count)).toBe(0)
+
+        acceptRerun = true
+        const recovered = yield* investigatePrStatusChecks(context)
+        expect(recovered).toEqual({
+          _tag: "checks_triggered",
+          handledCheckIds: [expect.any(String)],
+          checkStartAnchorRecorded: true,
+        })
+        const permits = (yield* sql.unsafe(
+          `SELECT status FROM automated_review_rerun WHERE work_item_id = ?`,
+          [context.workItemId],
+        )) as readonly { readonly status: string }[]
+        expect(permits).toEqual([{ status: "completed" }])
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(status, {
+              rerunWorkflowRun: () =>
+                acceptRerun
+                  ? Effect.void
+                  : Effect.fail(
+                      new GitHubRequestError({
+                        message:
+                          "Failed to rerun workflow run for acme/widgets",
+                        statusCode: 403,
+                        retryable: false,
+                      }),
+                    ),
+            }),
+            keymaxxer,
+            opencodeWith([rerunVerdict, rerunVerdict]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("keeps a 401 review rerun as the existing authentication failure", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        const investigation = yield* Effect.result(
+          investigatePrStatusChecks(context),
+        )
+        const permits = (yield* sql.unsafe(
+          `SELECT COUNT(*) AS count FROM automated_review_rerun WHERE work_item_id = ?`,
+          [context.workItemId],
+        )) as readonly { readonly count: number }[]
+        return { investigation, permitCount: Number(permits[0]?.count) }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                headSha: "sha-401-rerun",
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:1",
+                    name: "review",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                rerunWorkflowRun: () =>
+                  Effect.fail(
+                    new GitHubRequestError({
+                      message: "Failed to rerun workflow run for acme/widgets",
+                      statusCode: 401,
+                    }),
+                  ),
+              },
+            ),
+            keymaxxer,
+            opencodeWith([
+              "need rerun\nREADY_FOR_AGENT_RESULT: RERUN_REVIEW: 99 Review Bot",
+            ]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result.investigation._tag).toBe("Failure")
+    if (result.investigation._tag === "Failure") {
+      expect(result.investigation.failure.message).toContain(
+        "Failed to rerun workflow run",
+      )
+      expect(result.investigation.failure.message).not.toContain("Create token")
+      expect(result.investigation.failure.message).not.toContain(
+        "cannot rerun GitHub Actions",
+      )
+    }
+    expect(result.permitCount).toBe(0)
   })
 
   it("keeps a reserved permit when the GitHub rerun response is indeterminate", async () => {
