@@ -1,6 +1,6 @@
 # Implement With Merge Policy pin and local inspection
 
-Status: accepted (supersedes ADR 0052's remote-only/custom-local exclusion; the boolean Auto-merge checkbox and "not Merge Mode Always" rule are superseded by ADR 0059)
+Status: accepted (supersedes ADR 0052's remote-only/custom-local exclusion; the boolean Auto-merge checkbox and "not Merge Mode Always" rule are superseded by ADR 0059; parent Implement With is ADR 0067 and does not add these options to parent Implement All)
 
 Implement With remains the only command that persists an Explicit Work Item Execution Profile. That type stays exclusively the immutable backend, build, and review selection. Merge Policy and pause behavior are a separate Implement With options input: a concrete Work Item Merge Policy pin and an optional Implement Locally inspection pause.
 

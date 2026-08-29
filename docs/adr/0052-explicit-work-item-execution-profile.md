@@ -1,6 +1,6 @@
 # Explicit Work Item Execution Profile for Implement With
 
-Status: accepted (supersedes the per-Work-Item selection exclusions in ADR 0037 and the blanket model-snapshot rejection in ADR 0035; the remote-only/custom-local exclusion is superseded by ADR 0054)
+Status: accepted (supersedes the per-Work-Item selection exclusions in ADR 0037 and the blanket model-snapshot rejection in ADR 0035; the remote-only/custom-local exclusion is superseded by ADR 0054; the parent-path custom-selection exclusion is superseded by ADR 0067)
 
 Add a distinct `Implement with...` Issue-menu action and `implementWith` command for remote implementation of one Actionable Issue. Its ephemeral `Implement issue #N with...` dialog starts from the Repository's effective Agent Backend and currently resolved backend-scoped model preferences, then lets the operator choose any shipped Agent Backend, a build Agent Model and optional Thinking Level, and either `Same as build` or a distinct review Agent Model and optional Thinking Level. The command always persists those choices as one complete, immutable Explicit Work Item Execution Profile, even when the pre-filled values were not changed, without changing Repository settings or Harness Config.
 
