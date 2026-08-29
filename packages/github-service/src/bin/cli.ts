@@ -10,6 +10,7 @@ import {
 } from "../lib/errors.js"
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
+  GITHUB_HELPER_PERMISSION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
   GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
   githubHelperSuccess,
@@ -115,7 +116,9 @@ export const runGitHubCli = <A, E>(
         process.exitCode =
           error instanceof GitHubRequestError && error.statusCode === 401
             ? GITHUB_HELPER_AUTHENTICATION_EXIT_CODE
-            : 1
+            : error instanceof GitHubRequestError && error.statusCode === 403
+              ? GITHUB_HELPER_PERMISSION_EXIT_CODE
+              : 1
       }),
     ),
     BunRuntime.runMain,

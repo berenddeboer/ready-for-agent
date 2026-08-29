@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, test } from "vitest"
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
+  GITHUB_HELPER_PERMISSION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
   GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
   parseGitHubHelperControl,
@@ -384,6 +385,30 @@ describe("runOpenNonDraftPullRequestCountCli", () => {
     )
 
     expect(result.exitCode).toBe(GITHUB_HELPER_AUTHENTICATION_EXIT_CODE)
+  })
+
+  test("preserves HTTP 403 as the permission exit code", async () => {
+    const result = await runOpenNonDraftPullRequestCountCli(
+      [encode("github"), encode("github.com"), encode("acme/widgets")],
+      {
+        env: { GITHUB_TOKEN: "read-only-token" },
+        fetchImpl: async () =>
+          new Response(
+            JSON.stringify({
+              message: "Resource not accessible by personal access token",
+            }),
+            {
+              status: 403,
+              statusText: "Forbidden",
+            },
+          ),
+      },
+    )
+
+    expect(result.exitCode).toBe(GITHUB_HELPER_PERMISSION_EXIT_CODE)
+    expect(result.stderr).not.toContain(
+      "Resource not accessible by personal access token",
+    )
   })
 
   test("serializes TLS trust failures as versioned non-secret control", async () => {

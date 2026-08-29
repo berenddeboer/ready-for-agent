@@ -15,6 +15,11 @@ export const GITHUB_HELPER_AUTHENTICATION_EXIT_CODE = 4 as const
  * the parent rebuilds operator-facing remediation (no API/token material).
  */
 export const GITHUB_HELPER_TLS_TRUST_EXIT_CODE = 5 as const
+/**
+ * Typed helper exit for HTTP 403 permission (secret too narrow). Distinct from
+ * 401 authentication so the parent can speak without reading helper output.
+ */
+export const GITHUB_HELPER_PERMISSION_EXIT_CODE = 6 as const
 
 export interface GitHubHelperThrottle {
   readonly retryAt: number

@@ -14,6 +14,7 @@ import {
 import { TestClock } from "effect/testing"
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
+  GITHUB_HELPER_PERMISSION_EXIT_CODE,
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
@@ -21,6 +22,7 @@ import {
   INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
   githubHelperSuccess,
   githubHelperThrottled,
+  isGitHubRequestError,
   serializeGitHubHelperControl,
 } from "@ready-for-agent/github-service"
 import {
@@ -518,6 +520,87 @@ describe("Keymaxxer-backed GitHub layer", () => {
             "new",
           )
         }).pipe(Effect.provide(layer))
+      }),
+  )
+
+  it.effect(
+    "maps a helper permission exit on workflow rerun without copying helper output",
+    () =>
+      Effect.gen(function* () {
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("TOKEN_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.succeed({
+              exitCode: GITHUB_HELPER_PERMISSION_EXIT_CODE,
+              stdout: "",
+              stderr:
+                'Resource not accessible by personal access token\n{"message":"Resource not accessible by personal access token"}',
+            }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        const error = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          return yield* github
+            .rerunWorkflowRun(acmeWidgets, 33232172979)
+            .pipe(Effect.flip)
+        }).pipe(Effect.provide(layer))
+
+        expect(error).toBeInstanceOf(GitHubRequestError)
+        expect(isGitHubRequestError(error)).toBe(true)
+        if (!isGitHubRequestError(error)) {
+          return
+        }
+        expect(error.statusCode).toBe(403)
+        expect(error.retryable).toBe(false)
+        expect(error.message).not.toContain(
+          "Resource not accessible by personal access token",
+        )
+        expect(error.message).not.toContain("GitHub helper command failed")
+      }),
+  )
+
+  it.effect(
+    "keeps a helper authentication exit as HTTP 401, not a permission 403",
+    () =>
+      Effect.gen(function* () {
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("TOKEN_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.succeed({
+              exitCode: GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
+              stdout: "",
+              stderr: "HTTP 401: Bad credentials",
+            }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        const error = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          return yield* github
+            .rerunWorkflowRun(acmeWidgets, 33232172979)
+            .pipe(Effect.flip)
+        }).pipe(Effect.provide(layer))
+
+        expect(error).toBeInstanceOf(GitHubRequestError)
+        expect(isGitHubRequestError(error)).toBe(true)
+        if (!isGitHubRequestError(error)) {
+          return
+        }
+        expect(error.statusCode).toBe(401)
+        expect(error.message).not.toContain("Bad credentials")
       }),
   )
 

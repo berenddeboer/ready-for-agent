@@ -21,6 +21,9 @@ import {
   formatUserFacingError,
   isDeterministicForgeAuthFailure,
   isDeterministicForgeAuthHttpStatus,
+  isGitHubClientRejection,
+  isGitHubPermissionError,
+  isGitHubRequestError,
   logErrorAnnotations,
   makeGitHubServiceFromToken,
   makeGitHubServiceTest,
@@ -1958,6 +1961,91 @@ describe("GitHubService live implementation", () => {
       "POST https://api.github.com/repos/acme/widgets/actions/runs/29906669357/rerun",
     ])
   })
+
+  it("accepts HTTP 204 as a successful workflow rerun", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input, init) => {
+      if (
+        String(input).includes("/actions/runs/204/rerun") &&
+        init?.method === "POST"
+      ) {
+        return new Response(null, { status: 204 })
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    await Effect.runPromise(service.rerunWorkflowRun(repository, 204))
+  })
+
+  it.effect(
+    "maps a permission 403 on workflow rerun without copying the GitHub body",
+    () =>
+      Effect.gen(function* () {
+        const service = makeGitHubServiceFromToken(
+          "token",
+          async (input, init) => {
+            if (
+              String(input).includes("/actions/runs/33232172979/rerun") &&
+              init?.method === "POST"
+            ) {
+              return new Response(
+                JSON.stringify({
+                  message: "Resource not accessible by personal access token",
+                  documentation_url:
+                    "https://docs.github.com/rest/actions/workflow-runs",
+                }),
+                {
+                  status: 403,
+                  statusText: "Forbidden",
+                  headers: {
+                    "X-Accepted-GitHub-Permissions": "actions=write",
+                  },
+                },
+              )
+            }
+            return new Response("not found", { status: 404 })
+          },
+        )
+
+        const error = yield* service
+          .rerunWorkflowRun(repository, 33232172979)
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubRequestError)
+        expect(error.statusCode).toBe(403)
+        expect(error.retryable).toBe(false)
+        expect(error.message).not.toContain(
+          "Resource not accessible by personal access token",
+        )
+        expect(error.message).not.toContain("documentation_url")
+        expect(formatUserFacingError(error)).not.toContain(
+          "Resource not accessible by personal access token",
+        )
+      }),
+  )
+
+  it.effect(
+    "keeps a throttled 403 on workflow rerun as GitHub throttling",
+    () =>
+      Effect.gen(function* () {
+        const resetSeconds = Math.floor(Date.now() / 1_000) + 120
+        const service = makeGitHubServiceFromToken("token", async () => {
+          return new Response("API rate limit exceeded", {
+            status: 403,
+            headers: {
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-reset": String(resetSeconds),
+            },
+          })
+        })
+
+        const error = yield* service
+          .rerunWorkflowRun(repository, 1)
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubThrottledError)
+        expect(error.retryAt).toBe(resetSeconds * 1_000)
+      }),
+  )
 
   it("uploads a user attachment and returns the GitHub CDN URL", async () => {
     const dir = await mkdtemp(join(tmpdir(), "rfa-upload-"))
@@ -4638,6 +4726,24 @@ describe("user-facing error formatting", () => {
     expect(isDeterministicForgeAuthHttpStatus(401)).toBe(true)
     expect(isDeterministicForgeAuthHttpStatus(403)).toBe(true)
     expect(isDeterministicForgeAuthHttpStatus(503)).toBe(false)
+    const permission = new GitHubRequestError({
+      message: "Failed to rerun workflow run for acme/widgets",
+      statusCode: 403,
+    })
+    const unauthorized = new GitHubRequestError({
+      message: "Failed to rerun workflow run for acme/widgets",
+      statusCode: 401,
+    })
+    const serverError = new GitHubRequestError({
+      message: "Failed to rerun workflow run for acme/widgets",
+      statusCode: 502,
+    })
+    expect(isGitHubRequestError(permission)).toBe(true)
+    expect(isGitHubPermissionError(permission)).toBe(true)
+    expect(isGitHubPermissionError(unauthorized)).toBe(false)
+    expect(isGitHubClientRejection(permission)).toBe(true)
+    expect(isGitHubClientRejection(unauthorized)).toBe(true)
+    expect(isGitHubClientRejection(serverError)).toBe(false)
     expect(
       extractHttpStatus(
         new GitHubRequestError({

@@ -87,6 +87,34 @@ export const isGitHubTlsTrustError = (
   "_tag" in value &&
   value._tag === "GitHubTlsTrustError"
 
+export const isGitHubRequestError = (
+  value: unknown,
+): value is GitHubRequestError =>
+  typeof value === "object" &&
+  value !== null &&
+  "_tag" in value &&
+  value._tag === "GitHubRequestError"
+
+/** HTTP 403 permission (secret too narrow). Distinct from 401 authentication. */
+export const isGitHubPermissionError = (
+  value: unknown,
+): value is GitHubRequestError =>
+  isGitHubRequestError(value) && value.statusCode === 403
+
+/** Confirmed GitHub 4xx that did not start the requested mutation. */
+export const isGitHubClientRejection = (value: unknown): boolean => {
+  if (!isGitHubRequestError(value)) {
+    return false
+  }
+  const status = value.statusCode
+  return (
+    typeof status === "number" &&
+    Number.isInteger(status) &&
+    status >= 400 &&
+    status < 500
+  )
+}
+
 export type GitHubServiceError =
   | GitHubRepositoryUnavailableError
   | GitHubRequestError

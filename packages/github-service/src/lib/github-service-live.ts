@@ -3164,13 +3164,26 @@ const makeRerunWorkflowRun =
         signal,
       },
     )
-    if (!response.ok) {
-      throw new GitHubHttpError({
-        statusCode: response.status,
-        headers: response.headers,
-        message: `Failed to rerun workflow run ${workflowRunId} for ${repository.owner}/${repository.name}: ${response.statusText}: ${await response.text()}`,
-      })
+    if (response.ok) {
+      return
     }
+    const body = await response.text()
+    const throttle = githubThrottleFromResponse({
+      statusCode: response.status,
+      headers: response.headers,
+      message: `${response.statusText}: ${body}`,
+    })
+    if (throttle !== undefined) {
+      throw throttle
+    }
+    throw new GitHubHttpError({
+      statusCode: response.status,
+      headers: response.headers,
+      message:
+        response.status === 403
+          ? `Failed to rerun workflow run ${workflowRunId} for ${repository.owner}/${repository.name}: Actions write required`
+          : `Failed to rerun workflow run ${workflowRunId} for ${repository.owner}/${repository.name}: ${response.statusText}: ${body}`,
+    })
   }
 
 const makeUploadUserAttachment =
