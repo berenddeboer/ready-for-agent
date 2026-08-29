@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import {
   AGENT_BACKEND_IDS,
   ActiveAgentBackend,
@@ -10,17 +11,27 @@ import {
   DbServiceLive,
   type DbServiceShape,
 } from "@ready-for-agent/db-service"
+import {
+  EnqueueError,
+  type JobId,
+  QueueService,
+} from "@ready-for-agent/queue-service"
+import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
+  ImplementAllWithAutoMergeNotEligibleError,
   InstallCommandError,
   InvalidExecutionProfileError,
   type LifecycleStepContext,
   LifecycleSteps,
   type LifecycleStepsShape,
   AgentBackendUnavailableError as LifecycleUnavailableError,
+  ParentImplementWithPauseNotAllowedError,
   ParentIssueError,
   STEP_RUN_REASON,
   UnfinishedWorkItemExistsError,
+  UnsupportedIssueHierarchyError,
+  WORK_ITEM_LIFECYCLE_QUEUE,
   WorkItemLifecycle,
   WorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
@@ -152,6 +163,69 @@ const storeOpenLeafIssue = (
     blockedBy: [],
   })
 
+const storeOpenParentIssue = (
+  db: Pick<DbServiceShape, "storeIssue">,
+  repositoryId: string,
+  issueNumber: number,
+) =>
+  db.storeIssue({
+    repositoryId,
+    issueNumber,
+    title: `Parent ${issueNumber}`,
+    body: "body",
+    url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+    state: "OPEN",
+    githubCreatedAt: new Date(),
+    issueAuthor: null,
+    parent: null,
+    parentPosition: null,
+    hasChildren: true,
+    blockedBy: [],
+  })
+
+const storeOpenChildIssue = (
+  db: Pick<DbServiceShape, "storeIssue">,
+  repositoryId: string,
+  issueNumber: number,
+  parentIssueNumber: number,
+  extra?: {
+    readonly parentPosition?: number
+    readonly state?: "OPEN" | "CLOSED"
+    readonly blockedBy?: readonly {
+      readonly issueNumber: number
+      readonly issueUrl: string
+    }[]
+    readonly hasChildren?: boolean
+  },
+) =>
+  db.storeIssue({
+    repositoryId,
+    issueNumber,
+    title: `Child ${issueNumber}`,
+    body: "body",
+    url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+    state: extra?.state ?? "OPEN",
+    githubCreatedAt: new Date(),
+    issueAuthor: null,
+    parent: {
+      issueNumber: parentIssueNumber,
+      issueUrl: `https://github.com/acme/widgets/issues/${parentIssueNumber}`,
+    },
+    parentPosition: extra?.parentPosition ?? 0,
+    hasChildren: extra?.hasChildren ?? false,
+    blockedBy: extra?.blockedBy ?? [],
+  })
+
+const expectedExplicitReviewProfile = {
+  agentBackend: "opencode",
+  build: { model: "build-model", thinkingLevel: "high" },
+  review: {
+    kind: "explicit" as const,
+    model: "review-model",
+    thinkingLevel: "max",
+  },
+}
+
 const seedHarness = (
   db: Pick<DbServiceShape, "updateConfig">,
   input: {
@@ -253,46 +327,463 @@ describe("implementWith", () => {
     )
   })
 
-  it("rejects a Parent Issue as not a leaf", async () => {
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const db = yield* DbService
-        const lifecycle = yield* WorkItemLifecycle
-        const repo = yield* db.addRepository({
-          forge: "github",
-          forgeHost: "github.com",
-          projectPath: "acme/widgets",
-          localPath: "/repos/acme/widgets-implement-with-parent.git",
-          isBare: true,
-        })
-        yield* seedHarness(db, {
-          selectedAgentBackend: "opencode",
-          defaultModel: "settings-build",
-        })
-        yield* db.storeIssue({
-          repositoryId: repo.id,
-          issueNumber: 30,
-          title: "Parent",
-          body: "body",
-          url: "https://github.com/acme/widgets/issues/30",
-          state: "OPEN",
-          githubCreatedAt: new Date(),
-          issueAuthor: null,
-          parent: null,
-          parentPosition: null,
-          hasChildren: true,
-          blockedBy: [],
-        })
-        const error = yield* Effect.flip(
-          lifecycle.implementWith(repo.id, 30, sameAsBuildProfile, {
-            mergePolicy: "off",
-            implementLocally: false,
-          }),
-        )
-        expect(error).toBeInstanceOf(ParentIssueError)
-        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 30)).toEqual([])
-      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
-    )
+  describe("on a Parent Issue", () => {
+    it("enrolls the same open children as Implement All with the submitted profile and pin", async () => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const lifecycle = yield* WorkItemLifecycle
+          const repo = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets-implement-with-parent.git",
+            isBare: true,
+          })
+          yield* seedHarness(db, {
+            selectedAgentBackend: "opencode",
+            defaultModel: "settings-build",
+          })
+          yield* storeOpenParentIssue(db, repo.id, 30)
+          yield* storeOpenChildIssue(db, repo.id, 31, 30, { parentPosition: 0 })
+          yield* storeOpenChildIssue(db, repo.id, 32, 30, {
+            parentPosition: 1,
+            blockedBy: [
+              {
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+          yield* storeOpenChildIssue(db, repo.id, 33, 30, {
+            parentPosition: 2,
+            state: "CLOSED",
+          })
+
+          const covered = yield* lifecycle.implementWith(
+            repo.id,
+            30,
+            explicitReviewProfile,
+            { mergePolicy: "classify", implementLocally: false },
+          )
+          expect(covered.map((item) => item.issueNumber)).toEqual([31, 32])
+          expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 30)).toEqual(
+            [],
+          )
+
+          const unblocked = covered[0]!
+          expect(unblocked.executionProfile).toEqual(
+            expectedExplicitReviewProfile,
+          )
+          expect(unblocked.mergeMode).toBe("ordinary")
+          expect(unblocked.autoMergeOverride).toBe(true)
+          expect(unblocked.pauseBeforeStep).toBeNull()
+          expect(unblocked.waitingForBlockers).toBe(false)
+          expect(unblocked.holdsWorkerSlot).toBe(true)
+          expect(unblocked.stepRuns).toHaveLength(1)
+
+          const blocked = covered[1]!
+          expect(blocked.executionProfile).toEqual(
+            expectedExplicitReviewProfile,
+          )
+          expect(blocked.mergeMode).toBe("ordinary")
+          expect(blocked.autoMergeOverride).toBe(true)
+          expect(blocked.pauseBeforeStep).toBeNull()
+          expect(blocked.waitingForBlockers).toBe(true)
+          expect(blocked.holdsWorkerSlot).toBe(false)
+          expect(blocked.stepRuns).toHaveLength(0)
+
+          expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 33)).toEqual(
+            [],
+          )
+
+          yield* storeOpenChildIssue(db, repo.id, 34, 30, { parentPosition: 3 })
+          const again = yield* lifecycle.implementWith(
+            repo.id,
+            30,
+            explicitReviewProfile,
+            { mergePolicy: "off", implementLocally: false },
+          )
+          expect(again.map((item) => item.issueNumber).sort()).toEqual([
+            31, 32, 34,
+          ])
+          const later = again.find((item) => item.issueNumber === 34)!
+          expect(later.executionProfile).toEqual(expectedExplicitReviewProfile)
+          expect(later.autoMergeOverride).toBe(false)
+          expect(later.pauseBeforeStep).toBeNull()
+        }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+      )
+    })
+
+    it("adopts unfinished children by writing the pin only", async () => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const repo = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets-implement-with-adopt.git",
+            isBare: true,
+          })
+          yield* seedHarness(db, {
+            selectedAgentBackend: "opencode",
+            defaultModel: "build-model",
+          })
+          yield* storeOpenParentIssue(db, repo.id, 40)
+          yield* storeOpenChildIssue(db, repo.id, 41, 40)
+
+          const existing = yield* lifecycle.implementNow(repo.id, 41)
+          expect(existing.executionProfile).toBeNull()
+          expect(existing.mergeMode).toBe("ordinary")
+          expect(existing.autoMergeOverride).toBeNull()
+          yield* sql.unsafe(
+            `UPDATE work_item
+             SET state = 'needs_human',
+                 session_id = 'ses_parent_adopt',
+                 worktree_path = '/tmp/worktrees/parent-adopt',
+                 pull_request_number = 88,
+                 failure_code = 'needs_human',
+                 failure_message = 'Human merge required',
+                 holds_worker_slot = 0
+             WHERE id = ?`,
+            [existing.id],
+          )
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'succeeded',
+                 step = 'decide_pr_merge',
+                 finished_at = ?
+             WHERE work_item_id = ?`,
+            [Date.now(), existing.id],
+          )
+
+          const covered = yield* lifecycle.implementWith(
+            repo.id,
+            40,
+            explicitReviewProfile,
+            { mergePolicy: "always", implementLocally: false },
+          )
+          expect(covered).toHaveLength(1)
+          const adopted = covered[0]!
+          expect(adopted.id).toBe(existing.id)
+          expect(adopted.executionProfile).toBeNull()
+          expect(adopted.mergeMode).toBe("always")
+          expect(adopted.autoMergeOverride).toBeNull()
+          expect(adopted.pauseBeforeStep).toBeNull()
+          expect(adopted.state).toBe("needs_human")
+          expect(adopted.sessionId).toBe("ses_parent_adopt")
+          expect(adopted.worktreePath).toBe("/tmp/worktrees/parent-adopt")
+          expect(adopted.pullRequestNumber).toBe(88)
+          expect(adopted.failureCode).toBe("needs_human")
+          expect(adopted.stepRuns.every((run) => run.status !== "queued")).toBe(
+            true,
+          )
+          expect(adopted.stepRuns.some((run) => run.step === "merge_pr")).toBe(
+            false,
+          )
+        }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+      )
+    })
+
+    it("starts a queued blocked child remotely with the profile and pin once blockers lift", async () => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const lifecycle = yield* WorkItemLifecycle
+          const repo = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets-implement-with-blocked.git",
+            isBare: true,
+          })
+          yield* seedHarness(db, {
+            selectedAgentBackend: "opencode",
+            defaultModel: "settings-build",
+          })
+          yield* storeOpenParentIssue(db, repo.id, 50)
+          yield* storeOpenChildIssue(db, repo.id, 51, 50, {
+            blockedBy: [
+              {
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+
+          const [held] = yield* lifecycle.implementWith(
+            repo.id,
+            50,
+            explicitReviewProfile,
+            { mergePolicy: "off", implementLocally: false },
+          )
+          expect(held.waitingForBlockers).toBe(true)
+          expect(held.pauseBeforeStep).toBeNull()
+
+          yield* storeOpenChildIssue(db, repo.id, 51, 50, { blockedBy: [] })
+          expect(yield* lifecycle.releaseWaitingForBlockers(repo.id)).toBe(1)
+
+          const released = yield* lifecycle.getWorkItem(held.id)
+          expect(released.waitingForBlockers).toBe(false)
+          expect(released.holdsWorkerSlot).toBe(true)
+          expect(released.pauseBeforeStep).toBeNull()
+          expect(released.executionProfile).toEqual(
+            expectedExplicitReviewProfile,
+          )
+          expect(released.autoMergeOverride).toBe(false)
+          expect(released.mergeMode).toBe("ordinary")
+          expect(released.stepRuns).toHaveLength(1)
+        }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+      )
+    })
+
+    it("creates nothing when any covered child cannot be enrolled", async () => {
+      let enqueueCalls = 0
+      const failingEnqueueQueue = stubQueueService({
+        enqueue: () => {
+          enqueueCalls += 1
+          if (enqueueCalls >= 2) {
+            return Effect.fail(
+              new EnqueueError({
+                queue: WORK_ITEM_LIFECYCLE_QUEUE,
+                message: "injected enqueue failure on second child",
+              }),
+            )
+          }
+          return Effect.succeed("qjob-01ARZ3NDEKTSV4RRFFQ69G5FAV" as JobId)
+        },
+      })
+      const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(catalogLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
+        Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(stubAzureDevOpsServiceLayer()),
+        Layer.provideMerge(
+          Layer.succeed(LifecycleSteps, LifecycleSteps.of(successfulSteps)),
+        ),
+        Layer.provideMerge(DbServiceLive),
+        Layer.provideMerge(
+          Layer.succeed(QueueService, QueueService.of(failingEnqueueQueue)),
+        ),
+        Layer.provideMerge(DatabaseTest),
+      )
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const lifecycle = yield* WorkItemLifecycle
+          const repo = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets-implement-with-atomic.git",
+            isBare: true,
+          })
+          yield* seedHarness(db, {
+            selectedAgentBackend: "opencode",
+            defaultModel: "settings-build",
+          })
+          yield* storeOpenParentIssue(db, repo.id, 60)
+          yield* storeOpenChildIssue(db, repo.id, 61, 60, { parentPosition: 0 })
+          yield* storeOpenChildIssue(db, repo.id, 62, 60, { parentPosition: 1 })
+
+          const error = yield* Effect.flip(
+            lifecycle.implementWith(repo.id, 60, explicitReviewProfile, {
+              mergePolicy: "classify",
+              implementLocally: false,
+            }),
+          )
+          expect(error).toBeInstanceOf(EnqueueError)
+          expect(yield* lifecycle.listWorkItemsForRepository(repo.id)).toEqual(
+            [],
+          )
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("rejects an explicit Implement Locally pause and creates nothing", async () => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const lifecycle = yield* WorkItemLifecycle
+          const repo = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets-implement-with-pause.git",
+            isBare: true,
+          })
+          yield* seedHarness(db, {
+            selectedAgentBackend: "opencode",
+            defaultModel: "settings-build",
+          })
+          yield* storeOpenParentIssue(db, repo.id, 70)
+          yield* storeOpenChildIssue(db, repo.id, 71, 70)
+
+          const error = yield* Effect.flip(
+            lifecycle.implementWith(repo.id, 70, explicitReviewProfile, {
+              mergePolicy: "classify",
+              implementLocally: true,
+            }),
+          )
+          expect(error).toBeInstanceOf(ParentImplementWithPauseNotAllowedError)
+          expect(yield* lifecycle.listWorkItemsForRepository(repo.id)).toEqual(
+            [],
+          )
+        }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+      )
+    })
+
+    it("refuses unsupported hierarchy and parents with no open children", async () => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const lifecycle = yield* WorkItemLifecycle
+          const repo = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets-implement-with-ineligible.git",
+            isBare: true,
+          })
+          yield* seedHarness(db, {
+            selectedAgentBackend: "opencode",
+            defaultModel: "settings-build",
+          })
+          yield* storeOpenParentIssue(db, repo.id, 80)
+          yield* storeOpenChildIssue(db, repo.id, 81, 80, {
+            hasChildren: true,
+          })
+          const unsupported = yield* Effect.flip(
+            lifecycle.implementWith(repo.id, 80, explicitReviewProfile, {
+              mergePolicy: "off",
+              implementLocally: false,
+            }),
+          )
+          expect(unsupported).toBeInstanceOf(UnsupportedIssueHierarchyError)
+
+          yield* storeOpenParentIssue(db, repo.id, 90)
+          yield* storeOpenChildIssue(db, repo.id, 91, 90, { state: "CLOSED" })
+          const noOpen = yield* Effect.flip(
+            lifecycle.implementWith(repo.id, 90, explicitReviewProfile, {
+              mergePolicy: "off",
+              implementLocally: false,
+            }),
+          )
+          expect(noOpen).toBeInstanceOf(
+            ImplementAllWithAutoMergeNotEligibleError,
+          )
+          expect(yield* lifecycle.listWorkItemsForRepository(repo.id)).toEqual(
+            [],
+          )
+        }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+      )
+    })
+
+    it("creates nothing when the catalog is empty", async () => {
+      const liveCatalog = [...catalog]
+      const mutableLayer = stubActiveAgentBackendLayer({
+        registration: opencodeRegistration,
+        models: liveCatalog,
+      })
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const lifecycle = yield* WorkItemLifecycle
+          const repo = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets-implement-with-parent-catalog.git",
+            isBare: true,
+          })
+          yield* seedHarness(db, {
+            selectedAgentBackend: "opencode",
+            defaultModel: "build-model",
+          })
+          yield* storeOpenParentIssue(db, repo.id, 100)
+          yield* storeOpenChildIssue(db, repo.id, 101, 100)
+          const existing = yield* lifecycle.implementNow(repo.id, 101)
+          expect(existing.mergeMode).toBe("ordinary")
+          liveCatalog.splice(0, liveCatalog.length)
+
+          const error = yield* Effect.flip(
+            lifecycle.implementWith(repo.id, 100, explicitReviewProfile, {
+              mergePolicy: "always",
+              implementLocally: false,
+            }),
+          )
+          expect(error).toBeInstanceOf(InvalidExecutionProfileError)
+          const reloaded = yield* lifecycle.getWorkItem(existing.id)
+          expect(reloaded.mergeMode).toBe("ordinary")
+          expect(reloaded.autoMergeOverride).toBeNull()
+        }).pipe(Effect.provide(lifecycleLayer(mutableLayer))),
+      )
+    })
+
+    it("leaves Implement All with Auto-merge pinning Always with no profile", async () => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const lifecycle = yield* WorkItemLifecycle
+          const repo = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets-implement-all-still.git",
+            isBare: true,
+          })
+          yield* seedHarness(db, {
+            selectedAgentBackend: "opencode",
+            defaultModel: "build-model",
+          })
+          yield* storeOpenParentIssue(db, repo.id, 110)
+          yield* storeOpenChildIssue(db, repo.id, 111, 110)
+          const covered = yield* lifecycle.implementAllWithAutoMerge(
+            repo.id,
+            110,
+          )
+          expect(covered).toHaveLength(1)
+          expect(covered[0]!.executionProfile).toBeNull()
+          expect(covered[0]!.mergeMode).toBe("always")
+          expect(covered[0]!.pauseBeforeStep).toBeNull()
+        }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+      )
+    })
+
+    it("keeps Implement Now and Implement Locally rejected as not a leaf", async () => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const lifecycle = yield* WorkItemLifecycle
+          const repo = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets-parent-leaf-commands.git",
+            isBare: true,
+          })
+          yield* seedHarness(db, {
+            selectedAgentBackend: "opencode",
+            defaultModel: "build-model",
+          })
+          yield* storeOpenParentIssue(db, repo.id, 120)
+          yield* storeOpenChildIssue(db, repo.id, 121, 120)
+          const now = yield* Effect.flip(lifecycle.implementNow(repo.id, 120))
+          expect(now).toBeInstanceOf(ParentIssueError)
+          const locally = yield* Effect.flip(
+            lifecycle.implementLocally(repo.id, 120),
+          )
+          expect(locally).toBeInstanceOf(ParentIssueError)
+          expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 120)).toEqual(
+            [],
+          )
+        }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+      )
+    })
   })
 
   it("creates a Work Item with a durable complete explicit profile", async () => {

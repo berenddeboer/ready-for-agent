@@ -42,6 +42,7 @@ type ImplementWithBackendOption = {
 
 export type ImplementWithDialogProps = {
   readonly issueNumber: number
+  readonly target?: "leaf" | "parent"
   readonly backendId: string
   readonly backends: readonly ImplementWithBackendOption[]
   readonly configurationMode: string | null
@@ -121,6 +122,7 @@ const sameAsBuildDraft = (
  */
 export function ImplementWithDialog({
   issueNumber,
+  target = "leaf",
   backendId,
   backends,
   configurationMode,
@@ -268,7 +270,7 @@ export function ImplementWithDialog({
       }),
       options: {
         mergePolicy,
-        implementLocally,
+        implementLocally: target === "parent" ? false : implementLocally,
       },
     })
   }
@@ -283,11 +285,14 @@ export function ImplementWithDialog({
         <div className={ui.dialogHeader}>
           <p className={ui.dialogKicker}>Implement With</p>
           <h2 id={titleId} className={ui.dialogTitle}>
-            Implement issue #{issueNumber} with...
+            {target === "parent"
+              ? "Implement all with..."
+              : `Implement issue #${issueNumber} with...`}
           </h2>
           <p className={ui.dialogLede}>
-            These choices apply only to this Work Item. They never change
-            Repository settings or Harness Config.
+            {target === "parent"
+              ? "These choices apply to each new child Work Item. They never change Repository settings or Harness Config."
+              : "These choices apply only to this Work Item. They never change Repository settings or Harness Config."}
           </p>
         </div>
         <div className={ui.dialogBodySectioned}>
@@ -575,23 +580,27 @@ export function ImplementWithDialog({
                 Repository Merge Policy later changes.
               </span>
             </label>
-            <label className={ui.dialogCheck}>
-              <input
-                type="checkbox"
-                className={ui.dialogCheckInput}
-                name="implementLocally"
-                checked={implementLocally}
-                disabled={submitPending}
-                onChange={(event) => setImplementLocally(event.target.checked)}
-              />
-              Implement locally
-              <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
-                Pause after Review so you can inspect the worktree. Agent Turns
-                and dependency installation keep their current capabilities.
-                Start continues to Commit and PR creation. A No-Change Outcome
-                pauses before Close Issue.
-              </span>
-            </label>
+            {target === "leaf" && (
+              <label className={ui.dialogCheck}>
+                <input
+                  type="checkbox"
+                  className={ui.dialogCheckInput}
+                  name="implementLocally"
+                  checked={implementLocally}
+                  disabled={submitPending}
+                  onChange={(event) =>
+                    setImplementLocally(event.target.checked)
+                  }
+                />
+                Implement locally
+                <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+                  Pause after Review so you can inspect the worktree. Agent
+                  Turns and dependency installation keep their current
+                  capabilities. Start continues to Commit and PR creation. A
+                  No-Change Outcome pauses before Close Issue.
+                </span>
+              </label>
+            )}
           </section>
 
           {submitError !== null && (

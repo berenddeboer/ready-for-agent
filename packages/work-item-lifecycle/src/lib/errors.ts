@@ -69,6 +69,18 @@ export class ImplementAllWithAutoMergeNotEligibleError extends Schema.TaggedErro
   },
 ) {}
 
+/**
+ * Implement With cannot request an Implement Locally pause on a Parent Issue.
+ * Bulk enrollment is always remote; the pause option fails closed.
+ */
+export class ParentImplementWithPauseNotAllowedError extends Schema.TaggedErrorClass<ParentImplementWithPauseNotAllowedError>()(
+  "ParentImplementWithPauseNotAllowedError",
+  {
+    repositoryId: Schema.String,
+    issueNumber: Schema.Finite,
+  },
+) {}
+
 export class IssueBlockedError extends Schema.TaggedErrorClass<IssueBlockedError>()(
   "IssueBlockedError",
   {

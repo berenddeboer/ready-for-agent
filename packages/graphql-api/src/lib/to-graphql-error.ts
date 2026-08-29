@@ -88,6 +88,11 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
           `Parent Issue #${error.issueNumber} is not eligible for Implement all with auto-merge`,
         "IMPLEMENT_ALL_WITH_AUTO_MERGE_NOT_ELIGIBLE",
       )
+    case "ParentImplementWithPauseNotAllowedError":
+      return gql(
+        `Implement With cannot pause on Parent Issue #${error.issueNumber}`,
+        "PARENT_IMPLEMENT_WITH_PAUSE_NOT_ALLOWED",
+      )
     case "IssueBlockedError":
       return gql(
         `Issue #${error.issueNumber} is blocked by ${error.blockerCount} issue(s)`,

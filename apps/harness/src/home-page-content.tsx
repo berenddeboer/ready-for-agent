@@ -3077,12 +3077,44 @@ function ParentIssueGroup({
   readonly onOpenSession: (workItemId: string, sessionId: string) => void
 }) {
   const queryClient = useQueryClient()
+  const [implementWithOpen, setImplementWithOpen] = useState(false)
   const openChildren = childIssues.filter((child) => child.state === "OPEN")
   const canImplementAll = isParentImplementAllWithAutoMergeEligible({
     openChildren,
     directChildren: childIssues,
     workItemsLoading,
   })
+  const applyCoveredWorkItems = (covered: readonly WorkItem[]) => {
+    const byId = new Map(covered.map((item) => [item.id, item]))
+    for (const [queryKey] of queryClient.getQueriesData<readonly WorkItem[]>({
+      queryKey: ["work-items", parent.repositoryId],
+    })) {
+      // queryKey: ["work-items", repositoryId, listKind | null, limit | null]
+      const listKind = queryKey[2]
+      const allowAppend = listKind === null || listKind === "WORKING"
+      queryClient.setQueryData<readonly WorkItem[]>(queryKey, (current) => {
+        const next: WorkItem[] = []
+        const seen = new Set<string>()
+        for (const item of current ?? []) {
+          const updated = byId.get(item.id)
+          if (updated !== undefined) {
+            next.push(updated)
+            seen.add(item.id)
+          } else {
+            next.push(item)
+          }
+        }
+        if (allowAppend) {
+          for (const item of covered) {
+            if (!seen.has(item.id)) {
+              next.push(item)
+            }
+          }
+        }
+        return next
+      })
+    }
+  }
   const implementAll = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -3099,36 +3131,29 @@ function ParentIssueGroup({
     // Covered rows may be newly created or adopted (same id, updated mergeMode).
     // Update matching ids in every work-items cache; only append missing ids
     // into the default Issues list and Jobs WORKING (never Failed/Completed).
+    onSuccess: applyCoveredWorkItems,
+  })
+  const implementWith = useMutation({
+    mutationFn: async (input: ImplementWithSubmitInput) => {
+      const result = await graphql.mutation({
+        implementWith: {
+          __args: {
+            repositoryId: parent.repositoryId,
+            issueNumber: parent.issueNumber,
+            profile: input.profile,
+            options: input.options,
+          },
+          ...workItemFields,
+        },
+      })
+      return result.implementWith
+    },
     onSuccess: (covered) => {
-      const byId = new Map(covered.map((item) => [item.id, item]))
-      for (const [queryKey] of queryClient.getQueriesData<readonly WorkItem[]>({
-        queryKey: ["work-items", parent.repositoryId],
-      })) {
-        // queryKey: ["work-items", repositoryId, listKind | null, limit | null]
-        const listKind = queryKey[2]
-        const allowAppend = listKind === null || listKind === "WORKING"
-        queryClient.setQueryData<readonly WorkItem[]>(queryKey, (current) => {
-          const next: WorkItem[] = []
-          const seen = new Set<string>()
-          for (const item of current ?? []) {
-            const updated = byId.get(item.id)
-            if (updated !== undefined) {
-              next.push(updated)
-              seen.add(item.id)
-            } else {
-              next.push(item)
-            }
-          }
-          if (allowAppend) {
-            for (const item of covered) {
-              if (!seen.has(item.id)) {
-                next.push(item)
-              }
-            }
-          }
-          return next
-        })
-      }
+      setImplementWithOpen(false)
+      applyCoveredWorkItems(covered)
+      void queryClient.invalidateQueries({
+        queryKey: ["agentBackendStatus"],
+      })
     },
   })
 
@@ -3169,15 +3194,25 @@ function ParentIssueGroup({
               <ParentIssueActionsMenu
                 parentIssueNumber={parent.issueNumber}
                 menuId={parent.id}
-                pending={implementAll.isPending}
+                implementAllPending={implementAll.isPending}
+                implementWithPending={implementWith.isPending}
                 // Error Banner is in-flow under the summary (not under the kebab).
                 errorMessage={null}
-                onImplementAllWithAutoMerge={() => implementAll.mutate()}
+                onImplementAllWithAutoMerge={() => {
+                  implementWith.reset()
+                  implementAll.mutate()
+                }}
+                onImplementAllWith={() => {
+                  implementAll.reset()
+                  implementWith.reset()
+                  setImplementWithOpen(true)
+                }}
               />
             )}
           </span>
         </summary>
-        {implementAll.isError && (
+        {(implementAll.isError ||
+          (implementWith.isError && !implementWithOpen)) && (
           <Banner
             className={cx(ui.bannerCompact, ui.parentIssueError)}
             tone="alarm"
@@ -3185,9 +3220,12 @@ function ParentIssueGroup({
             role="alert"
           >
             {startWorkBannerMessage({
-              error: implementAll.error,
-              fallback:
-                "Could not start Implement all with auto-merge. Refresh the issues and try again.",
+              error: implementAll.isError
+                ? implementAll.error
+                : implementWith.error,
+              fallback: implementAll.isError
+                ? "Could not start Implement all with auto-merge. Refresh the issues and try again."
+                : "Could not start Implement all with... Refresh the issues and try again.",
             })}
           </Banner>
         )}
@@ -3204,6 +3242,37 @@ function ParentIssueGroup({
           ))}
         </ul>
       </details>
+      {implementWithOpen && (
+        <ImplementWithIssueDialog
+          issueNumber={parent.issueNumber}
+          target="parent"
+          repositoryId={repository.id}
+          initialBackendId={repository.effectiveAgentBackend}
+          repositoryPrefs={{
+            defaultModel: repository.defaultModel,
+            defaultThinkingLevel: repository.defaultThinkingLevel,
+            reviewModel: repository.reviewModel,
+            reviewThinkingLevel: repository.reviewThinkingLevel,
+          }}
+          initialMergePolicy={repository.mergePolicy}
+          submitPending={implementWith.isPending}
+          submitError={
+            implementWith.isError
+              ? startWorkBannerMessage({
+                  error: implementWith.error,
+                  fallback:
+                    "Could not start Implement all with... Refresh the issues and try again.",
+                })
+              : null
+          }
+          onSubmit={(input) => implementWith.mutate(input)}
+          onCancel={() => {
+            if (!implementWith.isPending) {
+              setImplementWithOpen(false)
+            }
+          }}
+        />
+      )}
     </li>
   )
 }

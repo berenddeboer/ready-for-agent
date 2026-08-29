@@ -58,7 +58,7 @@ import {
   AutonomousRetryLimitReachedError,
   InvalidExecutionProfileError,
   IssueNotFoundError,
-  ParentIssueError,
+  ParentImplementWithPauseNotAllowedError,
   RetryNotEligibleError,
   STEP_RUN_REASON,
   SessionIdAmbiguousError,
@@ -5318,7 +5318,106 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("implementWith on a Parent Issue still fails as not a leaf", async () => {
+  test("implementWith on a Parent Issue returns the covered child Work Items", async () => {
+    const childA = {
+      ...workItem,
+      id: makeWorkItemId(),
+      issueNumber: 43,
+      executionProfile: {
+        agentBackend: "opencode",
+        build: { model: "build-model", thinkingLevel: "high" },
+        review: { kind: "same_as_build" as const },
+      },
+      mergeMode: "ordinary" as const,
+      autoMergeOverride: true,
+    } as WorkItemRecord
+    const childB = {
+      ...workItem,
+      id: makeWorkItemId(),
+      issueNumber: 44,
+      executionProfile: {
+        agentBackend: "opencode",
+        build: { model: "build-model", thinkingLevel: "high" },
+        review: { kind: "same_as_build" as const },
+      },
+      mergeMode: "ordinary" as const,
+      autoMergeOverride: true,
+      waitingForBlockers: true,
+      holdsWorkerSlot: false,
+      stepRuns: [],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementWith: (repositoryId, issueNumber, profile, options) => {
+          expect(repositoryId).toBe(repository.id)
+          expect(issueNumber).toBe(10)
+          expect(profile.agentBackendId).toBe("opencode")
+          expect(options).toEqual({
+            mergePolicy: "classify",
+            implementLocally: false,
+          })
+          return Effect.succeed([childA, childB])
+        },
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementWith(
+          $repositoryId: ID!
+          $issueNumber: Int!
+          $profile: ExplicitWorkItemExecutionProfileInput!
+          $options: ImplementWithOptionsInput
+        ) {
+          implementWith(
+            repositoryId: $repositoryId
+            issueNumber: $issueNumber
+            profile: $profile
+            options: $options
+          ) {
+            id
+            issueNumber
+            mergePolicy
+            mergeMode
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: 10,
+          profile: {
+            agentBackendId: "opencode",
+            buildModel: "build-model",
+            buildThinkingLevel: "high",
+            reviewSameAsBuild: true,
+          },
+          options: { mergePolicy: "CLASSIFY", implementLocally: false },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        implementWith: [
+          {
+            id: childA.id,
+            issueNumber: 43,
+            mergePolicy: "CLASSIFY",
+            mergeMode: "ORDINARY",
+          },
+          {
+            id: childB.id,
+            issueNumber: 44,
+            mergePolicy: "CLASSIFY",
+            mergeMode: "ORDINARY",
+          },
+        ],
+      },
+    })
+  })
+
+  test("implementWith pause on a Parent Issue maps to a domain failure", async () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {},
@@ -5327,7 +5426,7 @@ describe("GraphQL API", () => {
       {
         implementWith: () =>
           Effect.fail(
-            new ParentIssueError({
+            new ParentImplementWithPauseNotAllowedError({
               repositoryId: repository.id,
               issueNumber: 10,
             }),
@@ -5340,11 +5439,13 @@ describe("GraphQL API", () => {
           $repositoryId: ID!
           $issueNumber: Int!
           $profile: ExplicitWorkItemExecutionProfileInput!
+          $options: ImplementWithOptionsInput
         ) {
           implementWith(
             repositoryId: $repositoryId
             issueNumber: $issueNumber
             profile: $profile
+            options: $options
           ) {
             id
           }
@@ -5357,6 +5458,7 @@ describe("GraphQL API", () => {
             buildModel: "build-model",
             reviewSameAsBuild: true,
           },
+          options: { mergePolicy: "CLASSIFY", implementLocally: true },
         },
       }),
     )
@@ -5364,9 +5466,9 @@ describe("GraphQL API", () => {
       data: null,
       errors: [
         expect.objectContaining({
-          message: "Issue #10 has child issues and must target a leaf Issue",
+          message: "Implement With cannot pause on Parent Issue #10",
           extensions: expect.objectContaining({
-            code: "ISSUE_IS_PARENT",
+            code: "PARENT_IMPLEMENT_WITH_PAUSE_NOT_ALLOWED",
           }),
         }),
       ],

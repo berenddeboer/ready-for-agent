@@ -171,4 +171,21 @@ describe("toGraphQLError", () => {
       projectPath: "acme/widgets",
     })
   })
+
+  test("maps ParentImplementWithPauseNotAllowedError to PARENT_IMPLEMENT_WITH_PAUSE_NOT_ALLOWED", () => {
+    const error = {
+      _tag: "ParentImplementWithPauseNotAllowedError" as const,
+      repositoryId: "repo-1",
+      issueNumber: 10,
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toBe(
+      "Implement With cannot pause on Parent Issue #10",
+    )
+    expect(gqlError.extensions).toMatchObject({
+      code: "PARENT_IMPLEMENT_WITH_PAUSE_NOT_ALLOWED",
+    })
+  })
 })

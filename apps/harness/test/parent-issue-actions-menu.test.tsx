@@ -76,17 +76,20 @@ describe("ParentIssueActionsMenu", () => {
       <ParentIssueActionsMenu
         parentIssueNumber={42}
         menuId="issue-parent-42"
-        pending={false}
+        implementAllPending={false}
+        implementWithPending={false}
         errorMessage={null}
         onImplementAllWithAutoMerge={() => undefined}
+        onImplementAllWith={() => undefined}
       />,
     )
     expect(html).toContain('aria-label="Actions for parent issue #42"')
     expect(html).toContain('aria-haspopup="menu"')
     expect(html).toContain("data-parent-issue-menu")
-    // Closed by default; sole action is Implement all with auto-merge only.
+    // Closed by default; actions are parent bulk starts only.
     expect(html).not.toContain("Implement now")
     expect(html).not.toContain("Queue")
+    expect(html).not.toContain("Implement locally")
   })
 
   test("shows parent-level error alert without partial-success copy", () => {
@@ -94,9 +97,11 @@ describe("ParentIssueActionsMenu", () => {
       <ParentIssueActionsMenu
         parentIssueNumber={7}
         menuId="issue-parent-7"
-        pending={true}
+        implementAllPending={true}
+        implementWithPending={false}
         errorMessage="Could not start Implement all with auto-merge. Refresh the issues and try again."
         onImplementAllWithAutoMerge={() => undefined}
+        onImplementAllWith={() => undefined}
       />,
     )
     expect(html).toContain('role="alert"')
@@ -109,7 +114,7 @@ describe("ParentIssueActionsMenu", () => {
     expect(html).not.toContain("absolute top-full right-0 z-10 mt-1 w-56")
   })
 
-  test("menu source exposes sole menuitem label Implement all with auto-merge", () => {
+  test("menu source exposes Implement all with auto-merge then Implement all with...", () => {
     // CI unit tests do not install Playwright browser binaries; lock the
     // accessible menu contract from the component source instead of chromium.
     const source = readFileSync(
@@ -119,9 +124,15 @@ describe("ParentIssueActionsMenu", () => {
     expect(source).toContain('role="menu"')
     expect(source).toContain('role="menuitem"')
     expect(source).toContain("Implement all with auto-merge")
+    expect(source).toContain("Implement all with...")
     expect(source).not.toContain("Implement now")
     expect(source).not.toContain('"Queue"')
-    expect(source.match(/role="menuitem"/g)?.length).toBe(1)
+    expect(source).not.toContain("Implement locally")
+    expect(source.match(/role="menuitem"/g)?.length).toBe(2)
+    const autoMerge = source.indexOf("Implement all with auto-merge")
+    const implementWith = source.indexOf('"Implement all with..."')
+    expect(autoMerge).toBeGreaterThan(0)
+    expect(implementWith).toBeGreaterThan(autoMerge)
   })
 
   test("menu uses Interchange mono uppercase menuitems and icon-btn trigger", () => {
