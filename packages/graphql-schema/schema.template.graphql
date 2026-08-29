@@ -1091,14 +1091,15 @@ type Mutation {
   Item Execution Profile. Submission activates and inspects an otherwise
   inactive shipped Agent Backend under the settings/create coordination
   boundary. Partial profiles cannot be represented. Failure creates nothing
-  and leaves saved defaults unchanged.
+  and leaves saved defaults unchanged. Returns a list whose only element is
+  that Work Item. A Parent Issue is rejected as not a leaf.
   """
   implementWith(
     repositoryId: ID!
     issueNumber: Int!
     profile: ExplicitWorkItemExecutionProfileInput!
     options: ImplementWithOptionsInput
-  ): WorkItem!
+  ): [WorkItem!]!
   """
   Create a Work Item that runs local steps through Review, then pauses before Commit.
   """

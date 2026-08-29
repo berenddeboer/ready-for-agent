@@ -3269,8 +3269,10 @@ function RepositoryIssueRow({
       })
       return result.implementWith
     },
-    onSuccess: (workItem) => {
+    onSuccess: (workItems) => {
       setImplementWithOpen(false)
+      const [workItem] = workItems
+      if (workItem === undefined) return
       onImplementSuccess(workItem)
       void queryClient.invalidateQueries({
         queryKey: ["agentBackendStatus"],

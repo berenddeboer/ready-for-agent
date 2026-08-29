@@ -58,6 +58,7 @@ import {
   AutonomousRetryLimitReachedError,
   InvalidExecutionProfileError,
   IssueNotFoundError,
+  ParentIssueError,
   RetryNotEligibleError,
   STEP_RUN_REASON,
   SessionIdAmbiguousError,
@@ -5195,12 +5196,14 @@ describe("GraphQL API", () => {
             reviewThinkingLevel: null,
           })
           expect(options).toBeUndefined()
-          return Effect.succeed({
-            ...profiled,
-            mergeMode: "ordinary" as const,
-            autoMergeOverride: null,
-            pauseBeforeStep: null,
-          })
+          return Effect.succeed([
+            {
+              ...profiled,
+              mergeMode: "ordinary" as const,
+              autoMergeOverride: null,
+              pauseBeforeStep: null,
+            },
+          ])
         },
       },
     )
@@ -5244,21 +5247,129 @@ describe("GraphQL API", () => {
     )
     expect(await response.json()).toEqual({
       data: {
-        implementWith: {
-          id: workItem.id,
-          executionProfile: {
-            backend: { id: "opencode", label: "OpenCode" },
-            buildModel: "build-model",
-            buildThinkingLevel: "high",
-            reviewSameAsBuild: true,
-            reviewModel: "build-model",
-            reviewThinkingLevel: "high",
+        implementWith: [
+          {
+            id: workItem.id,
+            executionProfile: {
+              backend: { id: "opencode", label: "OpenCode" },
+              buildModel: "build-model",
+              buildThinkingLevel: "high",
+              reviewSameAsBuild: true,
+              reviewModel: "build-model",
+              reviewThinkingLevel: "high",
+            },
+            mergePolicy: null,
+            mergeMode: "ORDINARY",
+            pauseBeforeStep: null,
           },
-          mergePolicy: null,
-          mergeMode: "ORDINARY",
-          pauseBeforeStep: null,
-        },
+        ],
       },
+    })
+  })
+
+  test("implementWith returns a one-element Work Item list", async () => {
+    const profiled = {
+      ...workItem,
+      executionProfile: {
+        agentBackend: "opencode",
+        build: { model: "build-model", thinkingLevel: "high" },
+        review: { kind: "same_as_build" as const },
+      },
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementWith: () => Effect.succeed([profiled]),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementWith(
+          $repositoryId: ID!
+          $issueNumber: Int!
+          $profile: ExplicitWorkItemExecutionProfileInput!
+        ) {
+          implementWith(
+            repositoryId: $repositoryId
+            issueNumber: $issueNumber
+            profile: $profile
+          ) {
+            id
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+          profile: {
+            agentBackendId: "opencode",
+            buildModel: "build-model",
+            reviewSameAsBuild: true,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        implementWith: [{ id: workItem.id }],
+      },
+    })
+  })
+
+  test("implementWith on a Parent Issue still fails as not a leaf", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementWith: () =>
+          Effect.fail(
+            new ParentIssueError({
+              repositoryId: repository.id,
+              issueNumber: 10,
+            }),
+          ),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementWith(
+          $repositoryId: ID!
+          $issueNumber: Int!
+          $profile: ExplicitWorkItemExecutionProfileInput!
+        ) {
+          implementWith(
+            repositoryId: $repositoryId
+            issueNumber: $issueNumber
+            profile: $profile
+          ) {
+            id
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: 10,
+          profile: {
+            agentBackendId: "opencode",
+            buildModel: "build-model",
+            reviewSameAsBuild: true,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "Issue #10 has child issues and must target a leaf Issue",
+          extensions: expect.objectContaining({
+            code: "ISSUE_IS_PARENT",
+          }),
+        }),
+      ],
     })
   })
 
@@ -5334,7 +5445,7 @@ describe("GraphQL API", () => {
             mergePolicy: "classify",
             implementLocally: true,
           })
-          return Effect.succeed(profiled)
+          return Effect.succeed([profiled])
         },
       },
     )
@@ -5371,11 +5482,13 @@ describe("GraphQL API", () => {
     )
     expect(await response.json()).toEqual({
       data: {
-        implementWith: {
-          mergePolicy: "CLASSIFY",
-          mergeMode: "ORDINARY",
-          pauseBeforeStep: "COMMIT",
-        },
+        implementWith: [
+          {
+            mergePolicy: "CLASSIFY",
+            mergeMode: "ORDINARY",
+            pauseBeforeStep: "COMMIT",
+          },
+        ],
       },
     })
   })
@@ -5403,7 +5516,7 @@ describe("GraphQL API", () => {
             mergePolicy: "always",
             implementLocally: false,
           })
-          return Effect.succeed(profiled)
+          return Effect.succeed([profiled])
         },
       },
     )
@@ -5440,11 +5553,13 @@ describe("GraphQL API", () => {
     )
     expect(await response.json()).toEqual({
       data: {
-        implementWith: {
-          mergePolicy: "ALWAYS",
-          mergeMode: "ALWAYS",
-          pauseBeforeStep: null,
-        },
+        implementWith: [
+          {
+            mergePolicy: "ALWAYS",
+            mergeMode: "ALWAYS",
+            pauseBeforeStep: null,
+          },
+        ],
       },
     })
   })
@@ -5472,7 +5587,7 @@ describe("GraphQL API", () => {
             mergePolicy: "off",
             implementLocally: false,
           })
-          return Effect.succeed(profiled)
+          return Effect.succeed([profiled])
         },
       },
     )
@@ -5509,11 +5624,13 @@ describe("GraphQL API", () => {
     )
     expect(await response.json()).toEqual({
       data: {
-        implementWith: {
-          mergePolicy: "OFF",
-          mergeMode: "ORDINARY",
-          pauseBeforeStep: null,
-        },
+        implementWith: [
+          {
+            mergePolicy: "OFF",
+            mergeMode: "ORDINARY",
+            pauseBeforeStep: null,
+          },
+        ],
       },
     })
   })

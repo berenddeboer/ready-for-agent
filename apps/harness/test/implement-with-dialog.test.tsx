@@ -859,6 +859,24 @@ describe("ImplementWithDialog interaction", () => {
   })
 })
 
+describe("Implement With leaf dialog caller", () => {
+  test("reads the mutation list's only Work Item", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../src/home-page-content.tsx"),
+      "utf8",
+    )
+    const start = source.indexOf("const implementWith = useMutation")
+    expect(start).toBeGreaterThan(-1)
+    const caller = source.slice(
+      start,
+      source.indexOf("const implementLocally = useMutation", start),
+    )
+    expect(caller).toContain("return result.implementWith")
+    expect(caller).toContain("const [workItem] = workItems")
+    expect(caller).toContain("onImplementSuccess(workItem)")
+  })
+})
+
 describe("Implement With preview query contract", () => {
   test("does not refetch the preview on focus, reconnect, or an interval", () => {
     const source = readFileSync(
