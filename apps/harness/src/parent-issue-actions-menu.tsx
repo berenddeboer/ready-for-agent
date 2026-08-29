@@ -6,24 +6,29 @@ import { cx, ui } from "./ui.js"
 export type ParentIssueActionsMenuProps = {
   readonly parentIssueNumber: number
   readonly menuId: string
-  readonly pending: boolean
+  readonly implementAllPending: boolean
+  readonly implementWithPending: boolean
   readonly errorMessage: string | null
   readonly onImplementAllWithAutoMerge: () => void
+  readonly onImplementAllWith: () => void
 }
 
 /**
- * Parent Issue kebab with the sole action Implement all with auto-merge.
+ * Parent Issue kebab: Implement all with auto-merge, then Implement all with....
  * Presentational shell so accessibility and menu interaction can be tested
  * without the full Issues list.
  */
 export function ParentIssueActionsMenu({
   parentIssueNumber,
   menuId,
-  pending,
+  implementAllPending,
+  implementWithPending,
   errorMessage,
   onImplementAllWithAutoMerge,
+  onImplementAllWith,
 }: ParentIssueActionsMenuProps): ReactNode {
   const [menuOpen, setMenuOpen] = useState(false)
+  const pending = implementAllPending || implementWithPending
 
   useEffect(() => {
     if (!menuOpen) return
@@ -82,7 +87,22 @@ export function ParentIssueActionsMenu({
                 onImplementAllWithAutoMerge()
               }}
             >
-              {pending ? "Starting..." : "Implement all with auto-merge"}
+              {implementAllPending
+                ? "Starting..."
+                : "Implement all with auto-merge"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={ui.menuItem}
+              disabled={pending}
+              onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                event.stopPropagation()
+                setMenuOpen(false)
+                onImplementAllWith()
+              }}
+            >
+              {implementWithPending ? "Starting..." : "Implement all with..."}
             </button>
           </div>
         )}

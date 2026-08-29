@@ -34,6 +34,7 @@ const agentBackendsQuery = {
 
 export type ImplementWithIssueDialogProps = {
   readonly issueNumber: number
+  readonly target?: "leaf" | "parent"
   readonly repositoryId: string
   readonly initialBackendId: string
   readonly repositoryPrefs: ExecutionProfilePrefSource
@@ -51,6 +52,7 @@ export type ImplementWithIssueDialogProps = {
  */
 export function ImplementWithIssueDialog({
   issueNumber,
+  target = "leaf",
   repositoryId,
   initialBackendId,
   repositoryPrefs,
@@ -196,11 +198,14 @@ export function ImplementWithIssueDialog({
         <div className={ui.dialogHeader}>
           <p className={ui.dialogKicker}>Implement With</p>
           <h2 id={loadingTitleId} className={ui.dialogTitle}>
-            Implement issue #{issueNumber} with...
+            {target === "parent"
+              ? "Implement all with..."
+              : `Implement issue #${issueNumber} with...`}
           </h2>
           <p className={ui.dialogLede}>
-            These choices apply only to this Work Item. They never change
-            Repository settings or Harness Config.
+            {target === "parent"
+              ? "These choices apply to each new child Work Item. They never change Repository settings or Harness Config."
+              : "These choices apply only to this Work Item. They never change Repository settings or Harness Config."}
           </p>
         </div>
         <div className={ui.dialogBody}>
@@ -243,6 +248,7 @@ export function ImplementWithIssueDialog({
   return (
     <ImplementWithDialog
       issueNumber={issueNumber}
+      target={target}
       backendId={backendId}
       backends={
         backends.length > 0 ? backends : [{ id: backendId, label: backendId }]

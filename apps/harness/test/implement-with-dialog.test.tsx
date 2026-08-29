@@ -159,6 +159,26 @@ describe("ImplementWithDialog copy and catalog", () => {
     expect(html).not.toContain("Auto-merge")
   })
 
+  test("parent rendering titles Implement all with... and omits Implement locally", () => {
+    const html = renderToStaticMarkup(
+      <ImplementWithDialog {...baseProps} target="parent" />,
+    )
+    expect(html).toContain("Implement all with...")
+    expect(html).not.toContain("Implement issue #1034 with...")
+    expect(html).toContain("each new child Work Item")
+    expect(html).toContain("never change Repository settings or Harness Config")
+    expect(html).toContain('name="mergePolicy"')
+    expect(html).toContain("Off — human merge")
+    expect(html).toContain("Classify — risk-assessed merge")
+    expect(html).toContain("Always — skip classify")
+    expect(html).toContain(">Implement<")
+    expect(html).toContain(">Cancel<")
+    expect(html).not.toContain('name="implementLocally"')
+    expect(html).not.toContain("Implement locally")
+    expect(html).not.toContain("Implement now")
+    expect(html).not.toContain("Auto-merge")
+  })
+
   test("prefills Merge Policy from the live Repository and Implement locally to false", () => {
     const off = renderToStaticMarkup(
       <ImplementWithDialog {...baseProps} initialMergePolicy="OFF" />,
@@ -857,6 +877,29 @@ describe("ImplementWithDialog interaction", () => {
     })
     expect(backendChanges).toEqual(["claude"])
   })
+
+  test("parent submit pins Merge Policy and never requests a local pause", () => {
+    const { node, submitted } = render({ target: "parent" })
+    expect(node.querySelector('input[name="implementLocally"]')).toBeNull()
+    flushSync(() => {
+      selectNamed(node, "mergePolicy").value = "ALWAYS"
+      fire(selectNamed(node, "mergePolicy"), "change")
+    })
+    flushSync(() => {
+      fire(node.querySelector("form"), "submit")
+    })
+    expect(submitted.at(-1)).toEqual({
+      profile: {
+        agentBackendId: "opencode",
+        buildModel: "sonnet",
+        buildThinkingLevel: "high",
+        reviewSameAsBuild: true,
+        reviewModel: null,
+        reviewThinkingLevel: null,
+      },
+      options: { mergePolicy: "ALWAYS", implementLocally: false },
+    })
+  })
 })
 
 describe("Implement With leaf dialog caller", () => {
@@ -865,7 +908,9 @@ describe("Implement With leaf dialog caller", () => {
       join(import.meta.dir, "../src/home-page-content.tsx"),
       "utf8",
     )
-    const start = source.indexOf("const implementWith = useMutation")
+    const rowStart = source.indexOf("function RepositoryIssueRow")
+    expect(rowStart).toBeGreaterThan(-1)
+    const start = source.indexOf("const implementWith = useMutation", rowStart)
     expect(start).toBeGreaterThan(-1)
     const caller = source.slice(
       start,
@@ -874,6 +919,25 @@ describe("Implement With leaf dialog caller", () => {
     expect(caller).toContain("return result.implementWith")
     expect(caller).toContain("const [workItem] = workItems")
     expect(caller).toContain("onImplementSuccess(workItem)")
+  })
+})
+
+describe("Implement With parent dialog caller", () => {
+  test("forwards the covered list and opens the parent dialog", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../src/home-page-content.tsx"),
+      "utf8",
+    )
+    const groupStart = source.indexOf("function ParentIssueGroup")
+    const groupEnd = source.indexOf("function RepositoryIssueRow", groupStart)
+    expect(groupStart).toBeGreaterThan(-1)
+    const group = source.slice(groupStart, groupEnd)
+    expect(group).toContain("return result.implementWith")
+    expect(group).toContain("applyCoveredWorkItems(covered)")
+    expect(group).toContain('target="parent"')
+    expect(group).toContain("Implement all with...")
+    expect(group).not.toContain("Implement now")
+    expect(group).not.toContain("Implement locally")
   })
 })
 

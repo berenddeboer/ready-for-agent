@@ -1109,12 +1109,14 @@ type Mutation {
   refreshRepository(repositoryId: ID!): RefreshJob!
   implementNow(repositoryId: ID!, issueNumber: Int!): WorkItem!
   """
-  Create a Work Item for an Actionable Issue with one complete Explicit Work
-  Item Execution Profile. Submission activates and inspects an otherwise
-  inactive shipped Agent Backend under the settings/create coordination
-  boundary. Partial profiles cannot be represented. Failure creates nothing
-  and leaves saved defaults unchanged. Returns a list whose only element is
-  that Work Item. A Parent Issue is rejected as not a leaf.
+  Create Work Items with one complete Explicit Work Item Execution Profile.
+  On an Actionable Issue, returns a list whose only element is that Work Item.
+  On a Parent Issue, enrolls the same open children as Implement all with
+  auto-merge: new children get the profile and Merge Policy pin; adopted
+  unfinished children get the pin only. A Parent Issue cannot pause. Submission
+  activates and inspects an otherwise inactive shipped Agent Backend under the
+  settings/create coordination boundary. Partial profiles cannot be represented.
+  Failure creates nothing and leaves saved defaults unchanged.
   """
   implementWith(
     repositoryId: ID!

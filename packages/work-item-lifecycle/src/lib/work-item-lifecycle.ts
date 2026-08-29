@@ -86,6 +86,7 @@ import {
   NeedsHumanHandoffNotEligibleError,
   NonTransactionalQueueError,
   NotAParentIssueError,
+  ParentImplementWithPauseNotAllowedError,
   ParentIssueError,
   ResetCleanupError,
   RetryNotEligibleError,
@@ -849,8 +850,6 @@ export type ImplementNowError =
   | EnqueueError
   | InvalidQueueNameError
 
-export type ImplementWithError = ImplementNowError
-
 export type ImplementAllWithAutoMergeError =
   | IssueNotFoundError
   | NotAParentIssueError
@@ -863,6 +862,11 @@ export type ImplementAllWithAutoMergeError =
   | DatabaseError
   | EnqueueError
   | InvalidQueueNameError
+
+export type ImplementWithError =
+  | ImplementNowError
+  | ImplementAllWithAutoMergeError
+  | ParentImplementWithPauseNotAllowedError
 
 export type QueueError =
   | IssueNotFoundError
@@ -1026,9 +1030,11 @@ export interface WorkItemLifecycleShape {
     issueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
   /**
-   * Create a Work Item for an Actionable Issue with an Explicit Work Item
-   * Execution Profile. Returns a list whose only element is that Work Item.
-   * A Parent Issue is rejected as not a leaf.
+   * Implement With: persist an Explicit Work Item Execution Profile and
+   * optional Merge Policy pin. On an Actionable Issue, returns a one-element
+   * list. On a Parent Issue, enrolls the same open children as Implement All
+   * with Auto-merge: new children get the profile and pin; adopted unfinished
+   * children get the pin only. Cannot pause. Does not create a parent Work Item.
    */
   readonly implementWith: (
     repositoryId: string,
@@ -7524,7 +7530,7 @@ export const makeWorkItemLifecycleLive = (
           readonly executionProfile?: ExplicitWorkItemExecutionProfile
           readonly autoMergeOverride?: boolean | null
         },
-      ): Effect.Effect<WorkItemRecord, ImplementWithError> =>
+      ): Effect.Effect<WorkItemRecord, ImplementNowError> =>
         Effect.gen(function* () {
           const issues = yield* db.listIssues(repositoryId)
           const issue = issues.find(
@@ -7803,7 +7809,7 @@ export const makeWorkItemLifecycleLive = (
                 .pipe(
                   Effect.tapError(() => restoreAddedBackend),
                   Effect.catch(
-                    (error): Effect.Effect<never, ImplementWithError> => {
+                    (error): Effect.Effect<never, ImplementNowError> => {
                       if (error instanceof WorkItemLifecycleDatabaseError) {
                         return Effect.fail(error)
                       }
@@ -7862,6 +7868,401 @@ export const makeWorkItemLifecycleLive = (
         },
       )
 
+      const sqlMergeOverride = (value: boolean | null): number | null =>
+        value === null ? null : value ? 1 : 0
+
+      const snapshotParentOpenChildren = (
+        repositoryId: string,
+        parentIssueNumber: number,
+      ) =>
+        Effect.gen(function* () {
+          const issues = yield* db.listIssues(repositoryId)
+          const parent = issues.find(
+            (candidate) => candidate.issueNumber === parentIssueNumber,
+          )
+
+          if (!parent) {
+            return yield* new IssueNotFoundError({
+              repositoryId,
+              issueNumber: parentIssueNumber,
+            })
+          }
+
+          if (!parent.hasChildren) {
+            return yield* new NotAParentIssueError({
+              repositoryId,
+              issueNumber: parentIssueNumber,
+            })
+          }
+
+          const children = issues.filter(
+            (candidate) =>
+              candidate.parent !== null &&
+              candidate.parent.issueNumber === parentIssueNumber,
+          )
+
+          if (children.some((child) => child.hasChildren)) {
+            return yield* new UnsupportedIssueHierarchyError({
+              repositoryId,
+              issueNumber: parentIssueNumber,
+              message: `Issue #${parentIssueNumber} has grandchildren and is not a Supported Issue Hierarchy`,
+            })
+          }
+
+          const openChildren = children
+            .filter((child) => child.state === "OPEN")
+            .slice()
+            .sort((a, b) => {
+              const aPos = a.parentPosition ?? Number.MAX_SAFE_INTEGER
+              const bPos = b.parentPosition ?? Number.MAX_SAFE_INTEGER
+              if (aPos !== bPos) return aPos - bPos
+              return a.issueNumber - b.issueNumber
+            })
+
+          if (openChildren.length === 0) {
+            return yield* new ImplementAllWithAutoMergeNotEligibleError({
+              repositoryId,
+              issueNumber: parentIssueNumber,
+              reason: `Parent Issue #${parentIssueNumber} has no open Child Issues`,
+            })
+          }
+
+          return openChildren
+        })
+
+      const unfinishedIssueNumbers = (
+        items: readonly WorkItemRecord[],
+      ): ReadonlySet<number> => {
+        const unfinished = new Set<number>()
+        for (const item of items) {
+          if (
+            evaluateUnfinishedWorkItem(workItemPredicateInput(item))._tag ===
+            "match"
+          ) {
+            unfinished.add(item.issueNumber)
+          }
+        }
+        return unfinished
+      }
+
+      const mapParentEnrollmentError = (
+        error: unknown,
+        repositoryId: string,
+        parentIssueNumber: number,
+      ): Effect.Effect<never, ImplementAllWithAutoMergeError> => {
+        if (error instanceof WorkItemLifecycleDatabaseError) {
+          return Effect.fail(error)
+        }
+        if (error instanceof EnqueueError) {
+          return Effect.fail(error)
+        }
+        if (error instanceof InvalidQueueNameError) {
+          return Effect.fail(error)
+        }
+        if (error instanceof AgentBackendUnavailableError) {
+          return Effect.fail(error)
+        }
+        if (error instanceof BuildModelNotConfiguredError) {
+          return Effect.fail(error)
+        }
+        if (error instanceof ImplementAllWithAutoMergeNotEligibleError) {
+          return Effect.fail(error)
+        }
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "_tag" in error &&
+          (error as { _tag: string })._tag === "SqlError"
+        ) {
+          const sqlError = error as SqlError
+          if (isUnfinishedWorkItemUniqueViolation(sqlError)) {
+            return Effect.fail(
+              new ImplementAllWithAutoMergeNotEligibleError({
+                repositoryId,
+                issueNumber: parentIssueNumber,
+                reason: `A concurrent request enrolled a Child Issue of Parent Issue #${parentIssueNumber}`,
+              }),
+            )
+          }
+          return Effect.fail(toDatabaseError(sqlError))
+        }
+        return Effect.fail(
+          new WorkItemLifecycleDatabaseError({
+            message: `Unexpected transaction failure: ${String(error)}`,
+            cause: error,
+          }),
+        )
+      }
+
+      const enrollOpenChildren = (input: {
+        readonly repositoryId: string
+        readonly parentIssueNumber: number
+        readonly openChildren: ReadonlyArray<{
+          readonly issueNumber: number
+          readonly title: string
+          readonly blockedBy: ReadonlyArray<unknown>
+        }>
+        readonly pin: {
+          readonly mergeMode: MergeMode
+          readonly autoMergeOverride: boolean | null
+        }
+        readonly create: {
+          readonly agentBackendId: string
+          readonly executionProfile?: ExplicitWorkItemExecutionProfile
+        } | null
+      }): Effect.Effect<
+        readonly WorkItemId[],
+        ImplementAllWithAutoMergeError
+      > =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const step: OperationalLifecycleStep = "create_worktree"
+          const openChildren = input.openChildren
+          const { repositoryId, parentIssueNumber, pin, create } = input
+
+          return yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                const limit = yield* maxWorkerSlots()
+                let occupied = yield* countOccupiedWorkerSlots()
+                const workItemIds: WorkItemId[] = []
+
+                for (const child of openChildren) {
+                  const unfinishedRows = (yield* sql
+                    .unsafe(
+                      `SELECT id FROM work_item
+                         WHERE repository_id = ?
+                           AND issue_number = ?
+                           AND state NOT IN ('complete', 'failed', 'abandoned')
+                         LIMIT 1`,
+                      [repositoryId, child.issueNumber],
+                    )
+                    .pipe(Effect.mapError(toDatabaseError))) as readonly {
+                    readonly id: string
+                  }[]
+
+                  const existingId = unfinishedRows[0]?.id
+                  if (existingId !== undefined) {
+                    const adoptedRows = (yield* sql
+                      .unsafe(
+                        `UPDATE work_item
+                           SET merge_mode = ?, auto_merge_override = ?, updated_at = ?
+                           WHERE id = ?
+                             AND state NOT IN ('complete', 'failed', 'abandoned')
+                           RETURNING id`,
+                        [
+                          pin.mergeMode,
+                          sqlMergeOverride(pin.autoMergeOverride),
+                          now,
+                          existingId,
+                        ],
+                      )
+                      .pipe(Effect.mapError(toDatabaseError))) as readonly {
+                      readonly id: string
+                    }[]
+                    if (adoptedRows[0]?.id === undefined) {
+                      return yield* new ImplementAllWithAutoMergeNotEligibleError(
+                        {
+                          repositoryId,
+                          issueNumber: parentIssueNumber,
+                          reason: `A concurrent request changed a Child Issue of Parent Issue #${parentIssueNumber}`,
+                        },
+                      )
+                    }
+                    workItemIds.push(existingId as WorkItemId)
+                    continue
+                  }
+
+                  if (create === null) {
+                    return yield* new ImplementAllWithAutoMergeNotEligibleError(
+                      {
+                        repositoryId,
+                        issueNumber: parentIssueNumber,
+                        reason: `A concurrent request changed a Child Issue of Parent Issue #${parentIssueNumber}`,
+                      },
+                    )
+                  }
+
+                  const workItemId = makeWorkItemId()
+                  const blocked = child.blockedBy.length > 0
+                  const admit = !blocked && occupied < limit
+                  const executionProfile = create.executionProfile
+                  yield* sql.unsafe(
+                    `INSERT INTO work_item (
+                     id, repository_id, issue_number, agent_backend,
+                      issue_title, state, state_ready_at, paused,
+                      waiting_since, waiting_for_blockers, merge_mode, auto_merge_override,
+                      holds_worker_slot,
+                      pause_before_step, worktree_path, session_id, failure_code,
+                      failure_message,
+                      execution_profile_present, execution_profile_build_model,
+                      execution_profile_build_thinking_level,
+                      execution_profile_review_same_as_build,
+                      execution_profile_review_model,
+                      execution_profile_review_thinking_level,
+                      created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                      workItemId,
+                      repositoryId,
+                      child.issueNumber,
+                      create.agentBackendId,
+                      child.title,
+                      step,
+                      now,
+                      blocked || admit ? null : now,
+                      blocked ? 1 : 0,
+                      pin.mergeMode,
+                      sqlMergeOverride(pin.autoMergeOverride),
+                      admit ? 1 : 0,
+                      executionProfile === undefined ? 0 : 1,
+                      executionProfile?.build.model ?? null,
+                      executionProfile?.build.thinkingLevel ?? null,
+                      executionProfile === undefined
+                        ? 0
+                        : executionProfile.review.kind === "same_as_build"
+                          ? 1
+                          : 0,
+                      executionProfile?.review.kind === "explicit"
+                        ? executionProfile.review.model
+                        : null,
+                      executionProfile?.review.kind === "explicit"
+                        ? executionProfile.review.thinkingLevel
+                        : null,
+                      now,
+                      now,
+                    ],
+                  )
+                  if (admit) {
+                    occupied += 1
+                    yield* enqueueStepRunForWorkItem(workItemId, step, now)
+                  }
+
+                  workItemIds.push(workItemId)
+                }
+
+                return workItemIds
+              }),
+            )
+            .pipe(
+              Effect.catch((error) =>
+                mapParentEnrollmentError(
+                  error,
+                  repositoryId,
+                  parentIssueNumber,
+                ),
+              ),
+            )
+        })
+
+      const coveredWorkItems = (
+        coveredIds: readonly WorkItemId[],
+        repositoryId: string,
+      ) =>
+        Effect.gen(function* () {
+          const covered = yield* Effect.forEach(
+            coveredIds,
+            (workItemId) =>
+              getWorkItem(workItemId).pipe(
+                Effect.catchTag(
+                  "WorkItemNotFoundError",
+                  (error) =>
+                    new WorkItemLifecycleDatabaseError({
+                      message: `Work Item missing after parent enrollment: ${error.workItemId}`,
+                      cause: error,
+                    }),
+                ),
+              ),
+            { concurrency: 1 },
+          )
+          yield* notifyWorkItemsChanged(repositoryId)
+          return covered
+        })
+
+      const activateExplicitProfile = (
+        explicitProfile: ExplicitWorkItemExecutionProfile,
+      ) =>
+        Effect.gen(function* () {
+          if (!isSelectableAgentBackendId(explicitProfile.agentBackend)) {
+            return yield* new AgentBackendUnavailableError({
+              message: `Unknown or unsupported Agent Backend: ${explicitProfile.agentBackend}`,
+              reason: `Unknown or unsupported Agent Backend: ${explicitProfile.agentBackend}`,
+            })
+          }
+          const captureBackendId = explicitProfile.agentBackend
+          const priorStatus =
+            yield* activeAgentBackend.getBackendStatus(captureBackendId)
+          const addedForAttempt = priorStatus === null
+          const previousSelectedOrInUse = addedForAttempt
+            ? yield* db.listSelectedOrInUseBackendIds
+            : []
+          const restoreAddedBackend = addedForAttempt
+            ? activeAgentBackend.setSelectedOrInUse(
+                previousSelectedOrInUse.filter((id): id is AgentBackendId =>
+                  isSelectableAgentBackendId(id),
+                ),
+                inspectInput,
+              )
+            : Effect.void
+          if (addedForAttempt) {
+            const nextSelectedOrInUse = [
+              ...new Set([
+                ...previousSelectedOrInUse.filter((id): id is AgentBackendId =>
+                  isSelectableAgentBackendId(id),
+                ),
+                captureBackendId,
+              ]),
+            ]
+            yield* activeAgentBackend.setSelectedOrInUse(
+              nextSelectedOrInUse,
+              inspectInput,
+            )
+          }
+          const captureStatus =
+            yield* activeAgentBackend.getBackendStatus(captureBackendId)
+          if (captureStatus === null) {
+            yield* restoreAddedBackend
+            return yield* new AgentBackendUnavailableError({
+              message: `Agent Backend is not Active: ${explicitProfile.agentBackend}`,
+              reason: "Agent Backend is not Active",
+            })
+          }
+          if (captureStatus.kind === "unavailable") {
+            yield* restoreAddedBackend
+            return yield* new AgentBackendUnavailableError({
+              message: captureStatus.reason ?? "Agent Backend is unavailable",
+              reason: captureStatus.reason ?? "Agent Backend is unavailable",
+            })
+          }
+          const catalogError = validateExecutionProfileCatalog({
+            backendLabel: captureStatus.backend.label,
+            catalog: captureStatus.models,
+            profile: explicitProfile,
+          })
+          if (catalogError !== null) {
+            yield* restoreAddedBackend
+            return yield* catalogError
+          }
+          yield* activeAgentBackend
+            .requireAgentTurnsAllowed(captureBackendId)
+            .pipe(
+              Effect.mapError(
+                (error) =>
+                  new AgentBackendUnavailableError({
+                    message: error.message,
+                    reason: error.reason,
+                  }),
+              ),
+              Effect.tapError(() => restoreAddedBackend),
+            )
+          const activeRegistration =
+            yield* activeAgentBackend.getRegistration(captureBackendId)
+          return {
+            agentBackendId: activeRegistration.descriptor.id,
+            restoreAddedBackend,
+          }
+        })
+
       const implementWith = Effect.fn("WorkItemLifecycle.implementWith")(
         function* (
           repositoryId: string,
@@ -7881,6 +8282,50 @@ export const makeWorkItemLifecycleLive = (
                   autoMergeOverride: null,
                 }
               : encodeWorkItemMergePolicyPin(options.mergePolicy)
+          const issues = yield* db.listIssues(repositoryId)
+          const issue = issues.find(
+            (candidate) => candidate.issueNumber === issueNumber,
+          )
+          if (issue?.hasChildren) {
+            if (options.implementLocally) {
+              return yield* new ParentImplementWithPauseNotAllowedError({
+                repositoryId,
+                issueNumber,
+              })
+            }
+            const openChildren = yield* snapshotParentOpenChildren(
+              repositoryId,
+              issueNumber,
+            )
+            const unfinished = unfinishedIssueNumbers(
+              yield* listWorkItemsForRepository(repositoryId),
+            )
+            const mayNeedCreate = openChildren.some(
+              (child) => !unfinished.has(child.issueNumber),
+            )
+            const coveredIds = yield* activeAgentBackend.withConfigCoordination(
+              Effect.gen(function* () {
+                const captured = yield* activateExplicitProfile(decoded)
+                const ids = yield* enrollOpenChildren({
+                  repositoryId,
+                  parentIssueNumber: issueNumber,
+                  openChildren,
+                  pin,
+                  create: mayNeedCreate
+                    ? {
+                        agentBackendId: captured.agentBackendId,
+                        executionProfile: decoded,
+                      }
+                    : null,
+                }).pipe(Effect.tapError(() => captured.restoreAddedBackend))
+                if (!mayNeedCreate) {
+                  yield* captured.restoreAddedBackend
+                }
+                return ids
+              }),
+            )
+            return yield* coveredWorkItems(coveredIds, repositoryId)
+          }
           const created = yield* createWorkItem(repositoryId, issueNumber, {
             pauseBeforeStep: options.implementLocally ? "commit" : null,
             executionProfile: decoded,
@@ -7909,264 +8354,17 @@ export const makeWorkItemLifecycleLive = (
       const implementAllWithAutoMerge = Effect.fn(
         "WorkItemLifecycle.implementAllWithAutoMerge",
       )(function* (repositoryId: string, parentIssueNumber: number) {
-        const issues = yield* db.listIssues(repositoryId)
-        const parent = issues.find(
-          (candidate) => candidate.issueNumber === parentIssueNumber,
+        const openChildren = yield* snapshotParentOpenChildren(
+          repositoryId,
+          parentIssueNumber,
         )
-
-        if (!parent) {
-          return yield* new IssueNotFoundError({
-            repositoryId,
-            issueNumber: parentIssueNumber,
-          })
-        }
-
-        if (!parent.hasChildren) {
-          return yield* new NotAParentIssueError({
-            repositoryId,
-            issueNumber: parentIssueNumber,
-          })
-        }
-
-        const children = issues.filter(
-          (candidate) =>
-            candidate.parent !== null &&
-            candidate.parent.issueNumber === parentIssueNumber,
+        const unfinished = unfinishedIssueNumbers(
+          yield* listWorkItemsForRepository(repositoryId),
         )
-
-        if (children.some((child) => child.hasChildren)) {
-          return yield* new UnsupportedIssueHierarchyError({
-            repositoryId,
-            issueNumber: parentIssueNumber,
-            message: `Issue #${parentIssueNumber} has grandchildren and is not a Supported Issue Hierarchy`,
-          })
-        }
-
-        // Snapshot open direct children at acceptance; closed children and
-        // children added later are out of scope for this request.
-        const openChildren = children
-          .filter((child) => child.state === "OPEN")
-          .slice()
-          .sort((a, b) => {
-            const aPos = a.parentPosition ?? Number.MAX_SAFE_INTEGER
-            const bPos = b.parentPosition ?? Number.MAX_SAFE_INTEGER
-            if (aPos !== bPos) return aPos - bPos
-            return a.issueNumber - b.issueNumber
-          })
-
-        if (openChildren.length === 0) {
-          return yield* new ImplementAllWithAutoMergeNotEligibleError({
-            repositoryId,
-            issueNumber: parentIssueNumber,
-            reason: `Parent Issue #${parentIssueNumber} has no open Child Issues`,
-          })
-        }
-
-        // Pre-scan only decides whether any create may need Agent Backend
-        // resolution. The transaction re-reads unfinished rows so concurrent
-        // create/abandon races stay all-or-nothing.
-        const repositoryWorkItems =
-          yield* listWorkItemsForRepository(repositoryId)
-        const unfinishedByIssue = new Map<number, WorkItemId>()
-        for (const item of repositoryWorkItems) {
-          if (
-            evaluateUnfinishedWorkItem(workItemPredicateInput(item))._tag ===
-            "match"
-          ) {
-            unfinishedByIssue.set(item.issueNumber, item.id)
-          }
-        }
-
         const mayNeedCreate = openChildren.some(
-          (child) => !unfinishedByIssue.has(child.issueNumber),
+          (child) => !unfinished.has(child.issueNumber),
         )
-
-        const mapTransactionError = (
-          error: unknown,
-        ): Effect.Effect<never, ImplementAllWithAutoMergeError> => {
-          if (error instanceof WorkItemLifecycleDatabaseError) {
-            return Effect.fail(error)
-          }
-          if (error instanceof EnqueueError) {
-            return Effect.fail(error)
-          }
-          if (error instanceof InvalidQueueNameError) {
-            return Effect.fail(error)
-          }
-          if (error instanceof AgentBackendUnavailableError) {
-            return Effect.fail(error)
-          }
-          if (error instanceof BuildModelNotConfiguredError) {
-            return Effect.fail(error)
-          }
-          // Domain eligibility failures raised inside the transaction (e.g.
-          // pure-adopt concurrent abandon) must keep their tag for GraphQL.
-          if (error instanceof ImplementAllWithAutoMergeNotEligibleError) {
-            return Effect.fail(error)
-          }
-          if (
-            typeof error === "object" &&
-            error !== null &&
-            "_tag" in error &&
-            (error as { _tag: string })._tag === "SqlError"
-          ) {
-            const sqlError = error as SqlError
-            if (isUnfinishedWorkItemUniqueViolation(sqlError)) {
-              return Effect.fail(
-                new ImplementAllWithAutoMergeNotEligibleError({
-                  repositoryId,
-                  issueNumber: parentIssueNumber,
-                  reason: `A concurrent request enrolled a Child Issue of Parent Issue #${parentIssueNumber}`,
-                }),
-              )
-            }
-            return Effect.fail(toDatabaseError(sqlError))
-          }
-          return Effect.fail(
-            new WorkItemLifecycleDatabaseError({
-              message: `Unexpected transaction failure: ${String(error)}`,
-              cause: error,
-            }),
-          )
-        }
-
-        const enrollOpenChildren = (
-          agentBackendId: string | null,
-        ): Effect.Effect<
-          readonly WorkItemId[],
-          ImplementAllWithAutoMergeError
-        > =>
-          Effect.gen(function* () {
-            const now = yield* Clock.currentTimeMillis
-            const step: OperationalLifecycleStep = "create_worktree"
-
-            return yield* sql
-              .withTransaction(
-                Effect.gen(function* () {
-                  const limit = yield* maxWorkerSlots()
-                  let occupied = yield* countOccupiedWorkerSlots()
-                  const workItemIds: WorkItemId[] = []
-
-                  for (const child of openChildren) {
-                    const unfinishedRows = (yield* sql
-                      .unsafe(
-                        `SELECT id FROM work_item
-                         WHERE repository_id = ?
-                           AND issue_number = ?
-                           AND state NOT IN ('complete', 'failed', 'abandoned')
-                         LIMIT 1`,
-                        [repositoryId, child.issueNumber],
-                      )
-                      .pipe(Effect.mapError(toDatabaseError))) as readonly {
-                      readonly id: string
-                    }[]
-
-                    const existingId = unfinishedRows[0]?.id
-                    if (existingId !== undefined) {
-                      // Adopt only: durable Merge Mode Always. Do not touch
-                      // state, admission, Step Runs, Session, worktree, PR, or
-                      // Needs Human handoff. RETURNING rejects a concurrent
-                      // terminal transition so we never report a false adopt.
-                      const adoptedRows = (yield* sql
-                        .unsafe(
-                          `UPDATE work_item
-                           SET merge_mode = 'always', updated_at = ?
-                           WHERE id = ?
-                             AND state NOT IN ('complete', 'failed', 'abandoned')
-                           RETURNING id`,
-                          [now, existingId],
-                        )
-                        .pipe(Effect.mapError(toDatabaseError))) as readonly {
-                        readonly id: string
-                      }[]
-                      if (adoptedRows[0]?.id === undefined) {
-                        return yield* new ImplementAllWithAutoMergeNotEligibleError(
-                          {
-                            repositoryId,
-                            issueNumber: parentIssueNumber,
-                            reason: `A concurrent request changed a Child Issue of Parent Issue #${parentIssueNumber}`,
-                          },
-                        )
-                      }
-                      workItemIds.push(existingId as WorkItemId)
-                      continue
-                    }
-
-                    if (agentBackendId === null) {
-                      // Race: pre-scan expected pure adopt, but a concurrent
-                      // abandon left this child without an unfinished WI.
-                      return yield* new ImplementAllWithAutoMergeNotEligibleError(
-                        {
-                          repositoryId,
-                          issueNumber: parentIssueNumber,
-                          reason: `A concurrent request changed a Child Issue of Parent Issue #${parentIssueNumber}`,
-                        },
-                      )
-                    }
-
-                    const workItemId = makeWorkItemId()
-                    const blocked = child.blockedBy.length > 0
-
-                    if (blocked) {
-                      yield* sql.unsafe(
-                        `INSERT INTO work_item (
-                     id, repository_id, issue_number, agent_backend,
-                      issue_title, state, state_ready_at, paused,
-                      waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
-                      pause_before_step, worktree_path, session_id, failure_code,
-                      failure_message, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, 'always', 0, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
-                        [
-                          workItemId,
-                          repositoryId,
-                          child.issueNumber,
-                          agentBackendId,
-                          child.title,
-                          step,
-                          now,
-                          now,
-                          now,
-                        ],
-                      )
-                    } else {
-                      const admit = occupied < limit
-                      yield* sql.unsafe(
-                        `INSERT INTO work_item (
-                     id, repository_id, issue_number, agent_backend,
-                      issue_title, state, state_ready_at, paused,
-                      waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
-                      pause_before_step, worktree_path, session_id, failure_code,
-                      failure_message, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 'always', ?, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
-                        [
-                          workItemId,
-                          repositoryId,
-                          child.issueNumber,
-                          agentBackendId,
-                          child.title,
-                          step,
-                          now,
-                          admit ? null : now,
-                          admit ? 1 : 0,
-                          now,
-                          now,
-                        ],
-                      )
-                      if (admit) {
-                        occupied += 1
-                        yield* enqueueStepRunForWorkItem(workItemId, step, now)
-                      }
-                    }
-
-                    workItemIds.push(workItemId)
-                  }
-
-                  return workItemIds
-                }),
-              )
-              .pipe(Effect.catch(mapTransactionError))
-          })
-
+        const pin = encodeWorkItemMergePolicyPin("always")
         const coveredIds = mayNeedCreate
           ? yield* activeAgentBackend.withConfigCoordination(
               Effect.gen(function* () {
@@ -8199,29 +8397,23 @@ export const makeWorkItemLifecycleLive = (
                 yield* resolveModelsForBackend(repositoryId, captureBackendId)
                 const activeRegistration =
                   yield* activeAgentBackend.getRegistration(captureBackendId)
-                const agentBackendId = activeRegistration.descriptor.id
-                return yield* enrollOpenChildren(agentBackendId)
+                return yield* enrollOpenChildren({
+                  repositoryId,
+                  parentIssueNumber,
+                  openChildren,
+                  pin,
+                  create: { agentBackendId: activeRegistration.descriptor.id },
+                })
               }),
             )
-          : yield* enrollOpenChildren(null)
-
-        const covered = yield* Effect.forEach(
-          coveredIds,
-          (workItemId) =>
-            getWorkItem(workItemId).pipe(
-              Effect.catchTag(
-                "WorkItemNotFoundError",
-                (error) =>
-                  new WorkItemLifecycleDatabaseError({
-                    message: `Work Item missing after implement-all adopt/create: ${error.workItemId}`,
-                    cause: error,
-                  }),
-              ),
-            ),
-          { concurrency: 1 },
-        )
-        yield* notifyWorkItemsChanged(repositoryId)
-        return covered
+          : yield* enrollOpenChildren({
+              repositoryId,
+              parentIssueNumber,
+              openChildren,
+              pin,
+              create: null,
+            })
+        return yield* coveredWorkItems(coveredIds, repositoryId)
       })
 
       const queueIssue = Effect.fn("WorkItemLifecycle.queue")(function* (
