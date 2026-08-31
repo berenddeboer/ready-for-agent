@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
-import { Duration, Effect, Layer } from "effect"
+import { Duration, Effect, Fiber, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import {
   AgentBackend,
@@ -26,6 +26,9 @@ import {
 } from "@ready-for-agent/github-service"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
+  COMMIT_COPY_GENERATION_MESSAGE,
+  COMMIT_HOOKS_MESSAGE,
+  COMMIT_REPAIR_MESSAGE,
   CommitInvalidWorktreeContextError,
   CommitNoChangeConfirmationError,
   CommitOpenCodeError,
@@ -34,6 +37,8 @@ import {
   CommitSessionContextMissingError,
   CommitStartingCommitMissingError,
   CommitWorktreeContextMissingError,
+  CurrentStepRun,
+  STEP_RUN_REASON,
   buildHarnessPublicationFallbackCopy,
   buildNoChangeConfirmationPrompt,
   commit,
@@ -269,6 +274,88 @@ const persistCopyOnWorkItem = (
       [copy.title, copy.body, Date.now(), workItemId],
     )
   })
+
+const seedCommitStepRun = (input: {
+  readonly stepRunId: string
+  readonly workItemId: string
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const now = Date.now()
+    yield* sql.unsafe(
+      `INSERT INTO step_run (
+         id, work_item_id, step, status, queue_job_id, queued_at,
+         started_at, finished_at, reason_code, reason_message,
+         created_at, updated_at
+       ) VALUES (?, ?, 'commit', 'running', NULL, ?, ?, NULL, NULL, NULL, ?, ?)`,
+      [input.stepRunId, input.workItemId, now, now, now, now],
+    )
+    return now
+  })
+
+type StepRunSnapshot = {
+  readonly id: string
+  readonly status: string
+  readonly reason_code: string | null
+  readonly reason_message: string | null
+  readonly started_at: number | null
+} | null
+
+const readStepRunSnapshot = (stepRunId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = (yield* sql.unsafe(
+      `SELECT id, status, reason_code, reason_message, started_at
+       FROM step_run WHERE id = ?`,
+      [stepRunId],
+    )) as readonly NonNullable<StepRunSnapshot>[]
+    return rows[0] ?? null
+  })
+
+const waitForPath = (path: string, timeoutMs = 8_000) =>
+  Effect.tryPromise({
+    try: async () => {
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        try {
+          await readFile(path)
+          return
+        } catch {
+          await Bun.sleep(25)
+        }
+      }
+      throw new Error(`timed out waiting for ${path}`)
+    },
+    catch: (cause) =>
+      cause instanceof Error ? cause : new Error(String(cause)),
+  })
+
+const installBlockingPreCommitHook = async (
+  root: string,
+  options: { readonly fail: boolean },
+) => {
+  const hooks = join(root, ".git", "hooks")
+  await mkdir(hooks, { recursive: true })
+  await writeFile(
+    join(hooks, "pre-commit"),
+    `#!/usr/bin/env bash
+set -euo pipefail
+git_dir=$(git rev-parse --git-dir)
+touch "$git_dir/rfa-commit-hook-started"
+while [ ! -f "$git_dir/rfa-commit-hook-release" ]; do
+  sleep 0.05
+done
+exit ${options.fail ? 1 : 0}
+`,
+  )
+  await chmod(join(hooks, "pre-commit"), 0o755)
+}
+
+const isPublicationCopyPrompt = (prompt: string): boolean =>
+  prompt.includes("Author shared publication copy")
+
+const isCommitRepairPrompt = (prompt: string): boolean =>
+  prompt.includes("The harness attempted to create a git commit")
 
 const initWorktree = async (root: string) => {
   await git(root, ["init", "-b", "main"])
@@ -2013,4 +2100,303 @@ exit 1
       )
       expect(error).toBeInstanceOf(CommitSessionContextMissingError)
     }))
+
+  it(
+    "records publication copy, commit hooks, and repair on one Step Run, then completes via agent_fallback",
+    () =>
+      withTempRepo(async (root, startingOid) => {
+        await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+        await installBlockingPreCommitHook(root, { fail: true })
+        const workItemId = makeWorkItemId()
+        const stepRunId = `srun-${workItemId.slice(3)}`
+        const hookStarted = join(root, ".git", "rfa-commit-hook-started")
+        const hookRelease = join(root, ".git", "rfa-commit-hook-release")
+        let phaseDuringCopy: StepRunSnapshot = null
+        let phaseDuringHooks: StepRunSnapshot = null
+        let phaseDuringRepair: StepRunSnapshot = null
+        let startedAt: number | null = null
+
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const repository = yield* seedRepository(root)
+            yield* seedWorkItem({
+              workItemId,
+              repositoryId: repository.id,
+              issueNumber: 91,
+            })
+            startedAt = yield* seedCommitStepRun({ stepRunId, workItemId })
+            const fiber = yield* commit(
+              baseContext(root, {
+                workItemId,
+                repositoryId: repository.id,
+                startingCommitOid: startingOid,
+                issueNumber: 91,
+                sessionId: "ses_from_implement",
+              }),
+            ).pipe(
+              Effect.provideService(CurrentStepRun, {
+                stepRunId,
+                repositoryId: repository.id,
+              }),
+              Effect.forkChild,
+            )
+            yield* waitForPath(hookStarted)
+            phaseDuringHooks = yield* readStepRunSnapshot(stepRunId)
+            yield* Effect.tryPromise({
+              try: () => writeFile(hookRelease, "ok\n"),
+              catch: (cause) =>
+                cause instanceof Error ? cause : new Error(String(cause)),
+            })
+            return committedOf(yield* Fiber.join(fiber))
+          }).pipe(
+            Effect.provide(
+              stubOpencode({
+                continueTurn: (input) =>
+                  Effect.gen(function* () {
+                    if (isPublicationCopyPrompt(input.prompt)) {
+                      phaseDuringCopy = yield* readStepRunSnapshot(stepRunId)
+                      return {
+                        sessionId: input.sessionId,
+                        assistantText: publicationResultLine(
+                          "feat: implement widgets",
+                          "Implements widgets as requested.\n\nVerified via local checks.",
+                        ),
+                      }
+                    }
+                    if (isCommitRepairPrompt(input.prompt)) {
+                      phaseDuringRepair = yield* readStepRunSnapshot(stepRunId)
+                      yield* Effect.tryPromise({
+                        try: async () => {
+                          await git(root, ["add", "feature.ts"])
+                          await git(root, [
+                            "commit",
+                            "--no-verify",
+                            "-m",
+                            "feat: implement widgets\n\nImplements widgets as requested.\n\nCloses #91",
+                          ])
+                        },
+                        catch: (cause) =>
+                          cause instanceof Error
+                            ? cause
+                            : new Error(String(cause)),
+                      })
+                      return { sessionId: input.sessionId, assistantText: "" }
+                    }
+                    return { sessionId: input.sessionId, assistantText: "" }
+                  }).pipe(Effect.orDie),
+              }),
+            ),
+            Effect.provide(stubGitHubServiceLayer()),
+            Effect.provide(DbServiceLive),
+            Effect.provide(DatabaseTest),
+            Effect.provide(PlatformLayer),
+          ),
+        )
+
+        expect(phaseDuringCopy).toMatchObject({
+          id: stepRunId,
+          status: "running",
+          reason_code: STEP_RUN_REASON.copyGeneration,
+          reason_message: COMMIT_COPY_GENERATION_MESSAGE,
+          started_at: startedAt,
+        })
+        expect(phaseDuringHooks).toMatchObject({
+          id: stepRunId,
+          status: "running",
+          reason_code: STEP_RUN_REASON.commitHooks,
+          reason_message: COMMIT_HOOKS_MESSAGE,
+          started_at: startedAt,
+        })
+        expect(phaseDuringRepair).toMatchObject({
+          id: stepRunId,
+          status: "running",
+          reason_code: STEP_RUN_REASON.commitRepair,
+          reason_message: COMMIT_REPAIR_MESSAGE,
+          started_at: startedAt,
+        })
+        expect(result.completion).toBe("agent_fallback")
+      }),
+    { timeout: 15_000 },
+  )
+
+  it(
+    "records publication copy then commit hooks on native success without repair",
+    () =>
+      withTempRepo(async (root, startingOid) => {
+        await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+        await installBlockingPreCommitHook(root, { fail: false })
+        const workItemId = makeWorkItemId()
+        const stepRunId = `srun-${workItemId.slice(3)}`
+        const hookStarted = join(root, ".git", "rfa-commit-hook-started")
+        const hookRelease = join(root, ".git", "rfa-commit-hook-release")
+        let phaseDuringCopy: StepRunSnapshot = null
+        let phaseDuringHooks: StepRunSnapshot = null
+        let repairTurns = 0
+        let startedAt: number | null = null
+
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const repository = yield* seedRepository(root)
+            yield* seedWorkItem({
+              workItemId,
+              repositoryId: repository.id,
+              issueNumber: 91,
+            })
+            startedAt = yield* seedCommitStepRun({ stepRunId, workItemId })
+            const fiber = yield* commit(
+              baseContext(root, {
+                workItemId,
+                repositoryId: repository.id,
+                startingCommitOid: startingOid,
+                issueNumber: 91,
+                sessionId: "ses_from_implement",
+              }),
+            ).pipe(
+              Effect.provideService(CurrentStepRun, {
+                stepRunId,
+                repositoryId: repository.id,
+              }),
+              Effect.forkChild,
+            )
+            yield* waitForPath(hookStarted)
+            phaseDuringHooks = yield* readStepRunSnapshot(stepRunId)
+            yield* Effect.tryPromise({
+              try: () => writeFile(hookRelease, "ok\n"),
+              catch: (cause) =>
+                cause instanceof Error ? cause : new Error(String(cause)),
+            })
+            return committedOf(yield* Fiber.join(fiber))
+          }).pipe(
+            Effect.provide(
+              stubOpencode({
+                continueTurn: (input) =>
+                  Effect.gen(function* () {
+                    if (isPublicationCopyPrompt(input.prompt)) {
+                      phaseDuringCopy = yield* readStepRunSnapshot(stepRunId)
+                      return {
+                        sessionId: input.sessionId,
+                        assistantText: publicationResultLine(
+                          "feat: implement widgets",
+                          "Implements widgets as requested.\n\nVerified via local checks.",
+                        ),
+                      }
+                    }
+                    if (isCommitRepairPrompt(input.prompt)) {
+                      repairTurns += 1
+                    }
+                    return { sessionId: input.sessionId, assistantText: "" }
+                  }),
+              }),
+            ),
+            Effect.provide(stubGitHubServiceLayer()),
+            Effect.provide(DbServiceLive),
+            Effect.provide(DatabaseTest),
+            Effect.provide(PlatformLayer),
+          ),
+        )
+
+        expect(phaseDuringCopy).toMatchObject({
+          id: stepRunId,
+          status: "running",
+          reason_code: STEP_RUN_REASON.copyGeneration,
+          reason_message: COMMIT_COPY_GENERATION_MESSAGE,
+          started_at: startedAt,
+        })
+        expect(phaseDuringHooks).toMatchObject({
+          id: stepRunId,
+          status: "running",
+          reason_code: STEP_RUN_REASON.commitHooks,
+          reason_message: COMMIT_HOOKS_MESSAGE,
+          started_at: startedAt,
+        })
+        expect(repairTurns).toBe(0)
+        expect(result.completion).toBe("native")
+      }),
+    { timeout: 15_000 },
+  )
+
+  it(
+    "skips generating publication copy on retry when canonical copy is already persisted",
+    () =>
+      withTempRepo(async (root, startingOid) => {
+        await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+        await installBlockingPreCommitHook(root, { fail: false })
+        const workItemId = makeWorkItemId()
+        const stepRunId = `srun-${workItemId.slice(3)}`
+        const hookStarted = join(root, ".git", "rfa-commit-hook-started")
+        const hookRelease = join(root, ".git", "rfa-commit-hook-release")
+        const observedReasons: string[] = []
+        let phaseDuringHooks: StepRunSnapshot = null
+        let startedAt: number | null = null
+
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const repository = yield* seedRepository(root)
+            yield* seedWorkItem({
+              workItemId,
+              repositoryId: repository.id,
+              issueNumber: 91,
+            })
+            startedAt = yield* seedCommitStepRun({ stepRunId, workItemId })
+            const fiber = yield* commit(
+              baseContext(root, {
+                workItemId,
+                repositoryId: repository.id,
+                startingCommitOid: startingOid,
+                issueNumber: 91,
+                sessionId: "ses_from_implement",
+                publicationTitle: "fix: widgets path",
+                publicationBody:
+                  "Corrects the widgets route used by the API.\n\nCloses #91",
+              }),
+            ).pipe(
+              Effect.provideService(CurrentStepRun, {
+                stepRunId,
+                repositoryId: repository.id,
+              }),
+              Effect.forkChild,
+            )
+            yield* waitForPath(hookStarted)
+            phaseDuringHooks = yield* readStepRunSnapshot(stepRunId)
+            if (phaseDuringHooks?.reason_code != null) {
+              observedReasons.push(phaseDuringHooks.reason_code)
+            }
+            yield* Effect.tryPromise({
+              try: () => writeFile(hookRelease, "ok\n"),
+              catch: (cause) =>
+                cause instanceof Error ? cause : new Error(String(cause)),
+            })
+            return committedOf(yield* Fiber.join(fiber))
+          }).pipe(
+            Effect.provide(
+              stubOpencode({
+                continueTurn: (input) =>
+                  Effect.gen(function* () {
+                    const snapshot = yield* readStepRunSnapshot(stepRunId)
+                    if (snapshot?.reason_code != null) {
+                      observedReasons.push(snapshot.reason_code)
+                    }
+                    return { sessionId: input.sessionId, assistantText: "" }
+                  }),
+              }),
+            ),
+            Effect.provide(stubGitHubServiceLayer()),
+            Effect.provide(DbServiceLive),
+            Effect.provide(DatabaseTest),
+            Effect.provide(PlatformLayer),
+          ),
+        )
+
+        expect(observedReasons).not.toContain(STEP_RUN_REASON.copyGeneration)
+        expect(phaseDuringHooks).toMatchObject({
+          id: stepRunId,
+          status: "running",
+          reason_code: STEP_RUN_REASON.commitHooks,
+          reason_message: COMMIT_HOOKS_MESSAGE,
+          started_at: startedAt,
+        })
+        expect(result.completion).toBe("native")
+      }),
+    { timeout: 15_000 },
+  )
 })

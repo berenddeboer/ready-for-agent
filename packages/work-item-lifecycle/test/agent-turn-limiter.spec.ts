@@ -9,6 +9,7 @@ import {
   pruneIdleRepositoryState,
 } from "../src/lib/agent-turn-limiter.js"
 import {
+  COMMIT_HOOKS_MESSAGE,
   REVIEW_PRE_COMMIT_MESSAGE,
   STEP_RUN_REASON,
   WAITING_FOR_AGENT_TURN_MESSAGE,
@@ -556,6 +557,116 @@ describe("limitAgentTurns", () => {
         expect(afterRows[0]).toEqual({
           reason_code: STEP_RUN_REASON.reviewPreCommit,
           reason_message: REVIEW_PRE_COMMIT_MESSAGE,
+        })
+        expect(starts).toBe(2)
+      }),
+    ))
+
+  it("restores a prior Commit phase after waiting for a session slot", () =>
+    runTest(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const sql = yield* SqlClient.SqlClient
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "low",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 1,
+          maxConcurrentWorkItems: 5,
+        })
+
+        const repositoryId = "repo-limiter-restore-commit"
+        const workItemId = "wi-01JLIMITERCMT00000000000001"
+        const stepRunId = "srun-01JLIMITERCMT0000000000001"
+        yield* seedRunningStepRun({
+          stepRunId,
+          workItemId,
+          repositoryId,
+        })
+        yield* sql.unsafe(
+          `UPDATE step_run
+           SET reason_code = ?, reason_message = ?, updated_at = ?
+           WHERE id = ?`,
+          [
+            STEP_RUN_REASON.commitHooks,
+            COMMIT_HOOKS_MESSAGE,
+            Date.now(),
+            stepRunId,
+          ],
+        )
+
+        const releaseFirst = yield* Deferred.make<void>()
+        const firstStarted = yield* Deferred.make<void>()
+        const secondStarted = yield* Deferred.make<void>()
+        let starts = 0
+
+        const inner = AgentBackend.of({
+          startTurn: () =>
+            Effect.gen(function* () {
+              starts += 1
+              if (starts === 1) {
+                yield* Deferred.succeed(firstStarted, undefined)
+                yield* Deferred.await(releaseFirst)
+              } else {
+                yield* Deferred.succeed(secondStarted, undefined)
+              }
+              return { sessionId: `ses_${starts}`, assistantText: "" }
+            }),
+          continueTurn: () =>
+            Effect.succeed({ sessionId: "ses_x", assistantText: "" }),
+          inspect: () =>
+            Effect.succeed({
+              backend: { id: "opencode" as const, label: "OpenCode" },
+              models: [],
+            }),
+        })
+        const limited = yield* limitAgentTurns(inner, db, sql)
+
+        const first = yield* limited
+          .startTurn(startInput)
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(firstStarted)
+
+        const second = yield* limited.startTurn(startInput).pipe(
+          Effect.provideService(CurrentStepRun, {
+            stepRunId,
+            repositoryId,
+          }),
+          Effect.forkChild,
+        )
+
+        yield* Effect.sleep("50 millis")
+        expect(starts).toBe(1)
+
+        const waitingRows = (yield* sql.unsafe(
+          `SELECT reason_code, reason_message FROM step_run WHERE id = ?`,
+          [stepRunId],
+        )) as readonly {
+          readonly reason_code: string | null
+          readonly reason_message: string | null
+        }[]
+        expect(waitingRows[0]).toEqual({
+          reason_code: STEP_RUN_REASON.waitingForAgentTurn,
+          reason_message: WAITING_FOR_AGENT_TURN_MESSAGE,
+        })
+
+        yield* Deferred.succeed(releaseFirst, undefined)
+        yield* Deferred.await(secondStarted)
+        yield* Fiber.join(first)
+        yield* Fiber.join(second)
+
+        const afterRows = (yield* sql.unsafe(
+          `SELECT reason_code, reason_message FROM step_run WHERE id = ?`,
+          [stepRunId],
+        )) as readonly {
+          readonly reason_code: string | null
+          readonly reason_message: string | null
+        }[]
+        expect(afterRows[0]).toEqual({
+          reason_code: STEP_RUN_REASON.commitHooks,
+          reason_message: COMMIT_HOOKS_MESSAGE,
         })
         expect(starts).toBe(2)
       }),

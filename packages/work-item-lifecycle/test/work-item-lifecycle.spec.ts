@@ -34,9 +34,11 @@ import {
   ActiveStepRunExistsError,
   BuildModelNotConfiguredError,
   CHECK_START_DEADLINE_MS,
+  COMMIT_REPAIR_MESSAGE,
   CloseIssueEligibilityError,
   CommitOpenCodeError,
   CreatePrOpenCodeError,
+  CurrentStepRun,
   ImplementAllWithAutoMergeNotEligibleError,
   InterruptNotEligibleError,
   IssueBlockedError,
@@ -8574,6 +8576,75 @@ describe("WorkItemLifecycle", () => {
               `Pre-commit validation failed (exit 1)\n${output}`,
             )
           }
+        }),
+      )
+    })
+
+    it("replaces a running Commit repair subphase with agent_fallback on success", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        commit: () =>
+          Effect.gen(function* () {
+            const current = yield* CurrentStepRun
+            const sql = yield* SqlClient.SqlClient
+            if (current !== null) {
+              yield* sql.unsafe(
+                `UPDATE step_run
+                 SET reason_code = ?, reason_message = ?, updated_at = ?
+                 WHERE id = ? AND status = 'running'`,
+                [
+                  STEP_RUN_REASON.commitRepair,
+                  COMMIT_REPAIR_MESSAGE,
+                  Date.now(),
+                  current.stepRunId,
+                ],
+              )
+            }
+            return {
+              _tag: "committed" as const,
+              completion: "agent_fallback" as const,
+              publicationTitle: "feat: test",
+              publicationBody: "Why\n\nCloses #1",
+            }
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          for (let index = 0; index < 6; index += 1) {
+            yield* claimAndRunPending
+          }
+          const beforeCommit = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            issue.issueNumber,
+          )
+          const queuedCommit = beforeCommit[0]?.stepRuns.at(-1)
+          expect(queuedCommit).toMatchObject({
+            step: "commit",
+            status: "queued",
+          })
+          const stepRunId = queuedCommit?.id
+
+          const result = yield* claimAndRunPending
+          expect(result._tag).toBe("processed")
+          if (result._tag !== "processed") {
+            return
+          }
+          const commitRuns = result.workItem.stepRuns.filter(
+            (run) => run.step === "commit",
+          )
+          expect(commitRuns).toHaveLength(1)
+          expect(commitRuns[0]).toMatchObject({
+            id: stepRunId,
+            step: "commit",
+            status: "succeeded",
+            reasonCode: STEP_RUN_REASON.agentFallback,
+          })
+          expect(commitRuns[0]?.reasonMessage).not.toBe(COMMIT_REPAIR_MESSAGE)
         }),
       )
     })
