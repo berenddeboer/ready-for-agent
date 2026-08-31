@@ -223,6 +223,12 @@ export const REVIEW_ASSESSING_RERUN_MESSAGE = "assessing rerun"
 /** Operator-visible Commit phase while the publication-copy Agent Turn runs. */
 export const COMMIT_COPY_GENERATION_MESSAGE = "generating publication copy"
 
+/** Operator-visible Commit phase while native git commit and repository hooks run. */
+export const COMMIT_HOOKS_MESSAGE = "running commit hooks"
+
+/** Operator-visible Commit phase while Agent Repair Fallback repairs a failed native commit. */
+export const COMMIT_REPAIR_MESSAGE = "repairing failed commit"
+
 export const WORK_ITEM_LIFECYCLE_QUEUE = "jobs"
 
 export const WorkItemStepJob = Schema.TaggedStruct("work-item-step", {

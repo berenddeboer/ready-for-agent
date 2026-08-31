@@ -55,6 +55,8 @@ export const STEP_RUN_REASONS = [
   "agent_fallback",
   "agent_model_not_in_catalog",
   "build_model_not_configured",
+  "commit_hooks",
+  "commit_repair",
   "copy_generation",
   "forge_auth_rejected",
   "github_throttled",
@@ -100,6 +102,10 @@ export const STEP_RUN_REASON = {
   agentModelNotInCatalog: "agent_model_not_in_catalog",
   /** An agent-dependent step is blocked because no build Agent Model is configured. */
   buildModelNotConfigured: "build_model_not_configured",
+  /** Mid-run: Commit is running the native git commit attempt, including repository hooks. */
+  commitHooks: "commit_hooks",
+  /** Mid-run: Commit is repairing a failed native commit via Agent Repair Fallback. */
+  commitRepair: "commit_repair",
   /** Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt. */
   copyGeneration: "copy_generation",
   /** The Step Run ended because the Forge rejected credentials or permission with HTTP 401 or 403. Deterministic; not retryable and does not consume Autonomous Retry Budget. */

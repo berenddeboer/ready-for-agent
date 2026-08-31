@@ -1,5 +1,11 @@
 import type { WorkItemRecord } from "@ready-for-agent/work-item-lifecycle"
-import { STEP_RUN_REASON } from "@ready-for-agent/work-item-lifecycle"
+import {
+  COMMIT_COPY_GENERATION_MESSAGE,
+  COMMIT_HOOKS_MESSAGE,
+  COMMIT_REPAIR_MESSAGE,
+  STEP_RUN_REASON,
+  WAITING_FOR_AGENT_TURN_MESSAGE,
+} from "@ready-for-agent/work-item-lifecycle"
 import {
   cumulativeExecutionDurationMs,
   lifecycleLabels,
@@ -758,6 +764,76 @@ describe("lifecycleLabels cumulative duration", () => {
         label: "Review: reviewing",
         status: "RUNNING",
         durationMs: 10_000,
+      },
+    ])
+  })
+})
+
+describe("Commit running subphases", () => {
+  const runningCommit = (
+    reasonCode: string,
+    reasonMessage: string,
+  ): WorkItemRecord =>
+    workItemWith({
+      state: "commit",
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "commit",
+          status: "running",
+          finishedAt: null,
+          reasonCode,
+          reasonMessage,
+        },
+      ],
+    })
+
+  test("surfaces generating publication copy as the live status message", () => {
+    const workItem = runningCommit(
+      STEP_RUN_REASON.copyGeneration,
+      COMMIT_COPY_GENERATION_MESSAGE,
+    )
+    expect(workItemStatus(workItem)).toBe("running")
+    expect(workItemStatusMessage(workItem)).toBe(COMMIT_COPY_GENERATION_MESSAGE)
+    expect(lifecycleLabels(workItem)).toEqual([
+      {
+        phase: "COMMIT",
+        label: "Commit: Running",
+        status: "RUNNING",
+        durationMs: 2_315_000,
+      },
+    ])
+  })
+
+  test("surfaces running commit hooks as the live status message", () => {
+    const workItem = runningCommit(
+      STEP_RUN_REASON.commitHooks,
+      COMMIT_HOOKS_MESSAGE,
+    )
+    expect(workItemStatusMessage(workItem)).toBe(COMMIT_HOOKS_MESSAGE)
+  })
+
+  test("surfaces repairing failed commit as the live status message", () => {
+    const workItem = runningCommit(
+      STEP_RUN_REASON.commitRepair,
+      COMMIT_REPAIR_MESSAGE,
+    )
+    expect(workItemStatusMessage(workItem)).toBe(COMMIT_REPAIR_MESSAGE)
+  })
+
+  test("lets waiting for an Agent Turn slot take precedence over a Commit subphase", () => {
+    const workItem = runningCommit(
+      STEP_RUN_REASON.waitingForAgentTurn,
+      WAITING_FOR_AGENT_TURN_MESSAGE,
+    )
+    expect(workItemStatus(workItem)).toBe("queued")
+    expect(workItemStatusMessage(workItem)).toBe(WAITING_FOR_AGENT_TURN_MESSAGE)
+    expect(lifecycleLabels(workItem)).toEqual([
+      {
+        phase: "COMMIT",
+        label: "Commit: Queued",
+        status: "QUEUED",
+        durationMs: 2_315_000,
       },
     ])
   })

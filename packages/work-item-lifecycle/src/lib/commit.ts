@@ -46,6 +46,8 @@ import {
 } from "./result-line.js"
 import {
   COMMIT_COPY_GENERATION_MESSAGE,
+  COMMIT_HOOKS_MESSAGE,
+  COMMIT_REPAIR_MESSAGE,
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleStepCompletion,
   STEP_RUN_REASON,
@@ -276,36 +278,54 @@ const readHeadCommitMessage = (worktreePath: string) =>
     ),
   )
 
-const markCopyGenerationPhase = Effect.gen(function* () {
-  const current = yield* CurrentStepRun
-  if (current === null) {
-    return
-  }
-  const sql = yield* SqlClient.SqlClient
-  const db = yield* DbService
-  const now = Date.now()
-  yield* sql.unsafe(
-    `UPDATE step_run
+const markCommitPhase = (
+  reasonCode: string,
+  reasonMessage: string,
+  logLabel: string,
+) =>
+  Effect.gen(function* () {
+    const current = yield* CurrentStepRun
+    if (current === null) {
+      return
+    }
+    const sql = yield* SqlClient.SqlClient
+    const db = yield* DbService
+    const now = Date.now()
+    yield* sql.unsafe(
+      `UPDATE step_run
      SET reason_code = ?,
          reason_message = ?,
          updated_at = ?
      WHERE id = ?
        AND status = 'running'`,
-    [
-      STEP_RUN_REASON.copyGeneration,
-      COMMIT_COPY_GENERATION_MESSAGE,
-      now,
-      current.stepRunId,
-    ],
+      [reasonCode, reasonMessage, now, current.stepRunId],
+    )
+    yield* db.notifyWorkItemsChanged(current.repositoryId)
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning(`Failed to mark Commit Step Run as ${logLabel}`, {
+        error,
+      }),
+    ),
+    Effect.asVoid,
   )
-  yield* db.notifyWorkItemsChanged(current.repositoryId)
-}).pipe(
-  Effect.catch((error) =>
-    Effect.logWarning("Failed to mark Commit Step Run as copy_generation", {
-      error,
-    }),
-  ),
-  Effect.asVoid,
+
+const markCopyGenerationPhase = markCommitPhase(
+  STEP_RUN_REASON.copyGeneration,
+  COMMIT_COPY_GENERATION_MESSAGE,
+  "copy_generation",
+)
+
+const markCommitHooksPhase = markCommitPhase(
+  STEP_RUN_REASON.commitHooks,
+  COMMIT_HOOKS_MESSAGE,
+  "commit_hooks",
+)
+
+const markCommitRepairPhase = markCommitPhase(
+  STEP_RUN_REASON.commitRepair,
+  COMMIT_REPAIR_MESSAGE,
+  "commit_repair",
 )
 
 /**
@@ -559,6 +579,7 @@ const alignCopyWithHeadCommit = (
 
 const attemptNativeCommit = (worktreePath: string, message: string) =>
   Effect.gen(function* () {
+    yield* markCommitHooksPhase
     // Stage implementation changes only; never include harness diagnostics.
     const stage = yield* runGitInWorktree(worktreePath, [
       "add",
@@ -668,6 +689,7 @@ const askAgentToRepairCommit = (
   diagnostics: string,
 ) =>
   Effect.gen(function* () {
+    yield* markCommitRepairPhase
     const agentBackend = yield* AgentBackend
     yield* agentBackend
       .continueTurn({
