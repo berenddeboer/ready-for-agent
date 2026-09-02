@@ -213,7 +213,7 @@ rfa:Paused
 rfa:RepositorySettings
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Repository settings"@en ;
-  skos:definition "Per-Repository operator preferences: Paused, optional Agent Backend override, optional build Agent Model selection, optional review Agent Model selection, Merge Policy, optional guaranteed-minimum concurrent Agent Turns floor (`guaranteedMinConcurrentAgentTurns`, null by default), Include all Issue Authors, and Wait for checks to start after ready for review (`waitForReadyForReviewChecks`, default true). Forge identity (Forge, Forge Host, and Project Path) is also corrected through Repository settings, subject to the Work Item gate described under Repository. An absent Agent Backend override inherits the Harness Config default Agent Backend. Build and review model selections are backend-scoped: each Agent Backend has its own optional overrides. An absent build model inherits the whole Harness build selection for the Repository's effective Agent Backend; an absent review model inherits the Harness review selection for that backend and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. For a Work Item without an Explicit Work Item Execution Profile, build and review selections are resolved at each Agent Turn from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend, so a model settings change affects the next turn without rewriting the Work Item. Changing the Agent Backend override is rejected while the Repository has an unfinished Work Item whose routing depends on that effective backend; an unfinished Work Item with an Explicit Work Item Execution Profile does not block the change. An absent guaranteed-minimum Agent Turns floor is fully fair-share, identical to a Repository that never had one; setting or raising it is rejected when the sum of every Repository's floor would exceed Harness Config's `maxConcurrentAgentTurns`."@en ;
+  skos:definition "Per-Repository operator preferences: Paused, selected CI Gate Definitions, optional Agent Backend override, optional build Agent Model selection, optional review Agent Model selection, Merge Policy, optional guaranteed-minimum concurrent Agent Turns floor (`guaranteedMinConcurrentAgentTurns`, null by default), Include all Issue Authors, and Wait for checks to start after ready for review (`waitForReadyForReviewChecks`, default true). Forge identity (Forge, Forge Host, and Project Path) is also corrected through Repository settings, subject to the Work Item gate described under Repository. An absent Agent Backend override inherits the Harness Config default Agent Backend. Build and review model selections are backend-scoped: each Agent Backend has its own optional overrides. An absent build model inherits the whole Harness build selection for the Repository's effective Agent Backend; an absent review model inherits the Harness review selection for that backend and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. For a Work Item without an Explicit Work Item Execution Profile, build and review selections are resolved at each Agent Turn from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend, so a model settings change affects the next turn without rewriting the Work Item. Changing the Agent Backend override is rejected while the Repository has an unfinished Work Item whose routing depends on that effective backend; an unfinished Work Item with an Explicit Work Item Execution Profile does not block the change. An absent guaranteed-minimum Agent Turns floor is fully fair-share, identical to a Repository that never had one; setting or raising it is rejected when the sum of every Repository's floor would exceed Harness Config's `maxConcurrentAgentTurns`."@en ;
   skos:hiddenLabel "Project config"@en, "repo config file"@en .
 
 [
@@ -230,6 +230,140 @@ rfa:RepositorySettings
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "repo config file"@en ;
   rfa:avoidanceRationale "CONTEXT.md prefers Repository settings for this concept."@en ;
+] .
+
+rfa:CiGateDefinition
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "CI Gate Definition"@en ;
+  skos:definition "A Forge-provided, operator-selectable unit of default-branch CI health, such as a GitHub workflow, GitLab project pipeline, or Azure DevOps build pipeline. Forge-specific catalogs may expose different kinds of definitions without changing the Repository CI Gate model."@en ;
+  skos:hiddenLabel "Workflow"@en, "PR Status Check"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CiGateDefinition ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Workflow"@en ;
+  rfa:avoidanceRationale "GitHub-specific"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CiGateDefinition ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "PR Status Check"@en ;
+  rfa:avoidanceRationale "belongs to one Pull Request"@en ;
+] .
+
+rfa:RepositoryCiGate
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Repository CI Gate"@en ;
+  skos:definition "A Repository-local health guard derived from observed default-branch runs of its selected CI Gate Definitions. It is Closed from a detected failure until that definition has a newer successful run, Degraded when a selected definition cannot be observed, and Open otherwise; only Closed blocks ordinary work, and a PR failure remains local to its Work Item."@en ;
+  skos:hiddenLabel "Global CI gate"@en, "PR status gate"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RepositoryCiGate ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Global CI gate"@en ;
+  rfa:avoidanceRationale "the gate is Repository-local"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RepositoryCiGate ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "PR status gate"@en ;
+  rfa:avoidanceRationale "PR failures remain local to their Work Item"@en ;
+] .
+
+rfa:CiRepair
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "CI Repair"@en ;
+  skos:definition "A Work Item explicitly authorized to cross a Closed Repository CI Gate for one CI Failure Incident, either when implementation starts or through a later audited operator action. The authorization expires when that incident ends and gives no reserved capacity or preemption: ordinary Worker Slot admission, the Work Item's own PR Status Checks, Merge Policy, conflict handling, and Forge requirements still apply."@en ;
+  skos:hiddenLabel "Skip CI"@en, "force merge"@en, "Repository bypass setting"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CiRepair ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Skip CI"@en ;
+  rfa:avoidanceRationale "the Work Item's own PR Status Checks remain required"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CiRepair ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "force merge"@en ;
+  rfa:avoidanceRationale "normal Merge Policy, conflict handling, and Forge requirements still apply"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CiRepair ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Repository bypass setting"@en ;
+  rfa:avoidanceRationale "CI Repair is a Work Item authorization scoped to one CI Failure Incident"@en ;
+] .
+
+rfa:CiFailureIncident
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "CI Failure Incident"@en ;
+  skos:definition "A durable Repository episode beginning when an observed CI Gate Definition failure closes the Repository CI Gate and ending when every latched failure clears. Additional failures while the gate remains Closed join the same incident; CI Repair authorization is scoped to that incident."@en ;
+  skos:hiddenLabel "PR check failure"@en, "permanent CI bypass"@en, "outage"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CiFailureIncident ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "PR check failure"@en ;
+  rfa:avoidanceRationale "PR failures remain local to their Work Item"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CiFailureIncident ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "permanent CI bypass"@en ;
+  rfa:avoidanceRationale "CI Repair authorization expires with the incident"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CiFailureIncident ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "outage"@en ;
+  rfa:avoidanceRationale "the incident records selected CI failures, not general Repository availability"@en ;
+] .
+
+rfa:WaitingForCiRepair
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Waiting for CI Repair"@en ;
+  skos:definition "A durable hold on an ordinary remote Work Item while its Repository CI Gate is Closed. New remote work waits before admission, already-admitted remote work reaches and retains its merge decision before waiting, and held work occupies no Worker Slot; Implement Locally may finish its local path but cannot continue remotely across the gate."@en ;
+  skos:hiddenLabel "Needs Human"@en, "failed Work Item"@en, "CI repair state"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForCiRepair ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Needs Human"@en ;
+  rfa:avoidanceRationale "the hold resumes automatically when the Repository CI Gate reopens"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForCiRepair ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "failed Work Item"@en ;
+  rfa:avoidanceRationale "the Work Item has not failed"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForCiRepair ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "CI repair state"@en ;
+  rfa:avoidanceRationale "this is a hold, not a Lifecycle Step or terminal state"@en ;
 ] .
 
 rfa:HarnessConfig

@@ -1,0 +1,11 @@
+# Repository CI gate is a best-effort failure circuit breaker
+
+Each Repository may watch operator-selected, Forge-native CI Gate Definitions on its default branch. Observation is periodic and optimistic until an actual terminal failure is seen; that failure latches the Repository CI Gate Closed until a newer success is observed or the definition is removed, while unavailable definitions make the gate Degraded without blocking work.
+
+A Closed gate holds every ordinary remote start path before Worker Slot admission and lets already-admitted remote work retain its merge decision before holding without a slot. Implement Locally may finish and pause on its local path but cannot continue remotely while Closed. Each closure is a durable CI Failure Incident: additional failures join it, and an explicit CI Repair authorization crosses the gate only for that incident, receives no reserved capacity, and bypasses none of the Work Item PR's checks, Merge Policy, conflict handling, or Forge rules.
+
+The circuit breaker governs Harness-initiated merges using the last observed state. It deliberately does not synchronously re-query CI before admission or merge, wait for green after each merge, cancel an in-flight merge, or control human and Forge-native auto-merges; these limits keep observation inexpensive and accept a small best-effort race.
+
+All three Forges ship behind one Forge-neutral interface using the existing Repository credential and official APIs: active GitHub workflows, one synthesized GitLab Project pipeline, and Azure DevOps build pipelines. Observation shares the Repository polling cadence but fails independently from Issue reconciliation; missing permissions or unavailable saved definitions are visible as Degraded and do not erase an existing failure latch.
+
+Incident summaries and repair authorizations are durable audit history without CI logs or operator identity, because the Harness has no authenticated user concept. The Repository and CLI expose Open, Closed, and Degraded status plus current diagnostics; new repair actions are available only during a Closed incident, while existing Repositories remain unchanged with no selected definitions until an operator opts in.
