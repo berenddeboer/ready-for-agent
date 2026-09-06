@@ -39,7 +39,7 @@ export const decodeForge = (value: unknown): Forge => {
   }
 }
 
-export type CiGateDefinition = {
+type CiGateDefinition = {
   identity: string
   displayLabel: string
   kind: string
