@@ -5,6 +5,7 @@ import type {
 } from "./automated-review-evidence.js"
 import type { GitHubServiceError } from "./errors.js"
 import type {
+  CiGateCatalogEntry,
   GitHubRepository,
   MergePullRequestOptions,
   MergePullRequestResult,
@@ -46,6 +47,14 @@ export interface GitHubServiceShape {
     repository: GitHubRepository,
     options?: GitHubOperationOptions,
   ) => Effect.Effect<readonly ReadyLabeledIssue[], GitHubServiceError>
+  /**
+   * Live catalog of active GitHub Actions workflows as CI Gate Definitions.
+   * Disabled, deleted, and inactive workflows are omitted.
+   */
+  readonly listCiGateCatalog: (
+    repository: GitHubRepository,
+    options?: GitHubOperationOptions,
+  ) => Effect.Effect<readonly CiGateCatalogEntry[], GitHubServiceError>
   readonly getPullRequestCheckStatus: (
     repository: GitHubRepository,
     headRefName: string,

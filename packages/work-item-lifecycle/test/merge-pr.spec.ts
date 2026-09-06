@@ -89,6 +89,7 @@ describe("mergePr", () => {
           "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
     } satisfies GitHubServiceShape)
 
     await Effect.runPromise(
@@ -201,6 +202,7 @@ describe("mergePr", () => {
           "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
     } satisfies GitHubServiceShape)
 
     const exit = await Effect.runPromise(
@@ -342,6 +344,7 @@ describe("mergePr", () => {
         return Effect.succeed({ _tag: "merged" as const })
       },
       ensureIssueCompletedWithSummary: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
     } as AzureDevOpsServiceShape)
 
     await Effect.runPromise(
@@ -376,6 +379,7 @@ describe("mergePr", () => {
         return Effect.succeed({ _tag: "merged" as const })
       },
       ensureIssueCompletedWithSummary: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
     } as AzureDevOpsServiceShape)
 
     await Effect.runPromise(

@@ -131,6 +131,15 @@ export const SerializedPrStatusCheckDiagnostics = Schema.Array(
   SerializedPrStatusCheckDiagnostic,
 )
 
+export const SerializedCiGateCatalog = Schema.Array(
+  Schema.Struct({
+    identity: RequiredString,
+    displayLabel: RequiredString,
+    kind: RequiredString,
+    diagnosticMetadata: Schema.NullOr(Schema.String),
+  }),
+)
+
 const SerializedPullRequestCheckStatusFields = {
   mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
   baseRefName: Schema.NullOr(Schema.String),

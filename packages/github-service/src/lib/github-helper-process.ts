@@ -10,6 +10,7 @@ import { getOpenPullRequestNumberProgram } from "../bin/get-open-pr-number.js"
 import { getPrCheckStatusProgram } from "../bin/get-pr-check-status.js"
 import { getPrLifecycleStatusProgram } from "../bin/get-pr-lifecycle-status.js"
 import { getPrStatusCheckDiagnosticsProgram } from "../bin/get-pr-status-check-diagnostics.js"
+import { listCiGateCatalogProgram } from "../bin/list-ci-gate-catalog.js"
 import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
 import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
 import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
@@ -26,6 +27,7 @@ export const INTERNAL_GITHUB_HELPER_ARG =
 
 export const GITHUB_HELPER_OPERATIONS = [
   "list-ready-issues",
+  "list-ci-gate-catalog",
   "get-authenticated-user-login",
   "get-open-pr-number",
   "find-open-pr-number",
@@ -140,6 +142,7 @@ const programs: Record<
   (args: ReadonlyArray<string>) => Effect.Effect<void, unknown, GitHubService>
 > = {
   "list-ready-issues": listReadyIssuesProgram,
+  "list-ci-gate-catalog": listCiGateCatalogProgram,
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
   "get-open-pr-number": getOpenPullRequestNumberProgram,
   "find-open-pr-number": findOpenPullRequestNumberProgram,

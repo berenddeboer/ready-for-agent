@@ -4,6 +4,19 @@ export interface GitHubRepository {
   readonly projectPath: string
 }
 
+/**
+ * Forge-neutral CI Gate catalog entry. GitHub maps an active Actions
+ * workflow to this shape; identity is the workflow id.
+ */
+export const GITHUB_CI_GATE_KIND = "workflow"
+
+export interface CiGateCatalogEntry {
+  readonly identity: string
+  readonly displayLabel: string
+  readonly kind: string
+  readonly diagnosticMetadata: string | null
+}
+
 /** Local file the harness uploads as a GitHub user attachment. */
 export interface UploadUserAttachmentInput {
   readonly name: string

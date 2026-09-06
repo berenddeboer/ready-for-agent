@@ -64,6 +64,10 @@ import {
   resolveAddRepositoryCommand,
 } from "./add-repository-command.js"
 import {
+  ciGateCatalogErrorMessage,
+  resolveSelectedCiGateDefinitions,
+} from "./ci-gate-definitions.js"
+import {
   activateRepositoryPolling,
   enqueueRefreshRepositoryJob,
   suspendRepositoryPolling,
@@ -160,6 +164,7 @@ type UpdateRepositorySettingsArgs = {
     mergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
     includeAllIssueAuthors: boolean
     waitForReadyForReviewChecks: boolean
+    selectedCiGateDefinitionIdentities?: readonly string[] | null
   }
 }
 
@@ -455,6 +460,64 @@ const isSameOriginRequest = (request: Request): boolean => {
  * still passes through like the identity-defaulting posture below.
  * Ready Issue listing stays in `@ready-for-agent/issue-reconciler`.
  */
+const loadCiGateCatalog = Effect.fn("graphql-api.loadCiGateCatalog")(
+  function* (repository: {
+    readonly forge: string
+    readonly forgeHost: string
+    readonly projectPath: string
+  }) {
+    if (repository.forge !== "github") {
+      return { kind: "loaded" as const, definitions: [] }
+    }
+    const github = yield* GitHubService
+    return yield* github
+      .listCiGateCatalog(
+        {
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
+        },
+        { origin: "operator" },
+      )
+      .pipe(
+        Effect.map((definitions) => ({
+          kind: "loaded" as const,
+          definitions,
+        })),
+        Effect.catch((error) =>
+          Effect.succeed({
+            kind: "unavailable" as const,
+            message: ciGateCatalogErrorMessage(error),
+          }),
+        ),
+      )
+  },
+)
+
+const resolveRepositoryCiGateSelection = Effect.fn(
+  "graphql-api.resolveRepositoryCiGateSelection",
+)(function* (input: {
+  readonly repository: {
+    readonly id: string
+    readonly forge: string
+    readonly forgeHost: string
+    readonly projectPath: string
+  }
+  readonly identities: readonly string[]
+}) {
+  if (input.identities.length === 0) {
+    return []
+  }
+  const db = yield* DbService
+  const existing = yield* db.listCiGateDefinitions(input.repository.id)
+  const catalog = yield* loadCiGateCatalog(input.repository)
+  return yield* resolveSelectedCiGateDefinitions({
+    requestedIdentities: input.identities,
+    existing,
+    catalog,
+  })
+})
+
 const verifyRepositoryIdentity = Effect.fn(
   "graphql-api.verifyRepositoryIdentity",
 )(function* (identity: {
@@ -920,6 +983,30 @@ export const createGraphqlApi = <R>(
               }).pipe(Effect.withSpan("graphql-api.repositoryModelPrefs")),
               context,
             ),
+          ciGateCatalog: async (
+            _parent: unknown,
+            args: { repositoryId: string },
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                const repositories = yield* db.listRepositories
+                const repository = repositories.find(
+                  ({ id }) => id === args.repositoryId,
+                )
+                if (repository === undefined) {
+                  return yield* new RepositoryNotFoundError({
+                    repositoryId: args.repositoryId,
+                  })
+                }
+                const catalog = yield* loadCiGateCatalog(repository)
+                return catalog.kind === "loaded"
+                  ? { definitions: catalog.definitions, error: null }
+                  : { definitions: [], error: catalog.message }
+              }).pipe(Effect.withSpan("graphql-api.ciGateCatalog")),
+              context,
+            ),
           models: async (
             _parent: unknown,
             _args: unknown,
@@ -1352,6 +1439,22 @@ export const createGraphqlApi = <R>(
               ),
               context,
             ),
+          selectedCiGateDefinitions: async (
+            repository: { id: string },
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                return yield* db.listCiGateDefinitions(repository.id)
+              }).pipe(
+                Effect.withSpan(
+                  "graphql-api.Repository.selectedCiGateDefinitions",
+                ),
+              ),
+              context,
+            ),
         },
         WorkItem: {
           agentBackend: (workItem: WorkItemRecord) =>
@@ -1756,6 +1859,18 @@ export const createGraphqlApi = <R>(
                       includeAllIssueAuthors: args.input.includeAllIssueAuthors,
                       waitForReadyForReviewChecks:
                         args.input.waitForReadyForReviewChecks,
+                      ...(args.input.selectedCiGateDefinitionIdentities ===
+                        undefined ||
+                      args.input.selectedCiGateDefinitionIdentities === null
+                        ? {}
+                        : {
+                            selectedCiGateDefinitions:
+                              yield* resolveRepositoryCiGateSelection({
+                                repository,
+                                identities:
+                                  args.input.selectedCiGateDefinitionIdentities,
+                              }),
+                          }),
                     })
                     // Sync Active set (activate missing, drop unused). Prefer
                     // setSelectedOrInUse over activate so repository Saves do

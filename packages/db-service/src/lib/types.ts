@@ -65,6 +65,14 @@ export const RepositoryRecord = Schema.Struct({
 })
 export type RepositoryRecord = typeof RepositoryRecord.Type
 
+export const CiGateDefinitionRecord = Schema.Struct({
+  identity: Schema.String,
+  displayLabel: Schema.String,
+  kind: Schema.String,
+  diagnosticMetadata: Schema.NullOr(Schema.String),
+})
+export type CiGateDefinitionRecord = typeof CiGateDefinitionRecord.Type
+
 export const UpdateRepositorySettingsInput = Schema.Struct({
   repositoryId: Schema.String,
   /** Omitted identity fields leave the persisted Forge identity unchanged. */
@@ -93,6 +101,13 @@ export const UpdateRepositorySettingsInput = Schema.Struct({
   ),
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
+  /**
+   * Selected CI Gate Definitions. Omitted leaves stored selections unchanged.
+   * Empty array clears every selection and disables the Repository CI Gate.
+   */
+  selectedCiGateDefinitions: Schema.optionalKey(
+    Schema.Array(CiGateDefinitionRecord),
+  ),
 })
 export type UpdateRepositorySettingsInput =
   typeof UpdateRepositorySettingsInput.Type
@@ -231,6 +246,19 @@ export const RepositorySqlRow = Schema.Struct({
   }),
 )
 export type RepositorySqlRow = typeof RepositorySqlRow.Type
+
+export const CiGateDefinitionSqlRow = Schema.Struct({
+  identity: Schema.String,
+  displayLabel: Schema.String,
+  kind: Schema.String,
+  diagnosticMetadata: Schema.NullOr(Schema.String),
+}).pipe(
+  Schema.encodeKeys({
+    displayLabel: "display_label",
+    diagnosticMetadata: "diagnostic_metadata",
+  }),
+)
+export type CiGateDefinitionSqlRow = typeof CiGateDefinitionSqlRow.Type
 
 export const ConfigSqlRow = Schema.Struct({
   selectedAgentBackend: Schema.String,

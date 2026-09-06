@@ -53,6 +53,13 @@ type Query {
     backendId: String!
   ): BackendModelPrefs!
   """
+  Live Forge-neutral CI Gate Definition catalog for one Repository.
+  Discovery uses the Repository's configured Forge credential. Failures
+  return an actionable error and an empty definitions list rather than
+  failing the query.
+  """
+  ciGateCatalog(repositoryId: ID!): CiGateCatalog!
+  """
   Agent Models available from the Active Agent Backend, each with optional
   Thinking Levels. Empty thinkingLevels means the model has no Thinking Levels.
   Empty when the backend is unavailable.
@@ -507,6 +514,34 @@ type AgentModel {
   kind: String
 }
 
+"""
+Forge-neutral CI Gate Definition. Identity is the Forge-native stable id.
+Kind distinguishes catalog kinds without leaking provider-specific GraphQL types.
+"""
+type CiGateDefinition {
+  """
+  Stable Forge-native identity. Opaque to generic callers.
+  """
+  identity: String!
+  displayLabel: String!
+  kind: String!
+  """
+  Optional diagnostic metadata such as a workflow path. Opaque string.
+  """
+  diagnosticMetadata: String
+}
+
+"""
+Live catalog of selectable CI Gate Definitions for one Repository.
+"""
+type CiGateCatalog {
+  definitions: [CiGateDefinition!]!
+  """
+  Null when the catalog loaded. Actionable message when discovery failed.
+  """
+  error: String
+}
+
 type Repository {
   id: ID!
   forge: String!
@@ -570,6 +605,11 @@ type Repository {
   and draft PRs are excluded. Does not apply Issue relevance filters.
   """
   pullRequestCount: Int!
+  """
+  Persisted CI Gate Definitions for this Repository. Empty disables the
+  Repository CI Gate. Unavailable saved entries keep last-known display metadata.
+  """
+  selectedCiGateDefinitions: [CiGateDefinition!]!
 }
 
 type LocalRepositoryInspection {
@@ -1077,6 +1117,12 @@ input UpdateRepositorySettingsInput {
   Defaults to true. Disable only when the ready transition cannot start relevant workflows.
   """
   waitForReadyForReviewChecks: Boolean!
+  """
+  Selected CI Gate Definition identities. Empty list disables the Repository
+  CI Gate. Omitted leaves stored selections unchanged. Newly added identities
+  must exist in the current live catalog.
+  """
+  selectedCiGateDefinitionIdentities: [String!]
 }
 
 type Mutation {

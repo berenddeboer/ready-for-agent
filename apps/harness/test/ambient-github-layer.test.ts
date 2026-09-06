@@ -54,6 +54,7 @@ const serviceWithList = (
   rerunWorkflowRun: () => Effect.void,
   uploadUserAttachment: () => Effect.die("not used"),
   ensureIssueCompletedWithSummary: () => Effect.die("not used"),
+  listCiGateCatalog: () => Effect.succeed([]),
 })
 
 const serviceWithAuthenticatedUser = (

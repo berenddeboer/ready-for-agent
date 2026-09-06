@@ -54,6 +54,8 @@ import {
   githubApiHost,
 } from "./tls-trust.js"
 import {
+  type CiGateCatalogEntry,
+  GITHUB_CI_GATE_KIND,
   type GitHubIssueReference,
   type GitHubIssueState,
   type GitHubPullRequestLifecycleState,
@@ -413,6 +415,12 @@ export type RerunWorkflowRun = (
   workflowRunId: number,
   signal?: AbortSignal,
 ) => Promise<void>
+
+/** List active GitHub Actions workflows as CI Gate catalog entries. */
+export type ListCiGateCatalog = (
+  repository: { owner: string; name: string },
+  signal?: AbortSignal,
+) => Promise<readonly CiGateCatalogEntry[]>
 
 /** Upload file bytes as a GitHub user attachment and return the CDN URL. */
 export type UploadUserAttachment = (
@@ -1246,6 +1254,7 @@ const makeGitHubApiService = (
   rerunWorkflowRunImpl?: RerunWorkflowRun,
   observeAutomatedReviewEvidenceImpl?: ObserveAutomatedReviewEvidence,
   uploadUserAttachmentImpl?: UploadUserAttachment,
+  listCiGateCatalogImpl?: ListCiGateCatalog,
 ): GitHubApiServiceShape => ({
   getAuthenticatedUserLogin: Effect.fn(
     "GitHubService.getAuthenticatedUserLogin",
@@ -2277,6 +2286,33 @@ const makeGitHubApiService = (
       )
     },
   ),
+  listCiGateCatalog: Effect.fn("GitHubService.listCiGateCatalog")(
+    function* (repository) {
+      if (listCiGateCatalogImpl === undefined) {
+        return yield* new GitHubRequestError({
+          message: `CI Gate catalog listing is not configured for ${repository.owner}/${repository.name}`,
+          retryable: false,
+        })
+      }
+      const listed = yield* githubRequest(
+        `Failed to list CI Gate Definitions for ${repository.owner}/${repository.name}`,
+        (signal) => listCiGateCatalogImpl(repository, signal),
+      ).pipe(Effect.result)
+      if (Result.isSuccess(listed)) {
+        return listed.success
+      }
+      const error = listed.failure
+      if (error._tag === "GitHubRequestError" && error.statusCode === 403) {
+        return yield* new GitHubRequestError({
+          message: `Failed to list CI Gate Definitions for ${repository.owner}/${repository.name}: Actions read required`,
+          statusCode: 403,
+          retryable: false,
+          cause: error,
+        })
+      }
+      return yield* error
+    },
+  ),
   ensureIssueCompletedWithSummary: Effect.fn(
     "GitHubService.ensureIssueCompletedWithSummary",
   )(function* (repository, issueNumber, workItemId, summaryMarkdown) {
@@ -2972,6 +3008,7 @@ export const makeGitHubService = (
   rerunWorkflowRunImpl?: RerunWorkflowRun,
   observeAutomatedReviewEvidenceImpl?: ObserveAutomatedReviewEvidence,
   uploadUserAttachmentImpl?: UploadUserAttachment,
+  listCiGateCatalogImpl?: ListCiGateCatalog,
 ): GitHubServiceShape => {
   const service = makeGitHubApiService(
     client,
@@ -2980,6 +3017,7 @@ export const makeGitHubService = (
     rerunWorkflowRunImpl,
     observeAutomatedReviewEvidenceImpl,
     uploadUserAttachmentImpl,
+    listCiGateCatalogImpl,
   )
   const adapt = adaptRepository(service)
   return {
@@ -3005,6 +3043,7 @@ export const makeGitHubService = (
     mergePullRequest: adapt(service.mergePullRequest),
     rerunWorkflowRun: adapt(service.rerunWorkflowRun),
     uploadUserAttachment: adapt(service.uploadUserAttachment),
+    listCiGateCatalog: adapt(service.listCiGateCatalog),
     ensureIssueCompletedWithSummary: adapt(
       service.ensureIssueCompletedWithSummary,
     ),
@@ -3184,6 +3223,84 @@ const makeRerunWorkflowRun =
           ? `Failed to rerun workflow run ${workflowRunId} for ${repository.owner}/${repository.name}: Actions write required`
           : `Failed to rerun workflow run ${workflowRunId} for ${repository.owner}/${repository.name}: ${response.statusText}: ${body}`,
     })
+  }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const mapActiveWorkflow = (value: unknown): CiGateCatalogEntry | null => {
+  if (!isRecord(value) || value.state !== "active") {
+    return null
+  }
+  const id = value.id
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) {
+    return null
+  }
+  const name = typeof value.name === "string" ? value.name.trim() : ""
+  if (name.length === 0) {
+    return null
+  }
+  const path =
+    typeof value.path === "string" && value.path.trim() !== ""
+      ? value.path.trim()
+      : null
+  return {
+    identity: String(id),
+    displayLabel: name,
+    kind: GITHUB_CI_GATE_KIND,
+    diagnosticMetadata: path,
+  }
+}
+
+const makeListCiGateCatalog =
+  (token: string, fetchImpl: GitHubFetch): ListCiGateCatalog =>
+  async (repository, signal) => {
+    const entries: CiGateCatalogEntry[] = []
+    for (let page = 1; ; page += 1) {
+      const url = new URL(
+        `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/workflows`,
+      )
+      url.searchParams.set("per_page", String(PAGE_SIZE))
+      url.searchParams.set("page", String(page))
+      const response = await fetchImpl(url, {
+        headers: githubRestHeaders(token),
+        signal,
+      })
+      if (!response.ok) {
+        const body = await response.text()
+        const throttle = githubThrottleFromResponse({
+          statusCode: response.status,
+          headers: response.headers,
+          message: `${response.statusText}: ${body}`,
+        })
+        if (throttle !== undefined) {
+          throw throttle
+        }
+        throw new GitHubHttpError({
+          statusCode: response.status,
+          headers: response.headers,
+          message:
+            response.status === 403
+              ? `Failed to list CI Gate Definitions for ${repository.owner}/${repository.name}: Actions read required`
+              : `Failed to list CI Gate Definitions for ${repository.owner}/${repository.name}: ${response.statusText}: ${body}`,
+        })
+      }
+      const payload: unknown = await response.json()
+      const workflows =
+        isRecord(payload) && Array.isArray(payload.workflows)
+          ? payload.workflows
+          : []
+      for (const workflow of workflows) {
+        const mapped = mapActiveWorkflow(workflow)
+        if (mapped !== null) {
+          entries.push(mapped)
+        }
+      }
+      if (workflows.length < PAGE_SIZE) {
+        break
+      }
+    }
+    return entries
   }
 
 const makeUploadUserAttachment =
@@ -3897,6 +4014,7 @@ export const makeGitHubServiceFromToken = (
     makeRerunWorkflowRun(token, observingFetch),
     makeObserveAutomatedReviewEvidence(token, observingFetch),
     makeUploadUserAttachment(token, observingFetch),
+    makeListCiGateCatalog(token, observingFetch),
   )
 }
 

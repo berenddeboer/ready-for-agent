@@ -112,6 +112,7 @@ export class InvalidRepositorySettingsError extends Schema.TaggedErrorClass<Inva
       "reviewModel",
       "reviewThinkingLevel",
       "guaranteedMinConcurrentAgentTurns",
+      "selectedCiGateDefinitionIdentities",
     ]),
     message: Schema.String,
   },

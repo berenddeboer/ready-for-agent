@@ -1877,6 +1877,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           rerunWorkflowRun: () => Effect.die("not used"),
           uploadUserAttachment: () => Effect.die("not used"),
           ensureIssueCompletedWithSummary: () => Effect.die("not used"),
+          listCiGateCatalog: () => Effect.succeed([]),
         } satisfies GitHubServiceShape
         const scope = yield* Effect.scope
         const keymaxxerContext = yield* Layer.buildWithScope(
@@ -1981,6 +1982,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           rerunWorkflowRun: () => Effect.die("not used"),
           uploadUserAttachment: () => Effect.die("not used"),
           ensureIssueCompletedWithSummary: () => Effect.die("not used"),
+          listCiGateCatalog: () => Effect.succeed([]),
         } satisfies GitHubServiceShape
         const scope = yield* Effect.scope
         const keymaxxerContext = yield* Layer.buildWithScope(

@@ -75,6 +75,7 @@ export const makeGitHubServiceTest = (
       options.uploadUserAttachment ??
       (() => Effect.succeed(TEST_USER_ATTACHMENT_URL)),
     ensureIssueCompletedWithSummary: () => Effect.void,
+    listCiGateCatalog: () => Effect.succeed([]),
     listReadyIssues: (repository) => {
       const fixture = fixturesByRepository.get(repositoryKey(repository))
       if (fixture === undefined) {

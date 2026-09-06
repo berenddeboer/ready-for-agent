@@ -92,6 +92,16 @@ describe("internal GitHub helper mode", () => {
     )
   })
 
+  test("spawns the CI Gate catalog helper from source", () => {
+    const spawnPlan = resolveGitHubHelperChildSpawn({
+      operation: "list-ci-gate-catalog",
+      args: ["github", "github.com", "acme/widgets"],
+      execPath: "/usr/bin/bun",
+      argv: ["/usr/bin/bun", "/repo/apps/harness/server.ts"],
+    })
+    expect(spawnPlan.args[2]).toMatch(/list-ci-gate-catalog\.ts$/)
+  })
+
   test("shell formatting quotes every argv token", () => {
     const command = formatGitHubHelperShellCommand({
       command: "/opt/ready-for-agent",

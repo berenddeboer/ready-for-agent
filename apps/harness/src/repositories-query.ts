@@ -39,6 +39,13 @@ export const decodeForge = (value: unknown): Forge => {
   }
 }
 
+export type CiGateDefinition = {
+  identity: string
+  displayLabel: string
+  kind: string
+  diagnosticMetadata: string | null
+}
+
 export type Repository = {
   id: string
   forge: Forge
@@ -56,6 +63,7 @@ export type Repository = {
   mergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
   includeAllIssueAuthors: boolean
   waitForReadyForReviewChecks: boolean
+  selectedCiGateDefinitions: readonly CiGateDefinition[]
   issuesReconciledAt: string | null
   blockingUnfinishedWorkItemCount: number
   credential: RepositoryCredential
@@ -86,6 +94,12 @@ export const repositoriesQuery = {
         mergePolicy: true,
         includeAllIssueAuthors: true,
         waitForReadyForReviewChecks: true,
+        selectedCiGateDefinitions: {
+          identity: true,
+          displayLabel: true,
+          kind: true,
+          diagnosticMetadata: true,
+        },
         issuesReconciledAt: true,
         blockingUnfinishedWorkItemCount: true,
       },

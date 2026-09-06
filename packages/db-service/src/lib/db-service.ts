@@ -20,6 +20,8 @@ import {
 import {
   type AddRepositoryInput,
   type BackendModelPrefs,
+  type CiGateDefinitionRecord,
+  CiGateDefinitionSqlRow,
   ConfigRecord,
   ConfigSqlRow,
   GuaranteedMinSumSqlRow,
@@ -270,6 +272,10 @@ const decodeRepositoryRows = (rows: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.Array(RepositorySqlRow))(rows).pipe(
     Effect.mapError(toSchemaDatabaseError),
   )
+const decodeCiGateDefinitionRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(CiGateDefinitionSqlRow))(rows).pipe(
+    Effect.mapError(toSchemaDatabaseError),
+  )
 const decodeConfigRows = (rows: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.Array(ConfigSqlRow))(rows).pipe(
     Effect.mapError(toSchemaDatabaseError),
@@ -451,6 +457,12 @@ export interface DbServiceShape {
     | RepositoryNotFoundError
     | GuaranteedMinAgentTurnsExceedsCapError
     | DatabaseError
+  >
+  readonly listCiGateDefinitions: (
+    repositoryId: string,
+  ) => Effect.Effect<
+    readonly CiGateDefinitionRecord[],
+    RepositoryNotFoundError | DatabaseError
   >
   readonly pauseRepository: (
     repositoryId: string,
@@ -1155,6 +1167,77 @@ export const DbServiceLive = Layer.effect(
       return repository
     })
 
+    const replaceCiGateDefinitions = Effect.fn(
+      "DbService.replaceCiGateDefinitions",
+    )(function* (input: {
+      readonly repositoryId: string
+      readonly definitions: readonly CiGateDefinitionRecord[]
+      readonly now: number
+    }) {
+      const normalized: CiGateDefinitionRecord[] = []
+      const seen = new Set<string>()
+      for (const definition of input.definitions) {
+        const identity = definition.identity.trim()
+        const displayLabel = definition.displayLabel.trim()
+        const kind = definition.kind.trim()
+        const diagnosticMetadata =
+          definition.diagnosticMetadata === null
+            ? null
+            : definition.diagnosticMetadata.trim() === ""
+              ? null
+              : definition.diagnosticMetadata.trim()
+        if (
+          identity.length === 0 ||
+          displayLabel.length === 0 ||
+          kind.length === 0
+        ) {
+          return yield* new InvalidRepositorySettingsError({
+            field: "selectedCiGateDefinitionIdentities",
+            message:
+              "Each CI Gate Definition needs a stable identity, display label, and kind",
+          })
+        }
+        if (seen.has(identity)) {
+          return yield* new InvalidRepositorySettingsError({
+            field: "selectedCiGateDefinitionIdentities",
+            message: `Duplicate CI Gate Definition identity: ${identity}`,
+          })
+        }
+        seen.add(identity)
+        normalized.push({
+          identity,
+          displayLabel,
+          kind,
+          diagnosticMetadata,
+        })
+      }
+      yield* sql
+        .unsafe(`DELETE FROM ci_gate_definition WHERE repository_id = ?`, [
+          input.repositoryId,
+        ])
+        .pipe(Effect.mapError(toDatabaseError))
+      for (const definition of normalized) {
+        yield* sql
+          .unsafe(
+            `INSERT INTO ci_gate_definition (
+               id, repository_id, identity, display_label, kind,
+               diagnostic_metadata, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              `cgd-${ulid()}`,
+              input.repositoryId,
+              definition.identity,
+              definition.displayLabel,
+              definition.kind,
+              definition.diagnosticMetadata,
+              input.now,
+              input.now,
+            ],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+      }
+    })
+
     const updateRepositorySettings = Effect.fn(
       "DbService.updateRepositorySettings",
     )(function* (input: UpdateRepositorySettingsInput) {
@@ -1352,7 +1435,7 @@ export const DbServiceLive = Layer.effect(
             // the (possibly empty) prefs for the new effective backend — which
             // we just wrote from this request's model fields.
             const backendModelPrefs = serializeBackendModelPrefsMap(prefsMap)
-            return yield* sql
+            const updatedRows = yield* sql
               .unsafe(
                 `UPDATE repository
              SET forge = ?,
@@ -1392,6 +1475,14 @@ export const DbServiceLive = Layer.effect(
                 ],
               )
               .pipe(Effect.mapError(toDatabaseError))
+            if (input.selectedCiGateDefinitions !== undefined) {
+              yield* replaceCiGateDefinitions({
+                repositoryId: input.repositoryId,
+                definitions: input.selectedCiGateDefinitions,
+                now,
+              })
+            }
+            return updatedRows
           }),
         )
         .pipe(
@@ -1498,6 +1589,25 @@ export const DbServiceLive = Layer.effect(
       const decoded = yield* decodeRepositoryRows(repositories)
       return decoded.map((row) => toRepositoryRecord(row))
     }).pipe(Effect.withSpan("DbService.listRepositories"))
+
+    const listCiGateDefinitions = Effect.fn("DbService.listCiGateDefinitions")(
+      function* (repositoryId: string) {
+        yield* ensureRepositoryExists(repositoryId)
+        const rows = yield* sql
+          .unsafe(
+            `SELECT identity,
+                    display_label,
+                    kind,
+                    diagnostic_metadata
+             FROM ci_gate_definition
+             WHERE repository_id = ?
+             ORDER BY display_label COLLATE NOCASE, identity`,
+            [repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+        return yield* decodeCiGateDefinitionRows(rows)
+      },
+    )
 
     const ensureRepositoryExists = Effect.fn(
       "DbService.ensureRepositoryExists",
@@ -1959,6 +2069,7 @@ export const DbServiceLive = Layer.effect(
       listSelectedOrInUseBackendIds,
       addRepository,
       updateRepositorySettings,
+      listCiGateDefinitions,
       pauseRepository,
       unpauseRepository,
       listRepositories,
