@@ -28,6 +28,7 @@ import { GraphqlApi } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
 import { StartHarness } from "./services/start-harness.ts"
 import { Tmux } from "./services/tmux.ts"
+import { skillsCommand } from "./skills/command.ts"
 
 const pathArg = Argument.string("path").pipe(
   Argument.withDescription("Path to a local git repository"),
@@ -589,7 +590,7 @@ export const cli = Command.make(
     startHarnessWorkflow(noOpen, Option.getOrUndefined(host)),
 ).pipe(
   Command.withDescription(
-    "Ready for Agent operator binary (start Harness, add repositories, intake, retry, Kanban status, jump)",
+    "Ready for Agent operator binary (start Harness, add repositories, intake, retry, Kanban status, jump, skills)",
   ),
   Command.withSubcommands([
     startCommand,
@@ -599,5 +600,6 @@ export const cli = Command.make(
     retryCommand,
     statusCommand,
     jumpCommand,
+    skillsCommand,
   ]),
 )

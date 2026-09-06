@@ -164,6 +164,44 @@ export const STEP_RUN_REASON = {
 
 export type StepRunReasonCode = (typeof STEP_RUN_REASON)[keyof typeof STEP_RUN_REASON]
 
+export const STEP_RUN_REASON_DEFINITIONS = {
+  abandoned: "The Step Run was cancelled because the operator abandoned the Work Item.",
+  agent_backend_auth_rejected: "An Agent Turn failed because the backend provider rejected credentials as missing, expired, or invalid.",
+  agent_backend_unavailable: "An agent-dependent step is blocked because the Active Agent Backend is unavailable.",
+  agent_fallback: "A conditionally agent-using step completed via one repair Agent Turn after the native path did not establish the postcondition.",
+  agent_model_not_in_catalog: "An agent-dependent step is blocked because the resolved Agent Model is absent from the Agent Backend's current Ready catalog. Rejected before the backend CLI is spawned.",
+  build_model_not_configured: "An agent-dependent step is blocked because no build Agent Model is configured.",
+  commit_hooks: "Mid-run: Commit is running the native git commit attempt, including repository hooks.",
+  commit_repair: "Mid-run: Commit is repairing a failed native commit via Agent Repair Fallback.",
+  copy_generation: "Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt.",
+  forge_auth_rejected: "The Step Run ended because the Forge rejected credentials or permission with HTTP 401 or 403. Deterministic; not retryable and does not consume Autonomous Retry Budget.",
+  github_throttled: "Watch PR Status Checks stopped cleanly at GitHub's explicit retry time.",
+  "green-no-review-evidence": "A green-only Status Check Handoff completed without an Agent Turn because harness-owned GitHub observation found no positive automated-review evidence.",
+  handler_defect: "The Step Run ended because the Lifecycle Step handler threw a defect rather than a typed failure.",
+  handler_failed: "The Step Run ended because the Lifecycle Step handler failed with a typed or unexpected error.",
+  interrupted: "The Step Run was stopped before completion by an operator or harness interrupt.",
+  issue_closed_pr_closed_unmerged: "A successful Step Run stopped because Issue revalidation found the Issue closed or missing and the Work Item PR was closed without merge. The Work Item is paused for an operator Start, Abandon, or Reset decision.",
+  issue_closed_while_pr_open: "A successful Step Run stopped because Issue revalidation found the Issue closed or missing while a Work Item PR is still open or PR status was indeterminate. The Work Item is paused for operator Start after reopen.",
+  merge_revalidation: "A successful Merge PR run that returned to Watch PR Status Checks for fresh validation.",
+  missing_successful_checks: "Autonomous merge stopped because the Forge reported no successful status-check aggregate by the deadline.",
+  native: "A conditionally agent-using step completed via the harness-owned native path with no Agent Turn.",
+  paused: "The Step Run stopped because the Work Item was paused.",
+  pr_merged: "Confirmed Work Item PR merge outcome, used when a Step Run is cancelled because the PR merged before it finished, or a successful Step Run advances to local cleanup after Issue revalidation finds the Issue closed or missing and the owned PR already merged.",
+  pr_status_checks_unresolved: "Watch PR Status Checks stopped because the status-check observation did not resolve.",
+  reset: "The Step Run was cancelled because the operator reset the Work Item.",
+  review_accepted: "A successful Review that accepted low-severity remediation without a full rerun.",
+  review_applying_findings: "Mid-run: Review is applying findings with the build model.",
+  review_assessing_rerun: "Mid-run: Review is assessing whether low-severity remediation needs a rerun.",
+  review_cleared: "A successful Review that cleared low or medium findings without changes.",
+  review_deferred: "A successful Review that deferred findings and advanced to Commit.",
+  review_pre_commit: "Mid-run: Review is re-running Pre-Commit after FIXED before re-review.",
+  review_reviewing: "Mid-run: Review is running the reviewing Agent Turn.",
+  thinking_level_not_in_catalog: "An agent-dependent step is blocked because the resolved Thinking Level is not advertised by the governing Agent Model's current catalog entry. Rejected before the backend CLI is spawned.",
+  timeout: "The Step Run ended because the Lifecycle Step exceeded its configured maximum duration.",
+  waiting_for_agent_turn: "Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns.",
+  worker_restarted: "The prior harness or job-worker process ended while the Step Run was still Running.",
+} as const satisfies Record<StepRunReason, string>
+
 export type LifecycleStepPropertyMap<Value> = {
   readonly [Step in OperationalLifecycleStep]: Value
 }

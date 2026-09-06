@@ -21,6 +21,7 @@ const PUBLIC_COMMANDS = [
   "retry",
   "status",
   "jump",
+  "skills",
 ] as const
 
 const INTERNAL_TOKENS = [
@@ -543,6 +544,7 @@ describe("operator CLI Usage contract", () => {
       retry: "write",
       status: "read",
       jump: "destructive",
+      skills: "read",
     })
 
     expect(spec.cmd.subcommands.add?.complete?.path?.type_).toBe("dir")

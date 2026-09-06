@@ -18,6 +18,7 @@ export type FiniteCommandName =
   | "intake"
   | "retry"
   | "status"
+  | "skills"
 
 /** Canonical Repository identity shared across finite CLI JSON documents. */
 export type CanonicalRepositoryIdentity = {
@@ -347,6 +348,7 @@ const FiniteCommandNameSchema = Schema.Literals([
   "intake",
   "retry",
   "status",
+  "skills",
 ])
 
 /**

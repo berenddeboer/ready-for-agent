@@ -71,6 +71,17 @@ export default defineConfig({
         return undefined
       },
     },
+    {
+      name: "markdown-as-text",
+      enforce: "pre",
+      load(id) {
+        const filePath = id.split("?")[0]?.replaceAll("\\", "/")
+        if (filePath === undefined || !filePath.endsWith(".md")) {
+          return undefined
+        }
+        return `export default ${JSON.stringify(readFileSync(filePath, "utf8"))}`
+      },
+    },
   ],
   resolve: {
     alias: workspacePackageAlias(),

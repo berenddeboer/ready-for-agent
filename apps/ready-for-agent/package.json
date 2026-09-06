@@ -38,6 +38,7 @@
     "@ready-for-agent/gitlab-service": "workspace:*",
     "@ready-for-agent/graphql-client": "workspace:*",
     "@ready-for-agent/keymaxxer-service": "workspace:*",
+    "@ready-for-agent/lifecycle-model": "workspace:*",
     "@ready-for-agent/local-git": "workspace:*",
     "effect": "^4.0.0-beta.97"
   },

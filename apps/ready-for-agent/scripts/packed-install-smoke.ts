@@ -500,6 +500,128 @@ try {
   }
   log("usage contract ok")
 
+  log("checking skills list/get via installed command")
+  const skillsList = spawnSync(installedBin, ["skills", "list", "--json"], {
+    cwd: runCwd,
+    env: productEnv,
+    encoding: "utf8",
+  })
+  stdoutLog += skillsList.stdout ?? ""
+  stderrLog += skillsList.stderr ?? ""
+  if (skillsList.status !== 0) {
+    fail(
+      `skills list --json failed: ${skillsList.stderr ?? skillsList.stdout ?? ""}`,
+    )
+  }
+  if (skillsList.stderr !== "") {
+    fail(`skills list --json wrote to stderr: ${skillsList.stderr}`)
+  }
+  let skillsDocument: {
+    schemaVersion?: unknown
+    command?: unknown
+    version?: unknown
+    skills?: { id?: unknown }[]
+  }
+  try {
+    skillsDocument = JSON.parse(skillsList.stdout) as typeof skillsDocument
+  } catch {
+    fail("skills list --json stdout was not JSON")
+  }
+  if (skillsDocument.schemaVersion !== 1) {
+    fail("skills list --json missing schemaVersion 1")
+  }
+  if (skillsDocument.command !== "skills") {
+    fail("skills list --json command is not skills")
+  }
+  if (
+    typeof skillsDocument.version !== "string" ||
+    skillsDocument.version === ""
+  ) {
+    fail("skills list --json missing CLI version")
+  }
+  if (!skillsDocument.version.includes(packageVersion)) {
+    fail(
+      `skills list version ${JSON.stringify(skillsDocument.version)} does not include packed version ${packageVersion}`,
+    )
+  }
+  const listedIds = (skillsDocument.skills ?? [])
+    .map((skill) => skill.id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0)
+  if (!listedIds.includes("core")) {
+    fail("skills list --json did not include core")
+  }
+  for (const id of listedIds) {
+    const skillsGet = spawnSync(installedBin, ["skills", "get", id], {
+      cwd: runCwd,
+      env: productEnv,
+      encoding: "utf8",
+    })
+    stdoutLog += skillsGet.stdout ?? ""
+    stderrLog += skillsGet.stderr ?? ""
+    if (skillsGet.status !== 0) {
+      fail(
+        `skills get ${id} failed: ${skillsGet.stderr ?? skillsGet.stdout ?? ""}`,
+      )
+    }
+    if (skillsGet.stderr !== "") {
+      fail(`skills get ${id} wrote to stderr: ${skillsGet.stderr}`)
+    }
+    if (skillsGet.stdout.trim().length === 0) {
+      fail(`skills get ${id} wrote empty Markdown`)
+    }
+  }
+  const skillsGetJson = spawnSync(
+    installedBin,
+    ["skills", "get", "core", "--json"],
+    {
+      cwd: runCwd,
+      env: productEnv,
+      encoding: "utf8",
+    },
+  )
+  stdoutLog += skillsGetJson.stdout ?? ""
+  stderrLog += skillsGetJson.stderr ?? ""
+  if (skillsGetJson.status !== 0) {
+    fail(
+      `skills get core --json failed: ${skillsGetJson.stderr ?? skillsGetJson.stdout ?? ""}`,
+    )
+  }
+  let getDocument: { skill?: { id?: unknown; content?: unknown } }
+  try {
+    getDocument = JSON.parse(skillsGetJson.stdout) as typeof getDocument
+  } catch {
+    fail("skills get core --json stdout was not JSON")
+  }
+  if (getDocument.skill?.id !== "core") {
+    fail("skills get core --json did not wrap core")
+  }
+  if (
+    typeof getDocument.skill?.content !== "string" ||
+    !getDocument.skill.content.includes("ready-for-agent skills get reporting")
+  ) {
+    fail("skills get core --json content did not route to reporting")
+  }
+  const unknownSkill = spawnSync(installedBin, ["skills", "get", "bootstrap"], {
+    cwd: runCwd,
+    env: productEnv,
+    encoding: "utf8",
+  })
+  stdoutLog += unknownSkill.stdout ?? ""
+  stderrLog += unknownSkill.stderr ?? ""
+  if (unknownSkill.status === 0) {
+    fail("skills get bootstrap should fail")
+  }
+  if (unknownSkill.stdout !== "") {
+    fail("skills get bootstrap wrote to stdout")
+  }
+  if (!unknownSkill.stderr.includes("SKILL_NOT_FOUND")) {
+    fail("skills get bootstrap did not emit SKILL_NOT_FOUND")
+  }
+  if (existsSync(databasePath)) {
+    fail("skills discovery must not create the Harness database")
+  }
+  log("skills discovery ok")
+
   const port = productEnv.PORT as string
   const base = `http://127.0.0.1:${port}`
 

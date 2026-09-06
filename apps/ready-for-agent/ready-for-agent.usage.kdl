@@ -6,7 +6,7 @@ name "Ready for Agent"
 bin "ready-for-agent"
 license "MIT"
 repository "https://github.com/berenddeboer/ready-for-agent"
-about "Ready for Agent operator binary (start Harness, add repositories, intake, retry, Kanban status, jump). Default invocation is write (same as start)."
+about "Ready for Agent operator binary (start Harness, add repositories, intake, retry, Kanban status, jump, skills). Default invocation is write (same as start)."
 long_about #"""
 Default invocation (`ready-for-agent`) starts the Harness. It is classified write, matching `start`.
 
@@ -19,7 +19,7 @@ HOST
   Listen host for the default start and `start`. The --host flag wins when given. Bare --host binds all IPv4 interfaces (0.0.0.0).
 
 READY_FOR_AGENT_GRAPHQL_URL
-  GraphQL endpoint for finite commands (add, candidates, intake, retry, status, jump). Defaults to http://127.0.0.1:6056/graphql. Does not start the Harness.
+  GraphQL endpoint for finite commands (add, candidates, intake, retry, status, jump). Defaults to http://127.0.0.1:6056/graphql. Does not start the Harness. `skills` is offline and does not use this variable.
 """#
 
 flag "-h --help" help="Show help information" global=#true
@@ -90,4 +90,21 @@ cmd "status" help="Print the current six-lane Kanban status as versioned JSON (o
 cmd "jump" help="Continue a Work Item Session (Interactive Session Continuation)" effect="destructive" {
   arg "<session-id>" help="Opaque backend Session ID to continue"
   example "ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd" header="Jump" help="Continue the Work Item Session in the current terminal or tmux"
+}
+
+cmd "skills" help="Discover version-matched agent skills bundled with this CLI (offline; aliases skills list)" effect="read" {
+  flag "--json" help="Print a versioned JSON document"
+  example "ready-for-agent skills" header="List skills" help="List bundled skills (alias for skills list)"
+  example "ready-for-agent skills list --json" header="List skills as JSON" help="Print versioned skill discovery JSON"
+  cmd "list" help="List bundled agent skills matching this CLI version" effect="read" {
+    flag "--json" help="Print a versioned JSON document"
+    example "ready-for-agent skills list" header="List skills" help="List bundled skills as Markdown"
+    example "ready-for-agent skills list --json" header="List skills as JSON" help="Print versioned skill discovery JSON"
+  }
+  cmd "get" help="Print one bundled skill as Markdown (or a versioned JSON document with --json)" effect="read" {
+    arg "<skill-id>" help="Stable skill identifier from `skills list` (core, reporting, operating, recovery, lifecycle)"
+    flag "--json" help="Print a versioned JSON document wrapping the same Markdown"
+    example "ready-for-agent skills get core" header="Get core skill" help="Print core operational guidance as Markdown"
+    example "ready-for-agent skills get core --json" header="Get core skill as JSON" help="Wrap core guidance in a versioned JSON document"
+  }
 }

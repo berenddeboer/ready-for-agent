@@ -29,6 +29,7 @@ const PUBLIC_COMMANDS = [
   "retry",
   "status",
   "jump",
+  "skills",
 ] as const
 
 const REPOSITORY_SELECTOR_FORMS = [
@@ -237,6 +238,11 @@ describe("operator CLI command-reference documentation", () => {
     expect(managed).toContain(
       "```\nready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd\n```",
     )
+    expect(managed).toContain("```\nready-for-agent skills\n```")
+    expect(managed).toContain("```\nready-for-agent skills list --json\n```")
+    expect(managed).toContain("```\nready-for-agent skills get core\n```")
+    expect(managed).toContain("#### `<skill-id>`")
+    expect(managed).toContain("#### `--json`")
 
     expect(managed).toContain("NO_BROWSER")
     expect(managed).toContain("HOST")

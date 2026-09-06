@@ -3,6 +3,11 @@ declare module "*.kdl" {
   export default content
 }
 
+declare module "*.md" {
+  const content: string
+  export default content
+}
+
 declare module "*.html" {
   const path: string
   export default path
