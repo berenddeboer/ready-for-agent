@@ -5,6 +5,7 @@ import {
   LIFECYCLE_TRANSITIONS,
   STEP_RUN_REASON,
   STEP_RUN_REASONS,
+  STEP_RUN_REASON_DEFINITIONS,
   StepRunReason,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -46,6 +47,15 @@ describe("generated STEP_RUN_REASON", () => {
     expect(Object.values(STEP_RUN_REASON).toSorted()).toEqual(
       ontologyReasonNotations(),
     )
+  })
+
+  it("exports a definition for every Step Run reason notation", () => {
+    expect(Object.keys(STEP_RUN_REASON_DEFINITIONS).toSorted()).toEqual(
+      ontologyReasonNotations(),
+    )
+    for (const notation of STEP_RUN_REASONS) {
+      expect(STEP_RUN_REASON_DEFINITIONS[notation].length).toBeGreaterThan(0)
+    }
   })
 
   it("keeps the camelCase accessors used by the harness", () => {

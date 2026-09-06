@@ -271,6 +271,81 @@ describe("compiled host binary ambient-auth smoke", () => {
     )
   })
 
+  test("serves bundled skills without starting the Harness", () => {
+    const env: NodeJS.ProcessEnv = {
+      HOME: process.env.HOME,
+      PATH: restrictedBin,
+      PORT: String(port),
+      SQLITE_DATABASE_PATH: databasePath,
+      KEYMAXXER_ENABLED: "false",
+      NO_BROWSER: "1",
+    }
+
+    const listed = Bun.spawnSync([binaryPath, "skills", "list", "--json"], {
+      cwd: runCwd,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(listed.exitCode).toBe(0)
+    expect(new TextDecoder().decode(listed.stderr)).toBe("")
+    const document = JSON.parse(new TextDecoder().decode(listed.stdout)) as {
+      schemaVersion: number
+      command: string
+      version: string
+      skills: { id: string }[]
+    }
+    expect(document.schemaVersion).toBe(1)
+    expect(document.command).toBe("skills")
+    expect(document.version).toContain(packageVersion)
+    const listedIds = document.skills.map((skill) => skill.id)
+    expect(listedIds).toContain("core")
+    expect(existsSync(databasePath)).toBe(false)
+
+    for (const id of listedIds) {
+      const got = Bun.spawnSync([binaryPath, "skills", "get", id], {
+        cwd: runCwd,
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      expect(got.exitCode, id).toBe(0)
+      expect(new TextDecoder().decode(got.stderr), id).toBe("")
+      expect(new TextDecoder().decode(got.stdout).length, id).toBeGreaterThan(0)
+    }
+
+    const gotJson = Bun.spawnSync(
+      [binaryPath, "skills", "get", "core", "--json"],
+      {
+        cwd: runCwd,
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    )
+    expect(gotJson.exitCode).toBe(0)
+    const getDocument = JSON.parse(
+      new TextDecoder().decode(gotJson.stdout),
+    ) as { skill?: { id?: string; content?: string } }
+    expect(getDocument.skill?.id).toBe("core")
+    expect(getDocument.skill?.content).toContain(
+      "ready-for-agent skills get reporting",
+    )
+
+    const unknown = Bun.spawnSync([binaryPath, "skills", "get", "bootstrap"], {
+      cwd: runCwd,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    expect(unknown.exitCode).not.toBe(0)
+    expect(new TextDecoder().decode(unknown.stdout)).toBe("")
+    expect(new TextDecoder().decode(unknown.stderr)).toContain(
+      "SKILL_NOT_FOUND",
+    )
+    expect(existsSync(databasePath)).toBe(false)
+  })
+
   test("starts UI, assets, GraphQL, migrates, restarts, reports version, shuts down", async () => {
     const env: NodeJS.ProcessEnv = {
       HOME: process.env.HOME,

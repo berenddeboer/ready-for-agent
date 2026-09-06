@@ -510,6 +510,17 @@ ${values
 } as const satisfies Record<string, StepRunReason>
 
 export type StepRunReasonCode = (typeof STEP_RUN_REASON)[keyof typeof STEP_RUN_REASON]
+
+export const STEP_RUN_REASON_DEFINITIONS = {
+${values
+  .map((value) => {
+    const key = /^[A-Za-z_][A-Za-z0-9_]*$/.test(value.notation)
+      ? value.notation
+      : JSON.stringify(value.notation)
+    return `  ${key}: ${JSON.stringify(value.definition)},`
+  })
+  .join("\n")}
+} as const satisfies Record<StepRunReason, string>
 `
 
 interface GeneratedTransition {

@@ -39,6 +39,7 @@ const PUBLIC_COMMANDS = [
   "retry",
   "status",
   "jump",
+  "skills",
 ] as const
 
 const EFFECT_GLOBAL_FLAGS = [
@@ -208,6 +209,23 @@ describe("Usage-generated operator CLI completions", () => {
       expect(retry).toContain(flag)
     }
     assertNoForbiddenTokens(retry.join("\n"))
+
+    const skills = completeWordFromUsage(["ready-for-agent", "skills", ""])
+    expect(skills.sort()).toEqual(["get", "list"])
+    const skillsFlags = completeWordFromUsage([
+      "ready-for-agent",
+      "skills",
+      "--",
+    ])
+    expect(skillsFlags).toContain("--json")
+    const skillsGetFlags = completeWordFromUsage([
+      "ready-for-agent",
+      "skills",
+      "get",
+      "--",
+    ])
+    expect(skillsGetFlags).toContain("--json")
+    assertNoForbiddenTokens(skills.join("\n"))
   })
 
   test("complete-word via --usage offers --log-level and --completions choices", () => {

@@ -8,79 +8,86 @@ import {
 if (isExactUsageMetadataInvocation(process.argv.slice(2))) {
   process.stdout.write(usageContractText())
 } else {
-  const { isInternalGitHubHelperMode, runGitHubHelperProcess } = await import(
-    "@ready-for-agent/github-service"
+  const { isSkillsInvocation, runSkillsProcess } = await import(
+    "./skills/run.ts"
   )
-  const { isInternalGitLabHelperMode, runGitLabHelperProcess } = await import(
-    "@ready-for-agent/gitlab-service"
-  )
-  const { isInternalAzureDevOpsHelperMode, runAzureDevOpsHelperProcess } =
-    await import("@ready-for-agent/azure-devops-service")
-  const { isInternalKeymaxxerSidecarMode, runKeymaxxerSidecarProcess } =
-    await import("@ready-for-agent/keymaxxer-service")
-  const { READY_FOR_AGENT_VERSION } = await import("./generated/version.ts")
-
-  if (isInternalKeymaxxerSidecarMode(process.argv)) {
-    await runKeymaxxerSidecarProcess()
-  } else if (isInternalGitHubHelperMode(process.argv)) {
-    runGitHubHelperProcess()
-  } else if (isInternalGitLabHelperMode(process.argv)) {
-    runGitLabHelperProcess()
-  } else if (isInternalAzureDevOpsHelperMode(process.argv)) {
-    runAzureDevOpsHelperProcess()
+  if (isSkillsInvocation(process.argv.slice(2))) {
+    runSkillsProcess(process.argv.slice(2))
   } else {
-    const { BunRuntime, BunServices } = await import("@effect/platform-bun")
-    const { Effect, Layer } = await import("effect")
-    const { Command } = await import("effect/unstable/cli")
-    const { expandBareHostFlag } = await import(
-      "../../harness/src/server/listen-host.ts"
+    const { isInternalGitHubHelperMode, runGitHubHelperProcess } = await import(
+      "@ready-for-agent/github-service"
     )
-    const { cli } = await import("./cli.ts")
-    const { ApplicationConfig } = await import(
-      "./services/application-config.ts"
+    const { isInternalGitLabHelperMode, runGitLabHelperProcess } = await import(
+      "@ready-for-agent/gitlab-service"
     )
-    const { ExecutablePath } = await import("./services/executable-path.ts")
-    const { GraphqlApi } = await import("./services/graphql-api.ts")
-    const { LocalGit } = await import("./services/local-git.ts")
-    const { StartHarness } = await import("./services/start-harness.ts")
-    const { DirectTerminal } = await import("./services/direct-terminal.ts")
-    const { Tmux } = await import("./services/tmux.ts")
+    const { isInternalAzureDevOpsHelperMode, runAzureDevOpsHelperProcess } =
+      await import("@ready-for-agent/azure-devops-service")
+    const { isInternalKeymaxxerSidecarMode, runKeymaxxerSidecarProcess } =
+      await import("@ready-for-agent/keymaxxer-service")
+    const { READY_FOR_AGENT_VERSION } = await import("./generated/version.ts")
 
-    const MainLive = Layer.mergeAll(
-      LocalGit.layer,
-      GraphqlApi.layer,
-      StartHarness.layer,
-      Tmux.layer,
-      DirectTerminal.layer,
-      ExecutablePath.layer,
-    ).pipe(
-      Layer.provideMerge(ApplicationConfig.layer),
-      Layer.provideMerge(BunServices.layer),
-    )
+    if (isInternalKeymaxxerSidecarMode(process.argv)) {
+      await runKeymaxxerSidecarProcess()
+    } else if (isInternalGitHubHelperMode(process.argv)) {
+      runGitHubHelperProcess()
+    } else if (isInternalGitLabHelperMode(process.argv)) {
+      runGitLabHelperProcess()
+    } else if (isInternalAzureDevOpsHelperMode(process.argv)) {
+      runAzureDevOpsHelperProcess()
+    } else {
+      const { BunRuntime, BunServices } = await import("@effect/platform-bun")
+      const { Effect, Layer } = await import("effect")
+      const { Command } = await import("effect/unstable/cli")
+      const { expandBareHostFlag } = await import(
+        "../../harness/src/server/listen-host.ts"
+      )
+      const { cli } = await import("./cli.ts")
+      const { ApplicationConfig } = await import(
+        "./services/application-config.ts"
+      )
+      const { ExecutablePath } = await import("./services/executable-path.ts")
+      const { GraphqlApi } = await import("./services/graphql-api.ts")
+      const { LocalGit } = await import("./services/local-git.ts")
+      const { StartHarness } = await import("./services/start-harness.ts")
+      const { DirectTerminal } = await import("./services/direct-terminal.ts")
+      const { Tmux } = await import("./services/tmux.ts")
 
-    // Expand bare `--host` → `--host 0.0.0.0` before Effect's string flag parser.
-    const args = expandBareHostFlag(process.argv.slice(2))
+      const MainLive = Layer.mergeAll(
+        LocalGit.layer,
+        GraphqlApi.layer,
+        StartHarness.layer,
+        Tmux.layer,
+        DirectTerminal.layer,
+        ExecutablePath.layer,
+      ).pipe(
+        Layer.provideMerge(ApplicationConfig.layer),
+        Layer.provideMerge(BunServices.layer),
+      )
 
-    const { encodeCompactJson } = await import("./cli-json.ts")
+      // Expand bare `--host` → `--host 0.0.0.0` before Effect's string flag parser.
+      const args = expandBareHostFlag(process.argv.slice(2))
 
-    const program = Command.runWith(cli, {
-      version: READY_FOR_AGENT_VERSION,
-    })(args).pipe(
-      Effect.provide(MainLive),
-      // FiniteCommandFailed is marked [Runtime.errorReported]=false so runMain
-      // skips Cause pretty-print; emit one versioned JSON error on stderr.
-      Effect.tapErrorTag("FiniteCommandFailed", (error) =>
-        Effect.sync(() => {
-          console.error(encodeCompactJson(error.document))
-        }),
-      ),
-      Effect.tapErrorTag("JumpFailed", (error) =>
-        Effect.sync(() => {
-          console.error(error.message)
-        }),
-      ),
-    )
+      const { encodeCompactJson } = await import("./cli-json.ts")
 
-    BunRuntime.runMain(program)
+      const program = Command.runWith(cli, {
+        version: READY_FOR_AGENT_VERSION,
+      })(args).pipe(
+        Effect.provide(MainLive),
+        // FiniteCommandFailed is marked [Runtime.errorReported]=false so runMain
+        // skips Cause pretty-print; emit one versioned JSON error on stderr.
+        Effect.tapErrorTag("FiniteCommandFailed", (error) =>
+          Effect.sync(() => {
+            console.error(encodeCompactJson(error.document))
+          }),
+        ),
+        Effect.tapErrorTag("JumpFailed", (error) =>
+          Effect.sync(() => {
+            console.error(error.message)
+          }),
+        ),
+      )
+
+      BunRuntime.runMain(program)
+    }
   }
 }

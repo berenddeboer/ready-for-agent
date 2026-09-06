@@ -1865,7 +1865,7 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
-  it("binary help lists start, add, candidates, intake, retry, status, jump, --no-open, and --host", () => {
+  it("binary help lists start, add, candidates, intake, retry, status, jump, skills, --no-open, and --host", () => {
     const result = spawnSync(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", "--help"],
@@ -1884,6 +1884,7 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("retry")
     expect(output).toContain("status")
     expect(output).toContain("jump")
+    expect(output).toContain("skills")
     expect(output).not.toContain("remove-github-token")
     expect(output).toContain("no-open")
     expect(output).toContain("host")

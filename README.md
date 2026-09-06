@@ -319,7 +319,7 @@ HOST
   Listen host for the default start and `start`. The --host flag wins when given. Bare --host binds all IPv4 interfaces (0.0.0.0).
 
 READY_FOR_AGENT_GRAPHQL_URL
-  GraphQL endpoint for finite commands (add, candidates, intake, retry, status, jump). Defaults to http://127.0.0.1:6056/graphql. Does not start the Harness.
+  GraphQL endpoint for finite commands (add, candidates, intake, retry, status, jump). Defaults to http://127.0.0.1:6056/graphql. Does not start the Harness. `skills` is offline and does not use this variable.
 
 
 ## Examples
@@ -656,6 +656,105 @@ Continue the Work Item Session in the current terminal or tmux
 
 ```
 ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd
+```
+
+## `ready-for-agent skills`
+
+- **Usage**: `ready-for-agent skills [--json] <SUBCOMMAND>`
+- **Effect**: read-only
+
+Discover version-matched agent skills bundled with this CLI (offline; aliases skills list)
+
+### Flags
+
+#### `--json`
+
+Print a versioned JSON document
+
+### Examples
+
+**List skills**
+
+List bundled skills (alias for skills list)
+
+```
+ready-for-agent skills
+```
+
+**List skills as JSON**
+
+Print versioned skill discovery JSON
+
+```
+ready-for-agent skills list --json
+```
+
+## `ready-for-agent skills list`
+
+- **Usage**: `ready-for-agent skills list [--json]`
+- **Effect**: read-only
+
+List bundled agent skills matching this CLI version
+
+### Flags
+
+#### `--json`
+
+Print a versioned JSON document
+
+### Examples
+
+**List skills**
+
+List bundled skills as Markdown
+
+```
+ready-for-agent skills list
+```
+
+**List skills as JSON**
+
+Print versioned skill discovery JSON
+
+```
+ready-for-agent skills list --json
+```
+
+## `ready-for-agent skills get`
+
+- **Usage**: `ready-for-agent skills get [--json] <skill-id>`
+- **Effect**: read-only
+
+Print one bundled skill as Markdown (or a versioned JSON document with --json)
+
+### Arguments
+
+#### `<skill-id>`
+
+Stable skill identifier from `skills list` (core, reporting, operating, recovery, lifecycle)
+
+### Flags
+
+#### `--json`
+
+Print a versioned JSON document wrapping the same Markdown
+
+### Examples
+
+**Get core skill**
+
+Print core operational guidance as Markdown
+
+```
+ready-for-agent skills get core
+```
+
+**Get core skill as JSON**
+
+Wrap core guidance in a versioned JSON document
+
+```
+ready-for-agent skills get core --json
 ```
 <!-- usage:end -->
 
