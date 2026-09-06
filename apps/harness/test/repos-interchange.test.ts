@@ -112,6 +112,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "Review model",
       "Wait for ready checks",
       "Merge Policy",
+      "CI Gate",
     ])
 
     const ui = uiSource()

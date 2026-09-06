@@ -509,6 +509,40 @@ export const autonomousRetry = snakeCase.table(
 )
 
 /**
+ * Repository-owned CI Gate Definition selection. Empty means the Repository
+ * CI Gate is disabled. Identity is Forge-native and unique per Repository.
+ * See xplain: type ci gate definition "cgd"
+ */
+export const ciGateDefinition = snakeCase.table(
+  "ci_gate_definition",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `cgd-${ulid()}`),
+    repositoryId: text()
+      .notNull()
+      .references(() => repository.id, { onDelete: "cascade" }),
+    identity: text().notNull(),
+    displayLabel: text().notNull(),
+    kind: text().notNull(),
+    diagnosticMetadata: text(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("ci_gate_definition_repository_id_identity_uidx").on(
+      t.repositoryId,
+      t.identity,
+    ),
+    index("ci_gate_definition_repository_id_idx").on(t.repositoryId),
+  ],
+)
+
+/**
  * Durable autonomous whole-review workflow rerun permits for a Work Item.
  * Scoped by PR head SHA and workflow run identity; initial execution is free.
  * See xplain: type automated review rerun "arr"

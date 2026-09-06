@@ -171,6 +171,7 @@ const stubGitHub = (
         "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
       ),
     ensureIssueCompletedWithSummary: () => Effect.void,
+    listCiGateCatalog: () => Effect.succeed([]),
     ...overrides,
   } satisfies GitHubServiceShape)
 

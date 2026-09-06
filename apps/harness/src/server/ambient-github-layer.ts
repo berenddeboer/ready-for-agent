@@ -397,6 +397,15 @@ export const ambientGitHubLayer = (options: {
                 service.listReadyIssues(repository, operationOptions),
             ),
         ),
+        listCiGateCatalog: Effect.fn("AmbientGitHub.listCiGateCatalog")(
+          (repository, operationOptions?: GitHubOperationOptions) =>
+            authenticated(
+              operationOptions?.origin ?? "operator",
+              repository,
+              (service) =>
+                service.listCiGateCatalog(repository, operationOptions),
+            ),
+        ),
       } satisfies GitHubServiceShape
     }),
   )

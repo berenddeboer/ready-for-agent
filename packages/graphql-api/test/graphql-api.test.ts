@@ -25,6 +25,7 @@ import {
 } from "@ready-for-agent/db-service/test"
 import {
   GitHubRepositoryUnavailableError,
+  GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
   GitHubThrottledError,
@@ -231,6 +232,7 @@ const defaultGithub: GitHubServiceShape = {
       "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
     ),
   ensureIssueCompletedWithSummary: () => Effect.void,
+  listCiGateCatalog: () => Effect.succeed([]),
   listReadyIssues: () => Effect.succeed([]),
 }
 
@@ -12914,5 +12916,346 @@ describe("GraphQL API", () => {
         }),
       ],
     })
+  })
+
+  test("ciGateCatalog returns live GitHub workflows without GitHub-specific types", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        listCiGateCatalog: () =>
+          Effect.succeed([
+            {
+              identity: "161335",
+              displayLabel: "CI",
+              kind: "workflow",
+              diagnosticMetadata: ".github/workflows/ci.yml",
+            },
+          ]),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          ciGateCatalog(repositoryId: "${repository.id}") {
+            error
+            definitions { identity displayLabel kind diagnosticMetadata }
+          }
+        }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        ciGateCatalog: {
+          error: null,
+          definitions: [
+            {
+              identity: "161335",
+              displayLabel: "CI",
+              kind: "workflow",
+              diagnosticMetadata: ".github/workflows/ci.yml",
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("ciGateCatalog returns an actionable error instead of failing the query", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        listCiGateCatalog: () =>
+          Effect.fail(
+            new GitHubRequestError({
+              message:
+                "Failed to list CI Gate Definitions for acme/widgets: Actions read required",
+              statusCode: 403,
+              retryable: false,
+            }),
+          ),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          ciGateCatalog(repositoryId: "${repository.id}") {
+            error
+            definitions { identity }
+          }
+        }`,
+      }),
+    )
+    const payload = (await response.json()) as {
+      data: {
+        ciGateCatalog: { error: string | null; definitions: unknown[] }
+      }
+    }
+    expect(payload.data.ciGateCatalog.definitions).toEqual([])
+    expect(payload.data.ciGateCatalog.error).toContain("Actions read required")
+  })
+
+  test("updateRepositorySettings saves catalog identities and rejects fabricated ones", async () => {
+    await runtime.dispose()
+    let persisted:
+      | ReadonlyArray<{
+          readonly identity: string
+          readonly displayLabel: string
+          readonly kind: string
+          readonly diagnosticMetadata: string | null
+        }>
+      | undefined
+    let stored: ReadonlyArray<{
+      readonly identity: string
+      readonly displayLabel: string
+      readonly kind: string
+      readonly diagnosticMetadata: string | null
+    }> = []
+    runtime = makeRuntime(
+      {
+        listCiGateDefinitions: () => Effect.succeed(stored),
+        updateRepositorySettings: (input) => {
+          if (input.selectedCiGateDefinitions !== undefined) {
+            persisted = input.selectedCiGateDefinitions
+            stored = [...input.selectedCiGateDefinitions]
+          }
+          return Effect.succeed({ ...repository, paused: input.paused })
+        },
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        listCiGateCatalog: () =>
+          Effect.succeed([
+            {
+              identity: "161335",
+              displayLabel: "CI",
+              kind: "workflow",
+              diagnosticMetadata: ".github/workflows/ci.yml",
+            },
+          ]),
+      },
+    )
+
+    const settingsInput = {
+      repositoryId: repository.id,
+      paused: true,
+      defaultModel: null,
+      defaultThinkingLevel: null,
+      reviewModel: null,
+      reviewThinkingLevel: null,
+      mergePolicy: "OFF",
+      includeAllIssueAuthors: false,
+      waitForReadyForReviewChecks: true,
+    }
+
+    const saved = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) {
+            selectedCiGateDefinitions { identity displayLabel kind diagnosticMetadata }
+          }
+        }`,
+        variables: {
+          input: {
+            ...settingsInput,
+            selectedCiGateDefinitionIdentities: ["161335"],
+          },
+        },
+      }),
+    )
+    expect(await saved.json()).toEqual({
+      data: {
+        updateRepositorySettings: {
+          selectedCiGateDefinitions: [
+            {
+              identity: "161335",
+              displayLabel: "CI",
+              kind: "workflow",
+              diagnosticMetadata: ".github/workflows/ci.yml",
+            },
+          ],
+        },
+      },
+    })
+    expect(persisted).toEqual([
+      {
+        identity: "161335",
+        displayLabel: "CI",
+        kind: "workflow",
+        diagnosticMetadata: ".github/workflows/ci.yml",
+      },
+    ])
+
+    const rejected = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { id }
+        }`,
+        variables: {
+          input: {
+            ...settingsInput,
+            selectedCiGateDefinitionIdentities: ["999"],
+          },
+        },
+      }),
+    )
+    expect(await rejected.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: expect.stringMatching(/not in the current catalog/),
+          extensions: {
+            code: "INVALID_REPOSITORY_SETTINGS",
+            field: "selectedCiGateDefinitionIdentities",
+          },
+        }),
+      ],
+    })
+  })
+
+  test("unavailable saved CI Gate Definitions do not block unrelated settings saves", async () => {
+    await runtime.dispose()
+    let persistedPaused: boolean | undefined
+    let persistedDefinitions:
+      | ReadonlyArray<{ readonly identity: string }>
+      | "unset" = "unset"
+    runtime = makeRuntime(
+      {
+        listCiGateDefinitions: () =>
+          Effect.succeed([
+            {
+              identity: "161335",
+              displayLabel: "CI",
+              kind: "workflow",
+              diagnosticMetadata: ".github/workflows/ci.yml",
+            },
+          ]),
+        updateRepositorySettings: (input) => {
+          persistedPaused = input.paused
+          persistedDefinitions =
+            input.selectedCiGateDefinitions === undefined
+              ? "unset"
+              : input.selectedCiGateDefinitions.map(({ identity }) => ({
+                  identity,
+                }))
+          return Effect.succeed({ ...repository, paused: input.paused })
+        },
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        listCiGateCatalog: () =>
+          Effect.fail(
+            new GitHubRequestError({
+              message:
+                "Failed to list CI Gate Definitions for acme/widgets: Actions read required",
+              statusCode: 403,
+              retryable: false,
+            }),
+          ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { paused }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "OFF",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+            selectedCiGateDefinitionIdentities: ["161335"],
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: { updateRepositorySettings: { paused: false } },
+    })
+    expect(persistedPaused).toBe(false)
+    expect(persistedDefinitions).toEqual([{ identity: "161335" }])
+  })
+
+  test("empty CI Gate selection disables the Repository CI Gate", async () => {
+    await runtime.dispose()
+    let persisted: ReadonlyArray<unknown> | undefined
+    let stored: ReadonlyArray<{
+      readonly identity: string
+      readonly displayLabel: string
+      readonly kind: string
+      readonly diagnosticMetadata: string | null
+    }> = [
+      {
+        identity: "161335",
+        displayLabel: "CI",
+        kind: "workflow",
+        diagnosticMetadata: ".github/workflows/ci.yml",
+      },
+    ]
+    runtime = makeRuntime({
+      listCiGateDefinitions: () => Effect.succeed(stored),
+      updateRepositorySettings: (input) => {
+        persisted = input.selectedCiGateDefinitions
+        if (input.selectedCiGateDefinitions !== undefined) {
+          stored = [...input.selectedCiGateDefinitions]
+        }
+        return Effect.succeed(repository)
+      },
+    })
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) {
+            selectedCiGateDefinitions { identity }
+          }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "OFF",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+            selectedCiGateDefinitionIdentities: [],
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        updateRepositorySettings: { selectedCiGateDefinitions: [] },
+      },
+    })
+    expect(persisted).toEqual([])
   })
 })

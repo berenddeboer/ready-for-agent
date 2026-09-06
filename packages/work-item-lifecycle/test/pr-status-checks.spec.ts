@@ -210,6 +210,7 @@ const githubWith = (
         "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
       ),
     ensureIssueCompletedWithSummary: () => Effect.void,
+    listCiGateCatalog: () => Effect.succeed([]),
     ...overrides,
   } satisfies GitHubServiceShape)
 
@@ -326,6 +327,7 @@ describe("PR status check steps", () => {
           "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
     } satisfies GitHubServiceShape)
 
     const status = await Effect.runPromise(
@@ -509,6 +511,7 @@ describe("PR status check steps", () => {
           "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
     } satisfies GitHubServiceShape)
 
     const result = await Effect.runPromise(
@@ -609,6 +612,7 @@ describe("PR status check steps", () => {
           "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
     } satisfies GitHubServiceShape)
 
     const result = await Effect.runPromise(
@@ -772,6 +776,7 @@ describe("PR status check steps", () => {
           "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
     } satisfies GitHubServiceShape)
 
     const result = await Effect.runPromise(
@@ -877,6 +882,7 @@ describe("PR status check steps", () => {
           "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
     } satisfies GitHubServiceShape)
 
     const second = await Effect.runPromise(
@@ -941,6 +947,7 @@ describe("PR status check steps", () => {
           "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
     } satisfies GitHubServiceShape)
 
     const result = await Effect.runPromise(

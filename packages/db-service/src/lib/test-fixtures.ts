@@ -70,6 +70,7 @@ export const stubDbService = (
   listSelectedOrInUseBackendIds: Effect.succeed(["opencode"]),
   addRepository: unused,
   updateRepositorySettings: unused,
+  listCiGateDefinitions: () => Effect.succeed([]),
   pauseRepository: unused,
   unpauseRepository: unused,
   listRepositories: unused(),

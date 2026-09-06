@@ -32,6 +32,7 @@ import {
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
+  SerializedCiGateCatalog,
   SerializedMergePullRequestResult,
   SerializedPrStatusCheckDiagnostics,
   SerializedPullRequestCheckStatus,
@@ -871,6 +872,20 @@ export const keymaxxerGitHubLayer = (options: {
               describe: "list Ready-labeled Issues",
               origin: operationOptions?.origin ?? "polling",
               decode: (stdout) => parseIssues(stdout, repository),
+            }),
+        ),
+        listCiGateCatalog: Effect.fn("KeymaxxerGitHub.listCiGateCatalog")(
+          (repository, operationOptions?: GitHubOperationOptions) =>
+            callHelper({
+              operation: "list-ci-gate-catalog",
+              repository,
+              describe: "list CI Gate Definitions",
+              origin: operationOptions?.origin ?? "operator",
+              decode: decodeJson(
+                SerializedCiGateCatalog,
+                repository,
+                "decode CI Gate catalog",
+              ),
             }),
         ),
       }

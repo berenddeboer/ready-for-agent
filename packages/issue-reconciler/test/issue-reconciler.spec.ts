@@ -214,6 +214,7 @@ const makeGitHubLayer = (
         "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001",
       ),
     ensureIssueCompletedWithSummary: () => Effect.void,
+    listCiGateCatalog: () => Effect.succeed([]),
     listReadyIssues: ({ projectPath }) => {
       actions.push(`github:${projectPath}`)
       return options.error ? Effect.fail(options.error) : Effect.succeed(issues)

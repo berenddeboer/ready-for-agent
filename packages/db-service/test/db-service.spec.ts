@@ -1923,6 +1923,92 @@ describe("DbService", () => {
           expect(error).toBeInstanceOf(RepositoryNotFoundError)
         }),
       ))
+
+    it("starts new Repositories with no CI Gate Definitions", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          expect(yield* db.listCiGateDefinitions(repo.id)).toEqual([])
+        }),
+      ))
+
+    it("persists selected CI Gate Definitions and keeps last-known metadata when omitted", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          const settings = {
+            repositoryId: repo.id,
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off" as const,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          }
+          yield* db.updateRepositorySettings({
+            ...settings,
+            selectedCiGateDefinitions: [
+              {
+                identity: "161335",
+                displayLabel: "CI",
+                kind: "workflow",
+                diagnosticMetadata: ".github/workflows/ci.yml",
+              },
+              {
+                identity: "269289",
+                displayLabel: "Linter",
+                kind: "workflow",
+                diagnosticMetadata: ".github/workflows/linter.yml",
+              },
+            ],
+          })
+          expect(yield* db.listCiGateDefinitions(repo.id)).toEqual([
+            {
+              identity: "161335",
+              displayLabel: "CI",
+              kind: "workflow",
+              diagnosticMetadata: ".github/workflows/ci.yml",
+            },
+            {
+              identity: "269289",
+              displayLabel: "Linter",
+              kind: "workflow",
+              diagnosticMetadata: ".github/workflows/linter.yml",
+            },
+          ])
+
+          yield* db.updateRepositorySettings({
+            ...settings,
+            paused: false,
+          })
+          expect((yield* db.listRepositories)[0]?.paused).toBe(false)
+          expect(yield* db.listCiGateDefinitions(repo.id)).toEqual([
+            {
+              identity: "161335",
+              displayLabel: "CI",
+              kind: "workflow",
+              diagnosticMetadata: ".github/workflows/ci.yml",
+            },
+            {
+              identity: "269289",
+              displayLabel: "Linter",
+              kind: "workflow",
+              diagnosticMetadata: ".github/workflows/linter.yml",
+            },
+          ])
+
+          yield* db.updateRepositorySettings({
+            ...settings,
+            paused: false,
+            selectedCiGateDefinitions: [],
+          })
+          expect(yield* db.listCiGateDefinitions(repo.id)).toEqual([])
+        }),
+      ))
   })
 
   describe("pauseRepository and unpauseRepository", () => {
