@@ -4,18 +4,13 @@ import recoveryBody from "./content/recovery.md" with { type: "text" }
 import reportingBody from "./content/reporting.md" with { type: "text" }
 import { renderLifecycleSkill } from "./lifecycle.ts"
 
-export const SKILL_MEDIA_TYPE = "text/markdown" as const
+const SKILL_MEDIA_TYPE = "text/markdown" as const
 
-export type SkillId =
-  | "core"
-  | "reporting"
-  | "operating"
-  | "recovery"
-  | "lifecycle"
+type SkillId = "core" | "reporting" | "operating" | "recovery" | "lifecycle"
 
-export type SkillEffect = "read" | "write" | "destructive"
+type SkillEffect = "read" | "write" | "destructive"
 
-export type SkillSafety = {
+type SkillSafety = {
   readonly read: boolean
   readonly write: boolean
   readonly destructive: boolean
@@ -105,9 +100,7 @@ export const SKILL_CATALOG: readonly SkillRecord[] = [
   },
 ]
 
-export const SKILL_IDS: readonly SkillId[] = SKILL_CATALOG.map(
-  (skill) => skill.id,
-)
+const SKILL_IDS: readonly SkillId[] = SKILL_CATALOG.map((skill) => skill.id)
 
 export const findSkill = (id: string): SkillRecord | undefined =>
   SKILL_CATALOG.find((skill) => skill.id === id)
