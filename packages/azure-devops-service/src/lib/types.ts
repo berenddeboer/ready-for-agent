@@ -1,5 +1,11 @@
 import type { ReadyLabeledIssue } from "@ready-for-agent/github-service"
 
+/**
+ * Forge-neutral CI Gate catalog kind for an Azure DevOps build pipeline.
+ * Identity is the build definition id.
+ */
+export const AZURE_DEVOPS_CI_GATE_KIND = "build-pipeline"
+
 export interface AzureDevOpsRepository {
   readonly forge: string
   readonly forgeHost: string

@@ -1,5 +1,7 @@
 import { Effect, Layer } from "effect"
 import type {
+  CiGateCatalogEntry,
+  CiGateObservation,
   MergePullRequestResult,
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
@@ -16,7 +18,7 @@ import type {
 } from "./types.js"
 
 /**
- * Hand-written fake for the Azure DevOps service surface: the 16 REST-backed
+ * Hand-written fake for the Azure DevOps service surface: the REST-backed
  * methods plus the two local credential checks (`hasCredentials`/
  * `hasAmbientCredentials`). Mirrors
  * `gitlab-service-test.ts`'s in-memory `Map`-keyed `Layer.succeed` pattern:
@@ -43,6 +45,8 @@ export interface AzureDevOpsServiceTestFixture {
   readonly pullRequestCheckStatus?: PullRequestCheckStatus
   readonly pullRequestLifecycleStatus?: PullRequestLifecycleStatus
   readonly mergePullRequestResult?: MergePullRequestResult
+  readonly ciGateCatalog?: readonly CiGateCatalogEntry[]
+  readonly ciGateObservation?: CiGateObservation
   readonly error?: AzureDevOpsRequestError
 }
 
@@ -116,6 +120,19 @@ export const makeAzureDevOpsServiceTest = (
           [...(state.fixture.issues ?? [])].sort(
             (left, right) => left.number - right.number,
           ),
+        ),
+      ),
+    listCiGateCatalog: (repository) =>
+      failOr(repository, (state) =>
+        Effect.succeed([...(state.fixture.ciGateCatalog ?? [])]),
+      ),
+    observeCiGate: (repository) =>
+      failOr(repository, (state) =>
+        Effect.succeed(
+          state.fixture.ciGateObservation ?? {
+            defaultBranch: "refs/heads/main",
+            observations: [],
+          },
         ),
       ),
     getOpenPullRequestNumber: (repository, headRefName) => {

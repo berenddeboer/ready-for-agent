@@ -468,6 +468,27 @@ const loadCiGateCatalog = Effect.fn("graphql-api.loadCiGateCatalog")(
     readonly forgeHost: string
     readonly projectPath: string
   }) {
+    if (repository.forge === "azure-devops") {
+      const azureDevOps = yield* AzureDevOpsService
+      return yield* azureDevOps
+        .listCiGateCatalog({
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
+        })
+        .pipe(
+          Effect.map((definitions) => ({
+            kind: "loaded" as const,
+            definitions,
+          })),
+          Effect.catch((error) =>
+            Effect.succeed({
+              kind: "unavailable" as const,
+              message: ciGateCatalogErrorMessage(error),
+            }),
+          ),
+        )
+    }
     if (repository.forge !== "github") {
       return { kind: "loaded" as const, definitions: [] }
     }

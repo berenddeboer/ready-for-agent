@@ -187,6 +187,9 @@ const stubAzureDevOps = (
     verifyProject: (repository) => Effect.succeed(repository),
     getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
     listReadyIssues: () => Effect.succeed([]),
+    listCiGateCatalog: () => Effect.succeed([]),
+    observeCiGate: () =>
+      Effect.succeed({ defaultBranch: "refs/heads/main", observations: [] }),
     hasCredentials: () => Effect.succeed(true),
     hasAmbientCredentials: () => Effect.succeed(true),
     getOpenPullRequestNumber: () => Effect.succeed(321),
