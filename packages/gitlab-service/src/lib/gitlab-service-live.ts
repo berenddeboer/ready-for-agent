@@ -938,7 +938,8 @@ export const makeGitLabService = (options: {
               break
             }
           }
-          if (reachedLastSeen) {
+          // First observation (no last-seen run) uses one official API page.
+          if (reachedLastSeen || lastSeen === null) {
             break
           }
           const nextPage = response.headers.get("x-next-page")?.trim() ?? ""
