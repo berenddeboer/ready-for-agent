@@ -75,6 +75,7 @@ import {
   AutonomousRetryDeferredError,
   AutonomousRetryLimitReachedError,
   BuildModelNotConfiguredError,
+  CiRepairNotAvailableError,
   ImplementAllWithAutoMergeNotEligibleError,
   InterruptNotEligibleError,
   InvalidAutonomousRetryLimitError,
@@ -169,7 +170,9 @@ import {
   WorkItemWakeJob,
   isRetryableFailedWorkItem,
   isTerminalWorkItemState,
+  isUnfinishedWorkItem,
   makeAutonomousRetryId,
+  makeCiRepairAuthorizationId,
   makeStepRunId,
   makeWorkItemId,
 } from "./types.js"
@@ -878,6 +881,18 @@ export type ImplementNowError =
   | DatabaseError
   | EnqueueError
   | InvalidQueueNameError
+  | CiRepairNotAvailableError
+
+export type ImplementCiRepairError = ImplementNowError
+
+export type AuthorizeAsCiRepairError =
+  | WorkItemNotFoundError
+  | WorkItemTerminalError
+  | CiRepairNotAvailableError
+  | WorkItemLifecycleDatabaseError
+  | DatabaseError
+  | EnqueueError
+  | InvalidQueueNameError
 
 export type ImplementAllWithAutoMergeError =
   | IssueNotFoundError
@@ -1058,6 +1073,22 @@ export interface WorkItemLifecycleShape {
     repositoryId: string,
     issueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
+  /**
+   * Create a Work Item authorized as CI Repair for the active Closed
+   * CI Failure Incident. Competes for ordinary Worker Slots.
+   */
+  readonly implementCiRepair: (
+    repositoryId: string,
+    issueNumber: number,
+  ) => Effect.Effect<WorkItemRecord, ImplementCiRepairError>
+  /**
+   * Authorize an unfinished Work Item as CI Repair for the active Closed
+   * incident without resetting worktree, Session, profile, Merge Policy, PR,
+   * or history.
+   */
+  readonly authorizeAsCiRepair: (
+    workItemId: string,
+  ) => Effect.Effect<WorkItemRecord, AuthorizeAsCiRepairError>
   /**
    * Implement With: persist an Explicit Work Item Execution Profile and
    * optional Merge Policy pin. On an Actionable Issue, returns a one-element
@@ -2085,11 +2116,12 @@ export const makeWorkItemLifecycleLive = (
             return true
           }
           if (
-            !isExemptFromClosedCiGateAdmissionHold({
+            yield* shouldHoldOrdinaryRemoteWorkForCiRepair({
+              workItemId,
+              repositoryId: current.repository_id,
               pauseBeforeStep: current.pause_before_step,
               state: current.state,
-            }) &&
-            (yield* repositoryCiGateIsClosed(current.repository_id))
+            })
           ) {
             yield* applyCiRepairMergeHold(workItemId, now)
             return false
@@ -2401,9 +2433,13 @@ export const makeWorkItemLifecycleLive = (
                     return false
                   }
 
-                  const holdForCiRepair = yield* repositoryCiGateIsClosed(
-                    current.repository_id,
-                  )
+                  const holdForCiRepair =
+                    yield* shouldHoldOrdinaryRemoteWorkForCiRepair({
+                      workItemId: held.id,
+                      repositoryId: current.repository_id,
+                      pauseBeforeStep: current.pause_before_step,
+                      state: current.state,
+                    })
 
                   // Leave Waiting for blockers before admission so the row is
                   // eligible for Worker Slot wait / Step Run enqueue. RETURNING
@@ -2558,6 +2594,115 @@ export const makeWorkItemLifecycleLive = (
             readonly closed: number
           }[]
           return rows.length > 0
+        })
+
+      const loadActiveClosedCiFailureIncidentId = (
+        repositoryId: string,
+      ): Effect.Effect<string | null, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          if (!(yield* repositoryCiGateIsClosed(repositoryId))) {
+            return null
+          }
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT id
+               FROM ci_failure_incident
+               WHERE repository_id = ?
+                 AND status = 'open'
+               ORDER BY opened_at DESC, id DESC
+               LIMIT 1`,
+              [repositoryId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly id: string
+          }[]
+          return rows[0]?.id ?? null
+        })
+
+      const workItemHasActiveCiRepairAuthorization = (
+        workItemId: string,
+        repositoryId: string,
+      ): Effect.Effect<boolean, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT 1 AS authorized
+               FROM ci_repair_authorization a
+               INNER JOIN ci_failure_incident i ON i.id = a.incident_id
+               WHERE a.work_item_id = ?
+                 AND a.repository_id = ?
+                 AND i.status = 'open'
+                 AND i.repository_id = a.repository_id
+               LIMIT 1`,
+              [workItemId, repositoryId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly authorized: number
+          }[]
+          return rows.length > 0
+        })
+
+      const shouldHoldOrdinaryRemoteWorkForCiRepair = (input: {
+        readonly workItemId: string
+        readonly repositoryId: string
+        readonly pauseBeforeStep: OperationalLifecycleStep | null
+        readonly state: string
+      }): Effect.Effect<boolean, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          if (
+            isExemptFromClosedCiGateAdmissionHold({
+              pauseBeforeStep: input.pauseBeforeStep,
+              state: input.state,
+            })
+          ) {
+            return false
+          }
+          if (!(yield* repositoryCiGateIsClosed(input.repositoryId))) {
+            return false
+          }
+          return !(yield* workItemHasActiveCiRepairAuthorization(
+            input.workItemId,
+            input.repositoryId,
+          ))
+        })
+
+      const insertCiRepairAuthorization = (input: {
+        readonly workItemId: string
+        readonly repositoryId: string
+        readonly incidentId: string
+        readonly sourceAction: "implement_ci_repair" | "authorize_as_ci_repair"
+        readonly now: number
+      }): Effect.Effect<void, WorkItemLifecycleDatabaseError> =>
+        sql
+          .unsafe(
+            `INSERT INTO ci_repair_authorization (
+               id, repository_id, work_item_id, incident_id,
+               source_action, authorized_at, created_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(work_item_id, incident_id) DO NOTHING`,
+            [
+              makeCiRepairAuthorizationId(),
+              input.repositoryId,
+              input.workItemId,
+              input.incidentId,
+              input.sourceAction,
+              input.now,
+              input.now,
+            ],
+          )
+          .pipe(Effect.mapError(toDatabaseError), Effect.asVoid)
+
+      const ciRepairNotAvailable = (input: {
+        readonly repositoryId: string
+        readonly workItemId?: string
+      }) =>
+        new CiRepairNotAvailableError({
+          repositoryId: input.repositoryId,
+          ...(input.workItemId === undefined
+            ? {}
+            : { workItemId: input.workItemId }),
+          message:
+            "CI Repair is available only while a CI Failure Incident is active and Closed",
         })
 
       const cancelStepRunForCiRepairHold = (
@@ -3790,7 +3935,14 @@ export const makeWorkItemLifecycleLive = (
             })
           case "merge_pr":
             return Effect.gen(function* () {
-              if (yield* repositoryCiGateIsClosed(workItem.repository_id)) {
+              if (
+                yield* shouldHoldOrdinaryRemoteWorkForCiRepair({
+                  workItemId: workItem.id,
+                  repositoryId: workItem.repository_id,
+                  pauseBeforeStep: workItem.pause_before_step,
+                  state: workItem.state,
+                })
+              ) {
                 return { holdForCiRepair: true as const }
               }
               const result = yield* steps.mergePr(context)
@@ -4366,7 +4518,12 @@ export const makeWorkItemLifecycleLive = (
                   const holdMergeForCiRepair =
                     !stayPaused &&
                     nextStep === "merge_pr" &&
-                    (yield* repositoryCiGateIsClosed(workItem.repository_id))
+                    (yield* shouldHoldOrdinaryRemoteWorkForCiRepair({
+                      workItemId: workItem.id,
+                      repositoryId: workItem.repository_id,
+                      pauseBeforeStep: pauseBeforeStep,
+                      state: nextStep,
+                    }))
 
                   if (shouldPauseBeforeNext) {
                     yield* sql.unsafe(
@@ -5184,7 +5341,14 @@ export const makeWorkItemLifecycleLive = (
                 stepRun.status === "queued" &&
                 !workItem.paused
               ) {
-                if (yield* repositoryCiGateIsClosed(workItem.repository_id)) {
+                if (
+                  yield* shouldHoldOrdinaryRemoteWorkForCiRepair({
+                    workItemId: workItem.id,
+                    repositoryId: workItem.repository_id,
+                    pauseBeforeStep: workItem.pause_before_step,
+                    state: workItem.state,
+                  })
+                ) {
                   const holdAt = yield* Clock.currentTimeMillis
                   yield* sql
                     .withTransaction(
@@ -5309,7 +5473,12 @@ export const makeWorkItemLifecycleLive = (
 
               if (
                 afterStart.step === "merge_pr" &&
-                (yield* repositoryCiGateIsClosed(workItem.repository_id))
+                (yield* shouldHoldOrdinaryRemoteWorkForCiRepair({
+                  workItemId: workItem.id,
+                  repositoryId: workItem.repository_id,
+                  pauseBeforeStep: workItem.pause_before_step,
+                  state: workItem.state,
+                }))
               ) {
                 const holdAt = yield* Clock.currentTimeMillis
                 yield* sql
@@ -6271,11 +6440,12 @@ export const makeWorkItemLifecycleLive = (
               }
 
               if (
-                !isExemptFromClosedCiGateAdmissionHold({
+                yield* shouldHoldOrdinaryRemoteWorkForCiRepair({
+                  workItemId,
+                  repositoryId: workItem.repository_id,
                   pauseBeforeStep: workItem.pause_before_step,
                   state: pendingStep,
-                }) &&
-                (yield* repositoryCiGateIsClosed(workItem.repository_id))
+                })
               ) {
                 yield* applyCiRepairMergeHold(workItemId, now)
                 return
@@ -7890,11 +8060,12 @@ export const makeWorkItemLifecycleLive = (
               const retryRow = yield* loadWorkItemRow(workItemId)
               if (
                 retryRow !== null &&
-                !isExemptFromClosedCiGateAdmissionHold({
+                (yield* shouldHoldOrdinaryRemoteWorkForCiRepair({
+                  workItemId,
+                  repositoryId: retryRow.repository_id,
                   pauseBeforeStep: retryRow.pause_before_step,
                   state: pendingStep,
-                }) &&
-                (yield* repositoryCiGateIsClosed(retryRow.repository_id))
+                }))
               ) {
                 yield* applyCiRepairMergeHold(workItemId, now)
                 if (autonomous !== undefined) {
@@ -8022,6 +8193,7 @@ export const makeWorkItemLifecycleLive = (
           readonly mergeMode?: MergeMode
           readonly executionProfile?: ExplicitWorkItemExecutionProfile
           readonly autoMergeOverride?: boolean | null
+          readonly ciRepair?: boolean
         },
       ): Effect.Effect<WorkItemRecord, ImplementNowError> =>
         Effect.gen(function* () {
@@ -8211,11 +8383,19 @@ export const makeWorkItemLifecycleLive = (
               return yield* sql
                 .withTransaction(
                   Effect.gen(function* () {
+                    const ciRepairIncidentId = options.ciRepair
+                      ? yield* loadActiveClosedCiFailureIncidentId(repositoryId)
+                      : null
+                    if (options.ciRepair && ciRepairIncidentId === null) {
+                      return yield* ciRepairNotAvailable({ repositoryId })
+                    }
                     const holdForCiRepair =
+                      ciRepairIncidentId === null &&
                       !isExemptFromClosedCiGateAdmissionHold({
                         pauseBeforeStep: options.pauseBeforeStep,
                         state: step,
-                      }) && (yield* repositoryCiGateIsClosed(repositoryId))
+                      }) &&
+                      (yield* repositoryCiGateIsClosed(repositoryId))
                     const limit = yield* maxWorkerSlots()
                     const occupied = yield* countOccupiedWorkerSlots()
                     const admit = !holdForCiRepair && occupied < limit
@@ -8302,6 +8482,16 @@ export const makeWorkItemLifecycleLive = (
                       )
                     }
 
+                    if (ciRepairIncidentId !== null) {
+                      yield* insertCiRepairAuthorization({
+                        workItemId,
+                        repositoryId,
+                        incidentId: ciRepairIncidentId,
+                        sourceAction: "implement_ci_repair",
+                        now,
+                      })
+                    }
+
                     if (admit) {
                       yield* enqueueStepRunForWorkItem(workItemId, step, now)
                     }
@@ -8313,6 +8503,9 @@ export const makeWorkItemLifecycleLive = (
                   Effect.tapError(() => restoreAddedBackend),
                   Effect.catch(
                     (error): Effect.Effect<never, ImplementNowError> => {
+                      if (error instanceof CiRepairNotAvailableError) {
+                        return Effect.fail(error)
+                      }
                       if (error instanceof WorkItemLifecycleDatabaseError) {
                         return Effect.fail(error)
                       }
@@ -8370,6 +8563,166 @@ export const makeWorkItemLifecycleLive = (
           })
         },
       )
+
+      const implementCiRepair = Effect.fn(
+        "WorkItemLifecycle.implementCiRepair",
+      )(function* (repositoryId: string, issueNumber: number) {
+        return yield* createWorkItem(repositoryId, issueNumber, {
+          pauseBeforeStep: null,
+          ciRepair: true,
+        })
+      })
+
+      const authorizeAsCiRepair = Effect.fn(
+        "WorkItemLifecycle.authorizeAsCiRepair",
+      )(function* (workItemId: string) {
+        const workItem = yield* getWorkItem(workItemId)
+        if (!isUnfinishedWorkItem(workItem)) {
+          return yield* new WorkItemTerminalError({
+            workItemId,
+            state: workItem.state,
+          })
+        }
+
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const current = yield* loadWorkItemRow(workItemId)
+              if (current === null) {
+                return yield* new WorkItemNotFoundError({ workItemId })
+              }
+              if (
+                !isUnfinishedWorkItem({
+                  state: current.state,
+                  failureCode: current.failure_code,
+                })
+              ) {
+                return yield* new WorkItemTerminalError({
+                  workItemId,
+                  state: current.state,
+                })
+              }
+              const incidentId = yield* loadActiveClosedCiFailureIncidentId(
+                current.repository_id,
+              )
+              if (incidentId === null) {
+                return yield* ciRepairNotAvailable({
+                  repositoryId: current.repository_id,
+                  workItemId,
+                })
+              }
+              const now = yield* Clock.currentTimeMillis
+              yield* insertCiRepairAuthorization({
+                workItemId,
+                repositoryId: current.repository_id,
+                incidentId,
+                sourceAction: "authorize_as_ci_repair",
+                now,
+              })
+
+              if (current.waiting_for_ci_repair) {
+                yield* sql
+                  .unsafe(
+                    `UPDATE work_item
+                     SET waiting_for_ci_repair = 0,
+                         updated_at = ?
+                     WHERE id = ?
+                       AND waiting_for_ci_repair = 1
+                       AND state NOT IN ('complete', 'abandoned')`,
+                    [now, workItemId],
+                  )
+                  .pipe(Effect.mapError(toDatabaseError))
+              }
+
+              if (
+                current.paused ||
+                current.waiting_for_blockers ||
+                isTerminalWorkItemState(current.state)
+              ) {
+                return
+              }
+
+              const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+              if (!acquired) {
+                return
+              }
+              const pendingStep = current.state as OperationalLifecycleStep
+              const activeRows = (yield* sql.unsafe(
+                `SELECT id FROM step_run
+                 WHERE work_item_id = ?
+                   AND status IN ('queued', 'running')
+                 LIMIT 1`,
+                [workItemId],
+              )) as readonly { readonly id: string }[]
+              if (activeRows[0] === undefined) {
+                yield* enqueueStepRunForWorkItem(workItemId, pendingStep, now)
+              }
+            }),
+          )
+          .pipe(
+            Effect.catch(
+              (error): Effect.Effect<never, AuthorizeAsCiRepairError> => {
+                if (
+                  error instanceof WorkItemNotFoundError ||
+                  error instanceof WorkItemTerminalError ||
+                  error instanceof CiRepairNotAvailableError ||
+                  error instanceof WorkItemLifecycleDatabaseError ||
+                  error instanceof EnqueueError ||
+                  error instanceof InvalidQueueNameError
+                ) {
+                  return Effect.fail(error)
+                }
+                if (
+                  typeof error === "object" &&
+                  error !== null &&
+                  "_tag" in error &&
+                  (error as { _tag: string })._tag === "SqlError"
+                ) {
+                  return Effect.fail(toDatabaseError(error as SqlError))
+                }
+                return Effect.fail(
+                  new WorkItemLifecycleDatabaseError({
+                    message: `Unexpected transaction failure: ${String(error)}`,
+                    cause: error,
+                  }),
+                )
+              },
+            ),
+          )
+
+        const released = yield* getWorkItem(workItemId).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after CI Repair authorization: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
+        )
+        yield* notifyWorkItemsChanged(released.repositoryId)
+        if (!released.holdsWorkerSlot) {
+          yield* admitWaitingWorkItems.pipe(
+            Effect.catch((error) =>
+              Effect.logError(
+                "Failed to admit waiters after CI Repair authorization",
+                { error: String(error) },
+              ),
+            ),
+          )
+          return yield* getWorkItem(workItemId).pipe(
+            Effect.catchTag(
+              "WorkItemNotFoundError",
+              (error) =>
+                new WorkItemLifecycleDatabaseError({
+                  message: `Work Item missing after CI Repair authorization: ${error.workItemId}`,
+                  cause: error,
+                }),
+            ),
+          )
+        }
+        return released
+      })
 
       const sqlMergeOverride = (value: boolean | null): number | null =>
         value === null ? null : value ? 1 : 0
@@ -9088,6 +9441,8 @@ export const makeWorkItemLifecycleLive = (
         recoverOrphanedStepRuns,
         interruptRunningStepRunsFromPriorWorker,
         implementNow,
+        implementCiRepair,
+        authorizeAsCiRepair,
         implementWith,
         implementLocally,
         implementAllWithAutoMerge,

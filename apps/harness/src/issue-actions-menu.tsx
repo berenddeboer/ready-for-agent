@@ -8,16 +8,20 @@ export type IssueActionsMenuProps = {
   readonly canQueue: boolean
   readonly implementPending: boolean
   readonly implementNowPending: boolean
+  readonly implementCiRepairPending: boolean
   readonly implementLocallyPending: boolean
   readonly queuePending: boolean
+  readonly canImplementCiRepair: boolean
   readonly onImplementNow: () => void
+  readonly onImplementCiRepair: () => void
   readonly onImplementWith: () => void
   readonly onImplementLocally: () => void
   readonly onQueue: () => void
 }
 
 /**
- * Actionable Issue kebab: Implement now, Implement with..., Implement locally.
+ * Actionable Issue kebab: Implement now, Implement CI Repair (Closed only),
+ * Implement with..., Implement locally.
  * Blocked Issues show Queue only. Presentational so menu order and eligibility
  * can be tested without the Repos list.
  */
@@ -28,9 +32,12 @@ export function IssueActionsMenu({
   canQueue,
   implementPending,
   implementNowPending,
+  implementCiRepairPending,
   implementLocallyPending,
   queuePending,
+  canImplementCiRepair,
   onImplementNow,
+  onImplementCiRepair,
   onImplementWith,
   onImplementLocally,
   onQueue,
@@ -94,6 +101,19 @@ export function IssueActionsMenu({
               >
                 {implementNowPending ? "Starting..." : "Implement now"}
               </button>
+              {canImplementCiRepair && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={ui.menuItem}
+                  disabled={implementPending}
+                  onClick={() => runMenuAction(onImplementCiRepair)}
+                >
+                  {implementCiRepairPending
+                    ? "Starting..."
+                    : "Implement CI Repair"}
+                </button>
+              )}
               <button
                 type="button"
                 role="menuitem"

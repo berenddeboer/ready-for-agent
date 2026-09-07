@@ -29,6 +29,8 @@ import {
   CiGateDefinitionSqlRow,
   type CiGateSnapshotRecord,
   CiGateStateSqlRow,
+  type CiRepairAuthorizationRecord,
+  CiRepairAuthorizationSqlRow,
   type CommitCiGateSnapshotInput,
   ConfigRecord,
   ConfigSqlRow,
@@ -300,6 +302,10 @@ const decodeCiFailureIncidentDefinitionRows = (rows: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.Array(CiFailureIncidentDefinitionSqlRow))(
     rows,
   ).pipe(Effect.mapError(toSchemaDatabaseError))
+const decodeCiRepairAuthorizationRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(CiRepairAuthorizationSqlRow))(
+    rows,
+  ).pipe(Effect.mapError(toSchemaDatabaseError))
 const millisOrNull = (value: Date | null): number | null =>
   value === null ? null : value.getTime()
 const decodeConfigRows = (rows: ReadonlyArray<unknown>) =>
@@ -499,6 +505,14 @@ export interface DbServiceShape {
   readonly commitCiGateSnapshot: (
     input: CommitCiGateSnapshotInput,
   ) => Effect.Effect<void, RepositoryNotFoundError | DatabaseError>
+  /**
+   * Append-only CI Repair authorization history for one Work Item, oldest first.
+   * Incident payloads are loaded with each row so GraphQL can project history
+   * after the incident resolves.
+   */
+  readonly listCiRepairAuthorizations: (
+    workItemId: string,
+  ) => Effect.Effect<readonly CiRepairAuthorizationRecord[], DatabaseError>
   readonly pauseRepository: (
     repositoryId: string,
   ) => Effect.Effect<RepositoryRecord, RepositoryNotFoundError | DatabaseError>
@@ -1824,6 +1838,45 @@ export const DbServiceLive = Layer.effect(
       }
     })
 
+    const listCiRepairAuthorizations = Effect.fn(
+      "DbService.listCiRepairAuthorizations",
+    )(function* (workItemId: string) {
+      const rows = yield* sql
+        .unsafe(
+          `SELECT id, repository_id, work_item_id, incident_id, source_action,
+                  authorized_at
+           FROM ci_repair_authorization
+           WHERE work_item_id = ?
+           ORDER BY authorized_at ASC, id ASC`,
+          [workItemId],
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+      const decoded = yield* decodeCiRepairAuthorizationRows(rows)
+      const authorizations: CiRepairAuthorizationRecord[] = []
+      for (const row of decoded) {
+        const incident = yield* loadIncidentByQuery(
+          `SELECT id, repository_id, status, opened_at, resolved_at,
+                  recovery_reason, summary
+           FROM ci_failure_incident
+           WHERE id = ?
+           LIMIT 1`,
+          [row.incidentId],
+        )
+        if (incident === null) {
+          continue
+        }
+        authorizations.push({
+          id: row.id,
+          repositoryId: row.repositoryId,
+          workItemId: row.workItemId,
+          sourceAction: row.sourceAction,
+          authorizedAt: row.authorizedAt,
+          incident,
+        })
+      }
+      return authorizations
+    })
+
     const commitCiGateSnapshot = Effect.fn("DbService.commitCiGateSnapshot")(
       function* (input: CommitCiGateSnapshotInput) {
         yield* ensureRepositoryExists(input.repositoryId)
@@ -2384,6 +2437,7 @@ export const DbServiceLive = Layer.effect(
       updateRepositorySettings,
       listCiGateDefinitions,
       loadCiGateSnapshot,
+      listCiRepairAuthorizations,
       commitCiGateSnapshot,
       pauseRepository,
       unpauseRepository,

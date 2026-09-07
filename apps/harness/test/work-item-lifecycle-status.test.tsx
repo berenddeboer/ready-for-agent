@@ -42,6 +42,11 @@ const waitingForGitHubWorkItem = {
       durationMs: 0,
     },
   ],
+  ciRepair: {
+    canAuthorize: false,
+    active: null,
+    history: [],
+  },
 } satisfies WorkItem
 
 describe("WorkItemLifecycleStatus", () => {
@@ -209,6 +214,84 @@ describe("WorkItemLifecycleStatus", () => {
     expect(warnings.join("\n")).not.toMatch(
       /Encountered two children with the same key/,
     )
+  })
+
+  test("shows active and historical CI Repair authorization without Skip CI or Force merge", () => {
+    const repairing = {
+      ...waitingForGitHubWorkItem,
+      status: "RUNNING",
+      statusLabel: "Running",
+      statusMessage: null,
+      postponedUntil: null,
+      hasActiveStepRun: true,
+      ciRepair: {
+        canAuthorize: false,
+        active: {
+          authorizedAt: "2026-09-07T12:00:00.000Z",
+          sourceAction: "AUTHORIZE_AS_CI_REPAIR" as const,
+          incident: {
+            id: "cfi-1",
+            status: "OPEN" as const,
+            summary: "CI Gate closed: CI failed.",
+          },
+        },
+        history: [
+          {
+            authorizedAt: "2026-09-07T11:00:00.000Z",
+            sourceAction: "IMPLEMENT_CI_REPAIR" as const,
+            incident: {
+              id: "cfi-0",
+              status: "RESOLVED" as const,
+              summary: "CI Gate closed: CI failed.",
+            },
+          },
+          {
+            authorizedAt: "2026-09-07T12:00:00.000Z",
+            sourceAction: "AUTHORIZE_AS_CI_REPAIR" as const,
+            incident: {
+              id: "cfi-1",
+              status: "OPEN" as const,
+              summary: "CI Gate closed: CI failed.",
+            },
+          },
+        ],
+      },
+    } satisfies WorkItem
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkItemLifecycleStatus workItem={repairing} compact />
+      </QueryClientProvider>,
+    )
+    expect(html).toContain("CI Repair for CI Gate closed: CI failed.")
+    expect(html).toContain("CI Repair authorization history")
+    expect(html).toContain("Implement CI Repair")
+    expect(html).toContain("Authorize as CI Repair")
+    expect(html).toContain("(resolved)")
+    expect(html).not.toContain("Skip CI")
+    expect(html).not.toContain("Force merge")
+  })
+
+  test("offers Authorize as CI Repair while the incident is Closed and the Work Item is unfinished", () => {
+    const held = {
+      ...waitingForGitHubWorkItem,
+      status: "WAITING_FOR_CI_REPAIR",
+      statusLabel: "Waiting for CI Repair",
+      statusMessage: "Waiting for CI Repair: CI Gate closed: CI failed.",
+      postponedUntil: null,
+      ciRepair: {
+        canAuthorize: true,
+        active: null,
+        history: [],
+      },
+    } satisfies WorkItem
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkItemLifecycleStatus workItem={held} compact />
+      </QueryClientProvider>,
+    )
+    expect(html).toContain("Authorize as CI Repair")
+    expect(html).not.toContain("Skip CI")
+    expect(html).not.toContain("Force merge")
   })
 })
 

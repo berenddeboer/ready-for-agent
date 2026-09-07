@@ -69,9 +69,12 @@ const defaultProps = {
   issueId: "issue-1034",
   implementPending: false,
   implementNowPending: false,
+  implementCiRepairPending: false,
   implementLocallyPending: false,
   queuePending: false,
+  canImplementCiRepair: false,
   onImplementNow: () => undefined,
+  onImplementCiRepair: () => undefined,
   onImplementWith: () => undefined,
   onImplementLocally: () => undefined,
   onQueue: () => undefined,
@@ -173,6 +176,42 @@ describe("IssueActionsMenu interaction", () => {
       "Implement with...",
       "Implement locally",
     ])
+  })
+
+  test("offers Implement CI Repair beside Implement now only while Closed", () => {
+    const calls: string[] = []
+    const node = render(
+      <IssueActionsMenu
+        {...defaultProps}
+        canImplement
+        canQueue={false}
+        canImplementCiRepair
+        onImplementNow={() => calls.push("now")}
+        onImplementCiRepair={() => calls.push("repair")}
+      />,
+    )
+    const kebab = node.querySelector("button[aria-haspopup='menu']")
+    flushSync(() => {
+      fire(kebab, "click")
+    })
+    const items = [...node.querySelectorAll("[role='menuitem']")].map(
+      (item) => item.textContent,
+    )
+    expect(items).toEqual([
+      "Implement now",
+      "Implement CI Repair",
+      "Implement with...",
+      "Implement locally",
+    ])
+    expect(items.join(" ")).not.toContain("Skip CI")
+    expect(items.join(" ")).not.toContain("Force merge")
+    const repairItem = [...node.querySelectorAll("[role='menuitem']")].find(
+      (item) => item.textContent === "Implement CI Repair",
+    )
+    flushSync(() => {
+      fire(repairItem ?? null, "click")
+    })
+    expect(calls).toEqual(["repair"])
   })
 
   test("blocked Issue kebab offers only Queue", () => {

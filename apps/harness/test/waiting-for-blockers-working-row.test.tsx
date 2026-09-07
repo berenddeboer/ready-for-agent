@@ -42,6 +42,11 @@ const runningWorkItem = {
   createdAt: "2026-08-07T11:00:00.000Z",
   stateReadyAt: "2026-08-07T11:00:00.000Z",
   lifecycleLabels: [],
+  ciRepair: {
+    canAuthorize: false,
+    active: null,
+    history: [],
+  },
 } satisfies WorkItem
 
 describe("Waiting for blockers Working-row polish", () => {
@@ -133,6 +138,8 @@ describe("Waiting for blockers Working-row polish", () => {
     expect(source).toContain("Implement issue #")
     expect(source).toContain("queueIssue.reset()")
     expect(source).toContain("implementNow.mutate()")
+    expect(source).toContain("implementCiRepair.mutate()")
+    expect(source).toContain("onImplementCiRepair={startImplementCiRepair}")
     expect(source).toContain("onClick={startImplementNow}")
     // The rightmost kebab retains Implement now, Implement with..., locally.
     expect(source).toContain("<IssueActionsMenu")
@@ -140,7 +147,7 @@ describe("Waiting for blockers Working-row polish", () => {
     expect(source).toContain("implementLocally.mutate()")
     expect(source).toContain("setImplementWithOpen(true)")
     expect(source).toMatch(
-      /implementNow\.isPending \|\|\s*implementWith\.isPending \|\|\s*implementLocally\.isPending \|\|\s*queueIssue\.isPending/,
+      /implementNow\.isPending \|\|\s*implementCiRepair\.isPending \|\|\s*implementWith\.isPending \|\|\s*implementLocally\.isPending \|\|\s*queueIssue\.isPending/,
     )
     expect(source).toContain("implementLocally.isError")
     // Pending disables the primary cue (styles + behavior stay aligned).

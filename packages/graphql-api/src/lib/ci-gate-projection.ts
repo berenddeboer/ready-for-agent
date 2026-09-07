@@ -89,7 +89,7 @@ const toGraphqlLatestRun = (observation: CiGateDefinitionObservationRecord) => {
   }
 }
 
-const toGraphqlIncident = (
+export const projectCiFailureIncident = (
   incident: CiFailureIncidentRecord | null,
   definitions: readonly CiGateDefinitionRecord[],
 ) => {
@@ -197,11 +197,11 @@ export const projectRepositoryCiGate = (input: {
         diagnostic: observationDiagnostic(observation),
       }
     }),
-    activeIncident: toGraphqlIncident(
+    activeIncident: projectCiFailureIncident(
       input.snapshot.activeIncident,
       input.definitions,
     ),
-    latestResolvedIncident: toGraphqlIncident(
+    latestResolvedIncident: projectCiFailureIncident(
       input.snapshot.latestResolvedIncident,
       input.definitions,
     ),
