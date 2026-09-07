@@ -108,6 +108,10 @@ import {
   repositoriesQuery,
 } from "./repositories-query.js"
 import {
+  RepositorySettingsCiGateSection,
+  ciGateCatalogViewFromQuery,
+} from "./repository-settings-ci-gate.js"
+import {
   isRepositorySettingsPathFor,
   markRepositorySettingsOpenedFromInApp,
   parseRepositorySettingsRepositoryId,
@@ -142,7 +146,8 @@ const FORGE_TOKEN_SCOPES_DOC_URL =
   "https://github.com/berenddeboer/ready-for-agent/blob/main/docs/forge-token-scopes.md"
 
 const graphql = createHarnessGraphqlClient({ batch: true })
-// Long-lived host folder dialog must not pin co-batched GraphQL operations.
+// Forge CI Gate catalog listing must not pin co-batched config/models/backends.
+const graphqlUnbatched = createHarnessGraphqlClient({ batch: false })
 
 const configQuery = {
   queryKey: ["config"],
@@ -199,7 +204,7 @@ const agentBackendsQuery = {
 const ciGateCatalogQuery = (repositoryId: string) => ({
   queryKey: ["ciGateCatalog", repositoryId] as const,
   queryFn: async () => {
-    const result = await graphql.query({
+    const result = await graphqlUnbatched.query({
       ciGateCatalog: {
         __args: { repositoryId },
         error: true,
@@ -1698,26 +1703,12 @@ function RepositoryCard({
     blockSaveForBuildThinking ||
     blockSaveForReviewThinking
 
-  const ciGateCatalogDefinitions =
-    ciGateCatalog.data !== undefined && ciGateCatalog.data.error === null
-      ? ciGateCatalog.data.definitions
-      : null
-  const unavailableCiGateDefinitions =
-    ciGateCatalogDefinitions === null
-      ? []
-      : repository.selectedCiGateDefinitions.filter(
-          (definition) =>
-            selectedCiGateIdentities.includes(definition.identity) &&
-            !ciGateCatalogDefinitions.some(
-              (entry) => entry.identity === definition.identity,
-            ),
-        )
-  const persistedCiGateDefinitions =
-    ciGateCatalog.data?.error === undefined || ciGateCatalog.data.error === null
-      ? []
-      : repository.selectedCiGateDefinitions.filter((definition) =>
-          selectedCiGateIdentities.includes(definition.identity),
-        )
+  const ciGateCatalogView = ciGateCatalogViewFromQuery({
+    pending: ciGateCatalog.isPending,
+    catalog: ciGateCatalog.data,
+    selectedIdentities: selectedCiGateIdentities,
+    savedDefinitions: repository.selectedCiGateDefinitions,
+  })
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -2290,161 +2281,6 @@ function RepositoryCard({
 
               <section
                 className={ui.dialogSection}
-                aria-labelledby={`repo-sec-ci-gate-${repository.id}`}
-              >
-                <div className={ui.dialogSectionHead}>
-                  <h3
-                    id={`repo-sec-ci-gate-${repository.id}`}
-                    className={ui.dialogSectionTitle}
-                  >
-                    CI Gate
-                  </h3>
-                  <span className={ui.dialogSectionMeta}>
-                    Default-branch CI
-                  </span>
-                </div>
-                {ciGateCatalog.isPending ? (
-                  <p className={ui.dialogFieldHint}>
-                    Loading CI Gate Definitions…
-                  </p>
-                ) : null}
-                {ciGateCatalog.data?.error ? (
-                  <p className={ui.dialogFieldHint} role="alert">
-                    {ciGateCatalog.data.error}
-                  </p>
-                ) : null}
-                {ciGateCatalogDefinitions !== null
-                  ? ciGateCatalogDefinitions.map((definition) => {
-                      const checked = selectedCiGateIdentities.includes(
-                        definition.identity,
-                      )
-                      return (
-                        <label
-                          key={definition.identity}
-                          className={ui.dialogCheck}
-                        >
-                          <input
-                            type="checkbox"
-                            className={ui.dialogCheckInput}
-                            name="selectedCiGateDefinitionIdentities"
-                            value={definition.identity}
-                            checked={checked}
-                            onChange={(event) => {
-                              const nextChecked = event.target.checked
-                              setSelectedCiGateIdentities((current) =>
-                                nextChecked
-                                  ? current.includes(definition.identity)
-                                    ? current
-                                    : [...current, definition.identity]
-                                  : current.filter(
-                                      (identity) =>
-                                        identity !== definition.identity,
-                                    ),
-                              )
-                            }}
-                          />
-                          {definition.displayLabel}
-                          {definition.diagnosticMetadata !== null &&
-                          definition.diagnosticMetadata !== "" ? (
-                            <span
-                              className={cx(
-                                ui.dialogFieldHint,
-                                ui.dialogCheckHint,
-                              )}
-                            >
-                              {definition.diagnosticMetadata}
-                            </span>
-                          ) : null}
-                        </label>
-                      )
-                    })
-                  : null}
-                {unavailableCiGateDefinitions.map((definition) => (
-                  <label
-                    key={`unavailable-${definition.identity}`}
-                    className={ui.dialogCheck}
-                  >
-                    <input
-                      type="checkbox"
-                      className={ui.dialogCheckInput}
-                      name="selectedCiGateDefinitionIdentities"
-                      value={definition.identity}
-                      checked
-                      onChange={() => {
-                        setSelectedCiGateIdentities((current) =>
-                          current.filter(
-                            (identity) => identity !== definition.identity,
-                          ),
-                        )
-                      }}
-                    />
-                    {definition.displayLabel} (unavailable)
-                    {definition.diagnosticMetadata !== null &&
-                    definition.diagnosticMetadata !== "" ? (
-                      <span
-                        className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}
-                      >
-                        {definition.diagnosticMetadata}
-                      </span>
-                    ) : null}
-                  </label>
-                ))}
-                {persistedCiGateDefinitions.map((definition) => (
-                  <label
-                    key={`persisted-${definition.identity}`}
-                    className={ui.dialogCheck}
-                  >
-                    <input
-                      type="checkbox"
-                      className={ui.dialogCheckInput}
-                      name="selectedCiGateDefinitionIdentities"
-                      value={definition.identity}
-                      checked
-                      onChange={() => {
-                        setSelectedCiGateIdentities((current) =>
-                          current.filter(
-                            (identity) => identity !== definition.identity,
-                          ),
-                        )
-                      }}
-                    />
-                    {definition.displayLabel}
-                    {definition.diagnosticMetadata !== null &&
-                    definition.diagnosticMetadata !== "" ? (
-                      <span
-                        className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}
-                      >
-                        {definition.diagnosticMetadata}
-                      </span>
-                    ) : null}
-                  </label>
-                ))}
-                <span className={ui.dialogFieldHint}>
-                  {selectedCiGateIdentities.length === 0
-                    ? "No CI Gate Definitions selected — Repository CI Gate is disabled."
-                    : "Selected definitions watch default-branch CI. Empty selection disables the Repository CI Gate."}
-                </span>
-                <span className={ui.dialogFieldHint}>
-                  Current status: {ciGateStatusLabel(repository.ciGate.status)}
-                  {repository.ciGate.diagnostic !== null
-                    ? ` — ${repository.ciGate.diagnostic}`
-                    : ""}
-                </span>
-                {repository.ciGate.activeIncident !== null ? (
-                  <span className={ui.dialogFieldHint}>
-                    Active incident: {repository.ciGate.activeIncident.summary}
-                  </span>
-                ) : null}
-                {repository.ciGate.latestResolvedIncident !== null ? (
-                  <span className={ui.dialogFieldHint}>
-                    Last resolved:{" "}
-                    {repository.ciGate.latestResolvedIncident.summary}
-                  </span>
-                ) : null}
-              </section>
-
-              <section
-                className={ui.dialogSection}
                 aria-labelledby={`repo-sec-agent-${repository.id}`}
               >
                 <div className={ui.dialogSectionHead}>
@@ -2770,6 +2606,21 @@ function RepositoryCard({
                   </>
                 )}
               </section>
+
+              <RepositorySettingsCiGateSection
+                repositoryId={repository.id}
+                catalog={ciGateCatalogView}
+                selectedIdentities={selectedCiGateIdentities}
+                onSelectedIdentitiesChange={setSelectedCiGateIdentities}
+                status={{
+                  statusLabel: ciGateStatusLabel(repository.ciGate.status),
+                  diagnostic: repository.ciGate.diagnostic,
+                  activeIncidentSummary:
+                    repository.ciGate.activeIncident?.summary ?? null,
+                  latestResolvedIncidentSummary:
+                    repository.ciGate.latestResolvedIncident?.summary ?? null,
+                }}
+              />
 
               {updateSettings.isError && (
                 <Banner

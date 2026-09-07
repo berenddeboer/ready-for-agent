@@ -116,3 +116,47 @@ Feature: Route Repository settings by Repository ID
     When I close the Repository not found dialog
     Then the Repository not found dialog is hidden
     And the browser location is the repos path
+
+  Scenario: CI Gate is last below Models on desktop and mobile
+    When I open the Repos page
+    And I open Repository settings from the card menu
+    Then the Repository settings dialog is visible
+    And the Repository settings sections are Forge identity, Options, Agent backend, Models, then CI Gate
+    When I resize Repository settings to a mobile viewport
+    Then the Repository settings sections are Forge identity, Options, Agent backend, Models, then CI Gate
+    When I cancel the Repository settings dialog
+    Then the Repository settings dialog is hidden
+    And the browser location is the repos path
+
+  Scenario: Delayed CI Gate discovery does not block other settings
+    When I open the Repos page
+    And CI Gate discovery is delayed
+    And I open Repository settings from the card menu
+    Then the Repository settings dialog is visible
+    And CI Gate discovery is pending
+    And the Repository settings sections are Forge identity, Options, Agent backend, Models, then CI Gate
+    When I change the Repository paused draft
+    Then the Repository settings dialog is visible
+    When CI Gate discovery completes
+    Then the CI Gate Definition names are shown
+    And the Repository settings dialog is visible
+    When I cancel the Repository settings dialog
+    Then the Repository settings dialog is hidden
+
+  Scenario: Fast CI Gate discovery shows names without a loading hold
+    When I open the Repos page
+    And CI Gate discovery is already available
+    And I open Repository settings from the card menu
+    Then the Repository settings dialog is visible
+    And the CI Gate Definition names are shown
+    When I cancel the Repository settings dialog
+    Then the Repository settings dialog is hidden
+
+  Scenario: Failed CI Gate discovery keeps the dialog open
+    When I open the Repos page
+    And CI Gate discovery is forced to fail
+    And I open Repository settings from the card menu
+    Then the Repository settings dialog is visible
+    And a CI Gate discovery error is shown
+    When I cancel the Repository settings dialog
+    Then the Repository settings dialog is hidden
