@@ -17,6 +17,7 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "es2022",
-    "customConditions": ["@ready-for-agent/source"]
+    "customConditions": ["@ready-for-agent/source"],
+    "disableSourceOfProjectReferenceRedirect": true
   }
 }

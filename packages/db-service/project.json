@@ -2,6 +2,12 @@
   "name": "db-service",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "targets": {
+    "build": {
+      "dependsOn": ["^build"],
+      "options": {
+        "command": "tsc --build tsconfig.lib.json --force"
+      }
+    },
     "test": {
       "executor": "nx:run-commands",
       "options": {
