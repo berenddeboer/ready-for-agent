@@ -6,7 +6,9 @@ export interface GitHubRepository {
 
 /**
  * Forge-neutral CI Gate catalog entry. GitHub maps an active Actions
- * workflow to this shape; identity is the workflow id.
+ * workflow (identity is the workflow id); Azure DevOps maps an enabled
+ * build pipeline associated with the Git Repository (identity is the
+ * build definition id).
  */
 export const GITHUB_CI_GATE_KIND = "workflow"
 

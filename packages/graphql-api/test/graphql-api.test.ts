@@ -274,6 +274,9 @@ const defaultAzureDevOps: AzureDevOpsServiceShape = {
   verifyProject: (repository) => Effect.succeed(repository),
   getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   listReadyIssues: () => Effect.succeed([]),
+  listCiGateCatalog: () => Effect.succeed([]),
+  observeCiGate: () =>
+    Effect.succeed({ defaultBranch: "refs/heads/main", observations: [] }),
   hasCredentials: () => Effect.succeed(true),
   hasAmbientCredentials: () => Effect.succeed(true),
   getOpenPullRequestNumber: () => Effect.succeed(1),
@@ -13006,6 +13009,115 @@ describe("GraphQL API", () => {
     }
     expect(payload.data.ciGateCatalog.definitions).toEqual([])
     expect(payload.data.ciGateCatalog.error).toContain("Actions read required")
+  })
+
+  test("ciGateCatalog returns live Azure DevOps build pipelines without Azure-specific types", async () => {
+    await runtime.dispose()
+    const azureRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/acme/widgets.git",
+      paused: true,
+    })
+    runtime = makeRuntime(
+      { listRepositories: Effect.succeed([azureRepository]) },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        listCiGateCatalog: () =>
+          Effect.succeed([
+            {
+              identity: "12",
+              displayLabel: "CI",
+              kind: "build-pipeline",
+              diagnosticMetadata:
+                "\\CI · build · enabled · rev 3 · https://dev.azure.com/acme/widgets/_build?definitionId=12",
+            },
+          ]),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          ciGateCatalog(repositoryId: "${azureRepository.id}") {
+            error
+            definitions { identity displayLabel kind diagnosticMetadata }
+          }
+        }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        ciGateCatalog: {
+          error: null,
+          definitions: [
+            {
+              identity: "12",
+              displayLabel: "CI",
+              kind: "build-pipeline",
+              diagnosticMetadata:
+                "\\CI · build · enabled · rev 3 · https://dev.azure.com/acme/widgets/_build?definitionId=12",
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("ciGateCatalog returns Azure Build-read guidance instead of failing the query", async () => {
+    await runtime.dispose()
+    const azureRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/acme/widgets.git",
+      paused: true,
+    })
+    runtime = makeRuntime(
+      { listRepositories: Effect.succeed([azureRepository]) },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        listCiGateCatalog: () =>
+          Effect.fail(
+            new AzureDevOpsRequestError({
+              message:
+                "Failed to list CI Gate Definitions for acme/widgets: Build read required",
+              statusCode: 403,
+            }),
+          ),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          ciGateCatalog(repositoryId: "${azureRepository.id}") {
+            error
+            definitions { identity }
+          }
+        }`,
+      }),
+    )
+    const payload = (await response.json()) as {
+      data: {
+        ciGateCatalog: { error: string | null; definitions: unknown[] }
+      }
+    }
+    expect(payload.data.ciGateCatalog.definitions).toEqual([])
+    expect(payload.data.ciGateCatalog.error).toContain("Build read required")
   })
 
   test("updateRepositorySettings saves catalog identities and rejects fabricated ones", async () => {

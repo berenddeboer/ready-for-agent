@@ -20,6 +20,12 @@ const platformLayer = BunChildProcessSpawner.layer.pipe(
 )
 
 const azureLifecycleStub = {
+  listCiGateCatalog: () => Effect.succeed([]),
+  observeCiGate: () =>
+    Effect.succeed({
+      defaultBranch: "refs/heads/main",
+      observations: [],
+    }),
   getOpenPullRequestNumber: () => Effect.succeed(1),
   findOpenPullRequestNumber: () => Effect.succeed(null),
   createDraftPullRequest: () => Effect.succeed(1),

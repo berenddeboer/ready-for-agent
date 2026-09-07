@@ -11,7 +11,12 @@ import {
   Schema,
 } from "effect"
 import {
+  type CiGateCatalogEntry,
+  type CiGateDefinitionObservation,
+  type CiGateObservation,
+  type CiGateObservedRun,
   type MergePullRequestResult,
+  type ObserveCiGateInput,
   type PrStatusCheckDiagnostic,
   type PullRequestCheckStatus,
   type PullRequestLifecycleStatus,
@@ -30,6 +35,7 @@ import {
   AzureDevOpsRequestError,
 } from "./errors.js"
 import {
+  AZURE_DEVOPS_CI_GATE_KIND,
   AZURE_DEVOPS_FORGE_HOST,
   AZURE_DEVOPS_PAT_ENV_VAR,
   type AzureDevOpsProjectIdentity,
@@ -592,6 +598,201 @@ const decodeOrRequestError = <S extends { readonly Type: unknown }>(
 const organizationApiBase = (organization: string): string =>
   `https://${AZURE_DEVOPS_FORGE_HOST}/${encodeURIComponent(organization)}`
 
+const CI_GATE_PAGE_SIZE = 100
+const CI_GATE_CONTINUATION_HEADER = "x-ms-continuationtoken"
+const CI_GATE_PULL_REQUEST_REASON = "pullrequest"
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const pageValues = (payload: unknown): readonly unknown[] => {
+  if (Array.isArray(payload)) {
+    return payload
+  }
+  if (isRecord(payload) && Array.isArray(payload.value)) {
+    return payload.value
+  }
+  return []
+}
+
+const parseAzureInstant = (value: unknown): Date | null => {
+  if (typeof value !== "string" || value.trim() === "") {
+    return null
+  }
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+const optionalNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== "string") {
+    return null
+  }
+  const trimmed = value.trim()
+  return trimmed === "" ? null : trimmed
+}
+
+const positiveInt = (value: unknown): number | null => {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    return null
+  }
+  return value
+}
+
+const definitionWebUrl = (
+  identity: AzureDevOpsProjectIdentity,
+  definitionId: number,
+): string =>
+  `https://${AZURE_DEVOPS_FORGE_HOST}/${encodeURIComponent(identity.organization)}/${encodeURIComponent(identity.project)}/_build?definitionId=${String(definitionId)}`
+
+const catalogDiagnosticMetadata = (input: {
+  readonly path: string | null
+  readonly type: string | null
+  readonly queueStatus: string | null
+  readonly revision: number | null
+  readonly url: string
+}): string => {
+  const parts: string[] = []
+  if (input.path !== null) {
+    parts.push(input.path)
+  }
+  if (input.type !== null) {
+    parts.push(input.type)
+  }
+  if (input.queueStatus !== null) {
+    parts.push(input.queueStatus)
+  }
+  if (input.revision !== null) {
+    parts.push(`rev ${String(input.revision)}`)
+  }
+  parts.push(input.url)
+  return parts.join(" · ")
+}
+
+const repositoryIdOf = (value: unknown): string | null => {
+  if (!isRecord(value)) {
+    return null
+  }
+  return optionalNonEmptyString(value.id)
+}
+
+const mapActiveBuildDefinition = (
+  value: unknown,
+  identity: AzureDevOpsProjectIdentity,
+  repositoryId: string,
+): CiGateCatalogEntry | null => {
+  if (!isRecord(value)) {
+    return null
+  }
+  if (optionalNonEmptyString(value.queueStatus)?.toLowerCase() !== "enabled") {
+    return null
+  }
+  if (optionalNonEmptyString(value.quality)?.toLowerCase() === "draft") {
+    return null
+  }
+  const repository = value.repository
+  const definitionRepositoryId = repositoryIdOf(repository)
+  if (
+    definitionRepositoryId !== null &&
+    definitionRepositoryId.toLowerCase() !== repositoryId.toLowerCase()
+  ) {
+    return null
+  }
+  if (
+    isRecord(repository) &&
+    optionalNonEmptyString(repository.type) !== null &&
+    optionalNonEmptyString(repository.type)?.toLowerCase() !== "tfsgit"
+  ) {
+    return null
+  }
+  const id = positiveInt(value.id)
+  if (id === null) {
+    return null
+  }
+  const name = optionalNonEmptyString(value.name)
+  if (name === null) {
+    return null
+  }
+  const webHref =
+    isRecord(value._links) && isRecord(value._links.web)
+      ? optionalNonEmptyString(value._links.web.href)
+      : null
+  return {
+    identity: String(id),
+    displayLabel: name,
+    kind: AZURE_DEVOPS_CI_GATE_KIND,
+    diagnosticMetadata: catalogDiagnosticMetadata({
+      path: optionalNonEmptyString(value.path),
+      type: optionalNonEmptyString(value.type),
+      queueStatus: optionalNonEmptyString(value.queueStatus),
+      revision: positiveInt(value.revision),
+      url: webHref ?? definitionWebUrl(identity, id),
+    }),
+  }
+}
+
+const runIdFromIdentity = (runIdentity: string): string => {
+  const separator = runIdentity.indexOf(":")
+  return separator === -1 ? runIdentity : runIdentity.slice(0, separator)
+}
+
+const isSameObservedRun = (
+  runIdentity: string,
+  lastRunIdentity: string,
+): boolean =>
+  runIdentity === lastRunIdentity ||
+  runIdFromIdentity(runIdentity) === runIdFromIdentity(lastRunIdentity)
+
+const mapObservedBuild = (
+  value: unknown,
+  defaultBranch: string,
+  identity: AzureDevOpsProjectIdentity,
+): CiGateObservedRun | null => {
+  if (!isRecord(value)) {
+    return null
+  }
+  const id = positiveInt(value.id)
+  if (id === null) {
+    return null
+  }
+  const reason = optionalNonEmptyString(value.reason)
+  if (reason === null || reason.toLowerCase() === CI_GATE_PULL_REQUEST_REASON) {
+    return null
+  }
+  const sourceBranch = optionalNonEmptyString(value.sourceBranch)
+  if (sourceBranch === null) {
+    return null
+  }
+  const normalizedSource = toFullRefName(sourceBranch)
+  if (normalizedSource !== defaultBranch) {
+    return null
+  }
+  const createdAt =
+    parseAzureInstant(value.queueTime) ?? parseAzureInstant(value.startTime)
+  if (createdAt === null) {
+    return null
+  }
+  const buildNumber = optionalNonEmptyString(value.buildNumber)
+  const webHref =
+    isRecord(value._links) && isRecord(value._links.web)
+      ? optionalNonEmptyString(value._links.web.href)
+      : null
+  return {
+    runIdentity:
+      buildNumber === null ? String(id) : `${String(id)}:${buildNumber}`,
+    htmlUrl: webHref ?? buildResultsUrl(identity, id),
+    headSha: optionalNonEmptyString(value.sourceVersion),
+    headRef: normalizedSource,
+    event: reason,
+    createdAt,
+    updatedAt:
+      parseAzureInstant(value.finishTime) ??
+      parseAzureInstant(value.lastChangedDate),
+    startedAt: parseAzureInstant(value.startTime),
+    rawStatus: optionalNonEmptyString(value.status),
+    rawConclusion: optionalNonEmptyString(value.result),
+  }
+}
+
 const REFS_HEADS_PREFIX = "refs/heads/"
 
 /** Azure DevOps requires fully-qualified refs on PR create/list bodies. */
@@ -802,6 +1003,57 @@ export const makeAzureDevOpsService = (options: {
         return await response.json()
       },
       catch: (cause) => requestError(message, cause),
+    }).pipe(
+      Effect.timeout(REQUEST_TIMEOUT),
+      Effect.catchTag("TimeoutError", (cause) =>
+        Effect.fail(requestError(`${message} timed out`, cause)),
+      ),
+    )
+
+  const requestJsonPage = (
+    organization: string,
+    path: string,
+    message: string,
+    permissionMessage: string,
+  ): Effect.Effect<
+    { readonly payload: unknown; readonly continuationToken: string | null },
+    AzureDevOpsRequestError
+  > =>
+    Effect.tryPromise({
+      try: async () => {
+        const separator = path.includes("?") ? "&" : "?"
+        const response = await fetchImpl(
+          `${organizationApiBase(organization)}${path}${separator}api-version=${API_VERSION}`,
+          { method: "GET", headers },
+        )
+        if (!response.ok) {
+          if (response.status === 403) {
+            await response.text()
+            throw new AzureDevOpsHttpError(403, permissionMessage)
+          }
+          throw new AzureDevOpsHttpError(
+            response.status,
+            `${message}: Azure DevOps returned HTTP ${response.status}`,
+          )
+        }
+        const payload: unknown = await response.json()
+        const continuationToken =
+          optionalNonEmptyString(
+            response.headers.get(CI_GATE_CONTINUATION_HEADER),
+          ) ??
+          optionalNonEmptyString(response.headers.get("X-MS-ContinuationToken"))
+        return { payload, continuationToken }
+      },
+      catch: (cause) => {
+        if (cause instanceof AzureDevOpsHttpError && cause.statusCode === 403) {
+          return new AzureDevOpsRequestError({
+            message: permissionMessage,
+            cause,
+            statusCode: 403,
+          })
+        }
+        return requestError(message, cause)
+      },
     }).pipe(
       Effect.timeout(REQUEST_TIMEOUT),
       Effect.catchTag("TimeoutError", (cause) =>
@@ -1167,6 +1419,254 @@ export const makeAzureDevOpsService = (options: {
       return yield* loadDefaultBranch(repository, identity)
     })
 
+  const loadGitRepository = (
+    repository: AzureDevOpsRepository,
+    identity: AzureDevOpsProjectIdentity,
+    permissionMessage: string,
+  ): Effect.Effect<
+    { readonly id: string; readonly defaultBranch: string },
+    AzureDevOpsServiceError
+  > =>
+    Effect.gen(function* () {
+      const page = yield* unavailableOn404(
+        repository,
+        requestJsonPage(
+          identity.organization,
+          repositoryMetaPath(identity),
+          `Failed to resolve the Git repository for ${repository.projectPath}`,
+          permissionMessage,
+        ),
+      )
+      const meta = yield* decodeOrRequestError(
+        RepositoryMetaSchema,
+        `Azure DevOps returned invalid repository metadata for ${repository.projectPath}`,
+        page.payload,
+      )
+      const id = meta.id?.trim() ?? ""
+      if (id === "") {
+        return yield* new AzureDevOpsRequestError({
+          message: `Azure DevOps did not identify the Git repository for ${repository.projectPath}`,
+        })
+      }
+      const defaultBranch = meta.defaultBranch?.trim() ?? ""
+      if (defaultBranch === "") {
+        return yield* new AzureDevOpsRequestError({
+          message: `Repository ${repository.projectPath} has no default branch; push an initial commit first`,
+        })
+      }
+      return { id, defaultBranch: toFullRefName(defaultBranch) }
+    })
+
+  const collectCiGatePages = (
+    organization: string,
+    path: string,
+    message: string,
+    permissionMessage: string,
+    onPage: (values: readonly unknown[]) => "continue" | "stop",
+  ): Effect.Effect<void, AzureDevOpsRequestError> =>
+    Effect.gen(function* () {
+      let continuationToken: string | null = null
+      for (;;) {
+        const pagePath: string =
+          continuationToken === null
+            ? path
+            : `${path}&continuationToken=${encodeURIComponent(continuationToken)}`
+        const page: {
+          readonly payload: unknown
+          readonly continuationToken: string | null
+        } = yield* requestJsonPage(
+          organization,
+          pagePath,
+          message,
+          permissionMessage,
+        )
+        const stop = onPage(pageValues(page.payload))
+        if (stop === "stop" || page.continuationToken === null) {
+          return
+        }
+        continuationToken = page.continuationToken
+      }
+    })
+
+  const listCiGateCatalog = (
+    repository: AzureDevOpsRepository,
+  ): Effect.Effect<readonly CiGateCatalogEntry[], AzureDevOpsServiceError> =>
+    Effect.gen(function* () {
+      const identity = splitAzureDevOpsProjectPath(repository.projectPath)
+      if (identity === null) {
+        return yield* invalidProjectPath(repository)
+      }
+      const permissionMessage = `Failed to list CI Gate Definitions for ${repository.projectPath}: Build read required`
+      const gitRepository = yield* loadGitRepository(
+        repository,
+        identity,
+        permissionMessage,
+      )
+      const entries: CiGateCatalogEntry[] = []
+      const listPath = `/${encodeURIComponent(identity.project)}/_apis/build/definitions?repositoryId=${encodeURIComponent(gitRepository.id)}&repositoryType=TfsGit&includeAllProperties=true&$top=${String(CI_GATE_PAGE_SIZE)}`
+      yield* collectCiGatePages(
+        identity.organization,
+        listPath,
+        `Failed to list CI Gate Definitions for ${repository.projectPath}`,
+        permissionMessage,
+        (values) => {
+          for (const value of values) {
+            const mapped = mapActiveBuildDefinition(
+              value,
+              identity,
+              gitRepository.id,
+            )
+            if (mapped !== null) {
+              entries.push(mapped)
+            }
+          }
+          return "continue"
+        },
+      )
+      return entries
+    })
+
+  const observeDefinition = (
+    repository: AzureDevOpsRepository,
+    identity: AzureDevOpsProjectIdentity,
+    gitRepository: { readonly id: string; readonly defaultBranch: string },
+    definitionIdentity: string,
+    lastRunIdentity: string | null,
+    permissionMessage: string,
+  ): Effect.Effect<CiGateDefinitionObservation, AzureDevOpsServiceError> =>
+    Effect.gen(function* () {
+      const trimmed = definitionIdentity.trim()
+      const definitionId = Number(trimmed)
+      if (
+        trimmed.length === 0 ||
+        !Number.isSafeInteger(definitionId) ||
+        definitionId <= 0
+      ) {
+        return {
+          identity: trimmed,
+          kind: "unavailable" as const,
+          reason: "not_found" as const,
+          message: `CI Gate Definition ${trimmed} could not be observed`,
+        }
+      }
+      const definitionPage = yield* requestJsonPage(
+        identity.organization,
+        `/${encodeURIComponent(identity.project)}/_apis/build/definitions/${String(definitionId)}`,
+        `Failed to observe CI Gate Definition ${trimmed} for ${repository.projectPath}`,
+        permissionMessage,
+      ).pipe(
+        Effect.catch((error) =>
+          error.statusCode === 404 ? Effect.succeed(null) : Effect.fail(error),
+        ),
+      )
+      if (definitionPage === null) {
+        return {
+          identity: trimmed,
+          kind: "unavailable" as const,
+          reason: "not_found" as const,
+          message: `CI Gate Definition ${trimmed} could not be observed`,
+        }
+      }
+      const definition = definitionPage.payload
+      const queueStatus = isRecord(definition)
+        ? optionalNonEmptyString(definition.queueStatus)?.toLowerCase()
+        : null
+      if (queueStatus === "disabled" || queueStatus === "paused") {
+        return {
+          identity: trimmed,
+          kind: "unavailable" as const,
+          reason: "error" as const,
+          message: `CI Gate Definition ${trimmed} is ${queueStatus}`,
+        }
+      }
+      const definitionRepositoryId = isRecord(definition)
+        ? repositoryIdOf(definition.repository)
+        : null
+      if (
+        definitionRepositoryId !== null &&
+        definitionRepositoryId.toLowerCase() !== gitRepository.id.toLowerCase()
+      ) {
+        return {
+          identity: trimmed,
+          kind: "unavailable" as const,
+          reason: "not_found" as const,
+          message: `CI Gate Definition ${trimmed} could not be observed`,
+        }
+      }
+      const runs: CiGateObservedRun[] = []
+      const buildsPath = `/${encodeURIComponent(identity.project)}/_apis/build/builds?definitions=${String(definitionId)}&branchName=${encodeURIComponent(gitRepository.defaultBranch)}&queryOrder=QueueTimeDescending&$top=${String(CI_GATE_PAGE_SIZE)}`
+      yield* collectCiGatePages(
+        identity.organization,
+        buildsPath,
+        `Failed to observe CI Gate Definition ${trimmed} for ${repository.projectPath}`,
+        permissionMessage,
+        (values) => {
+          for (const value of values) {
+            const mapped = mapObservedBuild(
+              value,
+              gitRepository.defaultBranch,
+              identity,
+            )
+            if (mapped === null) {
+              continue
+            }
+            runs.push(mapped)
+            if (
+              lastRunIdentity !== null &&
+              isSameObservedRun(mapped.runIdentity, lastRunIdentity)
+            ) {
+              return "stop"
+            }
+          }
+          return "continue"
+        },
+      )
+      return {
+        identity: trimmed,
+        kind: "observed" as const,
+        runs,
+      }
+    })
+
+  const observeCiGate = (
+    repository: AzureDevOpsRepository,
+    input: ObserveCiGateInput,
+  ): Effect.Effect<CiGateObservation, AzureDevOpsServiceError> =>
+    Effect.gen(function* () {
+      const identity = splitAzureDevOpsProjectPath(repository.projectPath)
+      if (identity === null) {
+        return yield* invalidProjectPath(repository)
+      }
+      const permissionMessage = `Failed to observe CI Gate Definitions for ${repository.projectPath}: Build read required`
+      const gitRepository = yield* loadGitRepository(
+        repository,
+        identity,
+        permissionMessage,
+      )
+      const observations: CiGateDefinitionObservation[] = []
+      for (const definitionIdentity of input.definitionIdentities) {
+        const lastSeenRaw = input.lastRunIdentities[definitionIdentity]
+        const lastSeen =
+          lastSeenRaw !== undefined && lastSeenRaw.trim() !== ""
+            ? lastSeenRaw
+            : null
+        observations.push(
+          yield* observeDefinition(
+            repository,
+            identity,
+            gitRepository,
+            definitionIdentity,
+            lastSeen,
+            permissionMessage,
+          ),
+        )
+      }
+      return {
+        defaultBranch: gitRepository.defaultBranch,
+        observations,
+      }
+    })
+
   return {
     verifyProject: Effect.fn("AzureDevOpsService.verifyProject")(
       function* (repository) {
@@ -1324,6 +1824,10 @@ export const makeAzureDevOpsService = (options: {
         })
       },
     ),
+    listCiGateCatalog: Effect.fn("AzureDevOpsService.listCiGateCatalog")(
+      listCiGateCatalog,
+    ),
+    observeCiGate: Effect.fn("AzureDevOpsService.observeCiGate")(observeCiGate),
     hasCredentials: () => Effect.succeed(options.token !== undefined),
     hasAmbientCredentials: () => Effect.succeed(options.token !== undefined),
     getOpenPullRequestNumber: Effect.fn(

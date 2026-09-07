@@ -17,6 +17,8 @@ import {
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { ambientAzureDevOpsLayer } from "./ambient-azure-devops-layer.js"
 import {
+  SerializedCiGateCatalog,
+  SerializedCiGateObservation,
   SerializedMergePullRequestResult,
   SerializedPrStatusCheckDiagnostics,
   SerializedPullRequestCheckStatus,
@@ -371,6 +373,53 @@ export const keymaxxerAzureDevOpsLayer = (options: {
                   decode: (stdout) => parseIssues(stdout, repository),
                 }),
               (ambientService) => ambientService.listReadyIssues(repository),
+            ),
+        ),
+        listCiGateCatalog: Effect.fn("KeymaxxerAzureDevOps.listCiGateCatalog")(
+          (repository) =>
+            withVaultOrAmbient(
+              repository,
+              (tokenName) =>
+                callHelper({
+                  operation: "list-ci-gate-catalog",
+                  repository,
+                  tokenName,
+                  describe: "list CI Gate Definitions",
+                  decode: decodeJson(
+                    SerializedCiGateCatalog,
+                    repository,
+                    "decode CI Gate catalog",
+                  ),
+                }),
+              (ambientService) => ambientService.listCiGateCatalog(repository),
+            ),
+        ),
+        observeCiGate: Effect.fn("KeymaxxerAzureDevOps.observeCiGate")(
+          (repository, input) =>
+            withVaultOrAmbient(
+              repository,
+              (tokenName) =>
+                callHelper({
+                  operation: "observe-ci-gate",
+                  repository,
+                  tokenName,
+                  describe: "observe CI Gate Definitions",
+                  args: [
+                    encodeArgument(
+                      JSON.stringify({
+                        definitionIdentities: input.definitionIdentities,
+                        lastRunIdentities: input.lastRunIdentities,
+                      }),
+                    ),
+                  ],
+                  decode: decodeJson(
+                    SerializedCiGateObservation,
+                    repository,
+                    "decode CI Gate observation",
+                  ),
+                }),
+              (ambientService) =>
+                ambientService.observeCiGate(repository, input),
             ),
         ),
         hasCredentials: Effect.fn("KeymaxxerAzureDevOps.hasCredentials")(

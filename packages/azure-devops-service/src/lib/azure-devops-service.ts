@@ -1,7 +1,10 @@
 import { Context, type Effect } from "effect"
 import type {
+  CiGateCatalogEntry,
+  CiGateObservation,
   MergePullRequestOptions,
   MergePullRequestResult,
+  ObserveCiGateInput,
   PrStatusCheckDiagnostic,
   PrStatusCheckDiagnosticsOptions,
   PrStatusCheckDiagnosticsRequest,
@@ -24,13 +27,13 @@ export type AzureDevOpsServiceError =
   | AzureDevOpsNotImplementedError
 
 /**
- * GitLab's 18-method surface plus {@link AzureDevOpsServiceShape.ensurePullRequestLinkedToIssue}:
- * Azure Boards does not honor `Closes #N` as a PR association, so Create PR
- * must write an ArtifactLink. 16 methods perform live Azure DevOps REST
- * requests (and have matching Keymaxxer helper operations),
- * `hasCredentials`/`hasAmbientCredentials` are local credential checks, and
- * only `countOpenNonDraftPullRequests` still fails with
- * `AzureDevOpsNotImplementedError` (see method-level docs).
+ * GitLab's 18-method surface plus {@link AzureDevOpsServiceShape.ensurePullRequestLinkedToIssue}
+ * and Repository CI Gate catalog/observation. Azure Boards does not honor
+ * `Closes #N` as a PR association, so Create PR must write an ArtifactLink.
+ * 18 methods perform live Azure DevOps REST requests (and have matching
+ * Keymaxxer helper operations), `hasCredentials`/`hasAmbientCredentials`
+ * are local credential checks, and only `countOpenNonDraftPullRequests`
+ * still fails with `AzureDevOpsNotImplementedError` (see method-level docs).
  */
 export interface AzureDevOpsServiceShape {
   /**
@@ -63,6 +66,24 @@ export interface AzureDevOpsServiceShape {
     readonly AzureDevOpsReadyLabeledIssue[],
     AzureDevOpsServiceError
   >
+  /**
+   * Live catalog of enabled build pipelines associated with this Git
+   * Repository (`GET .../build/definitions?repositoryId=&repositoryType=TfsGit`).
+   * Paused, disabled, draft, and other-repository definitions are omitted.
+   */
+  readonly listCiGateCatalog: (
+    repository: AzureDevOpsRepository,
+  ) => Effect.Effect<readonly CiGateCatalogEntry[], AzureDevOpsServiceError>
+  /**
+   * Observe selected build pipelines on the Repository's current default
+   * branch in Azure DevOps ref form. Pull Request validation builds are
+   * omitted even when they target that branch. Raw status/result stay
+   * Azure-native.
+   */
+  readonly observeCiGate: (
+    repository: AzureDevOpsRepository,
+    input: ObserveCiGateInput,
+  ) => Effect.Effect<CiGateObservation, AzureDevOpsServiceError>
   /**
    * Whether credentials resolve for this Repository: a per-Repository vault
    * secret and/or the ambient `AZURE_DEVOPS_EXT_PAT` (layer-dependent).

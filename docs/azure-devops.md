@@ -40,6 +40,21 @@ until you push an initial commit so `main` (or equivalent) exists.
 Add may still succeed today; later worktree and Implement steps fail.
 Push `main` first.
 
+## Repository CI Gate
+
+Azure Repos can opt into the same Repository CI Gate as GitHub. The
+catalog lists **enabled build pipelines associated with this Git
+repository**, not every definition in the Azure DevOps project. Select
+those pipelines in Repository settings. Default-branch builds are
+observed on the existing polling cadence; Pull Request validation
+builds stay local to the Work Item PR. A failed or partially succeeded
+build closes the gate until a newer succeeded run; missing Build read
+permission degrades observation without pretending the pipeline is
+healthy.
+
+PR Status Checks (branch policy / build validation on the pull request)
+remain a separate path. They are not CI Gate Definitions.
+
 ## Merge Policy
 
 New Repositories default to Merge Policy `off` — a human must merge.

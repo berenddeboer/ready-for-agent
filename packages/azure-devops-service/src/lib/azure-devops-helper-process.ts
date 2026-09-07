@@ -12,9 +12,11 @@ import { getOpenPullRequestNumberProgram } from "../bin/get-open-pull-request-nu
 import { getPrCheckStatusProgram } from "../bin/get-pr-check-status.js"
 import { getPrLifecycleStatusProgram } from "../bin/get-pr-lifecycle-status.js"
 import { getPrStatusCheckDiagnosticsProgram } from "../bin/get-pr-status-check-diagnostics.js"
+import { listCiGateCatalogProgram } from "../bin/list-ci-gate-catalog.js"
 import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
 import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
 import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
+import { observeCiGateProgram } from "../bin/observe-ci-gate.js"
 import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
 import { verifyProjectProgram } from "../bin/verify-project.js"
 import { azureDevOpsServiceBinScriptPath } from "../bin-script-path.js"
@@ -27,13 +29,16 @@ export const INTERNAL_AZURE_DEVOPS_HELPER_ARG =
 /**
  * CLI-backed operations. `hasCredentials`/`hasAmbientCredentials` are
  * synchronous local checks (no vault secret needed) and never need a
- * subprocess, matching GitLab's helper operation set.
- * `countOpenNonDraftPullRequests` still fails with
+ * subprocess, matching GitLab's helper operation set. CI Gate catalog
+ * and observation run through the same helper path as other REST
+ * operations. `countOpenNonDraftPullRequests` still fails with
  * `AzureDevOpsNotImplementedError` inside the helper the same way the
  * in-process Live layer does.
  */
 export const AZURE_DEVOPS_HELPER_OPERATIONS = [
   "list-ready-issues",
+  "list-ci-gate-catalog",
+  "observe-ci-gate",
   "get-authenticated-user-login",
   "verify-project",
   "get-open-pull-request-number",
@@ -146,6 +151,8 @@ const programs: Record<
   ) => Effect.Effect<void, unknown, AzureDevOpsService>
 > = {
   "list-ready-issues": listReadyIssuesProgram,
+  "list-ci-gate-catalog": listCiGateCatalogProgram,
+  "observe-ci-gate": observeCiGateProgram,
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
   "verify-project": verifyProjectProgram,
   "get-open-pull-request-number": getOpenPullRequestNumberProgram,

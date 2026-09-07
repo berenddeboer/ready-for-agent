@@ -1,5 +1,6 @@
 import { Clock, Effect, Result } from "effect"
 import { ulid } from "ulidx"
+import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import {
   type CiFailureIncidentRecord,
   type CiGateDefinitionObservationRecord,
@@ -11,15 +12,25 @@ import {
 } from "@ready-for-agent/db-service"
 import {
   type CiGateDefinitionObservation,
+  type CiGateObservation,
   type CiGateObservedRun,
   type GitHubOperationOrigin,
   GitHubService,
+  type ObserveCiGateInput,
   formatUserFacingError,
 } from "@ready-for-agent/github-service"
 
 export type RepositoryCiGateStatus = "disabled" | "open" | "closed" | "degraded"
 
-const FAILURE_CONCLUSIONS = new Set(["failure", "timed_out", "action_required"])
+const FAILURE_CONCLUSIONS = new Set([
+  "failure",
+  "timed_out",
+  "action_required",
+  "failed",
+  "partiallySucceeded",
+])
+
+const SUCCESS_CONCLUSIONS = new Set(["success", "succeeded"])
 
 export const ciGateObservationErrorMessage = (error: unknown): string => {
   const formatted = formatUserFacingError(error, "CI Gate observation failed")
@@ -39,7 +50,8 @@ const isPermissionError = (error: unknown): boolean => {
   }
   return (
     typeof record.message === "string" &&
-    record.message.includes("Actions read required")
+    (record.message.includes("Actions read required") ||
+      record.message.includes("Build read required"))
   )
 }
 
@@ -54,7 +66,7 @@ const classifyRun = (
   if (conclusion !== null && FAILURE_CONCLUSIONS.has(conclusion)) {
     return "failure"
   }
-  if (conclusion === "success") {
+  if (conclusion !== null && SUCCESS_CONCLUSIONS.has(conclusion)) {
     return "success"
   }
   return "non_decisive"
@@ -337,7 +349,10 @@ export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
           !definitions.some((definition) => definition.identity === identity),
       )
 
-    if (input.repository.forge !== "github") {
+    if (
+      input.repository.forge !== "github" &&
+      input.repository.forge !== "azure-devops"
+    ) {
       const observations = definitions.map((definition) =>
         unavailableObservation({
           previous: previousByIdentity.get(definition.identity),
@@ -371,23 +386,31 @@ export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
       }
     }
 
-    const github = yield* GitHubService
-    const adapterResult = yield* github
-      .observeCiGate(
-        {
-          forge: input.repository.forge,
-          forgeHost: input.repository.forgeHost,
-          projectPath: input.repository.projectPath,
-        },
-        {
-          definitionIdentities: definitions.map(
-            (definition) => definition.identity,
-          ),
-          lastRunIdentities,
-        },
-        { origin: input.origin },
-      )
-      .pipe(Effect.result)
+    const forgeRepository = {
+      forge: input.repository.forge,
+      forgeHost: input.repository.forgeHost,
+      projectPath: input.repository.projectPath,
+    }
+    const observationInput: ObserveCiGateInput = {
+      definitionIdentities: definitions.map(
+        (definition) => definition.identity,
+      ),
+      lastRunIdentities,
+    }
+    let adapterResult: Result.Result<CiGateObservation, unknown>
+    if (input.repository.forge === "azure-devops") {
+      const azureDevOps = yield* AzureDevOpsService
+      adapterResult = yield* azureDevOps
+        .observeCiGate(forgeRepository, observationInput)
+        .pipe(Effect.result)
+    } else {
+      const github = yield* GitHubService
+      adapterResult = yield* github
+        .observeCiGate(forgeRepository, observationInput, {
+          origin: input.origin,
+        })
+        .pipe(Effect.result)
+    }
 
     if (Result.isFailure(adapterResult)) {
       const message = ciGateObservationErrorMessage(adapterResult.failure)
