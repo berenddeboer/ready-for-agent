@@ -29,9 +29,30 @@ const seededRepositorySettingsPath = new RegExp(
   `/repos/${PAUSED_REPOSITORY_FIXTURE.repositoryId}/settings/?(?:\\?.*)?$`,
 )
 
+const CI_GATE_STUB_DEFINITION = {
+  identity: "ci.yml",
+  displayLabel: "Ready for Agent CI",
+  kind: "GITHUB_WORKFLOW",
+  diagnosticMetadata: null,
+} as const
+
+type CiGateCatalogPayload = {
+  error: string | null
+  definitions: ReadonlyArray<{
+    identity: string
+    displayLabel: string
+    kind: string
+    diagnosticMetadata: string | null
+  }>
+}
+
 type UpdateRepositorySettingsIntercept = {
   failNext: boolean
   delay: { resolve: () => void; promise: Promise<void> } | null
+  ciGateCatalog: {
+    delay: { resolve: () => void; promise: Promise<void> } | null
+    payload: CiGateCatalogPayload | null
+  }
 }
 
 const interceptByPage = new WeakMap<Page, UpdateRepositorySettingsIntercept>()
@@ -39,10 +60,38 @@ const interceptByPage = new WeakMap<Page, UpdateRepositorySettingsIntercept>()
 const interceptFor = (page: Page): UpdateRepositorySettingsIntercept => {
   let state = interceptByPage.get(page)
   if (state === undefined) {
-    state = { failNext: false, delay: null }
+    state = {
+      failNext: false,
+      delay: null,
+      ciGateCatalog: { delay: null, payload: null },
+    }
     interceptByPage.set(page, state)
   }
   return state
+}
+
+const graphqlQueryText = (postData: unknown): string => {
+  if (Array.isArray(postData)) {
+    return postData
+      .map((operation) =>
+        typeof operation === "object" &&
+        operation !== null &&
+        "query" in operation &&
+        typeof operation.query === "string"
+          ? operation.query
+          : "",
+      )
+      .join("\n")
+  }
+  if (
+    typeof postData === "object" &&
+    postData !== null &&
+    "query" in postData &&
+    typeof postData.query === "string"
+  ) {
+    return postData.query
+  }
+  return ""
 }
 
 const installUpdateRepositorySettingsRoute = async (page: Page) => {
@@ -55,9 +104,27 @@ const installUpdateRepositorySettingsRoute = async (page: Page) => {
     }
     let query = ""
     try {
-      const body = request.postDataJSON() as { query?: string }
-      query = body.query ?? ""
+      query = graphqlQueryText(request.postDataJSON())
     } catch {
+      await route.continue()
+      return
+    }
+    const state = interceptFor(page)
+    if (query.includes("ciGateCatalog")) {
+      const catalog = state.ciGateCatalog
+      if (catalog.delay !== null) {
+        await catalog.delay.promise
+      }
+      if (catalog.payload !== null) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            data: { ciGateCatalog: catalog.payload },
+          }),
+        })
+        return
+      }
       await route.continue()
       return
     }
@@ -66,7 +133,6 @@ const installUpdateRepositorySettingsRoute = async (page: Page) => {
       return
     }
 
-    const state = interceptFor(page)
     if (state.failNext) {
       state.failNext = false
       await route.fulfill({
@@ -312,6 +378,116 @@ Then("a repository settings save error is shown", async ({ page }) => {
     hasText: /Simulated repository settings save failure|could not be saved/i,
   })
   await expect(saveError).toBeVisible()
+})
+
+const repositorySettingsSectionTitles = async (page: Page) => {
+  const dialog = repositoryDialog(page)
+  return dialog.locator("h3").allTextContents()
+}
+
+When("CI Gate discovery is delayed", async ({ page }) => {
+  let resolveGate = () => {}
+  const promise = new Promise<void>((resolve) => {
+    resolveGate = resolve
+  })
+  const state = interceptFor(page)
+  state.ciGateCatalog = {
+    delay: { resolve: resolveGate, promise },
+    payload: {
+      error: null,
+      definitions: [CI_GATE_STUB_DEFINITION],
+    },
+  }
+  await installUpdateRepositorySettingsRoute(page)
+})
+
+When("CI Gate discovery is already available", async ({ page }) => {
+  const state = interceptFor(page)
+  state.ciGateCatalog = {
+    delay: null,
+    payload: {
+      error: null,
+      definitions: [CI_GATE_STUB_DEFINITION],
+    },
+  }
+  await installUpdateRepositorySettingsRoute(page)
+})
+
+When("CI Gate discovery is forced to fail", async ({ page }) => {
+  const state = interceptFor(page)
+  state.ciGateCatalog = {
+    delay: null,
+    payload: {
+      error: "The live CI Gate catalog could not be loaded",
+      definitions: [],
+    },
+  }
+  await installUpdateRepositorySettingsRoute(page)
+})
+
+When("CI Gate discovery completes", async ({ page }) => {
+  const state = interceptFor(page)
+  const gate = state.ciGateCatalog.delay
+  state.ciGateCatalog.delay = null
+  gate?.resolve()
+  const dialog = repositoryDialog(page)
+  await expect(dialog.getByText("Loading CI Gate Definitions…")).toHaveCount(
+    0,
+    {
+      timeout: 15_000,
+    },
+  )
+})
+
+When("I resize Repository settings to a mobile viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+})
+
+Then(
+  "the Repository settings sections are Forge identity, Options, Agent backend, Models, then CI Gate",
+  async ({ page }) => {
+    await expect
+      .poll(async () => repositorySettingsSectionTitles(page), {
+        timeout: 10_000,
+      })
+      .toEqual([
+        "Forge identity",
+        "Options",
+        "Agent backend",
+        "Models",
+        "CI Gate",
+      ])
+  },
+)
+
+Then("CI Gate discovery is pending", async ({ page }) => {
+  const dialog = repositoryDialog(page)
+  await expect(dialog.getByText("Loading CI Gate Definitions…")).toBeVisible()
+  await expect(
+    dialog.getByRole("checkbox", {
+      name: CI_GATE_STUB_DEFINITION.displayLabel,
+    }),
+  ).toHaveCount(0)
+})
+
+Then("the CI Gate Definition names are shown", async ({ page }) => {
+  const dialog = repositoryDialog(page)
+  await expect(
+    dialog.getByRole("checkbox", {
+      name: CI_GATE_STUB_DEFINITION.displayLabel,
+    }),
+  ).toBeVisible()
+  await expect(dialog.getByText("Loading CI Gate Definitions…")).toHaveCount(0)
+})
+
+Then("a CI Gate discovery error is shown", async ({ page }) => {
+  const dialog = repositoryDialog(page)
+  await expect(
+    dialog.getByRole("alert").filter({
+      hasText: "The live CI Gate catalog could not be loaded",
+    }),
+  ).toBeVisible()
+  await expect(dialog.getByText("Loading CI Gate Definitions…")).toHaveCount(0)
 })
 
 // Reuse shared "I go back/forward" and "I refresh" from settings-browser-history
