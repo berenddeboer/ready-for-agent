@@ -306,6 +306,7 @@ type WorkItemStatus =
   | "NEEDS_HUMAN_REVIEW"
   | "WAITING_FOR_WORKER_SLOT"
   | "WAITING_FOR_BLOCKERS"
+  | "WAITING_FOR_CI_REPAIR"
   | "WAITING_FOR_GITHUB"
 
 export type WorkItem = {

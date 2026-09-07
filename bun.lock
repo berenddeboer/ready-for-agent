@@ -274,6 +274,7 @@
       },
       "devDependencies": {
         "@ready-for-agent/db": "workspace:*",
+        "@ready-for-agent/sqlite-queue-service": "workspace:*",
         "@types/bun": "^1.3.0",
       },
     },

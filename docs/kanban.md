@@ -42,7 +42,8 @@ Placement is driven by **lifecycle progress**, not scheduler status:
 - Attention and Merged take precedence over every lifecycle lane.
 - Queue is only for genuine blocked or not-admitted work. A `QUEUED` step run
   (status-check poll, agent turn, or later lifecycle step) stays in Build,
-  Review, or PR according to its state.
+  Review, or PR according to its state. Merge-approved Waiting for CI Repair
+  stays in PR; it is not a Queue hold.
 - Once work has entered Build, Review, or PR, queued execution of a later step
   in that path must not return it to Queue or an earlier lane.
 

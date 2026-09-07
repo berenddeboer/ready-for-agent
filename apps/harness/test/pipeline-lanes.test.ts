@@ -129,6 +129,12 @@ describe("lifecycleFocusLaneFor", () => {
         status: "WAITING_FOR_WORKER_SLOT",
       }),
     ).toBeNull()
+    expect(
+      lifecycleFocusLaneFor({
+        state: "MERGE_PR",
+        status: "WAITING_FOR_CI_REPAIR",
+      }),
+    ).toBe("pr")
   })
 
   test("falls back to the latest chip phase when state is non-operational", () => {

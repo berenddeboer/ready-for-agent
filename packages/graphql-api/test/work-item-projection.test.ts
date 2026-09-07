@@ -51,6 +51,7 @@ const baseWorkItem = {
   paused: false,
   waitingSince: null,
   waitingForBlockers: false,
+  waitingForCiRepair: false,
   mergeMode: "ordinary",
   autoMergeOverride: null,
   holdsWorkerSlot: true,
@@ -137,6 +138,7 @@ describe("Postponed Step Run projection", () => {
           paused: false,
           waitingSince: null,
           waitingForBlockers: false,
+          waitingForCiRepair: false,
           stepRuns: [{ ...baseStepRun, status: "failed" }],
         }),
       ),
@@ -362,6 +364,54 @@ describe("paused Work Item statusLabel drain", () => {
     })
     expect(workItemStatus(startedDuringDrain)).toBe("running")
     expect(workItemStatusLabel(startedDuringDrain)).toBe("Running")
+  })
+
+  test("shows Waiting for CI Repair for merge-approved holds and names failed definitions", () => {
+    const held = workItemWith({
+      state: "merge_pr",
+      holdsWorkerSlot: false,
+      waitingForCiRepair: true,
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "decide_pr_merge",
+          status: "succeeded",
+        },
+      ],
+    })
+    expect(workItemStatus(held)).toBe("waiting_for_ci_repair")
+    expect(workItemStatusLabel(held)).toBe("Waiting for CI Repair")
+    expect(workItemStatusMessage(held)).toBe("Waiting for CI Repair")
+    expect(
+      workItemStatusMessage(held, {
+        failedCiGateDefinitionLabels: ["CI", "Nightly"],
+      }),
+    ).toBe("Waiting for CI Repair: CI, Nightly")
+    expect(workItemCanRetry(held)).toBe(false)
+    expect(workItemStateLabel(held)).toBe("Merge PR")
+  })
+
+  test("keeps blockers and Pause ahead of Waiting for CI Repair", () => {
+    expect(
+      workItemStatus(
+        workItemWith({
+          state: "merge_pr",
+          waitingForCiRepair: true,
+          waitingForBlockers: true,
+          holdsWorkerSlot: false,
+        }),
+      ),
+    ).toBe("waiting_for_blockers")
+    expect(
+      workItemStatus(
+        workItemWith({
+          state: "merge_pr",
+          waitingForCiRepair: true,
+          paused: true,
+          holdsWorkerSlot: false,
+        }),
+      ),
+    ).toBe("needs_human_review")
   })
 
   test("does not relabel waiting-for-blockers or waiting-for-worker-slot over Pause", () => {

@@ -20,6 +20,7 @@ import {
   formatUserFacingError,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
+import { WorkItemLifecycle } from "@ready-for-agent/work-item-lifecycle"
 
 export type RepositoryCiGateStatus = "disabled" | "open" | "closed" | "degraded"
 
@@ -167,6 +168,26 @@ const copyIncident = (
   ...patch,
   definitions: patch.definitions ?? incident.definitions,
 })
+
+const wakeMergeHoldsIfGateNotClosed = (
+  repositoryId: string,
+  status: RepositoryCiGateStatus,
+) =>
+  status === "closed"
+    ? Effect.void
+    : Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        yield* lifecycle
+          .releaseWaitingForCiRepair(repositoryId)
+          .pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(
+                "Failed releasing Waiting for CI Repair Work Items",
+                { repositoryId, error: String(error) },
+              ),
+            ),
+          )
+      })
 
 export const deriveRepositoryCiGateStatus = (input: {
   readonly selectedCount: number
@@ -351,6 +372,7 @@ export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
           recoveryReason: "empty_selection",
         })
       }
+      yield* wakeMergeHoldsIfGateNotClosed(input.repository.id, "disabled")
       return
     }
 
@@ -711,5 +733,6 @@ const commitWithIncidents = Effect.fn("commitCiGateIncidents")(
         status: nextStatus,
       })
     }
+    yield* wakeMergeHoldsIfGateNotClosed(input.repository.id, nextStatus)
   },
 )

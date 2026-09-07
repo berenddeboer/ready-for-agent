@@ -124,6 +124,7 @@ describe("refreshLoadedRepository", () => {
                   calls.push(`release:${repositoryId}`)
                   return 0
                 }),
+              releaseWaitingForCiRepair: () => Effect.succeed(0),
             }),
           ),
         ),
@@ -184,6 +185,7 @@ describe("refreshLoadedRepository", () => {
     admitWaitingWorkItems: Effect.succeed(0),
     completeParkedAttentionWhenIssueNoLongerRelevant: () => Effect.succeed(0),
     releaseWaitingForBlockers: () => Effect.succeed(0),
+    releaseWaitingForCiRepair: () => Effect.succeed(0),
   }
 
   it("observes CI even when Issue reconciliation fails", () =>

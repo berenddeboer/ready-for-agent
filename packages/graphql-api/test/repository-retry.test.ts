@@ -48,6 +48,7 @@ const baseWorkItem = {
   paused: false,
   waitingSince: null,
   waitingForBlockers: false,
+  waitingForCiRepair: false,
   mergeMode: "ordinary",
   autoMergeOverride: null,
   holdsWorkerSlot: false,

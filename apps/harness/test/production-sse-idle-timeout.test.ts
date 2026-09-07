@@ -449,6 +449,7 @@ describe("production GraphQL SSE idle timeout", () => {
         stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
         admitWaitingWorkItems: Effect.succeed(0),
         releaseWaitingForBlockers: () => Effect.succeed(0),
+        releaseWaitingForCiRepair: () => Effect.succeed(0),
         completeParkedAttentionWhenIssueNoLongerRelevant: () =>
           Effect.succeed(0),
       }

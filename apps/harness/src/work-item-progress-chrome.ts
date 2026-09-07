@@ -73,6 +73,7 @@ export function statusBadgeClassNameForStatus(status: string): string {
           ? ui.statusTagGhost
           : status === "WAITING_FOR_WORKER_SLOT" ||
               status === "WAITING_FOR_BLOCKERS" ||
+              status === "WAITING_FOR_CI_REPAIR" ||
               status === "WAITING_FOR_GITHUB"
             ? ui.statusTagHold
             : ui.statusTagPlain
