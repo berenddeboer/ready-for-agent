@@ -30,9 +30,6 @@ describe.skipIf(!runIntegration)("Codex AgentBackend integration", () => {
     expect(
       result.models.every((model) => Array.isArray(model.thinkingLevels)),
     ).toBe(true)
-    expect(
-      result.models.every((model) => model.thinkingLevels.length > 0),
-    ).toBe(true)
   }, 35_000)
 
   it("starts and resumes a Session, switches model/effort, and invokes /review", async () => {

@@ -125,7 +125,12 @@ missing or broken selected backend (default is OpenCode) is shown as
 backend, reinstall the CLI, or use Recheck after fixing it:
 
 - [OpenCode](https://opencode.ai/) (`opencode` on PATH)
-- [Codex](https://github.com/openai/codex) (`codex` on PATH)
+- [Codex](https://github.com/openai/codex) (`codex` on PATH). Codex Build
+  0.153.4 or later is the supported baseline so Settings can list GPT-6
+  Astra and current reasoning options. After upgrading Codex, use Recheck
+  Agent Backend. A custom `model_provider` is inspected from the CLI's
+  bundled catalog only — not that provider's deployment IDs — and never
+  runs the provider token helper during inspect.
 - [Grok Build](https://docs.x.ai/) (`grok` on PATH)
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
   (`claude` on PATH)
@@ -902,7 +907,8 @@ selects the instance-wide Agent Backend; the change hot-activates on
 Save when no Work Items are unfinished. Model catalogs and effort
 (thinking) options are backend-local, and build/review preferences
 are remembered per backend. Models are always picked from the
-backend's current catalog, never typed in.
+backend's current catalog, never typed in. Codex Build discovers that
+catalog during inspect and Recheck from the installed CLI.
 
 2. Does the harness support a Forge other than GitHub?
 

@@ -1,5 +1,4 @@
 import type { Duration } from "effect"
-import type { AgentModel } from "@ready-for-agent/agent-backend"
 
 export interface CodexLayerOptions {
   readonly binary?: string
@@ -22,28 +21,33 @@ export const CODEX_UNAUTHENTICATED_MESSAGE =
   "Codex Build is not authenticated. Run `codex login` to store ChatGPT or API-key credentials, or set `model_provider` to a custom provider in `~/.codex/config.toml`, then Recheck Agent Backend."
 
 /**
- * Adapter-bundled static model catalog for Codex Build (ADR 0041).
- *
- * Only current-generation models (gpt-5.5 and up). Thinking Levels are the
- * Codex CLI `model_reasoning_effort` values each model supports. Pinned from
- * `codex debug models` for Codex CLI 0.145.x; update on Harness release when
- * OpenAI ships a new generation.
+ * Codex CLI baseline for reliable first-party `model/list` discovery and
+ * bundled Astra visibility. Older CLIs may lack app-server model listing or
+ * ship Astra as hidden.
  */
-export const CODEX_STATIC_CATALOG: ReadonlyArray<AgentModel> = [
-  {
-    id: "gpt-5.6-sol",
-    thinkingLevels: ["low", "medium", "high", "xhigh", "max", "ultra"],
-  },
-  {
-    id: "gpt-5.6-terra",
-    thinkingLevels: ["low", "medium", "high", "xhigh", "max", "ultra"],
-  },
-  {
-    id: "gpt-5.6-luna",
-    thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
-  },
-  {
-    id: "gpt-5.5",
-    thinkingLevels: ["low", "medium", "high", "xhigh"],
-  },
-]
+export const CODEX_MIN_CLI_VERSION = "0.153.4"
+
+const CODEX_DISCOVERY_RECOVERY = `Upgrade Codex CLI to ${CODEX_MIN_CLI_VERSION} or later, then Recheck Agent Backend.`
+
+/**
+ * First-party inspect could not obtain a usable catalogue from a short-lived
+ * `codex app-server` `model/list` session.
+ */
+export const CODEX_APP_SERVER_DISCOVERY_FAILED_MESSAGE = (
+  detail: string,
+): string =>
+  `Codex Build could not list Agent Models (${detail}). ${CODEX_DISCOVERY_RECOVERY}`
+
+/**
+ * Custom-provider inspect parsed `codex debug models --bundled` but nothing
+ * survived picker visibility / API-eligibility projection.
+ */
+export const CODEX_BUNDLED_CATALOG_EMPTY_MESSAGE = `Codex custom-provider inspection found no picker-visible bundled models. This catalogue is the CLI's shipped models, not arbitrary custom-provider deployment IDs. ${CODEX_DISCOVERY_RECOVERY}`
+
+/**
+ * Custom-provider inspect received non-JSON or unusable bundled output.
+ */
+export const CODEX_BUNDLED_CATALOG_MALFORMED_MESSAGE = (
+  detail: string,
+): string =>
+  `Codex custom-provider inspection could not read \`codex debug models --bundled\` (${detail}). ${CODEX_DISCOVERY_RECOVERY}`

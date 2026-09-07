@@ -36,6 +36,29 @@ describe("buildRunArgs", () => {
     expect(args.some((a) => a.includes("model_reasoning_effort"))).toBe(false)
   })
 
+  it("passes Astra and an advertised ultra effort through to exec unchanged", () => {
+    expect(
+      buildRunArgs({
+        prompt: "implement the issue",
+        model: "gpt-6-astra",
+        thinkingLevel: "ultra",
+      }),
+    ).toEqual([
+      "exec",
+      "--json",
+      "--sandbox",
+      "danger-full-access",
+      "--model",
+      "gpt-6-astra",
+      "-c",
+      "approval_policy=never",
+      "-c",
+      "model_reasoning_effort=ultra",
+      "--",
+      "implement the issue",
+    ])
+  })
+
   it("resumes by exact thread id and restates model/effort", () => {
     const args = buildRunArgs({
       prompt: "continue",

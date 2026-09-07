@@ -15,27 +15,22 @@ import {
   PROMPT_ARGV_BYTE_LIMIT,
 } from "@ready-for-agent/agent-backend"
 import {
-  CODEX_STATIC_CATALOG,
+  CODEX_APP_SERVER_DISCOVERY_FAILED_MESSAGE,
+  CODEX_BUNDLED_CATALOG_EMPTY_MESSAGE,
+  CODEX_BUNDLED_CATALOG_MALFORMED_MESSAGE,
+  CODEX_MIN_CLI_VERSION,
   CODEX_UNAUTHENTICATED_MESSAGE,
   Codex,
   type CodexLayerOptions,
 } from "../src/index.js"
+import {
+  DEFAULT_APP_SERVER_PAGES,
+  DEFAULT_BUNDLED_MODELS,
+  HIDDEN_DAYBREAK_MODEL,
+  withExecutable,
+  withFakeCodex,
+} from "./fake-codex-cli.js"
 import { describe, expect, it } from "bun:test"
-
-const withExecutable = async <A>(
-  body: string,
-  use: (path: string) => Promise<A>,
-): Promise<A> => {
-  const directory = await mkdtemp(join(tmpdir(), "codex-effect-test-"))
-  const path = join(directory, "codex")
-  try {
-    await writeFile(path, `#!/bin/sh\n${body}\n`)
-    await chmod(path, 0o700)
-    return await use(path)
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-}
 
 const provide = (
   binary: string,
@@ -84,11 +79,28 @@ const isolatedFirstPartyEnv = async <A>(
   }) => Promise<A>,
 ): Promise<A> => withCodexHome({}, use)
 
-const expectedStaticCatalog = () =>
-  CODEX_STATIC_CATALOG.map((model) => ({
-    id: model.id,
-    thinkingLevels: [...model.thinkingLevels],
-  }))
+const firstPartyDiscoverEnv = (
+  overrides: Record<string, string | undefined> = {},
+): Record<string, string | undefined> => ({
+  ...process.env,
+  FAKE_MODEL_PAGES: JSON.stringify(DEFAULT_APP_SERVER_PAGES),
+  FAKE_NOTIFY_BEFORE: "1",
+  PYTHONUNBUFFERED: "1",
+  ...overrides,
+})
+
+const expectedDiscoveredCatalog = () => [
+  {
+    id: "gpt-6-astra",
+    name: "GPT-6 Astra",
+    thinkingLevels: ["low", "medium", "high", "xhigh", "max", "ultra"],
+  },
+  {
+    id: "gpt-9-zenith",
+    name: "GPT-9 Zenith",
+    thinkingLevels: ["spark"],
+  },
+]
 
 const azureConfig = (authCommand: string) =>
   `
@@ -136,34 +148,39 @@ const startTurn = (
   }).pipe(Effect.provide(provide(binary)))
 
 describe("Codex AgentBackend adapter (readiness inspection)", () => {
-  it("inspects authenticated CLI via stderr status (real CLI shape)", async () => {
-    await withExecutable(
-      [
-        'case " $* " in *" login status "*) ;; *) exit 20 ;; esac',
-        // Real codex prints status with eprintln! (stderr only, empty stdout).
-        "echo 'Logged in using ChatGPT' 1>&2",
-      ].join("\n"),
-      async (binary) => {
-        const result = await Effect.runPromise(inspect(binary))
-        expect(result.backend).toEqual({ id: "codex", label: "Codex Build" })
-        expect(result.models).toEqual(expectedStaticCatalog())
-        expect(result.warnings ?? []).toEqual([])
-      },
-    )
+  it("discovers Astra and an unseen model across model/list pages, ignoring notifications", async () => {
+    await withFakeCodex(async (binary) => {
+      const result = await Effect.runPromise(
+        inspect(binary, "2 seconds", {
+          environment: firstPartyDiscoverEnv(),
+        }),
+      )
+      expect(result.backend).toEqual({ id: "codex", label: "Codex Build" })
+      expect(result.models).toEqual(expectedDiscoveredCatalog())
+      expect(result.warnings ?? []).toEqual([])
+    })
   })
 
-  it("inspects when API key login is stored (stderr status)", async () => {
-    await withExecutable(
-      [
-        'case " $* " in *" login status "*) ;; *) exit 20 ;; esac',
-        "echo 'Logged in using an API key - sk-test' 1>&2",
-      ].join("\n"),
-      async (binary) => {
-        const result = await Effect.runPromise(inspect(binary))
-        expect(result.backend.id).toBe("codex")
-        expect(result.models.length).toBeGreaterThan(0)
-      },
-    )
+  it("inspects when API key login is stored and preserves advertised effort tokens", async () => {
+    await withFakeCodex(async (binary) => {
+      const result = await Effect.runPromise(
+        inspect(binary, "2 seconds", {
+          environment: firstPartyDiscoverEnv({
+            FAKE_LOGIN: "Logged in using an API key - sk-test",
+          }),
+        }),
+      )
+      expect(result.backend.id).toBe("codex")
+      const astra = result.models.find((model) => model.id === "gpt-6-astra")
+      expect(astra?.thinkingLevels).toEqual([
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra",
+      ])
+    })
   })
 
   it("fails inspect with actionable config error when unauthenticated (stderr)", async () => {
@@ -245,55 +262,49 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
     )
   })
 
-  it("inspects Ready with the static catalog and a warning for a valid Azure custom provider when login status is Not logged in", async () => {
-    await withCodexHome({}, async (environment) => {
-      const marker = join(environment.CODEX_HOME, "token-ran")
-      const authCommand = join(environment.CODEX_HOME, "token.sh")
-      const argvLog = join(environment.CODEX_HOME, "argv.log")
+  it("inspects Ready from bundled JSON for a valid Azure custom provider without running the token helper", async () => {
+    await withCodexHome({}, async (home) => {
+      const marker = join(home.CODEX_HOME, "token-ran")
+      const authCommand = join(home.CODEX_HOME, "token.sh")
+      const argvLog = join(home.CODEX_HOME, "argv.log")
       await writeFile(
         authCommand,
         `#!/bin/sh\necho ran > "${marker}"\necho fake-token\n`,
       )
       await chmod(authCommand, 0o700)
       await writeFile(
-        join(environment.CODEX_HOME, "config.toml"),
+        join(home.CODEX_HOME, "config.toml"),
         azureConfig(authCommand),
       )
 
-      await withExecutable(
-        [
-          `printf '%s\\n' "$*" >> ${JSON.stringify(argvLog)}`,
-          'case " $* " in *" exec "*) exit 20 ;; esac',
-          'case " $* " in *" login status "*)',
-          "  echo 'Not logged in' 1>&2",
-          "  exit 1",
-          "  ;;",
-          "esac",
-          'case " $* " in *" debug models "*"--bundled "*)',
-          "  echo 'gpt-5.6-terra'",
-          "  exit 0",
-          "  ;;",
-          "esac",
-          'case " $* " in *" debug models "*) exit 31 ;; esac',
-          "exit 21",
-        ].join("\n"),
-        async (binary) => {
-          const result = await Effect.runPromise(
-            inspect(binary, "2 seconds", { environment }),
-          )
-          expect(result.backend).toEqual({
-            id: "codex",
-            label: "Codex Build",
-          })
-          expect(result.models).toEqual(expectedStaticCatalog())
-          expect(
-            result.models.some((model) => model.id === "gpt-5.6-terra"),
-          ).toBe(true)
-          expect(result.warnings).toEqual([
-            'Codex custom provider "azure" is configured; its credentials will be validated on the first Agent Turn.',
-          ])
-        },
-      )
+      await withFakeCodex(async (binary) => {
+        const result = await Effect.runPromise(
+          inspect(binary, "2 seconds", {
+            environment: {
+              ...home,
+              FAKE_LOGIN: "Not logged in",
+              FAKE_LOGIN_EXIT: "1",
+              FAKE_BUNDLED_JSON: JSON.stringify(DEFAULT_BUNDLED_MODELS),
+              FAKE_ARGV_LOG: argvLog,
+            },
+          }),
+        )
+        expect(result.backend).toEqual({
+          id: "codex",
+          label: "Codex Build",
+        })
+        expect(result.models.map((model) => model.id)).toEqual([
+          "gpt-6-astra",
+          "gpt-5.6-terra",
+        ])
+        expect(result.models[0]?.thinkingLevels).toEqual([
+          "low",
+          "max",
+          "ultra",
+        ])
+        expect(result.warnings?.[0]).toContain('custom provider "azure"')
+        expect(result.warnings?.[0]).toContain("bundled models")
+      })
 
       expect(await Bun.file(marker).exists()).toBe(false)
       const argv = (await Bun.file(argvLog).text()).trim()
@@ -301,6 +312,7 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
       expect(argv).toContain("debug models")
       expect(argv).toContain("--bundled")
       expect(argv).not.toContain("exec")
+      expect(argv).not.toContain("app-server")
     })
   })
 
@@ -400,30 +412,219 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
     )
   })
 
-  it("does not re-probe custom providers when stored login is present", async () => {
+  it("does not run debug models or the token helper when stored login is present", async () => {
     await withCodexHome(
       {
         "config.toml": azureConfig("/usr/local/bin/fetch-codex-token"),
       },
-      async (environment) => {
-        await withExecutable(
-          [
-            'case " $* " in *" login status "*)',
-            "  echo 'Logged in using ChatGPT' 1>&2",
-            "  exit 0",
-            "  ;;",
-            "esac",
-            'case " $* " in *" debug models "*) exit 30 ;; esac',
-            "exit 20",
-          ].join("\n"),
-          async (binary) => {
-            const result = await Effect.runPromise(
-              inspect(binary, "2 seconds", { environment }),
-            )
-            expect(result.models).toEqual(expectedStaticCatalog())
-            expect(result.warnings ?? []).toEqual([])
-          },
+      async (home) => {
+        const argvLog = join(home.CODEX_HOME, "argv.log")
+        await withFakeCodex(async (binary) => {
+          const result = await Effect.runPromise(
+            inspect(binary, "2 seconds", {
+              environment: {
+                ...home,
+                ...firstPartyDiscoverEnv({ FAKE_ARGV_LOG: argvLog }),
+              },
+            }),
+          )
+          expect(result.models).toEqual(expectedDiscoveredCatalog())
+          expect(result.warnings ?? []).toEqual([])
+        })
+        const argv = (await Bun.file(argvLog).text()).trim()
+        expect(argv).toContain("login status")
+        expect(argv).toContain("app-server")
+        expect(argv).not.toContain("debug models")
+        expect(argv).not.toContain("exec")
+      },
+    )
+  })
+
+  it("fails inspect when app-server is an unsupported CLI", async () => {
+    await withFakeCodex(async (binary) => {
+      const error = await Effect.runPromise(
+        inspect(binary, "2 seconds", {
+          environment: firstPartyDiscoverEnv({
+            FAKE_CODEX_MODE: "unsupported",
+          }),
+        }).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(AgentBackendConfigError)
+      if (error instanceof AgentBackendConfigError) {
+        expect(error.message).toBe(
+          CODEX_APP_SERVER_DISCOVERY_FAILED_MESSAGE(
+            "unsupported Codex CLI: error: unrecognized subcommand 'app-server'",
+          ),
         )
+        expect(error.message).toContain(CODEX_MIN_CLI_VERSION)
+        expect(error.message).toContain("Recheck Agent Backend")
+      }
+    })
+  })
+
+  it("fails inspect on model/list RPC errors and invalid cursors", async () => {
+    await withFakeCodex(async (binary) => {
+      const error = await Effect.runPromise(
+        inspect(binary, "2 seconds", {
+          environment: firstPartyDiscoverEnv({ FAKE_CODEX_MODE: "rpc-error" }),
+        }).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(AgentBackendConfigError)
+      if (error instanceof AgentBackendConfigError) {
+        expect(error.message).toContain("invalid cursor: invalid")
+        expect(error.message).toContain("Recheck Agent Backend")
+      }
+    })
+  })
+
+  it("fails inspect when model/list repeats a pagination cursor", async () => {
+    await withFakeCodex(async (binary) => {
+      const error = await Effect.runPromise(
+        inspect(binary, "2 seconds", {
+          environment: firstPartyDiscoverEnv({
+            FAKE_CODEX_MODE: "repeat-cursor",
+          }),
+        }).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(AgentBackendConfigError)
+      if (error instanceof AgentBackendConfigError) {
+        expect(error.message).toContain("repeated a pagination cursor")
+      }
+    })
+  })
+
+  it("fails inspect on malformed model/list payloads", async () => {
+    await withFakeCodex(async (binary) => {
+      const error = await Effect.runPromise(
+        inspect(binary, "2 seconds", {
+          environment: firstPartyDiscoverEnv({
+            FAKE_CODEX_MODE: "malformed-result",
+          }),
+        }).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(AgentBackendConfigError)
+      if (error instanceof AgentBackendConfigError) {
+        expect(error.message).toContain("missing a data array")
+      }
+    })
+  })
+
+  it("fails inspect when model/list is empty or only hidden", async () => {
+    await withFakeCodex(async (binary) => {
+      const empty = await Effect.runPromise(
+        inspect(binary, "2 seconds", {
+          environment: firstPartyDiscoverEnv({ FAKE_CODEX_MODE: "empty" }),
+        }).pipe(Effect.flip),
+      )
+      expect(empty).toBeInstanceOf(AgentBackendConfigError)
+      if (empty instanceof AgentBackendConfigError) {
+        expect(empty.message).toContain("no usable models")
+      }
+
+      const hidden = await Effect.runPromise(
+        inspect(binary, "2 seconds", {
+          environment: firstPartyDiscoverEnv({
+            FAKE_CODEX_MODE: "hidden-only",
+            FAKE_HIDDEN_ENTRY: JSON.stringify(HIDDEN_DAYBREAK_MODEL),
+          }),
+        }).pipe(Effect.flip),
+      )
+      expect(hidden).toBeInstanceOf(AgentBackendConfigError)
+    })
+  })
+
+  it("fails inspect when model/list discovery times out", async () => {
+    await withFakeCodex(async (binary) => {
+      const error = await Effect.runPromise(
+        inspect(binary, "200 millis", {
+          environment: firstPartyDiscoverEnv({ FAKE_CODEX_MODE: "hang" }),
+        }).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(AgentBackendConfigError)
+      if (error instanceof AgentBackendConfigError) {
+        expect(error.message).toContain("timed out")
+        expect(error.message).toContain("Recheck Agent Backend")
+      }
+    })
+  })
+
+  it("terminates the app-server child when inspect is cancelled", async () => {
+    await withFakeCodex(async (binary) => {
+      const exit = await Effect.runPromise(
+        Effect.gen(function* () {
+          const fiber = yield* Effect.forkChild(
+            inspect(binary, "30 seconds", {
+              environment: firstPartyDiscoverEnv({ FAKE_CODEX_MODE: "hang" }),
+            }),
+          )
+          yield* Effect.sleep("100 millis")
+          yield* Fiber.interrupt(fiber)
+          return yield* Fiber.await(fiber)
+        }),
+      )
+      expect(Exit.isSuccess(exit)).toBe(false)
+    })
+  })
+
+  it("redacts credential-shaped stderr from discovery failures", async () => {
+    await withFakeCodex(async (binary) => {
+      const error = await Effect.runPromise(
+        inspect(binary, "2 seconds", {
+          environment: firstPartyDiscoverEnv({
+            FAKE_CODEX_MODE: "unsupported",
+            FAKE_APP_SERVER_STDERR:
+              "token sk-abcdefghijklmnopqrstuvwxyz0123456789",
+          }),
+        }).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(AgentBackendConfigError)
+      if (error instanceof AgentBackendConfigError) {
+        expect(error.message).not.toContain("sk-")
+      }
+    })
+  })
+
+  it("fails custom-provider inspect when bundled JSON is malformed or empty after projection", async () => {
+    await withCodexHome(
+      { "config.toml": azureConfig("/usr/local/bin/fetch-codex-token") },
+      async (home) => {
+        await withFakeCodex(async (binary) => {
+          const malformed = await Effect.runPromise(
+            inspect(binary, "2 seconds", {
+              environment: {
+                ...home,
+                FAKE_LOGIN: "Not logged in",
+                FAKE_LOGIN_EXIT: "1",
+                FAKE_BUNDLED_JSON: "not-json",
+              },
+            }).pipe(Effect.flip),
+          )
+          expect(malformed).toBeInstanceOf(AgentBackendConfigError)
+          if (malformed instanceof AgentBackendConfigError) {
+            expect(malformed.message).toBe(
+              CODEX_BUNDLED_CATALOG_MALFORMED_MESSAGE(
+                "bundled models output is not JSON",
+              ),
+            )
+          }
+
+          const empty = await Effect.runPromise(
+            inspect(binary, "2 seconds", {
+              environment: {
+                ...home,
+                FAKE_LOGIN: "Not logged in",
+                FAKE_LOGIN_EXIT: "1",
+                FAKE_BUNDLED_JSON: JSON.stringify({
+                  models: [DEFAULT_BUNDLED_MODELS.models[1]],
+                }),
+              },
+            }).pipe(Effect.flip),
+          )
+          expect(empty).toBeInstanceOf(AgentBackendConfigError)
+          if (empty instanceof AgentBackendConfigError) {
+            expect(empty.message).toBe(CODEX_BUNDLED_CATALOG_EMPTY_MESSAGE)
+          }
+        })
       },
     )
   })
@@ -443,6 +644,31 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
 })
 
 describe("Codex AgentBackend adapter (Agent Turns)", () => {
+  it("executes a new model id and unfamiliar effort without rewriting them", async () => {
+    await withExecutable(
+      [
+        'case " $* " in *" --model gpt-6-astra "*) ;; *) exit 20 ;; esac',
+        'case " $* " in *" model_reasoning_effort=ultra "*) ;; *) exit 21 ;; esac',
+        successfulTurnStream("astra-thread"),
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const backend = yield* AgentBackend
+            return yield* backend.startTurn({
+              cwd: process.cwd(),
+              prompt: "test",
+              model: "gpt-6-astra",
+              thinkingLevel: "ultra",
+              timeout: "2 seconds",
+            })
+          }).pipe(Effect.provide(provide(binary))),
+        )
+        expect(result.sessionId).toBe("astra-thread")
+      },
+    )
+  })
+
   it("requires exec --json, danger-full-access, and never-approval on every turn", async () => {
     await withExecutable(
       [
