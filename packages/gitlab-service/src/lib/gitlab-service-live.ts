@@ -10,6 +10,9 @@ import {
   Schema,
 } from "effect"
 import {
+  type CiGateCatalogEntry,
+  type CiGateDefinitionObservation,
+  type CiGateObservedRun,
   type MergePullRequestResult,
   type PrStatusCheckDiagnostic,
   type PullRequestCheckStatus,
@@ -24,7 +27,11 @@ import {
   type GitLabServiceError,
   type GitLabServiceShape,
 } from "./gitlab-service.js"
-import type { GitLabReadyLabeledIssue, GitLabRepository } from "./types.js"
+import {
+  GITLAB_CI_GATE_KIND,
+  type GitLabReadyLabeledIssue,
+  type GitLabRepository,
+} from "./types.js"
 
 const REQUEST_TIMEOUT = Duration.seconds(30)
 const READY_LABEL = "ready-for-agent"
@@ -57,7 +64,11 @@ const ProjectSchema = Schema.Struct({
   default_branch: Schema.optional(Schema.NullOr(Schema.String)),
   /** Canonical web/API host lives here; SSH remotes may use a different host. */
   web_url: Schema.optional(Schema.NullOr(Schema.String)),
+  ci_config_path: Schema.optional(Schema.NullOr(Schema.String)),
+  jobs_enabled: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  builds_access_level: Schema.optional(Schema.NullOr(Schema.String)),
 })
+type GitLabProject = typeof ProjectSchema.Type
 
 /**
  * Normalize a Forge Host string (hostname or hostname:port).
@@ -493,6 +504,136 @@ const apiBase = (repository: GitLabRepository): string =>
 const projectApiPath = (repository: GitLabRepository): string =>
   `/projects/${encodeURIComponent(repository.projectPath)}`
 
+const DEFAULT_CI_CONFIG_PATH = ".gitlab-ci.yml"
+const PROJECT_PIPELINE_LABEL = "Project pipeline"
+const CI_GATE_INCLUDED_SOURCES = new Set([
+  "push",
+  "schedule",
+  "web",
+  "trigger",
+  "api",
+])
+const CI_GATE_EXCLUDED_SOURCES = new Set([
+  "merge_request_event",
+  "external_pull_request_event",
+  "parent_pipeline",
+])
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const isProjectCiAvailable = (project: GitLabProject): boolean => {
+  const access = (project.builds_access_level ?? "").trim().toLowerCase()
+  if (access === "disabled") return false
+  if (project.jobs_enabled === false) return false
+  return true
+}
+
+const configurationPath = (project: GitLabProject): string => {
+  const path = project.ci_config_path?.trim() ?? ""
+  return path === "" ? DEFAULT_CI_CONFIG_PATH : path
+}
+
+const toProjectPipelineCatalogEntry = (
+  projectId: number,
+  project: GitLabProject,
+): CiGateCatalogEntry => ({
+  identity: String(projectId),
+  displayLabel: PROJECT_PIPELINE_LABEL,
+  kind: GITLAB_CI_GATE_KIND,
+  diagnosticMetadata: configurationPath(project),
+})
+
+const mapCiGatePermissionError = (
+  error: GitLabRequestError,
+  message: string,
+): GitLabRequestError =>
+  error.statusCode === 403
+    ? new GitLabRequestError({
+        message,
+        statusCode: 403,
+        cause: error,
+      })
+    : error
+
+const pipelineIdFromIdentity = (runIdentity: string): string => {
+  const separator = runIdentity.indexOf(":")
+  return separator === -1 ? runIdentity : runIdentity.slice(0, separator)
+}
+
+const isSameObservedPipeline = (
+  runIdentity: string,
+  lastRunIdentity: string,
+): boolean =>
+  runIdentity === lastRunIdentity ||
+  pipelineIdFromIdentity(runIdentity) ===
+    pipelineIdFromIdentity(lastRunIdentity)
+
+const mapObservedPipeline = (
+  value: unknown,
+  defaultBranch: string,
+): CiGateObservedRun | null => {
+  if (!isRecord(value)) {
+    return null
+  }
+  const id = value.id
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) {
+    return null
+  }
+  const source = typeof value.source === "string" ? value.source.trim() : ""
+  if (
+    source === "" ||
+    CI_GATE_EXCLUDED_SOURCES.has(source) ||
+    !CI_GATE_INCLUDED_SOURCES.has(source)
+  ) {
+    return null
+  }
+  const headRef = typeof value.ref === "string" ? value.ref.trim() : ""
+  if (headRef !== defaultBranch) {
+    return null
+  }
+  const createdAt = parseInstant(
+    typeof value.created_at === "string" ? value.created_at : null,
+  )
+  if (createdAt === null) {
+    return null
+  }
+  const iid =
+    typeof value.iid === "number" &&
+    Number.isSafeInteger(value.iid) &&
+    value.iid > 0
+      ? value.iid
+      : null
+  const htmlUrl =
+    typeof value.web_url === "string" && value.web_url.trim() !== ""
+      ? value.web_url.trim()
+      : null
+  const headSha =
+    typeof value.sha === "string" && value.sha.trim() !== ""
+      ? value.sha.trim()
+      : null
+  const rawStatus =
+    typeof value.status === "string" && value.status.trim() !== ""
+      ? value.status.trim()
+      : null
+  return {
+    runIdentity: iid === null ? String(id) : `${String(id)}:${String(iid)}`,
+    htmlUrl,
+    headSha,
+    headRef,
+    event: source,
+    createdAt,
+    updatedAt: parseInstant(
+      typeof value.updated_at === "string" ? value.updated_at : null,
+    ),
+    startedAt: parseInstant(
+      typeof value.started_at === "string" ? value.started_at : null,
+    ),
+    rawStatus,
+    rawConclusion: null,
+  }
+}
+
 const requestError = (message: string, cause: unknown): GitLabRequestError => {
   const code = extractErrorCode(cause)
   return new GitLabRequestError({
@@ -756,6 +897,71 @@ export const makeGitLabService = (options: {
       ),
     )
 
+  const listObservedPipelines = (
+    repository: GitLabRepository,
+    defaultBranch: string,
+    lastSeen: string | null,
+  ): Effect.Effect<readonly CiGateObservedRun[], GitLabRequestError> => {
+    const message = `Failed to observe CI Gate Definitions for ${repository.projectPath}`
+    return Effect.tryPromise({
+      try: async () => {
+        const runs: CiGateObservedRun[] = []
+        let page = 1
+        const path = `${projectApiPath(repository)}/pipelines?ref=${encodeURIComponent(defaultBranch)}&order_by=id&sort=desc`
+        while (true) {
+          const response = await fetchImpl(
+            `${apiBase(repository)}${path}&per_page=${PAGE_SIZE}&page=${page}`,
+            { headers },
+          )
+          if (!response.ok) {
+            throw new GitLabHttpError(
+              response.status,
+              `${message}: GitLab returned HTTP ${response.status}`,
+            )
+          }
+          const decoded: unknown = await response.json()
+          if (!Array.isArray(decoded)) {
+            throw new Error(`${message}: GitLab returned a non-array page`)
+          }
+          let reachedLastSeen = false
+          for (const value of decoded) {
+            const mapped = mapObservedPipeline(value, defaultBranch)
+            if (mapped === null) {
+              continue
+            }
+            runs.push(mapped)
+            if (
+              lastSeen !== null &&
+              isSameObservedPipeline(mapped.runIdentity, lastSeen)
+            ) {
+              reachedLastSeen = true
+              break
+            }
+          }
+          if (reachedLastSeen) {
+            break
+          }
+          const nextPage = response.headers.get("x-next-page")?.trim() ?? ""
+          if (nextPage === "") {
+            break
+          }
+          const parsed = Number(nextPage)
+          if (!Number.isSafeInteger(parsed) || parsed <= page) {
+            throw new Error(`${message}: invalid GitLab x-next-page header`)
+          }
+          page = parsed
+        }
+        return runs
+      },
+      catch: (cause) => requestError(message, cause),
+    }).pipe(
+      Effect.timeout(REQUEST_TIMEOUT),
+      Effect.catchTag("TimeoutError", (cause) =>
+        Effect.fail(requestError(`${message} timed out`, cause)),
+      ),
+    )
+  }
+
   const unavailableOn404 = <A>(
     repository: GitLabRepository,
     effect: Effect.Effect<A, GitLabRequestError>,
@@ -771,6 +977,29 @@ export const makeGitLabService = (options: {
           error.statusCode === 404
             ? Effect.fail(new GitLabProjectUnavailableError(repository))
             : Effect.fail(error),
+      ),
+    )
+
+  const loadCiGateProject = (
+    repository: GitLabRepository,
+    message: string,
+  ): Effect.Effect<GitLabProject, GitLabServiceError> =>
+    unavailableOn404(
+      repository,
+      requestUnknown(repository, projectApiPath(repository), message).pipe(
+        Effect.mapError((error) =>
+          mapCiGatePermissionError(
+            error,
+            `${message}: API/pipeline read required`,
+          ),
+        ),
+        Effect.flatMap((value) =>
+          decodeEffect(
+            ProjectSchema,
+            value,
+            `GitLab returned invalid project data for ${repository.projectPath}`,
+          ),
+        ),
       ),
     )
 
@@ -1083,6 +1312,100 @@ export const makeGitLabService = (options: {
           ),
         ),
       ),
+    ),
+    listCiGateCatalog: Effect.fn("GitLabService.listCiGateCatalog")(
+      (repository) =>
+        loadCiGateProject(
+          repository,
+          `Failed to list CI Gate Definitions for ${repository.projectPath}`,
+        ).pipe(
+          Effect.flatMap((project) => {
+            if (!isProjectCiAvailable(project)) {
+              return Effect.succeed([])
+            }
+            if (project.id === undefined) {
+              return Effect.fail(
+                new GitLabRequestError({
+                  message: `GitLab returned no project id for ${repository.projectPath}`,
+                }),
+              )
+            }
+            return Effect.succeed([
+              toProjectPipelineCatalogEntry(project.id, project),
+            ])
+          }),
+        ),
+    ),
+    observeCiGate: Effect.fn("GitLabService.observeCiGate")(
+      function* (repository, input) {
+        const project = yield* loadCiGateProject(
+          repository,
+          `Failed to observe CI Gate Definitions for ${repository.projectPath}`,
+        )
+        const defaultBranch = project.default_branch?.trim() ?? ""
+        if (defaultBranch === "") {
+          return yield* new GitLabRequestError({
+            message: `GitLab returned no default branch for ${repository.projectPath}`,
+          })
+        }
+        const ciAvailable = isProjectCiAvailable(project)
+        if (ciAvailable && project.id === undefined) {
+          return yield* new GitLabRequestError({
+            message: `GitLab returned no project id for ${repository.projectPath}`,
+          })
+        }
+        const projectIdentity =
+          project.id === undefined ? null : String(project.id)
+        const observations: CiGateDefinitionObservation[] = []
+        for (const rawIdentity of input.definitionIdentities) {
+          const identity = rawIdentity.trim()
+          if (
+            identity.length === 0 ||
+            projectIdentity === null ||
+            identity !== projectIdentity
+          ) {
+            observations.push({
+              identity,
+              kind: "unavailable",
+              reason: "not_found",
+              message: `CI Gate Definition ${identity} could not be observed`,
+            })
+            continue
+          }
+          if (!ciAvailable) {
+            observations.push({
+              identity,
+              kind: "unavailable",
+              reason: "not_found",
+              message: `Project CI is disabled for ${repository.projectPath}`,
+            })
+            continue
+          }
+          const lastSeenRaw = input.lastRunIdentities[identity]
+          const lastSeen =
+            lastSeenRaw !== undefined && lastSeenRaw.trim() !== ""
+              ? lastSeenRaw
+              : null
+          const runs = yield* listObservedPipelines(
+            repository,
+            defaultBranch,
+            lastSeen,
+          ).pipe(
+            Effect.mapError((error) =>
+              mapCiGatePermissionError(
+                error,
+                `Failed to observe CI Gate Definitions for ${repository.projectPath}: API/pipeline read required`,
+              ),
+            ),
+          )
+          observations.push({
+            identity,
+            kind: "observed",
+            runs,
+          })
+        }
+        return { defaultBranch, observations }
+      },
     ),
     getPullRequestCheckStatus: Effect.fn(
       "GitLabService.getPullRequestCheckStatus",

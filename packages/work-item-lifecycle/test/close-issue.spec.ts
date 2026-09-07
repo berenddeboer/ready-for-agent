@@ -200,6 +200,9 @@ describe("closeIssue", () => {
         }),
       closeOpenPullRequestsForBranch: () => Effect.void,
       deleteBranch: () => Effect.void,
+      listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } satisfies GitLabServiceShape)
 
     await Effect.runPromise(

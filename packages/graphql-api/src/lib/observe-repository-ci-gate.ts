@@ -19,6 +19,7 @@ import {
   type ObserveCiGateInput,
   formatUserFacingError,
 } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 
 export type RepositoryCiGateStatus = "disabled" | "open" | "closed" | "degraded"
 
@@ -27,7 +28,7 @@ const FAILURE_CONCLUSIONS = new Set([
   "timed_out",
   "action_required",
   "failed",
-  "partiallySucceeded",
+  "partiallysucceeded",
 ])
 
 const SUCCESS_CONCLUSIONS = new Set(["success", "succeeded"])
@@ -51,25 +52,42 @@ const isPermissionError = (error: unknown): boolean => {
   return (
     typeof record.message === "string" &&
     (record.message.includes("Actions read required") ||
+      record.message.includes("API/pipeline read required") ||
       record.message.includes("Build read required"))
   )
 }
 
+const NON_DECISIVE_STATUSES = new Set([
+  "canceled",
+  "cancelled",
+  "skipped",
+  "manual",
+])
+
 const classifyRun = (
   run: CiGateObservedRun,
 ): "failure" | "success" | "pending" | "non_decisive" => {
-  const status = run.rawStatus
-  if (status !== "completed") {
-    return "pending"
+  const status = (run.rawStatus ?? "").trim().toLowerCase()
+  const conclusion = (run.rawConclusion ?? "").trim().toLowerCase()
+  if (status === "completed") {
+    if (conclusion !== "" && FAILURE_CONCLUSIONS.has(conclusion)) {
+      return "failure"
+    }
+    if (conclusion !== "" && SUCCESS_CONCLUSIONS.has(conclusion)) {
+      return "success"
+    }
+    return "non_decisive"
   }
-  const conclusion = run.rawConclusion
-  if (conclusion !== null && FAILURE_CONCLUSIONS.has(conclusion)) {
+  if (status === "failed" || status === "failure") {
     return "failure"
   }
-  if (conclusion !== null && SUCCESS_CONCLUSIONS.has(conclusion)) {
+  if (status === "success" || SUCCESS_CONCLUSIONS.has(conclusion)) {
     return "success"
   }
-  return "non_decisive"
+  if (NON_DECISIVE_STATUSES.has(status)) {
+    return "non_decisive"
+  }
+  return "pending"
 }
 
 const runIdFromIdentity = (runIdentity: string): string => {
@@ -351,6 +369,7 @@ export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
 
     if (
       input.repository.forge !== "github" &&
+      input.repository.forge !== "gitlab" &&
       input.repository.forge !== "azure-devops"
     ) {
       const observations = definitions.map((definition) =>
@@ -401,6 +420,11 @@ export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
     if (input.repository.forge === "azure-devops") {
       const azureDevOps = yield* AzureDevOpsService
       adapterResult = yield* azureDevOps
+        .observeCiGate(forgeRepository, observationInput)
+        .pipe(Effect.result)
+    } else if (input.repository.forge === "gitlab") {
+      const gitlab = yield* GitLabService
+      adapterResult = yield* gitlab
         .observeCiGate(forgeRepository, observationInput)
         .pipe(Effect.result)
     } else {

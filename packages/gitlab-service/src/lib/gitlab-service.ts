@@ -1,7 +1,10 @@
 import { Context, type Effect } from "effect"
 import type {
+  CiGateCatalogEntry,
+  CiGateObservation,
   MergePullRequestOptions,
   MergePullRequestResult,
+  ObserveCiGateInput,
   PrStatusCheckDiagnostic,
   PrStatusCheckDiagnosticsOptions,
   PrStatusCheckDiagnosticsRequest,
@@ -101,6 +104,22 @@ export interface GitLabServiceShape {
   readonly countOpenNonDraftPullRequests: (
     repository: GitLabRepository,
   ) => Effect.Effect<number, GitLabServiceError>
+  /**
+   * Live catalog of the synthesized GitLab Project pipeline as a CI Gate
+   * Definition. Empty when project CI is disabled or unavailable.
+   */
+  readonly listCiGateCatalog: (
+    repository: GitLabRepository,
+  ) => Effect.Effect<readonly CiGateCatalogEntry[], GitLabServiceError>
+  /**
+   * Observe the selected Project pipeline on the Repository's current default
+   * branch. Merge-request and child pipelines are omitted. Provider order is
+   * GitLab's pipeline id descending.
+   */
+  readonly observeCiGate: (
+    repository: GitLabRepository,
+    input: ObserveCiGateInput,
+  ) => Effect.Effect<CiGateObservation, GitLabServiceError>
   /**
    * Observe the open MR's head pipeline at job granularity as PR Status Checks.
    * Each job is one check; `allow_failure` failures and manual/canceled/skipped

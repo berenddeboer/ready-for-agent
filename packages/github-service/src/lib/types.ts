@@ -4,14 +4,15 @@ export interface GitHubRepository {
   readonly projectPath: string
 }
 
-/**
- * Forge-neutral CI Gate catalog entry. GitHub maps an active Actions
- * workflow (identity is the workflow id); Azure DevOps maps an enabled
- * build pipeline associated with the Git Repository (identity is the
- * build definition id).
- */
 export const GITHUB_CI_GATE_KIND = "workflow"
 
+/**
+ * Forge-neutral CI Gate catalog entry. GitHub maps an active Actions
+ * workflow (identity is the workflow id). GitLab maps one synthesized
+ * Project pipeline (identity is the numeric project id). Azure DevOps
+ * maps an enabled build pipeline associated with the Git Repository
+ * (identity is the build definition id).
+ */
 export interface CiGateCatalogEntry {
   readonly identity: string
   readonly displayLabel: string

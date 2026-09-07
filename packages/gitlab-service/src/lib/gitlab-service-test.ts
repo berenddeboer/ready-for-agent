@@ -131,5 +131,11 @@ export const makeGitLabServiceTest = (
     closeOpenPullRequestsForBranch: (repository) =>
       failOr(repository, () => Effect.void),
     deleteBranch: (repository) => failOr(repository, () => Effect.void),
+    listCiGateCatalog: (repository) =>
+      failOr(repository, () => Effect.succeed([])),
+    observeCiGate: (repository) =>
+      failOr(repository, () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
+      ),
   })
 }

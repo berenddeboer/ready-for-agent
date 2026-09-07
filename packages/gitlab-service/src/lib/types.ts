@@ -1,5 +1,11 @@
 import type { ReadyLabeledIssue } from "@ready-for-agent/github-service"
 
+/**
+ * Forge-neutral CI Gate kind for the synthesized GitLab Project pipeline.
+ * Identity is the numeric project id, not a pipeline name or job id.
+ */
+export const GITLAB_CI_GATE_KIND = "project-pipeline"
+
 export interface GitLabRepository {
   readonly forge: string
   readonly forgeHost: string

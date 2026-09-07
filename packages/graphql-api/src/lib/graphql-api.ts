@@ -468,14 +468,15 @@ const loadCiGateCatalog = Effect.fn("graphql-api.loadCiGateCatalog")(
     readonly forgeHost: string
     readonly projectPath: string
   }) {
-    if (repository.forge === "azure-devops") {
-      const azureDevOps = yield* AzureDevOpsService
-      return yield* azureDevOps
-        .listCiGateCatalog({
-          forge: repository.forge,
-          forgeHost: repository.forgeHost,
-          projectPath: repository.projectPath,
-        })
+    const identity = {
+      forge: repository.forge,
+      forgeHost: repository.forgeHost,
+      projectPath: repository.projectPath,
+    }
+    if (repository.forge === "github") {
+      const github = yield* GitHubService
+      return yield* github
+        .listCiGateCatalog(identity, { origin: "operator" })
         .pipe(
           Effect.map((definitions) => ({
             kind: "loaded" as const,
@@ -489,20 +490,9 @@ const loadCiGateCatalog = Effect.fn("graphql-api.loadCiGateCatalog")(
           ),
         )
     }
-    if (repository.forge !== "github") {
-      return { kind: "loaded" as const, definitions: [] }
-    }
-    const github = yield* GitHubService
-    return yield* github
-      .listCiGateCatalog(
-        {
-          forge: repository.forge,
-          forgeHost: repository.forgeHost,
-          projectPath: repository.projectPath,
-        },
-        { origin: "operator" },
-      )
-      .pipe(
+    if (repository.forge === "gitlab") {
+      const gitlab = yield* GitLabService
+      return yield* gitlab.listCiGateCatalog(identity).pipe(
         Effect.map((definitions) => ({
           kind: "loaded" as const,
           definitions,
@@ -514,6 +504,23 @@ const loadCiGateCatalog = Effect.fn("graphql-api.loadCiGateCatalog")(
           }),
         ),
       )
+    }
+    if (repository.forge === "azure-devops") {
+      const azureDevOps = yield* AzureDevOpsService
+      return yield* azureDevOps.listCiGateCatalog(identity).pipe(
+        Effect.map((definitions) => ({
+          kind: "loaded" as const,
+          definitions,
+        })),
+        Effect.catch((error) =>
+          Effect.succeed({
+            kind: "unavailable" as const,
+            message: ciGateCatalogErrorMessage(error),
+          }),
+        ),
+      )
+    }
+    return { kind: "loaded" as const, definitions: [] }
   },
 )
 

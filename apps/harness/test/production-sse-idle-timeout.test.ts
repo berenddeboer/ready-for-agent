@@ -146,6 +146,9 @@ const defaultGitlab: GitLabServiceShape = {
   ensureIssueCompletedWithSummary: () => Effect.void,
   closeOpenPullRequestsForBranch: () => Effect.void,
   deleteBranch: () => Effect.void,
+  listCiGateCatalog: () => Effect.succeed([]),
+  observeCiGate: () =>
+    Effect.succeed({ defaultBranch: "main", observations: [] }),
 }
 
 const defaultAzureDevOps: AzureDevOpsServiceShape = {

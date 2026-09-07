@@ -186,6 +186,9 @@ const defaultGitlabLayer = Layer.succeed(GitLabService, {
   ensureIssueCompletedWithSummary: () => Effect.void,
   closeOpenPullRequestsForBranch: () => Effect.void,
   deleteBranch: () => Effect.void,
+  listCiGateCatalog: () => Effect.succeed([]),
+  observeCiGate: () =>
+    Effect.succeed({ defaultBranch: "main", observations: [] }),
 } satisfies GitLabServiceShape)
 
 const defaultAzureDevOpsShape = {

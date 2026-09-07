@@ -16,6 +16,8 @@ import {
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { ambientGitLabLayer } from "./ambient-gitlab-layer.js"
 import {
+  SerializedCiGateCatalog,
+  SerializedCiGateObservation,
   SerializedMergePullRequestResult,
   SerializedPrStatusCheckDiagnostics,
   SerializedPullRequestCheckStatus,
@@ -391,6 +393,53 @@ export const keymaxxerGitLabLayer = (options: {
                   decode: (stdout) => parseIssues(stdout, repository),
                 }),
               (ambientService) => ambientService.listReadyIssues(repository),
+            ),
+        ),
+        listCiGateCatalog: Effect.fn("KeymaxxerGitLab.listCiGateCatalog")(
+          (repository) =>
+            withVaultOrAmbient(
+              repository,
+              (tokenName) =>
+                callHelper({
+                  operation: "list-ci-gate-catalog",
+                  repository,
+                  tokenName,
+                  describe: "list CI Gate Definitions",
+                  decode: decodeJson(
+                    SerializedCiGateCatalog,
+                    repository,
+                    "decode CI Gate catalog",
+                  ),
+                }),
+              (ambientService) => ambientService.listCiGateCatalog(repository),
+            ),
+        ),
+        observeCiGate: Effect.fn("KeymaxxerGitLab.observeCiGate")(
+          (repository, input) =>
+            withVaultOrAmbient(
+              repository,
+              (tokenName) =>
+                callHelper({
+                  operation: "observe-ci-gate",
+                  repository,
+                  tokenName,
+                  describe: "observe CI Gate Definitions",
+                  args: [
+                    encodeArgument(
+                      JSON.stringify({
+                        definitionIdentities: input.definitionIdentities,
+                        lastRunIdentities: input.lastRunIdentities,
+                      }),
+                    ),
+                  ],
+                  decode: decodeJson(
+                    SerializedCiGateObservation,
+                    repository,
+                    "decode CI Gate observation",
+                  ),
+                }),
+              (ambientService) =>
+                ambientService.observeCiGate(repository, input),
             ),
         ),
         hasCredentials: Effect.fn("KeymaxxerGitLab.hasCredentials")(
