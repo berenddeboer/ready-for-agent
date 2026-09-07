@@ -6,9 +6,11 @@ import type {
 import type { GitHubServiceError } from "./errors.js"
 import type {
   CiGateCatalogEntry,
+  CiGateObservation,
   GitHubRepository,
   MergePullRequestOptions,
   MergePullRequestResult,
+  ObserveCiGateInput,
   PrStatusCheckDiagnostic,
   PrStatusCheckDiagnosticsOptions,
   PrStatusCheckDiagnosticsRequest,
@@ -55,6 +57,16 @@ export interface GitHubServiceShape {
     repository: GitHubRepository,
     options?: GitHubOperationOptions,
   ) => Effect.Effect<readonly CiGateCatalogEntry[], GitHubServiceError>
+  /**
+   * Observe selected CI Gate Definitions on the Repository's current default
+   * branch. Returns provider-ordered runs with raw GitHub status/conclusion.
+   * Pull Request validation executions are omitted.
+   */
+  readonly observeCiGate: (
+    repository: GitHubRepository,
+    input: ObserveCiGateInput,
+    options?: GitHubOperationOptions,
+  ) => Effect.Effect<CiGateObservation, GitHubServiceError>
   readonly getPullRequestCheckStatus: (
     repository: GitHubRepository,
     headRefName: string,

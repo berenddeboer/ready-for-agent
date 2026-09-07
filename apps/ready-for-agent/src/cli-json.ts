@@ -212,10 +212,35 @@ export type StatusLane = {
   readonly workItems: readonly StatusWorkItemRow[]
 }
 
+export type StatusCiGate = {
+  readonly enabled: boolean
+  readonly status: "DISABLED" | "OPEN" | "CLOSED" | "DEGRADED"
+  readonly observedAt: string | null
+  readonly defaultBranch: string | null
+  readonly diagnostic: string | null
+  readonly definitions: readonly {
+    readonly identity: string
+    readonly displayLabel: string
+    readonly failureLatched: boolean
+    readonly diagnostic: string | null
+    readonly htmlUrl: string | null
+  }[]
+  readonly activeIncident: {
+    readonly status: string
+    readonly summary: string
+  } | null
+  readonly latestResolvedIncident: {
+    readonly status: string
+    readonly summary: string
+    readonly recoveryReason: string | null
+  } | null
+}
+
 export type StatusSuccessDocument = {
   readonly schemaVersion: typeof CLI_SCHEMA_VERSION
   readonly command: "status"
   readonly repository: CanonicalRepositoryIdentity | null
+  readonly ciGate: StatusCiGate | null
   readonly lanes: readonly StatusLane[]
 }
 
@@ -321,11 +346,13 @@ export const toCanonicalRepositoryIdentity = (repository: {
 
 export const buildStatusSuccessDocument = (options: {
   readonly repository: CanonicalRepositoryIdentity | null
+  readonly ciGate?: StatusCiGate | null
   readonly lanes: readonly StatusLane[]
 }): StatusSuccessDocument => ({
   schemaVersion: CLI_SCHEMA_VERSION,
   command: "status",
   repository: options.repository,
+  ciGate: options.ciGate ?? null,
   lanes: options.lanes,
 })
 

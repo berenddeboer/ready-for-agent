@@ -33,6 +33,7 @@ import {
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   SerializedCiGateCatalog,
+  SerializedCiGateObservation,
   SerializedMergePullRequestResult,
   SerializedPrStatusCheckDiagnostics,
   SerializedPullRequestCheckStatus,
@@ -885,6 +886,28 @@ export const keymaxxerGitHubLayer = (options: {
                 SerializedCiGateCatalog,
                 repository,
                 "decode CI Gate catalog",
+              ),
+            }),
+        ),
+        observeCiGate: Effect.fn("KeymaxxerGitHub.observeCiGate")(
+          (repository, input, operationOptions?: GitHubOperationOptions) =>
+            callHelper({
+              operation: "observe-ci-gate",
+              repository,
+              describe: "observe CI Gate Definitions",
+              origin: operationOptions?.origin ?? "polling",
+              args: [
+                encodeArgument(
+                  JSON.stringify({
+                    definitionIdentities: input.definitionIdentities,
+                    lastRunIdentities: input.lastRunIdentities,
+                  }),
+                ),
+              ],
+              decode: decodeJson(
+                SerializedCiGateObservation,
+                repository,
+                "decode CI Gate observation",
               ),
             }),
         ),

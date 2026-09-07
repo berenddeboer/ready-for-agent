@@ -211,6 +211,8 @@ const githubWith = (
       ),
     ensureIssueCompletedWithSummary: () => Effect.void,
     listCiGateCatalog: () => Effect.succeed([]),
+    observeCiGate: () =>
+      Effect.succeed({ defaultBranch: "main", observations: [] }),
     ...overrides,
   } satisfies GitHubServiceShape)
 
@@ -328,6 +330,8 @@ describe("PR status check steps", () => {
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } satisfies GitHubServiceShape)
 
     const status = await Effect.runPromise(
@@ -512,6 +516,8 @@ describe("PR status check steps", () => {
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } satisfies GitHubServiceShape)
 
     const result = await Effect.runPromise(
@@ -613,6 +619,8 @@ describe("PR status check steps", () => {
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } satisfies GitHubServiceShape)
 
     const result = await Effect.runPromise(
@@ -777,6 +785,8 @@ describe("PR status check steps", () => {
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } satisfies GitHubServiceShape)
 
     const result = await Effect.runPromise(
@@ -883,6 +893,8 @@ describe("PR status check steps", () => {
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } satisfies GitHubServiceShape)
 
     const second = await Effect.runPromise(
@@ -948,6 +960,8 @@ describe("PR status check steps", () => {
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } satisfies GitHubServiceShape)
 
     const result = await Effect.runPromise(

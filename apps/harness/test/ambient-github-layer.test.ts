@@ -55,6 +55,8 @@ const serviceWithList = (
   uploadUserAttachment: () => Effect.die("not used"),
   ensureIssueCompletedWithSummary: () => Effect.die("not used"),
   listCiGateCatalog: () => Effect.succeed([]),
+  observeCiGate: () =>
+    Effect.succeed({ defaultBranch: "main", observations: [] }),
 })
 
 const serviceWithAuthenticatedUser = (

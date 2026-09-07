@@ -31,17 +31,20 @@ describe("Repository settings CI Gate Definitions", () => {
   test("shows persisted selections and empty default on the Repository card", () => {
     const source = indexSource()
     expect(source).toContain("<dt>CI Gate</dt>")
-    expect(source).toContain(
-      "repository.selectedCiGateDefinitions.length === 0",
-    )
-    expect(source).toContain('? "Disabled"')
-    expect(source).toContain("definition.displayLabel")
+    expect(source).toContain("ciGateStatusLabel(repository.ciGate.status)")
+    expect(source).toContain("repository.ciGate.activeIncident")
+    expect(source).toContain("repository.ciGate.latestResolvedIncident")
+    expect(source).toContain("View run")
   })
 
-  test("repositories query asks for selected CI Gate Definitions", () => {
+  test("repositories query asks for selected CI Gate Definitions and gate projection", () => {
     const source = repositoriesQuerySource()
     expect(source).toContain("selectedCiGateDefinitions")
     expect(source).toContain("displayLabel: true")
     expect(source).toContain("diagnosticMetadata: true")
+    expect(source).toContain("ciGate:")
+    expect(source).toContain("activeIncident:")
+    expect(source).toContain("latestResolvedIncident:")
+    expect(source).toContain("htmlUrl: true")
   })
 })

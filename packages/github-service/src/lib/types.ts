@@ -17,6 +17,51 @@ export interface CiGateCatalogEntry {
   readonly diagnosticMetadata: string | null
 }
 
+/**
+ * One default-branch CI execution in Forge-neutral form. Provider-specific
+ * status/conclusion stay raw; callers must not sort by opaque run identity.
+ */
+export interface CiGateObservedRun {
+  readonly runIdentity: string
+  readonly htmlUrl: string | null
+  readonly headSha: string | null
+  readonly headRef: string | null
+  readonly event: string
+  readonly createdAt: Date
+  readonly updatedAt: Date | null
+  readonly startedAt: Date | null
+  readonly rawStatus: string | null
+  readonly rawConclusion: string | null
+}
+
+export type CiGateDefinitionObservation =
+  | {
+      readonly identity: string
+      readonly kind: "observed"
+      readonly runs: readonly CiGateObservedRun[]
+    }
+  | {
+      readonly identity: string
+      readonly kind: "unavailable"
+      readonly reason: "permission" | "not_found" | "error"
+      readonly message: string
+    }
+
+/**
+ * Ordered observations for selected CI Gate Definitions on the current
+ * default branch. `runs` are in provider order (GitHub: newest first).
+ */
+export interface CiGateObservation {
+  readonly defaultBranch: string
+  readonly observations: readonly CiGateDefinitionObservation[]
+}
+
+export interface ObserveCiGateInput {
+  readonly definitionIdentities: readonly string[]
+  /** Last included run identity per definition; empty when none yet. */
+  readonly lastRunIdentities: { readonly [definitionIdentity: string]: string }
+}
+
 /** Local file the harness uploads as a GitHub user attachment. */
 export interface UploadUserAttachmentInput {
   readonly name: string

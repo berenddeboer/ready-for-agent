@@ -262,6 +262,8 @@ const defaultGithubLayer = Layer.mergeAll(
       ),
     ensureIssueCompletedWithSummary: () => Effect.void,
     listCiGateCatalog: () => Effect.succeed([]),
+    observeCiGate: () =>
+      Effect.succeed({ defaultBranch: "main", observations: [] }),
     getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
     listReadyIssues: () => Effect.succeed([]),
   } satisfies GitHubServiceShape),
@@ -839,6 +841,8 @@ describe("Job worker", () => {
           ),
         ensureIssueCompletedWithSummary: () => Effect.void,
         listCiGateCatalog: () => Effect.succeed([]),
+        observeCiGate: () =>
+          Effect.succeed({ defaultBranch: "main", observations: [] }),
         getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
         listReadyIssues: () =>
           Effect.succeed([

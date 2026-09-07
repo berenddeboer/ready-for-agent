@@ -102,6 +102,16 @@ describe("internal GitHub helper mode", () => {
     expect(spawnPlan.args[2]).toMatch(/list-ci-gate-catalog\.ts$/)
   })
 
+  test("spawns the CI Gate observation helper from source", () => {
+    const spawnPlan = resolveGitHubHelperChildSpawn({
+      operation: "observe-ci-gate",
+      args: ["github", "github.com", "acme/widgets", "e30"],
+      execPath: "/usr/bin/bun",
+      argv: ["/usr/bin/bun", "/repo/apps/harness/server.ts"],
+    })
+    expect(spawnPlan.args[2]).toMatch(/observe-ci-gate\.ts$/)
+  })
+
   test("shell formatting quotes every argv token", () => {
     const command = formatGitHubHelperShellCommand({
       command: "/opt/ready-for-agent",

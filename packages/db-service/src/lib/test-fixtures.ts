@@ -71,6 +71,14 @@ export const stubDbService = (
   addRepository: unused,
   updateRepositorySettings: unused,
   listCiGateDefinitions: () => Effect.succeed([]),
+  loadCiGateSnapshot: () =>
+    Effect.succeed({
+      state: null,
+      observations: [],
+      activeIncident: null,
+      latestResolvedIncident: null,
+    }),
+  commitCiGateSnapshot: () => Effect.void,
   pauseRepository: unused,
   unpauseRepository: unused,
   listRepositories: unused(),

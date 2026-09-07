@@ -543,6 +543,141 @@ export const ciGateDefinition = snakeCase.table(
 )
 
 /**
+ * Last observed default branch and observation time for a Repository CI Gate.
+ * See xplain: type ci gate state "cgs"
+ */
+export const ciGateState = snakeCase.table("ci_gate_state", {
+  repositoryId: text()
+    .primaryKey()
+    .references(() => repository.id, { onDelete: "cascade" }),
+  defaultBranch: text(),
+  lastObservedAt: integer({ mode: "number" }),
+  createdAt: integer({ mode: "number" })
+    .notNull()
+    .$defaultFn(() => Date.now()),
+  updatedAt: integer({ mode: "number" })
+    .notNull()
+    .$defaultFn(() => Date.now()),
+})
+
+/**
+ * Latest observed result and failure latch for one selected CI Gate Definition.
+ * See xplain: type ci gate definition observation "cgo"
+ */
+export const ciGateDefinitionObservation = snakeCase.table(
+  "ci_gate_definition_observation",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `cgo-${ulid()}`),
+    repositoryId: text()
+      .notNull()
+      .references(() => repository.id, { onDelete: "cascade" }),
+    definitionIdentity: text().notNull(),
+    lastObservedAt: integer({ mode: "number" }),
+    lastRunIdentity: text(),
+    lastRunHtmlUrl: text(),
+    lastHeadSha: text(),
+    lastHeadRef: text(),
+    lastEvent: text(),
+    lastRawStatus: text(),
+    lastRawConclusion: text(),
+    lastRunCreatedAt: integer({ mode: "number" }),
+    lastRunUpdatedAt: integer({ mode: "number" }),
+    failureLatched: integer({ mode: "boolean" }).notNull().default(false),
+    latchedRunIdentity: text(),
+    latchedRunHtmlUrl: text(),
+    observationError: text(),
+    observationErrorKind: text({
+      enum: ["permission", "not_found", "error"],
+    }),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex(
+      "ci_gate_definition_observation_repository_id_identity_uidx",
+    ).on(t.repositoryId, t.definitionIdentity),
+    index("ci_gate_definition_observation_repository_id_idx").on(
+      t.repositoryId,
+    ),
+  ],
+)
+
+/**
+ * Durable CI Failure Incident for one Repository CI Gate closure episode.
+ * See xplain: type ci failure incident "cfi"
+ */
+export const ciFailureIncident = snakeCase.table(
+  "ci_failure_incident",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `cfi-${ulid()}`),
+    repositoryId: text()
+      .notNull()
+      .references(() => repository.id, { onDelete: "cascade" }),
+    status: text({ enum: ["open", "resolved"] }).notNull(),
+    openedAt: integer({ mode: "number" }).notNull(),
+    resolvedAt: integer({ mode: "number" }),
+    recoveryReason: text({
+      enum: [
+        "newer_success",
+        "definition_removed",
+        "empty_selection",
+        "default_branch_changed",
+      ],
+    }),
+    summary: text().notNull(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    index("ci_failure_incident_repository_id_status_idx").on(
+      t.repositoryId,
+      t.status,
+    ),
+    index("ci_failure_incident_repository_id_opened_at_idx").on(
+      t.repositoryId,
+      t.openedAt,
+    ),
+  ],
+)
+
+/**
+ * Selected CI Gate Definitions that joined one CI Failure Incident.
+ * See xplain: type ci failure incident definition "cfid"
+ */
+export const ciFailureIncidentDefinition = snakeCase.table(
+  "ci_failure_incident_definition",
+  {
+    incidentId: text()
+      .notNull()
+      .references(() => ciFailureIncident.id, { onDelete: "cascade" }),
+    definitionIdentity: text().notNull(),
+    displayLabel: text().notNull(),
+    firstFailedRunIdentity: text(),
+    firstFailedRunHtmlUrl: text(),
+    joinedAt: integer({ mode: "number" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("ci_failure_incident_definition_incident_id_identity_uidx").on(
+      t.incidentId,
+      t.definitionIdentity,
+    ),
+    index("ci_failure_incident_definition_incident_id_idx").on(t.incidentId),
+  ],
+)
+
+/**
  * Durable autonomous whole-review workflow rerun permits for a Work Item.
  * Scoped by PR head SHA and workflow run identity; initial execution is free.
  * See xplain: type automated review rerun "arr"

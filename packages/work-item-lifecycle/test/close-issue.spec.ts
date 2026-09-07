@@ -98,6 +98,8 @@ const unusedGithub = {
     ),
   ensureIssueCompletedWithSummary: () => Effect.void,
   listCiGateCatalog: () => Effect.succeed([]),
+  observeCiGate: () =>
+    Effect.succeed({ defaultBranch: "main", observations: [] }),
 } satisfies GitHubServiceShape
 
 describe("closeIssue", () => {

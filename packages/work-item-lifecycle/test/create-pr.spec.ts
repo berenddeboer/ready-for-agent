@@ -136,6 +136,8 @@ const stubGitHub = (
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       ...overrides,

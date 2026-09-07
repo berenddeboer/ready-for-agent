@@ -406,6 +406,15 @@ export const ambientGitHubLayer = (options: {
                 service.listCiGateCatalog(repository, operationOptions),
             ),
         ),
+        observeCiGate: Effect.fn("AmbientGitHub.observeCiGate")(
+          (repository, input, operationOptions?: GitHubOperationOptions) =>
+            authenticated(
+              operationOptions?.origin ?? "polling",
+              repository,
+              (service) =>
+                service.observeCiGate(repository, input, operationOptions),
+            ),
+        ),
       } satisfies GitHubServiceShape
     }),
   )

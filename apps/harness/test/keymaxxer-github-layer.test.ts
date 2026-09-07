@@ -30,6 +30,7 @@ import {
   type RunWithSecretsInput,
 } from "@ready-for-agent/keymaxxer-service"
 import { ambientGitHubLayer } from "../src/server/ambient-github-layer.js"
+import { encodeArgument } from "../src/server/forge-helper-schemas.js"
 import {
   GitHubOperationCoordinator,
   GitHubOperationCoordinatorLive,
@@ -1878,6 +1879,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
           uploadUserAttachment: () => Effect.die("not used"),
           ensureIssueCompletedWithSummary: () => Effect.die("not used"),
           listCiGateCatalog: () => Effect.succeed([]),
+          observeCiGate: () =>
+            Effect.succeed({ defaultBranch: "main", observations: [] }),
         } satisfies GitHubServiceShape
         const scope = yield* Effect.scope
         const keymaxxerContext = yield* Layer.buildWithScope(
@@ -1983,6 +1986,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
           uploadUserAttachment: () => Effect.die("not used"),
           ensureIssueCompletedWithSummary: () => Effect.die("not used"),
           listCiGateCatalog: () => Effect.succeed([]),
+          observeCiGate: () =>
+            Effect.succeed({ defaultBranch: "main", observations: [] }),
         } satisfies GitHubServiceShape
         const scope = yield* Effect.scope
         const keymaxxerContext = yield* Layer.buildWithScope(
@@ -2306,6 +2311,54 @@ describe("Keymaxxer-backed GitHub layer", () => {
           )
         }).pipe(Effect.provide(layer))
         expect(observation).toEqual(incomplete)
+      }),
+  )
+
+  it.effect(
+    "forwards last-seen CI Gate run identities to the observe helper",
+    () =>
+      Effect.gen(function* () {
+        const runs: RunWithSecretsInput[] = []
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) => {
+            runs.push(input)
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: JSON.stringify({
+                defaultBranch: "main",
+                observations: [
+                  { identity: "161335", kind: "observed", runs: [] },
+                ],
+              }),
+              stderr: successfulHelperControl,
+            })
+          },
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+        const observation = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          return yield* github.observeCiGate(acmeWidgets, {
+            definitionIdentities: ["161335"],
+            lastRunIdentities: { "161335": "100:1" },
+          })
+        }).pipe(Effect.provide(layer))
+        expect(observation.defaultBranch).toBe("main")
+        expect(runs[0]?.command).toContain("observe-ci-gate")
+        expect(runs[0]?.command).toContain(
+          encodeArgument(
+            JSON.stringify({
+              definitionIdentities: ["161335"],
+              lastRunIdentities: { "161335": "100:1" },
+            }),
+          ),
+        )
       }),
   )
 })

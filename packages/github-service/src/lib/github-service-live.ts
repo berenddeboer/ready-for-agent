@@ -55,6 +55,9 @@ import {
 } from "./tls-trust.js"
 import {
   type CiGateCatalogEntry,
+  type CiGateDefinitionObservation,
+  type CiGateObservation,
+  type CiGateObservedRun,
   GITHUB_CI_GATE_KIND,
   type GitHubIssueReference,
   type GitHubIssueState,
@@ -62,6 +65,7 @@ import {
   type GitHubPullRequestReference,
   type GitHubRepository,
   type MergePullRequestResult,
+  type ObserveCiGateInput,
   type PrStatusCheckDiagnostic,
   type PrStatusCheckDiagnosticSource,
   type PrStatusCheckDiagnosticsOptions,
@@ -367,6 +371,16 @@ interface GitHubRestCheckRun {
 interface GitHubRestWorkflowRun {
   readonly id?: unknown
   readonly name?: unknown
+  readonly html_url?: unknown
+  readonly head_sha?: unknown
+  readonly head_branch?: unknown
+  readonly event?: unknown
+  readonly status?: unknown
+  readonly conclusion?: unknown
+  readonly created_at?: unknown
+  readonly updated_at?: unknown
+  readonly run_started_at?: unknown
+  readonly run_attempt?: unknown
 }
 
 interface GitHubRestJob {
@@ -421,6 +435,13 @@ export type ListCiGateCatalog = (
   repository: { owner: string; name: string },
   signal?: AbortSignal,
 ) => Promise<readonly CiGateCatalogEntry[]>
+
+/** Observe selected CI Gate Definitions on the current default branch. */
+export type ObserveCiGate = (
+  repository: { owner: string; name: string },
+  input: ObserveCiGateInput,
+  signal?: AbortSignal,
+) => Promise<CiGateObservation>
 
 /** Upload file bytes as a GitHub user attachment and return the CDN URL. */
 export type UploadUserAttachment = (
@@ -1255,6 +1276,7 @@ const makeGitHubApiService = (
   observeAutomatedReviewEvidenceImpl?: ObserveAutomatedReviewEvidence,
   uploadUserAttachmentImpl?: UploadUserAttachment,
   listCiGateCatalogImpl?: ListCiGateCatalog,
+  observeCiGateImpl?: ObserveCiGate,
 ): GitHubApiServiceShape => ({
   getAuthenticatedUserLogin: Effect.fn(
     "GitHubService.getAuthenticatedUserLogin",
@@ -2313,6 +2335,33 @@ const makeGitHubApiService = (
       return yield* error
     },
   ),
+  observeCiGate: Effect.fn("GitHubService.observeCiGate")(
+    function* (repository, input) {
+      if (observeCiGateImpl === undefined) {
+        return yield* new GitHubRequestError({
+          message: `CI Gate observation is not configured for ${repository.owner}/${repository.name}`,
+          retryable: false,
+        })
+      }
+      const observed = yield* githubRequest(
+        `Failed to observe CI Gate Definitions for ${repository.owner}/${repository.name}`,
+        (signal) => observeCiGateImpl(repository, input, signal),
+      ).pipe(Effect.result)
+      if (Result.isSuccess(observed)) {
+        return observed.success
+      }
+      const error = observed.failure
+      if (error._tag === "GitHubRequestError" && error.statusCode === 403) {
+        return yield* new GitHubRequestError({
+          message: `Failed to observe CI Gate Definitions for ${repository.owner}/${repository.name}: Actions read required`,
+          statusCode: 403,
+          retryable: false,
+          cause: error,
+        })
+      }
+      return yield* error
+    },
+  ),
   ensureIssueCompletedWithSummary: Effect.fn(
     "GitHubService.ensureIssueCompletedWithSummary",
   )(function* (repository, issueNumber, workItemId, summaryMarkdown) {
@@ -3009,6 +3058,7 @@ export const makeGitHubService = (
   observeAutomatedReviewEvidenceImpl?: ObserveAutomatedReviewEvidence,
   uploadUserAttachmentImpl?: UploadUserAttachment,
   listCiGateCatalogImpl?: ListCiGateCatalog,
+  observeCiGateImpl?: ObserveCiGate,
 ): GitHubServiceShape => {
   const service = makeGitHubApiService(
     client,
@@ -3018,6 +3068,7 @@ export const makeGitHubService = (
     observeAutomatedReviewEvidenceImpl,
     uploadUserAttachmentImpl,
     listCiGateCatalogImpl,
+    observeCiGateImpl,
   )
   const adapt = adaptRepository(service)
   return {
@@ -3044,6 +3095,7 @@ export const makeGitHubService = (
     rerunWorkflowRun: adapt(service.rerunWorkflowRun),
     uploadUserAttachment: adapt(service.uploadUserAttachment),
     listCiGateCatalog: adapt(service.listCiGateCatalog),
+    observeCiGate: adapt(service.observeCiGate),
     ensureIssueCompletedWithSummary: adapt(
       service.ensureIssueCompletedWithSummary,
     ),
@@ -3301,6 +3353,256 @@ const makeListCiGateCatalog =
       }
     }
     return entries
+  }
+
+const CI_GATE_PULL_REQUEST_EVENTS = new Set([
+  "pull_request",
+  "pull_request_target",
+  "pull_request_review",
+  "pull_request_review_comment",
+  "pull_request_comment",
+  "merge_group",
+])
+
+const CI_GATE_INCLUDED_EVENTS = new Set([
+  "push",
+  "schedule",
+  "workflow_dispatch",
+])
+
+const parseGitHubInstant = (value: unknown): Date | null => {
+  if (typeof value !== "string" || value.trim() === "") {
+    return null
+  }
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+const mapObservedWorkflowRun = (
+  value: unknown,
+  defaultBranch: string,
+): CiGateObservedRun | null => {
+  if (!isRecord(value)) {
+    return null
+  }
+  const id = value.id
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0) {
+    return null
+  }
+  const event = typeof value.event === "string" ? value.event.trim() : ""
+  if (event === "" || CI_GATE_PULL_REQUEST_EVENTS.has(event)) {
+    return null
+  }
+  if (!CI_GATE_INCLUDED_EVENTS.has(event)) {
+    return null
+  }
+  const headRef =
+    typeof value.head_branch === "string" ? value.head_branch.trim() : ""
+  if (headRef !== defaultBranch) {
+    return null
+  }
+  const createdAt = parseGitHubInstant(value.created_at)
+  if (createdAt === null) {
+    return null
+  }
+  const attempt =
+    typeof value.run_attempt === "number" &&
+    Number.isSafeInteger(value.run_attempt) &&
+    value.run_attempt > 0
+      ? value.run_attempt
+      : 1
+  const htmlUrl =
+    typeof value.html_url === "string" && value.html_url.trim() !== ""
+      ? value.html_url.trim()
+      : null
+  const headSha =
+    typeof value.head_sha === "string" && value.head_sha.trim() !== ""
+      ? value.head_sha.trim()
+      : null
+  const rawStatus =
+    typeof value.status === "string" && value.status.trim() !== ""
+      ? value.status.trim()
+      : null
+  const rawConclusion =
+    typeof value.conclusion === "string" && value.conclusion.trim() !== ""
+      ? value.conclusion.trim()
+      : null
+  return {
+    runIdentity: `${String(id)}:${String(attempt)}`,
+    htmlUrl,
+    headSha,
+    headRef,
+    event,
+    createdAt,
+    updatedAt: parseGitHubInstant(value.updated_at),
+    startedAt: parseGitHubInstant(value.run_started_at),
+    rawStatus,
+    rawConclusion,
+  }
+}
+
+const runIdFromIdentity = (runIdentity: string): string => {
+  const separator = runIdentity.indexOf(":")
+  return separator === -1 ? runIdentity : runIdentity.slice(0, separator)
+}
+
+const isSameObservedRun = (
+  runIdentity: string,
+  lastRunIdentity: string,
+): boolean =>
+  runIdentity === lastRunIdentity ||
+  runIdFromIdentity(runIdentity) === runIdFromIdentity(lastRunIdentity)
+
+const throwGitHubHttpError = async (
+  response: Response,
+  message: string,
+): Promise<never> => {
+  const body = await response.text()
+  const throttle = githubThrottleFromResponse({
+    statusCode: response.status,
+    headers: response.headers,
+    message: `${response.statusText}: ${body}`,
+  })
+  if (throttle !== undefined) {
+    throw throttle
+  }
+  throw new GitHubHttpError({
+    statusCode: response.status,
+    headers: response.headers,
+    message,
+  })
+}
+
+const makeObserveCiGate =
+  (token: string, fetchImpl: GitHubFetch): ObserveCiGate =>
+  async (repository, input, signal) => {
+    const repoResponse = await fetchImpl(
+      `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}`,
+      {
+        headers: githubRestHeaders(token),
+        signal,
+      },
+    )
+    if (!repoResponse.ok) {
+      await throwGitHubHttpError(
+        repoResponse,
+        `Failed to resolve default branch for ${repository.owner}/${repository.name}: ${repoResponse.statusText}`,
+      )
+    }
+    const repoPayload: unknown = await repoResponse.json()
+    const defaultBranch =
+      isRecord(repoPayload) &&
+      typeof repoPayload.default_branch === "string" &&
+      repoPayload.default_branch.trim() !== ""
+        ? repoPayload.default_branch.trim()
+        : null
+    if (defaultBranch === null) {
+      throw new GitHubHttpError({
+        statusCode: 0,
+        headers: new Headers(),
+        message: `GitHub returned no default branch for ${repository.owner}/${repository.name}`,
+      })
+    }
+
+    const observations: CiGateDefinitionObservation[] = []
+    for (const rawIdentity of input.definitionIdentities) {
+      const identity = rawIdentity.trim()
+      const workflowId = Number(identity)
+      if (
+        identity.length === 0 ||
+        !Number.isSafeInteger(workflowId) ||
+        workflowId <= 0
+      ) {
+        observations.push({
+          identity,
+          kind: "unavailable",
+          reason: "not_found",
+          message: `CI Gate Definition ${identity} could not be observed`,
+        })
+        continue
+      }
+
+      const lastSeenRaw = input.lastRunIdentities[identity]
+      const lastSeen =
+        lastSeenRaw !== undefined && lastSeenRaw.trim() !== ""
+          ? lastSeenRaw
+          : null
+      const runs: CiGateObservedRun[] = []
+      let unavailable: CiGateDefinitionObservation | null = null
+      let reachedLastSeen = false
+      for (let page = 1; ; page += 1) {
+        const url = new URL(
+          `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/workflows/${String(workflowId)}/runs`,
+        )
+        url.searchParams.set("branch", defaultBranch)
+        url.searchParams.set("exclude_pull_requests", "true")
+        url.searchParams.set("per_page", String(PAGE_SIZE))
+        url.searchParams.set("page", String(page))
+        const response = await fetchImpl(url, {
+          headers: githubRestHeaders(token),
+          signal,
+        })
+        if (!response.ok) {
+          if (response.status === 404) {
+            unavailable = {
+              identity,
+              kind: "unavailable",
+              reason: "not_found",
+              message: `CI Gate Definition ${identity} could not be observed`,
+            }
+            break
+          }
+          const body = await response.text()
+          const throttle = githubThrottleFromResponse({
+            statusCode: response.status,
+            headers: response.headers,
+            message: `${response.statusText}: ${body}`,
+          })
+          if (throttle !== undefined) {
+            throw throttle
+          }
+          throw new GitHubHttpError({
+            statusCode: response.status,
+            headers: response.headers,
+            message:
+              response.status === 403
+                ? `Failed to observe CI Gate Definitions for ${repository.owner}/${repository.name}: Actions read required`
+                : `Failed to observe CI Gate Definition ${identity} for ${repository.owner}/${repository.name}: ${response.statusText}: ${body}`,
+          })
+        }
+        const payload: unknown = await response.json()
+        const workflowRuns =
+          isRecord(payload) && Array.isArray(payload.workflow_runs)
+            ? payload.workflow_runs
+            : []
+        for (const workflowRun of workflowRuns) {
+          const mapped = mapObservedWorkflowRun(workflowRun, defaultBranch)
+          if (mapped === null) {
+            continue
+          }
+          runs.push(mapped)
+          if (
+            lastSeen !== null &&
+            isSameObservedRun(mapped.runIdentity, lastSeen)
+          ) {
+            reachedLastSeen = true
+            break
+          }
+        }
+        if (reachedLastSeen || workflowRuns.length < PAGE_SIZE) {
+          break
+        }
+      }
+      observations.push(
+        unavailable ?? {
+          identity,
+          kind: "observed",
+          runs,
+        },
+      )
+    }
+
+    return { defaultBranch, observations }
   }
 
 const makeUploadUserAttachment =
@@ -4015,6 +4317,7 @@ export const makeGitHubServiceFromToken = (
     makeObserveAutomatedReviewEvidence(token, observingFetch),
     makeUploadUserAttachment(token, observingFetch),
     makeListCiGateCatalog(token, observingFetch),
+    makeObserveCiGate(token, observingFetch),
   )
 }
 

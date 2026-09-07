@@ -379,6 +379,7 @@ describe("runMigrations", () => {
           { name: "20260818120000_repository_merge_policy" },
           { name: "20260819120000_repository_guaranteed_min_agent_turns" },
           { name: "20260907120000_repository_ci_gate_definitions" },
+          { name: "20260907133000_repository_ci_gate_observation" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

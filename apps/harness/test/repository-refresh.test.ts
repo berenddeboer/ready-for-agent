@@ -1,8 +1,10 @@
 import { Duration, Effect, Layer } from "effect"
+import { DatabaseError } from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
   stubDbServiceLayer,
 } from "@ready-for-agent/db-service/test"
+import { GitHubRequestError } from "@ready-for-agent/github-service"
 import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
 import {
   WorkItemLifecycle,
@@ -134,5 +136,164 @@ describe("refreshLoadedRepository", () => {
         `release:${repository.id}`,
         `notify:${repository.id}`,
       ])
+    }).pipe(Effect.runPromise))
+
+  const idleLifecycle = {
+    maxDurations: {
+      create_worktree: Duration.minutes(5),
+      install_dependencies: Duration.minutes(15),
+      implement: Duration.hours(2),
+      assess_changes: Duration.minutes(5),
+      pre_commit: Duration.hours(2),
+      review: Duration.hours(1),
+      commit: Duration.minutes(5),
+      create_pr: Duration.minutes(10),
+      watch_pr_status_checks: Duration.minutes(5),
+      resolve_pr_merge_conflict: Duration.hours(2),
+      investigate_pr_status_checks: Duration.hours(2),
+      mark_pr_ready_for_review: Duration.minutes(5),
+      decide_pr_merge: Duration.minutes(15),
+      merge_pr: Duration.minutes(5),
+      close_issue: Duration.minutes(5),
+      local_cleanup: Duration.minutes(5),
+    },
+    implementNow: unused,
+    implementWith: unused,
+    implementLocally: unused,
+    implementAllWithAutoMerge: unused,
+    queue: unused,
+    recoverOrphanedStepRuns: Effect.succeed(0),
+    interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
+    runStep: unused,
+    wakePostponedStep: unused,
+    retry: unused,
+    pause: unused,
+    interrupt: unused,
+    start: unused,
+    abandon: unused,
+    reset: unused,
+    getWorkItem: unused,
+    listWorkItemsForIssue: unused,
+    listWorkItemsForRepository: () => Effect.succeed([]),
+    listCompletedWorkItems: unused,
+    ownsSessionId: () => Effect.succeed(false),
+    findWorkItemBySessionId: unused,
+    countCommittedPullRequests: unused,
+    continueAfterHumanPrOutcome: unused,
+    stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
+    admitWaitingWorkItems: Effect.succeed(0),
+    completeParkedAttentionWhenIssueNoLongerRelevant: () => Effect.succeed(0),
+    releaseWaitingForBlockers: () => Effect.succeed(0),
+  }
+
+  it("observes CI even when Issue reconciliation fails", () =>
+    Effect.gen(function* () {
+      const repository = makeRepositoryRecord({ paused: true })
+      const calls: string[] = []
+      const result = yield* refreshLoadedRepository({
+        repository,
+        githubOperationOrigin: "polling",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            stubDbServiceLayer({
+              listCiGateDefinitions: () => Effect.succeed([]),
+              commitCiGateSnapshot: () =>
+                Effect.sync(() => {
+                  calls.push("ci")
+                }),
+              notifyIssuesChanged: () =>
+                Effect.sync(() => {
+                  calls.push("issues")
+                }),
+            }),
+            stubGitHubServiceLayer(),
+            stubGitLabServiceLayer(),
+            stubAzureDevOpsServiceLayer(),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () =>
+                Effect.fail(
+                  new DatabaseError({ message: "reconciliation failed" }),
+                ),
+            }),
+            Layer.succeed(WorkItemLifecycle, idleLifecycle),
+          ),
+        ),
+        Effect.result,
+      )
+      expect(calls).toEqual(["ci"])
+      expect(result._tag).toBe("Failure")
+    }).pipe(Effect.runPromise))
+
+  it("persists Issue reconciliation even when CI observation fails", () =>
+    Effect.gen(function* () {
+      const repository = makeRepositoryRecord({ paused: true })
+      const calls: string[] = []
+      const result = yield* refreshLoadedRepository({
+        repository,
+        githubOperationOrigin: "operator",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            stubDbServiceLayer({
+              listRepositories: Effect.succeed([repository]),
+              listCiGateDefinitions: () =>
+                Effect.succeed([
+                  {
+                    identity: "161335",
+                    displayLabel: "CI",
+                    kind: "workflow",
+                    diagnosticMetadata: null,
+                  },
+                ]),
+              loadCiGateSnapshot: () =>
+                Effect.succeed({
+                  state: null,
+                  observations: [],
+                  activeIncident: null,
+                  latestResolvedIncident: null,
+                }),
+              commitCiGateSnapshot: () =>
+                Effect.sync(() => {
+                  calls.push("ci")
+                }),
+              notifyIssuesChanged: () =>
+                Effect.sync(() => {
+                  calls.push("issues")
+                }),
+            }),
+            stubGitHubServiceLayer({
+              observeCiGate: () =>
+                Effect.fail(
+                  new GitHubRequestError({
+                    message: "Actions read required",
+                    statusCode: 403,
+                    retryable: false,
+                  }),
+                ),
+            }),
+            stubGitLabServiceLayer(),
+            stubAzureDevOpsServiceLayer(),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () =>
+                Effect.sync(() => {
+                  calls.push("reconcile")
+                  return {
+                    fetched: 0,
+                    inserted: 0,
+                    updated: 0,
+                    deleted: 0,
+                    unchanged: 0,
+                    competingObservations: [],
+                  }
+                }),
+            }),
+            Layer.succeed(WorkItemLifecycle, idleLifecycle),
+          ),
+        ),
+        Effect.result,
+      )
+      expect(calls).toEqual(["reconcile", "issues", "ci"])
+      expect(result._tag).toBe("Success")
     }).pipe(Effect.runPromise))
 })

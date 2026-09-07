@@ -73,6 +73,88 @@ export const CiGateDefinitionRecord = Schema.Struct({
 })
 export type CiGateDefinitionRecord = typeof CiGateDefinitionRecord.Type
 
+export const CiGateRecoveryReason = Schema.Literals([
+  "newer_success",
+  "definition_removed",
+  "empty_selection",
+  "default_branch_changed",
+])
+export type CiGateRecoveryReason = typeof CiGateRecoveryReason.Type
+
+export const CiGateObservationErrorKind = Schema.Literals([
+  "permission",
+  "not_found",
+  "error",
+])
+export type CiGateObservationErrorKind = typeof CiGateObservationErrorKind.Type
+
+export const CiGateStateRecord = Schema.Struct({
+  repositoryId: RepositoryId,
+  defaultBranch: Schema.NullOr(Schema.String),
+  lastObservedAt: Schema.NullOr(Schema.Date),
+})
+export type CiGateStateRecord = typeof CiGateStateRecord.Type
+
+export const CiGateDefinitionObservationRecord = Schema.Struct({
+  identity: Schema.String,
+  lastObservedAt: Schema.NullOr(Schema.Date),
+  lastRunIdentity: Schema.NullOr(Schema.String),
+  lastRunHtmlUrl: Schema.NullOr(Schema.String),
+  lastHeadSha: Schema.NullOr(Schema.String),
+  lastHeadRef: Schema.NullOr(Schema.String),
+  lastEvent: Schema.NullOr(Schema.String),
+  lastRawStatus: Schema.NullOr(Schema.String),
+  lastRawConclusion: Schema.NullOr(Schema.String),
+  lastRunCreatedAt: Schema.NullOr(Schema.Date),
+  lastRunUpdatedAt: Schema.NullOr(Schema.Date),
+  failureLatched: Schema.Boolean,
+  latchedRunIdentity: Schema.NullOr(Schema.String),
+  latchedRunHtmlUrl: Schema.NullOr(Schema.String),
+  observationError: Schema.NullOr(Schema.String),
+  observationErrorKind: Schema.NullOr(CiGateObservationErrorKind),
+})
+export type CiGateDefinitionObservationRecord =
+  typeof CiGateDefinitionObservationRecord.Type
+
+export const CiFailureIncidentDefinitionRecord = Schema.Struct({
+  identity: Schema.String,
+  displayLabel: Schema.String,
+  firstFailedRunIdentity: Schema.NullOr(Schema.String),
+  firstFailedRunHtmlUrl: Schema.NullOr(Schema.String),
+  joinedAt: Schema.Date,
+})
+export type CiFailureIncidentDefinitionRecord =
+  typeof CiFailureIncidentDefinitionRecord.Type
+
+export const CiFailureIncidentRecord = Schema.Struct({
+  id: Schema.String,
+  repositoryId: RepositoryId,
+  status: Schema.Literals(["open", "resolved"]),
+  openedAt: Schema.Date,
+  resolvedAt: Schema.NullOr(Schema.Date),
+  recoveryReason: Schema.NullOr(CiGateRecoveryReason),
+  summary: Schema.String,
+  definitions: Schema.Array(CiFailureIncidentDefinitionRecord),
+})
+export type CiFailureIncidentRecord = typeof CiFailureIncidentRecord.Type
+
+export const CiGateSnapshotRecord = Schema.Struct({
+  state: Schema.NullOr(CiGateStateRecord),
+  observations: Schema.Array(CiGateDefinitionObservationRecord),
+  activeIncident: Schema.NullOr(CiFailureIncidentRecord),
+  latestResolvedIncident: Schema.NullOr(CiFailureIncidentRecord),
+})
+export type CiGateSnapshotRecord = typeof CiGateSnapshotRecord.Type
+
+export const CommitCiGateSnapshotInput = Schema.Struct({
+  repositoryId: Schema.String,
+  defaultBranch: Schema.NullOr(Schema.String),
+  lastObservedAt: Schema.NullOr(Schema.Date),
+  observations: Schema.Array(CiGateDefinitionObservationRecord),
+  incidentsToUpsert: Schema.Array(CiFailureIncidentRecord),
+})
+export type CommitCiGateSnapshotInput = typeof CommitCiGateSnapshotInput.Type
+
 export const UpdateRepositorySettingsInput = Schema.Struct({
   repositoryId: Schema.String,
   /** Omitted identity fields leave the persisted Forge identity unchanged. */
@@ -259,6 +341,95 @@ export const CiGateDefinitionSqlRow = Schema.Struct({
   }),
 )
 export type CiGateDefinitionSqlRow = typeof CiGateDefinitionSqlRow.Type
+
+export const CiGateStateSqlRow = Schema.Struct({
+  repositoryId: RepositoryId,
+  defaultBranch: Schema.NullOr(Schema.String),
+  lastObservedAt: Schema.NullOr(Schema.DateFromMillis),
+}).pipe(
+  Schema.encodeKeys({
+    repositoryId: "repository_id",
+    defaultBranch: "default_branch",
+    lastObservedAt: "last_observed_at",
+  }),
+)
+export type CiGateStateSqlRow = typeof CiGateStateSqlRow.Type
+
+export const CiGateDefinitionObservationSqlRow = Schema.Struct({
+  identity: Schema.String,
+  lastObservedAt: Schema.NullOr(Schema.DateFromMillis),
+  lastRunIdentity: Schema.NullOr(Schema.String),
+  lastRunHtmlUrl: Schema.NullOr(Schema.String),
+  lastHeadSha: Schema.NullOr(Schema.String),
+  lastHeadRef: Schema.NullOr(Schema.String),
+  lastEvent: Schema.NullOr(Schema.String),
+  lastRawStatus: Schema.NullOr(Schema.String),
+  lastRawConclusion: Schema.NullOr(Schema.String),
+  lastRunCreatedAt: Schema.NullOr(Schema.DateFromMillis),
+  lastRunUpdatedAt: Schema.NullOr(Schema.DateFromMillis),
+  failureLatched: SqlBoolean,
+  latchedRunIdentity: Schema.NullOr(Schema.String),
+  latchedRunHtmlUrl: Schema.NullOr(Schema.String),
+  observationError: Schema.NullOr(Schema.String),
+  observationErrorKind: Schema.NullOr(CiGateObservationErrorKind),
+}).pipe(
+  Schema.encodeKeys({
+    identity: "definition_identity",
+    lastObservedAt: "last_observed_at",
+    lastRunIdentity: "last_run_identity",
+    lastRunHtmlUrl: "last_run_html_url",
+    lastHeadSha: "last_head_sha",
+    lastHeadRef: "last_head_ref",
+    lastEvent: "last_event",
+    lastRawStatus: "last_raw_status",
+    lastRawConclusion: "last_raw_conclusion",
+    lastRunCreatedAt: "last_run_created_at",
+    lastRunUpdatedAt: "last_run_updated_at",
+    failureLatched: "failure_latched",
+    latchedRunIdentity: "latched_run_identity",
+    latchedRunHtmlUrl: "latched_run_html_url",
+    observationError: "observation_error",
+    observationErrorKind: "observation_error_kind",
+  }),
+)
+export type CiGateDefinitionObservationSqlRow =
+  typeof CiGateDefinitionObservationSqlRow.Type
+
+export const CiFailureIncidentSqlRow = Schema.Struct({
+  id: Schema.String,
+  repositoryId: RepositoryId,
+  status: Schema.Literals(["open", "resolved"]),
+  openedAt: Schema.DateFromMillis,
+  resolvedAt: Schema.NullOr(Schema.DateFromMillis),
+  recoveryReason: Schema.NullOr(CiGateRecoveryReason),
+  summary: Schema.String,
+}).pipe(
+  Schema.encodeKeys({
+    repositoryId: "repository_id",
+    openedAt: "opened_at",
+    resolvedAt: "resolved_at",
+    recoveryReason: "recovery_reason",
+  }),
+)
+export type CiFailureIncidentSqlRow = typeof CiFailureIncidentSqlRow.Type
+
+export const CiFailureIncidentDefinitionSqlRow = Schema.Struct({
+  identity: Schema.String,
+  displayLabel: Schema.String,
+  firstFailedRunIdentity: Schema.NullOr(Schema.String),
+  firstFailedRunHtmlUrl: Schema.NullOr(Schema.String),
+  joinedAt: Schema.DateFromMillis,
+}).pipe(
+  Schema.encodeKeys({
+    identity: "definition_identity",
+    displayLabel: "display_label",
+    firstFailedRunIdentity: "first_failed_run_identity",
+    firstFailedRunHtmlUrl: "first_failed_run_html_url",
+    joinedAt: "joined_at",
+  }),
+)
+export type CiFailureIncidentDefinitionSqlRow =
+  typeof CiFailureIncidentDefinitionSqlRow.Type
 
 export const ConfigSqlRow = Schema.Struct({
   selectedAgentBackend: Schema.String,

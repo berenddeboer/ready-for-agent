@@ -1585,6 +1585,76 @@ describe("operator binary CLI seam", () => {
     }),
   )
 
+  it.live("status renders the server-owned Repository CI Gate projection", () =>
+    Effect.gen(function* () {
+      const logs: string[] = []
+      const originalLog = console.log
+      console.log = (...args: unknown[]) => {
+        logs.push(args.map(String).join(" "))
+      }
+      const ciGate = {
+        enabled: true,
+        status: "CLOSED" as const,
+        observedAt: "2026-09-07T12:00:00.000Z",
+        defaultBranch: "main",
+        diagnostic: "Repository CI Gate is closed: CI failed.",
+        definitions: [
+          {
+            identity: "161335",
+            displayLabel: "CI",
+            failureLatched: true,
+            diagnostic: null,
+            htmlUrl: "https://github.com/acme/widgets/actions/runs/200",
+          },
+        ],
+        activeIncident: {
+          status: "OPEN",
+          summary: "CI Gate closed: CI failed.",
+        },
+        latestResolvedIncident: null,
+      }
+      try {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              ...unusedGraphql,
+              listRepositories: Effect.succeed([
+                {
+                  id: "repo-1",
+                  forge: "github",
+                  forgeHost: "github.com",
+                  projectPath: "Owner/Repo",
+                },
+              ]),
+              kanbanStatus: () =>
+                Effect.succeed({
+                  repository: {
+                    id: "repo-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "Owner/Repo",
+                  },
+                  ciGate,
+                  lanes: emptyStatusLanes,
+                }),
+            }),
+          ),
+        )
+
+        yield* runOperator(["status", "owner/repo"], layer)
+
+        expect(JSON.parse(logs[0]!)).toMatchObject({
+          schemaVersion: CLI_SCHEMA_VERSION,
+          command: "status",
+          ciGate,
+        })
+      } finally {
+        console.log = originalLog
+      }
+    }),
+  )
+
   it.live(
     "status carries Harness-owned canRetry and latest Step Run reason",
     () =>

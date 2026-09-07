@@ -140,6 +140,38 @@ export const SerializedCiGateCatalog = Schema.Array(
   }),
 )
 
+const SerializedCiGateObservedRun = Schema.Struct({
+  runIdentity: RequiredString,
+  htmlUrl: Schema.NullOr(Schema.String),
+  headSha: Schema.NullOr(Schema.String),
+  headRef: Schema.NullOr(Schema.String),
+  event: RequiredString,
+  createdAt: Schema.DateFromString,
+  updatedAt: Schema.NullOr(Schema.DateFromString),
+  startedAt: Schema.NullOr(Schema.DateFromString),
+  rawStatus: Schema.NullOr(Schema.String),
+  rawConclusion: Schema.NullOr(Schema.String),
+})
+
+export const SerializedCiGateObservation = Schema.Struct({
+  defaultBranch: RequiredString,
+  observations: Schema.Array(
+    Schema.Union([
+      Schema.Struct({
+        identity: RequiredString,
+        kind: Schema.Literal("observed"),
+        runs: Schema.Array(SerializedCiGateObservedRun),
+      }),
+      Schema.Struct({
+        identity: RequiredString,
+        kind: Schema.Literal("unavailable"),
+        reason: Schema.Literals(["permission", "not_found", "error"]),
+        message: RequiredString,
+      }),
+    ]),
+  ),
+})
+
 const SerializedPullRequestCheckStatusFields = {
   mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
   baseRefName: Schema.NullOr(Schema.String),

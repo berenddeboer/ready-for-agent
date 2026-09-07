@@ -414,6 +414,7 @@ const statusWorkflow = Effect.fn("Cli.status")(function* (
         // Prefer the identity resolved from the operator selector when scoped;
         // otherwise use the GraphQL projection's repository (null for all).
         repository: scopedRepository ?? status.repository,
+        ciGate: status.ciGate ?? null,
         lanes: status.lanes,
       }),
     ),

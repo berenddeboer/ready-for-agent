@@ -20,8 +20,16 @@ import {
 import {
   type AddRepositoryInput,
   type BackendModelPrefs,
+  type CiFailureIncidentDefinitionRecord,
+  CiFailureIncidentDefinitionSqlRow,
+  type CiFailureIncidentRecord,
+  CiFailureIncidentSqlRow,
+  CiGateDefinitionObservationSqlRow,
   type CiGateDefinitionRecord,
   CiGateDefinitionSqlRow,
+  type CiGateSnapshotRecord,
+  CiGateStateSqlRow,
+  type CommitCiGateSnapshotInput,
   ConfigRecord,
   ConfigSqlRow,
   GuaranteedMinSumSqlRow,
@@ -276,6 +284,24 @@ const decodeCiGateDefinitionRows = (rows: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.Array(CiGateDefinitionSqlRow))(rows).pipe(
     Effect.mapError(toSchemaDatabaseError),
   )
+const decodeCiGateStateRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(CiGateStateSqlRow))(rows).pipe(
+    Effect.mapError(toSchemaDatabaseError),
+  )
+const decodeCiGateDefinitionObservationRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(CiGateDefinitionObservationSqlRow))(
+    rows,
+  ).pipe(Effect.mapError(toSchemaDatabaseError))
+const decodeCiFailureIncidentRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(CiFailureIncidentSqlRow))(rows).pipe(
+    Effect.mapError(toSchemaDatabaseError),
+  )
+const decodeCiFailureIncidentDefinitionRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(CiFailureIncidentDefinitionSqlRow))(
+    rows,
+  ).pipe(Effect.mapError(toSchemaDatabaseError))
+const millisOrNull = (value: Date | null): number | null =>
+  value === null ? null : value.getTime()
 const decodeConfigRows = (rows: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.Array(ConfigSqlRow))(rows).pipe(
     Effect.mapError(toSchemaDatabaseError),
@@ -464,6 +490,15 @@ export interface DbServiceShape {
     readonly CiGateDefinitionRecord[],
     RepositoryNotFoundError | DatabaseError
   >
+  readonly loadCiGateSnapshot: (
+    repositoryId: string,
+  ) => Effect.Effect<
+    CiGateSnapshotRecord,
+    RepositoryNotFoundError | DatabaseError
+  >
+  readonly commitCiGateSnapshot: (
+    input: CommitCiGateSnapshotInput,
+  ) => Effect.Effect<void, RepositoryNotFoundError | DatabaseError>
   readonly pauseRepository: (
     repositoryId: string,
   ) => Effect.Effect<RepositoryRecord, RepositoryNotFoundError | DatabaseError>
@@ -1609,6 +1644,284 @@ export const DbServiceLive = Layer.effect(
       },
     )
 
+    const loadIncidentDefinitions = Effect.fn(
+      "DbService.loadIncidentDefinitions",
+    )(function* (incidentId: string) {
+      const rows = yield* sql
+        .unsafe(
+          `SELECT definition_identity,
+                  display_label,
+                  first_failed_run_identity,
+                  first_failed_run_html_url,
+                  joined_at
+           FROM ci_failure_incident_definition
+           WHERE incident_id = ?
+           ORDER BY joined_at ASC, definition_identity ASC`,
+          [incidentId],
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+      return yield* decodeCiFailureIncidentDefinitionRows(rows)
+    })
+
+    const toIncidentRecord = (
+      row: CiFailureIncidentSqlRow,
+      definitions: readonly CiFailureIncidentDefinitionRecord[],
+    ): CiFailureIncidentRecord => ({
+      id: row.id,
+      repositoryId: row.repositoryId,
+      status: row.status,
+      openedAt: row.openedAt,
+      resolvedAt: row.resolvedAt,
+      recoveryReason: row.recoveryReason,
+      summary: row.summary,
+      definitions: [...definitions],
+    })
+
+    const loadIncidentByQuery = Effect.fn("DbService.loadIncidentByQuery")(
+      function* (query: string, params: readonly unknown[]) {
+        const rows = yield* sql
+          .unsafe(query, params)
+          .pipe(Effect.mapError(toDatabaseError))
+        const decoded = yield* decodeCiFailureIncidentRows(rows)
+        const row = decoded[0]
+        if (row === undefined) {
+          return null
+        }
+        const definitions = yield* loadIncidentDefinitions(row.id)
+        return toIncidentRecord(row, definitions)
+      },
+    )
+
+    const loadCiGateSnapshot = Effect.fn("DbService.loadCiGateSnapshot")(
+      function* (repositoryId: string) {
+        yield* ensureRepositoryExists(repositoryId)
+        const stateRows = yield* sql
+          .unsafe(
+            `SELECT repository_id,
+                    default_branch,
+                    last_observed_at
+             FROM ci_gate_state
+             WHERE repository_id = ?
+             LIMIT 1`,
+            [repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+        const states = yield* decodeCiGateStateRows(stateRows)
+        const observationRows = yield* sql
+          .unsafe(
+            `SELECT definition_identity,
+                    last_observed_at,
+                    last_run_identity,
+                    last_run_html_url,
+                    last_head_sha,
+                    last_head_ref,
+                    last_event,
+                    last_raw_status,
+                    last_raw_conclusion,
+                    last_run_created_at,
+                    last_run_updated_at,
+                    failure_latched,
+                    latched_run_identity,
+                    latched_run_html_url,
+                    observation_error,
+                    observation_error_kind
+             FROM ci_gate_definition_observation
+             WHERE repository_id = ?
+             ORDER BY definition_identity ASC`,
+            [repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+        const observations =
+          yield* decodeCiGateDefinitionObservationRows(observationRows)
+        const activeIncident = yield* loadIncidentByQuery(
+          `SELECT id, repository_id, status, opened_at, resolved_at,
+                  recovery_reason, summary
+           FROM ci_failure_incident
+           WHERE repository_id = ? AND status = 'open'
+           ORDER BY opened_at DESC, id DESC
+           LIMIT 1`,
+          [repositoryId],
+        )
+        const latestResolvedIncident = yield* loadIncidentByQuery(
+          `SELECT id, repository_id, status, opened_at, resolved_at,
+                  recovery_reason, summary
+           FROM ci_failure_incident
+           WHERE repository_id = ? AND status = 'resolved'
+           ORDER BY resolved_at DESC, opened_at DESC, id DESC
+           LIMIT 1`,
+          [repositoryId],
+        )
+        const state = states[0]
+        return {
+          state:
+            state === undefined
+              ? null
+              : {
+                  repositoryId: state.repositoryId,
+                  defaultBranch: state.defaultBranch,
+                  lastObservedAt: state.lastObservedAt,
+                },
+          observations,
+          activeIncident,
+          latestResolvedIncident,
+        } satisfies CiGateSnapshotRecord
+      },
+    )
+
+    const upsertIncident = Effect.fn("DbService.upsertIncident")(function* (
+      incident: CiFailureIncidentRecord,
+      now: number,
+    ) {
+      yield* sql
+        .unsafe(
+          `INSERT INTO ci_failure_incident (
+             id, repository_id, status, opened_at, resolved_at,
+             recovery_reason, summary, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             status = excluded.status,
+             opened_at = excluded.opened_at,
+             resolved_at = excluded.resolved_at,
+             recovery_reason = excluded.recovery_reason,
+             summary = excluded.summary,
+             updated_at = excluded.updated_at`,
+          [
+            incident.id,
+            incident.repositoryId,
+            incident.status,
+            incident.openedAt.getTime(),
+            millisOrNull(incident.resolvedAt),
+            incident.recoveryReason,
+            incident.summary,
+            now,
+            now,
+          ],
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+      yield* sql
+        .unsafe(
+          `DELETE FROM ci_failure_incident_definition WHERE incident_id = ?`,
+          [incident.id],
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+      for (const definition of incident.definitions) {
+        yield* sql
+          .unsafe(
+            `INSERT INTO ci_failure_incident_definition (
+               incident_id, definition_identity, display_label,
+               first_failed_run_identity, first_failed_run_html_url, joined_at
+             ) VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              incident.id,
+              definition.identity,
+              definition.displayLabel,
+              definition.firstFailedRunIdentity,
+              definition.firstFailedRunHtmlUrl,
+              definition.joinedAt.getTime(),
+            ],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+      }
+    })
+
+    const commitCiGateSnapshot = Effect.fn("DbService.commitCiGateSnapshot")(
+      function* (input: CommitCiGateSnapshotInput) {
+        yield* ensureRepositoryExists(input.repositoryId)
+        const now = yield* Clock.currentTimeMillis
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              yield* sql
+                .unsafe(
+                  `INSERT INTO ci_gate_state (
+                     repository_id, default_branch, last_observed_at,
+                     created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(repository_id) DO UPDATE SET
+                     default_branch = excluded.default_branch,
+                     last_observed_at = excluded.last_observed_at,
+                     updated_at = excluded.updated_at`,
+                  [
+                    input.repositoryId,
+                    input.defaultBranch,
+                    millisOrNull(input.lastObservedAt),
+                    now,
+                    now,
+                  ],
+                )
+                .pipe(Effect.mapError(toDatabaseError))
+              yield* sql
+                .unsafe(
+                  `DELETE FROM ci_gate_definition_observation
+                   WHERE repository_id = ?`,
+                  [input.repositoryId],
+                )
+                .pipe(Effect.mapError(toDatabaseError))
+              for (const observation of input.observations) {
+                yield* sql
+                  .unsafe(
+                    `INSERT INTO ci_gate_definition_observation (
+                       id, repository_id, definition_identity,
+                       last_observed_at, last_run_identity, last_run_html_url,
+                       last_head_sha, last_head_ref, last_event,
+                       last_raw_status, last_raw_conclusion,
+                       last_run_created_at, last_run_updated_at,
+                       failure_latched, latched_run_identity,
+                       latched_run_html_url, observation_error,
+                       observation_error_kind, created_at, updated_at
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                      `cgo-${ulid()}`,
+                      input.repositoryId,
+                      observation.identity,
+                      millisOrNull(observation.lastObservedAt),
+                      observation.lastRunIdentity,
+                      observation.lastRunHtmlUrl,
+                      observation.lastHeadSha,
+                      observation.lastHeadRef,
+                      observation.lastEvent,
+                      observation.lastRawStatus,
+                      observation.lastRawConclusion,
+                      millisOrNull(observation.lastRunCreatedAt),
+                      millisOrNull(observation.lastRunUpdatedAt),
+                      observation.failureLatched ? 1 : 0,
+                      observation.latchedRunIdentity,
+                      observation.latchedRunHtmlUrl,
+                      observation.observationError,
+                      observation.observationErrorKind,
+                      now,
+                      now,
+                    ],
+                  )
+                  .pipe(Effect.mapError(toDatabaseError))
+              }
+              for (const incident of input.incidentsToUpsert) {
+                yield* upsertIncident(incident, now)
+              }
+            }),
+          )
+          .pipe(
+            Effect.mapError((error: unknown) => {
+              if (
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error
+              ) {
+                const tag = (error as { _tag: string })._tag
+                if (
+                  tag === "RepositoryNotFoundError" ||
+                  tag === "DatabaseError"
+                ) {
+                  return error as RepositoryNotFoundError | DatabaseError
+                }
+              }
+              return toDatabaseError(error as SqlError)
+            }),
+          )
+        yield* publishRepositoryChanged()
+      },
+    )
+
     const ensureRepositoryExists = Effect.fn(
       "DbService.ensureRepositoryExists",
     )(function* (repositoryId: string) {
@@ -2070,6 +2383,8 @@ export const DbServiceLive = Layer.effect(
       addRepository,
       updateRepositorySettings,
       listCiGateDefinitions,
+      loadCiGateSnapshot,
+      commitCiGateSnapshot,
       pauseRepository,
       unpauseRepository,
       listRepositories,

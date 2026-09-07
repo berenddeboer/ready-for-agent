@@ -13,10 +13,16 @@
     "noImplicitOverride": true,
     "noImplicitReturns": true,
     "noUnusedLocals": true,
-    "plugins": [{ "name": "@effect/language-service" }],
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnostics": false
+      }
+    ],
     "skipLibCheck": true,
     "strict": true,
     "target": "es2022",
-    "customConditions": ["@ready-for-agent/source"]
+    "customConditions": ["@ready-for-agent/source"],
+    "disableSourceOfProjectReferenceRedirect": true
   }
 }
