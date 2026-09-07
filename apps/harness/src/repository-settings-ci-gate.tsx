@@ -3,7 +3,7 @@ import { cx, ui } from "./ui.js"
 export const CI_GATE_DEFINITIONS_LOADING_LABEL = "Loading CI Gate Definitions…"
 export const CI_GATE_DISABLED_HINT =
   "No CI Gate Definitions selected — Repository CI Gate is disabled."
-export const CI_GATE_SELECTED_HINT =
+const CI_GATE_SELECTED_HINT =
   "Selected definitions watch default-branch CI. Empty selection disables the Repository CI Gate."
 
 export type CiGateDefinitionChoice = {
@@ -25,7 +25,7 @@ export type CiGateCatalogView =
       readonly unavailable: readonly CiGateDefinitionChoice[]
     }
 
-export type RepositoryCiGateStatusView = {
+type RepositoryCiGateStatusView = {
   readonly statusLabel: string
   readonly diagnostic: string | null
   readonly activeIncidentSummary: string | null
