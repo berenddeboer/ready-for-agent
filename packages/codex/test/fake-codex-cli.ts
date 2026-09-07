@@ -2,7 +2,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-export const ASTRA_APP_SERVER_MODEL = {
+const ASTRA_APP_SERVER_MODEL = {
   model: "gpt-6-astra",
   displayName: "GPT-6 Astra",
   hidden: false,
@@ -16,7 +16,7 @@ export const ASTRA_APP_SERVER_MODEL = {
   ],
 }
 
-export const ZENITH_APP_SERVER_MODEL = {
+const ZENITH_APP_SERVER_MODEL = {
   model: "gpt-9-zenith",
   displayName: "GPT-9 Zenith",
   hidden: false,

@@ -248,17 +248,10 @@ export const discoverAppServerModels = (input: {
       )
 
     const failTimeout = (): Effect.Effect<never, AgentBackendConfigError> =>
-      Effect.fail(configError("model/list discovery timed out"))
+      configError("model/list discovery timed out")
 
-    const write = (
-      text: string,
-    ): Effect.Effect<void, AgentBackendConfigError> =>
-      Queue.offer(stdinQueue, text).pipe(
-        Effect.asVoid,
-        Effect.catch(() =>
-          Effect.fail(configError("failed to write app-server request")),
-        ),
-      )
+    const write = (text: string): Effect.Effect<boolean> =>
+      Queue.offer(stdinQueue, text)
 
     const waitFor = (
       id: RpcId,
@@ -280,8 +273,8 @@ export const discoverAppServerModels = (input: {
             }),
           )
           if (message.kind === "overflow") {
-            return yield* Effect.fail(
-              configError("app-server stdout exceeded the discovery bound"),
+            return yield* configError(
+              "app-server stdout exceeded the discovery bound",
             )
           }
           if (message.kind === "closed") {
@@ -293,10 +286,10 @@ export const discoverAppServerModels = (input: {
               tail.length > 0
                 ? unsupportedCliDetail(tail)
                 : "app-server exited before completing model/list"
-            return yield* Effect.fail(configError(detail))
+            return yield* configError(detail)
           }
           if (message.kind === "malformed") {
-            return yield* Effect.fail(configError(message.reason))
+            return yield* configError(message.reason)
           }
           if (message.kind === "notification" || message.kind === "unrelated") {
             continue
@@ -305,9 +298,7 @@ export const discoverAppServerModels = (input: {
             if (message.id !== null && message.id !== id) {
               continue
             }
-            return yield* Effect.fail(
-              configError(unsupportedCliDetail(message.message)),
-            )
+            return yield* configError(unsupportedCliDetail(message.message))
           }
           if (message.id !== id) {
             continue
@@ -391,7 +382,7 @@ export const discoverAppServerModels = (input: {
               yield* Queue.offer(incoming, parseAppServerLine(line))
             }),
           ),
-          Effect.catch(() => Effect.void),
+          Effect.ignore,
           Effect.forkScoped,
         )
 
@@ -409,8 +400,8 @@ export const discoverAppServerModels = (input: {
               : { includeHidden: false, cursor }
           const result = yield* request("model/list", params)
           if (!isRecord(result) || !Array.isArray(result.data)) {
-            return yield* Effect.fail(
-              configError("model/list result is missing a data array"),
+            return yield* configError(
+              "model/list result is missing a data array",
             )
           }
           collected.push(...result.data)
@@ -418,25 +409,21 @@ export const discoverAppServerModels = (input: {
           if (nextCursor === null) {
             const projected = projectAppServerModelList({ data: collected })
             if (projected.kind === "malformed") {
-              return yield* Effect.fail(configError(projected.reason))
+              return yield* configError(projected.reason)
             }
             if (projected.kind === "empty") {
-              return yield* Effect.fail(
-                configError("model/list returned no usable models"),
-              )
+              return yield* configError("model/list returned no usable models")
             }
             return projected.models
           }
           if (seenCursors.has(nextCursor)) {
-            return yield* Effect.fail(
-              configError("model/list repeated a pagination cursor"),
-            )
+            return yield* configError("model/list repeated a pagination cursor")
           }
           seenCursors.add(nextCursor)
           cursor = nextCursor
         }
-        return yield* Effect.fail(
-          configError("model/list pagination exceeded the page bound"),
+        return yield* configError(
+          "model/list pagination exceeded the page bound",
         )
       }),
     ).pipe(
