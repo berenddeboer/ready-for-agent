@@ -5,6 +5,7 @@ import {
   type IntakeCandidateAction,
   type IntakeIssueResult,
   type RetryWorkItemResult,
+  type StatusCiGate,
   type StatusLane,
   type StatusLaneId,
   type StatusStepRunReason,
@@ -111,6 +112,7 @@ export type RetryWorkItemsResult = {
 
 export type KanbanStatusResult = {
   readonly repository: CanonicalRepositoryIdentity | null
+  readonly ciGate?: StatusCiGate | null
   readonly lanes: readonly StatusLane[]
 }
 
@@ -226,6 +228,78 @@ const toStatusWorkItemRow = (row: {
   stateReadyAt: row.workItem.stateReadyAt,
   postponedUntil: row.workItem.postponedUntil,
 })
+
+const toStatusCiGate = (
+  ciGate:
+    | {
+        readonly enabled: boolean
+        readonly status: string
+        readonly observedAt?: string | null
+        readonly defaultBranch?: string | null
+        readonly diagnostic?: string | null
+        readonly definitions?: readonly {
+          readonly identity: string
+          readonly displayLabel: string
+          readonly failureLatched: boolean
+          readonly diagnostic?: string | null
+          readonly latestRun?: { readonly htmlUrl?: string | null } | null
+        }[]
+        readonly activeIncident?: {
+          readonly status: string
+          readonly summary: string
+        } | null
+        readonly latestResolvedIncident?: {
+          readonly status: string
+          readonly summary: string
+          readonly recoveryReason?: string | null
+        } | null
+      }
+    | null
+    | undefined,
+): StatusCiGate | null => {
+  if (ciGate === null || ciGate === undefined) {
+    return null
+  }
+  if (
+    ciGate.status !== "DISABLED" &&
+    ciGate.status !== "OPEN" &&
+    ciGate.status !== "CLOSED" &&
+    ciGate.status !== "DEGRADED"
+  ) {
+    return null
+  }
+  return {
+    enabled: ciGate.enabled,
+    status: ciGate.status,
+    observedAt: ciGate.observedAt ?? null,
+    defaultBranch: ciGate.defaultBranch ?? null,
+    diagnostic: ciGate.diagnostic ?? null,
+    definitions: (ciGate.definitions ?? []).map((definition) => ({
+      identity: definition.identity,
+      displayLabel: definition.displayLabel,
+      failureLatched: definition.failureLatched,
+      diagnostic: definition.diagnostic ?? null,
+      htmlUrl: definition.latestRun?.htmlUrl ?? null,
+    })),
+    activeIncident:
+      ciGate.activeIncident === null || ciGate.activeIncident === undefined
+        ? null
+        : {
+            status: ciGate.activeIncident.status,
+            summary: ciGate.activeIncident.summary,
+          },
+    latestResolvedIncident:
+      ciGate.latestResolvedIncident === null ||
+      ciGate.latestResolvedIncident === undefined
+        ? null
+        : {
+            status: ciGate.latestResolvedIncident.status,
+            summary: ciGate.latestResolvedIncident.summary,
+            recoveryReason:
+              ciGate.latestResolvedIncident.recoveryReason ?? null,
+          },
+  }
+}
 
 const toStatusLanes = (
   lanes: readonly {
@@ -849,6 +923,31 @@ export class GraphqlApi extends Context.Service<
                     forge: true,
                     forgeHost: true,
                     projectPath: true,
+                    ciGate: {
+                      enabled: true,
+                      status: true,
+                      observedAt: true,
+                      defaultBranch: true,
+                      diagnostic: true,
+                      definitions: {
+                        identity: true,
+                        displayLabel: true,
+                        failureLatched: true,
+                        diagnostic: true,
+                        latestRun: {
+                          htmlUrl: true,
+                        },
+                      },
+                      activeIncident: {
+                        status: true,
+                        summary: true,
+                      },
+                      latestResolvedIncident: {
+                        status: true,
+                        summary: true,
+                        recoveryReason: true,
+                      },
+                    },
                   },
                   lanes: {
                     id: true,
@@ -903,6 +1002,7 @@ export class GraphqlApi extends Context.Service<
                   status.repository === null || status.repository === undefined
                     ? null
                     : toCanonicalRepositoryIdentity(status.repository),
+                ciGate: toStatusCiGate(status.repository?.ciGate),
                 lanes: toStatusLanes(status.lanes ?? []),
               }
             }),

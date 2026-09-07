@@ -15,6 +15,7 @@ import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
 import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
 import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
 import { observeAutomatedReviewEvidenceProgram } from "../bin/observe-automated-review-evidence.js"
+import { observeCiGateProgram } from "../bin/observe-ci-gate.js"
 import { rerunWorkflowRunProgram } from "../bin/rerun-workflow-run.js"
 import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
 import { uploadUserAttachmentProgram } from "../bin/upload-user-attachment.js"
@@ -28,6 +29,7 @@ export const INTERNAL_GITHUB_HELPER_ARG =
 export const GITHUB_HELPER_OPERATIONS = [
   "list-ready-issues",
   "list-ci-gate-catalog",
+  "observe-ci-gate",
   "get-authenticated-user-login",
   "get-open-pr-number",
   "find-open-pr-number",
@@ -143,6 +145,7 @@ const programs: Record<
 > = {
   "list-ready-issues": listReadyIssuesProgram,
   "list-ci-gate-catalog": listCiGateCatalogProgram,
+  "observe-ci-gate": observeCiGateProgram,
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
   "get-open-pr-number": getOpenPullRequestNumberProgram,
   "find-open-pr-number": findOpenPullRequestNumberProgram,

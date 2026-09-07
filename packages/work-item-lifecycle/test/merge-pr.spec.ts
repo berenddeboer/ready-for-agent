@@ -90,6 +90,8 @@ describe("mergePr", () => {
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } satisfies GitHubServiceShape)
 
     await Effect.runPromise(
@@ -203,6 +205,8 @@ describe("mergePr", () => {
         ),
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } satisfies GitHubServiceShape)
 
     const exit = await Effect.runPromise(
@@ -345,6 +349,8 @@ describe("mergePr", () => {
       },
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } as AzureDevOpsServiceShape)
 
     await Effect.runPromise(
@@ -380,6 +386,8 @@ describe("mergePr", () => {
       },
       ensureIssueCompletedWithSummary: () => Effect.void,
       listCiGateCatalog: () => Effect.succeed([]),
+      observeCiGate: () =>
+        Effect.succeed({ defaultBranch: "main", observations: [] }),
     } as AzureDevOpsServiceShape)
 
     await Effect.runPromise(

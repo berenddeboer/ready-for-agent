@@ -102,6 +102,7 @@ import {
 import {
   type Forge,
   type Repository,
+  ciGateStatusLabel,
   decodeForge,
   forgeDisplayName,
   repositoriesQuery,
@@ -2380,6 +2381,23 @@ function RepositoryCard({
                     ? "No CI Gate Definitions selected — Repository CI Gate is disabled."
                     : "Selected definitions watch default-branch CI. Empty selection disables the Repository CI Gate."}
                 </span>
+                <span className={ui.dialogFieldHint}>
+                  Current status: {ciGateStatusLabel(repository.ciGate.status)}
+                  {repository.ciGate.diagnostic !== null
+                    ? ` — ${repository.ciGate.diagnostic}`
+                    : ""}
+                </span>
+                {repository.ciGate.activeIncident !== null ? (
+                  <span className={ui.dialogFieldHint}>
+                    Active incident: {repository.ciGate.activeIncident.summary}
+                  </span>
+                ) : null}
+                {repository.ciGate.latestResolvedIncident !== null ? (
+                  <span className={ui.dialogFieldHint}>
+                    Last resolved:{" "}
+                    {repository.ciGate.latestResolvedIncident.summary}
+                  </span>
+                ) : null}
               </section>
 
               <section
@@ -2837,11 +2855,59 @@ function RepositoryCard({
               <div className={ui.repoMetaRow}>
                 <dt>CI Gate</dt>
                 <dd>
-                  {repository.selectedCiGateDefinitions.length === 0
-                    ? "Disabled"
-                    : repository.selectedCiGateDefinitions
-                        .map((definition) => definition.displayLabel)
-                        .join(", ")}
+                  {ciGateStatusLabel(repository.ciGate.status)}
+                  {repository.ciGate.diagnostic !== null ? (
+                    <span className={ui.dialogFieldHint}>
+                      {repository.ciGate.diagnostic}
+                    </span>
+                  ) : null}
+                  {repository.ciGate.observedAt !== null ? (
+                    <span className={ui.dialogFieldHint}>
+                      Observed {repository.ciGate.observedAt}
+                      {repository.ciGate.defaultBranch !== null
+                        ? ` on ${repository.ciGate.defaultBranch}`
+                        : ""}
+                    </span>
+                  ) : null}
+                  {repository.ciGate.definitions.map((definition) => (
+                    <span
+                      key={definition.identity}
+                      className={ui.dialogFieldHint}
+                    >
+                      {definition.displayLabel}
+                      {definition.latestRun?.rawConclusion !== null &&
+                      definition.latestRun?.rawConclusion !== undefined
+                        ? ` · ${definition.latestRun.rawConclusion}`
+                        : definition.diagnostic !== null
+                          ? ` · ${definition.diagnostic}`
+                          : ""}
+                      {definition.latestRun?.htmlUrl !== null &&
+                      definition.latestRun?.htmlUrl !== undefined ? (
+                        <>
+                          {" "}
+                          <a
+                            href={definition.latestRun.htmlUrl}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            View run
+                          </a>
+                        </>
+                      ) : null}
+                    </span>
+                  ))}
+                  {repository.ciGate.activeIncident !== null ? (
+                    <span className={ui.dialogFieldHint}>
+                      Active incident:{" "}
+                      {repository.ciGate.activeIncident.summary}
+                    </span>
+                  ) : null}
+                  {repository.ciGate.latestResolvedIncident !== null ? (
+                    <span className={ui.dialogFieldHint}>
+                      Last resolved:{" "}
+                      {repository.ciGate.latestResolvedIncident.summary}
+                    </span>
+                  ) : null}
                 </dd>
               </div>
             </dl>

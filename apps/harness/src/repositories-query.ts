@@ -28,6 +28,19 @@ const FORGE_DISPLAY_NAMES: Record<Forge, string> = {
 export const forgeDisplayName = (forge: Forge): string =>
   FORGE_DISPLAY_NAMES[forge]
 
+export const ciGateStatusLabel = (status: RepositoryCiGateStatus): string => {
+  switch (status) {
+    case "DISABLED":
+      return "Disabled"
+    case "OPEN":
+      return "Open"
+    case "CLOSED":
+      return "Closed"
+    case "DEGRADED":
+      return "Degraded"
+  }
+}
+
 export const decodeForge = (value: unknown): Forge => {
   switch (value) {
     case "github":
@@ -44,6 +57,53 @@ type CiGateDefinition = {
   displayLabel: string
   kind: string
   diagnosticMetadata: string | null
+}
+
+export type RepositoryCiGateStatus = "DISABLED" | "OPEN" | "CLOSED" | "DEGRADED"
+
+export type RepositoryCiGate = {
+  enabled: boolean
+  status: RepositoryCiGateStatus
+  observedAt: string | null
+  defaultBranch: string | null
+  diagnostic: string | null
+  definitions: readonly {
+    identity: string
+    displayLabel: string
+    kind: string
+    diagnosticMetadata: string | null
+    failureLatched: boolean
+    diagnostic: string | null
+    latestRun: {
+      runIdentity: string
+      htmlUrl: string | null
+      headSha: string | null
+      headRef: string | null
+      event: string | null
+      rawStatus: string | null
+      rawConclusion: string | null
+      createdAt: string | null
+      updatedAt: string | null
+    } | null
+  }[]
+  activeIncident: {
+    id: string
+    status: "OPEN" | "RESOLVED"
+    openedAt: string
+    resolvedAt: string | null
+    recoveryReason: string | null
+    summary: string
+    failedDefinitions: readonly CiGateDefinition[]
+  } | null
+  latestResolvedIncident: {
+    id: string
+    status: "OPEN" | "RESOLVED"
+    openedAt: string
+    resolvedAt: string | null
+    recoveryReason: string | null
+    summary: string
+    failedDefinitions: readonly CiGateDefinition[]
+  } | null
 }
 
 export type Repository = {
@@ -64,6 +124,7 @@ export type Repository = {
   includeAllIssueAuthors: boolean
   waitForReadyForReviewChecks: boolean
   selectedCiGateDefinitions: readonly CiGateDefinition[]
+  ciGate: RepositoryCiGate
   issuesReconciledAt: string | null
   blockingUnfinishedWorkItemCount: number
   credential: RepositoryCredential
@@ -99,6 +160,60 @@ export const repositoriesQuery = {
           displayLabel: true,
           kind: true,
           diagnosticMetadata: true,
+        },
+        ciGate: {
+          enabled: true,
+          status: true,
+          observedAt: true,
+          defaultBranch: true,
+          diagnostic: true,
+          definitions: {
+            identity: true,
+            displayLabel: true,
+            kind: true,
+            diagnosticMetadata: true,
+            failureLatched: true,
+            diagnostic: true,
+            latestRun: {
+              runIdentity: true,
+              htmlUrl: true,
+              headSha: true,
+              headRef: true,
+              event: true,
+              rawStatus: true,
+              rawConclusion: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
+          activeIncident: {
+            id: true,
+            status: true,
+            openedAt: true,
+            resolvedAt: true,
+            recoveryReason: true,
+            summary: true,
+            failedDefinitions: {
+              identity: true,
+              displayLabel: true,
+              kind: true,
+              diagnosticMetadata: true,
+            },
+          },
+          latestResolvedIncident: {
+            id: true,
+            status: true,
+            openedAt: true,
+            resolvedAt: true,
+            recoveryReason: true,
+            summary: true,
+            failedDefinitions: {
+              identity: true,
+              displayLabel: true,
+              kind: true,
+              diagnosticMetadata: true,
+            },
+          },
         },
         issuesReconciledAt: true,
         blockingUnfinishedWorkItemCount: true,

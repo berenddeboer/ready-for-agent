@@ -542,6 +542,86 @@ type CiGateCatalog {
   error: String
 }
 
+"""
+Repository CI Gate status. DISABLED when no CI Gate Definitions are selected.
+CLOSED outranks DEGRADED.
+"""
+enum RepositoryCiGateStatus {
+  DISABLED
+  OPEN
+  CLOSED
+  DEGRADED
+}
+
+enum CiFailureIncidentStatus {
+  OPEN
+  RESOLVED
+}
+
+enum CiGateRecoveryReason {
+  NEWER_SUCCESS
+  DEFINITION_REMOVED
+  EMPTY_SELECTION
+  DEFAULT_BRANCH_CHANGED
+}
+
+"""
+Latest observed default-branch run for one CI Gate Definition.
+"""
+type CiGateObservedRun {
+  runIdentity: String!
+  htmlUrl: String
+  headSha: String
+  headRef: String
+  event: String
+  rawStatus: String
+  rawConclusion: String
+  createdAt: String
+  updatedAt: String
+}
+
+"""
+Latest observation of one selected CI Gate Definition.
+"""
+type CiGateDefinitionObservation {
+  identity: String!
+  displayLabel: String!
+  kind: String!
+  diagnosticMetadata: String
+  failureLatched: Boolean!
+  latestRun: CiGateObservedRun
+  observedAt: String
+  diagnostic: String
+}
+
+"""
+Durable CI Failure Incident for one Repository CI Gate closure.
+Summaries do not include CI logs or artifacts.
+"""
+type CiFailureIncident {
+  id: ID!
+  status: CiFailureIncidentStatus!
+  openedAt: String!
+  resolvedAt: String
+  recoveryReason: CiGateRecoveryReason
+  summary: String!
+  failedDefinitions: [CiGateDefinition!]!
+}
+
+"""
+Server-owned Repository CI Gate projection.
+"""
+type RepositoryCiGate {
+  enabled: Boolean!
+  status: RepositoryCiGateStatus!
+  observedAt: String
+  defaultBranch: String
+  diagnostic: String
+  definitions: [CiGateDefinitionObservation!]!
+  activeIncident: CiFailureIncident
+  latestResolvedIncident: CiFailureIncident
+}
+
 type Repository {
   id: ID!
   forge: String!
@@ -610,6 +690,11 @@ type Repository {
   Repository CI Gate. Unavailable saved entries keep last-known display metadata.
   """
   selectedCiGateDefinitions: [CiGateDefinition!]!
+  """
+  Observed Repository CI Gate. Empty selection is disabled/Open-equivalent
+  and does not close ordinary work.
+  """
+  ciGate: RepositoryCiGate!
 }
 
 type LocalRepositoryInspection {

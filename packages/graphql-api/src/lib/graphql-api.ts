@@ -67,6 +67,7 @@ import {
   ciGateCatalogErrorMessage,
   resolveSelectedCiGateDefinitions,
 } from "./ci-gate-definitions.js"
+import { projectRepositoryCiGate } from "./ci-gate-projection.js"
 import {
   activateRepositoryPolling,
   enqueueRefreshRepositoryJob,
@@ -76,6 +77,7 @@ import {
   buildKanbanSourceSet,
   projectKanbanLanes,
 } from "./kanban-projection.js"
+import { observeRepositoryCiGate } from "./observe-repository-ci-gate.js"
 import {
   RepositoryCredentialError,
   activatePollingIfCredentialed,
@@ -1455,6 +1457,22 @@ export const createGraphqlApi = <R>(
               ),
               context,
             ),
+          ciGate: async (
+            repository: { id: string },
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                const definitions = yield* db.listCiGateDefinitions(
+                  repository.id,
+                )
+                const snapshot = yield* db.loadCiGateSnapshot(repository.id)
+                return projectRepositoryCiGate({ definitions, snapshot })
+              }).pipe(Effect.withSpan("graphql-api.Repository.ciGate")),
+              context,
+            ),
         },
         WorkItem: {
           agentBackend: (workItem: WorkItemRecord) =>
@@ -1885,6 +1903,23 @@ export const createGraphqlApi = <R>(
                       backendIds,
                       inspectInput(agentBackendCwd),
                     )
+                    if (
+                      args.input.selectedCiGateDefinitionIdentities !==
+                        undefined &&
+                      args.input.selectedCiGateDefinitionIdentities !== null
+                    ) {
+                      yield* observeRepositoryCiGate({
+                        repository: updated,
+                        origin: "operator",
+                      }).pipe(
+                        Effect.catch((error) =>
+                          Effect.logWarning(
+                            "CI Gate observation after settings save failed",
+                            { repositoryId: updated.id, error },
+                          ),
+                        ),
+                      )
+                    }
                     return updated
                   }),
                 )

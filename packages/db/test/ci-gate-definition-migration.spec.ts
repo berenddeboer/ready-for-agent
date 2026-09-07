@@ -10,6 +10,7 @@ import {
 import { describe, expect, it } from "bun:test"
 
 const NEW_MIGRATION = "20260907120000_repository_ci_gate_definitions"
+const OBSERVATION_MIGRATION = "20260907133000_repository_ci_gate_observation"
 
 const loadMigrationSources = async () => {
   const names = (
@@ -81,6 +82,70 @@ describe("CI Gate Definition migration", () => {
         expect(repositories[0]?.mergePolicy).toBe("off")
         expect(Number(repositories[0]?.includeAllIssueAuthors)).toBe(0)
         expect(Number(repositories[0]?.waitForReadyForReviewChecks)).toBe(1)
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("leaves existing Repositories without CI Gate observations or incidents", async () => {
+    const sources = await loadMigrationSources()
+    const observation = sources.find(
+      (source) => source.name === OBSERVATION_MIGRATION,
+    )
+    if (observation === undefined) {
+      throw new Error(`Missing migration ${OBSERVATION_MIGRATION}`)
+    }
+    const prior = sources.filter(
+      (source) => source.name !== OBSERVATION_MIGRATION,
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* runMigrationsFromSources(prior)
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `INSERT INTO repository (
+             id, forge, forge_host, project_path, local_path, is_bare, paused,
+             selected_agent_backend, default_model, default_thinking_level,
+             review_model, review_thinking_level, backend_model_prefs,
+             merge_policy, include_all_issue_authors,
+             wait_for_ready_for_review_checks, created_at, updated_at
+           ) VALUES (
+             'repo-01ARZ3NDEKTSV4RRFFQ69G5FAV', 'github', 'github.com',
+             'acme/widgets', '/repos/acme/widgets.git', 1, 1,
+             NULL, NULL, NULL, NULL, NULL, '{}',
+             'off', 0, 1, 1, 1
+           )`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO ci_gate_definition (
+             id, repository_id, identity, display_label, kind,
+             diagnostic_metadata, created_at, updated_at
+           ) VALUES (
+             'cgd-01ARZ3NDEKTSV4RRFFQ69G5FAV',
+             'repo-01ARZ3NDEKTSV4RRFFQ69G5FAV',
+             '161335', 'CI', 'workflow', '.github/workflows/ci.yml', 1, 1
+           )`,
+        )
+
+        yield* runMigrationsFromSources([...prior, observation])
+
+        const states = (yield* sql.unsafe(
+          "SELECT repository_id FROM ci_gate_state",
+        )) as readonly unknown[]
+        const observations = (yield* sql.unsafe(
+          "SELECT definition_identity FROM ci_gate_definition_observation",
+        )) as readonly unknown[]
+        const incidents = (yield* sql.unsafe(
+          "SELECT id FROM ci_failure_incident",
+        )) as readonly unknown[]
+        expect(states).toEqual([])
+        expect(observations).toEqual([])
+        expect(incidents).toEqual([])
+
+        const definitions = (yield* sql.unsafe(
+          "SELECT identity FROM ci_gate_definition",
+        )) as readonly { readonly identity: string }[]
+        expect(definitions).toEqual([{ identity: "161335" }])
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

@@ -111,6 +111,8 @@ const defaultGithub: GitHubServiceShape = {
     ),
   ensureIssueCompletedWithSummary: () => Effect.void,
   listCiGateCatalog: () => Effect.succeed([]),
+  observeCiGate: () =>
+    Effect.succeed({ defaultBranch: "main", observations: [] }),
   listReadyIssues: () => Effect.succeed([]),
 }
 

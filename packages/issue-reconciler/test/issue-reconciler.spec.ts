@@ -215,6 +215,8 @@ const makeGitHubLayer = (
       ),
     ensureIssueCompletedWithSummary: () => Effect.void,
     listCiGateCatalog: () => Effect.succeed([]),
+    observeCiGate: () =>
+      Effect.succeed({ defaultBranch: "main", observations: [] }),
     listReadyIssues: ({ projectPath }) => {
       actions.push(`github:${projectPath}`)
       return options.error ? Effect.fail(options.error) : Effect.succeed(issues)

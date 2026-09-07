@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Result } from "effect"
 import {
   DbService,
   type RepositoryId,
@@ -6,6 +6,7 @@ import {
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
 import type { GitHubOperationOrigin } from "@ready-for-agent/github-service"
+import { observeRepositoryCiGate } from "@ready-for-agent/graphql-api"
 import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
 import {
   WorkItemLifecycle,
@@ -45,21 +46,47 @@ export const refreshLoadedRepository = Effect.fn("refreshLoadedRepository")(
     const reconciler = yield* IssueReconciler
     const lifecycle = yield* WorkItemLifecycle
 
-    const summary = yield* reconciler.reconcile(repository, {
-      githubOperation: { origin: githubOperationOrigin },
-    })
-    yield* lifecycle.stopForCompetingIssueClosingPullRequests(
-      repository.id,
-      summary.competingObservations,
+    const issueResult = yield* Effect.result(
+      Effect.gen(function* () {
+        const summary = yield* reconciler.reconcile(repository, {
+          githubOperation: { origin: githubOperationOrigin },
+        })
+        yield* lifecycle.stopForCompetingIssueClosingPullRequests(
+          repository.id,
+          summary.competingObservations,
+        )
+        yield* syncNeedsHumanMergeHandoffs(repository.id)
+        yield* lifecycle.completeParkedAttentionWhenIssueNoLongerRelevant(
+          repository.id,
+        )
+        // Issue store is current: lift or fail Waiting for blockers Work Items.
+        // Lifecycle owns Work Item mutations; reconciler only updates Issues.
+        yield* lifecycle.releaseWaitingForBlockers(repository.id)
+        yield* db.notifyIssuesChanged(repository.id)
+        return summary
+      }),
     )
-    yield* syncNeedsHumanMergeHandoffs(repository.id)
-    yield* lifecycle.completeParkedAttentionWhenIssueNoLongerRelevant(
-      repository.id,
+    const ciResult = yield* Effect.result(
+      observeRepositoryCiGate({
+        repository,
+        origin: githubOperationOrigin,
+      }),
     )
-    // Issue store is current: lift or fail Waiting for blockers Work Items.
-    // Lifecycle owns Work Item mutations; reconciler only updates Issues.
-    yield* lifecycle.releaseWaitingForBlockers(repository.id)
-    yield* db.notifyIssuesChanged(repository.id)
-    return summary
+    if (Result.isFailure(ciResult)) {
+      yield* Effect.logWarning(
+        "CI Gate observation failed during Repository refresh",
+        {
+          repositoryId: repository.id,
+          error: ciResult.failure,
+        },
+      )
+    }
+    if (Result.isFailure(issueResult)) {
+      return yield* Effect.fail(issueResult.failure)
+    }
+    if (Result.isFailure(ciResult)) {
+      return yield* Effect.fail(ciResult.failure)
+    }
+    return issueResult.success
   },
 )
