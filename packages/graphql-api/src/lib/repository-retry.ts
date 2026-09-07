@@ -188,6 +188,7 @@ export const snapshotRetryTargets = (input: {
             state: workItem.state,
             paused: workItem.paused,
             waitingForBlockers: workItem.waitingForBlockers,
+            waitingForCiRepair: workItem.waitingForCiRepair,
             waitingSince: workItem.waitingSince,
             pullRequestNumber: workItem.pullRequestNumber,
             failureCode: workItem.failureCode,

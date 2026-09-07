@@ -135,6 +135,12 @@ describe("lifecycleFocusLaneFor", () => {
         status: "WAITING_FOR_CI_REPAIR",
       }),
     ).toBe("pr")
+    expect(
+      lifecycleFocusLaneFor({
+        state: "CREATE_WORKTREE",
+        status: "WAITING_FOR_CI_REPAIR",
+      }),
+    ).toBeNull()
   })
 
   test("falls back to the latest chip phase when state is non-operational", () => {

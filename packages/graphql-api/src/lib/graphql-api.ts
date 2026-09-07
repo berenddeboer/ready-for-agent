@@ -1576,6 +1576,8 @@ export const createGraphqlApi = <R>(
                     issue?.blockedBy.map((blocker) => blocker.issueNumber) ??
                     [],
                   failedCiGateDefinitionLabels,
+                  ciFailureIncidentSummary:
+                    snapshot?.activeIncident?.summary ?? null,
                 })
               }).pipe(Effect.withSpan("graphql-api.WorkItem.statusMessage")),
               context,

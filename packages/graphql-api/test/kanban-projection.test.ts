@@ -100,6 +100,11 @@ describe("kanbanLaneFor", () => {
       status: "waiting_for_worker_slot",
       lane: "QUEUE",
     },
+    {
+      state: "create_worktree",
+      status: "waiting_for_ci_repair",
+      lane: "QUEUE",
+    },
   ] as const)(
     "places blocked or not-admitted $state in Queue",
     ({ state, status, lane }) => {

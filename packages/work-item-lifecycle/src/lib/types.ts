@@ -147,9 +147,10 @@ export interface WorkItemRecord {
    */
   readonly waitingForBlockers: boolean
   /**
-   * When true, the Work Item is Waiting for CI Repair. Ordinary merge-approved
-   * work stays at Merge PR without a Worker Slot until the Repository CI Gate
-   * is no longer Closed. Not a Lifecycle Step.
+   * When true, the Work Item is Waiting for CI Repair. Ordinary remote work
+   * waits before admission, and merge-approved work stays at Merge PR, without
+   * a Worker Slot until the Repository CI Gate is no longer Closed. Not a
+   * Lifecycle Step.
    */
   readonly waitingForCiRepair: boolean
   /**
@@ -217,7 +218,11 @@ export const formatWaitingForBlockersMessage = (
  */
 export const formatWaitingForCiRepairMessage = (
   failedDefinitionLabels: readonly string[] = [],
+  incidentSummary?: string | null,
 ): string => {
+  if (incidentSummary != null && incidentSummary.length > 0) {
+    return `Waiting for CI Repair: ${incidentSummary}`
+  }
   if (failedDefinitionLabels.length === 0) {
     return "Waiting for CI Repair"
   }

@@ -149,7 +149,9 @@ export function lifecycleFocusLaneFor(workItem: {
 }): LifecyclePipelineLaneId | null {
   if (
     workItem.status === "WAITING_FOR_BLOCKERS" ||
-    workItem.status === "WAITING_FOR_WORKER_SLOT"
+    workItem.status === "WAITING_FOR_WORKER_SLOT" ||
+    (workItem.status === "WAITING_FOR_CI_REPAIR" &&
+      workItem.state.toUpperCase() === "CREATE_WORKTREE")
   ) {
     return null
   }

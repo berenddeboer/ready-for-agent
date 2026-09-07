@@ -29,7 +29,7 @@ The board has six ordered lanes:
 
 | Lane | Meaning | Derived from |
 | --- | --- | --- |
-| Queue | Work cannot begin yet: waiting for blockers or a worker slot. | `WAITING_FOR_BLOCKERS`, `WAITING_FOR_WORKER_SLOT` |
+| Queue | Work cannot begin yet: waiting for blockers, a worker slot, or pre-admission CI repair. | `WAITING_FOR_BLOCKERS`, `WAITING_FOR_WORKER_SLOT`, pre-admission `WAITING_FOR_CI_REPAIR` |
 | Build | Startup and implementation work (including queued later Build steps). | `CREATE_WORKTREE`, `INSTALL_DEPENDENCIES`, `IMPLEMENT`, `ASSESS_CHANGES`, `PRE_COMMIT` |
 | Review | Local review is in progress (including a queued Review step). | `REVIEW` |
 | PR | Commit through cleanup on the pull-request path (including queued Watch and later PR steps). | `COMMIT`, `CREATE_PR`, `WATCH_PR_STATUS_CHECKS`, `RESOLVE_PR_MERGE_CONFLICT`, `INVESTIGATE_PR_STATUS_CHECKS`, `MARK_PR_READY_FOR_REVIEW`, `DECIDE_PR_MERGE`, `MERGE_PR`, `CLOSE_ISSUE`, `LOCAL_CLEANUP` |
@@ -42,8 +42,9 @@ Placement is driven by **lifecycle progress**, not scheduler status:
 - Attention and Merged take precedence over every lifecycle lane.
 - Queue is only for genuine blocked or not-admitted work. A `QUEUED` step run
   (status-check poll, agent turn, or later lifecycle step) stays in Build,
-  Review, or PR according to its state. Merge-approved Waiting for CI Repair
-  stays in PR; it is not a Queue hold.
+  Review, or PR according to its state. Pre-admission Waiting for CI Repair
+  belongs in Queue. Merge-approved Waiting for CI Repair stays in PR; it is
+  not a Queue hold.
 - Once work has entered Build, Review, or PR, queued execution of a later step
   in that path must not return it to Queue or an earlier lane.
 

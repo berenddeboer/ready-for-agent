@@ -946,8 +946,8 @@ enum WorkItemStatus {
   WAITING_FOR_BLOCKERS
   """
   Durable hold on an ordinary remote Work Item while its Repository CI Gate is
-  Closed. Merge-approved work stays at Merge PR without a Worker Slot. This is
-  not a Work Item lifecycle state.
+  Closed. New remote work waits before admission; merge-approved work stays at
+  Merge PR without a Worker Slot. This is not a Work Item lifecycle state.
   """
   WAITING_FOR_CI_REPAIR
   """
