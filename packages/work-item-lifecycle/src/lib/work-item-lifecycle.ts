@@ -786,6 +786,32 @@ const pollDelayUntilDeadline = (
   )
 }
 
+/** Implement Locally runs through Review, then pauses before Commit. */
+const IMPLEMENT_LOCALLY_LOCAL_STEPS = new Set<string>([
+  "create_worktree",
+  "install_dependencies",
+  "implement",
+  "assess_changes",
+  "pre_commit",
+  "review",
+])
+
+const isImplementLocallyLocalPath = (input: {
+  readonly pauseBeforeStep: OperationalLifecycleStep | null
+  readonly state: string
+}): boolean =>
+  input.pauseBeforeStep === "commit" &&
+  IMPLEMENT_LOCALLY_LOCAL_STEPS.has(input.state)
+
+const isExemptFromClosedCiGateAdmissionHold = (input: {
+  readonly pauseBeforeStep: OperationalLifecycleStep | null
+  readonly state: string
+}): boolean =>
+  input.state === "local_cleanup" ||
+  input.state === "close_issue" ||
+  input.state === "needs_human" ||
+  isImplementLocallyLocalPath(input)
+
 const nextOperationalStep = (
   step: OperationalLifecycleStep,
 ): OperationalLifecycleStep | "complete" => {
@@ -1198,8 +1224,9 @@ export interface WorkItemLifecycleShape {
   >
   /**
    * After the Repository CI Gate is no longer Closed: lift Waiting for CI
-   * Repair holds. Non-paused merge-approved Work Items rejoin ordinary FIFO
-   * Worker Slot admission. Paused Work Items keep Pause and are not started.
+   * Repair holds. Non-paused pre-admission and merge-approved Work Items
+   * rejoin ordinary FIFO Worker Slot admission. Paused Work Items keep Pause
+   * and are not started.
    */
   readonly releaseWaitingForCiRepair: (
     repositoryId: string,
@@ -1260,6 +1287,7 @@ export const isParkedAttentionWithoutOwnedPr = (input: {
   readonly state: WorkItemState
   readonly paused: boolean
   readonly waitingForBlockers: boolean
+  readonly waitingForCiRepair: boolean
   readonly waitingSince: Date | number | null
   readonly pullRequestNumber: number | null
   readonly failureCode: string | null
@@ -1275,6 +1303,9 @@ export const isParkedAttentionWithoutOwnedPr = (input: {
     return false
   }
   if (input.waitingForBlockers) {
+    return false
+  }
+  if (input.waitingForCiRepair) {
     return false
   }
   if (input.waitingSince !== null) {
@@ -1315,6 +1346,7 @@ export const shouldCompleteParkedAttentionWhenIssueNoLongerRelevant = (input: {
   readonly state: WorkItemState
   readonly paused: boolean
   readonly waitingForBlockers: boolean
+  readonly waitingForCiRepair: boolean
   readonly waitingSince: Date | number | null
   readonly pullRequestNumber: number | null
   readonly failureCode: string | null
@@ -2052,6 +2084,16 @@ export const makeWorkItemLifecycleLive = (
               .pipe(Effect.mapError(toDatabaseError))
             return true
           }
+          if (
+            !isExemptFromClosedCiGateAdmissionHold({
+              pauseBeforeStep: current.pause_before_step,
+              state: current.state,
+            }) &&
+            (yield* repositoryCiGateIsClosed(current.repository_id))
+          ) {
+            yield* applyCiRepairMergeHold(workItemId, now)
+            return false
+          }
           const limit = yield* maxWorkerSlots()
           const occupied = yield* countOccupiedWorkerSlots()
           if (occupied < limit) {
@@ -2111,6 +2153,8 @@ export const makeWorkItemLifecycleLive = (
           }
 
           const now = yield* Clock.currentTimeMillis
+          let admittedThisRound = 0
+          let convertedThisRound = 0
           for (const waiter of waiters) {
             const stillFree =
               (yield* countOccupiedWorkerSlots()) < (yield* maxWorkerSlots())
@@ -2184,13 +2228,23 @@ export const makeWorkItemLifecycleLive = (
               )
             if (didAdmit) {
               admitted += 1
+              admittedThisRound += 1
               const row = yield* loadWorkItemRow(waiter.id)
               if (row) {
+                yield* notifyWorkItemsChanged(row.repository_id)
+              }
+            } else {
+              const row = yield* loadWorkItemRow(waiter.id)
+              if (row?.waiting_for_ci_repair) {
+                convertedThisRound += 1
                 yield* notifyWorkItemsChanged(row.repository_id)
               }
             }
           }
           if (waiters.length < free) {
+            break
+          }
+          if (admittedThisRound === 0 && convertedThisRound === 0) {
             break
           }
         }
@@ -2334,8 +2388,8 @@ export const makeWorkItemLifecycleLive = (
               return Boolean(failedRows[0])
             }
 
-            // Implementable: clear hold and admit like a fresh Implement Now
-            // (full remote path — pause_before_step stays null from Queue).
+            // Implementable: leave Waiting for blockers. A Closed Repository
+            // CI Gate holds ordinary remote admission before Worker Slots.
             return yield* sql
               .withTransaction(
                 Effect.gen(function* () {
@@ -2347,19 +2401,32 @@ export const makeWorkItemLifecycleLive = (
                     return false
                   }
 
+                  const holdForCiRepair = yield* repositoryCiGateIsClosed(
+                    current.repository_id,
+                  )
+
                   // Leave Waiting for blockers before admission so the row is
                   // eligible for Worker Slot wait / Step Run enqueue. RETURNING
                   // gates concurrent abandon/reset that already left the hold.
                   const clearedRows = (yield* sql
                     .unsafe(
                       `UPDATE work_item
-                       SET waiting_for_blockers = 0, waiting_for_ci_repair = 0,
+                       SET waiting_for_blockers = 0,
+                           waiting_for_ci_repair = ?,
+                           holds_worker_slot = CASE WHEN ? = 1 THEN 0 ELSE holds_worker_slot END,
+                           waiting_since = CASE WHEN ? = 1 THEN NULL ELSE waiting_since END,
                            updated_at = ?
                        WHERE id = ?
                          AND waiting_for_blockers = 1
                          AND state NOT IN ('complete', 'failed', 'abandoned')
                        RETURNING id, state, created_at`,
-                      [now, held.id],
+                      [
+                        holdForCiRepair ? 1 : 0,
+                        holdForCiRepair ? 1 : 0,
+                        holdForCiRepair ? 1 : 0,
+                        now,
+                        held.id,
+                      ],
                     )
                     .pipe(Effect.mapError(toDatabaseError))) as readonly {
                     readonly id: string
@@ -2369,6 +2436,10 @@ export const makeWorkItemLifecycleLive = (
                   const cleared = clearedRows[0]
                   if (!cleared) {
                     return false
+                  }
+
+                  if (holdForCiRepair) {
+                    return true
                   }
 
                   const limit = yield* maxWorkerSlots()
@@ -2562,13 +2633,14 @@ export const makeWorkItemLifecycleLive = (
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly WorkItemRow[]
 
+        // Recovered holds join ordinary admission behind every existing
+        // Worker Slot waiter. Admit waiters even when this Repository has
+        // no CI Repair holds, so Closed-gate skips resume on reopen.
+        yield* admitWaitingWorkItems
+
         if (heldRows.length === 0) {
           return 0
         }
-
-        // Recovered merges join ordinary admission behind every existing
-        // Worker Slot waiter before they attempt to take any capacity.
-        yield* admitWaitingWorkItems
 
         let changed = 0
         for (const held of heldRows) {
@@ -2627,6 +2699,11 @@ export const makeWorkItemLifecycleLive = (
                   )) as readonly { readonly id: string }[]
                   if (!activeRows[0]) {
                     yield* enqueueStepRunForWorkItem(held.id, pendingStep, now)
+                    yield* consumeAutonomousRetryIfPending(
+                      held.id,
+                      pendingStep,
+                      now,
+                    )
                   }
                   return true
                 }),
@@ -2693,6 +2770,7 @@ export const makeWorkItemLifecycleLive = (
           state: workItem.state,
           paused: Boolean(workItem.paused),
           waitingForBlockers: Boolean(workItem.waiting_for_blockers),
+          waitingForCiRepair: Boolean(workItem.waiting_for_ci_repair),
           waitingSince: workItem.waiting_since,
           pullRequestNumber: workItem.pull_request_number,
           failureCode: workItem.failure_code,
@@ -2912,6 +2990,7 @@ export const makeWorkItemLifecycleLive = (
               state: workItem.state,
               paused: workItem.paused,
               waitingForBlockers: workItem.waitingForBlockers,
+              waitingForCiRepair: workItem.waitingForCiRepair,
               waitingSince: workItem.waitingSince,
               pullRequestNumber: workItem.pullRequestNumber,
               failureCode: workItem.failureCode,
@@ -6192,7 +6271,10 @@ export const makeWorkItemLifecycleLive = (
               }
 
               if (
-                pendingStep === "merge_pr" &&
+                !isExemptFromClosedCiGateAdmissionHold({
+                  pauseBeforeStep: workItem.pause_before_step,
+                  state: pendingStep,
+                }) &&
                 (yield* repositoryCiGateIsClosed(workItem.repository_id))
               ) {
                 yield* applyCiRepairMergeHold(workItemId, now)
@@ -7805,6 +7887,22 @@ export const makeWorkItemLifecycleLive = (
                 }
               }
 
+              const retryRow = yield* loadWorkItemRow(workItemId)
+              if (
+                retryRow !== null &&
+                !isExemptFromClosedCiGateAdmissionHold({
+                  pauseBeforeStep: retryRow.pause_before_step,
+                  state: pendingStep,
+                }) &&
+                (yield* repositoryCiGateIsClosed(retryRow.repository_id))
+              ) {
+                yield* applyCiRepairMergeHold(workItemId, now)
+                if (autonomous !== undefined) {
+                  yield* setPendingAutonomousRetry(workItemId, true, now)
+                }
+                return
+              }
+
               const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
               if (!acquired) {
                 if (autonomous !== undefined) {
@@ -8113,16 +8211,23 @@ export const makeWorkItemLifecycleLive = (
               return yield* sql
                 .withTransaction(
                   Effect.gen(function* () {
+                    const holdForCiRepair =
+                      !isExemptFromClosedCiGateAdmissionHold({
+                        pauseBeforeStep: options.pauseBeforeStep,
+                        state: step,
+                      }) && (yield* repositoryCiGateIsClosed(repositoryId))
                     const limit = yield* maxWorkerSlots()
                     const occupied = yield* countOccupiedWorkerSlots()
-                    const admit = occupied < limit
+                    const admit = !holdForCiRepair && occupied < limit
+                    const waitingSince = holdForCiRepair || admit ? null : now
 
                     if (explicitProfile !== undefined) {
                       yield* sql.unsafe(
                         `INSERT INTO work_item (
                  id, repository_id, issue_number, agent_backend,
                   issue_title, state, state_ready_at, paused,
-                  waiting_since, waiting_for_blockers, merge_mode, auto_merge_override,
+                  waiting_since, waiting_for_blockers, waiting_for_ci_repair,
+                  merge_mode, auto_merge_override,
                   holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message,
@@ -8132,7 +8237,7 @@ export const makeWorkItemLifecycleLive = (
                   execution_profile_review_model,
                   execution_profile_review_thinking_level,
                   created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 1, ?, ?, ?, ?, ?, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 1, ?, ?, ?, ?, ?, ?, ?)`,
                         [
                           workItemId,
                           repositoryId,
@@ -8141,7 +8246,8 @@ export const makeWorkItemLifecycleLive = (
                           matchedIssue.title,
                           step,
                           now,
-                          admit ? null : now,
+                          waitingSince,
+                          holdForCiRepair ? 1 : 0,
                           mergeMode,
                           options.autoMergeOverride === undefined
                             ? null
@@ -8172,10 +8278,11 @@ export const makeWorkItemLifecycleLive = (
                         `INSERT INTO work_item (
                  id, repository_id, issue_number, agent_backend,
                   issue_title, state, state_ready_at, paused,
-                  waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
+                  waiting_since, waiting_for_blockers, waiting_for_ci_repair,
+                  merge_mode, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
                         [
                           workItemId,
                           repositoryId,
@@ -8184,7 +8291,8 @@ export const makeWorkItemLifecycleLive = (
                           matchedIssue.title,
                           step,
                           now,
-                          admit ? null : now,
+                          waitingSince,
+                          holdForCiRepair ? 1 : 0,
                           mergeMode,
                           admit ? 1 : 0,
                           options.pauseBeforeStep,
@@ -8420,6 +8528,7 @@ export const makeWorkItemLifecycleLive = (
               Effect.gen(function* () {
                 const limit = yield* maxWorkerSlots()
                 let occupied = yield* countOccupiedWorkerSlots()
+                const gateClosed = yield* repositoryCiGateIsClosed(repositoryId)
                 const workItemIds: WorkItemId[] = []
 
                 for (const child of openChildren) {
@@ -8480,13 +8589,15 @@ export const makeWorkItemLifecycleLive = (
 
                   const workItemId = makeWorkItemId()
                   const blocked = child.blockedBy.length > 0
-                  const admit = !blocked && occupied < limit
+                  const holdForCiRepair = !blocked && gateClosed
+                  const admit = !blocked && !holdForCiRepair && occupied < limit
                   const executionProfile = create.executionProfile
                   yield* sql.unsafe(
                     `INSERT INTO work_item (
                      id, repository_id, issue_number, agent_backend,
                       issue_title, state, state_ready_at, paused,
-                      waiting_since, waiting_for_blockers, merge_mode, auto_merge_override,
+                      waiting_since, waiting_for_blockers, waiting_for_ci_repair,
+                      merge_mode, auto_merge_override,
                       holds_worker_slot,
                       pause_before_step, worktree_path, session_id, failure_code,
                       failure_message,
@@ -8496,7 +8607,7 @@ export const makeWorkItemLifecycleLive = (
                       execution_profile_review_model,
                       execution_profile_review_thinking_level,
                       created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                       workItemId,
                       repositoryId,
@@ -8505,8 +8616,9 @@ export const makeWorkItemLifecycleLive = (
                       child.title,
                       step,
                       now,
-                      blocked || admit ? null : now,
+                      blocked || holdForCiRepair || admit ? null : now,
                       blocked ? 1 : 0,
+                      holdForCiRepair ? 1 : 0,
                       pin.mergeMode,
                       sqlMergeOverride(pin.autoMergeOverride),
                       admit ? 1 : 0,

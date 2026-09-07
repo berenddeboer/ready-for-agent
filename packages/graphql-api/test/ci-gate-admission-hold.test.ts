@@ -1,5 +1,4 @@
-import { Effect, Layer, ManagedRuntime, Option } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { Effect, Layer, ManagedRuntime } from "effect"
 import {
   ActiveAgentBackend,
   type AgentBackendId,
@@ -9,7 +8,11 @@ import {
 } from "@ready-for-agent/agent-backend"
 import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DatabaseTest } from "@ready-for-agent/db/test"
-import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
+import {
+  DbService,
+  DbServiceLive,
+  type RepositoryRecord,
+} from "@ready-for-agent/db-service"
 import {
   type CiGateObservation,
   GitHubService,
@@ -18,12 +21,10 @@ import {
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
-import { QueueService } from "@ready-for-agent/queue-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   LifecycleSteps,
   type LifecycleStepsShape,
-  WORK_ITEM_LIFECYCLE_QUEUE,
   WorkItemLifecycle,
   WorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
@@ -66,7 +67,9 @@ const readyRuntime = (): AgentBackendRuntimeStatus => ({
   backend: { id: "opencode" as AgentBackendId, label: "OpenCode" },
   kind: "ready",
   reason: null,
-  models: [{ id: "opencode/deepseek-v4-flash-free", thinkingLevels: ["high"] }],
+  models: [
+    { id: "opencode/deepseek-v4-flash-free", thinkingLevels: ["low", "high"] },
+  ],
   provider: null,
   warnings: [],
 })
@@ -122,18 +125,9 @@ const graphqlRequest = (body: unknown) =>
     body: JSON.stringify(body),
   })
 
-describe("Hold approved merges during CI failure", () => {
+describe("Hold ordinary remote admission during CI failure", () => {
   let observe: GitHubServiceShape["observeCiGate"] = () =>
     Effect.succeed({ defaultBranch: "main", observations: [] })
-  let mergeCalls = 0
-  const steps: LifecycleStepsShape = {
-    ...successfulSteps,
-    mergePr: () =>
-      Effect.sync(() => {
-        mergeCalls += 1
-        return { _tag: "merged" as const }
-      }),
-  }
 
   const githubLayer = Layer.succeed(GitHubService, {
     getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
@@ -177,7 +171,16 @@ describe("Hold approved merges during CI failure", () => {
 
   const runtimeLayer = Layer.mergeAll(
     WorkItemLifecycleLive.pipe(
-      Layer.provideMerge(stubActiveAgentBackendLayer()),
+      Layer.provideMerge(
+        stubActiveAgentBackendLayer({
+          models: [
+            {
+              id: "opencode/deepseek-v4-flash-free",
+              thinkingLevels: ["low", "high"],
+            },
+          ],
+        }),
+      ),
       Layer.provideMerge(githubLayer),
       Layer.provideMerge(
         Layer.succeed(GitLabService, {
@@ -227,7 +230,7 @@ describe("Hold approved merges during CI failure", () => {
         }),
       ),
       Layer.provideMerge(
-        Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
+        Layer.succeed(LifecycleSteps, LifecycleSteps.of(successfulSteps)),
       ),
       Layer.provideMerge(DbServiceLive),
       Layer.provideMerge(SqliteQueueServiceLive),
@@ -302,33 +305,38 @@ describe("Hold approved merges during CI failure", () => {
   afterEach(async () => {
     await runtime.dispose()
     observe = () => Effect.succeed({ defaultBranch: "main", observations: [] })
-    mergeCalls = 0
     runtime = ManagedRuntime.make(runtimeLayer)
   })
 
-  const workItemQuery = (repositoryId: string) => ({
-    query: `query WorkItems($repositoryId: ID!) {
-      workItems(repositoryId: $repositoryId) {
-        id
-        state
-        status
-        statusLabel
-        statusMessage
-      }
-      kanbanStatus(repositoryId: $repositoryId) {
-        lanes {
-          id
-          workItems {
-            workItem { id status statusLabel statusMessage }
-          }
-        }
-      }
-    }`,
-    variables: { repositoryId },
-  })
+  const closeGate = (repository: RepositoryRecord) => {
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          {
+            identity: "161335",
+            kind: "observed" as const,
+            runs: [
+              observedRun({
+                runIdentity: "100:1",
+                rawConclusion: "failure",
+              }),
+            ],
+          },
+        ],
+      })
+    return runtime.runPromise(
+      Effect.gen(function* () {
+        yield* observeRepositoryCiGate({
+          repository,
+          origin: "operator",
+        })
+      }),
+    )
+  }
 
-  test("holds a merge-approved Work Item in the PR lane until CI recovers, then merges", async () => {
-    const setup = await runtime.runPromise(
+  const seedRepository = (issueNumber: number) =>
+    runtime.runPromise(
       Effect.gen(function* () {
         const db = yield* DbService
         const config = yield* db.getConfig
@@ -362,10 +370,10 @@ describe("Hold approved merges during CI failure", () => {
         })
         const issue = yield* db.storeIssue({
           repositoryId: repository.id,
-          issueNumber: 42,
+          issueNumber,
           title: "Implement feature",
           body: "Issue body",
-          url: "https://github.com/acme/widgets/issues/42",
+          url: `https://github.com/acme/widgets/issues/${issueNumber}`,
           state: "OPEN",
           githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
           issueAuthor: null,
@@ -378,68 +386,51 @@ describe("Hold approved merges during CI failure", () => {
       }),
     )
 
-    const workItemId = await runtime.runPromise(
+  const workItemQuery = (repositoryId: string) => ({
+    query: `query WorkItems($repositoryId: ID!) {
+      workItems(repositoryId: $repositoryId) {
+        id
+        state
+        status
+        statusLabel
+        statusMessage
+        canRetry
+        executionProfile { buildModel }
+        mergePolicy
+      }
+      kanbanStatus(repositoryId: $repositoryId) {
+        lanes {
+          id
+          workItems {
+            workItem { id status statusLabel statusMessage }
+          }
+        }
+      }
+    }`,
+    variables: { repositoryId },
+  })
+
+  test("places Implement Now in Queue as Waiting for CI Repair without Failed or Needs Human", async () => {
+    const setup = await seedRepository(42)
+    await closeGate(setup.repository)
+
+    const created = await runtime.runPromise(
       Effect.gen(function* () {
         const lifecycle = yield* WorkItemLifecycle
-        const queue = yield* QueueService
-        const sql = yield* SqlClient.SqlClient
-        const created = yield* lifecycle.implementNow(
+        return yield* lifecycle.implementNow(
           setup.repository.id,
           setup.issue.issueNumber,
         )
-        observe = () =>
-          Effect.succeed({
-            defaultBranch: "main",
-            observations: [
-              {
-                identity: "161335",
-                kind: "observed" as const,
-                runs: [
-                  observedRun({
-                    runIdentity: "100:1",
-                    rawConclusion: "failure",
-                  }),
-                ],
-              },
-            ],
-          })
-        yield* observeRepositoryCiGate({
-          repository: setup.repository,
-          origin: "operator",
-        })
-        const claimAndRun = Effect.gen(function* () {
-          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-          const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
-          if (Option.isNone(claimed)) {
-            return yield* Effect.die("expected a queued lifecycle job")
-          }
-          return yield* lifecycle.runStep(
-            (claimed.value.payload as { stepRunId: string }).stepRunId,
-          )
-        })
-        for (let index = 0; index < 8; index += 1) {
-          yield* claimAndRun
-        }
-        yield* sql.unsafe(
-          `UPDATE work_item SET check_start_last_observed_is_draft = NULL WHERE id = ?`,
-          [created.id],
-        )
-        yield* claimAndRun
-        const afterDecide = yield* claimAndRun
-        expect(afterDecide._tag).toBe("processed")
-        if (afterDecide._tag === "processed") {
-          expect(afterDecide.workItem.state).toBe("merge_pr")
-          expect(afterDecide.workItem.waitingForCiRepair).toBe(true)
-          expect(afterDecide.workItem.holdsWorkerSlot).toBe(false)
-        }
-        return created.id
       }),
     )
+    expect(created.waitingForCiRepair).toBe(true)
+    expect(created.holdsWorkerSlot).toBe(false)
+    expect(created.stepRuns).toHaveLength(0)
 
-    const heldResponse = await createGraphqlApi(runtime).fetch(
+    const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest(workItemQuery(setup.repository.id)),
     )
-    const heldPayload = (await heldResponse.json()) as {
+    const payload = (await response.json()) as {
       data: {
         workItems: ReadonlyArray<{
           id: string
@@ -447,101 +438,164 @@ describe("Hold approved merges during CI failure", () => {
           status: string
           statusLabel: string
           statusMessage: string | null
+          canRetry: boolean
         }>
         kanbanStatus: {
           lanes: ReadonlyArray<{
             id: string
             workItems: ReadonlyArray<{
-              workItem: {
-                id: string
-                status: string
-                statusLabel: string
-                statusMessage: string | null
-              }
+              workItem: { id: string; status: string }
             }>
           }>
         }
       }
     }
-    const held = heldPayload.data.workItems.find(
-      (item) => item.id === workItemId,
-    )
+    const held = payload.data.workItems.find((item) => item.id === created.id)
     expect(held).toMatchObject({
-      state: "MERGE_PR",
+      state: "CREATE_WORKTREE",
       status: "WAITING_FOR_CI_REPAIR",
       statusLabel: "Waiting for CI Repair",
+      canRetry: false,
     })
     expect(held?.statusMessage).toContain("Waiting for CI Repair")
     expect(held?.statusMessage).toContain("CI")
-    const prLane = heldPayload.data.kanbanStatus.lanes.find(
-      (lane) => lane.id === "PR",
-    )
-    expect(
-      prLane?.workItems.some((entry) => entry.workItem.id === workItemId),
-    ).toBe(true)
-    const queueLane = heldPayload.data.kanbanStatus.lanes.find(
+    expect(held?.status).not.toBe("FAILED")
+    expect(held?.status).not.toBe("NEEDS_HUMAN")
+    const queueLane = payload.data.kanbanStatus.lanes.find(
       (lane) => lane.id === "QUEUE",
     )
     expect(
-      queueLane?.workItems.some((entry) => entry.workItem.id === workItemId),
+      queueLane?.workItems.some((entry) => entry.workItem.id === created.id),
+    ).toBe(true)
+    const prLane = payload.data.kanbanStatus.lanes.find(
+      (lane) => lane.id === "PR",
+    )
+    expect(
+      prLane?.workItems.some((entry) => entry.workItem.id === created.id),
     ).toBe(false)
-    expect(mergeCalls).toBe(0)
+  })
 
-    observe = () =>
-      Effect.succeed({
-        defaultBranch: "main",
-        observations: [
-          {
-            identity: "161335",
-            kind: "observed" as const,
-            runs: [
-              observedRun({
-                runIdentity: "101:1",
-                rawConclusion: "success",
-              }),
-              observedRun({
-                runIdentity: "100:1",
-                rawConclusion: "failure",
-              }),
-            ],
-          },
-        ],
-      })
+  test("holds Implement With profile and Merge Policy in Queue", async () => {
+    const setup = await seedRepository(43)
+    await closeGate(setup.repository)
 
-    await runtime.runPromise(
+    const created = await runtime.runPromise(
       Effect.gen(function* () {
-        const db = yield* DbService
-        const repositories = yield* db.listRepositories
-        const repository = repositories.find(
-          (entry) => entry.id === setup.repository.id,
-        )
-        if (repository === undefined) {
-          return yield* Effect.die("missing repository")
-        }
-        yield* observeRepositoryCiGate({
-          repository,
-          origin: "polling",
-        })
         const lifecycle = yield* WorkItemLifecycle
-        const queue = yield* QueueService
-        const sql = yield* SqlClient.SqlClient
-        const woken = yield* lifecycle.getWorkItem(workItemId)
-        expect(woken.waitingForCiRepair).toBe(false)
-        expect(woken.holdsWorkerSlot).toBe(true)
-        yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-        const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
-        expect(Option.isSome(claimed)).toBe(true)
-        if (Option.isSome(claimed)) {
-          const afterMerge = yield* lifecycle.runStep(
-            (claimed.value.payload as { stepRunId: string }).stepRunId,
-          )
-          expect(afterMerge._tag).toBe("processed")
-          if (afterMerge._tag === "processed") {
-            expect(afterMerge.workItem.state).toBe("local_cleanup")
-          }
-        }
+        const items = yield* lifecycle.implementWith(
+          setup.repository.id,
+          setup.issue.issueNumber,
+          {
+            agentBackendId: "opencode",
+            buildModel: "opencode/deepseek-v4-flash-free",
+            buildThinkingLevel: "high",
+            reviewSameAsBuild: true,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          },
+          { mergePolicy: "always" },
+        )
+        return items[0]
       }),
     )
-    expect(mergeCalls).toBe(1)
+    expect(created?.waitingForCiRepair).toBe(true)
+    expect(created?.holdsWorkerSlot).toBe(false)
+    expect(created?.mergeMode).toBe("always")
+    expect(created?.executionProfile?.build.model).toBe(
+      "opencode/deepseek-v4-flash-free",
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest(workItemQuery(setup.repository.id)),
+    )
+    const payload = (await response.json()) as {
+      data: {
+        workItems: ReadonlyArray<{
+          id: string
+          status: string
+          mergePolicy: string | null
+          executionProfile: { buildModel: string } | null
+        }>
+        kanbanStatus: {
+          lanes: ReadonlyArray<{
+            id: string
+            workItems: ReadonlyArray<{ workItem: { id: string } }>
+          }>
+        }
+      }
+    }
+    const held = payload.data.workItems.find((item) => item.id === created?.id)
+    expect(held?.status).toBe("WAITING_FOR_CI_REPAIR")
+    expect(held?.mergePolicy).toBe("ALWAYS")
+    expect(held?.executionProfile?.buildModel).toBe(
+      "opencode/deepseek-v4-flash-free",
+    )
+    const queueLane = payload.data.kanbanStatus.lanes.find(
+      (lane) => lane.id === "QUEUE",
+    )
+    expect(
+      queueLane?.workItems.some((entry) => entry.workItem.id === created?.id),
+    ).toBe(true)
+  })
+
+  test("Repository Intake creates ordinary held Work Items", async () => {
+    const setup = await seedRepository(44)
+    await closeGate(setup.repository)
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation Intake($repositoryId: ID!) {
+          startRepositoryIntake(repositoryId: $repositoryId) {
+            results {
+              __typename
+              ... on RepositoryIntakeCreated {
+                issueNumber
+                action
+                workItem {
+                  id
+                  state
+                  status
+                  statusLabel
+                  statusMessage
+                }
+              }
+            }
+          }
+        }`,
+        variables: { repositoryId: setup.repository.id },
+      }),
+    )
+    const payload = (await response.json()) as {
+      data: {
+        startRepositoryIntake: {
+          results: ReadonlyArray<{
+            __typename: string
+            issueNumber: number
+            action: string
+            workItem: {
+              id: string
+              state: string
+              status: string
+              statusLabel: string
+              statusMessage: string | null
+            }
+          }>
+        }
+      }
+    }
+    expect(payload.data.startRepositoryIntake.results).toHaveLength(1)
+    const result = payload.data.startRepositoryIntake.results[0]
+    expect(result).toMatchObject({
+      __typename: "RepositoryIntakeCreated",
+      issueNumber: 44,
+      action: "IMPLEMENT_NOW",
+      workItem: {
+        state: "CREATE_WORKTREE",
+        status: "WAITING_FOR_CI_REPAIR",
+        statusLabel: "Waiting for CI Repair",
+      },
+    })
+    expect(result?.workItem.statusMessage).toContain("Waiting for CI Repair")
+    expect(result?.workItem.statusMessage).toContain("CI")
   })
 })

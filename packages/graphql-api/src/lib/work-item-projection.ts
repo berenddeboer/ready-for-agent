@@ -281,6 +281,7 @@ export const workItemStatusMessage = (
   options?: {
     readonly blockerIssueNumbers?: readonly number[]
     readonly failedCiGateDefinitionLabels?: readonly string[]
+    readonly ciFailureIncidentSummary?: string | null
   },
 ): string | null => {
   if (workItemIsTerminal(workItem)) {
@@ -298,6 +299,7 @@ export const workItemStatusMessage = (
   if (workItem.waitingForCiRepair) {
     return formatWaitingForCiRepairMessage(
       options?.failedCiGateDefinitionLabels ?? [],
+      options?.ciFailureIncidentSummary,
     )
   }
   const postponedUntil = workItemPostponedUntil(workItem)

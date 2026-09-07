@@ -387,8 +387,27 @@ describe("paused Work Item statusLabel drain", () => {
         failedCiGateDefinitionLabels: ["CI", "Nightly"],
       }),
     ).toBe("Waiting for CI Repair: CI, Nightly")
+    expect(
+      workItemStatusMessage(held, {
+        failedCiGateDefinitionLabels: ["CI"],
+        ciFailureIncidentSummary: "CI Gate closed: CI failed.",
+      }),
+    ).toBe("Waiting for CI Repair: CI Gate closed: CI failed.")
     expect(workItemCanRetry(held)).toBe(false)
     expect(workItemStateLabel(held)).toBe("Merge PR")
+  })
+
+  test("shows Waiting for CI Repair for pre-admission holds without Failed or Needs Human", () => {
+    const held = workItemWith({
+      state: "create_worktree",
+      holdsWorkerSlot: false,
+      waitingForCiRepair: true,
+      stepRuns: [],
+    })
+    expect(workItemStatus(held)).toBe("waiting_for_ci_repair")
+    expect(workItemStatusLabel(held)).toBe("Waiting for CI Repair")
+    expect(workItemCanRetry(held)).toBe(false)
+    expect(workItemStateLabel(held)).toBe("Create worktree")
   })
 
   test("keeps blockers and Pause ahead of Waiting for CI Repair", () => {

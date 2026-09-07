@@ -5,7 +5,8 @@
  *
  * Lane rules match `docs/kanban.md`. Status and state comparisons are
  * case-insensitive so domain (lowercase) and GraphQL (uppercase) shapes both
- * classify correctly.
+ * classify correctly. Pre-admission Waiting for CI Repair is Queue;
+ * merge-approved Waiting for CI Repair stays in PR.
  */
 import {
   JOBS_COMPLETED_WINDOW_MS,
@@ -104,7 +105,8 @@ export function kanbanLaneFor(workItem: {
 
   if (
     status === "WAITING_FOR_BLOCKERS" ||
-    status === "WAITING_FOR_WORKER_SLOT"
+    status === "WAITING_FOR_WORKER_SLOT" ||
+    (status === "WAITING_FOR_CI_REPAIR" && state === "CREATE_WORKTREE")
   ) {
     return "QUEUE"
   }

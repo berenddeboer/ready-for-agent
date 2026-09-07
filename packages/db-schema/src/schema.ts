@@ -281,8 +281,9 @@ export const workItem = snakeCase.table(
     waitingForBlockers: integer({ mode: "boolean" }).notNull().default(false),
     /**
      * Durable Waiting for CI Repair hold while the Repository CI Gate is Closed.
-     * Merge-approved work stays at Merge PR without a Worker Slot. Distinct from
-     * Waiting for blockers and Waiting for Worker Slot. Not a Lifecycle Step.
+     * Ordinary remote work waits before admission; merge-approved work stays at
+     * Merge PR without a Worker Slot. Distinct from Waiting for blockers and
+     * Waiting for Worker Slot. Not a Lifecycle Step.
      */
     waitingForCiRepair: integer({ mode: "boolean" }).notNull().default(false),
     /**
