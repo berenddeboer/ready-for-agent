@@ -14,11 +14,13 @@ import {
   runCliCapture,
   runCliTurn,
 } from "@ready-for-agent/agent-backend"
+import { discoverAppServerModels } from "./app-server-models.js"
 import {
   buildPromptBody,
   buildRunArgs,
   shouldUsePromptStdin,
 } from "./build-args.js"
+import { projectBundledDebugModels } from "./catalog.js"
 import { resolveCodexUserProvider } from "./custom-provider.js"
 import { makeCodexEnvironment } from "./environment.js"
 import { parseCodexLoginStatus } from "./parse-login-status.js"
@@ -29,7 +31,8 @@ import {
   isSuccessfulCodexTurn,
 } from "./parse-stream.js"
 import {
-  CODEX_STATIC_CATALOG,
+  CODEX_BUNDLED_CATALOG_EMPTY_MESSAGE,
+  CODEX_BUNDLED_CATALOG_MALFORMED_MESSAGE,
   CODEX_UNAUTHENTICATED_MESSAGE,
   type CodexLayerOptions,
 } from "./types.js"
@@ -57,10 +60,11 @@ const clipProbeOutput = (text: string, maxChars = 240): string => {
 /**
  * Codex Build adapter implementing the backend-neutral AgentBackend contract.
  *
- * Registration, static catalog, and provider-aware readiness inspection
- * ship with this layer. First-party login uses `codex login status`; a
- * valid user-level custom `model_provider` with `Not logged in` is Ready
- * after local `codex debug models --bundled`, without running token
+ * Registration, discovered catalog, and provider-aware readiness inspection
+ * ship with this layer. First-party login uses `codex login status` then a
+ * short-lived `codex app-server` `model/list`. A valid user-level custom
+ * `model_provider` with `Not logged in` is Ready after local
+ * `codex debug models --bundled` JSON projection, without running token
  * commands or `codex exec`.
  * Agent Turns run `codex exec --json` unsandboxed, capture `thread_id` from
  * `thread.started` via `onSessionId` while the first turn is still running,
@@ -142,14 +146,25 @@ export const Codex = {
               })
             }
 
+            const bundled = projectBundledDebugModels(debug.stdout)
+            if (bundled.kind === "malformed") {
+              return yield* new AgentBackendConfigError({
+                message: CODEX_BUNDLED_CATALOG_MALFORMED_MESSAGE(
+                  bundled.reason,
+                ),
+              })
+            }
+            if (bundled.kind === "empty") {
+              return yield* new AgentBackendConfigError({
+                message: CODEX_BUNDLED_CATALOG_EMPTY_MESSAGE,
+              })
+            }
+
             return {
               backend: CODEX_BACKEND,
-              models: CODEX_STATIC_CATALOG.map((model) => ({
-                id: model.id,
-                thinkingLevels: [...model.thinkingLevels],
-              })),
+              models: bundled.models,
               warnings: [
-                `Codex custom provider "${provider.providerId}" is configured; its credentials will be validated on the first Agent Turn.`,
+                `Codex custom provider "${provider.providerId}" is configured; its credentials will be validated on the first Agent Turn. The catalogue is Codex's bundled models, not this provider's deployment IDs.`,
               ],
             }
           }
@@ -164,12 +179,16 @@ export const Codex = {
             return yield* malformedOutput(input.cwd, statusOutput)
           }
 
+          const models = yield* discoverAppServerModels({
+            spawner,
+            binary,
+            cwd: input.cwd,
+            env: environment,
+            timeout: input.timeout ?? defaultTimeout,
+          })
           return {
             backend: CODEX_BACKEND,
-            models: CODEX_STATIC_CATALOG.map((model) => ({
-              id: model.id,
-              thinkingLevels: [...model.thinkingLevels],
-            })),
+            models,
           }
         })
 
