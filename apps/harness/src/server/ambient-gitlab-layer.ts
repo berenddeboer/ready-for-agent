@@ -175,6 +175,18 @@ export const ambientGitLabLayer = (options: {
               service.listReadyIssues(repository),
             ),
         ),
+        listCiGateCatalog: Effect.fn("AmbientGitLab.listCiGateCatalog")(
+          (repository) =>
+            authenticated(repository.forgeHost, (service) =>
+              service.listCiGateCatalog(repository),
+            ),
+        ),
+        observeCiGate: Effect.fn("AmbientGitLab.observeCiGate")(
+          (repository, input) =>
+            authenticated(repository.forgeHost, (service) =>
+              service.observeCiGate(repository, input),
+            ),
+        ),
         hasCredentials: Effect.fn("AmbientGitLab.hasCredentials")(
           (repository) =>
             acquireToken(repository.forgeHost).pipe(

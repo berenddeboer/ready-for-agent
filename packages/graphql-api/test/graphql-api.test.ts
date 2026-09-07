@@ -32,6 +32,7 @@ import {
 } from "@ready-for-agent/github-service"
 import {
   GitLabProjectUnavailableError,
+  GitLabRequestError,
   GitLabService,
   type GitLabServiceShape,
 } from "@ready-for-agent/gitlab-service"
@@ -268,6 +269,9 @@ const defaultGitlab: GitLabServiceShape = {
   ensureIssueCompletedWithSummary: () => Effect.void,
   closeOpenPullRequestsForBranch: () => Effect.void,
   deleteBranch: () => Effect.void,
+  listCiGateCatalog: () => Effect.succeed([]),
+  observeCiGate: () =>
+    Effect.succeed({ defaultBranch: "main", observations: [] }),
 }
 
 const defaultAzureDevOps: AzureDevOpsServiceShape = {
@@ -13118,6 +13122,107 @@ describe("GraphQL API", () => {
     }
     expect(payload.data.ciGateCatalog.definitions).toEqual([])
     expect(payload.data.ciGateCatalog.error).toContain("Build read required")
+  })
+
+  test("ciGateCatalog returns the synthesized GitLab Project pipeline", async () => {
+    const gitlabRepository = makeRepositoryRecord({
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+    })
+    await runtime.dispose()
+    runtime = makeRuntime(
+      { listRepositories: Effect.succeed([gitlabRepository]) },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        listCiGateCatalog: () =>
+          Effect.succeed([
+            {
+              identity: "42",
+              displayLabel: "Project pipeline",
+              kind: "project-pipeline",
+              diagnosticMetadata: ".gitlab-ci.yml",
+            },
+          ]),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          ciGateCatalog(repositoryId: "${gitlabRepository.id}") {
+            error
+            definitions { identity displayLabel kind diagnosticMetadata }
+          }
+        }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        ciGateCatalog: {
+          error: null,
+          definitions: [
+            {
+              identity: "42",
+              displayLabel: "Project pipeline",
+              kind: "project-pipeline",
+              diagnosticMetadata: ".gitlab-ci.yml",
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("ciGateCatalog returns GitLab pipeline-read guidance instead of failing the query", async () => {
+    const gitlabRepository = makeRepositoryRecord({
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+    })
+    await runtime.dispose()
+    runtime = makeRuntime(
+      { listRepositories: Effect.succeed([gitlabRepository]) },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        listCiGateCatalog: () =>
+          Effect.fail(
+            new GitLabRequestError({
+              message:
+                "Failed to list CI Gate Definitions for project/oauth_client: API/pipeline read required",
+              statusCode: 403,
+            }),
+          ),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          ciGateCatalog(repositoryId: "${gitlabRepository.id}") {
+            error
+            definitions { identity }
+          }
+        }`,
+      }),
+    )
+    const payload = (await response.json()) as {
+      data: {
+        ciGateCatalog: { error: string | null; definitions: unknown[] }
+      }
+    }
+    expect(payload.data.ciGateCatalog.definitions).toEqual([])
+    expect(payload.data.ciGateCatalog.error).toContain(
+      "API/pipeline read required",
+    )
   })
 
   test("updateRepositorySettings saves catalog identities and rejects fabricated ones", async () => {

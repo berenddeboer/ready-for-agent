@@ -44,6 +44,9 @@ const gitlabLifecycleStub = {
   ensureIssueCompletedWithSummary: () => Effect.void,
   closeOpenPullRequestsForBranch: () => Effect.void,
   deleteBranch: () => Effect.void,
+  listCiGateCatalog: () => Effect.succeed([]),
+  observeCiGate: () =>
+    Effect.succeed({ defaultBranch: "main", observations: [] }),
 } as const
 
 const repository = {
@@ -880,5 +883,50 @@ describe("Keymaxxer-backed GitLab layer", () => {
         expect(runs[0]?.command).toContain("get-pr-lifecycle-status")
         expect(runs[0]?.secrets).toEqual(["GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"])
       }),
+  )
+
+  it.effect("forwards CI Gate observation input to the observe helper", () =>
+    Effect.gen(function* () {
+      const runs: RunWithSecretsInput[] = []
+      const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+        initialize: Effect.void,
+        findSecret: () => Effect.succeed("GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"),
+        findSecrets: () => Effect.die("not used"),
+        hasSecret: () => Effect.die("not used"),
+        addSecret: () => Effect.die("not used"),
+        runWithSecrets: (input) => {
+          runs.push(input)
+          return Effect.succeed({
+            exitCode: 0,
+            stdout: JSON.stringify({
+              defaultBranch: "main",
+              observations: [{ identity: "42", kind: "observed", runs: [] }],
+            }),
+            stderr: "",
+          })
+        },
+      })
+      const layer = keymaxxerGitLabLayer({
+        workspaceRoot: "/workspace",
+      }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
+      const observation = yield* Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        return yield* gitlab.observeCiGate(repository, {
+          definitionIdentities: ["42"],
+          lastRunIdentities: { "42": "47:12" },
+        })
+      }).pipe(Effect.provide(layer))
+      expect(observation.defaultBranch).toBe("main")
+      expect(runs[0]?.command).toContain("observe-ci-gate")
+      expect(runs[0]?.command).toContain(
+        Buffer.from(
+          JSON.stringify({
+            definitionIdentities: ["42"],
+            lastRunIdentities: { "42": "47:12" },
+          }),
+          "utf8",
+        ).toString("base64url"),
+      )
+    }),
   )
 })
