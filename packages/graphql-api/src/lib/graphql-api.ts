@@ -77,7 +77,10 @@ import {
   buildKanbanSourceSet,
   projectKanbanLanes,
 } from "./kanban-projection.js"
-import { observeRepositoryCiGate } from "./observe-repository-ci-gate.js"
+import {
+  deriveRepositoryCiGateStatus,
+  observeRepositoryCiGate,
+} from "./observe-repository-ci-gate.js"
 import {
   RepositoryCredentialError,
   activatePollingIfCredentialed,
@@ -94,6 +97,7 @@ import { preflightRepositoryIntake } from "./repository-intake-preflight.js"
 import { retryWorkItems } from "./repository-retry.js"
 import { toGraphQLError } from "./to-graphql-error.js"
 import { validateAgentModelsAgainstCatalog } from "./validate-agent-models.js"
+import { projectWorkItemCiRepair } from "./work-item-ci-repair-projection.js"
 import {
   lifecycleLabels,
   workIssueProjection,
@@ -1600,6 +1604,37 @@ export const createGraphqlApi = <R>(
             workItem.createdAt.toISOString(),
           updatedAt: (workItem: { updatedAt: Date }) =>
             workItem.updatedAt.toISOString(),
+          ciRepair: async (
+            workItem: WorkItemRecord,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                const authorizations = yield* db.listCiRepairAuthorizations(
+                  workItem.id,
+                )
+                const definitions = yield* db.listCiGateDefinitions(
+                  workItem.repositoryId,
+                )
+                const snapshot = yield* db.loadCiGateSnapshot(
+                  workItem.repositoryId,
+                )
+                const gateStatus = deriveRepositoryCiGateStatus({
+                  selectedCount: definitions.length,
+                  observations: snapshot.observations,
+                })
+                return projectWorkItemCiRepair({
+                  workItem,
+                  authorizations,
+                  definitions,
+                  gateStatus,
+                  activeIncidentId: snapshot.activeIncident?.id ?? null,
+                })
+              }).pipe(Effect.withSpan("graphql-api.WorkItem.ciRepair")),
+              context,
+            ),
         },
         Subscription: {
           repositoriesChanged: {
@@ -2502,6 +2537,35 @@ export const createGraphqlApi = <R>(
                   args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementNow")),
+              context,
+            ),
+          implementCiRepair: async (
+            _parent: unknown,
+            args: ImplementNowArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                return yield* lifecycle.implementCiRepair(
+                  args.repositoryId,
+                  args.issueNumber,
+                )
+              }).pipe(Effect.withSpan("graphql-api.implementCiRepair")),
+              context,
+            ),
+          authorizeWorkItemAsCiRepair: async (
+            _parent: unknown,
+            args: WorkItemArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                return yield* lifecycle.authorizeAsCiRepair(args.workItemId)
+              }).pipe(
+                Effect.withSpan("graphql-api.authorizeWorkItemAsCiRepair"),
+              ),
               context,
             ),
           implementWith: async (

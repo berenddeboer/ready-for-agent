@@ -606,6 +606,44 @@ type CiFailureIncident {
 }
 
 """
+How a Work Item became a CI Repair for one CI Failure Incident.
+"""
+enum CiRepairSourceAction {
+  IMPLEMENT_CI_REPAIR
+  AUTHORIZE_AS_CI_REPAIR
+}
+
+"""
+One append-only CI Repair authorization. Incident remains visible after it
+resolves. Never labeled Skip CI or Force merge.
+"""
+type CiRepairAuthorization {
+  incident: CiFailureIncident!
+  authorizedAt: String!
+  sourceAction: CiRepairSourceAction!
+}
+
+"""
+Active and historical CI Repair authorization for one Work Item.
+"""
+type WorkItemCiRepair {
+  """
+  Effective authorization for the currently open CI Failure Incident, if any.
+  Null when none is in force, including after that incident resolves.
+  """
+  active: CiRepairAuthorization
+  """
+  Append-only authorization history for this Work Item, oldest first.
+  """
+  history: [CiRepairAuthorization!]!
+  """
+  True when this unfinished Work Item can be authorized for the active Closed
+  CI Failure Incident.
+  """
+  canAuthorize: Boolean!
+}
+
+"""
 Server-owned Repository CI Gate projection.
 """
 type RepositoryCiGate {
@@ -1081,6 +1119,11 @@ type WorkItem {
   statusLabel: String!
   statusMessage: String
   """
+  Incident-scoped CI Repair authorization. Active is set only while the
+  authorized CI Failure Incident is still open. History is append-only.
+  """
+  ciRepair: WorkItemCiRepair!
+  """
   Parsed diagnostic payload from the latest Step Run's reason_detail.
   Null when that Step Run has no persisted cause chain. Messages are
   already sanitized at write time and re-sanitized on read.
@@ -1223,6 +1266,17 @@ type Mutation {
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!
   implementNow(repositoryId: ID!, issueNumber: Int!): WorkItem!
+  """
+  Create a Work Item authorized as CI Repair for the active Closed CI Failure
+  Incident. Fails when no Closed incident is active. Competes for ordinary
+  Worker Slots and does not bypass Work Item-local PR safety.
+  """
+  implementCiRepair(repositoryId: ID!, issueNumber: Int!): WorkItem!
+  """
+  Authorize an unfinished Work Item as CI Repair for the active Closed incident
+  without resetting worktree, Session, profile, Merge Policy, PR, or history.
+  """
+  authorizeWorkItemAsCiRepair(workItemId: ID!): WorkItem!
   """
   Create Work Items with one complete Explicit Work Item Execution Profile.
   On an Actionable Issue, returns a list whose only element is that Work Item.

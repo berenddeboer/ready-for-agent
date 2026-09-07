@@ -2,6 +2,25 @@ import { toGraphQLError } from "../src/lib/to-graphql-error.js"
 import { describe, expect, test } from "bun:test"
 
 describe("toGraphQLError", () => {
+  test("maps CiRepairNotAvailableError to CI_REPAIR_NOT_AVAILABLE", () => {
+    const error = {
+      _tag: "CiRepairNotAvailableError" as const,
+      repositoryId: "repo-1",
+      workItemId: "wi-1",
+      message:
+        "CI Repair is available only while a CI Failure Incident is active and Closed",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toContain("CI Failure Incident")
+    expect(gqlError.extensions).toMatchObject({
+      code: "CI_REPAIR_NOT_AVAILABLE",
+      repositoryId: "repo-1",
+      workItemId: "wi-1",
+    })
+  })
+
   test("maps InvalidExecutionProfileError to INVALID_EXECUTION_PROFILE", () => {
     const error = {
       _tag: "InvalidExecutionProfileError" as const,

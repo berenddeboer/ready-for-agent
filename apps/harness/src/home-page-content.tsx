@@ -357,6 +357,27 @@ export type WorkItem = {
     status: WorkItemStatus
     durationMs: number | null
   }[]
+  ciRepair: {
+    canAuthorize: boolean
+    active: {
+      authorizedAt: string
+      sourceAction: "IMPLEMENT_CI_REPAIR" | "AUTHORIZE_AS_CI_REPAIR"
+      incident: {
+        id: string
+        status: "OPEN" | "RESOLVED"
+        summary: string
+      }
+    } | null
+    history: readonly {
+      authorizedAt: string
+      sourceAction: "IMPLEMENT_CI_REPAIR" | "AUTHORIZE_AS_CI_REPAIR"
+      incident: {
+        id: string
+        status: "OPEN" | "RESOLVED"
+        summary: string
+      }
+    }[]
+  }
 }
 
 const workItemFields = {
@@ -406,6 +427,27 @@ const workItemFields = {
     label: true,
     status: true,
     durationMs: true,
+  },
+  ciRepair: {
+    canAuthorize: true,
+    active: {
+      authorizedAt: true,
+      sourceAction: true,
+      incident: {
+        id: true,
+        status: true,
+        summary: true,
+      },
+    },
+    history: {
+      authorizedAt: true,
+      sourceAction: true,
+      incident: {
+        id: true,
+        status: true,
+        summary: true,
+      },
+    },
   },
 } as const
 
@@ -3601,6 +3643,21 @@ function RepositoryIssueRow({
     },
     onSuccess: onImplementSuccess,
   })
+  const implementCiRepair = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        implementCiRepair: {
+          __args: {
+            repositoryId: issue.repositoryId,
+            issueNumber: issue.issueNumber,
+          },
+          ...workItemFields,
+        },
+      })
+      return result.implementCiRepair
+    },
+    onSuccess: onImplementSuccess,
+  })
   const implementWith = useMutation({
     mutationFn: async (input: ImplementWithSubmitInput) => {
       const result = await graphql.mutation({
@@ -3658,17 +3715,31 @@ function RepositoryIssueRow({
   })
   const implementPending =
     implementNow.isPending ||
+    implementCiRepair.isPending ||
     implementWith.isPending ||
     implementLocally.isPending ||
     queueIssue.isPending
+  const canImplementCiRepair =
+    canImplement &&
+    repository.ciGate.status === "CLOSED" &&
+    repository.ciGate.activeIncident !== null
   const startImplementNow = () => {
+    implementCiRepair.reset()
     implementWith.reset()
     implementLocally.reset()
     queueIssue.reset()
     implementNow.mutate()
   }
+  const startImplementCiRepair = () => {
+    implementNow.reset()
+    implementWith.reset()
+    implementLocally.reset()
+    queueIssue.reset()
+    implementCiRepair.mutate()
+  }
   const startImplementWith = () => {
     implementNow.reset()
+    implementCiRepair.reset()
     implementLocally.reset()
     queueIssue.reset()
     implementWith.reset()
@@ -3676,12 +3747,14 @@ function RepositoryIssueRow({
   }
   const startImplementLocally = () => {
     implementNow.reset()
+    implementCiRepair.reset()
     implementWith.reset()
     queueIssue.reset()
     implementLocally.mutate()
   }
   const startQueue = () => {
     implementNow.reset()
+    implementCiRepair.reset()
     implementWith.reset()
     implementLocally.reset()
     queueIssue.mutate()
@@ -3749,6 +3822,7 @@ function RepositoryIssueRow({
             />
           )}
           {(implementNow.isError ||
+            implementCiRepair.isError ||
             implementWith.isError ||
             implementLocally.isError ||
             queueIssue.isError) && (
@@ -3763,9 +3837,11 @@ function RepositoryIssueRow({
                   ? queueIssue.error
                   : implementNow.isError
                     ? implementNow.error
-                    : implementWith.isError
-                      ? implementWith.error
-                      : implementLocally.error,
+                    : implementCiRepair.isError
+                      ? implementCiRepair.error
+                      : implementWith.isError
+                        ? implementWith.error
+                        : implementLocally.error,
                 fallback: queueIssue.isError
                   ? "Could not queue issue. Refresh the issues and try again."
                   : "Could not start implementation. Refresh the issues and try again.",
@@ -3795,12 +3871,15 @@ function RepositoryIssueRow({
             issueNumber={issue.issueNumber}
             issueId={issue.id}
             canImplement={canImplement}
+            canImplementCiRepair={canImplementCiRepair}
             canQueue={canQueue}
             implementPending={implementPending}
             implementNowPending={implementNow.isPending}
+            implementCiRepairPending={implementCiRepair.isPending}
             implementLocallyPending={implementLocally.isPending}
             queuePending={queueIssue.isPending}
             onImplementNow={startImplementNow}
+            onImplementCiRepair={startImplementCiRepair}
             onImplementWith={startImplementWith}
             onImplementLocally={startImplementLocally}
             onQueue={startQueue}
@@ -4122,6 +4201,18 @@ export function WorkItemLifecycleStatus({
     },
     onSuccess: patchWorkItem,
   })
+  const authorizeAsCiRepair = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        authorizeWorkItemAsCiRepair: {
+          __args: { workItemId: workItem.id },
+          ...workItemFields,
+        },
+      })
+      return result.authorizeWorkItemAsCiRepair
+    },
+    onSuccess: patchWorkItem,
+  })
   const reset = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -4137,7 +4228,23 @@ export function WorkItemLifecycleStatus({
       )
     },
   })
-  const actionsPending = retry.isPending || reset.isPending
+  const actionsPending =
+    retry.isPending || reset.isPending || authorizeAsCiRepair.isPending
+  const canAuthorizeAsCiRepair = workItem.ciRepair.canAuthorize
+  const ciRepairSourceLabel = (
+    sourceAction: WorkItem["ciRepair"]["history"][number]["sourceAction"],
+  ): string => {
+    switch (sourceAction) {
+      case "IMPLEMENT_CI_REPAIR":
+        return "Implement CI Repair"
+      case "AUTHORIZE_AS_CI_REPAIR":
+        return "Authorize as CI Repair"
+      default: {
+        const _exhaustive: never = sourceAction
+        return _exhaustive
+      }
+    }
+  }
   const prNumber = workItem.pullRequestNumber
   const statusBadgeClassName = statusBadgeClassNameForStatus(status)
   const statusMessageClassName = statusMessageClassNameForStatus(status)
@@ -4434,10 +4541,33 @@ export function WorkItemLifecycleStatus({
           {workItem.statusMessage}
         </p>
       )}
+      {workItem.ciRepair.active !== null && (
+        <p className={ui.jobTicketRuntimeLine}>
+          CI Repair for {workItem.ciRepair.active.incident.summary}
+        </p>
+      )}
+      {workItem.ciRepair.history.length > 0 && (
+        <ol
+          className="mt-1 mb-0 list-none p-0 font-mono text-xs text-ink-2"
+          aria-label="CI Repair authorization history"
+        >
+          {workItem.ciRepair.history.map((authorization) => (
+            <li
+              key={`${authorization.incident.id}-${authorization.authorizedAt}`}
+            >
+              {ciRepairSourceLabel(authorization.sourceAction)} ·{" "}
+              {authorization.incident.summary}
+              {authorization.incident.status === "RESOLVED"
+                ? " (resolved)"
+                : ""}
+            </li>
+          ))}
+        </ol>
+      )}
       {workItem.latestStepRunDetail !== null && (
         <CauseChainDisclosure detail={workItem.latestStepRunDetail} />
       )}
-      {(canReset || canRetry) && (
+      {(canReset || canRetry || canAuthorizeAsCiRepair) && (
         <div className="mt-2 flex flex-wrap gap-2">
           {canReset && (
             <WorkItemResetButton
@@ -4462,6 +4592,18 @@ export function WorkItemLifecycleStatus({
                   : "Retry"}
             </button>
           )}
+          {canAuthorizeAsCiRepair && (
+            <button
+              type="button"
+              className={ui.plateMini}
+              disabled={actionsPending}
+              onClick={() => authorizeAsCiRepair.mutate()}
+            >
+              {authorizeAsCiRepair.isPending
+                ? "Authorizing..."
+                : "Authorize as CI Repair"}
+            </button>
+          )}
         </div>
       )}
       {reset.isError && (
@@ -4472,6 +4614,16 @@ export function WorkItemLifecycleStatus({
           role="alert"
         >
           Could not reset this job.
+        </Banner>
+      )}
+      {authorizeAsCiRepair.isError && (
+        <Banner
+          className={cx(ui.bannerCompact, "mt-1.5")}
+          tone="alarm"
+          tag="Error"
+          role="alert"
+        >
+          Could not authorize this Work Item as CI Repair.
         </Banner>
       )}
       {retry.isError && (

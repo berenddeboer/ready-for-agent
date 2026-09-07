@@ -179,6 +179,16 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         `Work Item ${error.workItemId} is already ${error.state}`,
         "WORK_ITEM_TERMINAL",
       )
+    case "CiRepairNotAvailableError":
+      return gql(
+        error.message ??
+          "CI Repair is available only while a CI Failure Incident is active and Closed",
+        "CI_REPAIR_NOT_AVAILABLE",
+        {
+          repositoryId: error.repositoryId,
+          workItemId: error.workItemId,
+        },
+      )
     case "ActiveStepRunExistsError":
       return gql(
         `Work Item ${error.workItemId} already has an active Step Run`,

@@ -274,6 +274,32 @@ describe("Waiting for CI Repair pre-admission hold", () => {
       }),
     ))
 
+  it("admits Implement CI Repair for the active incident without a CI hold", () =>
+    runWithSteps(
+      successfulSteps,
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        const { repository, issue } = yield* seedActionableIssue
+        yield* closeCiGate(repository.id)
+        const now = Date.now()
+        yield* sql.unsafe(
+          `INSERT INTO ci_failure_incident (
+             id, repository_id, status, opened_at, summary, created_at, updated_at
+           ) VALUES (?, ?, 'open', ?, 'CI Gate closed: CI failed.', ?, ?)`,
+          [`cfi-${repository.id.slice(-16)}`, repository.id, now, now, now],
+        )
+
+        const created = yield* lifecycle.implementCiRepair(
+          repository.id,
+          issue.issueNumber,
+        )
+        expect(created.waitingForCiRepair).toBe(false)
+        expect(created.holdsWorkerSlot).toBe(true)
+        expect(created.stepRuns.length).toBeGreaterThan(0)
+      }),
+    ))
+
   it("holds Implement With and keeps the execution profile and Merge Policy pin", () =>
     runWithSteps(
       successfulSteps,

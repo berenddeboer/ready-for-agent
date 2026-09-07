@@ -685,6 +685,46 @@ export const ciFailureIncidentDefinition = snakeCase.table(
 )
 
 /**
+ * Append-only CI Repair authorization provenance for one Work Item and one
+ * CI Failure Incident. Effectiveness is derived from the currently open
+ * incident; resolved rows remain historical. No operator identity is stored.
+ * See xplain: type ci repair authorization "cra"
+ */
+export const ciRepairAuthorization = snakeCase.table(
+  "ci_repair_authorization",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `cra-${ulid()}`),
+    repositoryId: text()
+      .notNull()
+      .references(() => repository.id, { onDelete: "cascade" }),
+    workItemId: text()
+      .notNull()
+      .references(() => workItem.id, { onDelete: "cascade" }),
+    incidentId: text()
+      .notNull()
+      .references(() => ciFailureIncident.id, { onDelete: "cascade" }),
+    sourceAction: text({
+      enum: ["implement_ci_repair", "authorize_as_ci_repair"],
+    }).notNull(),
+    authorizedAt: integer({ mode: "number" }).notNull(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("ci_repair_authorization_work_item_id_incident_id_uidx").on(
+      t.workItemId,
+      t.incidentId,
+    ),
+    index("ci_repair_authorization_repository_id_idx").on(t.repositoryId),
+    index("ci_repair_authorization_incident_id_idx").on(t.incidentId),
+    index("ci_repair_authorization_work_item_id_idx").on(t.workItemId),
+  ],
+)
+
+/**
  * Durable autonomous whole-review workflow rerun permits for a Work Item.
  * Scoped by PR head SHA and workflow run identity; initial execution is free.
  * See xplain: type automated review rerun "arr"

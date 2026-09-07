@@ -138,6 +138,23 @@ export const CiFailureIncidentRecord = Schema.Struct({
 })
 export type CiFailureIncidentRecord = typeof CiFailureIncidentRecord.Type
 
+export const CiRepairSourceAction = Schema.Literals([
+  "implement_ci_repair",
+  "authorize_as_ci_repair",
+])
+export type CiRepairSourceAction = typeof CiRepairSourceAction.Type
+
+export const CiRepairAuthorizationRecord = Schema.Struct({
+  id: Schema.String,
+  repositoryId: RepositoryId,
+  workItemId: Schema.String,
+  sourceAction: CiRepairSourceAction,
+  authorizedAt: Schema.Date,
+  incident: CiFailureIncidentRecord,
+})
+export type CiRepairAuthorizationRecord =
+  typeof CiRepairAuthorizationRecord.Type
+
 export const CiGateSnapshotRecord = Schema.Struct({
   state: Schema.NullOr(CiGateStateRecord),
   observations: Schema.Array(CiGateDefinitionObservationRecord),
@@ -430,6 +447,25 @@ export const CiFailureIncidentDefinitionSqlRow = Schema.Struct({
 )
 export type CiFailureIncidentDefinitionSqlRow =
   typeof CiFailureIncidentDefinitionSqlRow.Type
+
+export const CiRepairAuthorizationSqlRow = Schema.Struct({
+  id: Schema.String,
+  repositoryId: RepositoryId,
+  workItemId: Schema.String,
+  incidentId: Schema.String,
+  sourceAction: CiRepairSourceAction,
+  authorizedAt: Schema.DateFromMillis,
+}).pipe(
+  Schema.encodeKeys({
+    repositoryId: "repository_id",
+    workItemId: "work_item_id",
+    incidentId: "incident_id",
+    sourceAction: "source_action",
+    authorizedAt: "authorized_at",
+  }),
+)
+export type CiRepairAuthorizationSqlRow =
+  typeof CiRepairAuthorizationSqlRow.Type
 
 export const ConfigSqlRow = Schema.Struct({
   selectedAgentBackend: Schema.String,

@@ -8,6 +8,7 @@ import {
   TERMINAL_WORK_ITEM_STATES,
   TerminalWorkItemState,
   WorkItemState,
+  evaluateUnfinishedWorkItem,
 } from "@ready-for-agent/lifecycle-model"
 import type { ExplicitWorkItemExecutionProfile } from "./execution-profile.js"
 import {
@@ -58,6 +59,8 @@ export type StepRunId = typeof StepRunId.Type
 export const makeStepRunId = (): StepRunId => StepRunId.make(`srun-${ulid()}`)
 
 export const makeAutonomousRetryId = (): string => `artry-${ulid()}`
+
+export const makeCiRepairAuthorizationId = (): string => `cra-${ulid()}`
 
 export const StepRunStatus = Schema.Literals([
   "queued",
@@ -306,6 +309,13 @@ export const isRetryableFailedWorkItem = (
 ): boolean =>
   item.state === "failed" &&
   item.failureCode === RETRYABLE_FAILED_WORK_ITEM_CODE
+
+/** Ontology Unfinished, including Needs Human and retryable Failed. */
+export const isUnfinishedWorkItem = (item: JobsListMembershipItem): boolean =>
+  evaluateUnfinishedWorkItem({
+    state: item.state,
+    canRetry: isRetryableFailedWorkItem(item),
+  })._tag === "match"
 
 export const isRetryableNeedsHumanWorkItem = (
   item: Pick<WorkItemRecord, "state" | "stepRuns">,

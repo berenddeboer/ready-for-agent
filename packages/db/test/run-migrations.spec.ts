@@ -381,6 +381,7 @@ describe("runMigrations", () => {
           { name: "20260907120000_repository_ci_gate_definitions" },
           { name: "20260907133000_repository_ci_gate_observation" },
           { name: "20260907150000_work_item_waiting_for_ci_repair" },
+          { name: "20260907160000_ci_repair_authorization" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

@@ -190,6 +190,19 @@ export class WorkItemTerminalError extends Schema.TaggedErrorClass<WorkItemTermi
   },
 ) {}
 
+/**
+ * Implement CI Repair / Authorize as CI Repair is offered only while a
+ * CI Failure Incident is active and Closed.
+ */
+export class CiRepairNotAvailableError extends Schema.TaggedErrorClass<CiRepairNotAvailableError>()(
+  "CiRepairNotAvailableError",
+  {
+    repositoryId: Schema.String,
+    workItemId: Schema.optionalKey(Schema.String),
+    message: Schema.String,
+  },
+) {}
+
 export class ActiveStepRunExistsError extends Schema.TaggedErrorClass<ActiveStepRunExistsError>()(
   "ActiveStepRunExistsError",
   {
