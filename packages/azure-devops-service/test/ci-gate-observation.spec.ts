@@ -299,7 +299,7 @@ describe("Azure DevOps CI Gate observation", () => {
     ])
   })
 
-  test("includes every relevant build across continuation-token pages", async () => {
+  test("caps first observation to one continuation-token page when last-seen is empty", async () => {
     const pageOne = Array.from({ length: 100 }, (_, index) =>
       buildPayload({
         id: 1000 - index,
@@ -329,20 +329,7 @@ describe("Azure DevOps CI Gate observation", () => {
       if (url.searchParams.get("continuationToken") === null) {
         return json({ value: pageOne }, { continuationToken: "builds-2" })
       }
-      if (url.searchParams.get("continuationToken") === "builds-2") {
-        return json({
-          value: [
-            buildPayload({
-              id: 1,
-              reason: "individualCI",
-              status: "completed",
-              result: "failed",
-              queueTime: "2026-09-06T09:00:00Z",
-            }),
-          ],
-        })
-      }
-      throw new Error(`unexpected continuation ${url.search}`)
+      throw new Error(`unexpected extra page ${url.search}`)
     }) as typeof fetch)
 
     const observation = await Effect.runPromise(
@@ -352,15 +339,14 @@ describe("Azure DevOps CI Gate observation", () => {
       }),
     )
     const definition = observation.observations[0]
-    expect(continuationTokens).toEqual([null, "builds-2"])
+    expect(continuationTokens).toEqual([null])
     expect(definition?.kind).toBe("observed")
     if (definition?.kind !== "observed") {
       throw new Error("expected observed definition")
     }
-    expect(definition.runs).toHaveLength(101)
+    expect(definition.runs).toHaveLength(100)
     expect(definition.runs[0]?.runIdentity).toBe("1000:20260907.1000")
-    expect(definition.runs[100]?.runIdentity).toBe("1:20260907.1")
-    expect(definition.runs[100]?.rawConclusion).toBe("failed")
+    expect(definition.runs.at(-1)?.runIdentity).toBe("901:20260907.901")
   })
 
   test("stops paging once the last-seen build identity is included", async () => {

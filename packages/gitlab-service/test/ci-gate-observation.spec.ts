@@ -184,7 +184,8 @@ describe("GitLab CI Gate observation", () => {
     expect(requested.some((path) => path.includes("/bridges"))).toBe(false)
   })
 
-  test("includes every relevant pipeline across paginated official API pages", async () => {
+  test("caps first observation to one official API page when last-seen is empty", async () => {
+    const requestedPages: string[] = []
     const pageOne = Array.from({ length: 100 }, (_, index) =>
       pipelinePayload({
         id: 1000 - index,
@@ -203,21 +204,11 @@ describe("GitLab CI Gate observation", () => {
         return new Response("not found", { status: 404 })
       }
       const page = url.searchParams.get("page") ?? "1"
+      requestedPages.push(page)
       if (page === "1") {
         return jsonResponse(pageOne, 200, { "x-next-page": "2" })
       }
-      if (page === "2") {
-        return jsonResponse([
-          pipelinePayload({
-            id: 1,
-            iid: 1,
-            source: "push",
-            status: "failed",
-            createdAt: "2026-09-06T09:00:00.000Z",
-          }),
-        ])
-      }
-      return jsonResponse([])
+      throw new Error(`unexpected extra page ${page}`)
     }) as typeof fetch)
 
     const observation = await Effect.runPromise(
@@ -227,14 +218,14 @@ describe("GitLab CI Gate observation", () => {
       }),
     )
     const definition = observation.observations[0]
+    expect(requestedPages).toEqual(["1"])
     expect(definition?.kind).toBe("observed")
     if (definition?.kind !== "observed") {
       throw new Error("expected observed definition")
     }
-    expect(definition.runs).toHaveLength(101)
+    expect(definition.runs).toHaveLength(100)
     expect(definition.runs[0]?.runIdentity).toBe("1000:1000")
-    expect(definition.runs[100]?.runIdentity).toBe("1:1")
-    expect(definition.runs[100]?.rawStatus).toBe("failed")
+    expect(definition.runs.at(-1)?.runIdentity).toBe("901:901")
   })
 
   test("stops paging once the last-seen pipeline identity is included", async () => {

@@ -166,7 +166,8 @@ describe("GitHub CI Gate observation", () => {
     expect(definition.runs[2]?.rawConclusion).toBe("failure")
   })
 
-  it("includes every relevant run across paginated official API pages", async () => {
+  it("caps first observation to one official API page when last-seen is empty", async () => {
+    const requestedPages: string[] = []
     const pageOne = Array.from({ length: 100 }, (_, index) =>
       workflowRunPayload({
         id: 1000 - index,
@@ -185,24 +186,11 @@ describe("GitHub CI Gate observation", () => {
         return new Response("not found", { status: 404 })
       }
       const page = url.searchParams.get("page") ?? "1"
+      requestedPages.push(page)
       if (page === "1") {
         return jsonResponse({ total_count: 101, workflow_runs: pageOne })
       }
-      if (page === "2") {
-        return jsonResponse({
-          total_count: 101,
-          workflow_runs: [
-            workflowRunPayload({
-              id: 1,
-              event: "push",
-              status: "completed",
-              conclusion: "failure",
-              createdAt: "2026-09-06T09:00:00Z",
-            }),
-          ],
-        })
-      }
-      return jsonResponse({ total_count: 101, workflow_runs: [] })
+      throw new Error(`unexpected extra page ${page}`)
     })
 
     const observation = await Effect.runPromise(
@@ -212,14 +200,14 @@ describe("GitHub CI Gate observation", () => {
       }),
     )
     const definition = observation.observations[0]
+    expect(requestedPages).toEqual(["1"])
     expect(definition?.kind).toBe("observed")
     if (definition?.kind !== "observed") {
       throw new Error("expected observed definition")
     }
-    expect(definition.runs).toHaveLength(101)
+    expect(definition.runs).toHaveLength(100)
     expect(definition.runs[0]?.runIdentity).toBe("1000:1")
-    expect(definition.runs[100]?.runIdentity).toBe("1:1")
-    expect(definition.runs[100]?.rawConclusion).toBe("failure")
+    expect(definition.runs.at(-1)?.runIdentity).toBe("901:1")
   })
 
   it("stops paging once the last-seen run identity is included", async () => {

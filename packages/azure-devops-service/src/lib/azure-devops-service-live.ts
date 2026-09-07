@@ -1618,7 +1618,8 @@ export const makeAzureDevOpsService = (options: {
               return "stop"
             }
           }
-          return "continue"
+          // First observation (no last-seen run) uses one official API page.
+          return lastRunIdentity === null ? "stop" : "continue"
         },
       )
       return {

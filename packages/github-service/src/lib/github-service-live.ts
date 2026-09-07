@@ -3589,7 +3589,12 @@ const makeObserveCiGate =
             break
           }
         }
-        if (reachedLastSeen || workflowRuns.length < PAGE_SIZE) {
+        // First observation (no last-seen run) uses one official API page.
+        if (
+          reachedLastSeen ||
+          lastSeen === null ||
+          workflowRuns.length < PAGE_SIZE
+        ) {
           break
         }
       }
