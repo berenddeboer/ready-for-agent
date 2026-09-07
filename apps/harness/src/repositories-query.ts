@@ -61,7 +61,7 @@ type CiGateDefinition = {
 
 export type RepositoryCiGateStatus = "DISABLED" | "OPEN" | "CLOSED" | "DEGRADED"
 
-export type RepositoryCiGate = {
+type RepositoryCiGate = {
   enabled: boolean
   status: RepositoryCiGateStatus
   observedAt: string | null
