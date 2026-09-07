@@ -11,6 +11,7 @@ import { describe, expect, it } from "bun:test"
 
 const NEW_MIGRATION = "20260907120000_repository_ci_gate_definitions"
 const OBSERVATION_MIGRATION = "20260907133000_repository_ci_gate_observation"
+const HOLD_MIGRATION = "20260907150000_work_item_waiting_for_ci_repair"
 
 const loadMigrationSources = async () => {
   const names = (
@@ -146,6 +147,67 @@ describe("CI Gate Definition migration", () => {
           "SELECT identity FROM ci_gate_definition",
         )) as readonly { readonly identity: string }[]
         expect(definitions).toEqual([{ identity: "161335" }])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("leaves existing Work Items without a Waiting for CI Repair hold", async () => {
+    const sources = await loadMigrationSources()
+    const hold = sources.find((source) => source.name === HOLD_MIGRATION)
+    if (hold === undefined) {
+      throw new Error(`Missing migration ${HOLD_MIGRATION}`)
+    }
+    const prior = sources.filter((source) => source.name !== HOLD_MIGRATION)
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* runMigrationsFromSources(prior)
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `INSERT INTO repository (
+             id, forge, forge_host, project_path, local_path, is_bare, paused,
+             selected_agent_backend, default_model, default_thinking_level,
+             review_model, review_thinking_level, backend_model_prefs,
+             merge_policy, include_all_issue_authors,
+             wait_for_ready_for_review_checks, created_at, updated_at
+           ) VALUES (
+             'repo-01ARZ3NDEKTSV4RRFFQ69G5FAV', 'github', 'github.com',
+             'acme/widgets', '/repos/acme/widgets.git', 1, 1,
+             NULL, NULL, NULL, NULL, NULL, '{}',
+             'off', 0, 1, 1, 1
+           )`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO work_item (
+             id, repository_id, issue_number, state, state_ready_at,
+             paused, waiting_for_blockers, holds_worker_slot, created_at, updated_at
+           ) VALUES (
+             'wi-01ARZ3NDEKTSV4RRFFQ69G5FAV',
+             'repo-01ARZ3NDEKTSV4RRFFQ69G5FAV',
+             42, 'merge_pr', 1, 0, 0, 1, 1, 1
+           )`,
+        )
+
+        yield* runMigrationsFromSources([...prior, hold])
+
+        const rows = (yield* sql.unsafe(
+          `SELECT waiting_for_ci_repair AS waitingForCiRepair,
+                  waiting_for_blockers AS waitingForBlockers,
+                  holds_worker_slot AS holdsWorkerSlot,
+                  state
+           FROM work_item
+           WHERE id = 'wi-01ARZ3NDEKTSV4RRFFQ69G5FAV'`,
+        )) as readonly {
+          readonly waitingForCiRepair: number | boolean
+          readonly waitingForBlockers: number | boolean
+          readonly holdsWorkerSlot: number | boolean
+          readonly state: string
+        }[]
+        expect(rows).toHaveLength(1)
+        expect(Number(rows[0]?.waitingForCiRepair)).toBe(0)
+        expect(Number(rows[0]?.waitingForBlockers)).toBe(0)
+        expect(Number(rows[0]?.holdsWorkerSlot)).toBe(1)
+        expect(rows[0]?.state).toBe("merge_pr")
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

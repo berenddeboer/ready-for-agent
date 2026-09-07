@@ -1545,20 +1545,37 @@ export const createGraphqlApi = <R>(
             _args: unknown,
             context: GraphqlRequestContext,
           ) => {
-            if (workItemIsTerminal(workItem) || !workItem.waitingForBlockers) {
+            if (
+              workItemIsTerminal(workItem) ||
+              (!workItem.waitingForBlockers && !workItem.waitingForCiRepair)
+            ) {
               return workItemStatusMessage(workItem)
             }
             return runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
-                const issues = yield* db.listIssues(workItem.repositoryId)
+                const issues = workItem.waitingForBlockers
+                  ? yield* db.listIssues(workItem.repositoryId)
+                  : []
                 const issue = issues.find(
                   (candidate) => candidate.issueNumber === workItem.issueNumber,
                 )
+                const snapshot = workItem.waitingForCiRepair
+                  ? yield* db.loadCiGateSnapshot(workItem.repositoryId)
+                  : null
+                const failedCiGateDefinitionLabels =
+                  snapshot?.activeIncident?.definitions.map(
+                    (definition) => definition.displayLabel,
+                  ) ??
+                  snapshot?.observations
+                    .filter((observation) => observation.failureLatched)
+                    .map((observation) => observation.identity) ??
+                  []
                 return workItemStatusMessage(workItem, {
                   blockerIssueNumbers:
                     issue?.blockedBy.map((blocker) => blocker.issueNumber) ??
                     [],
+                  failedCiGateDefinitionLabels,
                 })
               }).pipe(Effect.withSpan("graphql-api.WorkItem.statusMessage")),
               context,

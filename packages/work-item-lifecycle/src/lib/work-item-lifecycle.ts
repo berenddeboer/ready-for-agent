@@ -422,6 +422,7 @@ type WorkItemRow = {
   readonly paused: boolean | number
   readonly waiting_since: number | null
   readonly waiting_for_blockers: boolean | number
+  readonly waiting_for_ci_repair: boolean | number
   readonly merge_mode: string | null
   readonly auto_merge_override: boolean | number | null
   readonly pending_autonomous_retry?: boolean | number | null
@@ -676,6 +677,7 @@ const toWorkItemRecord = (
       ? null
       : new Date(row.waiting_since),
   waitingForBlockers: Boolean(row.waiting_for_blockers),
+  waitingForCiRepair: Boolean(row.waiting_for_ci_repair),
   mergeMode: decodeMergeMode(row.merge_mode),
   autoMergeOverride: decodeWorkItemAutoMergeOverride(row.auto_merge_override),
   holdsWorkerSlot: Boolean(row.holds_worker_slot),
@@ -700,7 +702,8 @@ const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, issue_number, issue_title, 
                    execution_profile_review_same_as_build,
                    execution_profile_review_model,
                    execution_profile_review_thinking_level,
-                   state, state_ready_at, paused, waiting_since, waiting_for_blockers, merge_mode,
+                   state, state_ready_at, paused, waiting_since, waiting_for_blockers,
+                   waiting_for_ci_repair, merge_mode,
                    auto_merge_override,
                    pending_autonomous_retry,
                    holds_worker_slot,
@@ -1184,6 +1187,21 @@ export interface WorkItemLifecycleShape {
    * Paused does not block lift; path is full remote (no pause-before-step).
    */
   readonly releaseWaitingForBlockers: (
+    repositoryId: string,
+  ) => Effect.Effect<
+    number,
+    | WorkItemLifecycleDatabaseError
+    | EnqueueError
+    | InvalidQueueNameError
+    | DatabaseError
+    | RepositoryNotFoundError
+  >
+  /**
+   * After the Repository CI Gate is no longer Closed: lift Waiting for CI
+   * Repair holds. Non-paused merge-approved Work Items rejoin ordinary FIFO
+   * Worker Slot admission. Paused Work Items keep Pause and are not started.
+   */
+  readonly releaseWaitingForCiRepair: (
     repositoryId: string,
   ) => Effect.Effect<
     number,
@@ -2020,6 +2038,9 @@ export const makeWorkItemLifecycleLive = (
           if (!current) {
             return false
           }
+          if (current.waiting_for_ci_repair) {
+            return false
+          }
           if (current.holds_worker_slot) {
             yield* sql
               .unsafe(
@@ -2075,6 +2096,7 @@ export const makeWorkItemLifecycleLive = (
                WHERE waiting_since IS NOT NULL
                  AND holds_worker_slot = 0
                  AND paused = 0
+                 AND waiting_for_ci_repair = 0
                  AND state NOT IN ('complete', 'failed', 'abandoned')
                ORDER BY waiting_since ASC, created_at ASC, rowid ASC
                LIMIT ?`,
@@ -2284,7 +2306,7 @@ export const makeWorkItemLifecycleLive = (
                        failure_message = ?,
                        holds_worker_slot = 0,
                        waiting_since = NULL,
-                       waiting_for_blockers = 0,
+                       waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                        updated_at = ?
                    WHERE id = ?
                      AND waiting_for_blockers = 1
@@ -2331,7 +2353,7 @@ export const makeWorkItemLifecycleLive = (
                   const clearedRows = (yield* sql
                     .unsafe(
                       `UPDATE work_item
-                       SET waiting_for_blockers = 0,
+                       SET waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                            updated_at = ?
                        WHERE id = ?
                          AND waiting_for_blockers = 1
@@ -2360,6 +2382,7 @@ export const makeWorkItemLifecycleLive = (
                              updated_at = ?
                          WHERE id = ?
                            AND waiting_for_blockers = 0
+                           AND waiting_for_ci_repair = 0
                            AND state NOT IN ('complete', 'failed', 'abandoned')`,
                         [now, held.id],
                       )
@@ -2391,6 +2414,7 @@ export const makeWorkItemLifecycleLive = (
                              updated_at = ?
                          WHERE id = ?
                            AND waiting_for_blockers = 0
+                           AND waiting_for_ci_repair = 0
                            AND state NOT IN ('complete', 'failed', 'abandoned')`,
                         [cleared.created_at, now, held.id],
                       )
@@ -2428,6 +2452,214 @@ export const makeWorkItemLifecycleLive = (
             Effect.catch((error) =>
               Effect.logWarning(
                 "Failed releasing Waiting for blockers Work Item; continuing pass",
+                {
+                  workItemId: held.id,
+                  repositoryId,
+                  error: String(error),
+                },
+              ).pipe(Effect.as(false)),
+            ),
+          )
+
+          if (didChange) {
+            changed += 1
+            yield* notifyWorkItemsChanged(repositoryId)
+          }
+        }
+
+        return changed
+      })
+
+      const repositoryCiGateIsClosed = (
+        repositoryId: string,
+      ): Effect.Effect<boolean, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT 1 AS closed
+               FROM ci_gate_definition_observation
+               WHERE repository_id = ?
+                 AND failure_latched = 1
+               LIMIT 1`,
+              [repositoryId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly closed: number
+          }[]
+          return rows.length > 0
+        })
+
+      const cancelStepRunForCiRepairHold = (
+        stepRun: {
+          readonly id: string
+          readonly queue_job_id: string | null
+        },
+        now: number,
+      ): Effect.Effect<
+        void,
+        | WorkItemLifecycleDatabaseError
+        | AcknowledgeError
+        | JobNotFoundError
+        | DatabaseError
+      > =>
+        Effect.gen(function* () {
+          yield* sql
+            .unsafe(
+              `UPDATE step_run
+               SET status = 'cancelled',
+                   finished_at = COALESCE(finished_at, ?),
+                   updated_at = ?
+               WHERE id = ?
+                 AND status IN ('queued', 'running')`,
+              [now, now, stepRun.id],
+            )
+            .pipe(Effect.mapError(toDatabaseError))
+          if (stepRun.queue_job_id !== null) {
+            yield* queue
+              .acknowledge(stepRun.queue_job_id)
+              .pipe(Effect.catchTag("JobNotFoundError", () => Effect.void))
+          }
+        })
+
+      const applyCiRepairMergeHold = (
+        workItemId: string,
+        now: number,
+      ): Effect.Effect<
+        boolean,
+        WorkItemLifecycleDatabaseError | DatabaseError
+      > =>
+        Effect.gen(function* () {
+          const updated = (yield* sql
+            .unsafe(
+              `UPDATE work_item
+               SET waiting_for_ci_repair = 1,
+                   holds_worker_slot = 0,
+                   waiting_since = NULL,
+                   updated_at = ?
+               WHERE id = ?
+                 AND state NOT IN ('complete', 'failed', 'abandoned')
+               RETURNING id`,
+              [now, workItemId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly id: string
+          }[]
+          return Boolean(updated[0])
+        })
+
+      const releaseWaitingForCiRepair = Effect.fn(
+        "WorkItemLifecycle.releaseWaitingForCiRepair",
+      )(function* (repositoryId: string) {
+        const heldRows = (yield* sql
+          .unsafe(
+            `SELECT ${WORK_ITEM_SELECT_COLUMNS}
+             FROM work_item
+             WHERE repository_id = ?
+               AND waiting_for_ci_repair = 1
+               AND state NOT IN ('complete', 'failed', 'abandoned')
+             ORDER BY created_at ASC, rowid ASC`,
+            [repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly WorkItemRow[]
+
+        if (heldRows.length === 0) {
+          return 0
+        }
+
+        // Recovered merges join ordinary admission behind every existing
+        // Worker Slot waiter before they attempt to take any capacity.
+        yield* admitWaitingWorkItems
+
+        let changed = 0
+        for (const held of heldRows) {
+          const didChange = yield* Effect.gen(function* () {
+            const now = yield* Clock.currentTimeMillis
+            return yield* sql
+              .withTransaction(
+                Effect.gen(function* () {
+                  const current = yield* loadWorkItemRow(held.id)
+                  if (
+                    current === null ||
+                    !current.waiting_for_ci_repair ||
+                    isTerminalWorkItemState(current.state)
+                  ) {
+                    return false
+                  }
+
+                  const clearedRows = (yield* sql
+                    .unsafe(
+                      `UPDATE work_item
+                       SET waiting_for_ci_repair = 0,
+                           updated_at = ?
+                       WHERE id = ?
+                         AND waiting_for_ci_repair = 1
+                         AND state NOT IN ('complete', 'failed', 'abandoned')
+                       RETURNING id, state, paused, created_at`,
+                      [now, held.id],
+                    )
+                    .pipe(Effect.mapError(toDatabaseError))) as readonly {
+                    readonly id: string
+                    readonly state: WorkItemState
+                    readonly paused: boolean | number
+                    readonly created_at: number
+                  }[]
+                  const cleared = clearedRows[0]
+                  if (!cleared) {
+                    return false
+                  }
+
+                  if (cleared.paused) {
+                    return true
+                  }
+
+                  const acquired = yield* tryAcquireWorkerSlot(held.id, now)
+                  if (!acquired) {
+                    return true
+                  }
+
+                  const pendingStep = cleared.state as OperationalLifecycleStep
+                  const activeRows = (yield* sql.unsafe(
+                    `SELECT id FROM step_run
+                     WHERE work_item_id = ?
+                       AND status IN ('queued', 'running')
+                     LIMIT 1`,
+                    [held.id],
+                  )) as readonly { readonly id: string }[]
+                  if (!activeRows[0]) {
+                    yield* enqueueStepRunForWorkItem(held.id, pendingStep, now)
+                  }
+                  return true
+                }),
+              )
+              .pipe(
+                Effect.catch((error) => {
+                  if (
+                    error instanceof WorkItemLifecycleDatabaseError ||
+                    error instanceof EnqueueError ||
+                    error instanceof InvalidQueueNameError
+                  ) {
+                    return Effect.fail(error)
+                  }
+                  if (
+                    typeof error === "object" &&
+                    error !== null &&
+                    "_tag" in error &&
+                    (error as { _tag: string })._tag === "SqlError"
+                  ) {
+                    return Effect.fail(toDatabaseError(error as SqlError))
+                  }
+                  return Effect.fail(
+                    new WorkItemLifecycleDatabaseError({
+                      message: `Failed releasing Waiting for CI Repair Work Item: ${String(error)}`,
+                      cause: error,
+                    }),
+                  )
+                }),
+              )
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(
+                "Failed releasing Waiting for CI Repair Work Item; continuing pass",
                 {
                   workItemId: held.id,
                   repositoryId,
@@ -2857,6 +3089,7 @@ export const makeWorkItemLifecycleLive = (
           readonly checkStartLastObservedIsDraft?: number | null
           readonly stepRunReasonCode?: StepRunReasonCode
           readonly stepRunNote?: string
+          readonly holdForCiRepair?: boolean
           readonly transition?: {
             readonly nextState:
               | OperationalLifecycleStep
@@ -3477,51 +3710,48 @@ export const makeWorkItemLifecycleLive = (
               }
             })
           case "merge_pr":
-            return steps.mergePr(context).pipe(
-              Effect.flatMap((result) =>
-                Effect.gen(function* () {
-                  if (result._tag === "merged") {
-                    return {}
-                  }
-                  if (result._tag === "needs_human") {
-                    if (result.reason === "missing_successful_checks") {
-                      return {
-                        stepRunReasonCode:
-                          STEP_RUN_REASON.missingSuccessfulChecks,
-                        transition: {
-                          nextState: "needs_human" as const,
-                          reason: MISSING_SUCCESSFUL_CHECKS_REASON,
-                        },
-                      }
-                    }
-                    return {
-                      transition: {
-                        nextState: "needs_human" as const,
-                        reason: result.message,
-                      },
-                    }
-                  }
-                  const priorOutcomes = yield* mergeRevalidationCount(
-                    workItem.id,
-                  )
-                  const outcomeNumber = priorOutcomes + 1
+            return Effect.gen(function* () {
+              if (yield* repositoryCiGateIsClosed(workItem.repository_id)) {
+                return { holdForCiRepair: true as const }
+              }
+              const result = yield* steps.mergePr(context)
+              if (result._tag === "merged") {
+                return {}
+              }
+              if (result._tag === "needs_human") {
+                if (result.reason === "missing_successful_checks") {
                   return {
-                    stepRunReasonCode: STEP_RUN_REASON.mergeRevalidation,
-                    stepRunNote: result.message,
-                    transition:
-                      outcomeNumber <= 3
-                        ? {
-                            nextState: "watch_pr_status_checks" as const,
-                          }
-                        : {
-                            nextState: "needs_human" as const,
-                            reason:
-                              "Merge revalidation requires human intervention after four changed merge attempts",
-                          },
+                    stepRunReasonCode: STEP_RUN_REASON.missingSuccessfulChecks,
+                    transition: {
+                      nextState: "needs_human" as const,
+                      reason: MISSING_SUCCESSFUL_CHECKS_REASON,
+                    },
                   }
-                }),
-              ),
-            )
+                }
+                return {
+                  transition: {
+                    nextState: "needs_human" as const,
+                    reason: result.message,
+                  },
+                }
+              }
+              const priorOutcomes = yield* mergeRevalidationCount(workItem.id)
+              const outcomeNumber = priorOutcomes + 1
+              return {
+                stepRunReasonCode: STEP_RUN_REASON.mergeRevalidation,
+                stepRunNote: result.message,
+                transition:
+                  outcomeNumber <= 3
+                    ? {
+                        nextState: "watch_pr_status_checks" as const,
+                      }
+                    : {
+                        nextState: "needs_human" as const,
+                        reason:
+                          "Merge revalidation requires human intervention after four changed merge attempts",
+                      },
+              }
+            })
           case "close_issue":
             return steps.closeIssue(context).pipe(Effect.as({}))
           case "local_cleanup":
@@ -3706,6 +3936,7 @@ export const makeWorkItemLifecycleLive = (
           readonly checkStartLastObservedIsDraft?: number | null
           readonly stepRunReasonCode?: StepRunReasonCode
           readonly stepRunNote?: string
+          readonly holdForCiRepair?: boolean
           readonly transition?: {
             readonly nextState:
               | OperationalLifecycleStep
@@ -3873,7 +4104,7 @@ export const makeWorkItemLifecycleLive = (
                        session_id = ?,
                        pull_request_number = ?,
                        waiting_since = NULL,
-                       waiting_for_blockers = 0,
+                       waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                        updated_at = ?
                    WHERE id = ?`,
                     [
@@ -3917,7 +4148,7 @@ export const makeWorkItemLifecycleLive = (
                        pull_request_number = ?,
                        holds_worker_slot = 0,
                        waiting_since = NULL,
-                       waiting_for_blockers = 0,
+                       waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                        updated_at = ?
                    WHERE id = ?`,
                     [
@@ -3949,7 +4180,7 @@ export const makeWorkItemLifecycleLive = (
                         pull_request_number = ?,
                         holds_worker_slot = 0,
                         waiting_since = NULL,
-                        waiting_for_blockers = 0,
+                        waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                         updated_at = ?
                    WHERE id = ?`,
                     [
@@ -3981,7 +4212,7 @@ export const makeWorkItemLifecycleLive = (
                         pull_request_number = ?,
                         holds_worker_slot = 0,
                         waiting_since = NULL,
-                        waiting_for_blockers = 0,
+                        waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                         updated_at = ?
                    WHERE id = ?`,
                     [
@@ -4013,7 +4244,7 @@ export const makeWorkItemLifecycleLive = (
                         pull_request_number = ?,
                         holds_worker_slot = 0,
                         waiting_since = NULL,
-                        waiting_for_blockers = 0,
+                        waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                         updated_at = ?
                    WHERE id = ?`,
                     [
@@ -4053,6 +4284,10 @@ export const makeWorkItemLifecycleLive = (
                     pauseBeforeStep !== null && pauseBeforeStep === nextStep
                   // Do not clear operator Pause; only set paused when auto-pausing.
                   const stayPaused = isPaused || shouldPauseBeforeNext
+                  const holdMergeForCiRepair =
+                    !stayPaused &&
+                    nextStep === "merge_pr" &&
+                    (yield* repositoryCiGateIsClosed(workItem.repository_id))
 
                   if (shouldPauseBeforeNext) {
                     yield* sql.unsafe(
@@ -4120,6 +4355,39 @@ export const makeWorkItemLifecycleLive = (
                         workItem.id,
                       ],
                     )
+                  } else if (holdMergeForCiRepair) {
+                    yield* sql.unsafe(
+                      `UPDATE work_item
+                   SET state = ?,
+                       state_ready_at = ?,
+                       waiting_for_ci_repair = 1,
+                       holds_worker_slot = 0,
+                       waiting_since = NULL,
+                        pause_before_step = ?,
+                        worktree_path = ?,
+                        starting_commit_oid = ?,
+                        completion_summary = ?,
+                        publication_title = ?,
+                        publication_body = ?,
+                        session_id = ?,
+                        pull_request_number = ?,
+                        updated_at = ?
+                   WHERE id = ?`,
+                      [
+                        nextStep,
+                        stateReadyAt,
+                        pauseBeforeStep,
+                        worktreePath,
+                        startingCommitOid,
+                        completionSummary,
+                        publicationTitle,
+                        publicationBody,
+                        sessionId,
+                        pullRequestNumber,
+                        now,
+                        workItem.id,
+                      ],
+                    )
                   } else {
                     yield* sql.unsafe(
                       `UPDATE work_item
@@ -4152,7 +4420,7 @@ export const makeWorkItemLifecycleLive = (
                     )
                   }
 
-                  if (!stayPaused) {
+                  if (!stayPaused && !holdMergeForCiRepair) {
                     yield* enqueueStepRunForWorkItem(
                       workItem.id,
                       nextStep,
@@ -4278,7 +4546,7 @@ export const makeWorkItemLifecycleLive = (
                        failure_message = ?,
                        holds_worker_slot = 0,
                        waiting_since = NULL,
-                       waiting_for_blockers = 0,
+                       waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                        updated_at = ?
                    WHERE id = ?`,
                     [
@@ -4745,7 +5013,8 @@ export const makeWorkItemLifecycleLive = (
               if (
                 workItem?.state !== latest.step ||
                 workItem.paused ||
-                workItem.waiting_for_blockers
+                workItem.waiting_for_blockers ||
+                workItem.waiting_for_ci_repair
               ) {
                 return { _tag: "stale" as const }
               }
@@ -4831,6 +5100,46 @@ export const makeWorkItemLifecycleLive = (
             }
 
             return Effect.gen(function* () {
+              if (
+                stepRun.step === "merge_pr" &&
+                stepRun.status === "queued" &&
+                !workItem.paused
+              ) {
+                if (yield* repositoryCiGateIsClosed(workItem.repository_id)) {
+                  const holdAt = yield* Clock.currentTimeMillis
+                  yield* sql
+                    .withTransaction(
+                      Effect.gen(function* () {
+                        yield* cancelStepRunForCiRepairHold(stepRun, holdAt)
+                        yield* applyCiRepairMergeHold(workItem.id, holdAt)
+                      }),
+                    )
+                    .pipe(Effect.catch(catchTransactionError))
+                  const held = yield* getWorkItem(workItem.id).pipe(
+                    Effect.catchTag(
+                      "WorkItemNotFoundError",
+                      (error) =>
+                        new WorkItemLifecycleDatabaseError({
+                          message: `Work Item missing after CI Repair merge hold: ${error.workItemId}`,
+                          cause: error,
+                        }),
+                    ),
+                  )
+                  yield* notifyWorkItemsChanged(workItem.repository_id)
+                  if (!held.holdsWorkerSlot) {
+                    yield* admitWaitingWorkItems.pipe(
+                      Effect.catch((error) =>
+                        Effect.logError(
+                          "Failed to admit waiters after CI Repair merge hold",
+                          { error: String(error) },
+                        ),
+                      ),
+                    )
+                  }
+                  return { _tag: "processed" as const, workItem: held }
+                }
+              }
+
               const startedAt = yield* Clock.currentTimeMillis
               const startedRows = (yield* sql
                 .unsafe(
@@ -4844,6 +5153,7 @@ export const makeWorkItemLifecycleLive = (
                 WHERE work_item.id = step_run.work_item_id
                   AND work_item.state = step_run.step
                   AND work_item.paused = 0
+                  AND work_item.waiting_for_ci_repair = 0
                   AND work_item.state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
               )
               AND NOT EXISTS (
@@ -4917,6 +5227,43 @@ export const makeWorkItemLifecycleLive = (
               }
 
               yield* notifyWorkItemsChanged(workItem.repository_id)
+
+              if (
+                afterStart.step === "merge_pr" &&
+                (yield* repositoryCiGateIsClosed(workItem.repository_id))
+              ) {
+                const holdAt = yield* Clock.currentTimeMillis
+                yield* sql
+                  .withTransaction(
+                    Effect.gen(function* () {
+                      yield* cancelStepRunForCiRepairHold(afterStart, holdAt)
+                      yield* applyCiRepairMergeHold(workItem.id, holdAt)
+                    }),
+                  )
+                  .pipe(Effect.catch(catchTransactionError))
+                const held = yield* getWorkItem(workItem.id).pipe(
+                  Effect.catchTag(
+                    "WorkItemNotFoundError",
+                    (error) =>
+                      new WorkItemLifecycleDatabaseError({
+                        message: `Work Item missing after CI Repair merge hold: ${error.workItemId}`,
+                        cause: error,
+                      }),
+                  ),
+                )
+                yield* notifyWorkItemsChanged(workItem.repository_id)
+                if (!held.holdsWorkerSlot) {
+                  yield* admitWaitingWorkItems.pipe(
+                    Effect.catch((error) =>
+                      Effect.logError(
+                        "Failed to admit waiters after CI Repair merge hold",
+                        { error: String(error) },
+                      ),
+                    ),
+                  )
+                }
+                return { _tag: "processed" as const, workItem: held }
+              }
 
               if (isAgentDependentLifecycleStep(stepRun.step)) {
                 // Fail closed on corrupt capture: getBackendStatus normalizes
@@ -5248,6 +5595,43 @@ export const makeWorkItemLifecycleLive = (
                             },
                     })
                     return { _tag: "processed" as const, workItem: failed }
+                  }
+
+                  if (handlerExit.value.holdForCiRepair === true) {
+                    const holdAt = yield* Clock.currentTimeMillis
+                    yield* sql
+                      .withTransaction(
+                        Effect.gen(function* () {
+                          yield* cancelStepRunForCiRepairHold(
+                            afterStart,
+                            holdAt,
+                          )
+                          yield* applyCiRepairMergeHold(workItem.id, holdAt)
+                        }),
+                      )
+                      .pipe(Effect.catch(catchTransactionError))
+                    const held = yield* getWorkItem(workItem.id).pipe(
+                      Effect.catchTag(
+                        "WorkItemNotFoundError",
+                        (error) =>
+                          new WorkItemLifecycleDatabaseError({
+                            message: `Work Item missing after CI Repair merge hold: ${error.workItemId}`,
+                            cause: error,
+                          }),
+                      ),
+                    )
+                    yield* notifyWorkItemsChanged(workItem.repository_id)
+                    if (!held.holdsWorkerSlot) {
+                      yield* admitWaitingWorkItems.pipe(
+                        Effect.catch((error) =>
+                          Effect.logError(
+                            "Failed to admit waiters after CI Repair merge hold",
+                            { error: String(error) },
+                          ),
+                        ),
+                      )
+                    }
+                    return { _tag: "processed" as const, workItem: held }
                   }
 
                   const revalidation =
@@ -5807,6 +6191,14 @@ export const makeWorkItemLifecycleLive = (
                 return
               }
 
+              if (
+                pendingStep === "merge_pr" &&
+                (yield* repositoryCiGateIsClosed(workItem.repository_id))
+              ) {
+                yield* applyCiRepairMergeHold(workItemId, now)
+                return
+              }
+
               const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
               if (!acquired) {
                 return
@@ -6027,7 +6419,7 @@ export const makeWorkItemLifecycleLive = (
                       worktree_path = NULL,
                       holds_worker_slot = 0,
                       waiting_since = NULL,
-                      waiting_for_blockers = 0,
+                      waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                       updated_at = ?
                   WHERE id = ?
                     AND state = 'needs_human'
@@ -6042,7 +6434,7 @@ export const makeWorkItemLifecycleLive = (
                       state_ready_at = ?,
                       holds_worker_slot = 0,
                       waiting_since = NULL,
-                      waiting_for_blockers = 0,
+                      waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                       updated_at = ?
                   WHERE id = ?
                     AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
@@ -6554,6 +6946,9 @@ export const makeWorkItemLifecycleLive = (
                        paused = 0,
                        failure_code = NULL,
                        failure_message = NULL,
+                       waiting_since = NULL,
+                       waiting_for_blockers = 0,
+                       waiting_for_ci_repair = 0,
                        updated_at = ?
                    WHERE id = ?
                      AND state NOT IN ('complete', 'failed', 'abandoned', 'local_cleanup')
@@ -6788,7 +7183,7 @@ export const makeWorkItemLifecycleLive = (
                        paused = 0,
                        pause_before_step = NULL,
                        waiting_since = NULL,
-                       waiting_for_blockers = 0,
+                       waiting_for_blockers = 0, waiting_for_ci_repair = 0,
                        holds_worker_slot = 0,
                        failure_code = ?,
                        failure_message = ?,
@@ -8605,6 +9000,7 @@ export const makeWorkItemLifecycleLive = (
         admitWaitingWorkItems,
         releaseWaitingForBlockers,
         completeParkedAttentionWhenIssueNoLongerRelevant,
+        releaseWaitingForCiRepair,
       })
     }),
   )

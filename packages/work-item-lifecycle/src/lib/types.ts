@@ -147,6 +147,12 @@ export interface WorkItemRecord {
    */
   readonly waitingForBlockers: boolean
   /**
+   * When true, the Work Item is Waiting for CI Repair. Ordinary merge-approved
+   * work stays at Merge PR without a Worker Slot until the Repository CI Gate
+   * is no longer Closed. Not a Lifecycle Step.
+   */
+  readonly waitingForCiRepair: boolean
+  /**
    * Derived skip-Decide signal. `always` iff the Work Item Merge Policy pin
    * is `always`; otherwise `ordinary`.
    */
@@ -203,6 +209,19 @@ export const formatWaitingForBlockersMessage = (
   }
   const listed = blockerIssueNumbers.map((n) => `#${n}`).join(", ")
   return `Queued — waiting for ${listed}`
+}
+
+/**
+ * Operator-facing copy for Waiting for CI Repair.
+ * Names failed CI Gate Definitions when provided.
+ */
+export const formatWaitingForCiRepairMessage = (
+  failedDefinitionLabels: readonly string[] = [],
+): string => {
+  if (failedDefinitionLabels.length === 0) {
+    return "Waiting for CI Repair"
+  }
+  return `Waiting for CI Repair: ${failedDefinitionLabels.join(", ")}`
 }
 
 /** Operator-visible message while a running Step Run waits for an Agent Turn slot. */

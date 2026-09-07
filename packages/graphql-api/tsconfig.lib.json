@@ -44,6 +44,9 @@
       "path": "../agent-backend/tsconfig.lib.json"
     },
     {
+      "path": "../sqlite-queue-service/tsconfig.lib.json"
+    },
+    {
       "path": "../db/tsconfig.lib.json"
     }
   ]

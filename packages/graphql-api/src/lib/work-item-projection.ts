@@ -19,6 +19,7 @@ import {
   WAITING_FOR_WORKER_SLOT_MESSAGE,
   type WorkItemRecord,
   formatWaitingForBlockersMessage,
+  formatWaitingForCiRepairMessage,
   isRetryableFailedWorkItem,
   isRetryableNeedsHumanWorkItem,
 } from "@ready-for-agent/work-item-lifecycle"
@@ -70,6 +71,7 @@ export type WorkItemStatus =
   | "needs_human_review"
   | "waiting_for_worker_slot"
   | "waiting_for_blockers"
+  | "waiting_for_ci_repair"
   | "waiting_for_github"
 
 type LifecyclePhase =
@@ -121,10 +123,18 @@ const lifecyclePhaseLabel = (
   }
 }
 
-export const statusLabel = (status: WorkItemStatus): string =>
-  status === "waiting_for_github"
-    ? "Waiting for GitHub"
-    : status.replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase())
+export const statusLabel = (status: WorkItemStatus): string => {
+  switch (status) {
+    case "waiting_for_github":
+      return "Waiting for GitHub"
+    case "waiting_for_ci_repair":
+      return "Waiting for CI Repair"
+    default:
+      return status
+        .replaceAll("_", " ")
+        .replace(/^./, (first) => first.toUpperCase())
+  }
+}
 
 const latestStepRun = (workItem: WorkItemRecord): StepRunRecord | undefined =>
   workItem.stepRuns.at(-1)
@@ -158,6 +168,7 @@ const higherPriorityWorkItemStatus = (
   if (workItem.waitingForBlockers) return "waiting_for_blockers"
   if (workItem.waitingSince !== null) return "waiting_for_worker_slot"
   if (workItem.paused) return "needs_human_review"
+  if (workItem.waitingForCiRepair) return "waiting_for_ci_repair"
   return null
 }
 
@@ -197,6 +208,7 @@ export const workItemCanRetry = (workItem: WorkItemRecord): boolean => {
   if (
     workItem.waitingSince != null ||
     workItem.waitingForBlockers ||
+    workItem.waitingForCiRepair ||
     workItem.paused
   ) {
     return false
@@ -268,6 +280,7 @@ export const workItemStatusMessage = (
   workItem: WorkItemRecord,
   options?: {
     readonly blockerIssueNumbers?: readonly number[]
+    readonly failedCiGateDefinitionLabels?: readonly string[]
   },
 ): string | null => {
   if (workItemIsTerminal(workItem)) {
@@ -281,6 +294,11 @@ export const workItemStatusMessage = (
   }
   if (workItem.paused) {
     return workItem.failureMessage
+  }
+  if (workItem.waitingForCiRepair) {
+    return formatWaitingForCiRepairMessage(
+      options?.failedCiGateDefinitionLabels ?? [],
+    )
   }
   const postponedUntil = workItemPostponedUntil(workItem)
   if (postponedUntil !== null) {

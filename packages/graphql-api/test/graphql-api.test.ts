@@ -165,6 +165,7 @@ const workItem = {
   paused: false,
   waitingSince: null,
   waitingForBlockers: false,
+  waitingForCiRepair: false,
   mergeMode: "ordinary",
   autoMergeOverride: null,
   holdsWorkerSlot: true,
@@ -418,6 +419,7 @@ const makeRuntime = (
     stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
     admitWaitingWorkItems: Effect.succeed(0),
     releaseWaitingForBlockers: () => Effect.succeed(0),
+    releaseWaitingForCiRepair: () => Effect.succeed(0),
     completeParkedAttentionWhenIssueNoLongerRelevant: () => Effect.succeed(0),
     ...lifecycleOverrides,
   }
@@ -9118,6 +9120,7 @@ describe("GraphQL API", () => {
         state,
         holdsWorkerSlot: false,
         waitingForBlockers: false,
+        waitingForCiRepair: false,
         waitingSince: null,
         stepRuns: [],
       }) as WorkItemRecord
@@ -9209,6 +9212,7 @@ describe("GraphQL API", () => {
       state: "complete",
       holdsWorkerSlot: false,
       waitingForBlockers: false,
+      waitingForCiRepair: false,
       waitingSince: null,
       stepRuns: [],
     } as WorkItemRecord
@@ -9550,6 +9554,7 @@ describe("GraphQL API", () => {
       state: "complete",
       holdsWorkerSlot: false,
       waitingForBlockers: false,
+      waitingForCiRepair: false,
       waitingSince: null,
       stepRuns: [],
     } as WorkItemRecord
@@ -9637,6 +9642,7 @@ describe("GraphQL API", () => {
       issueNumber: 12,
       issueTitle: actionable.title,
       waitingForBlockers: false,
+      waitingForCiRepair: false,
       holdsWorkerSlot: true,
     } as WorkItemRecord
     const createdQueue = {
