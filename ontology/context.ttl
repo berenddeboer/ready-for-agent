@@ -2046,7 +2046,7 @@ rfa:ClearedReviewOutcome
 rfa:ReviewFixRound
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Review Fix Round"@en ;
-  skos:definition "One build-model pass that interprets Review Findings and changes the worktree, possibly while deferring other findings, followed by Pre-Commit and either a Review Rerun Assessment or a mandatory reviewing pass. An apply-findings turn that changes the worktree but leaves an unparseable outcome after one verdict-repair turn also counts as a round and is revalidated the same way. A Review Step Run allows at most five rounds; exhausting the limit without a clean, deferred, or Accepted Review Outcome is Needs Human."@en ;
+  skos:definition "One build-model pass that interprets Review Findings and changes the worktree, possibly while deferring other findings, followed by Pre-Commit and either a Review Rerun Assessment or a mandatory reviewing pass. An apply-findings turn that changes the worktree but leaves an unparseable outcome after one verdict-repair turn also counts as a round and is revalidated the same way. A Review Step Run allows at most six rounds; exhausting the limit without a clean, deferred, or Accepted Review Outcome is Needs Human."@en ;
   skos:hiddenLabel "Implement redo"@en, "unbounded fix loop"@en .
 
 [

@@ -312,7 +312,7 @@ A successful Review outcome in which the build model rejects all low- or medium-
 _Avoid_: Clean review, deferred finding, fixed finding
 
 **Review Fix Round**:
-One build-model pass that interprets Review Findings and changes the worktree, possibly while deferring other findings, followed by Pre-Commit and either a Review Rerun Assessment or a mandatory reviewing pass. An apply-findings turn that changes the worktree but leaves an unparseable outcome after one verdict-repair turn also counts as a round and is revalidated the same way. A Review Step Run allows at most five rounds; exhausting the limit without a clean, deferred, or Accepted Review Outcome is Needs Human.
+One build-model pass that interprets Review Findings and changes the worktree, possibly while deferring other findings, followed by Pre-Commit and either a Review Rerun Assessment or a mandatory reviewing pass. An apply-findings turn that changes the worktree but leaves an unparseable outcome after one verdict-repair turn also counts as a round and is revalidated the same way. A Review Step Run allows at most six rounds; exhausting the limit without a clean, deferred, or Accepted Review Outcome is Needs Human.
 _Avoid_: Implement redo, unbounded fix loop
 
 **Repair Fallback**:

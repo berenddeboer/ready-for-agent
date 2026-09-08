@@ -3,7 +3,7 @@ import { Duration, Effect } from "effect"
 import { Database } from "bun:sqlite"
 
 const DEFAULT_BUSY_TIMEOUT_MS = 250
-/** Fast enough to disarm within a short startup window (default 60s; tests use ~200ms). */
+/** Fast enough to disarm within a short startup window (default 90s; tests use ~200ms). */
 const DEFAULT_POLL_INTERVAL = Duration.millis(100)
 
 /**

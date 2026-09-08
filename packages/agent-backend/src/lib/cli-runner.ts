@@ -43,7 +43,7 @@ const capturedCliOutputMessage = (
  * crashes or hangs before emitting anything otherwise burns the whole turn
  * timeout while holding the Work Item.
  */
-export const DEFAULT_STARTUP_TIMEOUT = Duration.seconds(60)
+export const DEFAULT_STARTUP_TIMEOUT = Duration.seconds(90)
 
 export type AgentBackendCliError =
   | AgentBackendExitError
