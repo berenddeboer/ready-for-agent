@@ -978,6 +978,9 @@ function RepositoryCard({
     reviewThinkingLevel: string | null
   } | null>(null)
   const previewGenerationRef = useRef(0)
+  // Bumped by prepareSettingsSession so Preview re-runs after a routed open
+  // (Forward / direct) that otherwise abandons the first in-flight fetch.
+  const [settingsPreviewEpoch, setSettingsPreviewEpoch] = useState(0)
   // Dialog-session stash so switching backends and back restores form fields.
   // Server map for non-projected backends needs repositoryModelPrefs.
   type DraftModelPrefs = {
@@ -1153,6 +1156,7 @@ function RepositoryCard({
   const prepareSettingsSessionRef = useRef(() => {})
   prepareSettingsSessionRef.current = () => {
     previewGenerationRef.current += 1
+    setSettingsPreviewEpoch((epoch) => epoch + 1)
     setPaused(repository.paused)
     setForge(repository.forge)
     setForgeHost(repository.forgeHost)
@@ -1371,8 +1375,13 @@ function RepositoryCard({
     config.data?.selectedAgentBackend ?? null
   useEffect(() => {
     if (!dialogOpen || harnessDefaultBackendFromConfig === null) {
+      if (!dialogOpen) {
+        previewGenerationRef.current += 1
+        setPreviewPending(false)
+      }
       return
     }
+    void settingsPreviewEpoch
     const harnessDefault = harnessDefaultBackendFromConfig
     const effective = selectedAgentBackend ?? harnessDefault
     const generation = ++previewGenerationRef.current
@@ -1456,6 +1465,7 @@ function RepositoryCard({
     harnessDefaultBackendFromConfig,
     selectedAgentBackend,
     queryClient,
+    settingsPreviewEpoch,
   ])
 
   const inheritHarnessBuildModel = (): string => {

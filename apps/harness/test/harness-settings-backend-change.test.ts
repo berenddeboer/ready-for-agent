@@ -23,6 +23,8 @@ describe("Harness settings Agent Backend change", () => {
       "const catalogFailed = previewError !== null && !previewPending",
     )
     expect(source).toContain("const catalogLoading = modelsLoading")
+    expect(source).toContain("settingsPreviewEpoch")
+    expect(source).toContain("setSettingsPreviewEpoch")
     expect(source).toContain("blockingUnfinishedWorkItemCount")
     expect(source).toContain("backendChangeBlocked")
     expect(source).toContain(

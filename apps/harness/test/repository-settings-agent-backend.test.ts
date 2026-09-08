@@ -23,6 +23,8 @@ describe("Repository settings Agent Backend override", () => {
       "const catalogFailed = previewError !== null && !previewPending",
     )
     expect(source).toContain("const catalogLoading = modelsLoading")
+    expect(source).toContain("settingsPreviewEpoch")
+    expect(source).toContain("setSettingsPreviewEpoch")
 
     // Prefer the settings-dialog control (name=), not the card summary.
     const backendSelectIndex = source.indexOf('name="selectedAgentBackend"')

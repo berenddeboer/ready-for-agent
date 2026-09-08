@@ -456,6 +456,9 @@ function SettingsChrome() {
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewPending, setPreviewPending] = useState(false)
   const previewGenerationRef = useRef(0)
+  // Bumped by prepareSettingsSession so Preview re-runs after a routed open
+  // (Forward / direct) that otherwise abandons the first in-flight fetch.
+  const [settingsPreviewEpoch, setSettingsPreviewEpoch] = useState(0)
   // Ready alternatives for the default-Unavailable banner when those backends
   // are not yet in the Active set (typical first-run; issue #937).
   const [readyAlternativesForBanner, setReadyAlternativesForBanner] = useState<
@@ -484,6 +487,8 @@ function SettingsChrome() {
   useEffect(() => {
     if (!dialogOpen) {
       formHydratedForOpenRef.current = false
+      previewGenerationRef.current += 1
+      setPreviewPending(false)
       return
     }
     if (!config.data || formHydratedForOpenRef.current) {
@@ -512,6 +517,7 @@ function SettingsChrome() {
     if (!dialogOpen) {
       return
     }
+    void settingsPreviewEpoch
     const backendId = selectedAgentBackend
     const savedAgentBackend = config.data?.selectedAgentBackend ?? "opencode"
     const generation = ++previewGenerationRef.current
@@ -598,6 +604,7 @@ function SettingsChrome() {
     selectedAgentBackend,
     queryClient,
     config.data?.selectedAgentBackend,
+    settingsPreviewEpoch,
   ])
 
   const updateConfig = useMutation({
@@ -788,8 +795,11 @@ function SettingsChrome() {
   prepareSettingsSessionRef.current = () => {
     // Allow one hydrate for this open (effect or inline below).
     formHydratedForOpenRef.current = false
-    // Discard any in-flight preview from a previous dialog session.
+    // Discard any in-flight preview from a previous dialog session, then
+    // bump epoch so the Preview effect starts a new fetch after this prepare
+    // (Forward/direct open runs prepare after the first Preview effect).
     previewGenerationRef.current += 1
+    setSettingsPreviewEpoch((epoch) => epoch + 1)
     // Refresh provider-mode and catalog metadata on every open. Both queries
     // are cached indefinitely so a long-open browser would otherwise keep a
     // catalog (and Claude configurationMode) from before a Harness restart and
