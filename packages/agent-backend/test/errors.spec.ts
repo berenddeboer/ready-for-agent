@@ -136,7 +136,7 @@ describe("formatAgentBackendStartupTimeoutMessage", () => {
       action: "while applying Review Findings",
       cause: new AgentBackendStartupTimeoutError({
         cwd: "/tmp",
-        startupTimeoutMs: 60_000,
+        startupTimeoutMs: 90_000,
         sessionId: "ses_review",
         model: "opencode/deepseek",
         attemptCount: 2,
@@ -144,7 +144,7 @@ describe("formatAgentBackendStartupTimeoutMessage", () => {
       phase: "review_applying_findings",
     })
     expect(message).toBe(
-      "OpenCode failed while applying Review Findings: no output within the startup window (60000ms); session ses_review; model opencode/deepseek; phase review_applying_findings; attempts 1 and 2",
+      "OpenCode failed while applying Review Findings: no output within the startup window (90000ms); session ses_review; model opencode/deepseek; phase review_applying_findings; attempts 1 and 2",
     )
     expect(message).not.toContain("Interpret those findings")
   })

@@ -12,7 +12,7 @@ A compatible Agent Backend must:
 - accept an explicit Agent Model and optional backend-defined Thinking Level on every turn, including switching them within one Session;
 - expose an instance-wide Agent Model catalog through atomic readiness inspection;
 - emit machine-readable output that the adapter can normalize to the Session ID and ordered final assistant text;
-- begin emitting that output within a bounded startup window (60 seconds) of spawn;
+- begin emitting that output within a bounded startup window (90 seconds) of spawn;
 - provide the `/review` Agent Command at runtime;
 - accept an Agent Turn prompt out of band as well as on argv, since argv cannot carry a large prompt (Linux caps a single argument at 128 KiB, and an oversized argument fails the spawn with an opaque platform error rather than an Agent Backend error) — the shared package sets the byte ceiling, and each adapter routes past it through whatever the CLI supports (stdin for OpenCode, Claude Code, and Codex Build; a prompt file for Grok Build, which ignores piped stdin); and
 - tolerate bounded termination of the whole Agent Turn process tree on timeout, Reset, or Harness shutdown.
@@ -27,4 +27,4 @@ The shared `maxConcurrentAgentTurns` limit defaults to two and bounds in-flight 
 
 Grok Build is the first additional adapter, with stable ID `grok`. It runs with auto-update disabled so Harness operation cannot replace the CLI underneath active work. The adapter initially uses ambient `gh` authentication and does not integrate Keymaxxer.
 
-A backend whose first machine-readable output can legitimately lag more than a minute behind spawn must raise its own startup window rather than rely on the shared default.
+A backend whose first machine-readable output can legitimately lag more than 90 seconds behind spawn must raise its own startup window rather than rely on the shared default.

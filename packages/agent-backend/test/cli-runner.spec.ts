@@ -11,6 +11,7 @@ import {
   AgentBackendSessionIdMissingError,
   AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
+  DEFAULT_STARTUP_TIMEOUT,
   collectChildStderrTail,
   runCliCapture,
   runCliTurn,
@@ -786,6 +787,10 @@ describe("runCliTurn", () => {
     } finally {
       await rm(markerDir, { recursive: true, force: true })
     }
+  })
+
+  it("uses a 90-second production startup window by default", () => {
+    expect(Duration.toMillis(DEFAULT_STARTUP_TIMEOUT)).toBe(90_000)
   })
 
   it("fails within the startup window when the CLI emits nothing", async () => {

@@ -1605,16 +1605,16 @@ describe("review", () => {
         }),
       )
 
-      // 6 reviewing passes + 5 apply passes (no 6th apply)
-      expect(MAX_REVIEW_FIX_ROUNDS).toBe(5)
-      expect(turn).toBe(11)
+      // 7 reviewing passes + 6 apply passes (no 7th apply)
+      expect(MAX_REVIEW_FIX_ROUNDS).toBe(6)
+      expect(turn).toBe(13)
       expect(result).toEqual({
         _tag: "needs_human",
         reason:
-          "Review fix limit reached (5); inspect the worktree or address remaining findings, then Retry.",
+          "Review fix limit reached (6); inspect the worktree or address remaining findings, then Retry.",
       })
       expect(REVIEW_FIX_LIMIT_REASON).toBe(
-        "Review fix limit reached (5); inspect the worktree or address remaining findings, then Retry.",
+        "Review fix limit reached (6); inspect the worktree or address remaining findings, then Retry.",
       )
     }))
 
@@ -1694,9 +1694,9 @@ describe("review", () => {
         }),
       )
 
-      expect(MAX_REVIEW_FIX_ROUNDS).toBe(5)
-      expect(applyPasses).toBe(5)
-      expect(reviewingPasses).toBe(6)
+      expect(MAX_REVIEW_FIX_ROUNDS).toBe(6)
+      expect(applyPasses).toBe(6)
+      expect(reviewingPasses).toBe(7)
       expect(result).toEqual({ _tag: "clean" })
     }))
 
@@ -1784,10 +1784,10 @@ describe("review", () => {
         }),
       )
 
-      // 6 reviewing + 5 apply + 5 assessment; no 6th apply
-      expect(applyPasses).toBe(5)
-      expect(assessmentPasses).toBe(5)
-      expect(reviewingPasses).toBe(6)
+      // 7 reviewing + 6 apply + 6 assessment; no 7th apply
+      expect(applyPasses).toBe(6)
+      expect(assessmentPasses).toBe(6)
+      expect(reviewingPasses).toBe(7)
       expect(result).toEqual({
         _tag: "needs_human",
         reason: REVIEW_FIX_LIMIT_REASON,
@@ -2463,7 +2463,7 @@ describe("review", () => {
               Effect.fail(
                 new AgentBackendStartupTimeoutError({
                   cwd: root,
-                  startupTimeoutMs: 60_000,
+                  startupTimeoutMs: 90_000,
                   sessionId: "ses_review",
                 }),
               ),
@@ -2477,7 +2477,7 @@ describe("review", () => {
       )
       expect(error).toBeInstanceOf(ReviewOpenCodeError)
       expect((error as ReviewOpenCodeError).message).toContain(
-        "no output within the startup window (60000ms)",
+        "no output within the startup window (90000ms)",
       )
       expect((error as ReviewOpenCodeError).message).toContain(
         "session ses_review",
@@ -2491,7 +2491,7 @@ describe("review", () => {
       expect((error as ReviewOpenCodeError).cause).toEqual(
         new AgentBackendStartupTimeoutError({
           cwd: root,
-          startupTimeoutMs: 60_000,
+          startupTimeoutMs: 90_000,
           sessionId: "ses_review",
         }),
       )

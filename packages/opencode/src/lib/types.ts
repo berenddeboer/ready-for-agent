@@ -20,7 +20,7 @@ export interface OpencodeLayerOptions {
    */
   readonly startupActivityDbPath?: string
   /**
-   * Startup inactivity window forwarded to the shared CLI runner (default 60s).
+   * Startup inactivity window forwarded to the shared CLI runner (default 90s).
    * Tests may shorten it.
    */
   readonly startupTimeout?: Duration.Input
