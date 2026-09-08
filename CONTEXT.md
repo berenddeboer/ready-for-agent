@@ -156,8 +156,8 @@ A per-backend degraded state established by failed startup inspection, failed ho
 _Avoid_: Startup failure, automatic fallback, harness-wide block when another backend is healthy, Paused Repository, restart required
 
 **Agent Backend Preview**:
-An inspection of a not-yet-saved Agent Backend selection that loads that backend's Agent Model catalog for Settings or Implement With. It does not add or change an Active Agent Backend or allow Agent Turns on the previewed backend.
-_Avoid_: Hot activate, Recheck Agent Backend
+An inspection that loads an Agent Backend's Agent Model catalog for Settings or Implement With without activating an inactive backend. Opening Settings always Previews the effective backend and, when it is already Active, a successful result becomes the Harness catalog used by Save and later Agent Turns for one minute; a failed Preview keeps the previous Active catalog and readiness.
+_Avoid_: Hot activate, Recheck Agent Backend, Settings-local catalog cache
 
 **Recheck Agent Backend**:
 An explicit operator request that revalidates one Agent Backend by id and refreshes its Agent Model catalog. Success clears that backend's Agent Backend Unavailable and permits Agent Turns on it to resume; failure leaves that backend degraded with an actionable reason. Optional UI may recheck every selected-or-in-use backend.

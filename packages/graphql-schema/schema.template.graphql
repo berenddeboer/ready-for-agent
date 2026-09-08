@@ -33,8 +33,10 @@ type Query {
   """
   agentBackendStatus: AgentBackendStatus!
   """
-  Settings-only inspection of a not-yet-saved Agent Backend catalog.
-  Does not change the Active Agent Backend set.
+  Settings inspection of an Agent Backend catalog. Always inspects.
+  Does not activate an inactive backend. When the backend is already
+  Active, a successful inspect publishes the catalog for Save and Agent
+  Turns; a failed inspect leaves the previous Active catalog unchanged.
   """
   previewAgentBackend(backendId: String!): AgentBackendPreview!
   """

@@ -252,6 +252,7 @@ describe("Hold approved merges during CI failure", () => {
       activate: () => Effect.succeed(readyRuntime()),
       drop: () => Effect.void,
       preview: () => Effect.succeed(readyRuntime()),
+      refreshCatalog: () => Effect.succeed(readyRuntime()),
       withConfigCoordination: (effect) => effect,
       getRegistration: () =>
         Effect.succeed({

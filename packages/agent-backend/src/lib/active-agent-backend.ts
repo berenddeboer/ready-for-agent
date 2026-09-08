@@ -1,4 +1,14 @@
-import { Context, Effect, Layer, Ref, Result, Schema, Semaphore } from "effect"
+import {
+  Clock,
+  Context,
+  Deferred,
+  Effect,
+  Layer,
+  Ref,
+  Result,
+  Schema,
+  Semaphore,
+} from "effect"
 import type { AgentBackend, AgentBackendError } from "./agent-backend.js"
 import { AgentBackend as AgentBackendService } from "./agent-backend.js"
 import {
@@ -84,6 +94,36 @@ export type AgentBackendPreview = {
   readonly warnings: ReadonlyArray<string>
 }
 
+/**
+ * Save reuses a Settings-open or Recheck catalog newer than this. Opening
+ * Settings always inspects (force), so a newly configured model appears without
+ * waiting for the window to expire.
+ */
+export const AGENT_MODEL_CATALOG_FRESHNESS_MS = 60_000
+
+export type RefreshAgentModelCatalogOptions = {
+  /**
+   * When true (Settings / Preview), always inspect. When false or omitted
+   * (Save), reuse a catalog inspected within
+   * {@link AGENT_MODEL_CATALOG_FRESHNESS_MS}.
+   */
+  readonly force?: boolean
+}
+
+export const toAgentBackendPreview = (
+  status: Pick<
+    AgentBackendRuntimeStatus,
+    "backend" | "kind" | "reason" | "models" | "provider" | "warnings"
+  >,
+): AgentBackendPreview => ({
+  backend: status.backend,
+  kind: status.kind,
+  reason: status.reason,
+  models: status.models,
+  provider: status.provider,
+  warnings: status.warnings,
+})
+
 export class AgentBackendUnavailableError extends Schema.TaggedErrorClass<AgentBackendUnavailableError>()(
   "AgentBackendUnavailableError",
   {
@@ -137,6 +177,11 @@ type ActiveEntry = {
    * state over a newer result (issue #822).
    */
   readonly inspectGeneration: number
+  /**
+   * Clock millis of the last applied inspect (Ready or Unavailable). Null
+   * until the first apply; Save treats null as stale.
+   */
+  readonly catalogInspectedAt: number | null
 }
 
 const normalizeInspectProvider = (
@@ -279,6 +324,7 @@ const emptyEntry = (
   provider: null,
   warnings: [],
   inspectGeneration: 0,
+  catalogInspectedAt: null,
 })
 
 export type ActiveAgentBackendShape = {
@@ -340,12 +386,26 @@ export type ActiveAgentBackendShape = {
     backendId: AgentBackendId,
   ) => Effect.Effect<void, AgentBackendUnavailableError>
   /**
-   * Settings-only inspect of a not-yet-saved backend. Does not change the
-   * Active set.
+   * Settings-only inspect of a backend catalog. Always inspects (does not
+   * reuse a still-fresh snapshot). When the backend is already Active, a
+   * successful inspect publishes the catalog for Save and Agent Turns; a
+   * failed inspect leaves the previous Active catalog and readiness
+   * unchanged. Does not add an inactive backend to the Active set.
    */
   readonly preview: (
     backendId: AgentBackendId,
     input: InspectInput,
+  ) => Effect.Effect<AgentBackendPreview>
+  /**
+   * Load the Agent Model catalog for Settings or Save. `force` (Preview)
+   * always inspects; otherwise a snapshot newer than
+   * {@link AGENT_MODEL_CATALOG_FRESHNESS_MS} is reused. Overlapping calls for
+   * the same backend join one in-flight inspect.
+   */
+  readonly refreshCatalog: (
+    backendId: AgentBackendId,
+    input: InspectInput,
+    options?: RefreshAgentModelCatalogOptions,
   ) => Effect.Effect<AgentBackendPreview>
   /**
    * Serialize Config/Repository backend commits + activate with Work Item
@@ -495,10 +555,25 @@ export const ActiveAgentBackendLive = (
         entries: initialEntries,
         proxyBackendId,
       })
+      const inFlightRefreshRef = yield* Ref.make(
+        new Map<string, Deferred.Deferred<AgentBackendPreview>>(),
+      )
+      const previewCacheRef = yield* Ref.make(
+        new Map<
+          string,
+          {
+            readonly preview: AgentBackendPreview
+            readonly inspectedAt: number
+          }
+        >(),
+      )
       const configCoordination = yield* Semaphore.make(1)
       const withConfigCoordination = <A, E, R>(
         effect: Effect.Effect<A, E, R>,
       ): Effect.Effect<A, E, R> => configCoordination.withPermits(1)(effect)
+      const previewFlightsRef = yield* Ref.make(
+        new Map<string, Deferred.Deferred<void>>(),
+      )
 
       const listStatuses = Ref.get(stateRef).pipe(
         Effect.map((state) =>
@@ -581,37 +656,88 @@ export const ActiveAgentBackendLive = (
         },
       )
 
+      type InspectFailurePolicy = "mark-unavailable" | "preserve"
+
       type InspectActiveOutcome = {
         readonly status: AgentBackendRuntimeStatus
         /** The raw inspect failure, or null when inspect succeeded. */
         readonly failure: unknown | null
+        /**
+         * Catalog discovered by this inspect, even when the result was not
+         * applied (backend left Active, or preserve-on-failure).
+         */
+        readonly discovered: AgentBackendPreview
       }
 
-      const inspectActiveEntry = (
+      const completePreviewFlight = (
+        inspectedBackendId: AgentBackendId,
+        flight: Deferred.Deferred<void>,
+      ) =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(flight, undefined)
+          yield* Ref.update(previewFlightsRef, (current) => {
+            if (current.get(inspectedBackendId) !== flight) {
+              return current
+            }
+            const next = new Map(current)
+            next.delete(inspectedBackendId)
+            return next
+          })
+        })
+
+      const inspectActiveEntryBody = (
         inspectedBackendId: AgentBackendId,
         entryAtStart: ActiveEntry,
         input: InspectInput,
+        failurePolicy: InspectFailurePolicy,
       ): Effect.Effect<InspectActiveOutcome> =>
         Effect.gen(function* () {
-          // Claim a generation before calling inspect so concurrent Rechecks
-          // that finish later cannot clobber a fresher catalog/provider/warning
-          // snapshot (issue #822).
-          const claimedGeneration = yield* Ref.modify(stateRef, (state) => {
-            const previous = state.entries.get(inspectedBackendId)
-            if (
-              previous === undefined ||
-              previous.adapter !== entryAtStart.adapter
-            ) {
-              return [null as number | null, state]
-            }
-            const nextGeneration = previous.inspectGeneration + 1
-            const entries = new Map(state.entries)
-            entries.set(inspectedBackendId, {
-              ...previous,
-              inspectGeneration: nextGeneration,
-            })
-            return [nextGeneration, { ...state, entries }]
-          })
+          const backend = entryAtStart.registration.descriptor
+          // Claim a generation before inspect so a slower earlier inspect
+          // cannot clobber a newer snapshot (issue #822), including Settings
+          // Preview vs Recheck. Preserve-failure releases the claim if it is
+          // still current so a concurrent Recheck can still apply.
+          const claimedGeneration = yield* Ref.modify(
+            stateRef,
+            (state): [number | null, RegistryState] => {
+              const previous = state.entries.get(inspectedBackendId)
+              if (
+                previous === undefined ||
+                previous.adapter !== entryAtStart.adapter
+              ) {
+                return [null, state]
+              }
+              const nextGeneration = previous.inspectGeneration + 1
+              const entries = new Map(state.entries)
+              entries.set(inspectedBackendId, {
+                ...previous,
+                inspectGeneration: nextGeneration,
+              })
+              return [nextGeneration, { ...state, entries }]
+            },
+          )
+
+          const inspected = yield* Effect.result(
+            entryAtStart.adapter.inspect(input),
+          )
+          const discovered: AgentBackendPreview = Result.isFailure(inspected)
+            ? {
+                backend,
+                kind: "unavailable",
+                reason: formatInspectFailure(inspected.failure),
+                models: [],
+                provider: providerFromInspectFailure(inspected.failure),
+                warnings: [],
+              }
+            : {
+                backend,
+                kind: "ready",
+                reason: null,
+                models: inspected.success.models,
+                provider: normalizeInspectProvider(inspected.success.provider),
+                warnings: normalizeInspectWarnings(inspected.success.warnings),
+              }
+
           if (claimedGeneration === null) {
             // Entry was dropped or replaced between the caller's snapshot and
             // claim (e.g. deselect/reselect installed a new adapter). Return
@@ -620,15 +746,11 @@ export const ActiveAgentBackendLive = (
             const current = yield* getBackendStatus(inspectedBackendId)
             return {
               status: current ?? notActiveStatus(inspectedBackendId),
-              failure: null,
+              failure: Result.isFailure(inspected) ? inspected.failure : null,
+              discovered,
             }
           }
 
-          const inspected = yield* Effect.result(
-            entryAtStart.adapter.inspect(input),
-          )
-          // Discard results if this backend was dropped, replaced, or a newer
-          // inspect claimed the entry mid-flight.
           const stillCurrentInspect = (state: RegistryState): boolean => {
             const previous = state.entries.get(inspectedBackendId)
             return (
@@ -637,14 +759,10 @@ export const ActiveAgentBackendLive = (
               previous.inspectGeneration === claimedGeneration
             )
           }
-          if (Result.isFailure(inspected)) {
-            const reason = formatInspectFailure(inspected.failure)
-            // Prefer provider reported with this failure (first Unavailable);
-            // otherwise keep last known identity across recheck failures.
-            const failureProvider = providerFromInspectFailure(
-              inspected.failure,
-            )
-            yield* Ref.update(stateRef, (state) => {
+          const applyIfCurrent = (
+            mutate: (previous: ActiveEntry) => ActiveEntry,
+          ) =>
+            Ref.update(stateRef, (state) => {
               if (!stillCurrentInspect(state)) {
                 return state
               }
@@ -653,46 +771,117 @@ export const ActiveAgentBackendLive = (
                 return state
               }
               const entries = new Map(state.entries)
-              entries.set(inspectedBackendId, {
-                ...previous,
-                models: [],
-                unavailableReason: reason,
-                provider: failureProvider ?? previous.provider,
-                warnings: [],
-              })
+              entries.set(inspectedBackendId, mutate(previous))
               return { ...state, entries }
             })
+          // Recheck apply is otherwise one-shot. If Settings Preview claimed a
+          // newer generation, wait it out and retry: a failed Preview restores
+          // generation, and Recheck must still publish Ready or Unavailable. A
+          // successful Preview is newer, so the retry stays discarded.
+          // Overlapping Rechecks do not wait (no Preview flight).
+          const waitForPreviewThenApply = (
+            apply: Effect.Effect<void>,
+          ): Effect.Effect<void> =>
+            Effect.gen(function* () {
+              yield* apply
+              if (failurePolicy !== "mark-unavailable") {
+                return
+              }
+              while (true) {
+                const state = yield* Ref.get(stateRef)
+                if (stillCurrentInspect(state)) {
+                  break
+                }
+                const flight = (yield* Ref.get(previewFlightsRef)).get(
+                  inspectedBackendId,
+                )
+                if (flight === undefined) {
+                  yield* apply
+                  break
+                }
+                yield* Deferred.await(flight)
+                yield* apply
+              }
+            })
+          if (Result.isFailure(inspected)) {
+            if (failurePolicy === "mark-unavailable") {
+              const reason = formatInspectFailure(inspected.failure)
+              // Prefer provider reported with this failure (first Unavailable);
+              // otherwise keep last known identity across recheck failures.
+              const failureProvider = providerFromInspectFailure(
+                inspected.failure,
+              )
+              const now = yield* Clock.currentTimeMillis
+              yield* waitForPreviewThenApply(
+                applyIfCurrent((previous) => ({
+                  ...previous,
+                  models: [],
+                  unavailableReason: reason,
+                  provider: failureProvider ?? previous.provider,
+                  warnings: [],
+                  catalogInspectedAt: now,
+                })),
+              )
+            } else {
+              yield* applyIfCurrent((previous) => ({
+                ...previous,
+                inspectGeneration: claimedGeneration - 1,
+              }))
+            }
             const status = yield* getBackendStatus(inspectedBackendId)
             return {
               status: status ?? notActiveStatus(inspectedBackendId),
               failure: inspected.failure,
+              discovered,
             }
           }
-          yield* Ref.update(stateRef, (state) => {
-            if (!stillCurrentInspect(state)) {
-              return state
-            }
-            const previous = state.entries.get(inspectedBackendId)
-            if (previous === undefined) {
-              return state
-            }
-            const entries = new Map(state.entries)
-            // Atomic Ready refresh: models, provider, and warnings together.
-            entries.set(inspectedBackendId, {
+          const now = yield* Clock.currentTimeMillis
+          yield* waitForPreviewThenApply(
+            applyIfCurrent((previous) => ({
               ...previous,
+              // Atomic Ready refresh: models, provider, and warnings together.
               models: inspected.success.models,
               unavailableReason: null,
               provider: normalizeInspectProvider(inspected.success.provider),
               warnings: normalizeInspectWarnings(inspected.success.warnings),
-            })
-            return { ...state, entries }
-          })
+              catalogInspectedAt: now,
+            })),
+          )
           const status = yield* getBackendStatus(inspectedBackendId)
           return {
             status: status ?? notActiveStatus(inspectedBackendId),
             failure: null,
+            discovered,
           }
         })
+
+      const inspectActiveEntry = (
+        inspectedBackendId: AgentBackendId,
+        entryAtStart: ActiveEntry,
+        input: InspectInput,
+        failurePolicy: InspectFailurePolicy = "mark-unavailable",
+      ): Effect.Effect<InspectActiveOutcome> => {
+        const body = inspectActiveEntryBody(
+          inspectedBackendId,
+          entryAtStart,
+          input,
+          failurePolicy,
+        )
+        if (failurePolicy !== "preserve") {
+          return body
+        }
+        return Effect.gen(function* () {
+          const flight = yield* Deferred.make<void>()
+          yield* Ref.update(previewFlightsRef, (current) => {
+            const next = new Map(current)
+            next.set(inspectedBackendId, flight)
+            return next
+          })
+          return yield* body.pipe(
+            Effect.ensuring(completePreviewFlight(inspectedBackendId, flight)),
+          )
+        })
+      }
 
       const recheck = Effect.fn("ActiveAgentBackend.recheck")(function* (
         backendId: AgentBackendId,
@@ -849,39 +1038,168 @@ export const ActiveAgentBackendLive = (
           }
         }).pipe(Effect.asVoid)
 
-      const preview = Effect.fn("ActiveAgentBackend.preview")(function* (
+      const readFreshCatalog = (
+        resolvedId: AgentBackendId,
+      ): Effect.Effect<AgentBackendPreview | null> =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const current = yield* Ref.get(stateRef)
+          const existing = current.entries.get(resolvedId)
+          if (
+            existing !== undefined &&
+            existing.catalogInspectedAt !== null &&
+            now - existing.catalogInspectedAt < AGENT_MODEL_CATALOG_FRESHNESS_MS
+          ) {
+            return toAgentBackendPreview(toRuntimeStatus(existing))
+          }
+          if (existing === undefined) {
+            const cached = (yield* Ref.get(previewCacheRef)).get(resolvedId)
+            if (
+              cached !== undefined &&
+              now - cached.inspectedAt < AGENT_MODEL_CATALOG_FRESHNESS_MS
+            ) {
+              return cached.preview
+            }
+          }
+          return null
+        })
+
+      const inspectCatalog = (
+        resolvedId: AgentBackendId,
+        input: InspectInput,
+      ): Effect.Effect<AgentBackendPreview> =>
+        Effect.gen(function* () {
+          const backend = descriptorFor(resolvedId)
+          const current = yield* Ref.get(stateRef)
+          const existing = current.entries.get(resolvedId)
+          if (existing !== undefined) {
+            const outcome = yield* inspectActiveEntry(
+              resolvedId,
+              existing,
+              input,
+              "preserve",
+            )
+            // Settings dropdown uses this payload. A successful inspect that
+            // lost to a newer Recheck must still return the published catalog
+            // so Save and Agent Turns see the same snapshot. A failed inspect
+            // keeps `discovered` so Settings can show the Preview error
+            // without marking the Active backend Unavailable. A backend that
+            // left the Active set stays catalog-only (do not activate).
+            if (outcome.failure === null) {
+              const published = yield* getBackendStatus(resolvedId)
+              if (published !== null) {
+                return toAgentBackendPreview(published)
+              }
+            }
+            return outcome.discovered
+          }
+
+          const adapter = (yield* resolveOrUnavailable(resolvedId)).adapter
+          const inspected = yield* Effect.result(adapter.inspect(input))
+          if (Result.isFailure(inspected)) {
+            return {
+              backend,
+              kind: "unavailable" as const,
+              reason: formatInspectFailure(inspected.failure),
+              models: [] as ReadonlyArray<AgentModel>,
+              provider: providerFromInspectFailure(inspected.failure),
+              warnings: [] as ReadonlyArray<string>,
+            }
+          }
+          const previewResult: AgentBackendPreview = {
+            backend,
+            kind: "ready",
+            reason: null,
+            models: inspected.success.models,
+            provider: normalizeInspectProvider(inspected.success.provider),
+            warnings: normalizeInspectWarnings(inspected.success.warnings),
+          }
+          const inspectedAt = yield* Clock.currentTimeMillis
+          yield* Ref.update(previewCacheRef, (cache) => {
+            const next = new Map(cache)
+            next.set(resolvedId, {
+              preview: previewResult,
+              inspectedAt,
+            })
+            return next
+          })
+          return previewResult
+        })
+
+      const refreshCatalog = Effect.fn("ActiveAgentBackend.refreshCatalog")(
+        function* (
+          backendId: AgentBackendId,
+          input: InspectInput,
+          options?: RefreshAgentModelCatalogOptions,
+        ) {
+          const resolvedId = normalizeBackendId(backendId)
+          const force = options?.force === true
+          const inflight = (yield* Ref.get(inFlightRefreshRef)).get(resolvedId)
+          if (inflight !== undefined) {
+            return yield* Deferred.await(inflight)
+          }
+          if (!force) {
+            const fresh = yield* readFreshCatalog(resolvedId)
+            if (fresh !== null) {
+              return fresh
+            }
+          }
+          const deferred = yield* Deferred.make<AgentBackendPreview>()
+          const claimed = yield* Ref.modify(
+            inFlightRefreshRef,
+            (
+              currentInflight,
+            ): [
+              (
+                | {
+                    readonly kind: "run"
+                    readonly deferred: Deferred.Deferred<AgentBackendPreview>
+                  }
+                | {
+                    readonly kind: "join"
+                    readonly deferred: Deferred.Deferred<AgentBackendPreview>
+                  }
+              ),
+              Map<string, Deferred.Deferred<AgentBackendPreview>>,
+            ] => {
+              const existingInflight = currentInflight.get(resolvedId)
+              if (existingInflight !== undefined) {
+                return [
+                  { kind: "join", deferred: existingInflight },
+                  currentInflight,
+                ]
+              }
+              const next = new Map(currentInflight)
+              next.set(resolvedId, deferred)
+              return [{ kind: "run", deferred }, next]
+            },
+          )
+          if (claimed.kind === "join") {
+            return yield* Deferred.await(claimed.deferred)
+          }
+          return yield* inspectCatalog(resolvedId, input).pipe(
+            Effect.tap((previewResult) =>
+              Deferred.succeed(claimed.deferred, previewResult),
+            ),
+            Effect.tapCause((cause) =>
+              Deferred.failCause(claimed.deferred, cause),
+            ),
+            Effect.ensuring(
+              Ref.update(inFlightRefreshRef, (currentInflight) => {
+                const next = new Map(currentInflight)
+                next.delete(resolvedId)
+                return next
+              }),
+            ),
+          )
+        },
+      )
+
+      const preview = (
         backendId: AgentBackendId,
         input: InspectInput,
-      ) {
-        const resolvedId = normalizeBackendId(backendId)
-        const backend = descriptorFor(resolvedId)
-        const current = yield* Ref.get(stateRef)
-        const existing = current.entries.get(resolvedId)
-        const adapter =
-          existing !== undefined
-            ? existing.adapter
-            : (yield* resolveOrUnavailable(resolvedId)).adapter
-        const inspected = yield* Effect.result(adapter.inspect(input))
-        if (Result.isFailure(inspected)) {
-          return {
-            backend,
-            kind: "unavailable" as const,
-            reason: formatInspectFailure(inspected.failure),
-            models: [] as ReadonlyArray<AgentModel>,
-            provider: providerFromInspectFailure(inspected.failure),
-            warnings: [] as ReadonlyArray<string>,
-          }
-        }
-        // Preview must not mutate the Active set.
-        return {
-          backend,
-          kind: "ready" as const,
-          reason: null,
-          models: inspected.success.models,
-          provider: normalizeInspectProvider(inspected.success.provider),
-          warnings: normalizeInspectWarnings(inspected.success.warnings),
-        }
-      })
+      ): Effect.Effect<AgentBackendPreview> =>
+        refreshCatalog(backendId, input, { force: true })
 
       const getRegistration = (backendId: AgentBackendId) =>
         Ref.get(stateRef).pipe(
@@ -1019,6 +1337,7 @@ export const ActiveAgentBackendLive = (
         inspectStartupBackend,
         requireAgentTurnsAllowed,
         preview,
+        refreshCatalog,
         withConfigCoordination,
         getRegistration,
         getActiveRegistration,

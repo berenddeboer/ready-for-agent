@@ -9,13 +9,22 @@ describe("Harness settings Agent Backend change", () => {
   test("previews catalog and restores per-backend prefs without restart ceremony", () => {
     const source = rootSource()
     expect(source).toContain(
-      "const applyAgentBackendSelection = async (nextBackend: string) => {",
+      "const applyAgentBackendSelection = (nextBackend: string) => {",
     )
     expect(source).toContain(
       "void applyAgentBackendSelection(event.target.value)",
     )
     expect(source).toContain("previewAgentBackend")
     expect(source).toContain("harnessModelPrefs")
+    // Catalog Preview must not hide the whole form behind "Loading settings...".
+    expect(source).not.toContain("config.isPending || modelsLoading")
+    // A failed Preview is a settled error, not an in-flight catalog load.
+    expect(source).toContain(
+      "const catalogFailed = previewError !== null && !previewPending",
+    )
+    expect(source).toContain("const catalogLoading = modelsLoading")
+    expect(source).toContain("settingsPreviewEpoch")
+    expect(source).toContain("setSettingsPreviewEpoch")
     expect(source).toContain("blockingUnfinishedWorkItemCount")
     expect(source).toContain("backendChangeBlocked")
     expect(source).toContain(
@@ -122,6 +131,11 @@ describe("Harness settings Agent Backend change", () => {
     )
     expect(prepare).toContain("void models.refetch()")
     expect(prepare).toContain("void backendStatus.refetch()")
+    expect(prepare).toContain("setPreviewPending(true)")
+    expect(source).toContain("previewAgentBackend")
+    expect(source).toContain(
+      "Opening Settings always Previews the selected backend",
+    )
     // Explicit openers still prepare then mask `/settings` (issues #840 / #1146).
     expect(source).toContain("openHarnessSettings")
     expect(source).toContain("prepareSettingsSession()")

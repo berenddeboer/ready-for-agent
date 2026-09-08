@@ -978,6 +978,9 @@ function RepositoryCard({
     reviewThinkingLevel: string | null
   } | null>(null)
   const previewGenerationRef = useRef(0)
+  // Bumped by prepareSettingsSession so Preview re-runs after a routed open
+  // (Forward / direct) that otherwise abandons the first in-flight fetch.
+  const [settingsPreviewEpoch, setSettingsPreviewEpoch] = useState(0)
   // Dialog-session stash so switching backends and back restores form fields.
   // Server map for non-projected backends needs repositoryModelPrefs.
   type DraftModelPrefs = {
@@ -1117,21 +1120,12 @@ function RepositoryCard({
     // validate against the previous override's catalog for a render frame.
     // Bump generation so any in-flight preview is ignored when the effect runs.
     previewGenerationRef.current += 1
-    if (nextEffective === harnessDefault) {
-      setPreviewPending(false)
-      setPreviewError(null)
-      setPreviewModels(null)
-      setPreviewProvider(null)
-      setPreviewWarnings([])
-      setHarnessPrefsForDraft(null)
-    } else {
-      setPreviewPending(true)
-      setPreviewError(null)
-      setPreviewModels(null)
-      setPreviewProvider(null)
-      setPreviewWarnings([])
-      setHarnessPrefsForDraft(null)
-    }
+    setPreviewPending(true)
+    setPreviewError(null)
+    setPreviewModels(null)
+    setPreviewProvider(null)
+    setPreviewWarnings([])
+    setHarnessPrefsForDraft(null)
 
     const stashed = draftPrefsByBackendRef.current[nextEffective]
     if (stashed !== undefined) {
@@ -1162,6 +1156,7 @@ function RepositoryCard({
   const prepareSettingsSessionRef = useRef(() => {})
   prepareSettingsSessionRef.current = () => {
     previewGenerationRef.current += 1
+    setSettingsPreviewEpoch((epoch) => epoch + 1)
     setPaused(repository.paused)
     setForge(repository.forge)
     setForgeHost(repository.forgeHost)
@@ -1183,9 +1178,9 @@ function RepositoryCard({
     setPreviewProvider(null)
     setPreviewWarnings([])
     setPreviewError(null)
-    // Override catalogs load via preview; start pending so model fields stay
-    // disabled until the effect loads the correct catalog.
-    setPreviewPending(repository.selectedAgentBackend !== null)
+    // Catalogs load via Preview on every open so Save validates the same
+    // snapshot the dropdown offers.
+    setPreviewPending(true)
     setHarnessPrefsForDraft(null)
     // Seed session stash with the saved effective projection.
     draftPrefsByBackendRef.current = {
@@ -1372,26 +1367,23 @@ function RepositoryCard({
   const backendDraftChanging = draftEffective !== savedEffective
   const backendChangeBlocked = repository.blockingUnfinishedWorkItemCount > 0
 
-  // Override / draft backends cannot use the harness-default models query.
+  // Opening Settings Previews the effective backend (including the harness
+  // default) so Save validates the same catalog the dropdown offers.
   // Depend only on selectedAgentBackend (not whole config.data) so live config
   // refetches that only update unfinished counts do not thrash preview.
   const harnessDefaultBackendFromConfig =
     config.data?.selectedAgentBackend ?? null
   useEffect(() => {
     if (!dialogOpen || harnessDefaultBackendFromConfig === null) {
+      if (!dialogOpen) {
+        previewGenerationRef.current += 1
+        setPreviewPending(false)
+      }
       return
     }
+    void settingsPreviewEpoch
     const harnessDefault = harnessDefaultBackendFromConfig
     const effective = selectedAgentBackend ?? harnessDefault
-    if (effective === harnessDefault) {
-      setHarnessPrefsForDraft(null)
-      setPreviewModels(null)
-      setPreviewProvider(null)
-      setPreviewWarnings([])
-      setPreviewError(null)
-      setPreviewPending(false)
-      return
-    }
     const generation = ++previewGenerationRef.current
     setPreviewPending(true)
     setPreviewError(null)
@@ -1440,6 +1432,9 @@ function RepositoryCard({
         if (preview.kind === "READY") {
           setPreviewModels(preview.models)
           setPreviewError(null)
+          void queryClient.invalidateQueries({
+            queryKey: ["agentBackendStatus"],
+          })
         } else {
           setPreviewModels([])
           setPreviewError(
@@ -1465,7 +1460,13 @@ function RepositoryCard({
         }
       }
     })()
-  }, [dialogOpen, harnessDefaultBackendFromConfig, selectedAgentBackend])
+  }, [
+    dialogOpen,
+    harnessDefaultBackendFromConfig,
+    selectedAgentBackend,
+    queryClient,
+    settingsPreviewEpoch,
+  ])
 
   const inheritHarnessBuildModel = (): string => {
     if (harnessPrefsForDraft !== null) {
@@ -1519,11 +1520,10 @@ function RepositoryCard({
   const harnessReviewModel = inheritHarnessReviewModel()
   const harnessReviewVariant = inheritHarnessReviewVariant()
 
-  // Global models query catalogs only the harness default backend. Effective
-  // override catalogs (saved or draft) come from Preview.
-  const usesPreviewCatalog = draftEffective !== harnessDefaultBackendId
+  // Opening Settings always Previews the effective backend so the dropdown
+  // and Save share one fresh catalog, including the harness default.
   const catalogModels: readonly AgentModelOption[] | undefined =
-    usesPreviewCatalog ? (previewModels ?? undefined) : models.data
+    previewModels ?? undefined
   const modelIds = (catalogModels ?? []).map((model) => model.id)
   const modelBackendId = draftEffective
   const catalogLoaded = catalogModels !== undefined
@@ -1587,34 +1587,20 @@ function RepositoryCard({
     reviewThinkingLevel.length > 0 &&
     (reviewThinkingLevelSourceUnavailable ||
       !reviewThinkingLevels.includes(reviewThinkingLevel))
-  const modelsDisabled =
-    usesPreviewCatalog && (previewPending || previewError !== null)
+  const modelsDisabled = previewPending || previewError !== null
   // isFetching, not isPending: opening Settings refetches, and React Query
   // would otherwise keep serving the previous catalog while that request is in
   // flight — exactly the indefinitely-cached catalog a Harness restart must
   // invalidate (issue #838). Treat a refresh as "no catalog yet" so no stale
   // model is offered and Save stays blocked until the current one arrives.
-  const modelsLoading =
-    dialogOpen &&
-    (usesPreviewCatalog
-      ? previewPending || config.isFetching
-      : models.isFetching || config.isFetching || agentBackends.isFetching)
+  const modelsLoading = dialogOpen && previewPending
   // A backend-draft change may only be saved once its Preview catalog resolved,
   // so the model overrides are validated against the next Effective backend.
-  const catalogReadyForModelValidation = usesPreviewCatalog
-    ? !previewPending && previewError === null && previewModels !== null
-    : !models.isFetching && !models.isError && models.data !== undefined
-  const discoveryWarningsForModels = usesPreviewCatalog ? previewWarnings : []
-  const catalogFailed =
-    !modelsLoading &&
-    !modelsDisabled &&
-    (usesPreviewCatalog
-      ? previewError !== null
-      : models.isError || agentBackends.isError)
-  const catalogLoading =
-    modelsLoading ||
-    modelsDisabled ||
-    (!catalogFailed && catalogModels === undefined)
+  const catalogReadyForModelValidation =
+    !previewPending && previewError === null && previewModels !== null
+  const discoveryWarningsForModels = previewWarnings
+  const catalogFailed = previewError !== null && !previewPending
+  const catalogLoading = modelsLoading
   const catalogState = {
     backendId: modelBackendId,
     configurationMode: modelConfigurationMode,
@@ -1694,10 +1680,8 @@ function RepositoryCard({
     (backendChangeBlocked &&
       selectedAgentBackend !== repository.selectedAgentBackend) ||
     (backendDraftChanging && modelsLoading) ||
-    (backendDraftChanging &&
-      usesPreviewCatalog &&
-      !catalogReadyForModelValidation) ||
-    (backendDraftChanging && usesPreviewCatalog && previewError !== null) ||
+    (backendDraftChanging && !catalogReadyForModelValidation) ||
+    (backendDraftChanging && previewError !== null) ||
     blockSaveForBuildModel ||
     blockSaveForReviewModel ||
     blockSaveForBuildThinking ||
@@ -2337,7 +2321,7 @@ function RepositoryCard({
                   </span>
                 </label>
 
-                {usesPreviewCatalog && !previewPending && (
+                {!previewPending && (
                   <div className={ui.dialogStatusLabel}>
                     <p className="m-0">
                       {formatAgentBackendStatusLabel({
@@ -2369,17 +2353,17 @@ function RepositoryCard({
                   </Banner>
                 )}
 
-                {usesPreviewCatalog && previewError !== null && (
+                {previewError !== null && (
                   <Banner
                     className={ui.bannerCompact}
                     tone="alarm"
                     tag="Error"
                     role="alert"
                   >
-                    Preview failed: {previewError}. Model fields stay disabled
-                    until preview succeeds.
+                    Could not refresh the Agent Model catalog: {previewError}.
+                    Form edits are kept. Retry by reopening Settings.
                     {backendDraftChanging
-                      ? " Changing the effective backend cannot be saved until preview succeeds."
+                      ? " Changing the effective backend cannot be saved until the catalog loads."
                       : " Non-model settings can still be saved."}
                   </Banner>
                 )}
@@ -2401,15 +2385,6 @@ function RepositoryCard({
 
                 {modelsLoading ? (
                   <p className={ui.dialogLoading}>Loading models...</p>
-                ) : !usesPreviewCatalog && models.isError ? (
-                  <Banner
-                    className={ui.bannerCompact}
-                    tone="alarm"
-                    tag="Error"
-                    role="alert"
-                  >
-                    Models could not be loaded.
-                  </Banner>
                 ) : (
                   <>
                     <AgentModelSelect

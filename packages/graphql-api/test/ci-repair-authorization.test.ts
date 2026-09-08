@@ -299,6 +299,7 @@ describe("Authorize incident-scoped CI Repair", () => {
         activate: () => Effect.succeed(readyRuntime()),
         drop: () => Effect.void,
         preview: () => Effect.succeed(readyRuntime()),
+        refreshCatalog: () => Effect.succeed(readyRuntime()),
         withConfigCoordination: (effect) => effect,
         getRegistration: () =>
           Effect.succeed({

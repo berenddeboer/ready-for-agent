@@ -190,6 +190,15 @@ export const stubActiveAgentBackendLayer = (
           provider: overrides.provider ?? null,
           warnings: [],
         }),
+      refreshCatalog: (backendId) =>
+        Effect.succeed({
+          backend: registrationFor(backendId).descriptor,
+          kind: "ready" as const,
+          reason: null,
+          models: overrides.models ?? [],
+          provider: overrides.provider ?? null,
+          warnings: [],
+        }),
       withConfigCoordination: (effect) => effect,
       getRegistration: (backendId) =>
         Effect.succeed(registrationFor(backendId)),

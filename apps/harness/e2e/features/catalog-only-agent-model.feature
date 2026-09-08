@@ -44,3 +44,20 @@ Feature: Agent Model selection is catalog-only
     And I reopen Harness settings
     Then the build model dropdown offers no usable Agent Model
     And saving Harness settings is blocked
+
+  Scenario: An already-Active Repository override can save a model added while the Harness is running
+    Given the Harness runs Claude Code with the "sonnet" Agent Model
+    And the Harness has no configured Repositories
+    And the End-to-End Fixture Repository is checked out
+    When I add the Repository with the CLI
+    And the Repository stores an OpenCode override with "opencode/test-model-a"
+    And I add "azure/gpt-6-astra" to the OpenCode catalog without restarting the Harness
+    And I open Repository settings
+    Then the Repository build model dropdown offers "azure/gpt-6-astra"
+    When I choose the Repository build model "azure/gpt-6-astra"
+    And I choose the Repository build thinking level "high"
+    Then saving Repository settings is allowed
+    When I save Repository settings
+    And I open Repository settings
+    Then the Repository build model dropdown has "azure/gpt-6-astra" selected
+    And the Repository build thinking level has "high" selected

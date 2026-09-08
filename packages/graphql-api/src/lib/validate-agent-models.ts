@@ -49,9 +49,9 @@ const backendLabel = (backendId: string): string =>
 /**
  * Catalog for the backend a mutation is about to make selected/effective.
  *
- * An Active backend answers from its current status; anything else is resolved
- * through the same Preview path Settings uses, so a not-yet-Active draft
- * backend validates against what it would actually offer. A backend that is
+ * Save reuses a Settings-open or Recheck snapshot that is still fresh, and
+ * inspects only when that window has expired, so a model offered by Settings
+ * is judged against the same authoritative catalog. A backend that is
  * Unavailable (or unknown) yields no catalog — membership cannot be
  * established, so explicit models are rejected rather than trusted.
  */
@@ -67,14 +67,10 @@ const resolveValidationCatalog = (
       } as const
     }
     const active = yield* ActiveAgentBackend
-    const id = backendId as AgentBackendId
-    const status = yield* active.getBackendStatus(id)
-    if (status !== null) {
-      return status.kind === "ready"
-        ? ({ _tag: "ready", models: status.models } as const)
-        : ({ _tag: "unusable", reason: status.reason } as const)
-    }
-    const preview = yield* active.preview(id, inspectInput)
+    const preview = yield* active.refreshCatalog(
+      backendId as AgentBackendId,
+      inspectInput,
+    )
     return preview.kind === "ready"
       ? ({ _tag: "ready", models: preview.models } as const)
       : ({ _tag: "unusable", reason: preview.reason } as const)

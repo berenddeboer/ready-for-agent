@@ -369,6 +369,15 @@ describe("production GraphQL SSE idle timeout", () => {
             provider: null,
             warnings: [],
           }),
+        refreshCatalog: () =>
+          Effect.succeed({
+            backend: { id: "opencode", label: "OpenCode" },
+            kind: "ready" as const,
+            reason: null,
+            models: readyStatus().models,
+            provider: null,
+            warnings: [],
+          }),
         withConfigCoordination: (effect) => effect,
         getRegistration: () =>
           Effect.succeed({

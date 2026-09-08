@@ -255,6 +255,7 @@ describe("Hold ordinary remote admission during CI failure", () => {
       activate: () => Effect.succeed(readyRuntime()),
       drop: () => Effect.void,
       preview: () => Effect.succeed(readyRuntime()),
+      refreshCatalog: () => Effect.succeed(readyRuntime()),
       withConfigCoordination: (effect) => effect,
       getRegistration: () =>
         Effect.succeed({

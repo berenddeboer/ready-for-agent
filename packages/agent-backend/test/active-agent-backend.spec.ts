@@ -1,6 +1,8 @@
 import { Effect, Fiber } from "effect"
+import { TestClock } from "effect/testing"
 import {
   AGENT_BACKEND_IDS,
+  AGENT_MODEL_CATALOG_FRESHNESS_MS,
   ActiveAgentBackend,
   ActiveAgentBackendLive,
   AgentBackend,
@@ -874,6 +876,816 @@ describe("ActiveAgentBackend multi-backend registry", () => {
         const builtIn = yield* active.getRegistration(AGENT_BACKEND_IDS.grok)
         expect(builtIn.descriptor.id).toBe("grok")
       }).pipe(Effect.provide(layer)),
+    )
+  })
+})
+
+describe("Agent Model catalog refresh freshness", () => {
+  const inspectInput = { cwd: "/tmp" as const }
+
+  const makeMutableResolve = (options: {
+    readonly models: () => ReadonlyArray<{
+      id: string
+      thinkingLevels: readonly string[]
+    }>
+    readonly inspectStarted?: () => void
+    readonly inspectGate?: () => Promise<void>
+    readonly failInspect?: () => boolean
+    readonly inspectCount: { value: number }
+  }): ResolveAgentBackendRuntime => {
+    const inner = makeResolve({})
+    return (backendId) =>
+      inner(backendId).pipe(
+        Effect.map((runtime) => ({
+          ...runtime,
+          adapter: {
+            ...runtime.adapter,
+            inspect: () =>
+              Effect.gen(function* () {
+                options.inspectCount.value += 1
+                options.inspectStarted?.()
+                if (options.inspectGate !== undefined) {
+                  yield* Effect.promise(options.inspectGate)
+                }
+                if (options.failInspect?.() === true) {
+                  return yield* Effect.fail(
+                    new AgentBackendConfigError({
+                      message: `${backendId} catalog inspect failed`,
+                    }),
+                  )
+                }
+                return {
+                  backend: runtime.registration.descriptor,
+                  models: [...options.models()],
+                  provider: null,
+                  warnings: [] as const,
+                }
+              }),
+          },
+        })),
+      )
+  }
+
+  const runWithTestClock = <A>(
+    layer: ReturnType<typeof ActiveAgentBackendLive>,
+    program: Effect.Effect<A, unknown, ActiveAgentBackend>,
+  ) =>
+    Effect.runPromise(
+      program.pipe(Effect.provide(layer), Effect.provide(TestClock.layer())),
+    )
+
+  it("Preview of an Active backend publishes the inspected catalog", async () => {
+    const inspectCount = { value: 0 }
+    let models = [{ id: "opencode/old", thinkingLevels: ["low"] as const }]
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime: makeMutableResolve({
+        models: () => models,
+        inspectCount,
+      }),
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        expect(
+          (yield* active.getBackendStatus(
+            AGENT_BACKEND_IDS.opencode,
+          ))?.models.map((model) => model.id),
+        ).toEqual(["opencode/old"])
+
+        models = [
+          { id: "opencode/old", thinkingLevels: ["low"] },
+          { id: "azure/gpt-6-astra", thinkingLevels: ["low", "high"] },
+        ]
+        const preview = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(preview.kind).toBe("ready")
+        expect(preview.models.map((model) => model.id)).toEqual([
+          "opencode/old",
+          "azure/gpt-6-astra",
+        ])
+        expect(
+          (yield* active.getBackendStatus(
+            AGENT_BACKEND_IDS.opencode,
+          ))?.models.map((model) => model.id),
+        ).toEqual(["opencode/old", "azure/gpt-6-astra"])
+      }),
+    )
+  })
+
+  it("Preview of an inactive backend does not add it to the Active set", async () => {
+    const inspectCount = { value: 0 }
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime: makeMutableResolve({
+        models: () => [{ id: "grok/preview", thinkingLevels: ["high"] }],
+        inspectCount,
+      }),
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        const preview = yield* active.preview(
+          AGENT_BACKEND_IDS.grok,
+          inspectInput,
+        )
+        expect(preview.kind).toBe("ready")
+        expect(preview.models[0]?.id).toBe("grok/preview")
+        expect(yield* active.getBackendStatus(AGENT_BACKEND_IDS.grok)).toBe(
+          null,
+        )
+      }),
+    )
+  })
+
+  it("Save reuses a still-fresh catalog and inspects after the freshness window", async () => {
+    const inspectCount = { value: 0 }
+    let models = [{ id: "opencode/old", thinkingLevels: ["low"] as const }]
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime: makeMutableResolve({
+        models: () => models,
+        inspectCount,
+      }),
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        yield* active.preview(AGENT_BACKEND_IDS.opencode, inspectInput)
+        const afterOpen = inspectCount.value
+        models = [{ id: "azure/gpt-6-astra", thinkingLevels: ["high"] }]
+
+        const reused = yield* active.refreshCatalog(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterOpen)
+        expect(reused.models.map((model) => model.id)).toEqual(["opencode/old"])
+
+        yield* TestClock.adjust(`${AGENT_MODEL_CATALOG_FRESHNESS_MS} millis`)
+        const refreshed = yield* active.refreshCatalog(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterOpen + 1)
+        expect(refreshed.models.map((model) => model.id)).toEqual([
+          "azure/gpt-6-astra",
+        ])
+        expect(
+          (yield* active.getBackendStatus(
+            AGENT_BACKEND_IDS.opencode,
+          ))?.models.map((model) => model.id),
+        ).toEqual(["azure/gpt-6-astra"])
+      }),
+    )
+  })
+
+  it("overlapping refreshes share one inspect", async () => {
+    const inspectCount = { value: 0 }
+    let releaseInspect: (() => void) | undefined
+    const inspectGate = new Promise<void>((resolve) => {
+      releaseInspect = resolve
+    })
+    let markStarted: (() => void) | undefined
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime: makeMutableResolve({
+        models: () => [{ id: "opencode/shared", thinkingLevels: [] }],
+        inspectCount,
+        inspectStarted: () => markStarted?.(),
+        inspectGate: () => inspectGate,
+      }),
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const first = yield* Effect.forkChild(
+          active.preview(AGENT_BACKEND_IDS.opencode, inspectInput),
+        )
+        yield* Effect.promise(() => started)
+        const second = yield* Effect.forkChild(
+          active.preview(AGENT_BACKEND_IDS.opencode, inspectInput),
+        )
+        yield* Effect.yieldNow
+        releaseInspect?.()
+        const firstResult = yield* Fiber.join(first)
+        const secondResult = yield* Fiber.join(second)
+        expect(inspectCount.value).toBe(1)
+        expect(firstResult.models[0]?.id).toBe("opencode/shared")
+        expect(secondResult.models[0]?.id).toBe("opencode/shared")
+      }),
+    )
+  })
+
+  it("failed Preview of an Active backend keeps the previous catalog and does not mark Unavailable", async () => {
+    const inspectCount = { value: 0 }
+    let failInspect = false
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime: makeMutableResolve({
+        models: () => [{ id: "opencode/live", thinkingLevels: ["low"] }],
+        inspectCount,
+        failInspect: () => failInspect,
+      }),
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        failInspect = true
+        const preview = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(preview.kind).toBe("unavailable")
+        expect(preview.reason).toContain("catalog inspect failed")
+        const status = yield* active.getBackendStatus(
+          AGENT_BACKEND_IDS.opencode,
+        )
+        expect(status?.kind).toBe("ready")
+        expect(status?.models.map((model) => model.id)).toEqual([
+          "opencode/live",
+        ])
+      }),
+    )
+  })
+
+  it("failed Preview does not discard a concurrent Recheck catalog update", async () => {
+    let releaseRecheck: (() => void) | undefined
+    const recheckGate = new Promise<void>((resolve) => {
+      releaseRecheck = resolve
+    })
+    let markRecheckEntered: (() => void) | undefined
+    const recheckEntered = new Promise<void>((resolve) => {
+      markRecheckEntered = resolve
+    })
+    let inspectCalls = 0
+    const resolveRuntime: ResolveAgentBackendRuntime = (backendId) => {
+      const reg = registration(backendId)
+      return Effect.succeed({
+        registration: reg,
+        adapter: {
+          inspect: () =>
+            Effect.gen(function* () {
+              inspectCalls += 1
+              const call = inspectCalls
+              if (call === 1) {
+                return {
+                  backend: reg.descriptor,
+                  models: [{ id: "old-model", thinkingLevels: ["low"] }],
+                }
+              }
+              if (call === 2) {
+                markRecheckEntered?.()
+                yield* Effect.promise(() => recheckGate)
+                return {
+                  backend: reg.descriptor,
+                  models: [{ id: "recheck-model", thinkingLevels: ["high"] }],
+                }
+              }
+              return yield* Effect.fail(
+                new AgentBackendConfigError({
+                  message: "preview inspect failed",
+                }),
+              )
+            }),
+          startTurn: () => Effect.die("unused"),
+          continueTurn: () => Effect.die("unused"),
+        },
+        telemetry: {
+          getSession: (sessionId: string) =>
+            Effect.succeed(
+              unsupportedSessionTelemetry(sessionId, reg.descriptor),
+            ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: reg.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
+        },
+      })
+    }
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        const recheckFiber = yield* Effect.forkChild(
+          active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput),
+        )
+        yield* Effect.promise(() => recheckEntered)
+        const preview = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(preview.kind).toBe("unavailable")
+        releaseRecheck?.()
+        const rechecked = yield* Fiber.join(recheckFiber)
+        expect(rechecked.kind).toBe("ready")
+        expect(rechecked.models.map((model) => model.id)).toEqual([
+          "recheck-model",
+        ])
+        expect(
+          (yield* active.getBackendStatus(
+            AGENT_BACKEND_IDS.opencode,
+          ))?.models.map((model) => model.id),
+        ).toEqual(["recheck-model"])
+      }),
+    )
+  })
+
+  it("publishes Recheck when it finishes inspect while a failing Preview is still in flight", async () => {
+    let releaseRecheck: (() => void) | undefined
+    const recheckGate = new Promise<void>((resolve) => {
+      releaseRecheck = resolve
+    })
+    let markRecheckEntered: (() => void) | undefined
+    const recheckEntered = new Promise<void>((resolve) => {
+      markRecheckEntered = resolve
+    })
+    let markRecheckInspectDone: (() => void) | undefined
+    const recheckInspectDone = new Promise<void>((resolve) => {
+      markRecheckInspectDone = resolve
+    })
+    let releasePreview: (() => void) | undefined
+    const previewGate = new Promise<void>((resolve) => {
+      releasePreview = resolve
+    })
+    let markPreviewEntered: (() => void) | undefined
+    const previewEntered = new Promise<void>((resolve) => {
+      markPreviewEntered = resolve
+    })
+    let inspectCalls = 0
+    const resolveRuntime: ResolveAgentBackendRuntime = (backendId) => {
+      const reg = registration(backendId)
+      return Effect.succeed({
+        registration: reg,
+        adapter: {
+          inspect: () =>
+            Effect.gen(function* () {
+              inspectCalls += 1
+              const call = inspectCalls
+              if (call === 1) {
+                return {
+                  backend: reg.descriptor,
+                  models: [{ id: "old-model", thinkingLevels: ["low"] }],
+                }
+              }
+              if (call === 2) {
+                markRecheckEntered?.()
+                yield* Effect.promise(() => recheckGate)
+                markRecheckInspectDone?.()
+                return {
+                  backend: reg.descriptor,
+                  models: [{ id: "recheck-model", thinkingLevels: ["high"] }],
+                }
+              }
+              markPreviewEntered?.()
+              yield* Effect.promise(() => previewGate)
+              return yield* Effect.fail(
+                new AgentBackendConfigError({
+                  message: "preview inspect failed",
+                }),
+              )
+            }),
+          startTurn: () => Effect.die("unused"),
+          continueTurn: () => Effect.die("unused"),
+        },
+        telemetry: {
+          getSession: (sessionId: string) =>
+            Effect.succeed(
+              unsupportedSessionTelemetry(sessionId, reg.descriptor),
+            ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: reg.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
+        },
+      })
+    }
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        const recheckFiber = yield* Effect.forkChild(
+          active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput),
+        )
+        yield* Effect.promise(() => recheckEntered)
+        const previewFiber = yield* Effect.forkChild(
+          active.preview(AGENT_BACKEND_IDS.opencode, inspectInput),
+        )
+        yield* Effect.promise(() => previewEntered)
+        // Recheck claimed first; Preview now holds a newer generation. Finish
+        // Recheck inspect while Preview is still in flight so apply is skipped
+        // unless Recheck waits for that Preview to finish.
+        releaseRecheck?.()
+        yield* Effect.promise(() => recheckInspectDone)
+        for (let i = 0; i < 8; i += 1) {
+          yield* Effect.yieldNow
+        }
+        releasePreview?.()
+        const rechecked = yield* Fiber.join(recheckFiber)
+        const preview = yield* Fiber.join(previewFiber)
+        expect(preview.kind).toBe("unavailable")
+        expect(rechecked.kind).toBe("ready")
+        expect(rechecked.models.map((model) => model.id)).toEqual([
+          "recheck-model",
+        ])
+        expect(
+          (yield* active.getBackendStatus(
+            AGENT_BACKEND_IDS.opencode,
+          ))?.models.map((model) => model.id),
+        ).toEqual(["recheck-model"])
+      }),
+    )
+  })
+
+  it("marks Unavailable when Recheck fails while a failing Preview is still in flight", async () => {
+    let releaseRecheck: (() => void) | undefined
+    const recheckGate = new Promise<void>((resolve) => {
+      releaseRecheck = resolve
+    })
+    let markRecheckEntered: (() => void) | undefined
+    const recheckEntered = new Promise<void>((resolve) => {
+      markRecheckEntered = resolve
+    })
+    let markRecheckInspectDone: (() => void) | undefined
+    const recheckInspectDone = new Promise<void>((resolve) => {
+      markRecheckInspectDone = resolve
+    })
+    let releasePreview: (() => void) | undefined
+    const previewGate = new Promise<void>((resolve) => {
+      releasePreview = resolve
+    })
+    let markPreviewEntered: (() => void) | undefined
+    const previewEntered = new Promise<void>((resolve) => {
+      markPreviewEntered = resolve
+    })
+    let inspectCalls = 0
+    const resolveRuntime: ResolveAgentBackendRuntime = (backendId) => {
+      const reg = registration(backendId)
+      return Effect.succeed({
+        registration: reg,
+        adapter: {
+          inspect: () =>
+            Effect.gen(function* () {
+              inspectCalls += 1
+              const call = inspectCalls
+              if (call === 1) {
+                return {
+                  backend: reg.descriptor,
+                  models: [{ id: "old-model", thinkingLevels: ["low"] }],
+                }
+              }
+              if (call === 2) {
+                markRecheckEntered?.()
+                yield* Effect.promise(() => recheckGate)
+                markRecheckInspectDone?.()
+                return yield* Effect.fail(
+                  new AgentBackendConfigError({
+                    message: "recheck inspect failed",
+                  }),
+                )
+              }
+              markPreviewEntered?.()
+              yield* Effect.promise(() => previewGate)
+              return yield* Effect.fail(
+                new AgentBackendConfigError({
+                  message: "preview inspect failed",
+                }),
+              )
+            }),
+          startTurn: () => Effect.die("unused"),
+          continueTurn: () => Effect.die("unused"),
+        },
+        telemetry: {
+          getSession: (sessionId: string) =>
+            Effect.succeed(
+              unsupportedSessionTelemetry(sessionId, reg.descriptor),
+            ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: reg.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
+        },
+      })
+    }
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        const recheckFiber = yield* Effect.forkChild(
+          active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput),
+        )
+        yield* Effect.promise(() => recheckEntered)
+        const previewFiber = yield* Effect.forkChild(
+          active.preview(AGENT_BACKEND_IDS.opencode, inspectInput),
+        )
+        yield* Effect.promise(() => previewEntered)
+        releaseRecheck?.()
+        yield* Effect.promise(() => recheckInspectDone)
+        for (let i = 0; i < 8; i += 1) {
+          yield* Effect.yieldNow
+        }
+        releasePreview?.()
+        const rechecked = yield* Fiber.join(recheckFiber)
+        const preview = yield* Fiber.join(previewFiber)
+        expect(preview.kind).toBe("unavailable")
+        expect(rechecked.kind).toBe("unavailable")
+        expect(rechecked.reason).toContain("recheck inspect failed")
+        const status = yield* active.getBackendStatus(
+          AGENT_BACKEND_IDS.opencode,
+        )
+        expect(status?.kind).toBe("unavailable")
+        expect(status?.reason).toContain("recheck inspect failed")
+      }),
+    )
+  })
+
+  it("does not let a slower Preview overwrite a Recheck that already finished", async () => {
+    let releasePreview: (() => void) | undefined
+    const previewGate = new Promise<void>((resolve) => {
+      releasePreview = resolve
+    })
+    let markPreviewEntered: (() => void) | undefined
+    const previewEntered = new Promise<void>((resolve) => {
+      markPreviewEntered = resolve
+    })
+    let inspectCalls = 0
+    const resolveRuntime: ResolveAgentBackendRuntime = (backendId) => {
+      const reg = registration(backendId)
+      return Effect.succeed({
+        registration: reg,
+        adapter: {
+          inspect: () =>
+            Effect.gen(function* () {
+              inspectCalls += 1
+              const call = inspectCalls
+              if (call === 1) {
+                return {
+                  backend: reg.descriptor,
+                  models: [{ id: "old-model", thinkingLevels: ["low"] }],
+                }
+              }
+              if (call === 2) {
+                markPreviewEntered?.()
+                yield* Effect.promise(() => previewGate)
+                return {
+                  backend: reg.descriptor,
+                  models: [
+                    { id: "stale-preview-model", thinkingLevels: ["low"] },
+                  ],
+                }
+              }
+              return {
+                backend: reg.descriptor,
+                models: [{ id: "recheck-model", thinkingLevels: ["high"] }],
+              }
+            }),
+          startTurn: () => Effect.die("unused"),
+          continueTurn: () => Effect.die("unused"),
+        },
+        telemetry: {
+          getSession: (sessionId: string) =>
+            Effect.succeed(
+              unsupportedSessionTelemetry(sessionId, reg.descriptor),
+            ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: reg.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
+        },
+      })
+    }
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        const previewFiber = yield* Effect.forkChild(
+          active.preview(AGENT_BACKEND_IDS.opencode, inspectInput),
+        )
+        yield* Effect.promise(() => previewEntered)
+        const rechecked = yield* active.recheck(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(rechecked.models.map((model) => model.id)).toEqual([
+          "recheck-model",
+        ])
+        releasePreview?.()
+        const preview = yield* Fiber.join(previewFiber)
+        // Settings dropdown uses this Preview payload; it must match the
+        // published Recheck catalog Save and Agent Turns will use.
+        expect(preview.kind).toBe("ready")
+        expect(preview.models.map((model) => model.id)).toEqual([
+          "recheck-model",
+        ])
+        expect(
+          (yield* active.getBackendStatus(
+            AGENT_BACKEND_IDS.opencode,
+          ))?.models.map((model) => model.id),
+        ).toEqual(["recheck-model"])
+      }),
+    )
+  })
+
+  it("discards a slower catalog refresh after a newer inspect", async () => {
+    let releaseSlow: (() => void) | undefined
+    const slowGate = new Promise<void>((resolve) => {
+      releaseSlow = resolve
+    })
+    let markSlowEntered: (() => void) | undefined
+    const slowEntered = new Promise<void>((resolve) => {
+      markSlowEntered = resolve
+    })
+    let inspectCalls = 0
+    const resolveRuntime: ResolveAgentBackendRuntime = (backendId) => {
+      const reg = registration(backendId)
+      return Effect.succeed({
+        registration: reg,
+        adapter: {
+          inspect: () =>
+            Effect.gen(function* () {
+              inspectCalls += 1
+              const call = inspectCalls
+              if (call === 1) {
+                markSlowEntered?.()
+                yield* Effect.promise(() => slowGate)
+                return {
+                  backend: reg.descriptor,
+                  models: [{ id: "stale-model", thinkingLevels: ["low"] }],
+                }
+              }
+              return {
+                backend: reg.descriptor,
+                models: [{ id: "fresh-model", thinkingLevels: ["high"] }],
+              }
+            }),
+          startTurn: () => Effect.die("unused"),
+          continueTurn: () => Effect.die("unused"),
+        },
+        telemetry: {
+          getSession: (sessionId: string) =>
+            Effect.succeed(
+              unsupportedSessionTelemetry(sessionId, reg.descriptor),
+            ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: reg.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
+        },
+      })
+    }
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const slow = yield* Effect.forkChild(
+          active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput),
+        )
+        yield* Effect.promise(() => slowEntered)
+        const fast = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(fast.models.map((model) => model.id)).toEqual(["fresh-model"])
+        releaseSlow?.()
+        yield* Fiber.join(slow)
+        expect(
+          (yield* active.getBackendStatus(
+            AGENT_BACKEND_IDS.opencode,
+          ))?.models.map((model) => model.id),
+        ).toEqual(["fresh-model"])
+      }),
+    )
+  })
+
+  it("does not re-activate a backend that left the Active set during refresh", async () => {
+    let releaseInspect: (() => void) | undefined
+    const inspectGate = new Promise<void>((resolve) => {
+      releaseInspect = resolve
+    })
+    const resolveRuntime: ResolveAgentBackendRuntime = (backendId) => {
+      const reg = registration(backendId)
+      return Effect.succeed({
+        registration: reg,
+        adapter: {
+          inspect: () =>
+            Effect.gen(function* () {
+              if (backendId === AGENT_BACKEND_IDS.opencode) {
+                yield* Effect.promise(() => inspectGate)
+              }
+              return {
+                backend: reg.descriptor,
+                models: [
+                  {
+                    id: `${backendId}/model-a`,
+                    thinkingLevels: ["low"] as const,
+                  },
+                ],
+              }
+            }),
+          startTurn: () => Effect.die("unused"),
+          continueTurn: () => Effect.die("unused"),
+        },
+        telemetry: {
+          getSession: (sessionId: string) =>
+            Effect.succeed(
+              unsupportedSessionTelemetry(sessionId, reg.descriptor),
+            ),
+          getTail: () =>
+            Effect.succeed({
+              availability: "unsupported" as const,
+              backend: reg.descriptor,
+              items: [],
+              jumpHint: false,
+            }),
+        },
+      })
+    }
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const previewFiber = yield* Effect.forkChild(
+          active.preview(AGENT_BACKEND_IDS.opencode, inspectInput),
+        )
+        yield* Effect.yieldNow
+        yield* active.setSelectedOrInUse([AGENT_BACKEND_IDS.grok], inspectInput)
+        releaseInspect?.()
+        const preview = yield* Fiber.join(previewFiber)
+        expect(preview.kind).toBe("ready")
+        expect(preview.models[0]?.id).toBe("opencode/model-a")
+        expect(yield* active.getBackendStatus(AGENT_BACKEND_IDS.opencode)).toBe(
+          null,
+        )
+        const statuses = yield* active.listStatuses
+        expect(statuses.map((status) => status.backend.id)).toEqual(["grok"])
+      }),
     )
   })
 })
