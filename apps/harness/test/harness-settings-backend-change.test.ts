@@ -16,6 +16,13 @@ describe("Harness settings Agent Backend change", () => {
     )
     expect(source).toContain("previewAgentBackend")
     expect(source).toContain("harnessModelPrefs")
+    // Catalog Preview must not hide the whole form behind "Loading settings...".
+    expect(source).not.toContain("config.isPending || modelsLoading")
+    // A failed Preview is a settled error, not an in-flight catalog load.
+    expect(source).toContain(
+      "const catalogFailed = previewError !== null && !previewPending",
+    )
+    expect(source).toContain("const catalogLoading = modelsLoading")
     expect(source).toContain("blockingUnfinishedWorkItemCount")
     expect(source).toContain("backendChangeBlocked")
     expect(source).toContain(

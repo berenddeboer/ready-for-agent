@@ -1107,11 +1107,8 @@ function SettingsChrome() {
   // "no catalog yet" so a stale Active snapshot is never offered.
   const modelsLoading = dialogOpen && previewPending
   const discoveryWarningsForModels = previewWarnings
-  const catalogFailed = !modelsLoading && previewError !== null
-  const catalogLoading =
-    modelsLoading ||
-    modelsDisabled ||
-    (!catalogFailed && catalogModels === undefined)
+  const catalogFailed = previewError !== null && !previewPending
+  const catalogLoading = modelsLoading
   const catalogState = {
     backendId: modelBackendId,
     configurationMode: modelConfigurationMode,
@@ -1379,7 +1376,7 @@ function SettingsChrome() {
           </div>
 
           <div className={ui.dialogBodySectioned}>
-            {config.isPending || modelsLoading ? (
+            {config.isPending ? (
               <p className={ui.dialogLoading}>Loading settings...</p>
             ) : config.isError || backendStatus.isError ? (
               <Banner

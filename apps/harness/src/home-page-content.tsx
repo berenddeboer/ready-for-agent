@@ -1589,12 +1589,8 @@ function RepositoryCard({
   const catalogReadyForModelValidation =
     !previewPending && previewError === null && previewModels !== null
   const discoveryWarningsForModels = previewWarnings
-  const catalogFailed =
-    !modelsLoading && !modelsDisabled && previewError !== null
-  const catalogLoading =
-    modelsLoading ||
-    modelsDisabled ||
-    (!catalogFailed && catalogModels === undefined)
+  const catalogFailed = previewError !== null && !previewPending
+  const catalogLoading = modelsLoading
   const catalogState = {
     backendId: modelBackendId,
     configurationMode: modelConfigurationMode,
