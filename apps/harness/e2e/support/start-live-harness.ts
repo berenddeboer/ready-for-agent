@@ -18,6 +18,8 @@
  * Agent Model catalog are fixed for the run: no Anthropic login, no AWS call,
  * and no billable model is ever involved. `CLAUDE_CODE_USE_BEDROCK` is
  * explicitly removed so the Harness runs in first-party configuration mode.
+ * Default mode also prepends a fake `opencode` whose catalog file can change
+ * while the Harness stays running.
  *
  * `E2E_AGENT_BACKEND_MODE=no-opencode` strips ambient Agent Backend CLIs
  * (`opencode`, `grok`, `codex`, ambient `claude`) from the product PATH and
@@ -89,6 +91,15 @@ const controlFile = (
 ) => join(controlDir, file)
 
 writeFileSync(controlFile(CONTROL_FILES.claudeMode), "firstParty")
+writeFileSync(
+  controlFile(CONTROL_FILES.opencodeModels),
+  `opencode/test-model-a
+{
+  "name": "Test Model A",
+  "variants": { "low": {}, "high": {} }
+}
+`,
+)
 
 /**
  * Fake `claude` CLI. Only `auth status` matters for readiness and catalog:
@@ -119,6 +130,32 @@ exit 1
 `,
 )
 chmodSync(join(binDir, "claude"), 0o755)
+
+/**
+ * Fake `opencode` CLI. Catalog-only live scenarios mutate
+ * {@link CONTROL_FILES.opencodeModels} while the Harness stays running so
+ * Settings must refresh the Active catalog instead of requiring Recheck.
+ * Installed only in default mode: `no-opencode` must keep OpenCode absent.
+ */
+if (agentBackendMode === "default") {
+  writeFileSync(
+    join(binDir, "opencode"),
+    `#!/usr/bin/env bash
+set -u
+if [ "\${1-}" = "--version" ]; then
+  echo "0.0.0-e2e-fake (OpenCode)"
+  exit 0
+fi
+if [ "\${1-}" = "models" ]; then
+  cat ${JSON.stringify(controlFile(CONTROL_FILES.opencodeModels))}
+  exit 0
+fi
+echo "e2e fake opencode: unsupported invocation: $*" >&2
+exit 1
+`,
+  )
+  chmodSync(join(binDir, "opencode"), 0o755)
+}
 
 const productPath = buildProductPath({
   mode: agentBackendMode,

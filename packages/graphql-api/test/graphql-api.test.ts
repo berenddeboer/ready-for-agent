@@ -1,5 +1,6 @@
 import { Duration, Effect, Layer, ManagedRuntime, Stream } from "effect"
 import {
+  AGENT_MODEL_CATALOG_FRESHNESS_MS,
   ActiveAgentBackend,
   type ActiveAgentBackendShape,
   type AgentBackendId,
@@ -7,6 +8,7 @@ import {
   type AgentBackendStatus,
   type SessionTelemetry,
   missingSessionTelemetry,
+  toAgentBackendPreview,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
 import {
@@ -435,12 +437,22 @@ const makeRuntime = (
     getStatus: Effect.succeed(readyStatus()),
     setSelectedOrInUse: () => Effect.succeed([readyRuntime]),
     recheck: () => Effect.succeed(readyRuntime),
+    inspectStartupBackend: () => Effect.succeed(readyRuntime),
     requireAgentTurnsAllowed: () => Effect.void,
     activate: () => Effect.succeed(readyRuntime),
     drop: () => Effect.void,
     preview: () =>
       Effect.succeed({
         backend: { id: "opencode", label: "OpenCode" },
+        kind: "ready" as const,
+        reason: null,
+        models: readyStatus().models,
+        provider: null,
+        warnings: [],
+      }),
+    refreshCatalog: (backendId, _input) =>
+      Effect.succeed({
+        backend: { id: backendId, label: backendId },
         kind: "ready" as const,
         reason: null,
         models: readyStatus().models,
@@ -481,6 +493,18 @@ const makeRuntime = (
         jumpHint: false,
       }),
     ...activeBackendOverrides,
+  }
+  if (activeBackendOverrides.refreshCatalog === undefined) {
+    const getBackendStatus = activeBackend.getBackendStatus
+    const preview = activeBackend.preview
+    activeBackend.refreshCatalog = (backendId, input) =>
+      getBackendStatus(backendId).pipe(
+        Effect.flatMap((status) =>
+          status === null
+            ? preview(backendId, input)
+            : Effect.succeed(toAgentBackendPreview(status)),
+        ),
+      )
   }
   const localGit = Layer.succeed(LocalGit, {
     inspect: (path) =>
@@ -2580,6 +2604,321 @@ describe("GraphQL API", () => {
     })
     expect(previewCalls).toEqual(["grok"])
     await previewRuntime.dispose()
+  })
+
+  test("updateConfig accepts a model Settings just refreshed and does not inspect again", async () => {
+    const astra = {
+      id: "azure/gpt-6-astra",
+      thinkingLevels: ["low", "high"],
+    }
+    let catalog: AgentBackendRuntimeStatus["models"] = [...defaultModels]
+    let inspectCount = 0
+    const now = 0
+    let inspectedAt = 0
+    const snapshot = () => readyRuntimeStatus(catalog)
+    const inspect = () => {
+      inspectCount += 1
+      catalog = [...defaultModels, astra]
+      inspectedAt = now
+      return toAgentBackendPreview(snapshot())
+    }
+    const updateCalls: string[] = []
+    const freshnessRuntime = makeRuntime(
+      {
+        updateConfig: (input) => {
+          updateCalls.push(input.defaultModel ?? "")
+          return Effect.succeed({
+            selectedAgentBackend: input.selectedAgentBackend,
+            defaultModel: input.defaultModel,
+            defaultThinkingLevel: input.defaultThinkingLevel,
+            reviewModel: input.reviewModel,
+            reviewThinkingLevel: input.reviewThinkingLevel,
+            maxConcurrentAgentTurns: input.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: input.maxConcurrentWorkItems,
+          })
+        },
+      },
+      {},
+      {},
+      {},
+      {
+        getBackendStatus: () => Effect.succeed(snapshot()),
+        preview: () => Effect.succeed(inspect()),
+        refreshCatalog: (_backendId, _input, options) => {
+          const fresh =
+            inspectedAt !== null &&
+            now - inspectedAt < AGENT_MODEL_CATALOG_FRESHNESS_MS
+          if (options?.force !== true && fresh) {
+            return Effect.succeed(toAgentBackendPreview(snapshot()))
+          }
+          return Effect.succeed(inspect())
+        },
+      },
+    )
+    const api = createGraphqlApi(freshnessRuntime)
+    const previewed = await api.fetch(
+      graphqlRequest({
+        query: `query { previewAgentBackend(backendId: "opencode") { models { id } } }`,
+      }),
+    )
+    expect(await previewed.json()).toEqual({
+      data: {
+        previewAgentBackend: {
+          models: [...defaultModels, astra].map((model) => ({ id: model.id })),
+        },
+      },
+    })
+    expect(inspectCount).toBe(1)
+
+    const saved = await api.fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultModel defaultThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "azure/gpt-6-astra",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await saved.json()).toEqual({
+      data: {
+        updateConfig: {
+          defaultModel: "azure/gpt-6-astra",
+          defaultThinkingLevel: "high",
+        },
+      },
+    })
+    expect(inspectCount).toBe(1)
+    expect(updateCalls).toEqual(["azure/gpt-6-astra"])
+    await freshnessRuntime.dispose()
+  })
+
+  test("updateConfig refreshes an expired catalog before persisting", async () => {
+    const astra = {
+      id: "azure/gpt-6-astra",
+      thinkingLevels: ["low", "high"],
+    }
+    let catalog: AgentBackendRuntimeStatus["models"] = [...defaultModels]
+    let inspectCount = 0
+    let now = 0
+    let inspectedAt = 0
+    const snapshot = () => readyRuntimeStatus(catalog)
+    const inspect = () => {
+      inspectCount += 1
+      catalog = [...defaultModels, astra]
+      inspectedAt = now
+      return toAgentBackendPreview(snapshot())
+    }
+    const freshnessRuntime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        getBackendStatus: () => Effect.succeed(snapshot()),
+        preview: () => Effect.succeed(inspect()),
+        refreshCatalog: (_backendId, _input, options) => {
+          const fresh =
+            inspectedAt !== null &&
+            now - inspectedAt < AGENT_MODEL_CATALOG_FRESHNESS_MS
+          if (options?.force !== true && fresh) {
+            return Effect.succeed(toAgentBackendPreview(snapshot()))
+          }
+          return Effect.succeed(inspect())
+        },
+      },
+    )
+    const api = createGraphqlApi(freshnessRuntime)
+    await api.fetch(
+      graphqlRequest({
+        query: `query { previewAgentBackend(backendId: "opencode") { models { id } } }`,
+      }),
+    )
+    expect(inspectCount).toBe(1)
+    now = AGENT_MODEL_CATALOG_FRESHNESS_MS
+    const saved = await api.fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultModel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "azure/gpt-6-astra",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await saved.json()).toEqual({
+      data: { updateConfig: { defaultModel: "azure/gpt-6-astra" } },
+    })
+    expect(inspectCount).toBe(2)
+    await freshnessRuntime.dispose()
+  })
+
+  test("updateConfig does not persist when a required catalog refresh fails", async () => {
+    const updateCalls: string[] = []
+    const failedRuntime = makeRuntime(
+      {
+        updateConfig: (input) => {
+          updateCalls.push(input.defaultModel ?? "")
+          return Effect.succeed({
+            selectedAgentBackend: input.selectedAgentBackend,
+            defaultModel: input.defaultModel,
+            defaultThinkingLevel: input.defaultThinkingLevel,
+            reviewModel: input.reviewModel,
+            reviewThinkingLevel: input.reviewThinkingLevel,
+            maxConcurrentAgentTurns: input.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: input.maxConcurrentWorkItems,
+          })
+        },
+      },
+      {},
+      {},
+      {},
+      {
+        refreshCatalog: () =>
+          Effect.succeed({
+            backend: { id: "opencode", label: "OpenCode" },
+            kind: "unavailable" as const,
+            reason: "OpenCode catalog inspection timed out",
+            models: [],
+            provider: null,
+            warnings: [],
+          }),
+      },
+    )
+    const response = await createGraphqlApi(failedRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultModel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "azure/gpt-6-astra",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    const payload = (await response.json()) as {
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string; field?: string }
+      }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_CONFIG_INPUT",
+      field: "defaultModel",
+    })
+    expect(payload.errors?.[0]?.message).toContain("catalog is unavailable")
+    expect(updateCalls).toEqual([])
+    await failedRuntime.dispose()
+  })
+
+  test("updateRepositorySettings accepts a model Settings just refreshed", async () => {
+    const astra = {
+      id: "azure/gpt-6-astra",
+      thinkingLevels: ["low", "high"],
+    }
+    let catalog: AgentBackendRuntimeStatus["models"] = [...defaultModels]
+    let inspectCount = 0
+    const snapshot = () => readyRuntimeStatus(catalog)
+    const inspect = () => {
+      inspectCount += 1
+      catalog = [...defaultModels, astra]
+      return toAgentBackendPreview(snapshot())
+    }
+    const settingsCalls: string[] = []
+    const repoRuntime = makeRuntime(
+      {
+        updateRepositorySettings: (input) => {
+          settingsCalls.push(input.defaultModel ?? "")
+          return Effect.succeed({
+            ...repository,
+            paused: input.paused,
+            selectedAgentBackend: "opencode",
+            defaultModel: input.defaultModel,
+            defaultThinkingLevel: input.defaultThinkingLevel,
+            reviewModel: input.reviewModel,
+            reviewThinkingLevel: input.reviewThinkingLevel,
+            mergePolicy: input.mergePolicy,
+            includeAllIssueAuthors: input.includeAllIssueAuthors,
+            waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
+          })
+        },
+      },
+      {},
+      {},
+      {},
+      {
+        getBackendStatus: () => Effect.succeed(snapshot()),
+        preview: () => Effect.succeed(inspect()),
+        refreshCatalog: (_backendId, _input, options) => {
+          if (options?.force !== true) {
+            return Effect.succeed(toAgentBackendPreview(snapshot()))
+          }
+          return Effect.succeed(inspect())
+        },
+      },
+    )
+    const api = createGraphqlApi(repoRuntime)
+    await api.fetch(
+      graphqlRequest({
+        query: `query { previewAgentBackend(backendId: "opencode") { models { id } } }`,
+      }),
+    )
+    expect(inspectCount).toBe(1)
+    const saved = await api.fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { defaultModel defaultThinkingLevel }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            selectedAgentBackend: "opencode",
+            defaultModel: "azure/gpt-6-astra",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "OFF",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          },
+        },
+      }),
+    )
+    expect(await saved.json()).toEqual({
+      data: {
+        updateRepositorySettings: {
+          defaultModel: "azure/gpt-6-astra",
+          defaultThinkingLevel: "high",
+        },
+      },
+    })
+    expect(inspectCount).toBe(1)
+    expect(settingsCalls).toEqual(["azure/gpt-6-astra"])
+    await repoRuntime.dispose()
   })
 
   test("updateRepositorySettings rejects an applicable Thinking Level and preserves a dormant one", async () => {

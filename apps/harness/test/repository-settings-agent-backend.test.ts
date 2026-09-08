@@ -64,7 +64,7 @@ describe("Repository settings Agent Backend override", () => {
     expect(source).toContain("formatAgentBackendStatusLabel")
     expect(source).toContain("previewProvider")
     expect(source).toContain("setPreviewProvider(null)")
-    expect(source).toContain("usesPreviewCatalog && !previewPending")
+    expect(source).toContain("!previewPending && (")
   })
 
   test("override preview requests discovery warnings and keeps a catalog-only select (issues #828, #838)", () => {
@@ -116,6 +116,10 @@ describe("Repository settings Agent Backend override", () => {
     )
     expect(prepare).toContain("void models.refetch()")
     expect(prepare).toContain("void agentBackends.refetch()")
+    expect(prepare).toContain("setPreviewPending(true)")
+    expect(source).toContain(
+      "Opening Settings always Previews the effective backend",
+    )
     const openSettings = source.slice(
       source.indexOf("const openSettings = () => {"),
       source.indexOf("const harnessDefaultBackendId"),

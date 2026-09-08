@@ -503,8 +503,102 @@ function SettingsChrome() {
     setPreviewModels(null)
     setPreviewProvider(null)
     setPreviewError(null)
-    setPreviewPending(false)
+    setPreviewPending(true)
   }, [dialogOpen, config.data])
+
+  // Opening Settings always Previews the selected backend so the dropdown and
+  // Save share one fresh catalog. Switching the draft backend does the same.
+  useEffect(() => {
+    if (!dialogOpen) {
+      return
+    }
+    const backendId = selectedAgentBackend
+    const savedAgentBackend = config.data?.selectedAgentBackend ?? "opencode"
+    const generation = ++previewGenerationRef.current
+    setPreviewPending(true)
+    setPreviewError(null)
+    void (async () => {
+      try {
+        const [prefsResult, previewResult] = await Promise.all([
+          backendId === savedAgentBackend
+            ? Promise.resolve(null)
+            : graphql.query({
+                harnessModelPrefs: {
+                  __args: { backendId },
+                  defaultModel: true,
+                  defaultThinkingLevel: true,
+                  reviewModel: true,
+                  reviewThinkingLevel: true,
+                },
+              }),
+          graphql.query({
+            previewAgentBackend: {
+              __args: { backendId },
+              backend: { id: true, label: true },
+              kind: true,
+              reason: true,
+              models: {
+                id: true,
+                thinkingLevels: true,
+                name: true,
+                kind: true,
+              },
+              provider: { id: true, label: true },
+              warnings: true,
+            },
+          }),
+        ])
+        if (generation !== previewGenerationRef.current) {
+          return
+        }
+        if (prefsResult !== null) {
+          const prefs = prefsResult.harnessModelPrefs
+          setDefaultModel(prefs.defaultModel ?? "")
+          setDefaultVariant(prefs.defaultThinkingLevel ?? "")
+          setReviewModel(prefs.reviewModel ?? "")
+          setReviewVariant(prefs.reviewThinkingLevel ?? "")
+        }
+        const preview = previewResult.previewAgentBackend
+        setPreviewProvider(preview.provider)
+        setPreviewWarnings(preview.warnings ?? [])
+        if (preview.kind === "READY") {
+          setPreviewModels(preview.models)
+          setPreviewError(null)
+          void queryClient.invalidateQueries({
+            queryKey: agentBackendStatusQuery.queryKey,
+          })
+          void queryClient.invalidateQueries({ queryKey: modelsQuery.queryKey })
+        } else {
+          setPreviewModels([])
+          setPreviewError(
+            preview.reason ??
+              "Could not load the Agent Model catalog for the selected Agent Backend",
+          )
+        }
+      } catch (error) {
+        if (generation !== previewGenerationRef.current) {
+          return
+        }
+        setPreviewModels([])
+        setPreviewProvider(null)
+        setPreviewWarnings([])
+        setPreviewError(
+          error instanceof Error
+            ? error.message
+            : "Could not load the Agent Model catalog",
+        )
+      } finally {
+        if (generation === previewGenerationRef.current) {
+          setPreviewPending(false)
+        }
+      }
+    })()
+  }, [
+    dialogOpen,
+    selectedAgentBackend,
+    queryClient,
+    config.data?.selectedAgentBackend,
+  ])
 
   const updateConfig = useMutation({
     mutationFn: (input: {
@@ -671,88 +765,16 @@ function SettingsChrome() {
     setReviewVariant(prefs.reviewThinkingLevel ?? "")
   }
 
-  const applyAgentBackendSelection = async (nextBackend: string) => {
-    const generation = ++previewGenerationRef.current
+  const applyAgentBackendSelection = (nextBackend: string) => {
     setSelectedAgentBackend(nextBackend)
     const savedAgentBackend = config.data?.selectedAgentBackend ?? "opencode"
-    if (nextBackend === savedAgentBackend) {
-      if (config.data) {
-        applyModelPrefs({
-          defaultModel: config.data.defaultModel,
-          defaultThinkingLevel: config.data.defaultThinkingLevel,
-          reviewModel: config.data.reviewModel,
-          reviewThinkingLevel: config.data.reviewThinkingLevel,
-        })
-      }
-      setPreviewModels(null)
-      setPreviewProvider(null)
-      setPreviewWarnings([])
-      setPreviewError(null)
-      setPreviewPending(false)
-      return
-    }
-
-    setPreviewPending(true)
-    setPreviewError(null)
-    setPreviewProvider(null)
-    setPreviewWarnings([])
-    try {
-      const [prefsResult, previewResult] = await Promise.all([
-        graphql.query({
-          harnessModelPrefs: {
-            __args: { backendId: nextBackend },
-            defaultModel: true,
-            defaultThinkingLevel: true,
-            reviewModel: true,
-            reviewThinkingLevel: true,
-          },
-        }),
-        graphql.query({
-          previewAgentBackend: {
-            __args: { backendId: nextBackend },
-            backend: { id: true, label: true },
-            kind: true,
-            reason: true,
-            models: { id: true, thinkingLevels: true, name: true, kind: true },
-            provider: { id: true, label: true },
-            warnings: true,
-          },
-        }),
-      ])
-      // Ignore stale responses after a newer dropdown selection.
-      if (generation !== previewGenerationRef.current) {
-        return
-      }
-      applyModelPrefs(prefsResult.harnessModelPrefs)
-      const preview = previewResult.previewAgentBackend
-      setPreviewProvider(preview.provider)
-      setPreviewWarnings(preview.warnings ?? [])
-      if (preview.kind === "READY") {
-        setPreviewModels(preview.models)
-        setPreviewError(null)
-      } else {
-        setPreviewModels([])
-        setPreviewError(
-          preview.reason ??
-            "Could not load model catalog for the selected Agent Backend",
-        )
-      }
-    } catch (error) {
-      if (generation !== previewGenerationRef.current) {
-        return
-      }
-      setPreviewModels([])
-      setPreviewProvider(null)
-      setPreviewWarnings([])
-      setPreviewError(
-        error instanceof Error
-          ? error.message
-          : "Could not preview the selected Agent Backend",
-      )
-    } finally {
-      if (generation === previewGenerationRef.current) {
-        setPreviewPending(false)
-      }
+    if (nextBackend === savedAgentBackend && config.data) {
+      applyModelPrefs({
+        defaultModel: config.data.defaultModel,
+        defaultThinkingLevel: config.data.defaultThinkingLevel,
+        reviewModel: config.data.reviewModel,
+        reviewThinkingLevel: config.data.reviewThinkingLevel,
+      })
     }
   }
 
@@ -792,7 +814,7 @@ function SettingsChrome() {
     setPreviewModels(null)
     setPreviewProvider(null)
     setPreviewError(null)
-    setPreviewPending(false)
+    setPreviewPending(true)
     setRecheckAllFailures([])
     updateConfig.reset()
     recheckBackend.reset()
@@ -975,9 +997,8 @@ function SettingsChrome() {
   const savedAgentBackend = config.data?.selectedAgentBackend ?? "opencode"
   const backendChanging = selectedAgentBackend !== savedAgentBackend
 
-  const catalogModels: readonly AgentModelOption[] | undefined = backendChanging
-    ? (previewModels ?? undefined)
-    : models.data
+  const catalogModels: readonly AgentModelOption[] | undefined =
+    previewModels ?? undefined
   const catalogLoaded = catalogModels !== undefined
   const modelIds = (catalogModels ?? []).map((model) => model.id)
   // Draft backend while changing; otherwise the saved/selected harness default.
@@ -1081,27 +1102,12 @@ function SettingsChrome() {
     config.data?.selectedAgentBackend ??
     defaultBackendId
   }' (harness default). Set one in Settings, or per repository.`
-  const modelsDisabled =
-    backendChanging && (previewPending || previewError !== null)
-  // isFetching, not isPending: opening Settings refetches, and React Query
-  // would otherwise keep serving the previous catalog while that request is in
-  // flight — exactly the indefinitely-cached catalog a Harness restart must
-  // invalidate (issue #838). Treat a refresh as "no catalog yet" so no stale
-  // model is offered and Save stays blocked until the current one arrives.
-  const modelsLoading =
-    dialogOpen &&
-    (backendChanging
-      ? previewPending
-      : models.isFetching || backendStatus.isFetching)
-  const discoveryWarningsForModels = backendChanging
-    ? previewWarnings
-    : (defaultStatus?.warnings ??
-      statuses.find((row) => row.backend.id === modelBackendId)?.warnings ??
-      [])
-  const catalogFailed =
-    !backendChanging &&
-    !modelsLoading &&
-    (models.isError || backendStatus.isError)
+  const modelsDisabled = previewPending || previewError !== null
+  // Opening Settings Previews the selected backend. Treat in-flight Preview as
+  // "no catalog yet" so a stale Active snapshot is never offered.
+  const modelsLoading = dialogOpen && previewPending
+  const discoveryWarningsForModels = previewWarnings
+  const catalogFailed = !modelsLoading && previewError !== null
   const catalogLoading =
     modelsLoading ||
     modelsDisabled ||
@@ -1171,7 +1177,7 @@ function SettingsChrome() {
     // Claude mode unknown (pending/error/missing agentBackends entry) — fail closed.
     claudeConfigurationModeUnresolved ||
     (backendChangeBlocked && backendChanging) ||
-    (backendChanging && previewError !== null) ||
+    previewError !== null ||
     blockSaveForBuildModel ||
     blockSaveForReviewModel ||
     blockSaveForBuildThinking ||
@@ -1375,9 +1381,7 @@ function SettingsChrome() {
           <div className={ui.dialogBodySectioned}>
             {config.isPending || modelsLoading ? (
               <p className={ui.dialogLoading}>Loading settings...</p>
-            ) : config.isError ||
-              (!backendChanging &&
-                (models.isError || backendStatus.isError)) ? (
+            ) : config.isError || backendStatus.isError ? (
               <Banner
                 className={ui.bannerCompact}
                 tone="alarm"
@@ -1568,16 +1572,19 @@ function SettingsChrome() {
                     )}
                   </div>
 
-                  {backendChanging && previewError !== null && (
+                  {previewError !== null && (
                     <Banner
                       className={ui.bannerCompact}
                       tone="alarm"
                       tag="Preview"
                       role="alert"
                     >
-                      Preview failed: {previewError}. Model fields stay disabled
-                      until preview succeeds. Active backend is unchanged until
-                      Save.
+                      Could not refresh the Agent Model catalog: {previewError}.
+                      Form edits are kept. Retry by reopening Settings or
+                      Recheck Agent Backend.
+                      {backendChanging
+                        ? " Active backend is unchanged until Save."
+                        : ""}
                     </Banner>
                   )}
                 </section>

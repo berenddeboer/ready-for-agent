@@ -9,7 +9,7 @@ describe("Harness settings Agent Backend change", () => {
   test("previews catalog and restores per-backend prefs without restart ceremony", () => {
     const source = rootSource()
     expect(source).toContain(
-      "const applyAgentBackendSelection = async (nextBackend: string) => {",
+      "const applyAgentBackendSelection = (nextBackend: string) => {",
     )
     expect(source).toContain(
       "void applyAgentBackendSelection(event.target.value)",
@@ -122,6 +122,11 @@ describe("Harness settings Agent Backend change", () => {
     )
     expect(prepare).toContain("void models.refetch()")
     expect(prepare).toContain("void backendStatus.refetch()")
+    expect(prepare).toContain("setPreviewPending(true)")
+    expect(source).toContain("previewAgentBackend")
+    expect(source).toContain(
+      "Opening Settings always Previews the selected backend",
+    )
     // Explicit openers still prepare then mask `/settings` (issues #840 / #1146).
     expect(source).toContain("openHarnessSettings")
     expect(source).toContain("prepareSettingsSession()")

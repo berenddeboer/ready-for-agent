@@ -4,7 +4,9 @@
  * The scenarios run against the live Harness with a deterministic fake `claude`
  * binary (no Anthropic login, no AWS call, no billable model) and the Harness
  * started without `CLAUDE_CODE_USE_BEDROCK`, so Claude Code is in first-party
- * configuration mode with its static alias catalog.
+ * configuration mode with its static alias catalog. Default-mode runs also
+ * install a fake `opencode` whose catalog can change while the Harness stays
+ * running, so Settings must refresh an already-Active override catalog.
  *
  * A legacy Bedrock model is seeded straight into the database: the mutations now
  * refuse such a value, so GraphQL cannot produce the upgraded-installation state
@@ -117,6 +119,57 @@ Given(
   // biome-ignore lint/correctness/noEmptyPattern: playwright-bdd requires the first argument to use the object destructuring pattern, even when no fixtures are needed.
   async ({}, model: string) => {
     await seedClaudeHarnessDefault(model)
+  },
+)
+
+When(
+  "the Repository stores an OpenCode override with {string}",
+  // biome-ignore lint/correctness/noEmptyPattern: playwright-bdd requires the first argument to use the object destructuring pattern, even when no fixtures are needed.
+  async ({}, model: string) => {
+    const prefs = JSON.stringify({
+      opencode: {
+        defaultModel: model,
+        defaultThinkingLevel: null,
+        reviewModel: null,
+        reviewThinkingLevel: null,
+      },
+    })
+    await seedLiveHarnessAndRestart(
+      [
+        "UPDATE repository SET",
+        "  selected_agent_backend = 'opencode',",
+        `  default_model = ${sqlLiteral(model)},`,
+        "  default_thinking_level = NULL,",
+        "  review_model = NULL,",
+        "  review_thinking_level = NULL,",
+        `  backend_model_prefs = ${sqlLiteral(prefs)};`,
+      ].join("\n"),
+    )
+  },
+)
+
+When(
+  "I add {string} to the OpenCode catalog without restarting the Harness",
+  // biome-ignore lint/correctness/noEmptyPattern: playwright-bdd requires the first argument to use the object destructuring pattern, even when no fixtures are needed.
+  async ({}, modelId: string) => {
+    const state = readLiveHarnessState()
+    writeControlFile(
+      state,
+      CONTROL_FILES.opencodeModels,
+      [
+        "opencode/test-model-a",
+        "{",
+        '  "name": "Test Model A",',
+        '  "variants": { "low": {}, "high": {} }',
+        "}",
+        modelId,
+        "{",
+        '  "name": "Astra",',
+        '  "variants": { "low": {}, "high": {}, "max": {} }',
+        "}",
+        "",
+      ].join("\n"),
+    )
   },
 )
 
@@ -365,5 +418,45 @@ Then(
     await expect(select).toHaveValue("")
     // The placeholder names the inherited Harness default.
     expect((await optionLabels(select)).join(" ")).toContain("Harness default")
+  },
+)
+
+Then(
+  "the Repository build model dropdown offers {string}",
+  async ({ page }, model: string) => {
+    const values = await optionValues(buildModelSelect(repositoryDialog(page)))
+    expect(values).toContain(model)
+  },
+)
+
+When(
+  "I choose the Repository build model {string}",
+  async ({ page }, model: string) => {
+    await buildModelSelect(repositoryDialog(page)).selectOption(model)
+  },
+)
+
+When(
+  "I choose the Repository build thinking level {string}",
+  async ({ page }, level: string) => {
+    await repositoryDialog(page)
+      .locator('select[name="defaultThinkingLevel"]')
+      .selectOption(level)
+  },
+)
+
+Then(
+  "the Repository build model dropdown has {string} selected",
+  async ({ page }, model: string) => {
+    await expect(buildModelSelect(repositoryDialog(page))).toHaveValue(model)
+  },
+)
+
+Then(
+  "the Repository build thinking level has {string} selected",
+  async ({ page }, level: string) => {
+    await expect(
+      repositoryDialog(page).locator('select[name="defaultThinkingLevel"]'),
+    ).toHaveValue(level)
   },
 )

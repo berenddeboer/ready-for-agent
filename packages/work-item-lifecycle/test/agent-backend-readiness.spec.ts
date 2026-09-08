@@ -171,6 +171,15 @@ describe("Agent Backend readiness gates", () => {
                 provider: null,
                 warnings: [],
               }),
+            refreshCatalog: () =>
+              Effect.succeed({
+                backend: { id: "opencode", label: "OpenCode" },
+                kind: "unavailable" as const,
+                reason: "opencode binary not found",
+                models: [],
+                provider: null,
+                warnings: [],
+              }),
             withConfigCoordination: (effect) => effect,
             getRegistration: () =>
               Effect.succeed({
@@ -345,6 +354,7 @@ const cachedReadyBackendLayer = (options: {
       activate: () => Effect.sync(() => status),
       drop: () => Effect.void,
       preview: () => Effect.sync(() => status),
+      refreshCatalog: () => Effect.sync(() => status),
       withConfigCoordination: (effect) => effect,
       getRegistration: () => Effect.succeed(opencodeRegistration),
       getActiveRegistration: Effect.succeed(opencodeRegistration),

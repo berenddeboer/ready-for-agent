@@ -1004,8 +1004,8 @@ rfa:AgentBackendUnavailable
 rfa:AgentBackendPreview
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Agent Backend Preview"@en ;
-  skos:definition "An inspection of a not-yet-saved Agent Backend selection that loads that backend's Agent Model catalog for Settings or Implement With. It does not add or change an Active Agent Backend or allow Agent Turns on the previewed backend."@en ;
-  skos:hiddenLabel "Hot activate"@en, "Recheck Agent Backend"@en .
+  skos:definition "An inspection that loads an Agent Backend's Agent Model catalog for Settings or Implement With without activating an inactive backend. Opening Settings always Previews the effective backend and, when it is already Active, a successful result becomes the Harness catalog used by Save and later Agent Turns for one minute; a failed Preview keeps the previous Active catalog and readiness."@en ;
+  skos:hiddenLabel "Hot activate"@en, "Recheck Agent Backend"@en, "Settings-local catalog cache"@en .
 
 [
   a owl:Axiom ;
@@ -1020,6 +1020,14 @@ rfa:AgentBackendPreview
   owl:annotatedSource rfa:AgentBackendPreview ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Recheck Agent Backend"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Preview for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackendPreview ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Settings-local catalog cache"@en ;
   rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Preview for this concept."@en ;
 ] .
 

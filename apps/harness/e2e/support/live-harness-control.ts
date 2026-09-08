@@ -52,6 +52,12 @@ export type FakeClaudeMode = "firstParty" | "unauthenticated"
 export const CONTROL_FILES = {
   /** Current {@link FakeClaudeMode}, read by the fake CLI on every probe. */
   claudeMode: "claude-mode",
+  /**
+   * `opencode models --verbose` stdout served by the fake OpenCode CLI. The
+   * supervisor seeds a baseline catalog; steps may append models while the
+   * Harness stays running.
+   */
+  opencodeModels: "opencode-models",
   /** SQL applied against the stopped Harness database before the next start. */
   seedSql: "seed.sql",
   /** Presence requests a restart; the supervisor deletes it when it starts. */
