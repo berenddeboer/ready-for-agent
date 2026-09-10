@@ -8,6 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { smokeProcessSnapshot } from "./smoke-diagnostics.ts"
 
 const harnessRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(harnessRoot, "../..")
@@ -103,8 +104,10 @@ const env: NodeJS.ProcessEnv = {
   PORT: String(port),
   KEYMAXXER_ENABLED: "false",
   NO_BROWSER: "1",
+  HARNESS_STARTUP_DIAGNOSTICS: "1",
 }
 
+console.log("[harness:smoke] migrating isolated database")
 const migrate = spawn(
   process.execPath,
   [
@@ -129,6 +132,7 @@ if (migrateCode !== 0) {
 }
 
 // Same boot path as harness:dev — Bun runs vite.js (not the Node shebang).
+console.log("[harness:smoke] migration complete; launching preflight then Vite")
 const child = spawn(
   process.execPath,
   [
@@ -137,7 +141,7 @@ const child = spawn(
     sidecarWrapper,
     "bash",
     "-c",
-    "bun --conditions @ready-for-agent/source src/server/preflight.ts && bun --conditions @ready-for-agent/source ./node_modules/vite/bin/vite.js",
+    "bun --conditions @ready-for-agent/source src/server/preflight.ts && printf '[harness:smoke] preflight exited; launching Vite\\n' && bun --conditions @ready-for-agent/source ./node_modules/vite/bin/vite.js",
   ],
   {
     cwd: harnessRoot,
@@ -167,12 +171,16 @@ const cleanup = async () => {
 }
 
 try {
+  console.log(
+    `[harness:smoke] waiting for GraphQL health (processGroup=${child.pid ?? "?"}, timeoutMs=${GRAPHQL_HEALTH_TIMEOUT_MS})`,
+  )
   await waitForGraphqlHealth(
     baseUrl,
     GRAPHQL_HEALTH_TIMEOUT_MS,
     () => !childExited,
   )
 
+  console.log("[harness:smoke] GraphQL healthy; requesting GET /")
   const root = await fetch(`${baseUrl}/`, { redirect: "manual" })
   if (root.status <= 0) {
     throw new Error(`GET / failed with status ${root.status}`)
@@ -189,6 +197,10 @@ try {
   }
   if (childExited) {
     console.error(`Dev server exit code: ${exitCode ?? "?"}`)
+  }
+  if (child.pid !== undefined) {
+    console.error("--- smoke process snapshot ---")
+    console.error(smokeProcessSnapshot(child.pid))
   }
   await cleanup()
   process.exit(1)
