@@ -8,6 +8,10 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import {
+  VITE_LISTENING_MARKER,
+  waitForGraphqlHealth,
+} from "./dev-smoke-health.ts"
 import { smokeProcessSnapshot } from "./smoke-diagnostics.ts"
 
 const harnessRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -21,58 +25,6 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** Overall wait for cold CI Vite first boot (empty dep graph, no Nx cache). */
 const GRAPHQL_HEALTH_TIMEOUT_MS = 360_000
-/** Cap each poll so a hung TCP/fetch cannot outrun the overall deadline. */
-const GRAPHQL_HEALTH_POLL_MS = 5_000
-
-const waitForGraphqlHealth = async (
-  baseUrl: string,
-  timeoutMs: number,
-  isAlive: () => boolean,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs
-  let lastError: unknown
-  while (Date.now() < deadline) {
-    if (!isAlive()) {
-      throw new Error(
-        `Dev server exited before GraphQL health succeeded: ${
-          lastError instanceof Error ? lastError.message : String(lastError)
-        }`,
-      )
-    }
-    const remainingMs = deadline - Date.now()
-    if (remainingMs <= 0) break
-    const pollMs = Math.min(GRAPHQL_HEALTH_POLL_MS, remainingMs)
-    try {
-      const response = await fetch(`${baseUrl}/graphql`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ query: "{ health }" }),
-        signal: AbortSignal.timeout(pollMs),
-      })
-      if (response.status === 200) {
-        const payload = (await response.json()) as {
-          data?: { health?: boolean }
-        }
-        if (payload.data?.health === true) {
-          return
-        }
-        lastError = new Error(
-          `Unexpected GraphQL payload: ${JSON.stringify(payload)}`,
-        )
-      } else {
-        lastError = new Error(`HTTP ${response.status}`)
-      }
-    } catch (error) {
-      lastError = error
-    }
-    await sleep(250)
-  }
-  throw new Error(
-    `Timed out waiting for GraphQL health at ${baseUrl}/graphql: ${
-      lastError instanceof Error ? lastError.message : String(lastError)
-    }`,
-  )
-}
 
 const killTree = async (child: ChildProcess) => {
   if (child.pid === undefined) return
@@ -178,6 +130,7 @@ try {
     baseUrl,
     GRAPHQL_HEALTH_TIMEOUT_MS,
     () => !childExited,
+    () => output.includes(VITE_LISTENING_MARKER),
   )
 
   console.log("[harness:smoke] GraphQL healthy; requesting GET /")

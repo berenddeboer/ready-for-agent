@@ -72,7 +72,11 @@ describe("single application server topology", () => {
       "bun --conditions @ready-for-agent/source ./node_modules/vite/bin/vite.js",
     )
     expect(smokeScript).toContain("{ health }")
-    expect(smokeScript).toContain("AbortSignal.timeout")
+    const healthPoll = await readFile(
+      new URL("../scripts/dev-smoke-health.ts", import.meta.url),
+      "utf8",
+    )
+    expect(healthPoll).toContain("AbortSignal.timeout")
     expect(smokeScript).toContain("GRAPHQL_HEALTH_TIMEOUT_MS")
     expect(smokeScript).not.toContain("E2E_KEYMAXXER_MASTER_KEY")
   })
