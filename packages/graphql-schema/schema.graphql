@@ -872,8 +872,9 @@ input RetryWorkItemsSelector {
   """
   workItemId: ID
   """
-  Retry every Work Item currently selected by the Harness-owned canRetry
-  predicate. Must be true to select this mode; false is treated as unset.
+  Retry every Work Item eligible for Autonomous Retry. Paused Work Items
+  are excluded even when explicit canRetry is true. Must be true to select
+  this mode; false is treated as unset.
   """
   allRetryable: Boolean
 }
@@ -1169,6 +1170,11 @@ type WorkItem {
   pause control so clients do not scrape chips for drain vs idle.
   """
   hasActiveStepRun: Boolean!
+  """
+  True when explicit operator Retry is allowed. Includes an otherwise-retryable
+  idle Needs Human handoff even while paused. Autonomous Retry still excludes
+  paused Work Items.
+  """
   canRetry: Boolean!
   isTerminal: Boolean!
   stateReadyAt: String!
@@ -1350,8 +1356,8 @@ type Mutation {
   startRepositoryIntake(repositoryId: ID!): RepositoryIntakeResult!
   """
   Synchronous best-effort Retry: resolve one Issue's unfinished Work Item,
-  one Work Item in this Repository, or every currently retryable Work Item
-  (Harness-owned canRetry). Process accepted targets sequentially through
+  one Work Item in this Repository, or every Work Item eligible for
+  Autonomous Retry. Process accepted targets sequentially through
   ordinary Work Item Retry. --all-retryable applies the Autonomous Retry
   Budget (default 3, override with maxAutonomousRetries). Ineligible races
   become per-item skipped results; concurrent active-run conflicts become

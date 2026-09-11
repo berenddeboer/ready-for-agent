@@ -163,6 +163,55 @@ describe("Postponed Step Run projection", () => {
     expect(
       workItemCanRetry(
         workItemWith({
+          state: "needs_human",
+          paused: true,
+          holdsWorkerSlot: false,
+          stepRuns: [{ ...baseStepRun, step: "review", status: "succeeded" }],
+        }),
+      ),
+    ).toBe(true)
+    expect(
+      workItemCanAutonomousRetry(
+        workItemWith({
+          state: "needs_human",
+          paused: true,
+          holdsWorkerSlot: false,
+          stepRuns: [{ ...baseStepRun, step: "review", status: "succeeded" }],
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      workItemCanRetry(
+        workItemWith({
+          state: "needs_human",
+          paused: true,
+          holdsWorkerSlot: true,
+          stepRuns: [
+            {
+              ...baseStepRun,
+              step: "review",
+              status: "running",
+              finishedAt: null,
+            },
+          ],
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      workItemCanRetry(
+        workItemWith({
+          state: "needs_human",
+          paused: true,
+          holdsWorkerSlot: false,
+          stepRuns: [
+            { ...baseStepRun, step: "decide_pr_merge", status: "succeeded" },
+          ],
+        }),
+      ),
+    ).toBe(false)
+    expect(
+      workItemCanRetry(
+        workItemWith({
           paused: false,
           stepRuns: [
             {
@@ -1088,6 +1137,20 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
 
   test("retryable Needs Human handoff exposes canRetry and the latest Step Run reason", () => {
     expect(workItemCanRetry(retryableNeedsHuman)).toBe(true)
+    expect(
+      workItemCanRetry({
+        ...retryableNeedsHuman,
+        paused: true,
+        holdsWorkerSlot: false,
+      }),
+    ).toBe(true)
+    expect(
+      workItemCanAutonomousRetry({
+        ...retryableNeedsHuman,
+        paused: true,
+        holdsWorkerSlot: false,
+      }),
+    ).toBe(false)
     expect(workItemStatus(retryableNeedsHuman)).toBe("needs_human")
     expect(workItemLatestStepRunReason(retryableNeedsHuman)).toEqual({
       code: "review_accepted",
@@ -1115,6 +1178,20 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
       ],
     })
     expect(workItemCanRetry(missingChecks)).toBe(true)
+    expect(
+      workItemCanRetry({
+        ...missingChecks,
+        paused: true,
+        holdsWorkerSlot: false,
+      }),
+    ).toBe(true)
+    expect(
+      workItemCanAutonomousRetry({
+        ...missingChecks,
+        paused: true,
+        holdsWorkerSlot: false,
+      }),
+    ).toBe(false)
     expect(workItemLatestStepRunReason(missingChecks)).toEqual({
       code: "missing_successful_checks",
       message:

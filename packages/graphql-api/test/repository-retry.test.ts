@@ -207,6 +207,14 @@ describe("snapshotRetryTargets", () => {
     issueNumber: 25,
     paused: true,
   })
+  const pausedRetryableNeedsHuman = workItemWith({
+    id: "wi-paused-nh-review",
+    issueNumber: 34,
+    state: "needs_human",
+    paused: true,
+    holdsWorkerSlot: false,
+    stepRuns: [{ ...baseStepRun, step: "review", status: "succeeded" }],
+  })
   const postponed = workItemWith({
     id: "wi-postponed",
     issueNumber: 26,
@@ -273,6 +281,7 @@ describe("snapshotRetryTargets", () => {
     running,
     postponed,
     paused,
+    pausedRetryableNeedsHuman,
     decideNeedsHuman,
     retryableFailed,
     retryableNeedsHuman,
@@ -281,7 +290,7 @@ describe("snapshotRetryTargets", () => {
     failedInterrupted,
   ]
 
-  test("all-retryable uses canRetry and excludes paused, postponed, active, waiting, and terminal", () => {
+  test("all-retryable uses Autonomous Retry eligibility and excludes paused, postponed, active, waiting, and terminal", () => {
     const snapshot = snapshotRetryTargets({
       selector: { kind: "all-retryable" },
       repositoryId: "repo-1",

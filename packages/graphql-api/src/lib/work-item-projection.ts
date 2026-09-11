@@ -208,9 +208,17 @@ export const workItemCanRetry = (workItem: WorkItemRecord): boolean => {
   if (
     workItem.waitingSince != null ||
     workItem.waitingForBlockers ||
-    workItem.waitingForCiRepair ||
-    workItem.paused
+    workItem.waitingForCiRepair
   ) {
+    return false
+  }
+
+  const pausedIdleRetryableNeedsHuman =
+    workItem.paused &&
+    isRetryableNeedsHumanWorkItem(workItem) &&
+    !workItemHasActiveStepRun(workItem)
+
+  if (workItem.paused && !pausedIdleRetryableNeedsHuman) {
     return false
   }
 
@@ -240,7 +248,9 @@ export const workItemCanRetry = (workItem: WorkItemRecord): boolean => {
 
 /** UI / single-item Retry stays true; Autonomous Retry and --all-retryable do not. */
 export const workItemCanAutonomousRetry = (workItem: WorkItemRecord): boolean =>
-  workItemCanRetry(workItem) && !isInterruptedWithPausedReason(workItem)
+  workItemCanRetry(workItem) &&
+  !workItem.paused &&
+  !isInterruptedWithPausedReason(workItem)
 
 export const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
   const higherPriorityStatus = higherPriorityWorkItemStatus(workItem)
