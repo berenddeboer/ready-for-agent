@@ -283,10 +283,11 @@ const releasePermit =
  *
  * While waiting for a permit, marks the ambient Step Run with
  * `waiting_for_agent_turn` so GraphQL can show **Queued** instead of
- * **Running**, and records `session_wait_started_at` so max-duration and
- * visibility-lease clocks freeze for the wait. When the slot is acquired,
- * accumulates the wait into `session_wait_ms` and restores any prior mid-run
- * phase (for example Review: pre-commit) instead of clearing the reason.
+ * **Running**, and records `session_wait_started_at` so max-duration,
+ * Review no-progress, and visibility-lease clocks freeze for the wait. When
+ * the slot is acquired, accumulates the wait into `session_wait_ms` and
+ * restores any prior mid-run phase (for example Review: pre-commit) instead
+ * of clearing the reason.
  */
 export const limitAgentTurns = (
   backend: AgentBackendService,

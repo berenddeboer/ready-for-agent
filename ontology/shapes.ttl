@@ -160,7 +160,7 @@ rfa:OperationalLifecycleStepShape
         "^P(?:0{1,3}D)?(?:T(?:0{1,3}H)?(?:0{1,3}M)?(?:0{1,3}(?:[.]0{1,3})?S)?)?$" ;
     ] ;
     sh:message
-      "Every operational Lifecycle Step must declare one positive fixed maximum duration with millisecond precision."@en ;
+      "Every operational Lifecycle Step must declare one positive fixed timeout budget with millisecond precision."@en ;
   ] ;
   sh:property [
     sh:path rfa:retryable ;

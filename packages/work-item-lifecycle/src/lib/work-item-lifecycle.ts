@@ -142,8 +142,9 @@ import {
 import {
   formatAcceptedReviewSummary,
   formatDeferredReviewSummary,
+  formatReviewNoProgressTimeoutMessage,
 } from "./review.js"
-import { computeProductiveElapsedMs } from "./step-run-productive-time.js"
+import { computeStepTimeoutElapsedMs } from "./step-run-productive-time.js"
 import { applyCheckedLifecycleTransition } from "./transition-relation-check.js"
 import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
@@ -534,6 +535,9 @@ type StepRunRow = {
   readonly postponed_until: number | null
   readonly session_wait_ms: number | null
   readonly session_wait_started_at: number | null
+  readonly progress_checkpoint_at: number | null
+  readonly progress_checkpoint_kind: string | null
+  readonly progress_checkpoint_session_wait_ms: number | null
 }
 
 const PostponedStepRunIdRow = Schema.Struct({ id: Schema.String })
@@ -610,7 +614,8 @@ const decodeLatestStepRunDeadlineRows = (rows: unknown) =>
 const STEP_RUN_SELECT_COLUMNS = `id, work_item_id, step, status, queue_job_id, queued_at,
                         started_at, finished_at, reason_code, reason_message,
                         reason_detail, postponed_until, session_wait_ms,
-                        session_wait_started_at`
+                        session_wait_started_at, progress_checkpoint_at,
+                        progress_checkpoint_kind, progress_checkpoint_session_wait_ms`
 
 const deriveQueueWaitMs = (row: StepRunRow, nowMs: number): number => {
   const endMs = row.started_at ?? row.finished_at ?? nowMs
@@ -5443,12 +5448,35 @@ export const makeWorkItemLifecycleLive = (
                     maxDurations[recovered.step],
                   )
                   const nowMs = yield* Clock.currentTimeMillis
-                  const productiveElapsedMs = computeProductiveElapsedMs(
+                  const timeoutElapsedMs = computeStepTimeoutElapsedMs(
+                    recovered.step,
                     recovered,
                     nowMs,
                   )
-                  const leaseExpired = productiveElapsedMs >= maxDurationMs
+                  const leaseExpired = timeoutElapsedMs >= maxDurationMs
                   if (leaseExpired) {
+                    if (recovered.step === "review") {
+                      const recoveredWorkItem = yield* loadWorkItemRow(
+                        recovered.work_item_id,
+                      )
+                      if (recoveredWorkItem !== null) {
+                        const failed = yield* completeFailedStep({
+                          stepRun: recovered,
+                          workItem: recoveredWorkItem,
+                          reasonCode: STEP_RUN_REASON.timeout,
+                          reasonMessage: formatReviewNoProgressTimeoutMessage({
+                            interval: maxDurations.review,
+                            checkpointKind: recovered.progress_checkpoint_kind,
+                            checkpointAt: recovered.progress_checkpoint_at,
+                          }),
+                          cause: Cause.fail(new Cause.TimeoutError()),
+                        })
+                        return {
+                          _tag: "processed" as const,
+                          workItem: failed,
+                        }
+                      }
+                    }
                     yield* completeInterruptedStep({
                       stepRun: recovered,
                       reasonMessage:
@@ -5688,14 +5716,15 @@ export const makeWorkItemLifecycleLive = (
                   if (current === null || current.status !== "running") {
                     return yield* Effect.never
                   }
-                  const productiveElapsedMs = computeProductiveElapsedMs(
+                  const timeoutElapsedMs = computeStepTimeoutElapsedMs(
+                    current.step,
                     current,
                     nowMs,
                   )
-                  if (productiveElapsedMs >= maxDurationMs) {
+                  if (timeoutElapsedMs >= maxDurationMs) {
                     return yield* new Cause.TimeoutError()
                   }
-                  const remainingMs = maxDurationMs - productiveElapsedMs
+                  const remainingMs = maxDurationMs - timeoutElapsedMs
                   const waitingForSession =
                     current.session_wait_started_at !== null ||
                     current.reason_code === STEP_RUN_REASON.waitingForAgentTurn
@@ -5828,11 +5857,23 @@ export const makeWorkItemLifecycleLive = (
                     const eligibility = closeIssueEligibilityFailure(
                       handlerExit.cause,
                     )
+                    const timeoutRow =
+                      isTimeout && afterStart.step === "review"
+                        ? ((yield* loadStepRunRow(afterStart.id)) ?? afterStart)
+                        : afterStart
+                    const timeoutMessage =
+                      isTimeout && afterStart.step === "review"
+                        ? formatReviewNoProgressTimeoutMessage({
+                            interval: maxDuration,
+                            checkpointKind: timeoutRow.progress_checkpoint_kind,
+                            checkpointAt: timeoutRow.progress_checkpoint_at,
+                          })
+                        : classification.reasonMessage
                     const failed = yield* completeFailedStep({
                       stepRun: afterStart,
                       workItem,
                       reasonCode: classification.reasonCode,
-                      reasonMessage: classification.reasonMessage,
+                      reasonMessage: timeoutMessage,
                       cause: handlerExit.cause,
                       terminalFailure:
                         eligibility === null

@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Stream } from "effect"
+import { Clock, Duration, Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
 import {
@@ -60,6 +60,56 @@ export const reviewAgentFailureMessage = (
     return `${backendLabel} failed ${action}: ${cause.message}`
   }
   return `${backendLabel} failed ${action}`
+}
+
+/** Durable Review Progress Checkpoint kinds persisted on the Step Run. */
+export const REVIEW_PROGRESS_CHECKPOINT_KIND = {
+  reviewing: "reviewing",
+  verifiedApply: "verified_apply",
+} as const
+
+export type ReviewProgressCheckpointKind =
+  (typeof REVIEW_PROGRESS_CHECKPOINT_KIND)[keyof typeof REVIEW_PROGRESS_CHECKPOINT_KIND]
+
+const isReviewProgressCheckpointKind = (
+  value: string,
+): value is ReviewProgressCheckpointKind =>
+  value === REVIEW_PROGRESS_CHECKPOINT_KIND.reviewing ||
+  value === REVIEW_PROGRESS_CHECKPOINT_KIND.verifiedApply
+
+const formatTimeoutInterval = (interval: Duration.Duration): string => {
+  const ms = Duration.toMillis(interval)
+  if (ms > 0 && ms % 60_000 === 0) {
+    const minutes = ms / 60_000
+    return minutes === 1 ? "1 minute" : `${minutes} minutes`
+  }
+  if (ms > 0 && ms % 1_000 === 0) {
+    const seconds = ms / 1_000
+    return seconds === 1 ? "1 second" : `${seconds} seconds`
+  }
+  return ms === 1 ? "1 millisecond" : `${ms} milliseconds`
+}
+
+const checkpointKindLabel = (kind: ReviewProgressCheckpointKind): string =>
+  kind === REVIEW_PROGRESS_CHECKPOINT_KIND.verifiedApply
+    ? "verified apply"
+    : "reviewing"
+
+/** Operator-facing Review timeout when no Review Progress Checkpoint completed. */
+export const formatReviewNoProgressTimeoutMessage = (input: {
+  readonly interval: Duration.Duration
+  readonly checkpointKind: string | null
+  readonly checkpointAt: number | null
+}): string => {
+  const intervalLabel = formatTimeoutInterval(input.interval)
+  const kind = input.checkpointKind
+  const checkpoint =
+    input.checkpointAt === null ||
+    kind === null ||
+    !isReviewProgressCheckpointKind(kind)
+      ? "no checkpoint has completed"
+      : `last checkpoint: ${checkpointKindLabel(kind)} at ${new Date(input.checkpointAt).toISOString()}`
+  return `Review made no completed-checkpoint progress for ${intervalLabel} (${checkpoint})`
 }
 
 /** Max build-model apply rounds per Review Step Run before Needs Human. */
@@ -583,6 +633,45 @@ const markAssessingRerunPhase = markReviewPhase(
   "assessing rerun",
 )
 
+const recordReviewProgressCheckpoint = (kind: ReviewProgressCheckpointKind) =>
+  Effect.gen(function* () {
+    const current = yield* CurrentStepRun
+    if (current === null) {
+      return
+    }
+    const sql = yield* SqlClient.SqlClient
+    const now = yield* Clock.currentTimeMillis
+    const rows = (yield* sql.unsafe(
+      `SELECT session_wait_ms, session_wait_started_at
+     FROM step_run
+     WHERE id = ?
+       AND status = 'running'`,
+      [current.stepRunId],
+    )) as readonly {
+      readonly session_wait_ms: number | null
+      readonly session_wait_started_at: number | null
+    }[]
+    const row = rows[0]
+    if (row === undefined) {
+      return
+    }
+    const completedWaitMs = Math.max(0, row.session_wait_ms ?? 0)
+    const openWaitMs =
+      row.session_wait_started_at === null
+        ? 0
+        : Math.max(0, now - row.session_wait_started_at)
+    yield* sql.unsafe(
+      `UPDATE step_run
+     SET progress_checkpoint_at = ?,
+         progress_checkpoint_kind = ?,
+         progress_checkpoint_session_wait_ms = ?,
+         updated_at = ?
+     WHERE id = ?
+       AND status = 'running'`,
+      [now, kind, completedWaitMs + openWaitMs, now, current.stepRunId],
+    )
+  })
+
 /**
  * Production Review Lifecycle Step — reviewing pass, optional apply-findings,
  * and on changed work a nested Pre-Commit then either a Review Rerun Assessment
@@ -696,6 +785,10 @@ export const review = (context: LifecycleStepContext) =>
           message: `${agentBackendLabel(context.agentBackend)} did not report a valid READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high> (${formatResultLineFailure(failure.kind, failure.lastCandidate)})`,
         })
       }
+
+      yield* recordReviewProgressCheckpoint(
+        REVIEW_PROGRESS_CHECKPOINT_KIND.reviewing,
+      )
 
       if (reviewingParsed._tag === "clean") {
         return { _tag: "clean" as const }
@@ -818,6 +911,9 @@ export const review = (context: LifecycleStepContext) =>
         fixRoundsUsed += 1
         yield* markReviewPreCommitPhase
         yield* preCommit(context)
+        yield* recordReviewProgressCheckpoint(
+          REVIEW_PROGRESS_CHECKPOINT_KIND.verifiedApply,
+        )
         continue
       }
 
@@ -870,6 +966,9 @@ export const review = (context: LifecycleStepContext) =>
 
       yield* markReviewPreCommitPhase
       yield* preCommit(context)
+      yield* recordReviewProgressCheckpoint(
+        REVIEW_PROGRESS_CHECKPOINT_KIND.verifiedApply,
+      )
 
       if (originalSeverity === "low") {
         yield* markAssessingRerunPhase

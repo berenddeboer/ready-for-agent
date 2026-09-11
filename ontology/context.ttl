@@ -1836,7 +1836,7 @@ rfa:PreCommit
 rfa:Review
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Review"@en ;
-  skos:definition "The Lifecycle Step after Pre-Commit that critiques the Work Item's repository changes with the review model, then may apply accepted Review Findings with the build model in bounded Review Fix Rounds before Commit. A missing or malformed reviewing or apply-findings control marker gets one no-tools verdict-repair turn; an unparseable apply that changed the worktree is revalidated rather than treated as fixed, and an unparseable unchanged apply is Needs Human. Operator-visible phases stay under this one step: reviewing, applying findings, pre-commit, and assessing rerun inside the loop."@en ;
+  skos:definition "The Lifecycle Step after Pre-Commit that critiques the Work Item's repository changes with the review model, then may apply accepted Review Findings with the build model in bounded Review Fix Rounds before Commit. A missing or malformed reviewing or apply-findings control marker gets one no-tools verdict-repair turn; an unparseable apply that changed the worktree is revalidated rather than treated as fixed, and an unparseable unchanged apply is Needs Human. Operator-visible phases stay under this one step: reviewing, applying findings, pre-commit, and assessing rerun inside the loop. Its timeout is a 60-minute no-progress interval between Review Progress Checkpoints rather than an aggregate maximum duration."@en ;
   skos:hiddenLabel "Code review PR check"@en, "Mark PR Ready for Review"@en, "advisory-only review"@en .
 
 [
@@ -2063,6 +2063,36 @@ rfa:ReviewFixRound
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "unbounded fix loop"@en ;
   rfa:avoidanceRationale "CONTEXT.md prefers Review Fix Round for this concept."@en ;
+] .
+
+rfa:ReviewProgressCheckpoint
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Review Progress Checkpoint"@en ;
+  skos:definition "A completed, accepted Review milestone that renews Review's 60-minute no-progress timeout: a reviewing pass whose verdict the harness has accepted, or a worktree-changing apply-findings pass whose required nested Pre-Commit has succeeded. Tool calls, commentary, file edits, phase updates, malformed verdicts, and a fix verdict without successful verification are not checkpoints."@en ;
+  skos:hiddenLabel "activity heartbeat"@en, "phase marker"@en, "Session progress"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewProgressCheckpoint ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "activity heartbeat"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Progress Checkpoint for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewProgressCheckpoint ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "phase marker"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Progress Checkpoint for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewProgressCheckpoint ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Session progress"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Progress Checkpoint for this concept."@en ;
 ] .
 
 rfa:RepairFallback
@@ -2586,7 +2616,7 @@ rfa:ActionableIssue
 rfa:LifecycleStep
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Lifecycle Step"@en ;
-  skos:definition "The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Assess Changes, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, Close Issue, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. Every operational Lifecycle Step declares whether it is Agent-free, its default maximum productive execution time, and whether a failed or interrupted Step Run permits Retry; in the PR completion loop, Watch prioritizes merge conflicts and red Status Check Handoffs (including while the Work Item PR is still draft), defers green-only Status Check Handoffs while any execution is still pending, then hands the accumulated unhandled batch once the aggregate settles, sends a green draft through Mark PR Ready for Review without waiting for the Check-Start Deadline, sends a check-less draft (`no_checks` or only Expected PR Status Checks) through Mark PR Ready for Review only at or after that deadline, and sends a settled ready PR past its Check-Start Deadline to Merge PR when the effective Merge Policy is Always, or to Decide PR Merge otherwise, except that Classify and `off` enter Needs Human when the aggregate is not a successful non-empty check set (Always treats post-deadline `no_checks` as green)."@en ;
+  skos:definition "The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Assess Changes, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, Close Issue, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. Every operational Lifecycle Step declares whether it is Agent-free, its default timeout budget, and whether a failed or interrupted Step Run permits Retry (for most steps that budget is an aggregate maximum productive execution time; for Review it is a no-progress interval between Review Progress Checkpoints); in the PR completion loop, Watch prioritizes merge conflicts and red Status Check Handoffs (including while the Work Item PR is still draft), defers green-only Status Check Handoffs while any execution is still pending, then hands the accumulated unhandled batch once the aggregate settles, sends a green draft through Mark PR Ready for Review without waiting for the Check-Start Deadline, sends a check-less draft (`no_checks` or only Expected PR Status Checks) through Mark PR Ready for Review only at or after that deadline, and sends a settled ready PR past its Check-Start Deadline to Merge PR when the effective Merge Policy is Always, or to Decide PR Merge otherwise, except that Classify and `off` enter Needs Human when the aggregate is not a successful non-empty check set (Always treats post-deadline `no_checks` as green)."@en ;
   skos:hiddenLabel "Last completed step"@en, "phase"@en .
 
 [

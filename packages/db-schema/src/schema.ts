@@ -422,11 +422,27 @@ export const stepRun = snakeCase.table(
     postponedUntil: integer({ mode: "number" }),
     /**
      * Cumulative ms spent blocked on an OpenCode session slot (completed waits).
-     * Excluded from max-duration / visibility-lease productive time.
+     * Excluded from max-duration / visibility-lease productive time, and from
+     * Review's no-progress interval after the matching checkpoint snapshot.
      */
     sessionWaitMs: integer({ mode: "number" }).notNull().default(0),
     /** Wall-clock start of the current OpenCode session-slot wait, if any. */
     sessionWaitStartedAt: integer({ mode: "number" }),
+    /**
+     * Instant of the latest Review Progress Checkpoint. Null when none has
+     * completed or the Step Run is not Review. Existing rows stay null.
+     */
+    progressCheckpointAt: integer({ mode: "number" }),
+    /**
+     * Kind of the latest Review Progress Checkpoint (`reviewing` or
+     * `verified_apply`). Null when none has completed.
+     */
+    progressCheckpointKind: text(),
+    /**
+     * `session_wait_ms` (plus any open wait) snapshotted at the latest Review
+     * Progress Checkpoint so later waits are not subtracted twice.
+     */
+    progressCheckpointSessionWaitMs: integer({ mode: "number" }),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),
