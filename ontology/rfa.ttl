@@ -62,7 +62,7 @@ rfa:canRetry
   rdfs:range xsd:boolean ;
   rdfs:label "can retry"@en ;
   skos:definition
-    "True when the Work Item may be retried, including a retryable persisted status-check failure."@en .
+    "True when an explicit operator Retry is allowed, including a retryable persisted status-check failure and an otherwise-retryable idle Needs Human handoff even while paused."@en .
 
 rfa:isCurrentIssue
   a owl:DatatypeProperty ;

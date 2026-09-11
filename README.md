@@ -593,7 +593,7 @@ Retry this Work Item after verifying it belongs to the selected Repository
 
 #### `--all-retryable`
 
-Retry every currently retryable Work Item in the Repository (Harness-owned canRetry)
+Retry every Work Item eligible for Autonomous Retry in the Repository (excludes paused Work Items)
 
 #### `--max-autonomous-retries <count>`
 
@@ -603,7 +603,7 @@ Maximum accepted Autonomous Retry execution attempts per Work Item at its curren
 
 **Retry all retryable**
 
-Retry every currently retryable Work Item in the Repository
+Retry every Work Item eligible for Autonomous Retry in the Repository
 
 ```
 ready-for-agent retry github.com/owner/repo --all-retryable

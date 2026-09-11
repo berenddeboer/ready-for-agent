@@ -212,6 +212,17 @@ describe("workItemPauseControl", () => {
       }),
     ).toEqual({ kind: "start", label: "Start job" })
   })
+
+  test("hides Start on terminal Needs Human even when paused, so Retry is the continuation", () => {
+    expect(
+      workItemPauseControl({
+        isTerminal: true,
+        status: "NEEDS_HUMAN",
+        paused: true,
+        hasActiveStepRun: false,
+      }),
+    ).toEqual({ kind: "hidden" })
+  })
 })
 
 describe("canShowWorkItemResetAction", () => {
@@ -244,6 +255,7 @@ describe("Jobs Reset button wiring", () => {
     expect(lifecycle).toContain(
       "const canRetry = compact && workItem.canRetry && !heldForBlockers",
     )
+    expect(lifecycle).not.toContain("workItem.canRetry && !workItem.paused")
     expect(lifecycle).not.toContain("canReset = compact && !heldForBlockers")
     // Gate must not denylist projected FAILED status strings (step failures).
     // Terminal Failed is allowed via isFailed; non-terminal step FAILED uses the

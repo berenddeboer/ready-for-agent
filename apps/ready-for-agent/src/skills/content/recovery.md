@@ -13,7 +13,7 @@ Translate the matching field and `statusMessage` into an action. Do not re-deriv
 
 | What you see | What it means | Do |
 | --- | --- | --- |
-| `canRetry: true` | The step failed but the path forward is intact | `ready-for-agent retry <repo> --issue N` |
+| `canRetry: true` | The path forward is intact, including a paused idle retryable Needs Human handoff | `ready-for-agent retry <repo> --issue N` |
 | Issue no longer in the Issue store | Issue was closed or unlabelled mid-flight | Report it. Reopen/relabel to retry |
 | `handler_failed` + malformed `READY_FOR_AGENT_RESULT` | Agent's final message was malformed | Retry; if it repeats, the model is too weak |
 | `handler_defect` | Internal harness defect | Report it; retry rarely helps |
@@ -22,7 +22,7 @@ Translate the matching field and `statusMessage` into an action. Do not re-deriv
 | `build_model_not_configured` | No build model configured | Set one in Settings |
 | `missing_successful_checks` | Autonomous merge wanted green CI and did not get it | Retryable — returns to watching checks |
 | `github_throttled` | GitHub-only rate limit; stopped at GitHub's retry time | Wait for `retryAt`; do not hammer it |
-| `paused` | An operator held it | Start (Retry is rejected while paused) |
+| `paused` | Interrupt stopped a draining Step Run | Retry (Pause is already cleared) |
 | `timeout` / `interrupted` / `worker_restarted` | Budget, interrupt, or process restart | Retry |
 
 Repeated failures across *different* issues usually indict configuration — a weak model or unavailable backend — rather than the issues.

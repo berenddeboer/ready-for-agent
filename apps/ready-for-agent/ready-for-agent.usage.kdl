@@ -76,9 +76,9 @@ cmd "retry" help="Retry one Work Item, the unfinished Work Item for one Issue, o
   arg "<repository>" help="Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)"
   flag "--issue <number>" help="Retry the current unfinished Work Item for this Issue number"
   flag "--work-item <id>" help="Retry this Work Item after verifying it belongs to the selected Repository"
-  flag "--all-retryable" help="Retry every currently retryable Work Item in the Repository (Harness-owned canRetry)"
+  flag "--all-retryable" help="Retry every Work Item eligible for Autonomous Retry in the Repository (excludes paused Work Items)"
   flag "--max-autonomous-retries <count>" help="Maximum accepted Autonomous Retry execution attempts per Work Item at its current Lifecycle Step (default 3; --all-retryable only)"
-  example "ready-for-agent retry github.com/owner/repo --all-retryable" header="Retry all retryable" help="Retry every currently retryable Work Item in the Repository"
+  example "ready-for-agent retry github.com/owner/repo --all-retryable" header="Retry all retryable" help="Retry every Work Item eligible for Autonomous Retry in the Repository"
 }
 
 cmd "status" help="Print the current six-lane Kanban status as versioned JSON (optional repository selector)" effect="read" {

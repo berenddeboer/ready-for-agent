@@ -8007,6 +8007,77 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("paused idle retryable Needs Human exposes canRetry for explicit Retry", async () => {
+    const pausedRetryableNeedsHuman = {
+      ...workItem,
+      id: "wi-paused-retryable-needs-human",
+      state: "needs_human",
+      paused: true,
+      holdsWorkerSlot: false,
+      failureCode: "needs_human",
+      failureMessage: "Human must review findings",
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          id: "srun-paused-retryable-needs-human",
+          workItemId: "wi-paused-retryable-needs-human",
+          step: "review",
+          status: "succeeded",
+          finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+          reasonCode: STEP_RUN_REASON.reviewAccepted,
+          reasonMessage: "Human must review findings",
+          reasonDetail: null,
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () =>
+          Effect.succeed([pausedRetryableNeedsHuman]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            id
+            state
+            status
+            paused
+            canRetry
+            isTerminal
+            hasActiveStepRun
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            id: "wi-paused-retryable-needs-human",
+            state: "NEEDS_HUMAN",
+            status: "NEEDS_HUMAN",
+            paused: true,
+            canRetry: true,
+            isTerminal: true,
+            hasActiveStepRun: false,
+          },
+        ],
+      },
+    })
+  })
+
   test("keeps failed Review reasonMessage as statusMessage", async () => {
     const baseRun = workItem.stepRuns[0]!
     const failedReview = {

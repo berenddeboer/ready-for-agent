@@ -7855,7 +7855,12 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
-        if (workItem.paused) {
+        const explicitPausedIdleRetryableNeedsHuman =
+          workItem.paused &&
+          retryableNeedsHumanHandoff &&
+          !retryHasActive &&
+          options?.autonomous === undefined
+        if (workItem.paused && !explicitPausedIdleRetryableNeedsHuman) {
           return yield* new RetryNotEligibleError({
             workItemId,
             reason: "paused",
@@ -8013,6 +8018,7 @@ export const makeWorkItemLifecycleLive = (
                    state_ready_at = ?,
                    failure_code = NULL,
                    failure_message = NULL,
+                   paused = 0,
                    check_start_anchor_at = CASE
                      WHEN ? = 1 AND check_start_anchor_at IS NULL THEN ?
                      ELSE check_start_anchor_at

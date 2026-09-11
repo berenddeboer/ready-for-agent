@@ -36,7 +36,7 @@ ready-for-agent retry <repo> --all-retryable
 
 `--all-retryable` is *Autonomous Retry*, capped by the Autonomous Retry Budget (default 3 attempts per Work Item at its current step). Explicit `--issue` and `--work-item` retries are not capped. Prefer the targeted form when you already know which item you mean.
 
-Retry is rejected while the Work Item is paused. Start it first.
+Retry is rejected while the Work Item is paused, except an otherwise-retryable idle Needs Human handoff: explicit `--issue` / `--work-item` / UI Retry then clears Pause and continues. `--all-retryable` still skips paused Work Items. Other paused Work Items need Start first.
 
 ## Pause and Start (GraphQL)
 

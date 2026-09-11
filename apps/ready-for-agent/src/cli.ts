@@ -97,7 +97,7 @@ const retryWorkItemFlag = Flag.string("work-item").pipe(
 
 const retryAllRetryableFlag = Flag.boolean("all-retryable").pipe(
   Flag.withDescription(
-    "Retry every currently retryable Work Item in the Repository (Harness-owned canRetry)",
+    "Retry every Work Item eligible for Autonomous Retry in the Repository (excludes paused Work Items)",
   ),
 )
 
