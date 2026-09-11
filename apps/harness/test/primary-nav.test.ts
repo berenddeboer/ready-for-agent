@@ -414,7 +414,16 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
     expect(styles).toContain("::backdrop")
     expect(styles).toContain("background: var(--scrim)")
     expect(ui).toMatch(/dialogPanel:[\s\S]*?dialog-backdrop/)
+    expect(ui).toMatch(/dialogPanel:[\s\S]*?overscroll-y-contain/)
     expect(root).toContain("ui.dialogPanel")
+    // Modal-aware document lock follows native :modal, not route state.
+    expect(styles).toContain("html:has(dialog:modal)")
+    expect(styles).toMatch(
+      /html:has\(dialog:modal\) \{\n {2}overflow: hidden;\n {2}overscroll-behavior: none;\n\}/,
+    )
+    expect(styles).toMatch(
+      /^dialog:modal \{\n {2}overscroll-behavior: contain;/m,
+    )
     // Ledger oxblood / elevated paper-2 palette is gone after phase 5 teardown.
     expect(styles).not.toContain("--paper-2:")
     expect(styles).not.toContain("--color-oxblood")

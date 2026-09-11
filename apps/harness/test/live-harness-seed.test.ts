@@ -1,4 +1,8 @@
 import {
+  IMPLEMENT_WITH_ISSUE_FIXTURE,
+  implementWithIssueFixturesArePresent,
+} from "../e2e/support/implement-with-issue-fixture.ts"
+import {
   CONTROL_FILES,
   type LiveHarnessState,
 } from "../e2e/support/live-harness-control.ts"
@@ -154,6 +158,42 @@ describe("sessionTelemetryFixturesArePresent", () => {
           .filter((item) => item.id !== TELEMETRY_FIXTURE.completedWorkItemId)
           .concat(fillers),
       ),
+    ).toBe(false)
+  })
+})
+
+describe("implementWithIssueFixturesArePresent", () => {
+  const leaf = {
+    id: IMPLEMENT_WITH_ISSUE_FIXTURE.leafIssueId,
+    issueNumber: IMPLEMENT_WITH_ISSUE_FIXTURE.leafIssueNumber,
+    hasChildren: false,
+    parent: null,
+  }
+  const parent = {
+    id: IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueId,
+    issueNumber: IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueNumber,
+    hasChildren: true,
+    parent: null,
+  }
+  const child = {
+    id: IMPLEMENT_WITH_ISSUE_FIXTURE.childIssueId,
+    issueNumber: IMPLEMENT_WITH_ISSUE_FIXTURE.childIssueNumber,
+    hasChildren: false,
+    parent: { issueNumber: IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueNumber },
+  }
+
+  test("requires the leaf and supported parent/child pair", () => {
+    expect(implementWithIssueFixturesArePresent([])).toBe(false)
+    expect(implementWithIssueFixturesArePresent([leaf, parent])).toBe(false)
+    expect(implementWithIssueFixturesArePresent([leaf, parent, child])).toBe(
+      true,
+    )
+    expect(
+      implementWithIssueFixturesArePresent([
+        leaf,
+        { ...parent, hasChildren: false },
+        child,
+      ]),
     ).toBe(false)
   })
 })

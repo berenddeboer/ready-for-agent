@@ -49,6 +49,7 @@ export type ImplementWithDialogProps = {
   readonly initialDraft: ExecutionProfileDraft
   readonly catalog: ImplementWithCatalog
   readonly prefsError?: string | null
+  readonly preferencesLoading?: boolean
   readonly initialMergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
   readonly submitPending: boolean
   readonly submitError: string | null
@@ -129,6 +130,7 @@ export function ImplementWithDialog({
   initialDraft,
   catalog,
   prefsError = null,
+  preferencesLoading = false,
   initialMergePolicy,
   submitPending,
   submitError,
@@ -275,364 +277,397 @@ export function ImplementWithDialog({
     })
   }
 
+  const header = (
+    <div className={ui.dialogHeader}>
+      <p className={ui.dialogKicker}>Implement With</p>
+      <h2 id={titleId} className={ui.dialogTitle}>
+        {target === "parent"
+          ? "Implement all with..."
+          : `Implement issue #${issueNumber} with...`}
+      </h2>
+      <p className={ui.dialogLede}>
+        {target === "parent"
+          ? "These choices apply to each new child Work Item. They never change Repository settings or Harness Config."
+          : "These choices apply only to this Work Item. They never change Repository settings or Harness Config."}
+      </p>
+    </div>
+  )
+
   return (
     <ImplementWithModalDialog
       labelledBy={titleId}
       preventCancel={submitPending}
       onCancel={onCancel}
     >
-      <form onSubmit={handleSubmit}>
-        <div className={ui.dialogHeader}>
-          <p className={ui.dialogKicker}>Implement With</p>
-          <h2 id={titleId} className={ui.dialogTitle}>
-            {target === "parent"
-              ? "Implement all with..."
-              : `Implement issue #${issueNumber} with...`}
-          </h2>
-          <p className={ui.dialogLede}>
-            {target === "parent"
-              ? "These choices apply to each new child Work Item. They never change Repository settings or Harness Config."
-              : "These choices apply only to this Work Item. They never change Repository settings or Harness Config."}
-          </p>
-        </div>
-        <div className={ui.dialogBodySectioned}>
-          <section
-            className={ui.dialogSection}
-            aria-labelledby="implement-with-backend"
-          >
-            <div className={ui.dialogSectionHead}>
-              <h3 id="implement-with-backend" className={ui.dialogSectionTitle}>
+      {preferencesLoading ? (
+        <>
+          {header}
+          <div className={ui.dialogBody}>
+            <p className={ui.dialogLoading}>Loading current preferences...</p>
+          </div>
+          <div className={ui.dialogFooter}>
+            <button type="button" className={ui.plateMini} onClick={onCancel}>
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : (
+        <form onSubmit={handleSubmit}>
+          {header}
+          <div className={ui.dialogBodySectioned}>
+            <section
+              className={ui.dialogSection}
+              aria-labelledby="implement-with-backend"
+            >
+              <div className={ui.dialogSectionHead}>
+                <h3
+                  id="implement-with-backend"
+                  className={ui.dialogSectionTitle}
+                >
+                  Agent Backend
+                </h3>
+                <span className={ui.dialogSectionMeta}>Shipped</span>
+              </div>
+              <label className={ui.dialogField}>
                 Agent Backend
-              </h3>
-              <span className={ui.dialogSectionMeta}>Shipped</span>
-            </div>
-            <label className={ui.dialogField}>
-              Agent Backend
-              <select
-                className={ui.dialogInput}
-                name="agentBackend"
-                value={backendId}
-                disabled={submitPending}
-                onChange={(event) => onBackendChange(event.target.value)}
-              >
-                {backends.some((backend) => backend.id === backendId) ? null : (
-                  <option value={backendId}>{backendLabel}</option>
-                )}
-                {backends.map((backend) => (
-                  <option key={backend.id} value={backend.id}>
-                    {backend.label}
-                  </option>
-                ))}
-              </select>
-              <span className={ui.dialogFieldHint}>
-                Previewing another Agent Backend does not change saved defaults.
-                This Work Item will keep the backend you submit.
-              </span>
-            </label>
-          </section>
-
-          <section
-            className={ui.dialogSection}
-            aria-labelledby="implement-with-models"
-          >
-            <div className={ui.dialogSectionHead}>
-              <h3 id="implement-with-models" className={ui.dialogSectionTitle}>
-                Models
-              </h3>
-              <span className={ui.dialogSectionMeta}>Build · Review</span>
-            </div>
-
-            {prefsError !== null && (
-              <Banner
-                className={ui.bannerCompact}
-                tone="alarm"
-                tag="Error"
-                role="alert"
-              >
-                {prefsError}
-              </Banner>
-            )}
-            {catalog.failed && catalog.error !== null && (
-              <Banner
-                className={ui.bannerCompact}
-                tone="alarm"
-                tag="Error"
-                role="alert"
-              >
-                {catalog.error}
-              </Banner>
-            )}
-
-            <AgentModelSelect
-              className={cx(ui.dialogField, ui.dialogFieldMono)}
-              label="Build model"
-              name="buildModel"
-              value={draft.buildModel}
-              models={catalogModels}
-              catalogLoading={catalog.loading}
-              allowClear={false}
-              required
-              disabled={modelSelectDisabled}
-              placeholder={
-                claudeBedrockStrict
-                  ? "Select a Bedrock inference profile"
-                  : "Select a build model"
-              }
-              emptyCatalogLabel={
-                claudeBedrockStrict
-                  ? "No Bedrock profiles available"
-                  : "No Agent Models available"
-              }
-              blockReason={buildBlockReason}
-              hint="Used for implement and other build steps."
-              onChange={updateBuild}
-            />
-
-            {draft.buildModel.length > 0 && buildUnavailable ? (
-              <Banner
-                className={ui.bannerCompact}
-                tone="alarm"
-                tag="Model"
-                role="alert"
-              >
-                Build effort (thinking) is unavailable — the selected model is
-                not in the Agent Model catalog. Choose another build model.
-              </Banner>
-            ) : draft.buildModel.length > 0 &&
-              catalogLoaded &&
-              buildVariants.length === 0 ? (
-              <p className={ui.dialogNote}>
-                Build effort (thinking) is unavailable — this model has no
-                effort (thinking) options.
-              </p>
-            ) : (
-              <label className={ui.dialogField}>
-                Build effort (thinking)
                 <select
                   className={ui.dialogInput}
-                  name="buildThinkingLevel"
-                  value={draft.buildThinkingLevel}
-                  disabled={
-                    modelSelectDisabled || draft.buildModel.length === 0
-                  }
-                  onChange={(event) =>
-                    replaceDraft((current) => ({
-                      ...current,
-                      buildThinkingLevel: event.target.value,
-                    }))
-                  }
-                >
-                  <option value="">
-                    {buildVariants.length === 0
-                      ? "Model default (no effort (thinking) options)"
-                      : "Model default"}
-                  </option>
-                  {hasCustomBuildVariant && (
-                    <option value={draft.buildThinkingLevel}>
-                      {formatUnavailableVariantLabel(draft.buildThinkingLevel)}
-                    </option>
-                  )}
-                  {buildVariants.map((variant) => (
-                    <option key={variant} value={variant}>
-                      {formatVariantLabel(variant)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-
-            <AgentModelSelect
-              className={cx(ui.dialogField, ui.dialogFieldMono)}
-              label="Review model"
-              name="reviewModel"
-              value={reviewModel}
-              models={catalogModels}
-              catalogLoading={catalog.loading}
-              allowClear
-              required={false}
-              disabled={modelSelectDisabled}
-              placeholder="Same as build"
-              emptyCatalogLabel="Same as build"
-              blockReason={reviewBlockReason}
-              hint="Same as build uses exactly the build Agent Model and Thinking Level."
-              onChange={(nextModel) => {
-                if (nextModel.length === 0) {
-                  replaceDraft((current) => sameAsBuildDraft(current))
-                  return
-                }
-                const nextVariants = thinkingLevelsForModel(
-                  catalogModels,
-                  nextModel,
-                )
-                replaceDraft((current) => ({
-                  buildModel: current.buildModel,
-                  buildThinkingLevel: current.buildThinkingLevel,
-                  reviewSameAsBuild: false,
-                  reviewModel: nextModel,
-                  reviewThinkingLevel: reconcileVariantForModel(
-                    current.reviewSameAsBuild
-                      ? current.buildThinkingLevel
-                      : current.reviewThinkingLevel,
-                    nextVariants,
-                  ),
-                }))
-              }}
-            />
-
-            {reviewModel.length > 0 && reviewUnavailable ? (
-              <Banner
-                className={ui.bannerCompact}
-                tone="alarm"
-                tag="Model"
-                role="alert"
-              >
-                Review effort (thinking) is unavailable — the selected model is
-                not in the Agent Model catalog. Choose another model or use Same
-                as build.
-              </Banner>
-            ) : reviewModel.length > 0 &&
-              catalogLoaded &&
-              reviewThinkingLevels.length === 0 ? (
-              <p className={ui.dialogNote}>
-                Review effort (thinking) is unavailable — this model has no
-                effort (thinking) options.
-              </p>
-            ) : (
-              <label className={ui.dialogField}>
-                Review effort (thinking)
-                <select
-                  className={ui.dialogInput}
-                  name="reviewThinkingLevel"
-                  value={reviewThinkingLevel}
-                  disabled={
-                    modelSelectDisabled ||
-                    draft.reviewSameAsBuild ||
-                    reviewModel.length === 0 ||
-                    reviewThinkingLevels.length === 0
-                  }
-                  onChange={(event) =>
-                    replaceDraft((current) =>
-                      current.reviewSameAsBuild
-                        ? current
-                        : {
-                            ...current,
-                            reviewThinkingLevel: event.target.value,
-                          },
-                    )
-                  }
-                >
-                  <option value="">
-                    {draft.reviewSameAsBuild
-                      ? "Same as build"
-                      : "Model default"}
-                  </option>
-                  {hasCustomReviewVariant && (
-                    <option value={reviewThinkingLevel}>
-                      {formatUnavailableVariantLabel(reviewThinkingLevel)}
-                    </option>
-                  )}
-                  {reviewThinkingLevels.map((variant) => (
-                    <option key={`review-${variant}`} value={variant}>
-                      {formatVariantLabel(variant)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </section>
-
-          <section
-            className={ui.dialogSection}
-            aria-labelledby="implement-with-options"
-          >
-            <div className={ui.dialogSectionHead}>
-              <h3 id="implement-with-options" className={ui.dialogSectionTitle}>
-                Options
-              </h3>
-              <span className={ui.dialogSectionMeta}>This Work Item</span>
-            </div>
-            <label className={ui.dialogField}>
-              Merge Policy
-              <select
-                name="mergePolicy"
-                className={ui.dialogInput}
-                value={mergePolicy}
-                disabled={submitPending}
-                onChange={(event) => {
-                  const next = event.target.value
-                  if (
-                    next === "OFF" ||
-                    next === "CLASSIFY" ||
-                    next === "ALWAYS"
-                  ) {
-                    setMergePolicy(next)
-                  }
-                }}
-              >
-                <option value="OFF">Off — human merge</option>
-                <option value="CLASSIFY">Classify — risk-assessed merge</option>
-                <option value="ALWAYS">Always — skip classify</option>
-              </select>
-              <span className={ui.dialogFieldHint}>
-                Off requires a human merge. Classify runs Decide PR Merge.
-                Always skips Classify and treats missing CI as green after the
-                Check-Start Deadline. This pin stays on the Work Item even if
-                Repository Merge Policy later changes.
-              </span>
-            </label>
-            {target === "leaf" && (
-              <label className={ui.dialogCheck}>
-                <input
-                  type="checkbox"
-                  className={ui.dialogCheckInput}
-                  name="implementLocally"
-                  checked={implementLocally}
+                  name="agentBackend"
+                  value={backendId}
                   disabled={submitPending}
-                  onChange={(event) =>
-                    setImplementLocally(event.target.checked)
-                  }
-                />
-                Implement locally
-                <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
-                  Pause after Review so you can inspect the worktree. Agent
-                  Turns and dependency installation keep their current
-                  capabilities. Start continues to Commit and PR creation. A
-                  No-Change Outcome pauses before Close Issue.
+                  onChange={(event) => onBackendChange(event.target.value)}
+                >
+                  {backends.some(
+                    (backend) => backend.id === backendId,
+                  ) ? null : (
+                    <option value={backendId}>{backendLabel}</option>
+                  )}
+                  {backends.map((backend) => (
+                    <option key={backend.id} value={backend.id}>
+                      {backend.label}
+                    </option>
+                  ))}
+                </select>
+                <span className={ui.dialogFieldHint}>
+                  Previewing another Agent Backend does not change saved
+                  defaults. This Work Item will keep the backend you submit.
                 </span>
               </label>
-            )}
-          </section>
+            </section>
 
-          {submitError !== null && (
-            <Banner
-              className={ui.bannerCompact}
-              tone="alarm"
-              tag="Error"
-              role="alert"
+            <section
+              className={ui.dialogSection}
+              aria-labelledby="implement-with-models"
             >
-              {submitError}
-            </Banner>
-          )}
-        </div>
-        <div className={ui.dialogFooter}>
-          <button
-            type="button"
-            className={ui.plateMini}
-            onClick={onCancel}
-            disabled={submitPending}
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            className={ui.platePrimary}
-            aria-busy={submitPending || undefined}
-            disabled={implementDisabled}
-          >
-            {submitPending ? "Starting..." : "Implement"}
-          </button>
-        </div>
-      </form>
+              <div className={ui.dialogSectionHead}>
+                <h3
+                  id="implement-with-models"
+                  className={ui.dialogSectionTitle}
+                >
+                  Models
+                </h3>
+                <span className={ui.dialogSectionMeta}>Build · Review</span>
+              </div>
+
+              {prefsError !== null && (
+                <Banner
+                  className={ui.bannerCompact}
+                  tone="alarm"
+                  tag="Error"
+                  role="alert"
+                >
+                  {prefsError}
+                </Banner>
+              )}
+              {catalog.failed && catalog.error !== null && (
+                <Banner
+                  className={ui.bannerCompact}
+                  tone="alarm"
+                  tag="Error"
+                  role="alert"
+                >
+                  {catalog.error}
+                </Banner>
+              )}
+
+              <AgentModelSelect
+                className={cx(ui.dialogField, ui.dialogFieldMono)}
+                label="Build model"
+                name="buildModel"
+                value={draft.buildModel}
+                models={catalogModels}
+                catalogLoading={catalog.loading}
+                allowClear={false}
+                required
+                disabled={modelSelectDisabled}
+                placeholder={
+                  claudeBedrockStrict
+                    ? "Select a Bedrock inference profile"
+                    : "Select a build model"
+                }
+                emptyCatalogLabel={
+                  claudeBedrockStrict
+                    ? "No Bedrock profiles available"
+                    : "No Agent Models available"
+                }
+                blockReason={buildBlockReason}
+                hint="Used for implement and other build steps."
+                onChange={updateBuild}
+              />
+
+              {draft.buildModel.length > 0 && buildUnavailable ? (
+                <Banner
+                  className={ui.bannerCompact}
+                  tone="alarm"
+                  tag="Model"
+                  role="alert"
+                >
+                  Build effort (thinking) is unavailable — the selected model is
+                  not in the Agent Model catalog. Choose another build model.
+                </Banner>
+              ) : draft.buildModel.length > 0 &&
+                catalogLoaded &&
+                buildVariants.length === 0 ? (
+                <p className={ui.dialogNote}>
+                  Build effort (thinking) is unavailable — this model has no
+                  effort (thinking) options.
+                </p>
+              ) : (
+                <label className={ui.dialogField}>
+                  Build effort (thinking)
+                  <select
+                    className={ui.dialogInput}
+                    name="buildThinkingLevel"
+                    value={draft.buildThinkingLevel}
+                    disabled={
+                      modelSelectDisabled || draft.buildModel.length === 0
+                    }
+                    onChange={(event) =>
+                      replaceDraft((current) => ({
+                        ...current,
+                        buildThinkingLevel: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">
+                      {buildVariants.length === 0
+                        ? "Model default (no effort (thinking) options)"
+                        : "Model default"}
+                    </option>
+                    {hasCustomBuildVariant && (
+                      <option value={draft.buildThinkingLevel}>
+                        {formatUnavailableVariantLabel(
+                          draft.buildThinkingLevel,
+                        )}
+                      </option>
+                    )}
+                    {buildVariants.map((variant) => (
+                      <option key={variant} value={variant}>
+                        {formatVariantLabel(variant)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              <AgentModelSelect
+                className={cx(ui.dialogField, ui.dialogFieldMono)}
+                label="Review model"
+                name="reviewModel"
+                value={reviewModel}
+                models={catalogModels}
+                catalogLoading={catalog.loading}
+                allowClear
+                required={false}
+                disabled={modelSelectDisabled}
+                placeholder="Same as build"
+                emptyCatalogLabel="Same as build"
+                blockReason={reviewBlockReason}
+                hint="Same as build uses exactly the build Agent Model and Thinking Level."
+                onChange={(nextModel) => {
+                  if (nextModel.length === 0) {
+                    replaceDraft((current) => sameAsBuildDraft(current))
+                    return
+                  }
+                  const nextVariants = thinkingLevelsForModel(
+                    catalogModels,
+                    nextModel,
+                  )
+                  replaceDraft((current) => ({
+                    buildModel: current.buildModel,
+                    buildThinkingLevel: current.buildThinkingLevel,
+                    reviewSameAsBuild: false,
+                    reviewModel: nextModel,
+                    reviewThinkingLevel: reconcileVariantForModel(
+                      current.reviewSameAsBuild
+                        ? current.buildThinkingLevel
+                        : current.reviewThinkingLevel,
+                      nextVariants,
+                    ),
+                  }))
+                }}
+              />
+
+              {reviewModel.length > 0 && reviewUnavailable ? (
+                <Banner
+                  className={ui.bannerCompact}
+                  tone="alarm"
+                  tag="Model"
+                  role="alert"
+                >
+                  Review effort (thinking) is unavailable — the selected model
+                  is not in the Agent Model catalog. Choose another model or use
+                  Same as build.
+                </Banner>
+              ) : reviewModel.length > 0 &&
+                catalogLoaded &&
+                reviewThinkingLevels.length === 0 ? (
+                <p className={ui.dialogNote}>
+                  Review effort (thinking) is unavailable — this model has no
+                  effort (thinking) options.
+                </p>
+              ) : (
+                <label className={ui.dialogField}>
+                  Review effort (thinking)
+                  <select
+                    className={ui.dialogInput}
+                    name="reviewThinkingLevel"
+                    value={reviewThinkingLevel}
+                    disabled={
+                      modelSelectDisabled ||
+                      draft.reviewSameAsBuild ||
+                      reviewModel.length === 0 ||
+                      reviewThinkingLevels.length === 0
+                    }
+                    onChange={(event) =>
+                      replaceDraft((current) =>
+                        current.reviewSameAsBuild
+                          ? current
+                          : {
+                              ...current,
+                              reviewThinkingLevel: event.target.value,
+                            },
+                      )
+                    }
+                  >
+                    <option value="">
+                      {draft.reviewSameAsBuild
+                        ? "Same as build"
+                        : "Model default"}
+                    </option>
+                    {hasCustomReviewVariant && (
+                      <option value={reviewThinkingLevel}>
+                        {formatUnavailableVariantLabel(reviewThinkingLevel)}
+                      </option>
+                    )}
+                    {reviewThinkingLevels.map((variant) => (
+                      <option key={`review-${variant}`} value={variant}>
+                        {formatVariantLabel(variant)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </section>
+
+            <section
+              className={ui.dialogSection}
+              aria-labelledby="implement-with-options"
+            >
+              <div className={ui.dialogSectionHead}>
+                <h3
+                  id="implement-with-options"
+                  className={ui.dialogSectionTitle}
+                >
+                  Options
+                </h3>
+                <span className={ui.dialogSectionMeta}>This Work Item</span>
+              </div>
+              <label className={ui.dialogField}>
+                Merge Policy
+                <select
+                  name="mergePolicy"
+                  className={ui.dialogInput}
+                  value={mergePolicy}
+                  disabled={submitPending}
+                  onChange={(event) => {
+                    const next = event.target.value
+                    if (
+                      next === "OFF" ||
+                      next === "CLASSIFY" ||
+                      next === "ALWAYS"
+                    ) {
+                      setMergePolicy(next)
+                    }
+                  }}
+                >
+                  <option value="OFF">Off — human merge</option>
+                  <option value="CLASSIFY">
+                    Classify — risk-assessed merge
+                  </option>
+                  <option value="ALWAYS">Always — skip classify</option>
+                </select>
+                <span className={ui.dialogFieldHint}>
+                  Off requires a human merge. Classify runs Decide PR Merge.
+                  Always skips Classify and treats missing CI as green after the
+                  Check-Start Deadline. This pin stays on the Work Item even if
+                  Repository Merge Policy later changes.
+                </span>
+              </label>
+              {target === "leaf" && (
+                <label className={ui.dialogCheck}>
+                  <input
+                    type="checkbox"
+                    className={ui.dialogCheckInput}
+                    name="implementLocally"
+                    checked={implementLocally}
+                    disabled={submitPending}
+                    onChange={(event) =>
+                      setImplementLocally(event.target.checked)
+                    }
+                  />
+                  Implement locally
+                  <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+                    Pause after Review so you can inspect the worktree. Agent
+                    Turns and dependency installation keep their current
+                    capabilities. Start continues to Commit and PR creation. A
+                    No-Change Outcome pauses before Close Issue.
+                  </span>
+                </label>
+              )}
+            </section>
+
+            {submitError !== null && (
+              <Banner
+                className={ui.bannerCompact}
+                tone="alarm"
+                tag="Error"
+                role="alert"
+              >
+                {submitError}
+              </Banner>
+            )}
+          </div>
+          <div className={ui.dialogFooter}>
+            <button
+              type="button"
+              className={ui.plateMini}
+              onClick={onCancel}
+              disabled={submitPending}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className={ui.platePrimary}
+              aria-busy={submitPending || undefined}
+              disabled={implementDisabled}
+            >
+              {submitPending ? "Starting..." : "Implement"}
+            </button>
+          </div>
+        </form>
+      )}
     </ImplementWithModalDialog>
   )
 }

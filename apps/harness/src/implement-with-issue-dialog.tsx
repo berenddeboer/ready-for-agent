@@ -12,11 +12,7 @@ import {
   usablePreviewCatalog,
 } from "./execution-profile-draft.js"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
-import {
-  ImplementWithDialog,
-  ImplementWithModalDialog,
-} from "./implement-with-dialog.js"
-import { ui } from "./ui.js"
+import { ImplementWithDialog } from "./implement-with-dialog.js"
 
 const graphql = createHarnessGraphqlClient({ batch: true })
 
@@ -191,34 +187,6 @@ export function ImplementWithIssueDialog({
     backendId === initialBackendId &&
     harnessPrefs.isPending &&
     harnessPrefs.data === undefined
-  if (firstPrefsPending) {
-    const loadingTitleId = `implement-with-loading-${issueNumber}`
-    return (
-      <ImplementWithModalDialog labelledBy={loadingTitleId} onCancel={onCancel}>
-        <div className={ui.dialogHeader}>
-          <p className={ui.dialogKicker}>Implement With</p>
-          <h2 id={loadingTitleId} className={ui.dialogTitle}>
-            {target === "parent"
-              ? "Implement all with..."
-              : `Implement issue #${issueNumber} with...`}
-          </h2>
-          <p className={ui.dialogLede}>
-            {target === "parent"
-              ? "These choices apply to each new child Work Item. They never change Repository settings or Harness Config."
-              : "These choices apply only to this Work Item. They never change Repository settings or Harness Config."}
-          </p>
-        </div>
-        <div className={ui.dialogBody}>
-          <p className={ui.dialogLoading}>Loading current preferences...</p>
-        </div>
-        <div className={ui.dialogFooter}>
-          <button type="button" className={ui.plateMini} onClick={onCancel}>
-            Cancel
-          </button>
-        </div>
-      </ImplementWithModalDialog>
-    )
-  }
 
   const emptyPrefs: ExecutionProfilePrefSource = {
     defaultModel: null,
@@ -257,6 +225,7 @@ export function ImplementWithIssueDialog({
       initialDraft={initialDraft}
       catalog={catalog}
       prefsError={prefsError}
+      preferencesLoading={firstPrefsPending}
       initialMergePolicy={initialMergePolicy}
       submitPending={submitPending}
       submitError={submitError}

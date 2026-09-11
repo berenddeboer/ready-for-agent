@@ -847,3 +847,18 @@
     background: var(--scrim);
   }
 }
+
+/*
+ * Document scroll lock follows native modal state (`dialog:modal`), not
+ * route state, so first-run Settings and Implement With stay locked.
+ * UA already sizes modal dialogs (`max-height` + `overflow: auto`).
+ * Overscroll containment stops wheel chaining at the panel boundary.
+ */
+html:has(dialog:modal) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+dialog:modal {
+  overscroll-behavior: contain;
+}
