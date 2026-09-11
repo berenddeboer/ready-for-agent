@@ -382,6 +382,7 @@ describe("runMigrations", () => {
           { name: "20260907133000_repository_ci_gate_observation" },
           { name: "20260907150000_work_item_waiting_for_ci_repair" },
           { name: "20260907160000_ci_repair_authorization" },
+          { name: "20260911120000_step_run_review_progress_checkpoint" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -433,6 +434,22 @@ describe("runMigrations", () => {
         expect(
           yield* sql`SELECT count(*) AS count FROM __drizzle_migrations WHERE name IN (${baselineName}, ${preSquashMigrations[0][0]}, ${preSquashMigrations[22][0]})`,
         ).toEqual([{ count: 3 }])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("adds Step Run Review Progress Checkpoint columns defaulting to absent", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* runMigrations(defaultMigrationsFolder)
+        const columns = (yield* sql.unsafe(
+          `PRAGMA table_info(step_run)`,
+        )) as readonly { readonly name: string }[]
+        const names = new Set(columns.map((column) => column.name))
+        expect(names.has("progress_checkpoint_at")).toBe(true)
+        expect(names.has("progress_checkpoint_kind")).toBe(true)
+        expect(names.has("progress_checkpoint_session_wait_ms")).toBe(true)
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

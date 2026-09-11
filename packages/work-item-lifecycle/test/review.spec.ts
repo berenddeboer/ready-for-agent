@@ -36,6 +36,7 @@ import {
   buildReviewingPrompt,
   formatAcceptedReviewSummary,
   formatDeferredReviewSummary,
+  formatReviewNoProgressTimeoutMessage,
   makeWorkItemId,
   parseApplyReviewResult,
   parseRerunAssessmentResult,
@@ -211,6 +212,44 @@ const writeHook = async (root: string, body: string) => {
     mode: 0o755,
   })
 }
+
+describe("formatReviewNoProgressTimeoutMessage", () => {
+  it("names a 60-minute interval when no checkpoint has completed", () => {
+    expect(
+      formatReviewNoProgressTimeoutMessage({
+        interval: Duration.minutes(60),
+        checkpointKind: null,
+        checkpointAt: null,
+      }),
+    ).toBe(
+      "Review made no completed-checkpoint progress for 60 minutes (no checkpoint has completed)",
+    )
+  })
+
+  it("identifies the last reviewing checkpoint", () => {
+    expect(
+      formatReviewNoProgressTimeoutMessage({
+        interval: Duration.minutes(60),
+        checkpointKind: "reviewing",
+        checkpointAt: Date.parse("2026-09-11T11:21:00.000Z"),
+      }),
+    ).toBe(
+      "Review made no completed-checkpoint progress for 60 minutes (last checkpoint: reviewing at 2026-09-11T11:21:00.000Z)",
+    )
+  })
+
+  it("identifies a verified apply checkpoint", () => {
+    expect(
+      formatReviewNoProgressTimeoutMessage({
+        interval: Duration.millis(80),
+        checkpointKind: "verified_apply",
+        checkpointAt: Date.parse("2026-09-11T12:40:00.000Z"),
+      }),
+    ).toBe(
+      "Review made no completed-checkpoint progress for 80 milliseconds (last checkpoint: verified apply at 2026-09-11T12:40:00.000Z)",
+    )
+  })
+})
 
 describe("parseReviewResult", () => {
   it("parses clean and severity-tagged has-findings lines", () => {

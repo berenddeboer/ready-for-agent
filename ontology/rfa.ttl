@@ -256,7 +256,7 @@ rfa:maximumDuration
   rdfs:range xsd:dayTimeDuration ;
   rdfs:label "maximum duration"@en ;
   skos:definition
-    "The positive fixed default maximum productive execution time for the Lifecycle Step, expressed to millisecond precision."@en .
+    "The positive fixed default timeout budget for the Lifecycle Step, expressed to millisecond precision. For most steps this is an aggregate maximum productive execution time from Step Run start, excluding Agent Turn admission waiting. For Review it is a no-progress interval: productive time without a completed Review Progress Checkpoint, excluding Agent Turn admission waiting accrued since that checkpoint or the Step Run start."@en .
 
 rfa:retryable
   a owl:DatatypeProperty ;
@@ -462,7 +462,7 @@ rfa:TimeoutReason
   a rfa:StepRunReason ;
   skos:notation "timeout" ;
   skos:definition
-    "The Step Run ended because the Lifecycle Step exceeded its configured maximum duration."@en .
+    "The Step Run ended because the Lifecycle Step exceeded its configured timeout budget: an aggregate maximum duration, or for Review a no-progress interval without a completed checkpoint."@en .
 
 rfa:WaitingForAgentTurnReason
   a rfa:StepRunReason ;

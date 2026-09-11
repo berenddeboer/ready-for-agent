@@ -154,7 +154,7 @@ export const STEP_RUN_REASON = {
   reviewReviewing: "review_reviewing",
   /** An agent-dependent step is blocked because the resolved Thinking Level is not advertised by the governing Agent Model's current catalog entry. Rejected before the backend CLI is spawned. */
   thinkingLevelNotInCatalog: "thinking_level_not_in_catalog",
-  /** The Step Run ended because the Lifecycle Step exceeded its configured maximum duration. */
+  /** The Step Run ended because the Lifecycle Step exceeded its configured timeout budget: an aggregate maximum duration, or for Review a no-progress interval without a completed checkpoint. */
   timeout: "timeout",
   /** Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns. */
   waitingForAgentTurn: "waiting_for_agent_turn",
@@ -197,7 +197,7 @@ export const STEP_RUN_REASON_DEFINITIONS = {
   review_pre_commit: "Mid-run: Review is re-running Pre-Commit after FIXED before re-review.",
   review_reviewing: "Mid-run: Review is running the reviewing Agent Turn.",
   thinking_level_not_in_catalog: "An agent-dependent step is blocked because the resolved Thinking Level is not advertised by the governing Agent Model's current catalog entry. Rejected before the backend CLI is spawned.",
-  timeout: "The Step Run ended because the Lifecycle Step exceeded its configured maximum duration.",
+  timeout: "The Step Run ended because the Lifecycle Step exceeded its configured timeout budget: an aggregate maximum duration, or for Review a no-progress interval without a completed checkpoint.",
   waiting_for_agent_turn: "Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns.",
   worker_restarted: "The prior harness or job-worker process ended while the Step Run was still Running.",
 } as const satisfies Record<StepRunReason, string>
