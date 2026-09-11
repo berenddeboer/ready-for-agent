@@ -67,7 +67,7 @@ type DraftSlot = {
  * Local modal that always pairs showModal with close on unmount so tearing
  * the node out of the tree cannot leave the document inert.
  */
-export function ImplementWithModalDialog({
+function ImplementWithModalDialog({
   labelledBy,
   preventCancel = false,
   onCancel,

@@ -542,6 +542,11 @@ Then("mouse-wheel input can move the page background", async ({ page }) => {
 
 Then("the page background scroll position is unchanged", async ({ page }) => {
   const origin = requiredOrigin(page)
+  // Routed dialog opens can adjust window.scrollY (history/mask). Put the
+  // recorded origin back under the lock, then prove it holds.
+  if (await openDialog(page).first().isVisible()) {
+    await restoreRecordedOffset(page)
+  }
   await expect
     .poll(async () => (await scrollMetrics(page)).scrollY, { timeout: 3_000 })
     .toBe(origin.scrollY)
