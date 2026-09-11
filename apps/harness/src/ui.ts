@@ -416,7 +416,7 @@ export const ui = {
    * styles.css (`::backdrop { background: var(--scrim) }`).
    */
   dialogPanel:
-    "dialog-backdrop m-auto w-[min(92vw,32rem)] border-2 border-ink bg-paper p-0 text-ink shadow-none",
+    "dialog-backdrop m-auto w-[min(92vw,32rem)] overflow-y-auto overscroll-y-contain border-2 border-ink bg-paper p-0 text-ink shadow-none",
 
   dialogPanelNarrow: "w-[min(92vw,28rem)]",
 

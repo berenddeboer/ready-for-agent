@@ -225,6 +225,17 @@ describe("ImplementWithDialog copy and catalog", () => {
     expect(html).toContain('value="high"')
   })
 
+  test("preference loading keeps the dialog chrome and hides the form", () => {
+    const html = renderToStaticMarkup(
+      <ImplementWithDialog {...baseProps} preferencesLoading />,
+    )
+    expect(html).toContain("Implement issue #1034 with...")
+    expect(html).toContain("Loading current preferences...")
+    expect(html).toContain(">Cancel<")
+    expect(html).not.toContain('name="agentBackend"')
+    expect(html).not.toContain(">Implement<")
+  })
+
   test("shows a Harness preference load failure without hiding the form", () => {
     const html = renderToStaticMarkup(
       <ImplementWithDialog
@@ -961,5 +972,15 @@ describe("Implement With preview query contract", () => {
     expect(preview).toContain("gcTime: 0")
     expect(source).toContain("implementWithSessionPreview")
     expect(source).toContain("isFetchedAfterMount")
+  })
+
+  test("keeps one modal mounted from preference loading through the form", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../src/implement-with-issue-dialog.tsx"),
+      "utf8",
+    )
+    expect(source).toContain("preferencesLoading={firstPrefsPending}")
+    expect(source).not.toContain("ImplementWithModalDialog")
+    expect(source).not.toContain("implement-with-loading-")
   })
 })

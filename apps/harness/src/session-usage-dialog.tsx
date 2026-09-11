@@ -428,7 +428,7 @@ function AgentTurnTailPanel({
     )
   }
   return (
-    <ol className="m-0 grid max-h-64 list-none gap-2 overflow-y-auto p-0">
+    <ol className="m-0 grid max-h-64 list-none gap-2 overflow-y-auto overscroll-y-contain p-0">
       {data.items.map((item) => (
         <li
           key={`${item.__typename}-${item.at}-${item.__typename === "AgentTurnTailTool" ? item.name : item.text}`}
