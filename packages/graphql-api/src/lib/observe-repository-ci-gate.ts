@@ -1,6 +1,5 @@
 import { Clock, Effect, Result } from "effect"
 import { ulid } from "ulidx"
-import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import {
   type CiFailureIncidentRecord,
   type CiGateDefinitionObservationRecord,
@@ -14,15 +13,14 @@ import {
   type CiGateDefinitionObservation,
   type CiGateObservation,
   type CiGateObservedRun,
+  type ForgeOperationOrigin,
   type ObserveCiGateInput,
   formatUserFacingError,
 } from "@ready-for-agent/forge-contract"
 import {
-  type GitHubOperationOrigin,
-  GitHubService,
-} from "@ready-for-agent/github-service"
-import { GitLabService } from "@ready-for-agent/gitlab-service"
-import { WorkItemLifecycle } from "@ready-for-agent/work-item-lifecycle"
+  WorkItemLifecycle,
+  forgeObservation,
+} from "@ready-for-agent/work-item-lifecycle"
 
 export type RepositoryCiGateStatus = "disabled" | "open" | "closed" | "degraded"
 
@@ -336,7 +334,7 @@ const observationFromAdapter = (input: {
 export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
   function* (input: {
     readonly repository: RepositoryRecord
-    readonly origin: GitHubOperationOrigin
+    readonly origin: ForgeOperationOrigin
   }) {
     const db = yield* DbService
     const definitions = yield* db.listCiGateDefinitions(input.repository.id)
@@ -391,36 +389,6 @@ export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
           !definitions.some((definition) => definition.identity === identity),
       )
 
-    if (
-      input.repository.forge !== "github" &&
-      input.repository.forge !== "gitlab" &&
-      input.repository.forge !== "azure-devops"
-    ) {
-      const observations = definitions.map((definition) =>
-        unavailableObservation({
-          previous: previousByIdentity.get(definition.identity),
-          identity: definition.identity,
-          observedAt,
-          reason: "error",
-          message: `CI Gate observation is not available for ${input.repository.forge} Repositories`,
-        }),
-      )
-      yield* commitWithIncidents({
-        repository: input.repository,
-        defaultBranch: previous.state?.defaultBranch ?? null,
-        observedAt,
-        definitions,
-        previous,
-        observations,
-        removedIdentities,
-        sameObservationFailures: [],
-        recoveryIfCleared:
-          removedIdentities.length > 0 ? "definition_removed" : "newer_success",
-        previousStatus,
-      })
-      return
-    }
-
     const lastRunIdentities: { [definitionIdentity: string]: string } = {}
     for (const definition of definitions) {
       const last = previousByIdentity.get(definition.identity)?.lastRunIdentity
@@ -440,25 +408,13 @@ export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
       ),
       lastRunIdentities,
     }
-    let adapterResult: Result.Result<CiGateObservation, unknown>
-    if (input.repository.forge === "azure-devops") {
-      const azureDevOps = yield* AzureDevOpsService
-      adapterResult = yield* azureDevOps
-        .observeCiGate(forgeRepository, observationInput)
-        .pipe(Effect.result)
-    } else if (input.repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      adapterResult = yield* gitlab
-        .observeCiGate(forgeRepository, observationInput)
-        .pipe(Effect.result)
-    } else {
-      const github = yield* GitHubService
-      adapterResult = yield* github
+    const observationsAdapter = yield* forgeObservation(input.repository)
+    const adapterResult: Result.Result<CiGateObservation, unknown> =
+      yield* observationsAdapter
         .observeCiGate(forgeRepository, observationInput, {
           origin: input.origin,
         })
         .pipe(Effect.result)
-    }
 
     if (Result.isFailure(adapterResult)) {
       const message = ciGateObservationErrorMessage(adapterResult.failure)

@@ -17,6 +17,7 @@ import {
   toGitHubRepository,
   toGitLabRepository,
 } from "./agent-turn-forge-auth.js"
+import { forgeObservation } from "./forge-observation.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   MarkPrReadyForReviewContextError,
@@ -106,83 +107,26 @@ const checkReadyForReview = (
   branch: string,
 ) =>
   Effect.gen(function* () {
-    switch (repository.forge) {
-      case "gitlab": {
-        const gitlab = yield* GitLabService
-        const status = yield* gitlab
-          .getPullRequestCheckStatus(toGitLabRepository(repository), branch)
-          .pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning(
+    const observations = yield* forgeObservation(repository)
+    const status = yield* observations
+      .getPullRequestCheckStatus(repository, branch)
+      .pipe(
+        Effect.catch((cause) =>
+          isGitHubThrottledError(cause)
+            ? Effect.fail(cause)
+            : Effect.logWarning(
                 "Soft ready-for-review check failed; treating as not yet ready",
                 {
                   step: "mark_pr_ready_for_review",
                   repositoryId: context.repositoryId,
                   projectPath: repository.projectPath,
                   branch,
-                  cause,
+                  ...logErrorAnnotations(cause),
                 },
               ).pipe(Effect.as(null)),
-            ),
-          )
-        return status !== null && status.isDraft === false
-          ? (true as const)
-          : null
-      }
-      case "azure-devops": {
-        const azureDevOps = yield* AzureDevOpsService
-        const status = yield* azureDevOps
-          .getPullRequestCheckStatus(
-            toAzureDevOpsRepository(repository),
-            branch,
-          )
-          .pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning(
-                "Soft ready-for-review check failed; treating as not yet ready",
-                {
-                  step: "mark_pr_ready_for_review",
-                  repositoryId: context.repositoryId,
-                  projectPath: repository.projectPath,
-                  branch,
-                  cause,
-                },
-              ).pipe(Effect.as(null)),
-            ),
-          )
-        return status !== null && status.isDraft === false
-          ? (true as const)
-          : null
-      }
-      case "github": {
-        const github = yield* GitHubService
-        const status = yield* github
-          .getPullRequestCheckStatus(toGitHubRepository(repository), branch)
-          .pipe(
-            Effect.catch((cause) =>
-              isGitHubThrottledError(cause)
-                ? Effect.fail(cause)
-                : Effect.logWarning(
-                    "Soft ready-for-review check failed; treating as not yet ready",
-                    {
-                      step: "mark_pr_ready_for_review",
-                      repositoryId: context.repositoryId,
-                      projectPath: repository.projectPath,
-                      branch,
-                      ...logErrorAnnotations(cause),
-                    },
-                  ).pipe(Effect.as(null)),
-            ),
-          )
-        return status !== null && status.isDraft === false
-          ? (true as const)
-          : null
-      }
-      default: {
-        const _exhaustive: never = repository.forge
-        return _exhaustive
-      }
-    }
+        ),
+      )
+    return status !== null && status.isDraft === false ? (true as const) : null
   })
 
 const attemptNativeMarkReady = (

@@ -3,6 +3,7 @@ import type {
   CiGateCatalogEntry,
   CiGateObservation,
   ForgeIssueOperations,
+  ForgeObservation,
   MergePullRequestOptions,
   MergePullRequestResult,
   ObserveCiGateInput,
@@ -37,7 +38,8 @@ export type AzureDevOpsServiceError =
  * still fails with `AzureDevOpsNotImplementedError` (see method-level docs).
  */
 export interface AzureDevOpsServiceShape
-  extends ForgeIssueOperations<AzureDevOpsServiceError> {
+  extends ForgeIssueOperations<AzureDevOpsServiceError>,
+    ForgeObservation<AzureDevOpsServiceError> {
   /**
    * Verify Organization + Project against Azure DevOps before persistence
    * (`GET _apis/projects/{project}`), then the Git repository itself

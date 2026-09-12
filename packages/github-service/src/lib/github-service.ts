@@ -3,6 +3,9 @@ import type {
   CiGateCatalogEntry,
   CiGateObservation,
   ForgeIssueOperations,
+  ForgeObservation,
+  ForgeOperationOptions,
+  ForgeOperationOrigin,
   MergePullRequestOptions,
   MergePullRequestResult,
   ObserveCiGateInput,
@@ -26,18 +29,13 @@ import type { GitHubRepository, UploadUserAttachmentInput } from "./types.js"
  * This is deliberately a closed set: callers express why the operation is
  * happening, while the harness owns scheduling policy and numeric priorities.
  */
-export type GitHubOperationOrigin =
-  | "operator"
-  | "lifecycle"
-  | "polling"
-  | "background"
+export type GitHubOperationOrigin = ForgeOperationOrigin
 
-export interface GitHubOperationOptions {
-  readonly origin: GitHubOperationOrigin
-}
+export type GitHubOperationOptions = ForgeOperationOptions
 
 export interface GitHubServiceShape
-  extends ForgeIssueOperations<GitHubServiceError> {
+  extends ForgeIssueOperations<GitHubServiceError>,
+    ForgeObservation<GitHubServiceError> {
   /**
    * Login of the authenticated principal for this Repository's credential
    * (Operator GitHub User). Same token path as other GitHub API calls.
