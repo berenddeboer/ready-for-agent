@@ -1,12 +1,13 @@
 import { Duration, Effect, FileSystem, Path } from "effect"
-import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
-import { GitHubService } from "@ready-for-agent/github-service"
-import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
   CreateWorktreeRepositoryNotFoundError,
   GitCommandError,
 } from "./create-worktree-errors.js"
+import {
+  forgePullRequestMutations,
+  toForgeRepository,
+} from "./forge-mutation.js"
 import { type GitRepository, gitExitCode, runGit } from "./git.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { RemoveWorktreeRemoteError } from "./remove-worktree-errors.js"
@@ -89,111 +90,75 @@ const removeResidualDirectoryWithRetry = (path: string) =>
     yield* removeDirectoryIfPresent(path).pipe(Effect.ignore)
   })
 
-const removeGitLabRemoteArtifacts = (input: {
-  readonly repository: RepositoryRecord
-  readonly branchName: string
-}) =>
-  Effect.gen(function* () {
-    const gitlab = yield* GitLabService
-    const forgeRepository = {
-      forge: input.repository.forge,
-      forgeHost: input.repository.forgeHost,
-      projectPath: input.repository.projectPath,
+const sequentialCleanupMessages = (
+  forge: "gitlab" | "azure-devops",
+): { readonly close: string; readonly delete: string } => {
+  switch (forge) {
+    case "gitlab":
+      return {
+        close: "Failed to close open GitLab merge requests for cleanup",
+        delete: "Failed to delete remote GitLab Work Item branch",
+      }
+    case "azure-devops":
+      return {
+        close: "Failed to close open Azure DevOps pull requests for cleanup",
+        delete: "Failed to delete remote Azure DevOps Work Item branch",
+      }
+    default: {
+      const _exhaustive: never = forge
+      return _exhaustive
     }
-    yield* gitlab
-      .closeOpenPullRequestsForBranch(forgeRepository, input.branchName)
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new RemoveWorktreeRemoteError({
-              message: "Failed to close open GitLab merge requests for cleanup",
-              branchName: input.branchName,
-              cause,
-            }),
-        ),
-      )
-    yield* gitlab.deleteBranch(forgeRepository, input.branchName).pipe(
-      Effect.mapError(
-        (cause) =>
-          new RemoveWorktreeRemoteError({
-            message: "Failed to delete remote GitLab Work Item branch",
-            branchName: input.branchName,
-            cause,
-          }),
-      ),
-    )
-  })
-
-const removeGitHubRemoteArtifacts = (input: {
-  readonly repository: RepositoryRecord
-  readonly branchName: string
-}) =>
-  Effect.gen(function* () {
-    const github = yield* GitHubService
-    const forgeRepository = {
-      forge: input.repository.forge,
-      forgeHost: input.repository.forgeHost,
-      projectPath: input.repository.projectPath,
-    }
-    // This is deliberately one service operation. Ambient and Keymaxxer
-    // adapters therefore retain their coordinator permit across list, every
-    // sequential close, and the final branch delete.
-    yield* github.closeOpenPullRequestsAndDeleteBranch(
-      forgeRepository,
-      input.branchName,
-    )
-  })
-
-const removeAzureDevOpsRemoteArtifacts = (input: {
-  readonly repository: RepositoryRecord
-  readonly branchName: string
-}) =>
-  Effect.gen(function* () {
-    const azureDevOps = yield* AzureDevOpsService
-    const forgeRepository = {
-      forge: input.repository.forge,
-      forgeHost: input.repository.forgeHost,
-      projectPath: input.repository.projectPath,
-    }
-    yield* azureDevOps
-      .closeOpenPullRequestsForBranch(forgeRepository, input.branchName)
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new RemoveWorktreeRemoteError({
-              message:
-                "Failed to close open Azure DevOps pull requests for cleanup",
-              branchName: input.branchName,
-              cause,
-            }),
-        ),
-      )
-    yield* azureDevOps.deleteBranch(forgeRepository, input.branchName).pipe(
-      Effect.mapError(
-        (cause) =>
-          new RemoveWorktreeRemoteError({
-            message: "Failed to delete remote Azure DevOps Work Item branch",
-            branchName: input.branchName,
-            cause,
-          }),
-      ),
-    )
-  })
+  }
+}
 
 const removeRemoteArtifacts = (input: {
   readonly repository: RepositoryRecord
   readonly branchName: string
 }) =>
   Effect.gen(function* () {
-    switch (input.repository.forge) {
-      case "gitlab":
-        return yield* removeGitLabRemoteArtifacts(input)
-      case "azure-devops":
-        return yield* removeAzureDevOpsRemoteArtifacts(input)
+    const mutations = yield* forgePullRequestMutations(input.repository)
+    const forgeRepository = toForgeRepository(input.repository)
+    switch (mutations.forge) {
       case "github":
-        return yield* removeGitHubRemoteArtifacts(input)
+        // This is deliberately one service operation. Ambient and Keymaxxer
+        // adapters therefore retain their coordinator permit across list, every
+        // sequential close, and the final branch delete.
+        yield* mutations.remoteCleanup.closeOpenPullRequestsAndDeleteBranch(
+          forgeRepository,
+          input.branchName,
+        )
+        return
+      case "gitlab":
+      case "azure-devops": {
+        const messages = sequentialCleanupMessages(mutations.forge)
+        yield* mutations.remoteCleanup
+          .closeOpenPullRequestsForBranch(forgeRepository, input.branchName)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new RemoveWorktreeRemoteError({
+                  message: messages.close,
+                  branchName: input.branchName,
+                  cause,
+                }),
+            ),
+          )
+        yield* mutations.remoteCleanup
+          .deleteBranch(forgeRepository, input.branchName)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new RemoveWorktreeRemoteError({
+                  message: messages.delete,
+                  branchName: input.branchName,
+                  cause,
+                }),
+            ),
+          )
+        return
+      }
       default: {
-        const _exhaustive: never = input.repository.forge
+        const _exhaustive: never = mutations
         return _exhaustive
       }
     }

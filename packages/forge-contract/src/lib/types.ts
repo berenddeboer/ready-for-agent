@@ -223,6 +223,27 @@ export type MergePullRequestOptions = {
   readonly acceptNoChecks?: boolean
 }
 
+/**
+ * Input for creating a draft pull/merge request. The caller must already
+ * have pushed `headRefName`. `baseRefName` is optional; each Forge uses its
+ * default branch when omitted.
+ */
+export interface CreateDraftPullRequestInput {
+  readonly headRefName: string
+  readonly title: string
+  readonly body: string
+  readonly baseRefName?: string
+}
+
+/**
+ * Title and body applied to an existing open draft pull/merge request.
+ * Non-draft open PRs/MRs are left unchanged.
+ */
+export interface UpdateDraftPullRequestCopyInput {
+  readonly title: string
+  readonly body: string
+}
+
 /** Domain result of a merge attempt; request/response failures remain errors. */
 export type MergePullRequestResult =
   | { readonly _tag: "merged" }

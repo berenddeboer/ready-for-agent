@@ -1,22 +1,21 @@
 import { Effect } from "effect"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
-import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
+import type { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
 import {
   formatUserFacingError,
   logErrorAnnotations,
 } from "@ready-for-agent/forge-contract"
 import {
-  GitHubService,
+  type GitHubService,
   type GitHubThrottledError,
   isGitHubThrottledError,
 } from "@ready-for-agent/github-service"
-import { GitLabService } from "@ready-for-agent/gitlab-service"
+import type { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
-  toAzureDevOpsRepository,
-  toGitHubRepository,
-  toGitLabRepository,
-} from "./agent-turn-forge-auth.js"
+  forgePullRequestMutations,
+  toForgeRepository,
+} from "./forge-mutation.js"
 import { forgeObservation } from "./forge-observation.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
@@ -138,65 +137,22 @@ const attemptNativeMarkReady = (
   GitHubService | GitLabService | AzureDevOpsService
 > =>
   Effect.gen(function* () {
-    switch (repository.forge) {
-      case "gitlab": {
-        const gitlab = yield* GitLabService
-        return yield* gitlab
-          .markPullRequestReadyForReview(toGitLabRepository(repository), branch)
-          .pipe(
-            Effect.map((): NativeAttemptOutcome => ({ ok: true })),
-            Effect.catch((cause) =>
-              Effect.succeed<NativeAttemptOutcome>({
+    const mutations = yield* forgePullRequestMutations(repository)
+    return yield* mutations
+      .markPullRequestReadyForReview(toForgeRepository(repository), branch)
+      .pipe(
+        Effect.map((): NativeAttemptOutcome => ({ ok: true })),
+        Effect.catch((cause) =>
+          isGitHubThrottledError(cause)
+            ? Effect.fail(cause)
+            : Effect.succeed<NativeAttemptOutcome>({
                 ok: false,
                 diagnostics: boundDiagnostics(
                   `markPullRequestReadyForReview failed: ${errorMessage(cause)}`,
                 ),
               }),
-            ),
-          )
-      }
-      case "azure-devops": {
-        const azureDevOps = yield* AzureDevOpsService
-        return yield* azureDevOps
-          .markPullRequestReadyForReview(
-            toAzureDevOpsRepository(repository),
-            branch,
-          )
-          .pipe(
-            Effect.map((): NativeAttemptOutcome => ({ ok: true })),
-            Effect.catch((cause) =>
-              Effect.succeed<NativeAttemptOutcome>({
-                ok: false,
-                diagnostics: boundDiagnostics(
-                  `markPullRequestReadyForReview failed: ${errorMessage(cause)}`,
-                ),
-              }),
-            ),
-          )
-      }
-      case "github": {
-        const github = yield* GitHubService
-        return yield* github
-          .markPullRequestReadyForReview(toGitHubRepository(repository), branch)
-          .pipe(
-            Effect.map((): NativeAttemptOutcome => ({ ok: true })),
-            Effect.catch((cause) =>
-              isGitHubThrottledError(cause)
-                ? Effect.fail(cause)
-                : Effect.succeed<NativeAttemptOutcome>({
-                    ok: false,
-                    diagnostics: boundDiagnostics(
-                      `markPullRequestReadyForReview failed: ${errorMessage(cause)}`,
-                    ),
-                  }),
-            ),
-          )
-      }
-      default: {
-        const _exhaustive: never = repository.forge
-        return _exhaustive
-      }
-    }
+        ),
+      )
   })
 
 const buildMarkPrReadyForReviewFallbackPrompt = (input: {

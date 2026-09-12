@@ -9,7 +9,7 @@ import {
 } from "@ready-for-agent/agent-backend"
 import {
   AZURE_DEVOPS_PAT_ENV_VAR,
-  AzureDevOpsService,
+  type AzureDevOpsService,
   azureDevOpsVaultAccount,
   splitAzureDevOpsProjectPath,
 } from "@ready-for-agent/azure-devops-service"
@@ -19,12 +19,12 @@ import {
   logErrorAnnotations,
 } from "@ready-for-agent/forge-contract"
 import {
-  GitHubService,
+  type GitHubService,
   type GitHubThrottledError,
   isGitHubThrottledError,
 } from "@ready-for-agent/github-service"
 import {
-  GitLabService,
+  type GitLabService,
   resolveGlabHostToken,
 } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
@@ -35,9 +35,6 @@ import {
   agentTurnForgeCredentialGuidance,
   forgeDisplayName,
   resolveAgentTurnForgeAuth,
-  toAzureDevOpsRepository,
-  toGitHubRepository,
-  toGitLabRepository,
 } from "./agent-turn-forge-auth.js"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import {
@@ -50,6 +47,10 @@ import {
   CreatePrSessionContextMissingError,
   CreatePrWorktreeContextMissingError,
 } from "./create-pr-errors.js"
+import {
+  forgePullRequestMutations,
+  toForgeRepository,
+} from "./forge-mutation.js"
 import { forgeObservation } from "./forge-observation.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
@@ -714,83 +715,29 @@ const attemptNativeCreateDraft = (
   copy: PublicationCopy,
 ) =>
   Effect.gen(function* () {
-    switch (repository.forge) {
-      case "gitlab": {
-        const gitlab = yield* GitLabService
-        return yield* gitlab
-          .createDraftPullRequest(toGitLabRepository(repository), {
-            headRefName: branch,
-            title: copy.title,
-            body: copy.body,
-          })
-          .pipe(
-            Effect.map((pullRequestNumber) => ({
-              ok: true as const,
-              pullRequestNumber,
-            })),
-            Effect.catch((cause) =>
-              Effect.succeed({
+    const mutations = yield* forgePullRequestMutations(repository)
+    return yield* mutations
+      .createDraftPullRequest(toForgeRepository(repository), {
+        headRefName: branch,
+        title: copy.title,
+        body: copy.body,
+      })
+      .pipe(
+        Effect.map((pullRequestNumber) => ({
+          ok: true as const,
+          pullRequestNumber,
+        })),
+        Effect.catch((cause) =>
+          isGitHubThrottledError(cause)
+            ? Effect.fail(cause)
+            : Effect.succeed({
                 ok: false as const,
                 diagnostics: boundDiagnostics(
                   `createDraftPullRequest failed: ${errorMessage(cause)}`,
                 ),
               }),
-            ),
-          )
-      }
-      case "azure-devops": {
-        const azureDevOps = yield* AzureDevOpsService
-        return yield* azureDevOps
-          .createDraftPullRequest(toAzureDevOpsRepository(repository), {
-            headRefName: branch,
-            title: copy.title,
-            body: copy.body,
-          })
-          .pipe(
-            Effect.map((pullRequestNumber) => ({
-              ok: true as const,
-              pullRequestNumber,
-            })),
-            Effect.catch((cause) =>
-              Effect.succeed({
-                ok: false as const,
-                diagnostics: boundDiagnostics(
-                  `createDraftPullRequest failed: ${errorMessage(cause)}`,
-                ),
-              }),
-            ),
-          )
-      }
-      case "github": {
-        const github = yield* GitHubService
-        return yield* github
-          .createDraftPullRequest(toGitHubRepository(repository), {
-            headRefName: branch,
-            title: copy.title,
-            body: copy.body,
-          })
-          .pipe(
-            Effect.map((pullRequestNumber) => ({
-              ok: true as const,
-              pullRequestNumber,
-            })),
-            Effect.catch((cause) =>
-              isGitHubThrottledError(cause)
-                ? Effect.fail(cause)
-                : Effect.succeed({
-                    ok: false as const,
-                    diagnostics: boundDiagnostics(
-                      `createDraftPullRequest failed: ${errorMessage(cause)}`,
-                    ),
-                  }),
-            ),
-          )
-      }
-      default: {
-        const _exhaustive: never = repository.forge
-        return _exhaustive
-      }
-    }
+        ),
+      )
   })
 
 /**
@@ -828,6 +775,13 @@ const softPersistPublicationCopy = (
     Effect.asVoid,
   )
 
+const draftCopyKind = (
+  forge: RepositoryRecord["forge"],
+): { readonly draft: string; readonly reuse: string } =>
+  forge === "gitlab"
+    ? { draft: "draft MR", reuse: "open MR" }
+    : { draft: "draft PR", reuse: "open PR" }
+
 const softReconcileDraftCopy = (
   repository: RepositoryRecord,
   branch: string,
@@ -835,86 +789,26 @@ const softReconcileDraftCopy = (
   pullRequestNumber: number,
 ) =>
   Effect.gen(function* () {
-    switch (repository.forge) {
-      case "gitlab": {
-        const gitlab = yield* GitLabService
-        yield* gitlab
-          .updateOpenDraftPullRequestCopy(
-            toGitLabRepository(repository),
-            branch,
-            {
-              title: copy.title,
-              body: copy.body,
-            },
-          )
-          .pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning(
-                "Failed to reconcile draft MR title/body to canonical publication copy; reusing open MR",
+    const mutations = yield* forgePullRequestMutations(repository)
+    const kind = draftCopyKind(repository.forge)
+    yield* mutations
+      .updateOpenDraftPullRequestCopy(toForgeRepository(repository), branch, {
+        title: copy.title,
+        body: copy.body,
+      })
+      .pipe(
+        Effect.catch((cause) =>
+          isGitHubThrottledError(cause)
+            ? Effect.fail(cause)
+            : Effect.logWarning(
+                `Failed to reconcile ${kind.draft} title/body to canonical publication copy; reusing ${kind.reuse}`,
                 {
                   pullRequestNumber,
                   cause,
                 },
               ).pipe(Effect.as(pullRequestNumber)),
-            ),
-          )
-        return
-      }
-      case "azure-devops": {
-        const azureDevOps = yield* AzureDevOpsService
-        yield* azureDevOps
-          .updateOpenDraftPullRequestCopy(
-            toAzureDevOpsRepository(repository),
-            branch,
-            {
-              title: copy.title,
-              body: copy.body,
-            },
-          )
-          .pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning(
-                "Failed to reconcile draft PR title/body to canonical publication copy; reusing open PR",
-                {
-                  pullRequestNumber,
-                  cause,
-                },
-              ).pipe(Effect.as(pullRequestNumber)),
-            ),
-          )
-        return
-      }
-      case "github": {
-        const github = yield* GitHubService
-        yield* github
-          .updateOpenDraftPullRequestCopy(
-            toGitHubRepository(repository),
-            branch,
-            {
-              title: copy.title,
-              body: copy.body,
-            },
-          )
-          .pipe(
-            Effect.catch((cause) =>
-              isGitHubThrottledError(cause)
-                ? Effect.fail(cause)
-                : Effect.logWarning(
-                    "Failed to reconcile draft PR title/body to canonical publication copy; reusing open PR",
-                    {
-                      pullRequestNumber,
-                      cause,
-                    },
-                  ).pipe(Effect.as(pullRequestNumber)),
-            ),
-          )
-        return
-      }
-      default: {
-        const _exhaustive: never = repository.forge
-        return _exhaustive
-      }
-    }
+        ),
+      )
   })
 
 const resolvePublicationCopyForCreatePr = (
@@ -1201,11 +1095,11 @@ export const createPr = (context: LifecycleStepContext) =>
         }),
     })
 
-    if (repository.forge === "azure-devops") {
-      const azureDevOps = yield* AzureDevOpsService
-      yield* azureDevOps
+    const mutations = yield* forgePullRequestMutations(repository)
+    if (mutations.forge === "azure-devops") {
+      yield* mutations
         .ensurePullRequestLinkedToIssue(
-          toAzureDevOpsRepository(repository),
+          toForgeRepository(repository),
           outcome.value,
           context.issueNumber,
         )

@@ -23,7 +23,7 @@ export type ResolvedForgeObservation = ForgeObservation<ForgeObservationError>
 
 /**
  * Select the PR/CI observation view for a Repository's existing Forge.
- * Mutation migration can add a sibling resolver against the same providers.
+ * PR mutations resolve through the sibling `forge-mutation` module.
  */
 export const resolveForgeObservation = (
   forge: Forge,

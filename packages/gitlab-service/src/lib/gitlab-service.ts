@@ -2,8 +2,11 @@ import { Context, type Effect } from "effect"
 import type {
   CiGateCatalogEntry,
   CiGateObservation,
+  CreateDraftPullRequestInput,
   ForgeIssueOperations,
   ForgeObservation,
+  ForgePullRequestMutations,
+  ForgeSequentialRemoteCleanup,
   MergePullRequestOptions,
   MergePullRequestResult,
   ObserveCiGateInput,
@@ -12,6 +15,7 @@ import type {
   PrStatusCheckDiagnosticsRequest,
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
+  UpdateDraftPullRequestCopyInput,
 } from "@ready-for-agent/forge-contract"
 import type {
   GitLabProjectUnavailableError,
@@ -25,7 +29,9 @@ export type GitLabServiceError =
 
 export interface GitLabServiceShape
   extends ForgeIssueOperations<GitLabServiceError>,
-    ForgeObservation<GitLabServiceError> {
+    ForgeObservation<GitLabServiceError>,
+    ForgePullRequestMutations<GitLabServiceError>,
+    ForgeSequentialRemoteCleanup<GitLabServiceError> {
   /**
    * Verify Forge Host + Project Path against GitLab before persistence.
    * Returns the repository identity with the instance's canonical API/web host
@@ -81,12 +87,7 @@ export interface GitLabServiceShape
    */
   readonly createDraftPullRequest: (
     repository: GitLabRepository,
-    input: {
-      readonly headRefName: string
-      readonly title: string
-      readonly body: string
-      readonly baseRefName?: string
-    },
+    input: CreateDraftPullRequestInput,
   ) => Effect.Effect<number, GitLabServiceError>
   /**
    * When an open draft MR exists for the exact source branch, set its title
@@ -96,10 +97,7 @@ export interface GitLabServiceShape
   readonly updateOpenDraftPullRequestCopy: (
     repository: GitLabRepository,
     headRefName: string,
-    input: {
-      readonly title: string
-      readonly body: string
-    },
+    input: UpdateDraftPullRequestCopyInput,
   ) => Effect.Effect<number | null, GitLabServiceError>
   /**
    * Count currently open, non-draft merge requests for the project.
