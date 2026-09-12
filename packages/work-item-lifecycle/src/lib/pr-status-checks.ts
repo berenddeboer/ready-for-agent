@@ -20,6 +20,7 @@ import {
   workflowNameFromCheckName,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
+import type { Forge } from "@ready-for-agent/lifecycle-model"
 import {
   AgentTurnForgeCredentialMissingError,
   InvalidCapturedAgentBackendError,
@@ -723,7 +724,7 @@ export const formatDiagnosticBlock = (
 }
 
 const buildInvestigationWorkPrompt = (
-  forge: "github" | "gitlab" | "azure-devops",
+  forge: Forge,
   checks: readonly ObservedPrStatusCheckRow[],
   diagnostics: readonly PrStatusCheckDiagnostic[],
 ): string => {
@@ -788,7 +789,7 @@ const buildInvestigationWorkPrompt = (
 
 /** Shared outcome contract for status-check work, recovery, and fallback. */
 const investigationOutcomeContractLines = (
-  forge: "github" | "gitlab" | "azure-devops" = "github",
+  forge: Forge = "github",
 ): readonly string[] => [
   "You may include a concise work and verification summary before the result line.",
   "End your final response with exactly one machine-readable result line:",
@@ -812,7 +813,7 @@ const investigationOutcomeContractLines = (
 ]
 
 const buildInvestigationOutcomeFallbackPrompt = (
-  forge: "github" | "gitlab" | "azure-devops" = "github",
+  forge: Forge = "github",
 ): string =>
   [
     "Based only on the PR status-check work you just did in this session, report the outcome.",
@@ -823,7 +824,7 @@ const buildInvestigationOutcomeFallbackPrompt = (
 /** Recovery prompt after a FAILED investigation outcome (exported for tests). */
 export const buildInvestigationRecoveryPrompt = (
   reason: string,
-  forge: "github" | "gitlab" | "azure-devops" = "github",
+  forge: Forge = "github",
 ): string =>
   [
     "Make one focused recovery attempt to process the PR Status Check Handoff.",

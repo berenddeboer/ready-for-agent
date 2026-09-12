@@ -1,3 +1,4 @@
+import { FORGES, type Forge, isForge } from "@ready-for-agent/lifecycle-model"
 import { Database } from "bun:sqlite"
 
 const resolveFilePath = (databasePath: string): string | undefined => {
@@ -16,16 +17,7 @@ const resolveFilePath = (databasePath: string): string | undefined => {
       : databasePath
 }
 
-export type RepositoryForge = "github" | "gitlab" | "azure-devops"
-
-const REPOSITORY_FORGES: ReadonlyArray<RepositoryForge> = [
-  "github",
-  "gitlab",
-  "azure-devops",
-]
-
-const isRepositoryForge = (value: string): value is RepositoryForge =>
-  value === "github" || value === "gitlab" || value === "azure-devops"
+export type RepositoryForge = Forge
 
 /** HTTPS endpoint a cold-start TLS preflight should probe. */
 export type ForgeApiEndpoint = {
@@ -90,11 +82,11 @@ export const peekRepositoryForges = (
           .values()
         const found = new Set<RepositoryForge>()
         for (const [forge] of rows) {
-          if (typeof forge === "string" && isRepositoryForge(forge)) {
+          if (typeof forge === "string" && isForge(forge)) {
             found.add(forge)
           }
         }
-        return REPOSITORY_FORGES.filter((forge) => found.has(forge))
+        return FORGES.filter((candidate) => found.has(candidate))
       } catch {
         const count = db
           .query(`SELECT COUNT(*) AS count FROM repository`)
@@ -164,9 +156,11 @@ export const peekForgeApiEndpoints = (
         const gitlabHosts = new Set<string>()
         for (const [forge, forgeHost] of rows) {
           // `forge` is untyped external data (a raw distinct DB column
-          // value); unrecognized/legacy values are safely ignored rather
-          // than exhaustively type-checked (that guard lives at
-          // isRepositoryForge, the boundary parser above).
+          // value). Unrecognized/legacy values are ignored by isForge;
+          // the switch is exhaustive over the remaining supported kinds.
+          if (typeof forge !== "string" || !isForge(forge)) {
+            continue
+          }
           switch (forge) {
             case "github":
               hasGitHub = true
@@ -182,8 +176,10 @@ export const peekForgeApiEndpoints = (
             case "azure-devops":
               hasAzureDevOps = true
               break
-            default:
-              break
+            default: {
+              const _exhaustive: never = forge
+              throw new Error(`Unsupported Forge: ${String(_exhaustive)}`)
+            }
           }
         }
         if (hasGitHub) {

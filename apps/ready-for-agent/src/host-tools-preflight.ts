@@ -1,4 +1,5 @@
 import { isKeymaxxerAvailable } from "@ready-for-agent/keymaxxer-service"
+import { FORGES, type Forge, isForge } from "@ready-for-agent/lifecycle-model"
 
 type HostTool = {
   readonly name: string
@@ -37,7 +38,7 @@ const AZURE_DEVOPS_ENV_REQUIREMENT: HostTool = {
     "Set the AZURE_DEVOPS_EXT_PAT environment variable to an Azure DevOps Personal Access Token: https://learn.microsoft.com/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate — required scopes (Merge PR needs more than git + Create PR): https://github.com/berenddeboer/ready-for-agent/blob/main/docs/forge-token-scopes.md",
 }
 
-type RepositoryForge = "github" | "gitlab" | "azure-devops"
+type RepositoryForge = Forge
 
 export type HostToolsPreflightOptions = {
   /**
@@ -66,17 +67,12 @@ export type HostToolsPreflightResult =
       readonly message: string
     }
 
-const isRepositoryForge = (value: string): value is RepositoryForge =>
-  value === "github" || value === "gitlab" || value === "azure-devops"
-
 const resolveRepositoryForges = (
   options: HostToolsPreflightOptions,
 ): ReadonlyArray<RepositoryForge> => {
   const raw = options.repositoryForges ?? ["github"]
-  const selected = new Set(raw.filter(isRepositoryForge))
-  return (["github", "gitlab", "azure-devops"] as const).filter((forge) =>
-    selected.has(forge),
-  )
+  const selected = new Set(raw.filter(isForge))
+  return FORGES.filter((forge) => selected.has(forge))
 }
 
 const cliToolForForge = (forge: RepositoryForge): HostTool | undefined => {

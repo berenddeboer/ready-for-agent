@@ -1,3 +1,4 @@
+import type { Forge } from "./generated/forge.js"
 import {
   type LifecyclePredicateName,
   matchesLifecyclePredicateExpression,
@@ -48,7 +49,7 @@ export interface PendingSelfOwnership {
 }
 
 export interface RelevantIssuePredicateContext {
-  readonly forge: string
+  readonly forge: Forge
   readonly repositoryName: string
   readonly workItemPullRequestNumbers: ReadonlySet<number>
   readonly pendingSelfOwnership?: readonly PendingSelfOwnership[]
@@ -60,11 +61,10 @@ export interface RelevantIssuePredicateContext {
 /**
  * Forges with no native sub-Issue hierarchy queried by this harness, so a
  * Ready Issue reporting `hierarchySupported: false` is expected rather than
- * anomalous. `forge` stays `string` here (this module has no Forge union of
- * its own to stay decoupled from `db-service`); kept as a Set so a third
- * such Forge is a one-line addition instead of another inline comparison.
+ * anomalous. Kept as a Set so a third such Forge is a one-line addition
+ * instead of another inline comparison.
  */
-const FORGES_WITHOUT_HIERARCHY_SUPPORT: ReadonlySet<string> = new Set([
+const FORGES_WITHOUT_HIERARCHY_SUPPORT: ReadonlySet<Forge> = new Set([
   "gitlab",
   "azure-devops",
 ])
@@ -304,7 +304,7 @@ export const evaluateActionableIssue = (
 
 const activeClosingPullRequest = (
   pullRequest: ClosingPullRequestPredicateShape,
-  forge: string,
+  forge: Forge,
   issueState: string,
 ): boolean => {
   if (pullRequest.state === "OPEN") {

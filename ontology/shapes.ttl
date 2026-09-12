@@ -131,6 +131,26 @@ rfa:StepRunReasonShape
     sh:message "A Step Run reason must have one English definition."@en ;
   ] .
 
+rfa:ForgeKindShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:Forge ;
+  sh:property [
+    sh:path skos:notation ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype <http://www.w3.org/2001/XMLSchema#string> ;
+    sh:minLength 1 ;
+    sh:message "A Forge kind must have one runtime notation."@en ;
+  ] ;
+  sh:property [
+    sh:path skos:definition ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:languageIn ("en") ;
+    sh:uniqueLang true ;
+    sh:message "A Forge kind must have one English definition."@en ;
+  ] .
+
 rfa:OperationalLifecycleStepShape
   a sh:NodeShape ;
   sh:targetClass rfa:OperationalLifecycleStep ;
