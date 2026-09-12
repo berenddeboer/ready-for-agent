@@ -2,10 +2,13 @@ import { Context, type Effect } from "effect"
 import type {
   CiGateCatalogEntry,
   CiGateObservation,
+  CreateDraftPullRequestInput,
+  ForgeCombinedRemoteCleanup,
   ForgeIssueOperations,
   ForgeObservation,
   ForgeOperationOptions,
   ForgeOperationOrigin,
+  ForgePullRequestMutations,
   MergePullRequestOptions,
   MergePullRequestResult,
   ObserveCiGateInput,
@@ -15,6 +18,7 @@ import type {
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
   ReadyLabeledIssue,
+  UpdateDraftPullRequestCopyInput,
 } from "@ready-for-agent/forge-contract"
 import type {
   AutomatedReviewEvidenceCheck,
@@ -35,7 +39,9 @@ export type GitHubOperationOptions = ForgeOperationOptions
 
 export interface GitHubServiceShape
   extends ForgeIssueOperations<GitHubServiceError>,
-    ForgeObservation<GitHubServiceError> {
+    ForgeObservation<GitHubServiceError>,
+    ForgePullRequestMutations<GitHubServiceError>,
+    ForgeCombinedRemoteCleanup<GitHubServiceError> {
   /**
    * Login of the authenticated principal for this Repository's credential
    * (Operator GitHub User). Same token path as other GitHub API calls.
@@ -122,12 +128,7 @@ export interface GitHubServiceShape
    */
   readonly createDraftPullRequest: (
     repository: GitHubRepository,
-    input: {
-      readonly headRefName: string
-      readonly title: string
-      readonly body: string
-      readonly baseRefName?: string
-    },
+    input: CreateDraftPullRequestInput,
   ) => Effect.Effect<number, GitHubServiceError>
   /**
    * When an open draft PR exists for the exact head branch, set its title and
@@ -137,10 +138,7 @@ export interface GitHubServiceShape
   readonly updateOpenDraftPullRequestCopy: (
     repository: GitHubRepository,
     headRefName: string,
-    input: {
-      readonly title: string
-      readonly body: string
-    },
+    input: UpdateDraftPullRequestCopyInput,
   ) => Effect.Effect<number | null, GitHubServiceError>
   readonly markPullRequestReadyForReview: (
     repository: GitHubRepository,

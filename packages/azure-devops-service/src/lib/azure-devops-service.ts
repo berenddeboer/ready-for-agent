@@ -2,8 +2,12 @@ import { Context, type Effect } from "effect"
 import type {
   CiGateCatalogEntry,
   CiGateObservation,
+  CreateDraftPullRequestInput,
+  ForgeAzurePullRequestAssociation,
   ForgeIssueOperations,
   ForgeObservation,
+  ForgePullRequestMutations,
+  ForgeSequentialRemoteCleanup,
   MergePullRequestOptions,
   MergePullRequestResult,
   ObserveCiGateInput,
@@ -12,6 +16,7 @@ import type {
   PrStatusCheckDiagnosticsRequest,
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
+  UpdateDraftPullRequestCopyInput,
 } from "@ready-for-agent/forge-contract"
 import type {
   AzureDevOpsNotImplementedError,
@@ -39,7 +44,10 @@ export type AzureDevOpsServiceError =
  */
 export interface AzureDevOpsServiceShape
   extends ForgeIssueOperations<AzureDevOpsServiceError>,
-    ForgeObservation<AzureDevOpsServiceError> {
+    ForgeObservation<AzureDevOpsServiceError>,
+    ForgePullRequestMutations<AzureDevOpsServiceError>,
+    ForgeSequentialRemoteCleanup<AzureDevOpsServiceError>,
+    ForgeAzurePullRequestAssociation<AzureDevOpsServiceError> {
   /**
    * Verify Organization + Project against Azure DevOps before persistence
    * (`GET _apis/projects/{project}`), then the Git repository itself
@@ -127,12 +135,7 @@ export interface AzureDevOpsServiceShape
    */
   readonly createDraftPullRequest: (
     repository: AzureDevOpsRepository,
-    input: {
-      readonly headRefName: string
-      readonly title: string
-      readonly body: string
-      readonly baseRefName?: string
-    },
+    input: CreateDraftPullRequestInput,
   ) => Effect.Effect<number, AzureDevOpsServiceError>
   /**
    * Associate the Forge Issue (Azure Boards work item) with an existing
@@ -156,10 +159,7 @@ export interface AzureDevOpsServiceShape
   readonly updateOpenDraftPullRequestCopy: (
     repository: AzureDevOpsRepository,
     headRefName: string,
-    input: {
-      readonly title: string
-      readonly body: string
-    },
+    input: UpdateDraftPullRequestCopyInput,
   ) => Effect.Effect<number | null, AzureDevOpsServiceError>
   /**
    * Count currently open, non-draft pull requests for the project.

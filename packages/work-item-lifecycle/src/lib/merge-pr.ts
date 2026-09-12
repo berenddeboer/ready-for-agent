@@ -1,8 +1,10 @@
 import { Effect, Schema } from "effect"
-import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService } from "@ready-for-agent/db-service"
-import { GitHubService } from "@ready-for-agent/github-service"
-import { GitLabService } from "@ready-for-agent/gitlab-service"
+import { completeAzureBoardsIssueAfterNativeMerge } from "@ready-for-agent/forge-contract"
+import {
+  forgePullRequestMutations,
+  toForgeRepository,
+} from "./forge-mutation.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { resolveEffectiveMergePolicy } from "./merge-policy.js"
 import { workItemBranchName } from "./worktree-names.js"
@@ -34,7 +36,8 @@ const azureBoardsMergeCompletionSummary = (
  * GitHub squash-merges; GitLab and Azure DevOps defer merge method to
  * project/repository settings. On Azure DevOps, a successful merge then
  * completes the Boards Issue if it is still open (harness-owned backup for
- * `transitionWorkItems`).
+ * `transitionWorkItems`). GitHub/GitLab native closing is unchanged;
+ * human-observed merge paths do not write completion here.
  */
 export const mergePr = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -65,35 +68,22 @@ export const mergePr = (context: LifecycleStepContext) =>
     })
     const options =
       effectivePolicy === "always" ? { acceptNoChecks: true } : undefined
-    switch (repository.forge) {
-      case "gitlab": {
-        const gitlab = yield* GitLabService
-        return yield* gitlab.mergePullRequest(repository, branch, options)
-      }
-      case "azure-devops": {
-        const azureDevOps = yield* AzureDevOpsService
-        const result = yield* azureDevOps.mergePullRequest(
-          repository,
-          branch,
-          options,
-        )
-        if (result._tag === "merged") {
-          yield* azureDevOps.ensureIssueCompletedWithSummary(
-            repository,
-            context.issueNumber,
-            context.workItemId,
-            azureBoardsMergeCompletionSummary(context),
-          )
-        }
-        return result
-      }
-      case "github": {
-        const github = yield* GitHubService
-        return yield* github.mergePullRequest(repository, branch, options)
-      }
-      default: {
-        const _exhaustive: never = repository.forge
-        return _exhaustive
-      }
+    const mutations = yield* forgePullRequestMutations(repository)
+    const forgeRepository = toForgeRepository(repository)
+    const result = yield* mutations.mergePullRequest(
+      forgeRepository,
+      branch,
+      options,
+    )
+    if (mutations.forge !== "azure-devops") {
+      return result
     }
+    return yield* completeAzureBoardsIssueAfterNativeMerge({
+      result,
+      completeIssue: mutations.ensureIssueCompletedWithSummary,
+      repository: forgeRepository,
+      issueNumber: context.issueNumber,
+      workItemId: context.workItemId,
+      summaryMarkdown: azureBoardsMergeCompletionSummary(context),
+    })
   })
