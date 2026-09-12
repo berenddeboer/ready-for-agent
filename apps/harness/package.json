@@ -16,6 +16,7 @@
     "@ready-for-agent/azure-devops-service": "workspace:*",
     "@ready-for-agent/db": "workspace:*",
     "@ready-for-agent/db-service": "workspace:*",
+    "@ready-for-agent/forge-contract": "workspace:*",
     "@ready-for-agent/github-service": "workspace:*",
     "@ready-for-agent/gitlab-service": "workspace:*",
     "@ready-for-agent/graphql-api": "workspace:*",

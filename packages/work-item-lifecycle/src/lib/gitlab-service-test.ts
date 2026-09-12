@@ -2,7 +2,7 @@ import { Effect, Layer } from "effect"
 import type {
   MergePullRequestResult,
   PullRequestLifecycleStatus,
-} from "@ready-for-agent/github-service"
+} from "@ready-for-agent/forge-contract"
 import {
   GitLabService,
   type GitLabServiceShape,

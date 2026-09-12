@@ -2,7 +2,7 @@ import { Effect, Result } from "effect"
 import {
   buildReasonDetail,
   formatUserFacingError,
-} from "@ready-for-agent/github-service"
+} from "@ready-for-agent/forge-contract"
 import {
   GitLabProjectUnavailableError,
   GitLabRequestError,

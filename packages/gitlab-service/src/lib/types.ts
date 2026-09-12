@@ -1,4 +1,4 @@
-import type { ReadyLabeledIssue } from "@ready-for-agent/github-service"
+import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
 
 /**
  * Forge-neutral CI Gate kind for the synthesized GitLab Project pipeline.

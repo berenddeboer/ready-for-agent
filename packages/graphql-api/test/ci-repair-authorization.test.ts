@@ -17,8 +17,8 @@ import {
   DbServiceLive,
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
+import type { CiGateObservation } from "@ready-for-agent/forge-contract"
 import {
-  type CiGateObservation,
   GitHubService,
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"

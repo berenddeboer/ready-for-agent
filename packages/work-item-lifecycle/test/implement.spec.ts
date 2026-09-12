@@ -17,7 +17,7 @@ import {
 } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
-import { extractCauseChain } from "@ready-for-agent/github-service"
+import { extractCauseChain } from "@ready-for-agent/forge-contract"
 import {
   KeymaxxerService,
   type KeymaxxerServiceShape,

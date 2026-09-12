@@ -9,11 +9,11 @@ import {
   makeRepositoryRecord,
   stubDbServiceLayer,
 } from "@ready-for-agent/db-service/test"
+import { formatUserFacingError } from "@ready-for-agent/forge-contract"
 import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
-  formatUserFacingError,
 } from "@ready-for-agent/github-service"
 import {
   GitLabRequestError,

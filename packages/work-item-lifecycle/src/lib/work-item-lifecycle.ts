@@ -32,17 +32,19 @@ import {
   RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
 import {
-  GitHubService,
-  type GitHubThrottledError,
   type PullRequestLifecycleStatus,
   buildReasonDetail,
   formatUserFacingError,
   isDeterministicForgeAuthFailure,
-  isGitHubThrottledError,
   logErrorAnnotations,
   parseReasonDetail,
   sanitizeUserFacingText,
   serializeReasonDetail,
+} from "@ready-for-agent/forge-contract"
+import {
+  GitHubService,
+  type GitHubThrottledError,
+  isGitHubThrottledError,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {

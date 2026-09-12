@@ -6,7 +6,7 @@ import {
 import {
   type CiGateCatalogEntry,
   formatUserFacingError,
-} from "@ready-for-agent/github-service"
+} from "@ready-for-agent/forge-contract"
 
 export type CiGateCatalogLoad =
   | {

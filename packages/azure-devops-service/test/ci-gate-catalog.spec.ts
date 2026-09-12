@@ -1,5 +1,5 @@
 import { Effect, Result } from "effect"
-import { formatUserFacingError } from "@ready-for-agent/github-service"
+import { formatUserFacingError } from "@ready-for-agent/forge-contract"
 import {
   AZURE_DEVOPS_CI_GATE_KIND,
   AzureDevOpsRequestError,

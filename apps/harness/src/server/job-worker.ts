@@ -17,10 +17,8 @@ import {
   RepositoryId,
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
-import {
-  isGitHubThrottledError,
-  logErrorAnnotations,
-} from "@ready-for-agent/github-service"
+import { logErrorAnnotations } from "@ready-for-agent/forge-contract"
+import { isGitHubThrottledError } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
   ISSUE_POLL_QUEUE,

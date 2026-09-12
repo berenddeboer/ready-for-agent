@@ -4,13 +4,15 @@ import { ulid } from "ulidx"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService } from "@ready-for-agent/db-service"
+import type {
+  PrStatusCheckDiagnostic,
+  PullRequestCheckStatus,
+  TerminalPrStatusCheck,
+} from "@ready-for-agent/forge-contract"
 import {
   GREEN_NO_REVIEW_EVIDENCE_REASON,
   GitHubService,
   INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
-  type PrStatusCheckDiagnostic,
-  type PullRequestCheckStatus,
-  type TerminalPrStatusCheck,
   isGitHubClientRejection,
   isGitHubPermissionError,
   isGitHubThrottledError,

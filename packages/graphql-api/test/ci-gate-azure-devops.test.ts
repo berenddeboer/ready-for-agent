@@ -13,8 +13,8 @@ import {
 } from "@ready-for-agent/azure-devops-service"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
+import type { CiGateObservation } from "@ready-for-agent/forge-contract"
 import {
-  type CiGateObservation,
   GitHubService,
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"

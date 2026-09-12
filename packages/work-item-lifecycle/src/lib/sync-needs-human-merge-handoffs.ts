@@ -1,11 +1,13 @@
 import { Effect } from "effect"
 import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService } from "@ready-for-agent/db-service"
+import type {
+  PullRequestCheckStatus,
+  PullRequestLifecycleStatus,
+} from "@ready-for-agent/forge-contract"
 import {
   GitHubService,
   type GitHubThrottledError,
-  type PullRequestCheckStatus,
-  type PullRequestLifecycleStatus,
   isGitHubThrottledError,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"

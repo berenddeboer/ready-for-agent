@@ -3,7 +3,7 @@ import {
   AzureDevOpsService,
   type AzureDevOpsServiceShape,
 } from "@ready-for-agent/azure-devops-service"
-import type { PullRequestLifecycleStatus } from "@ready-for-agent/github-service"
+import type { PullRequestLifecycleStatus } from "@ready-for-agent/forge-contract"
 
 /**
  * Minimal AzureDevOpsService for Work Item Lifecycle unit tests.

@@ -1,6 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import { Effect, Schema } from "effect"
-import { formatUserFacingError } from "@ready-for-agent/github-service"
+import { formatUserFacingError } from "@ready-for-agent/forge-contract"
 import { GitLabProjectUnavailableError } from "../lib/errors.js"
 import type { GitLabService } from "../lib/gitlab-service.js"
 import { GitLabServiceLive } from "../lib/gitlab-service-live.js"

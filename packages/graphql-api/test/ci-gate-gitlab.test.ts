@@ -9,9 +9,11 @@ import {
 import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
+import type {
+  CiGateCatalogEntry,
+  CiGateObservation,
+} from "@ready-for-agent/forge-contract"
 import {
-  type CiGateCatalogEntry,
-  type CiGateObservation,
   GitHubService,
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
