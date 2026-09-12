@@ -36,7 +36,7 @@ import {
   type MergePolicy,
   RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
-import { GitHubService } from "@ready-for-agent/github-service"
+import type { GitHubService } from "@ready-for-agent/github-service"
 import {
   GitLabService,
   gitlabVaultAccount,
@@ -54,6 +54,7 @@ import {
   type WorkItemsListKind,
   decodeWorkItemMergePolicy,
   filterWorkItemsByListKind,
+  forgeObservation,
   isJobsCompletedWorkItemState,
   isJobsWorkingWorkItem,
   isRetryableFailedWorkItem,
@@ -477,26 +478,14 @@ const loadCiGateCatalog = Effect.fn("graphql-api.loadCiGateCatalog")(
       forgeHost: repository.forgeHost,
       projectPath: repository.projectPath,
     }
-    if (repository.forge === "github") {
-      const github = yield* GitHubService
-      return yield* github
-        .listCiGateCatalog(identity, { origin: "operator" })
-        .pipe(
-          Effect.map((definitions) => ({
-            kind: "loaded" as const,
-            definitions,
-          })),
-          Effect.catch((error) =>
-            Effect.succeed({
-              kind: "unavailable" as const,
-              message: ciGateCatalogErrorMessage(error),
-            }),
-          ),
-        )
+    const forge = repository.forge
+    if (forge !== "github" && forge !== "gitlab" && forge !== "azure-devops") {
+      return { kind: "loaded" as const, definitions: [] }
     }
-    if (repository.forge === "gitlab") {
-      const gitlab = yield* GitLabService
-      return yield* gitlab.listCiGateCatalog(identity).pipe(
+    const observations = yield* forgeObservation({ ...repository, forge })
+    return yield* observations
+      .listCiGateCatalog(identity, { origin: "operator" })
+      .pipe(
         Effect.map((definitions) => ({
           kind: "loaded" as const,
           definitions,
@@ -508,23 +497,6 @@ const loadCiGateCatalog = Effect.fn("graphql-api.loadCiGateCatalog")(
           }),
         ),
       )
-    }
-    if (repository.forge === "azure-devops") {
-      const azureDevOps = yield* AzureDevOpsService
-      return yield* azureDevOps.listCiGateCatalog(identity).pipe(
-        Effect.map((definitions) => ({
-          kind: "loaded" as const,
-          definitions,
-        })),
-        Effect.catch((error) =>
-          Effect.succeed({
-            kind: "unavailable" as const,
-            message: ciGateCatalogErrorMessage(error),
-          }),
-        ),
-      )
-    }
-    return { kind: "loaded" as const, definitions: [] }
   },
 )
 
@@ -1451,10 +1423,18 @@ export const createGraphqlApi = <R>(
                 // Forge is authoritative: open non-draft PRs/MRs regardless of
                 // Work Item ownership. GitHub observation failures must reach
                 // the dedicated query cache: converting one to zero would
-                // overwrite a last-known count with false data.
-                if (repository.forge === "gitlab") {
-                  const gitlab = yield* GitLabService
-                  return yield* gitlab
+                // overwrite a last-known count with false data. Azure DevOps
+                // is not implemented and stays zero without a live call.
+                const forge = repository.forge
+                if (forge !== "github" && forge !== "gitlab") {
+                  return 0
+                }
+                const observations = yield* forgeObservation({
+                  ...repository,
+                  forge,
+                })
+                if (forge === "gitlab") {
+                  return yield* observations
                     .countOpenNonDraftPullRequests(forgeRepository)
                     .pipe(
                       Effect.catchTags({
@@ -1463,9 +1443,7 @@ export const createGraphqlApi = <R>(
                       }),
                     )
                 }
-                if (repository.forge !== "github") return 0
-                const github = yield* GitHubService
-                return yield* github.countOpenNonDraftPullRequests(
+                return yield* observations.countOpenNonDraftPullRequests(
                   forgeRepository,
                 )
               }).pipe(

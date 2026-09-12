@@ -3,6 +3,7 @@ import type {
   CiGateCatalogEntry,
   CiGateObservation,
   ForgeIssueOperations,
+  ForgeObservation,
   MergePullRequestOptions,
   MergePullRequestResult,
   ObserveCiGateInput,
@@ -23,7 +24,8 @@ export type GitLabServiceError =
   | GitLabRequestError
 
 export interface GitLabServiceShape
-  extends ForgeIssueOperations<GitLabServiceError> {
+  extends ForgeIssueOperations<GitLabServiceError>,
+    ForgeObservation<GitLabServiceError> {
   /**
    * Verify Forge Host + Project Path against GitLab before persistence.
    * Returns the repository identity with the instance's canonical API/web host

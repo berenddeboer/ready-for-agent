@@ -50,6 +50,7 @@ import {
   CreatePrSessionContextMissingError,
   CreatePrWorktreeContextMissingError,
 } from "./create-pr-errors.js"
+import { forgeObservation } from "./forge-observation.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   type PublicationCopy,
@@ -238,61 +239,22 @@ const findExistingOpenPr = (
   branch: string,
 ) =>
   Effect.gen(function* () {
-    switch (repository.forge) {
-      case "gitlab": {
-        const gitlab = yield* GitLabService
-        return yield* gitlab
-          .findOpenPullRequestNumber(toGitLabRepository(repository), branch)
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new CreatePrLookupError({
-                  repositoryId: context.repositoryId,
-                  message: `Failed to look up an open merge request for ${repository.projectPath}:${branch}`,
-                  cause,
-                }),
-            ),
-          )
-      }
-      case "azure-devops": {
-        const azureDevOps = yield* AzureDevOpsService
-        return yield* azureDevOps
-          .findOpenPullRequestNumber(
-            toAzureDevOpsRepository(repository),
-            branch,
-          )
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new CreatePrLookupError({
-                  repositoryId: context.repositoryId,
-                  message: `Failed to look up an open pull request for ${repository.projectPath}:${branch}`,
-                  cause,
-                }),
-            ),
-          )
-      }
-      case "github": {
-        const github = yield* GitHubService
-        return yield* github
-          .findOpenPullRequestNumber(toGitHubRepository(repository), branch)
-          .pipe(
-            Effect.mapError((cause) =>
-              isGitHubThrottledError(cause)
-                ? cause
-                : new CreatePrLookupError({
-                    repositoryId: context.repositoryId,
-                    message: `Failed to look up an open pull request for ${repository.projectPath}:${branch}`,
-                    cause,
-                  }),
-            ),
-          )
-      }
-      default: {
-        const _exhaustive: never = repository.forge
-        return _exhaustive
-      }
-    }
+    const observations = yield* forgeObservation(repository)
+    const lookupKind =
+      repository.forge === "gitlab" ? "merge request" : "pull request"
+    return yield* observations
+      .findOpenPullRequestNumber(repository, branch)
+      .pipe(
+        Effect.mapError((cause) =>
+          isGitHubThrottledError(cause)
+            ? cause
+            : new CreatePrLookupError({
+                repositoryId: context.repositoryId,
+                message: `Failed to look up an open ${lookupKind} for ${repository.projectPath}:${branch}`,
+                cause,
+              }),
+        ),
+      )
   })
 
 /**
@@ -329,58 +291,22 @@ const resolveRequiredOpenPr = (
   branch: string,
 ) =>
   Effect.gen(function* () {
-    switch (repository.forge) {
-      case "gitlab": {
-        const gitlab = yield* GitLabService
-        return yield* gitlab
-          .getOpenPullRequestNumber(toGitLabRepository(repository), branch)
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new CreatePrLookupError({
-                  repositoryId: context.repositoryId,
-                  message: `Failed to resolve the open merge request for ${repository.projectPath}:${branch}`,
-                  cause,
-                }),
-            ),
-          )
-      }
-      case "azure-devops": {
-        const azureDevOps = yield* AzureDevOpsService
-        return yield* azureDevOps
-          .getOpenPullRequestNumber(toAzureDevOpsRepository(repository), branch)
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new CreatePrLookupError({
-                  repositoryId: context.repositoryId,
-                  message: `Failed to resolve the open pull request for ${repository.projectPath}:${branch}`,
-                  cause,
-                }),
-            ),
-          )
-      }
-      case "github": {
-        const github = yield* GitHubService
-        return yield* github
-          .getOpenPullRequestNumber(toGitHubRepository(repository), branch)
-          .pipe(
-            Effect.mapError((cause) =>
-              isGitHubThrottledError(cause)
-                ? cause
-                : new CreatePrLookupError({
-                    repositoryId: context.repositoryId,
-                    message: `Failed to resolve the open pull request for ${repository.projectPath}:${branch}`,
-                    cause,
-                  }),
-            ),
-          )
-      }
-      default: {
-        const _exhaustive: never = repository.forge
-        return _exhaustive
-      }
-    }
+    const observations = yield* forgeObservation(repository)
+    const lookupKind =
+      repository.forge === "gitlab" ? "merge request" : "pull request"
+    return yield* observations
+      .getOpenPullRequestNumber(repository, branch)
+      .pipe(
+        Effect.mapError((cause) =>
+          isGitHubThrottledError(cause)
+            ? cause
+            : new CreatePrLookupError({
+                repositoryId: context.repositoryId,
+                message: `Failed to resolve the open ${lookupKind} for ${repository.projectPath}:${branch}`,
+                cause,
+              }),
+        ),
+      )
   })
 
 /** Keymaxxer vault account for native push, per Forge. */

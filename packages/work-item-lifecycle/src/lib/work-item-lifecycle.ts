@@ -113,6 +113,7 @@ import {
   resolveExecutionProfileSelection,
   validateExecutionProfileCatalog,
 } from "./execution-profile.js"
+import { resolveForgeObservation } from "./forge-observation.js"
 import { selectJumpAgentModel } from "./jump-agent-model.js"
 import {
   type LifecycleStepContext,
@@ -4063,27 +4064,11 @@ export const makeWorkItemLifecycleLive = (
             issueNumber: row.issue_number,
             workItemId: row.id,
           })
-          switch (repository.forge) {
-            case "gitlab":
-              return yield* gitlab.getPullRequestLifecycleStatus(
-                repository,
-                headRefName,
-              )
-            case "github":
-              return yield* github.getPullRequestLifecycleStatus(
-                repository,
-                headRefName,
-              )
-            case "azure-devops":
-              return yield* azureDevOps.getPullRequestLifecycleStatus(
-                repository,
-                headRefName,
-              )
-            default: {
-              const _exhaustive: never = repository.forge
-              return _exhaustive
-            }
-          }
+          return yield* resolveForgeObservation(repository.forge, {
+            github,
+            gitlab,
+            azureDevOps,
+          }).getPullRequestLifecycleStatus(repository, headRefName)
         }).pipe(
           Effect.catch((error) =>
             isGitHubThrottledError(error)

@@ -1,16 +1,14 @@
 import { Effect } from "effect"
-import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService } from "@ready-for-agent/db-service"
 import type {
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
 } from "@ready-for-agent/forge-contract"
 import {
-  GitHubService,
   type GitHubThrottledError,
   isGitHubThrottledError,
 } from "@ready-for-agent/github-service"
-import { GitLabService } from "@ready-for-agent/gitlab-service"
+import { forgeObservation } from "./forge-observation.js"
 import { WorkItemLifecycle } from "./work-item-lifecycle.js"
 import { workItemBranchName } from "./worktree-names.js"
 
@@ -53,9 +51,7 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
     if (repository === undefined) {
       return 0
     }
-    const github = yield* GitHubService
-    const gitlab = yield* GitLabService
-    const azureDevOps = yield* AzureDevOpsService
+    const observations = yield* forgeObservation(repository)
 
     const workItems = yield* lifecycle.listWorkItemsForRepository(repositoryId)
     let advanced = 0
@@ -96,23 +92,7 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
       const lifecycleLookup: Effect.Effect<
         PullRequestLifecycleStatus,
         unknown
-      > = ((): Effect.Effect<PullRequestLifecycleStatus, unknown> => {
-        switch (repository.forge) {
-          case "gitlab":
-            return gitlab.getPullRequestLifecycleStatus(repository, headRefName)
-          case "azure-devops":
-            return azureDevOps.getPullRequestLifecycleStatus(
-              repository,
-              headRefName,
-            )
-          case "github":
-            return github.getPullRequestLifecycleStatus(repository, headRefName)
-          default: {
-            const _exhaustive: never = repository.forge
-            return _exhaustive
-          }
-        }
-      })()
+      > = observations.getPullRequestLifecycleStatus(repository, headRefName)
 
       const status = yield* skipNonThrottleLookupFailure(lifecycleLookup, {
         message:
@@ -174,23 +154,7 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
         const checkStatusLookup: Effect.Effect<
           PullRequestCheckStatus,
           unknown
-        > = ((): Effect.Effect<PullRequestCheckStatus, unknown> => {
-          switch (repository.forge) {
-            case "gitlab":
-              return gitlab.getPullRequestCheckStatus(repository, headRefName)
-            case "azure-devops":
-              return azureDevOps.getPullRequestCheckStatus(
-                repository,
-                headRefName,
-              )
-            case "github":
-              return github.getPullRequestCheckStatus(repository, headRefName)
-            default: {
-              const _exhaustive: never = repository.forge
-              return _exhaustive
-            }
-          }
-        })()
+        > = observations.getPullRequestCheckStatus(repository, headRefName)
 
         const checkStatus = yield* skipNonThrottleLookupFailure(
           checkStatusLookup,

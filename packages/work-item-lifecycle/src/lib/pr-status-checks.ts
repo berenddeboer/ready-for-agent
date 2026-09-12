@@ -2,11 +2,9 @@ import { Clock, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { ulid } from "ulidx"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
-import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService } from "@ready-for-agent/db-service"
 import type {
   PrStatusCheckDiagnostic,
-  PullRequestCheckStatus,
   TerminalPrStatusCheck,
 } from "@ready-for-agent/forge-contract"
 import {
@@ -19,7 +17,6 @@ import {
   isRecognizedAutomatedReviewerName,
   workflowNameFromCheckName,
 } from "@ready-for-agent/github-service"
-import { GitLabService } from "@ready-for-agent/gitlab-service"
 import type { Forge } from "@ready-for-agent/lifecycle-model"
 import {
   AgentTurnForgeCredentialMissingError,
@@ -28,6 +25,7 @@ import {
   forgeDisplayName,
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
+import { forgeObservation } from "./forge-observation.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   promptUserContentSection,
@@ -299,33 +297,11 @@ const timingEvidence = (status: {
 export const watchPrStatusChecks = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, branch } = yield* resolveContext(context)
-    let status: PullRequestCheckStatus
-    // Forge dispatch: GitLab head-pipeline jobs, Azure DevOps build
-    // validation / branch policy checks, or GitHub Checks/statuses.
-    switch (repository.forge) {
-      case "gitlab": {
-        const gitlab = yield* GitLabService
-        status = yield* gitlab.getPullRequestCheckStatus(repository, branch)
-        break
-      }
-      case "azure-devops": {
-        const azureDevOps = yield* AzureDevOpsService
-        status = yield* azureDevOps.getPullRequestCheckStatus(
-          repository,
-          branch,
-        )
-        break
-      }
-      case "github": {
-        const github = yield* GitHubService
-        status = yield* github.getPullRequestCheckStatus(repository, branch)
-        break
-      }
-      default: {
-        const _exhaustive: never = repository.forge
-        return _exhaustive
-      }
-    }
+    const observations = yield* forgeObservation(repository)
+    const status = yield* observations.getPullRequestCheckStatus(
+      repository,
+      branch,
+    )
     const evidence = timingEvidence(status)
     const terminalChecks =
       status._tag === "pending" ||
@@ -1076,45 +1052,16 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
               ? `Failed to load PR Status Check diagnostics: ${cause.message}`
               : "Failed to load PR Status Check diagnostics for red PR Status Checks",
         })
-      switch (repository.forge) {
-        case "gitlab": {
-          const gitlab = yield* GitLabService
-          diagnostics = yield* gitlab
-            .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
-              logDirectory,
-            })
-            .pipe(Effect.mapError(mapDiagnosticError))
-          break
-        }
-        case "azure-devops": {
-          const azureDevOps = yield* AzureDevOpsService
-          diagnostics = yield* azureDevOps
-            .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
-              logDirectory,
-            })
-            .pipe(Effect.mapError(mapDiagnosticError))
-          break
-        }
-        case "github": {
-          const github = yield* GitHubService
-          diagnostics = yield* github
-            .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
-              logDirectory,
-            })
-            .pipe(
-              Effect.mapError((cause) =>
-                isGitHubThrottledError(cause)
-                  ? cause
-                  : mapDiagnosticError(cause),
-              ),
-            )
-          break
-        }
-        default: {
-          const _exhaustive: never = repository.forge
-          return _exhaustive
-        }
-      }
+      const observations = yield* forgeObservation(repository)
+      diagnostics = yield* observations
+        .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
+          logDirectory,
+        })
+        .pipe(
+          Effect.mapError((cause) =>
+            isGitHubThrottledError(cause) ? cause : mapDiagnosticError(cause),
+          ),
+        )
     }
     const agentBackend = yield* AgentBackend
     const timeout =
