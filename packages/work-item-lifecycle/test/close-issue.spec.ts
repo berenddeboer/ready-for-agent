@@ -24,6 +24,8 @@ import {
   CloseIssueSummaryMissingError,
   closeIssue,
   makeWorkItemId,
+  stubAzureDevOpsServiceLayer,
+  stubGitLabServiceLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -209,7 +211,11 @@ describe("closeIssue", () => {
       closeIssue({
         ...context,
         repositoryId: gitlabRepository.id,
-      }).pipe(Effect.provide(Layer.mergeAll(db, github, gitlab))),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(db, github, gitlab, stubAzureDevOpsServiceLayer()),
+        ),
+      ),
     )
 
     expect(githubCalls).toBe(0)
@@ -276,7 +282,11 @@ describe("closeIssue", () => {
       closeIssue({
         ...context,
         repositoryId: azureDevOpsRepository.id,
-      }).pipe(Effect.provide(Layer.mergeAll(db, github, azureDevOps))),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(db, github, stubGitLabServiceLayer(), azureDevOps),
+        ),
+      ),
     )
 
     expect(githubCalls).toBe(0)
@@ -331,7 +341,9 @@ describe("closeIssue", () => {
         ...context,
         repositoryId: azureDevOpsRepository.id,
       }).pipe(
-        Effect.provide(Layer.mergeAll(db, github, azureDevOps)),
+        Effect.provide(
+          Layer.mergeAll(db, github, stubGitLabServiceLayer(), azureDevOps),
+        ),
         Effect.flip,
       ),
     )
@@ -427,7 +439,16 @@ describe("closeIssue", () => {
         }),
     } satisfies GitHubServiceShape)
     await Effect.runPromise(
-      closeIssue(context).pipe(Effect.provide(Layer.merge(db, github))),
+      closeIssue(context).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            github,
+            stubGitLabServiceLayer(),
+            stubAzureDevOpsServiceLayer(),
+          ),
+        ),
+      ),
     )
     expect(calls).toEqual([
       {
@@ -457,7 +478,16 @@ describe("closeIssue", () => {
         }),
     } satisfies GitHubServiceShape)
     await Effect.runPromise(
-      closeIssue(context).pipe(Effect.provide(Layer.merge(db, github))),
+      closeIssue(context).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            github,
+            stubGitLabServiceLayer(),
+            stubAzureDevOpsServiceLayer(),
+          ),
+        ),
+      ),
     )
     expect(calls).toEqual(["Findings complete."])
   })

@@ -2,6 +2,7 @@ import { Context, type Effect } from "effect"
 import type {
   CiGateCatalogEntry,
   CiGateObservation,
+  ForgeIssueOperations,
   MergePullRequestOptions,
   MergePullRequestResult,
   ObserveCiGateInput,
@@ -21,7 +22,8 @@ export type GitLabServiceError =
   | GitLabProjectUnavailableError
   | GitLabRequestError
 
-export interface GitLabServiceShape {
+export interface GitLabServiceShape
+  extends ForgeIssueOperations<GitLabServiceError> {
   /**
    * Verify Forge Host + Project Path against GitLab before persistence.
    * Returns the repository identity with the instance's canonical API/web host

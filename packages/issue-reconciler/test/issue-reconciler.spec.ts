@@ -488,6 +488,45 @@ describe("IssueReconciler", () => {
     )
   })
 
+  it("resolves a scoped Azure DevOps author before fetching remote Issues", () => {
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: "repo-1",
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      includeAllIssueAuthors: false,
+    })
+    const db = makeDbFixture({ issues: [] })
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      ...defaultAzureDevOpsShape,
+      getAuthenticatedUserLogin: ({ projectPath }) =>
+        Effect.sync(() => {
+          db.actions.push(`azure-identity:${projectPath}`)
+          return "operator"
+        }),
+      listReadyIssues: ({ projectPath }) =>
+        Effect.sync(() => {
+          db.actions.push(`azure:${projectPath}`)
+          return []
+        }),
+    } satisfies AzureDevOpsServiceShape)
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        yield* reconciler.reconcile(azureDevOpsRepository)
+
+        expect(db.actions.indexOf("azure-identity:acme/widgets")).toBeLessThan(
+          db.actions.indexOf("azure:acme/widgets"),
+        )
+      }),
+      db.layer,
+      makeGitHubLayer([], db.actions),
+      defaultGitLabLayer,
+      azureDevOps,
+    )
+  })
+
   it("classifies changes, writes by issue number, and records success", () => {
     const db = makeDbFixture({
       issues: [

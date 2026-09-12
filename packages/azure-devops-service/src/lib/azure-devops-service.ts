@@ -2,6 +2,7 @@ import { Context, type Effect } from "effect"
 import type {
   CiGateCatalogEntry,
   CiGateObservation,
+  ForgeIssueOperations,
   MergePullRequestOptions,
   MergePullRequestResult,
   ObserveCiGateInput,
@@ -35,7 +36,8 @@ export type AzureDevOpsServiceError =
  * are local credential checks, and only `countOpenNonDraftPullRequests`
  * still fails with `AzureDevOpsNotImplementedError` (see method-level docs).
  */
-export interface AzureDevOpsServiceShape {
+export interface AzureDevOpsServiceShape
+  extends ForgeIssueOperations<AzureDevOpsServiceError> {
   /**
    * Verify Organization + Project against Azure DevOps before persistence
    * (`GET _apis/projects/{project}`), then the Git repository itself
