@@ -15,8 +15,11 @@ import {
 } from "@ready-for-agent/azure-devops-service"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
 import {
+  associateNativePullRequestWithIssue,
+  currentNativeForgeClosingReferenceRules,
   formatUserFacingError,
   logErrorAnnotations,
+  resolveForgeIssuePresentation,
 } from "@ready-for-agent/forge-contract"
 import {
   type GitHubService,
@@ -72,24 +75,6 @@ import { workItemBranchName } from "./worktree-names.js"
 
 const DIAGNOSTIC_CHAR_LIMIT = 4_000
 const NATIVE_PUSH_TIMEOUT_MS = 60_000
-
-/** Agent Turn credential-guidance access-scope phrase, per Forge. */
-const nativeCredentialAccessScope = (
-  forge: RepositoryRecord["forge"],
-): string => {
-  switch (forge) {
-    case "github":
-      return "GitHub CLI or API access"
-    case "gitlab":
-      return "GitLab API or push access"
-    case "azure-devops":
-      return "Azure DevOps API or push access"
-    default: {
-      const _exhaustive: never = forge
-      return _exhaustive
-    }
-  }
-}
 
 export type CreatePrResult = {
   readonly pullRequestNumber: number
@@ -225,9 +210,9 @@ export const buildDeterministicPullRequestBody = (
   issueNumber: number,
 ): string =>
   [
-    `Automated draft pull request for GitHub issue #${issueNumber}.`,
+    currentNativeForgeClosingReferenceRules.genericPlaceholderBody(issueNumber),
     "",
-    `Closes #${issueNumber}`,
+    currentNativeForgeClosingReferenceRules.formatLine(issueNumber),
   ].join("\n")
 
 /**
@@ -913,6 +898,12 @@ export const createPr = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
     const repository = yield* resolveRepositoryRecord(context)
+    const presentation = resolveForgeIssuePresentation({
+      forge: repository.forge,
+      forgeHost: repository.forgeHost,
+      projectPath: repository.projectPath,
+      issueNumber: context.issueNumber,
+    })
     const branch = workItemBranchName({
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
@@ -1032,7 +1023,7 @@ export const createPr = (context: LifecycleStepContext) =>
                 credentialGuidance: agentTurnForgeCredentialGuidance(
                   repository,
                   prepared.auth,
-                  nativeCredentialAccessScope(repository.forge),
+                  presentation.nativeCreateAccessScope,
                 ),
                 diagnostics,
               }),
@@ -1096,24 +1087,21 @@ export const createPr = (context: LifecycleStepContext) =>
     })
 
     const mutations = yield* forgePullRequestMutations(repository)
-    if (mutations.forge === "azure-devops") {
-      yield* mutations
-        .ensurePullRequestLinkedToIssue(
-          toForgeRepository(repository),
-          outcome.value,
-          context.issueNumber,
-        )
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new CreatePrPostconditionError({
-                repositoryId: context.repositoryId,
-                message: `Failed to associate Azure Boards Issue #${context.issueNumber} with pull request ${outcome.value}`,
-                diagnostics: boundDiagnostics(errorMessage(cause)),
-              }),
-          ),
-        )
-    }
+    yield* associateNativePullRequestWithIssue({
+      mutations,
+      repository: toForgeRepository(repository),
+      pullRequestNumber: outcome.value,
+      issueNumber: context.issueNumber,
+    }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new CreatePrPostconditionError({
+            repositoryId: context.repositoryId,
+            message: `Failed to associate Azure Boards Issue #${context.issueNumber} with pull request ${outcome.value}`,
+            diagnostics: boundDiagnostics(errorMessage(cause)),
+          }),
+      ),
+    )
 
     return toCreatePrResult(outcome.value, outcome.completion, copy)
   })
