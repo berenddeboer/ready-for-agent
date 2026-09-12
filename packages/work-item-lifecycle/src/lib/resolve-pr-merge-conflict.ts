@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
+import type { Forge } from "@ready-for-agent/lifecycle-model"
 import {
   type AgentTurnForgeAuth,
   AgentTurnForgeCredentialMissingError,
@@ -75,9 +76,7 @@ const mergeConflictOutcomeContractLines = (): readonly string[] => [
   "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
 ]
 
-const forgeFetchPushAccessScope = (
-  forge: "github" | "gitlab" | "azure-devops",
-): string => {
+const forgeFetchPushAccessScope = (forge: Forge): string => {
   switch (forge) {
     case "github":
       return "GitHub CLI, API, fetch, or push access"

@@ -43,7 +43,7 @@ flowchart LR
 
   subgraph lm["packages/lifecycle-model"]
     gen["scripts/generate-lifecycle-state.ts<br/>(n3 Turtle parser)"]
-    generated["src/generated/work-item-state.ts<br/>Effect Schema literals +<br/>STEP_RUN_REASON +<br/>LIFECYCLE_TRANSITIONS +<br/>isDeclaredLifecycleTransition"]
+    generated["src/generated/work-item-state.ts<br/>+ forge.ts<br/>Effect Schema literals +<br/>STEP_RUN_REASON +<br/>FORGES +<br/>LIFECYCLE_TRANSITIONS"]
     tests["test/ontology.test.ts<br/>SHACL validation, OWL consistency,<br/>CONTEXT.md parity"]
   end
 
@@ -65,7 +65,8 @@ flowchart LR
 ```
 
 The generator (`bunx nx run lifecycle-model:generate`) parses `rfa.ttl` and
-emits `packages/lifecycle-model/src/generated/work-item-state.ts`:
+emits `packages/lifecycle-model/src/generated/work-item-state.ts` and
+`packages/lifecycle-model/src/generated/forge.ts`:
 
 - `OPERATIONAL_LIFECYCLE_STEPS` and `TERMINAL_WORK_ITEM_STATES` — the state
   space, keyed by each term's `skos:notation` (the runtime string, e.g.
@@ -73,6 +74,9 @@ emits `packages/lifecycle-model/src/generated/work-item-state.ts`:
 - `WorkItemState` — an Effect `Schema.Literals` union over both.
 - `STEP_RUN_REASONS` / `STEP_RUN_REASON` — every `rfa:StepRunReason`
   (`skos:notation` plus camelCase accessor), the complete harness vocabulary.
+- `FORGES` / `Forge` / `isForge` — the three supported Forge kinds
+  (`github`, `gitlab`, `azure-devops`) from `rfa:Forge` `owl:oneOf`, in
+  declared order. GraphQL keeps the existing string wire contract.
 - `LIFECYCLE_TRANSITIONS` — every declared `rfa:Transition` as queryable data
   (`from`, `to`, `guard`, `reasonCode`).
 - `isDeclaredLifecycleTransition(from, to)` — membership in the declared

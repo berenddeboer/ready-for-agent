@@ -6,6 +6,7 @@
  * without importing the home route.
  */
 
+import { type Forge, isForge } from "@ready-for-agent/lifecycle-model"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
 
 const graphql = createHarnessGraphqlClient({ batch: true })
@@ -17,7 +18,7 @@ type RepositoryCredential = {
   githubTokenCreationUrl: string
 }
 
-export type Forge = "github" | "gitlab" | "azure-devops"
+export type { Forge }
 
 const FORGE_DISPLAY_NAMES: Record<Forge, string> = {
   github: "GitHub",
@@ -42,14 +43,10 @@ export const ciGateStatusLabel = (status: RepositoryCiGateStatus): string => {
 }
 
 export const decodeForge = (value: unknown): Forge => {
-  switch (value) {
-    case "github":
-    case "gitlab":
-    case "azure-devops":
-      return value
-    default:
-      throw new Error(`Unsupported Forge: ${String(value)}`)
+  if (isForge(value)) {
+    return value
   }
+  throw new Error(`Unsupported Forge: ${String(value)}`)
 }
 
 type CiGateDefinition = {

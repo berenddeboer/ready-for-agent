@@ -3,7 +3,9 @@
  * Used on archive legs, PR badges, and aria-labels.
  */
 
-export type ForgeId = "github" | "gitlab" | "azure-devops"
+import { type Forge, isForge } from "@ready-for-agent/lifecycle-model"
+
+export type ForgeId = Forge
 
 /**
  * Azure DevOps uses GitHub's "pull request" terminology, so it maps onto the
@@ -11,14 +13,7 @@ export type ForgeId = "github" | "gitlab" | "azure-devops"
  * of silently inheriting the wrong noun.
  */
 export function normalizeForge(forge: string | undefined | null): ForgeId {
-  switch (forge) {
-    case "gitlab":
-      return "gitlab"
-    case "azure-devops":
-      return "azure-devops"
-    default:
-      return "github"
-  }
+  return isForge(forge) ? forge : "github"
 }
 
 /** Compact chip / badge token: "PR" (GitHub) or "MR" (GitLab). */

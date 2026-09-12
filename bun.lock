@@ -214,6 +214,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@ready-for-agent/agent-backend": "workspace:*",
+        "@ready-for-agent/lifecycle-model": "workspace:*",
         "effect": "^4.0.0-beta.97",
         "tslib": "^2.3.0",
         "ulidx": "^2.4.1",
@@ -364,6 +365,7 @@
       "name": "@ready-for-agent/local-git",
       "version": "0.0.1",
       "dependencies": {
+        "@ready-for-agent/lifecycle-model": "workspace:*",
         "effect": "^4.0.0-beta.97",
         "tslib": "^2.3.0",
       },

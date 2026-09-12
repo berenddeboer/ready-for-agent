@@ -22,12 +22,14 @@ const owlEquivalentClass = iri(`${namespace.owl}equivalentClass`)
 const owlHasValue = iri(`${namespace.owl}hasValue`)
 const owlIntersectionOf = iri(`${namespace.owl}intersectionOf`)
 const owlOnProperty = iri(`${namespace.owl}onProperty`)
+const owlOneOf = iri(`${namespace.owl}oneOf`)
 const owlSomeValuesFrom = iri(`${namespace.owl}someValuesFrom`)
 const owlUnionOf = iri(`${namespace.owl}unionOf`)
 const skosNotation = iri(`${namespace.skos}notation`)
 const skosDefinition = iri(`${namespace.skos}definition`)
 const operationalLifecycleStep = term("OperationalLifecycleStep")
 const terminalWorkItemState = term("TerminalWorkItemState")
+const forgeClass = term("Forge")
 const stepRunReasonClass = term("StepRunReason")
 const transitionClass = term("Transition")
 const fromStep = term("fromStep")
@@ -43,6 +45,7 @@ const xsdDayTimeDuration = iri(`${namespace.xsd}dayTimeDuration`)
 const packageRoot = resolve(import.meta.dir, "..")
 const ontologyPath = resolve(packageRoot, "../../ontology/rfa.ttl")
 const generatedPath = resolve(packageRoot, "src/generated/work-item-state.ts")
+const generatedForgePath = resolve(packageRoot, "src/generated/forge.ts")
 const generatedPredicatePath = resolve(
   packageRoot,
   "src/generated/predicate-expressions.ts",
@@ -431,6 +434,50 @@ const notationsForClass = (
   return values
 }
 
+const forgeKinds = (store: Store): readonly string[] => {
+  const equivalent = onlyObject(store, forgeClass, owlEquivalentClass)
+  const listHead = onlyObject(store, equivalent, owlOneOf)
+  const members = rdfList(store, listHead)
+  if (members.length === 0) {
+    throw new Error("rfa:Forge owl:oneOf must declare at least one kind")
+  }
+
+  const memberIris = members.map((member) => {
+    if (member.termType !== "NamedNode") {
+      throw new Error(
+        `rfa:Forge owl:oneOf member must be an IRI: ${member.value}`,
+      )
+    }
+    if (store.countQuads(member, rdfType, forgeClass, null) !== 1) {
+      throw new Error(
+        `${member.value} is in rfa:Forge owl:oneOf but is not typed as rfa:Forge`,
+      )
+    }
+    return member
+  })
+
+  const typed = store.getSubjects(rdfType, forgeClass, null)
+  const expected = new Set(memberIris.map((member) => member.value))
+  const actual = new Set(typed.map((subject) => subject.value))
+  if (
+    expected.size !== actual.size ||
+    [...expected].some((iriValue) => !actual.has(iriValue))
+  ) {
+    throw new Error(
+      "rfa:Forge individuals must be exactly the owl:oneOf members",
+    )
+  }
+
+  const values = memberIris.map((member) => onlyNotation(store, member))
+  const sorted = [...values].sort()
+  const duplicate = sorted.find((value, index) => value === sorted[index - 1])
+  if (duplicate !== undefined) {
+    throw new Error(`Duplicate Forge notation: ${duplicate}`)
+  }
+
+  return values
+}
+
 interface GeneratedStepRunReason {
   readonly key: string
   readonly notation: string
@@ -601,6 +648,20 @@ ${values.map((value) => `  ${JSON.stringify(value)},`).join("\n")}
 ] as const
 `
 
+const renderForgeSource = (values: readonly string[]) => `\
+// This file is generated from ontology/rfa.ttl.
+// Run \`bunx nx run lifecycle-model:generate\` to update it.
+
+import { Schema } from "effect"
+
+${renderTuple("FORGES", values)}
+export const Forge = Schema.Literals(FORGES)
+export type Forge = typeof Forge.Type
+
+export const isForge = (value: unknown): value is Forge =>
+  FORGES.some((forge) => forge === value)
+`
+
 const renderTransitions = (values: readonly GeneratedTransition[]) => `\
 export interface LifecycleTransition {
   readonly from: WorkItemState
@@ -739,6 +800,7 @@ const generate = async () => {
       ),
       lifecycleStepProperties,
     ),
+    forgeSource: renderForgeSource(forgeKinds(ontology)),
     predicateSource: renderPredicateExpressions(predicateExpressions(ontology)),
   }
 }
@@ -755,12 +817,15 @@ if (unknownArguments.length > 0) {
 const generated = await generate()
 
 if (check) {
-  const [checkedInStateSource, checkedInPredicateSource] = await Promise.all([
-    readFile(generatedPath, "utf8").catch(() => ""),
-    readFile(generatedPredicatePath, "utf8").catch(() => ""),
-  ])
+  const [checkedInStateSource, checkedInForgeSource, checkedInPredicateSource] =
+    await Promise.all([
+      readFile(generatedPath, "utf8").catch(() => ""),
+      readFile(generatedForgePath, "utf8").catch(() => ""),
+      readFile(generatedPredicatePath, "utf8").catch(() => ""),
+    ])
   if (
     checkedInStateSource !== generated.stateSource ||
+    checkedInForgeSource !== generated.forgeSource ||
     checkedInPredicateSource !== generated.predicateSource
   ) {
     console.error(
@@ -771,10 +836,12 @@ if (check) {
 } else {
   await Promise.all([
     mkdir(dirname(generatedPath), { recursive: true }),
+    mkdir(dirname(generatedForgePath), { recursive: true }),
     mkdir(dirname(generatedPredicatePath), { recursive: true }),
   ])
   await Promise.all([
     writeFile(generatedPath, generated.stateSource),
+    writeFile(generatedForgePath, generated.forgeSource),
     writeFile(generatedPredicatePath, generated.predicateSource),
   ])
 }

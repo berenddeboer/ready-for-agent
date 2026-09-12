@@ -15,6 +15,8 @@ Read `ontology/README.md` for the full model and diagrams before editing.
 
 - `packages/lifecycle-model/src/generated/work-item-state.ts`
   (state space, transition relation, and the complete `STEP_RUN_REASON` table)
+- `packages/lifecycle-model/src/generated/forge.ts`
+  (the three supported Forge kinds and `isForge`)
 - `packages/graphql-schema/src/type-defs.gen.ts`
 - Any state enum in `db-schema` or SDL that lists Work Item states — they
   import from `@ready-for-agent/lifecycle-model`.
@@ -38,6 +40,12 @@ Read `ontology/README.md` for the full model and diagrams before editing.
      (the runtime snake_case or kebab-case string) and one English
      `skos:definition`. `STEP_RUN_REASON` is generated from these
      individuals.
+   - Supported Forge kinds: declare each kind as an `rfa:Forge` individual
+     in `rfa.ttl` with one `skos:notation` (the runtime spelling) and one
+     English `skos:definition`. Keep `rfa:Forge owl:equivalentClass / owl:oneOf`
+     and `owl:AllDifferent` in exact parity with those individuals. Do not
+     add Repository selection properties. `FORGES` is generated from the
+     `owl:oneOf` list order. GraphQL `forge` stays a string.
 2. **Keep the glossary in parity.** If the term is (or becomes) a CONTEXT.md
    glossary entry, update the glossary in `CONTEXT.md` and mirror it in
    `ontology/context.ttl` (`rfa:ContextTerm` with matching

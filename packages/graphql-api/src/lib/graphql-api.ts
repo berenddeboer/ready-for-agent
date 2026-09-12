@@ -555,7 +555,7 @@ const resolveRepositoryCiGateSelection = Effect.fn(
 const verifyRepositoryIdentity = Effect.fn(
   "graphql-api.verifyRepositoryIdentity",
 )(function* (identity: {
-  readonly forge: "github" | "gitlab" | "azure-devops"
+  readonly forge: Forge
   readonly forgeHost: string
   readonly projectPath: string
 }) {

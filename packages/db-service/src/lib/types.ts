@@ -1,4 +1,7 @@
 import { Schema } from "effect"
+import { Forge } from "@ready-for-agent/lifecycle-model"
+
+export { Forge }
 
 export const RepositoryId = Schema.String.pipe(
   Schema.check(Schema.isPattern(/^repo-[0-9A-HJKMNP-TV-Z]{26}$/)),
@@ -11,9 +14,6 @@ const SqlBoolean = Schema.Union([Schema.Boolean, Schema.BooleanFromBit])
 
 export const IssueState = Schema.Literals(["OPEN", "CLOSED"])
 export type IssueState = typeof IssueState.Type
-
-export const Forge = Schema.Literals(["github", "gitlab", "azure-devops"])
-export type Forge = typeof Forge.Type
 
 export const MergePolicy = Schema.Literals(["off", "classify", "always"])
 export type MergePolicy = typeof MergePolicy.Type

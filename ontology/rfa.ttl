@@ -14,7 +14,7 @@
     "The Ready for Agent domain vocabulary and Work Item lifecycle model."@en ;
   dcterms:source
     <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
-  owl:versionInfo "0.6.0" .
+  owl:versionInfo "0.7.0" .
 
 rfa:ContextTerm
   a owl:Class ;
@@ -890,6 +890,36 @@ rfa:MergeModeAlways
   a owl:Class ;
   rdfs:subClassOf rfa:MergeMode ;
   owl:equivalentClass rfa:MergePolicyAlways .
+
+# Existing supported Forge kinds. Runtime spellings are skos:notation.
+# Completeness is owl:oneOf in this order; kinds are pairwise distinct.
+# Do not add Repository selection properties here — a Repository still
+# selects exactly one Forge in the existing application model.
+rfa:Forge
+  owl:equivalentClass [
+    owl:oneOf ( rfa:GitHub rfa:GitLab rfa:AzureDevOps )
+  ] .
+
+rfa:GitHub
+  a rfa:Forge ;
+  skos:notation "github" ;
+  skos:definition
+    "The GitHub Forge kind: git hosting, Issues, and Pull Requests for a Repository. Runtime spelling github."@en .
+
+rfa:GitLab
+  a rfa:Forge ;
+  skos:notation "gitlab" ;
+  skos:definition
+    "The GitLab Forge kind: git hosting, Issues, and Pull Requests for a Repository. Runtime spelling gitlab."@en .
+
+rfa:AzureDevOps
+  a rfa:Forge ;
+  skos:notation "azure-devops" ;
+  skos:definition
+    "The Azure DevOps Forge kind: git hosting, Issues, and Pull Requests for a Repository. Runtime spelling azure-devops."@en .
+
+[] a owl:AllDifferent ;
+  owl:distinctMembers ( rfa:GitHub rfa:GitLab rfa:AzureDevOps ) .
 
 rfa:StepRun
   rdfs:subClassOf

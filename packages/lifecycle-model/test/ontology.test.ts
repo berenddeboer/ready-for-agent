@@ -36,6 +36,9 @@ const owlAnnotatedTarget = iri(`${namespace.owl}annotatedTarget`)
 const owlAxiom = iri(`${namespace.owl}Axiom`)
 const owlDisjointWith = iri(`${namespace.owl}disjointWith`)
 const owlEquivalentClass = iri(`${namespace.owl}equivalentClass`)
+const owlOneOf = iri(`${namespace.owl}oneOf`)
+const owlAllDifferent = iri(`${namespace.owl}AllDifferent`)
+const owlDistinctMembers = iri(`${namespace.owl}distinctMembers`)
 const owlMembers = iri(`${namespace.owl}members`)
 const owlNamedIndividual = iri(`${namespace.owl}NamedIndividual`)
 const owlObjectProperty = iri(`${namespace.owl}ObjectProperty`)
@@ -53,6 +56,7 @@ const shPath = iri(`${namespace.sh}path`)
 
 const operationalClass = term("OperationalLifecycleStep")
 const terminalClass = term("TerminalWorkItemState")
+const forgeClass = term("Forge")
 const contextTermClass = term("ContextTerm")
 const avoidanceRationale = term("avoidanceRationale")
 const maximumDuration = term("maximumDuration")
@@ -175,6 +179,16 @@ const expectedStateIris = [
   ...Object.keys(expectedOperationalTerms),
   ...Object.keys(expectedTerminalTerms),
 ].map((localName) => `${namespace.rfa}${localName}`)
+
+const expectedForgeTerms = {
+  GitHub: "github",
+  GitLab: "gitlab",
+  AzureDevOps: "azure-devops",
+} as const
+
+const expectedForgeIris = Object.keys(expectedForgeTerms).map(
+  (localName) => `${namespace.rfa}${localName}`,
+)
 
 const parseTurtle = (path: string) => {
   const source = readFileSync(path, "utf8")
@@ -656,6 +670,46 @@ describe("full vocabulary semantic distinctions", () => {
         null,
       ),
     ).toBe(1)
+  })
+
+  it("declares exactly the three supported Forge kinds with stable runtime notations", () => {
+    const actualTerms = ontology.getSubjects(rdfType, forgeClass, null)
+    expectExactIris(actualTerms, expectedForgeIris)
+
+    for (const [localName, notation] of Object.entries(expectedForgeTerms)) {
+      const subject = term(localName)
+      expect(ontology.countQuads(subject, rdfType, forgeClass, null)).toBe(1)
+
+      const actualNotation = getOnlyLiteral(ontology, subject, skosNotation)
+      expect(actualNotation.value).toBe(notation)
+
+      const definition = getOnlyLiteral(ontology, subject, skosDefinition)
+      expect(definition.language).toBe("en")
+      expect(definition.value.length).toBeGreaterThan(20)
+    }
+  })
+
+  it("proves the Forge kind vocabulary is complete and pairwise distinct", () => {
+    const equivalent = getOnlyObject(ontology, forgeClass, owlEquivalentClass)
+    const oneOf = getOnlyObject(ontology, equivalent, owlOneOf)
+    expectExactIris(readRdfList(ontology, oneOf), expectedForgeIris)
+
+    const oneOfOrder = readRdfList(ontology, oneOf).map(({ value }) => value)
+    expect(oneOfOrder).toEqual(expectedForgeIris)
+
+    const hasExactAllDifferent = ontology
+      .getSubjects(rdfType, owlAllDifferent, null)
+      .some((axiom) => {
+        const members = getOnlyObject(ontology, axiom, owlDistinctMembers)
+        const actual = readRdfList(ontology, members)
+          .map(({ value }) => value)
+          .sort()
+        return (
+          JSON.stringify(actual) ===
+          JSON.stringify([...expectedForgeIris].sort())
+        )
+      })
+    expect(hasExactAllDifferent).toBe(true)
   })
 
   it("attributes outcomes to an Agent Backend or the Harness", () => {

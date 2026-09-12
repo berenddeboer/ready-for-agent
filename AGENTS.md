@@ -48,9 +48,10 @@ glossary are derived from a versioned ontology under `ontology/` (see
 `ontology/README.md`, `docs/adr/0044-ontology-derived-lifecycle-model.md`,
 and `docs/adr/0058-ontology-owns-step-run-reason-codes.md`). Domain changes
 start with an ontology edit and flow through codegen — never edit
-`packages/lifecycle-model/src/generated/work-item-state.ts` or the state
+`packages/lifecycle-model/src/generated/work-item-state.ts`,
+`packages/lifecycle-model/src/generated/forge.ts`, or the state
 enums directly. Use the `ontology-change` skill when adding or changing
-lifecycle states, transitions, Step Run reason codes, or glossary terms.
+lifecycle states, transitions, Step Run reason codes, Forge kinds, or glossary terms.
 
 <!-- effect-solutions:start -->
 

@@ -8,6 +8,7 @@ import {
 } from "drizzle-orm/sqlite-core"
 import { ulid } from "ulidx"
 import {
+  FORGES,
   OPERATIONAL_LIFECYCLE_STEPS,
   WORK_ITEM_STATES,
 } from "@ready-for-agent/lifecycle-model"
@@ -18,9 +19,7 @@ export const repository = snakeCase.table(
     id: text()
       .primaryKey()
       .$defaultFn(() => `repo-${ulid()}`),
-    forge: text({ enum: ["github", "gitlab", "azure-devops"] })
-      .notNull()
-      .default("github"),
+    forge: text({ enum: FORGES }).notNull().default("github"),
     forgeHost: text().notNull().default("github.com"),
     projectPath: text().notNull(),
     localPath: text().notNull().unique(),

@@ -18,6 +18,7 @@ import {
   gitlabVaultAccount,
 } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import type { Forge } from "@ready-for-agent/lifecycle-model"
 import {
   CurrentCapturedAgentBackendId,
   CurrentStepRun,
@@ -36,9 +37,7 @@ export type AgentTurnForgeAuth =
  * the three Forges so a new Forge fails to compile here instead of silently
  * mislabeling itself as one of the other two.
  */
-export const forgeDisplayName = (
-  forge: "github" | "gitlab" | "azure-devops",
-): string => {
+export const forgeDisplayName = (forge: Forge): string => {
   switch (forge) {
     case "github":
       return "GitHub"
@@ -54,7 +53,7 @@ export const forgeDisplayName = (
 }
 
 export type AgentTurnForgeRepository = {
-  readonly forge: "github" | "gitlab" | "azure-devops"
+  readonly forge: Forge
   readonly forgeHost: string
   readonly projectPath: string
 }
@@ -110,7 +109,7 @@ export const isAgentTurnKeymaxxerEffective = (
 ): boolean => keymaxxerMcpSupported && keymaxxerEnabled !== false
 
 const resolveAgentTurnKeymaxxerAuth = (input: {
-  readonly provider: "github" | "gitlab" | "azure-devops"
+  readonly provider: Forge
   readonly account: string
   readonly credentialDescription: string
   /**
