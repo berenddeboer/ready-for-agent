@@ -2,6 +2,7 @@ import { Context, type Effect } from "effect"
 import type {
   CiGateCatalogEntry,
   CiGateObservation,
+  ForgeIssueOperations,
   MergePullRequestOptions,
   MergePullRequestResult,
   ObserveCiGateInput,
@@ -35,7 +36,8 @@ export interface GitHubOperationOptions {
   readonly origin: GitHubOperationOrigin
 }
 
-export interface GitHubServiceShape {
+export interface GitHubServiceShape
+  extends ForgeIssueOperations<GitHubServiceError> {
   /**
    * Login of the authenticated principal for this Repository's credential
    * (Operator GitHub User). Same token path as other GitHub API calls.

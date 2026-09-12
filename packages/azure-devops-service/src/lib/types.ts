@@ -1,4 +1,7 @@
-import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
+import type {
+  ForgeRepository,
+  ReadyLabeledIssue,
+} from "@ready-for-agent/forge-contract"
 
 /**
  * Forge-neutral CI Gate catalog kind for an Azure DevOps build pipeline.
@@ -6,9 +9,7 @@ import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
  */
 export const AZURE_DEVOPS_CI_GATE_KIND = "build-pipeline"
 
-export interface AzureDevOpsRepository {
-  readonly forge: string
-  readonly forgeHost: string
+export interface AzureDevOpsRepository extends ForgeRepository {
   /**
    * `<organization>/<project>` or, when the Git repository name differs from
    * the ADO project name, `<organization>/<project>/<repository>` — Azure

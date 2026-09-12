@@ -171,6 +171,25 @@ export type PullRequestCheckStatus = (
   readonly isDraft: boolean | null
 }
 
+/**
+ * Identity a Repository uses to talk to its Forge. Shared by GitHub, GitLab,
+ * and Azure DevOps service methods.
+ */
+export interface ForgeRepository {
+  readonly forge: string
+  readonly forgeHost: string
+  readonly projectPath: string
+}
+
+/**
+ * How Issue reconciliation scopes Ready-labeled Issues by author. `includeAll`
+ * is the Include all Issue Authors setting; otherwise identity is the Operator
+ * Forge User resolved for this attempt.
+ */
+export type IssueAuthorScope =
+  | { readonly includeAll: true }
+  | { readonly includeAll: false; readonly operatorLogin: string }
+
 export type GitHubIssueState = "OPEN" | "CLOSED"
 
 export interface GitHubIssueReference {

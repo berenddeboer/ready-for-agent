@@ -1,4 +1,7 @@
-import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
+import type {
+  ForgeRepository,
+  ReadyLabeledIssue,
+} from "@ready-for-agent/forge-contract"
 
 /**
  * Forge-neutral CI Gate kind for the synthesized GitLab Project pipeline.
@@ -6,11 +9,7 @@ import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
  */
 export const GITLAB_CI_GATE_KIND = "project-pipeline"
 
-export interface GitLabRepository {
-  readonly forge: string
-  readonly forgeHost: string
-  readonly projectPath: string
-}
+export type GitLabRepository = ForgeRepository
 
 export type GitLabReadyLabeledIssue = ReadyLabeledIssue
 

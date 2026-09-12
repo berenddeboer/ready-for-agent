@@ -1,8 +1,6 @@
-export interface GitHubRepository {
-  readonly forge: string
-  readonly forgeHost: string
-  readonly projectPath: string
-}
+import type { ForgeRepository } from "@ready-for-agent/forge-contract"
+
+export type GitHubRepository = ForgeRepository
 
 export const GITHUB_CI_GATE_KIND = "workflow"
 

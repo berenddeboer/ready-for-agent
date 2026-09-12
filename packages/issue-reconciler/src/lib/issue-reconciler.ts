@@ -12,7 +12,10 @@ import {
   type RepositoryNotFoundError,
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
-import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
+import {
+  type ReadyLabeledIssue,
+  resolveForgeIssueOperations,
+} from "@ready-for-agent/forge-contract"
 import {
   type GitHubOperationOptions,
   type GitHubRepositoryUnavailableError,
@@ -150,63 +153,16 @@ export const IssueReconcilerLive = Layer.effect(
       }
       const localIssues = yield* db.listIssues(repository.id)
 
-      const fetchRemote = (() => {
-        switch (repository.forge) {
-          case "gitlab":
-            return Effect.gen(function* () {
-              const authorScope = repository.includeAllIssueAuthors
-                ? ({ includeAll: true } as const)
-                : ({
-                    includeAll: false,
-                    operatorLogin:
-                      yield* gitlab.getAuthenticatedUserLogin(forgeRepository),
-                  } as const)
-              const remoteIssues =
-                yield* gitlab.listReadyIssues(forgeRepository)
-              return { authorScope, remoteIssues }
-            })
-          case "azure-devops":
-            return Effect.gen(function* () {
-              const authorScope = repository.includeAllIssueAuthors
-                ? ({ includeAll: true } as const)
-                : ({
-                    includeAll: false,
-                    operatorLogin:
-                      yield* azureDevOps.getAuthenticatedUserLogin(
-                        forgeRepository,
-                      ),
-                  } as const)
-              const remoteIssues =
-                yield* azureDevOps.listReadyIssues(forgeRepository)
-              return { authorScope, remoteIssues }
-            })
-          case "github":
-            return Effect.gen(function* () {
-              // An authenticated GitHub list may refresh a stale credential.
-              // Resolve the operator afterwards so author scoping uses that
-              // credential's identity for this reconciliation.
-              const remoteIssues = yield* github.listReadyIssues(
-                forgeRepository,
-                options?.githubOperation,
-              )
-              const authorScope = repository.includeAllIssueAuthors
-                ? ({ includeAll: true } as const)
-                : ({
-                    includeAll: false,
-                    operatorLogin: yield* github.getAuthenticatedUserLogin(
-                      forgeRepository,
-                      options?.githubOperation,
-                    ),
-                  } as const)
-              return { authorScope, remoteIssues }
-            })
-          default: {
-            const _exhaustive: never = repository.forge
-            return Effect.die(_exhaustive)
-          }
-        }
-      })()
-      const { authorScope, remoteIssues } = yield* fetchRemote
+      const issueOperations = resolveForgeIssueOperations(
+        repository.forge,
+        { github, gitlab, azureDevOps },
+        options?.githubOperation,
+      )
+      const { authorScope, remoteIssues } =
+        yield* issueOperations.listReadyIssuesWithAuthorScope(
+          forgeRepository,
+          repository.includeAllIssueAuthors,
+        )
       const repositoryName = repository.projectPath.toLowerCase()
       const workItemPullRequests = yield* db.listWorkItemPullRequests(
         repository.id,
