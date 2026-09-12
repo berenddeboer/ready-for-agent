@@ -9,9 +9,5 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "references": [
-    {
-      "path": "../forge-contract/tsconfig.lib.json"
-    }
-  ]
+  "references": []
 }

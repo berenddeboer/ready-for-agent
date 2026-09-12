@@ -1,13 +1,7 @@
 import { Context, type Effect } from "effect"
 import type {
-  AutomatedReviewEvidenceCheck,
-  AutomatedReviewEvidenceObservation,
-} from "./automated-review-evidence.js"
-import type { GitHubServiceError } from "./errors.js"
-import type {
   CiGateCatalogEntry,
   CiGateObservation,
-  GitHubRepository,
   MergePullRequestOptions,
   MergePullRequestResult,
   ObserveCiGateInput,
@@ -17,8 +11,13 @@ import type {
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
   ReadyLabeledIssue,
-  UploadUserAttachmentInput,
-} from "./types.js"
+} from "@ready-for-agent/forge-contract"
+import type {
+  AutomatedReviewEvidenceCheck,
+  AutomatedReviewEvidenceObservation,
+} from "./automated-review-evidence.js"
+import type { GitHubServiceError } from "./errors.js"
+import type { GitHubRepository, UploadUserAttachmentInput } from "./types.js"
 
 /**
  * Semantic source used by the harness to order GitHub API operations.

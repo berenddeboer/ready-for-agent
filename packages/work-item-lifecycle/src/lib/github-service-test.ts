@@ -1,8 +1,8 @@
 import { Effect, Layer } from "effect"
+import type { PullRequestLifecycleStatus } from "@ready-for-agent/forge-contract"
 import {
   GitHubService,
   type GitHubServiceShape,
-  type PullRequestLifecycleStatus,
 } from "@ready-for-agent/github-service"
 
 /**

@@ -15,11 +15,13 @@ import {
 } from "@ready-for-agent/azure-devops-service"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
 import {
+  formatUserFacingError,
+  logErrorAnnotations,
+} from "@ready-for-agent/forge-contract"
+import {
   GitHubService,
   type GitHubThrottledError,
-  formatUserFacingError,
   isGitHubThrottledError,
-  logErrorAnnotations,
 } from "@ready-for-agent/github-service"
 import {
   GitLabService,

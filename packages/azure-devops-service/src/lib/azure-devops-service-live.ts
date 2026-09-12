@@ -23,7 +23,7 @@ import {
   type PullRequestMergeability,
   type TerminalPrStatusCheck,
   extractErrorCode,
-} from "@ready-for-agent/github-service"
+} from "@ready-for-agent/forge-contract"
 import {
   AzureDevOpsService,
   type AzureDevOpsServiceError,

@@ -65,6 +65,9 @@
       "path": "../../packages/gitlab-service/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/forge-contract/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/github-service/tsconfig.lib.json"
     },
     {

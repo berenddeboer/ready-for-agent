@@ -1,4 +1,4 @@
-import type { ReadyLabeledIssue } from "@ready-for-agent/github-service"
+import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
 
 /**
  * Forge-neutral CI Gate catalog kind for an Azure DevOps build pipeline.

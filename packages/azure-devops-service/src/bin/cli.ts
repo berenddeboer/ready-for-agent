@@ -1,6 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import { Effect, Schema } from "effect"
-import { formatUserFacingError } from "@ready-for-agent/github-service"
+import { formatUserFacingError } from "@ready-for-agent/forge-contract"
 import type { AzureDevOpsService } from "../lib/azure-devops-service.js"
 import { AzureDevOpsServiceLive } from "../lib/azure-devops-service-live.js"
 import { AzureDevOpsProjectUnavailableError } from "../lib/errors.js"

@@ -13,13 +13,13 @@ import {
   makeRepositoryRecord,
   stubDbServiceLayer,
 } from "@ready-for-agent/db-service/test"
+import type { PullRequestCheckStatus } from "@ready-for-agent/forge-contract"
 import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
   GitHubThrottledError,
   INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
-  type PullRequestCheckStatus,
 } from "@ready-for-agent/github-service"
 import {
   GitLabService,

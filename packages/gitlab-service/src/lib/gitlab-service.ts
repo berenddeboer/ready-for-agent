@@ -10,7 +10,7 @@ import type {
   PrStatusCheckDiagnosticsRequest,
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
-} from "@ready-for-agent/github-service"
+} from "@ready-for-agent/forge-contract"
 import type {
   GitLabProjectUnavailableError,
   GitLabRequestError,

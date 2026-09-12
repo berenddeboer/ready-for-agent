@@ -1,5 +1,6 @@
 import { Cache, Duration, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { extractErrorCode } from "@ready-for-agent/forge-contract"
 import {
   type GitHubOperationOptions,
   GitHubRequestError,
@@ -7,7 +8,6 @@ import {
   type GitHubServiceError,
   type GitHubServiceShape,
   type GitHubThrottledError,
-  extractErrorCode,
   isGitHubThrottledError,
   makeGitHubServiceFromToken,
 } from "@ready-for-agent/github-service"

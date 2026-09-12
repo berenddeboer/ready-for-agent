@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
 import { AgentBackend } from "@ready-for-agent/agent-backend"
-import { extractCauseChain } from "@ready-for-agent/github-service"
+import { extractCauseChain } from "@ready-for-agent/forge-contract"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   InstallDependenciesFallbackError,

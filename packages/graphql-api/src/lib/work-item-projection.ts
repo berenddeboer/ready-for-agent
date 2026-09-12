@@ -2,7 +2,7 @@ import type { IssueRecord } from "@ready-for-agent/db-service"
 import {
   type StepRunReasonDetail,
   parseReasonDetail,
-} from "@ready-for-agent/github-service"
+} from "@ready-for-agent/forge-contract"
 import {
   LIFECYCLE_STEP_RETRYABLE,
   type OperationalLifecycleStep,

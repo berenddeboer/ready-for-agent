@@ -12,6 +12,7 @@ import {
   type RepositoryNotFoundError,
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
+import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
 import {
   type GitHubOperationOptions,
   type GitHubRepositoryUnavailableError,
@@ -19,7 +20,6 @@ import {
   GitHubService,
   type GitHubThrottledError,
   type GitHubTlsTrustError,
-  type ReadyLabeledIssue,
 } from "@ready-for-agent/github-service"
 import {
   type GitLabProjectUnavailableError,

@@ -6,8 +6,8 @@
  * back into typed service shapes so both layers cannot drift.
  */
 import { Effect, Schema, SchemaTransformation } from "effect"
-import type { ReadyLabeledIssue } from "@ready-for-agent/github-service"
-import { sanitizeUserFacingText } from "@ready-for-agent/github-service"
+import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
+import { sanitizeUserFacingText } from "@ready-for-agent/forge-contract"
 
 /** Minimal repository identity shared by GitHub and GitLab forge types. */
 type ForgeRepositoryRef = {

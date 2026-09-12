@@ -14,10 +14,12 @@ import {
   type CiGateDefinitionObservation,
   type CiGateObservation,
   type CiGateObservedRun,
-  type GitHubOperationOrigin,
-  GitHubService,
   type ObserveCiGateInput,
   formatUserFacingError,
+} from "@ready-for-agent/forge-contract"
+import {
+  type GitHubOperationOrigin,
+  GitHubService,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { WorkItemLifecycle } from "@ready-for-agent/work-item-lifecycle"

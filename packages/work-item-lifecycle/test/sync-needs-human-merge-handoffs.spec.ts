@@ -2,12 +2,14 @@ import { Effect, Layer, Option } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
+import type {
+  PullRequestCheckStatus,
+  PullRequestLifecycleStatus,
+} from "@ready-for-agent/forge-contract"
 import {
   GitHubService,
   type GitHubServiceShape,
   GitHubThrottledError,
-  type PullRequestCheckStatus,
-  type PullRequestLifecycleStatus,
 } from "@ready-for-agent/github-service"
 import { QueueService } from "@ready-for-agent/queue-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"

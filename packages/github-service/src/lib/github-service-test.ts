@@ -1,10 +1,11 @@
 import { Effect, Layer } from "effect"
+import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
 import {
   GitHubRepositoryUnavailableError,
   type GitHubRequestError,
 } from "./errors.js"
 import { GitHubService, type GitHubServiceShape } from "./github-service.js"
-import type { GitHubRepository, ReadyLabeledIssue } from "./types.js"
+import type { GitHubRepository } from "./types.js"
 
 const TEST_USER_ATTACHMENT_URL =
   "https://github.com/user-attachments/assets/00000000-0000-0000-0000-000000000001"

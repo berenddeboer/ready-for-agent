@@ -5,7 +5,7 @@ import type {
   MergePullRequestResult,
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
-} from "@ready-for-agent/github-service"
+} from "@ready-for-agent/forge-contract"
 import { AzureDevOpsService } from "./azure-devops-service.js"
 import {
   AzureDevOpsNotImplementedError,

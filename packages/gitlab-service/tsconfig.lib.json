@@ -11,7 +11,7 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../github-service/tsconfig.lib.json"
+      "path": "../forge-contract/tsconfig.lib.json"
     }
   ]
 }

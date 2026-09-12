@@ -3,7 +3,7 @@ import { TestClock } from "effect/testing"
 import {
   buildReasonDetail,
   formatUserFacingError,
-} from "@ready-for-agent/github-service"
+} from "@ready-for-agent/forge-contract"
 import {
   AzureDevOpsNotImplementedError,
   AzureDevOpsProjectUnavailableError,

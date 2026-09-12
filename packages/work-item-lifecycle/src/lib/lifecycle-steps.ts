@@ -11,12 +11,12 @@ import type {
   DatabaseError,
   RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
+import type { MergePullRequestResult } from "@ready-for-agent/forge-contract"
 import type {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
   GitHubThrottledError,
   GitHubTlsTrustError,
-  MergePullRequestResult,
 } from "@ready-for-agent/github-service"
 import type {
   GitLabProjectUnavailableError,

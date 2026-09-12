@@ -13,6 +13,26 @@ import {
 } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import {
+  type CiGateCatalogEntry,
+  type CiGateDefinitionObservation,
+  type CiGateObservation,
+  type CiGateObservedRun,
+  type GitHubIssueReference,
+  type GitHubIssueState,
+  type GitHubPullRequestLifecycleState,
+  type GitHubPullRequestReference,
+  type MergePullRequestResult,
+  type ObserveCiGateInput,
+  type PrStatusCheckDiagnostic,
+  type PrStatusCheckDiagnosticSource,
+  type PrStatusCheckDiagnosticsOptions,
+  type PrStatusCheckDiagnosticsRequest,
+  type PullRequestCheckStatus,
+  type ReadyLabeledIssue,
+  type TerminalPrStatusCheck,
+  extractErrorCode,
+} from "@ready-for-agent/forge-contract"
+import {
   type FieldsSelection,
   createClient,
 } from "../internal/generated/index.js"
@@ -34,7 +54,6 @@ import {
   isRecognizedAutomatedReviewerName,
   workflowNameFromCheckName,
 } from "./automated-review-evidence.js"
-import { extractErrorCode } from "./error-cause-chain.js"
 import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
@@ -54,25 +73,8 @@ import {
   githubApiHost,
 } from "./tls-trust.js"
 import {
-  type CiGateCatalogEntry,
-  type CiGateDefinitionObservation,
-  type CiGateObservation,
-  type CiGateObservedRun,
   GITHUB_CI_GATE_KIND,
-  type GitHubIssueReference,
-  type GitHubIssueState,
-  type GitHubPullRequestLifecycleState,
-  type GitHubPullRequestReference,
   type GitHubRepository,
-  type MergePullRequestResult,
-  type ObserveCiGateInput,
-  type PrStatusCheckDiagnostic,
-  type PrStatusCheckDiagnosticSource,
-  type PrStatusCheckDiagnosticsOptions,
-  type PrStatusCheckDiagnosticsRequest,
-  type PullRequestCheckStatus,
-  type ReadyLabeledIssue,
-  type TerminalPrStatusCheck,
   isGitHubUserAttachmentUrl,
 } from "./types.js"
 

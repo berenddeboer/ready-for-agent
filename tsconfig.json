@@ -55,6 +55,9 @@
       "path": "./packages/claude"
     },
     {
+      "path": "./packages/forge-contract"
+    },
+    {
       "path": "./packages/github-service"
     },
     {

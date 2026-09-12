@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { formatUserFacingError } from "@ready-for-agent/github-service"
+import { formatUserFacingError } from "@ready-for-agent/forge-contract"
 import {
   AzureDevOpsRequestError,
   makeAzureDevOpsServiceFromToken,
