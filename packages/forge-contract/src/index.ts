@@ -1,5 +1,6 @@
 export * from "./lib/error-cause-chain.js"
 export * from "./lib/issue-operations.js"
+export * from "./lib/issue-presentation.js"
 export * from "./lib/mutation.js"
 export * from "./lib/observation.js"
 export * from "./lib/types.js"

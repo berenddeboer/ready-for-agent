@@ -4,11 +4,14 @@
  */
 
 import { basename, extname, isAbsolute, relative, resolve } from "node:path"
+import { currentNativeForgeClosingReferenceRules } from "@ready-for-agent/forge-contract"
 import {
   classifyUnparsedResult,
   normalizeResultCandidateLine,
 } from "./result-line.js"
 import { promptUserContentSection } from "./sanitize-prompt-user-content.js"
+
+const closingReference = currentNativeForgeClosingReferenceRules
 
 /** GitHub pull request title limit. */
 export const PUBLICATION_TITLE_MAX_LENGTH = 256
@@ -28,17 +31,6 @@ const RESULT_LINE =
   /^READY_FOR_AGENT_RESULT:\s*PUBLICATION_COPY(?:\s+(\{[\s\S]*\}))?\s*$/i
 
 const PUBLICATION_COPY_NAMES = new Set(["PUBLICATION_COPY"])
-
-/**
- * Closing-reference patterns that the harness normalizes to a single
- * `Closes #<n>` line (issue keywords GitHub recognizes).
- */
-// Whole-line close/fix/resolve refs (optional list marker / trailing punctuation).
-const CLOSING_REFERENCE_LINE =
-  /^(?:[-*]\s+)?(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\s*[.:]?\s*$/i
-
-const GENERIC_PLACEHOLDER_BODY =
-  /^Automated draft pull request for GitHub issue #\d+\.?$/i
 
 const decodePublicationCopyJson = (
   jsonText: string,
@@ -153,23 +145,6 @@ export const inspectPublicationCopyResult = (output: string) => {
   } as const
 }
 
-const stripClosingReferences = (body: string, issueNumber: number): string => {
-  const kept: string[] = []
-  for (const line of body.split("\n")) {
-    const trimmed = line.trim()
-    const match = CLOSING_REFERENCE_LINE.exec(trimmed)
-    if (match !== null && Number(match[1]) === issueNumber) {
-      continue
-    }
-    kept.push(line)
-  }
-  // Collapse trailing blank lines left by stripped closing refs.
-  while (kept.length > 0 && kept[kept.length - 1]?.trim() === "") {
-    kept.pop()
-  }
-  return kept.join("\n").trim()
-}
-
 /**
  * Normalize agent copy: trim, enforce length bounds, require substantive body,
  * and ensure exactly one `Closes #<issue>` line. Returns null when invalid.
@@ -183,11 +158,11 @@ export const normalizePublicationCopy = (
     return null
   }
 
-  const withoutCloses = stripClosingReferences(raw.body, issueNumber)
+  const withoutCloses = closingReference.strip(raw.body, issueNumber)
   if (withoutCloses === "") {
     return null
   }
-  if (GENERIC_PLACEHOLDER_BODY.test(withoutCloses)) {
+  if (closingReference.isGenericPlaceholder(withoutCloses)) {
     return null
   }
   // Substantive: more than a single trivial token/line of punctuation.
@@ -195,8 +170,7 @@ export const normalizePublicationCopy = (
     return null
   }
 
-  const closesLine = `Closes #${issueNumber}`
-  const body = `${withoutCloses}\n\n${closesLine}`
+  const body = `${withoutCloses}\n\n${closingReference.formatLine(issueNumber)}`
   if (body.length > PUBLICATION_BODY_MAX_LENGTH) {
     return null
   }
@@ -237,7 +211,7 @@ export const buildHarnessPublicationFallbackCopy = (input: {
     `${HARNESS_FALLBACK_BODY_PREFIX} for Work Item ${input.workItemId}.`,
     "The agent did not emit valid publication copy. Review the linked Issue and this commit diff.",
     "",
-    `Closes #${input.issueNumber}`,
+    closingReference.formatLine(input.issueNumber),
   ].join("\n")
   return { title, body }
 }
@@ -411,12 +385,10 @@ export const publicationCopyFromCommitMessage = (
   // Prefer equality with the actual commit: strip duplicate closing refs and
   // re-append exactly one. Do not invent prose when the body was empty or only
   // closes (legacy `title\n\nCloses #N` → body is just `Closes #N`).
-  const stripped = body === "" ? "" : stripClosingReferences(body, issueNumber)
+  const stripped = body === "" ? "" : closingReference.strip(body, issueNumber)
   const prose = stripped.trim()
-  const normalizedBody =
-    prose === ""
-      ? `Closes #${issueNumber}`
-      : `${prose}\n\nCloses #${issueNumber}`
+  const closesLine = closingReference.formatLine(issueNumber)
+  const normalizedBody = prose === "" ? closesLine : `${prose}\n\n${closesLine}`
   if (title.length > PUBLICATION_TITLE_MAX_LENGTH) {
     return {
       title: title.slice(0, PUBLICATION_TITLE_MAX_LENGTH).trimEnd(),
@@ -446,8 +418,8 @@ export const buildPublicationCopyPrompt = (input: {
     "- title: a concise title describing the actual net change; follow this repository's conventions (for example Conventional Commits when the repo uses them).",
     "- body: useful reviewer-facing Markdown explaining why the change was needed, what changed, and meaningful verification or limitations.",
     "Do not use the Issue title alone as the publication title.",
-    'Do not write a generic body such as "Automated draft pull request for GitHub issue #N".',
-    `You may mention issue #${input.issueNumber}; the harness will ensure the body ends with exactly one Closes #${input.issueNumber} reference.`,
+    `Do not write a generic body such as "${closingReference.genericPlaceholderExample}".`,
+    closingReference.mentionGuidance(input.issueNumber),
     "End your final response with exactly one machine-readable result line. Prefer putting the JSON on that line:",
     `READY_FOR_AGENT_RESULT: PUBLICATION_COPY {"title":"...","body":"..."}`,
     "The body value must be a JSON string (use \\n for newlines). The result line must be the final non-empty line.",
@@ -504,7 +476,7 @@ export const buildCommitFallbackPromptWithCopy = (input: {
     "Prefer this exact commit message (subject + body). Only change the message if repository policy (for example commitlint) requires a different form:",
     promptUserContentSection("publication_title", input.title),
     promptUserContentSection("publication_body", input.body),
-    `The commit must still close GitHub issue #${input.issueNumber} (include Closes #${input.issueNumber} in the body unless policy forbids it — then mention the issue another accepted way).`,
+    closingReference.commitMustCloseGuidance(input.issueNumber),
     "Stage only the relevant implementation changes, then commit.",
     "Exclude harness-owned diagnostic artifacts such as `.ready-for-agent/`.",
     "If there is nothing left to commit because a valid commit already exists for this work, succeed without creating an empty commit.",
