@@ -8,6 +8,12 @@ import {
   type TerminalWorkItemState,
   type WorkItemState,
 } from "./generated/work-item-state.js"
+import {
+  type ForgeRelevancePolicy,
+  type HierarchyObservationPolicy,
+  type OpenDraftClosingPullRequestPolicy,
+  relevancePolicyForForge,
+} from "./relevance-policy.js"
 
 export interface IssuePredicateShape {
   readonly isCurrentIssue: boolean
@@ -48,8 +54,7 @@ export interface PendingSelfOwnership {
   readonly sourceRepository: string
 }
 
-export interface RelevantIssuePredicateContext {
-  readonly forge: Forge
+export interface RelevantIssuePredicateContext extends ForgeRelevancePolicy {
   readonly repositoryName: string
   readonly workItemPullRequestNumbers: ReadonlySet<number>
   readonly pendingSelfOwnership?: readonly PendingSelfOwnership[]
@@ -58,16 +63,24 @@ export interface RelevantIssuePredicateContext {
     | { readonly includeAll: false; readonly operatorLogin: string }
 }
 
+export type RelevantIssuePredicateContextInput = Omit<
+  RelevantIssuePredicateContext,
+  keyof ForgeRelevancePolicy
+> & {
+  readonly forge: Forge
+}
+
 /**
- * Forges with no native sub-Issue hierarchy queried by this harness, so a
- * Ready Issue reporting `hierarchySupported: false` is expected rather than
- * anomalous. Kept as a Set so a third such Forge is a one-line addition
- * instead of another inline comparison.
+ * Resolve current-Forge policy facts and assemble the relevance context.
+ * Callers pass the Repository Forge; decision functions never see the name.
  */
-const FORGES_WITHOUT_HIERARCHY_SUPPORT: ReadonlySet<Forge> = new Set([
-  "gitlab",
-  "azure-devops",
-])
+export const relevantIssuePredicateContext = ({
+  forge,
+  ...rest
+}: RelevantIssuePredicateContextInput): RelevantIssuePredicateContext => ({
+  ...relevancePolicyForForge(forge),
+  ...rest,
+})
 
 export type ClosingPullRequestClassificationKind =
   | "exact_owned"
@@ -302,13 +315,31 @@ export const evaluateActionableIssue = (
   throw new Error("Actionable Issue expression rejected valid facts")
 }
 
+const openDraftClosingPullRequestIsActive = (
+  policy: OpenDraftClosingPullRequestPolicy,
+): boolean => {
+  switch (policy.kind) {
+    case "active":
+      return true
+    case "inactive":
+      return false
+    default: {
+      const _exhaustive: never = policy
+      return _exhaustive
+    }
+  }
+}
+
 const activeClosingPullRequest = (
   pullRequest: ClosingPullRequestPredicateShape,
-  forge: Forge,
+  openDraftClosingPullRequest: OpenDraftClosingPullRequestPolicy,
   issueState: string,
 ): boolean => {
   if (pullRequest.state === "OPEN") {
-    return forge === "gitlab" || !pullRequest.isDraft
+    return (
+      openDraftClosingPullRequestIsActive(openDraftClosingPullRequest) ||
+      !pullRequest.isDraft
+    )
   }
   return pullRequest.state === "MERGED" && issueState !== "OPEN"
 }
@@ -377,7 +408,11 @@ export const classifyActiveClosingPullRequests = (
 ): ClosingPullRequestClassification => {
   const active = issue.closingPullRequests
     .filter((pullRequest) =>
-      activeClosingPullRequest(pullRequest, context.forge, issue.state),
+      activeClosingPullRequest(
+        pullRequest,
+        context.openDraftClosingPullRequest,
+        issue.state,
+      ),
     )
     .map((pullRequest) =>
       classifyActiveClosingPullRequest(pullRequest, context),
@@ -427,6 +462,62 @@ export const formatCompetingIssueClosingPullRequestMessage = (
   return `Open Issue-closing PRs ${unique.join(", ")} are not owned by this Work Item. Autonomous work stopped; review those PRs, then Reset this Work Item to discard the local attempt.`
 }
 
+const unsupportedHierarchyFailure = (): RelevantIssueFailure => ({
+  _tag: "issue_hierarchy_unsupported",
+})
+
+const evaluateExpectedUnsupportedHierarchy = (
+  issue: RelevantIssuePredicateShape,
+): RelevantIssueFailure | undefined => {
+  if (issue.state !== "OPEN") {
+    return { _tag: "issue_not_open", state: issue.state }
+  }
+  if (issue.parent !== null || issue.hasChildren) {
+    return unsupportedHierarchyFailure()
+  }
+  return undefined
+}
+
+const evaluateSupportedHierarchy = (
+  issue: RelevantIssuePredicateShape,
+): RelevantIssueFailure | undefined => {
+  if (issue.parent === null) {
+    if (issue.state !== "OPEN") {
+      return { _tag: "issue_not_open", state: issue.state }
+    }
+    return undefined
+  }
+  if (issue.parent.state !== "OPEN") {
+    return {
+      _tag: "issue_parent_not_open",
+      state: issue.parent.state,
+    }
+  }
+  if (!issue.parent.isReadyLabeled) {
+    return { _tag: "issue_parent_not_ready" }
+  }
+  return undefined
+}
+
+const evaluateHierarchyObservation = (
+  issue: RelevantIssuePredicateShape,
+  policy: HierarchyObservationPolicy,
+): RelevantIssueFailure | undefined => {
+  if (issue.hierarchySupported) {
+    return evaluateSupportedHierarchy(issue)
+  }
+  switch (policy.kind) {
+    case "expected_unsupported":
+      return evaluateExpectedUnsupportedHierarchy(issue)
+    case "required":
+      return unsupportedHierarchyFailure()
+    default: {
+      const _exhaustive: never = policy
+      return _exhaustive
+    }
+  }
+}
+
 export const evaluateRelevantIssue = (
   issue: RelevantIssuePredicateShape | null | undefined,
   context: RelevantIssuePredicateContext,
@@ -435,36 +526,10 @@ export const evaluateRelevantIssue = (
     return { _tag: "issue_missing" }
   }
 
-  let hierarchyFailure: RelevantIssueFailure | undefined
-  if (issue.hierarchySupported) {
-    if (issue.parent === null) {
-      if (issue.state !== "OPEN") {
-        hierarchyFailure = { _tag: "issue_not_open", state: issue.state }
-      }
-    } else {
-      if (issue.parent.state !== "OPEN") {
-        hierarchyFailure = {
-          _tag: "issue_parent_not_open",
-          state: issue.parent.state,
-        }
-      } else if (!issue.parent.isReadyLabeled) {
-        hierarchyFailure = { _tag: "issue_parent_not_ready" }
-      }
-    }
-  } else if (FORGES_WITHOUT_HIERARCHY_SUPPORT.has(context.forge)) {
-    // GitLab and Azure DevOps have no native sub-Issue hierarchy queried by
-    // this harness today, so `hierarchySupported: false` is an expected,
-    // legitimate signal from those Forges rather than a bug — fall back to
-    // the flat-Issue rules below. Any other Forge (GitHub) reporting
-    // `hierarchySupported: false` is unexpected and fails closed instead.
-    if (issue.state !== "OPEN") {
-      hierarchyFailure = { _tag: "issue_not_open", state: issue.state }
-    } else if (issue.parent !== null || issue.hasChildren) {
-      hierarchyFailure = { _tag: "issue_hierarchy_unsupported" }
-    }
-  } else {
-    hierarchyFailure = { _tag: "issue_hierarchy_unsupported" }
-  }
+  const hierarchyFailure = evaluateHierarchyObservation(
+    issue,
+    context.hierarchyObservation,
+  )
 
   const classification = classifyActiveClosingPullRequests(issue, context)
   const satisfiesClosingPullRequestCondition =

@@ -1,5 +1,6 @@
 import {
   type RelevantIssuePredicateContext,
+  type RelevantIssuePredicateContextInput,
   type RelevantIssuePredicateShape,
   type WorkItemPredicateShape,
   classifyActiveClosingPullRequests,
@@ -9,6 +10,7 @@ import {
   evaluateRelevantIssue,
   evaluateUnfinishedWorkItem,
   formatCompetingIssueClosingPullRequestMessage,
+  relevantIssuePredicateContext,
   shippedWorkItems,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -33,14 +35,26 @@ const relevantIssue = (
 })
 
 const relevantContext = (
-  overrides: Partial<RelevantIssuePredicateContext> = {},
-): RelevantIssuePredicateContext => ({
-  forge: "github",
-  repositoryName: "owner/repository",
-  workItemPullRequestNumbers: new Set(),
-  authorScope: { includeAll: false, operatorLogin: "operator" },
-  ...overrides,
-})
+  overrides: Partial<RelevantIssuePredicateContextInput> = {},
+): RelevantIssuePredicateContext =>
+  relevantIssuePredicateContext({
+    forge: "github",
+    repositoryName: "owner/repository",
+    workItemPullRequestNumbers: new Set(),
+    authorScope: { includeAll: false, operatorLogin: "operator" },
+    ...overrides,
+  })
+
+const includeAllAuthors = {
+  authorScope: { includeAll: true as const },
+}
+
+const unownedDraftClosingPullRequest = {
+  number: 9,
+  repository: "owner/repository",
+  state: "OPEN",
+  isDraft: true,
+} as const
 
 describe("shared lifecycle predicates", () => {
   it("defines Leaf Issue with missing and not-leaf failures", () => {
@@ -305,6 +319,158 @@ describe("shared lifecycle predicates", () => {
         }),
       ),
     ).toEqual({ _tag: "issue_not_open", state: "CLOSED" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          hierarchySupported: false,
+          closingPullRequests: [mergedClosingPullRequest],
+        }),
+        relevantContext({
+          forge: "azure-devops",
+          ...includeAllAuthors,
+        }),
+      ),
+    ).toEqual({ _tag: "match" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          hierarchySupported: false,
+          closingPullRequests: [openClosingPullRequest],
+        }),
+        relevantContext({
+          forge: "azure-devops",
+          ...includeAllAuthors,
+        }),
+      ),
+    ).toEqual({ _tag: "issue_closing_pull_request_unowned" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          hierarchySupported: false,
+          state: "CLOSED",
+          closingPullRequests: [mergedClosingPullRequest],
+        }),
+        relevantContext({
+          forge: "azure-devops",
+          ...includeAllAuthors,
+        }),
+      ),
+    ).toEqual({ _tag: "issue_not_open", state: "CLOSED" })
+  })
+
+  it("keeps GitHub from using the expected-unsupported hierarchy fallback", () => {
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({ hierarchySupported: false }),
+        relevantContext(),
+      ),
+    ).toEqual({ _tag: "issue_hierarchy_unsupported" })
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          hierarchySupported: false,
+          parent: null,
+          hasChildren: false,
+        }),
+        relevantContext(),
+      ),
+    ).toEqual({ _tag: "issue_hierarchy_unsupported" })
+  })
+
+  it("applies the expected-unsupported hierarchy fallback on GitLab and Azure DevOps only", () => {
+    const forgesWithoutHierarchy = ["gitlab", "azure-devops"] as const
+    for (const forge of forgesWithoutHierarchy) {
+      expect(
+        evaluateRelevantIssue(
+          relevantIssue({ hierarchySupported: false }),
+          relevantContext({ forge, ...includeAllAuthors }),
+        ),
+      ).toEqual({ _tag: "match" })
+      expect(
+        evaluateRelevantIssue(
+          relevantIssue({
+            hierarchySupported: false,
+            hasChildren: true,
+          }),
+          relevantContext({ forge, ...includeAllAuthors }),
+        ),
+      ).toEqual({ _tag: "issue_hierarchy_unsupported" })
+      expect(
+        evaluateRelevantIssue(
+          relevantIssue({
+            hierarchySupported: false,
+            parent: { state: "OPEN", isReadyLabeled: true },
+          }),
+          relevantContext({ forge, ...includeAllAuthors }),
+        ),
+      ).toEqual({ _tag: "issue_hierarchy_unsupported" })
+    }
+  })
+
+  it("treats open draft closing PRs as active only on GitLab", () => {
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          closingPullRequests: [unownedDraftClosingPullRequest],
+        }),
+        relevantContext(),
+      ),
+    ).toEqual({ _tag: "match" })
+    expect(
+      classifyActiveClosingPullRequests(
+        relevantIssue({
+          closingPullRequests: [unownedDraftClosingPullRequest],
+        }),
+        relevantContext(),
+      ).active,
+    ).toEqual([])
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          hierarchySupported: false,
+          closingPullRequests: [unownedDraftClosingPullRequest],
+        }),
+        relevantContext({ forge: "azure-devops", ...includeAllAuthors }),
+      ),
+    ).toEqual({ _tag: "match" })
+    expect(
+      classifyActiveClosingPullRequests(
+        relevantIssue({
+          hierarchySupported: false,
+          closingPullRequests: [unownedDraftClosingPullRequest],
+        }),
+        relevantContext({ forge: "azure-devops" }),
+      ).active,
+    ).toEqual([])
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({
+          hierarchySupported: false,
+          closingPullRequests: [unownedDraftClosingPullRequest],
+        }),
+        relevantContext({ forge: "gitlab", ...includeAllAuthors }),
+      ),
+    ).toEqual({ _tag: "issue_closing_pull_request_unowned" })
+    expect(
+      classifyActiveClosingPullRequests(
+        relevantIssue({
+          hierarchySupported: false,
+          closingPullRequests: [unownedDraftClosingPullRequest],
+        }),
+        relevantContext({ forge: "gitlab" }),
+      ).competing,
+    ).toEqual([
+      {
+        number: 9,
+        repository: "owner/repository",
+        kind: "competing",
+      },
+    ])
   })
 
   it("matches Relevant closed children, owned PRs, and GitLab roots", () => {
@@ -332,6 +498,16 @@ describe("shared lifecycle predicates", () => {
         relevantContext({
           forge: "gitlab",
           authorScope: { includeAll: true },
+        }),
+      ),
+    ).toEqual({ _tag: "match" })
+
+    expect(
+      evaluateRelevantIssue(
+        relevantIssue({ hierarchySupported: false }),
+        relevantContext({
+          forge: "azure-devops",
+          ...includeAllAuthors,
         }),
       ),
     ).toEqual({ _tag: "match" })

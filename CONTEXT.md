@@ -232,7 +232,7 @@ The later of a Work Item PR's creation and the push of its current head commit, 
 _Avoid_: Last commit time (ambiguous with author or commit timestamps), Watch start time
 
 **Supported Issue Hierarchy**:
-A GitHub issue hierarchy wholly contained within one Repository and limited to a root Issue with optional direct children. A hierarchy containing a cross-Repository relationship or a grandchild is unsupported in its entirety. GitLab Issues do not participate in a hierarchy: every GitLab Issue is a root with no children and is therefore structurally a Standalone Issue.
+A GitHub issue hierarchy wholly contained within one Repository and limited to a root Issue with optional direct children. A hierarchy containing a cross-Repository relationship or a grandchild is unsupported in its entirety. GitLab and Azure DevOps Issues do not participate in a hierarchy: every such Issue is a root with no children and is therefore structurally a Standalone Issue.
 _Avoid_: Issue tree (implies arbitrary depth), nested Issues
 
 **Listed Blockers**:

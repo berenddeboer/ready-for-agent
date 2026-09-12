@@ -1364,10 +1364,22 @@ describe("IssueReconciler", () => {
           },
         ],
       }),
+      remoteIssue(3, {
+        hierarchySupported: false,
+        closingPullRequests: [
+          {
+            number: 303,
+            repository: "acme/widgets",
+            state: "OPEN",
+            isDraft: true,
+          },
+        ],
+      }),
     ]
     // Exercises the hand-written Azure DevOps fake's `issues` fixture,
     // including a Predecessor blocking link surfaced as `blockedBy` — the
-    // same canonical shape GitHub's native `blockedBy` field already uses.
+    // same canonical shape GitHub's native `blockedBy` field already uses —
+    // and an unowned open draft closing PR, which stays Relevant on Azure.
     const azureDevOps = makeAzureDevOpsServiceTest([
       {
         repository: azureDevOpsRepository,
@@ -1388,14 +1400,16 @@ describe("IssueReconciler", () => {
         // Predecessor link is preserved on the blocked one as `blockedBy`,
         // the same canonical shape GitHub's native field already uses.
         expect(summary).toEqual({
-          fetched: 2,
-          inserted: 2,
+          fetched: 3,
+          inserted: 3,
           updated: 0,
           deleted: 0,
           unchanged: 0,
           competingObservations: [],
         })
-        expect(db.stored.map(({ issueNumber }) => issueNumber)).toEqual([1, 2])
+        expect(db.stored.map(({ issueNumber }) => issueNumber)).toEqual([
+          1, 2, 3,
+        ])
         expect(db.stored[0]?.blockedBy).toEqual([])
         expect(db.stored[1]?.blockedBy).toEqual([
           {

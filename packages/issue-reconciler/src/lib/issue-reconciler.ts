@@ -33,6 +33,7 @@ import {
   classifyActiveClosingPullRequests,
   competingPullRequestIdentity,
   evaluateRelevantIssue,
+  relevantIssuePredicateContext,
   workItemBranchName,
 } from "@ready-for-agent/lifecycle-model"
 
@@ -208,14 +209,14 @@ export const IssueReconcilerLive = Layer.effect(
       const remoteByNumber = new Map(
         remoteIssues
           .filter((issue) => {
-            const context = {
+            const context = relevantIssuePredicateContext({
               forge: repository.forge,
               repositoryName,
               workItemPullRequestNumbers:
                 workItemPullRequestsByIssue.get(issue.number) ?? new Set(),
               pendingSelfOwnership: pendingSelfByIssue.get(issue.number) ?? [],
               authorScope,
-            }
+            })
             const classification = classifyActiveClosingPullRequests(
               issue,
               context,
