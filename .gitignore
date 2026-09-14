@@ -68,3 +68,15 @@ core.[0-9]*
 .claude/settings.local.json
 
 .nx/polygraph
+
+# Sokrates analysis output. The scope definition (_sokrates/config.json) and the README
+# beside it are committed on purpose; everything else under _sokrates/ is regenerated
+# by each run.
+_sokrates/reports/
+_sokrates/scores/
+_sokrates/reports.zip
+
+# Sidecars the analyser writes into the repository root while extracting git history.
+git-history.txt
+git-commits.txt
+git-commit-trailers.txt
