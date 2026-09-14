@@ -3,19 +3,32 @@ name: Claude Code Review
 on:
   pull_request_target:
     types: [opened, synchronize, reopened]
+  # GITHUB_TOKEN cannot fire pull_request_target `labeled`. Dispatch is the
+  # allowed chain from pr-approval-relay.yml after PR checks actually start.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to review
+        required: true
+        type: string
 
 jobs:
   claude-review:
     timeout-minutes: 25
-    # pull_request_target always runs (with secrets), even for first-time
-    # fork authors — GitHub's workflow-approval gate does not apply. Skip
-    # first-timers here. After a merged commit/PR they become CONTRIBUTOR
-    # and later PRs are reviewed automatically, matching when other checks
-    # already run without approval.
+    # pull_request_target always runs (with secrets) and bypasses GitHub's
+    # first-time-contributor approval gate. Skip first-timers on that event.
+    # After Enable, PR checks start and the relay dispatches this workflow.
+    # Later PRs from a CONTRIBUTOR skip the wait, matching PR.
     if: |
-      github.event.pull_request.user.login != 'berenddeboer' &&
-      !contains(fromJSON('["FIRST_TIME_CONTRIBUTOR","FIRST_TIMER","NONE"]'), github.event.pull_request.author_association)
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.pull_request.user.login != 'berenddeboer' &&
+        !contains(fromJSON('["FIRST_TIME_CONTRIBUTOR","FIRST_TIMER","NONE"]'), github.event.pull_request.author_association)
+      )
     runs-on: ubuntu-latest
+    concurrency:
+      group: claude-review-${{ github.event.pull_request.number || inputs.pr_number }}
+      cancel-in-progress: true
     env:
       # Headless runs exit when the parent finishes, terminating background
       # review agents before their findings can be aggregated.
@@ -28,6 +41,20 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Resolve pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          test -n "${PR_NUMBER}"
+          gh pr view "${PR_NUMBER}" --repo "${GH_REPO}" \
+            --json number,baseRefName,headRefName,headRefOid \
+            --jq '"number=\(.number)\nbase=\(.baseRefName)\nhead=\(.headRefName)\nsha=\(.headRefOid)"' \
+            >> "${GITHUB_OUTPUT}"
+
       - name: Checkout base repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,13 +65,37 @@ jobs:
       # branch is also `main` collide with the local base branch.
       - name: Drop local branch colliding with the PR head
         env:
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_REF: ${{ steps.pr.outputs.head }}
         run: |
           set -euo pipefail
           git checkout --detach
           if git show-ref --verify --quiet "refs/heads/${HEAD_REF}"; then
             git branch -D "${HEAD_REF}"
           fi
+
+      # workflow_dispatch has no pull_request payload, so the action will not
+      # fetch the PR. Check it out here and restore Claude config from base.
+      - name: Check out PR head for dispatched reviews
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          BASE_REF: ${{ steps.pr.outputs.base }}
+          HEAD_SHA: ${{ steps.pr.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "pull/${PR_NUMBER}/head"
+          git checkout --detach "${HEAD_SHA}"
+          restore_from_base() {
+            local path="$1"
+            if git cat-file -e "origin/${BASE_REF}:${path}" 2>/dev/null; then
+              git checkout "origin/${BASE_REF}" -- "${path}"
+            elif [ -e "${path}" ]; then
+              rm -rf "${path}"
+            fi
+          }
+          for path in .claude .mcp.json .claude.json .gitmodules .ripgreprc CLAUDE.md CLAUDE.local.md .husky; do
+            restore_from_base "${path}"
+          done
 
       - name: Run Claude Code Review
         id: claude-review
@@ -55,19 +106,23 @@ jobs:
           # (anthropics/claude-code-action#713). The job token skips that
           # exchange; reviews post as github-actions[bot], not claude[bot].
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # Fork CONTRIBUTORs have no write access. The job if already skips
-          # first-timers; this only lets those remaining authors through.
+          # Fork authors have no write access. The job if already shares the
+          # PR workflow's first-timer gate; this lets remaining authors through.
           allowed_non_write_users: "*"
           # Automatic PR reviews often run as github-actions[bot] (e.g. after
           # workflow re-runs). Explicit allowlist — not '*' — so only this
           # trusted platform bot can trigger the review action.
           allowed_bots: github-actions
-          track_progress: true
+          # track_progress is only valid for pull_request / issue events.
+          track_progress: ${{ github.event_name == 'pull_request_target' }}
           additional_permissions: |
             actions: read
           # The action restores .claude/ from the trusted base before Claude
           # starts, so this resolves to the repository's reviewed local skill.
-          prompt: '/code-review origin/${{ github.event.pull_request.base.ref }}'
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ steps.pr.outputs.number }}
+            /code-review origin/${{ steps.pr.outputs.base }}
           # Permit only the local review skill, its required sub-agent, and
           # read-only repository inspection commands.
           claude_args: |

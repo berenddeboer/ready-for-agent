@@ -1,0 +1,58 @@
+# Share the PR workflow's first-time-contributor Enable gate with Claude Code
+# Review. pull_request_target cannot wait for that click, and GITHUB_TOKEN
+# cannot fire `labeled`. When PR checks actually start, dispatch the review.
+name: PR approval relay
+
+on:
+  workflow_run:
+    workflows: ["PR"]
+    types: [in_progress]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-first-timer-review:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch Claude review for first-timer PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          pr_meta="$(
+            gh api --method GET "repos/${GH_REPO}/pulls" \
+              -f state=open \
+              -f "head=${HEAD_OWNER}:${HEAD_BRANCH}" \
+              --jq ".[0] | select(. != null) | {number, assoc: .author_association, login: .user.login, type: .user.type}"
+          )"
+          if [ -z "${pr_meta}" ]; then
+            echo "No open PR for ${HEAD_OWNER}:${HEAD_BRANCH}"
+            exit 0
+          fi
+          assoc="$(printf '%s' "${pr_meta}" | jq -r '.assoc')"
+          login="$(printf '%s' "${pr_meta}" | jq -r '.login')"
+          type="$(printf '%s' "${pr_meta}" | jq -r '.type')"
+          number="$(printf '%s' "${pr_meta}" | jq -r '.number')"
+          case "${assoc}" in
+            FIRST_TIME_CONTRIBUTOR|FIRST_TIMER|NONE) ;;
+            *)
+              echo "Skipping ${login} (#${number}): ${assoc}"
+              exit 0
+              ;;
+          esac
+          if [ "${type}" = "Bot" ]; then
+            echo "Skipping bot ${login} (#${number})"
+            exit 0
+          fi
+          gh workflow run "Claude Code Review" \
+            --repo "${GH_REPO}" \
+            --ref "${DEFAULT_BRANCH}" \
+            -f "pr_number=${number}"
