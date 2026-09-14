@@ -1,0 +1,1172 @@
+{
+  "metadata": {
+    "name": "ready-for-agent",
+    "description": "",
+    "tooltip": "",
+    "logoLink": "",
+    "links": []
+  },
+  "summary": [],
+  "srcRoot": "..",
+  "extensions": [
+    "ts",
+    "md",
+    "json",
+    "tsx",
+    "yaml",
+    "sql",
+    "feature",
+    "sh",
+    "ttl",
+    "js",
+    "graphql",
+    "txt",
+    "py",
+    "toml",
+    "mjs",
+    "css",
+    "webmanifest",
+    "gitattributes",
+    "pkl",
+    "svg",
+    "gitignore"
+  ],
+  "ignore": [
+    {
+      "pathPattern": ".*/docs/.*",
+      "contentPattern": "",
+      "exception": false,
+      "note": "Documentation"
+    },
+    {
+      "pathPattern": ".*\\.d\\.ts",
+      "contentPattern": "",
+      "exception": false,
+      "note": "Typescript definition files"
+    },
+    {
+      "pathPattern": ".*/git[-][a-zA-Z0-9_]+[.]txt",
+      "contentPattern": "",
+      "exception": false,
+      "note": "Git data exports for sokrates analyses"
+    }
+  ],
+  "main": {
+    "name": "main",
+    "sourceFileFilters": [
+      {
+        "pathPattern": ".*",
+        "contentPattern": "",
+        "exception": false,
+        "note": ""
+      }
+    ],
+    "files": []
+  },
+  "test": {
+    "name": "test",
+    "sourceFileFilters": [
+      {
+        "pathPattern": ".*[.][Tt]est[.].*",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Test files"
+      },
+      {
+        "pathPattern": ".*[.]test[.].*",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Test files"
+      },
+      {
+        "pathPattern": ".*/[Tt]est/.*",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Test files"
+      },
+      {
+        "pathPattern": ".*[.]spec[.]ts",
+        "contentPattern": "",
+        "exception": false,
+        "note": "TypeScript test files"
+      },
+      {
+        "pathPattern": ".*/vitest[.].*",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Vitest configuration files"
+      },
+      {
+        "pathPattern": ".*/e2e/.*",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Protractor test files"
+      },
+      {
+        "pathPattern": ".*[.]feature",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Test files"
+      }
+    ],
+    "files": []
+  },
+  "generated": {
+    "name": "generated",
+    "sourceFileFilters": [
+      {
+        "pathPattern": ".*/generated/.*",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Generated files"
+      }
+    ],
+    "files": []
+  },
+  "buildAndDeployment": {
+    "name": "build and deployment",
+    "sourceFileFilters": [
+      {
+        "pathPattern": ".*[.]sh",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Scripts"
+      },
+      {
+        "pathPattern": ".*[.]git[a-z]+",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Git configuration files"
+      },
+      {
+        "pathPattern": ".*/[.]gitignore",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Git ignore files"
+      },
+      {
+        "pathPattern": ".*/package[.]json",
+        "contentPattern": "",
+        "exception": false,
+        "note": "npm configuration"
+      },
+      {
+        "pathPattern": ".*/[.]gitattributes",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Git attributes"
+      },
+      {
+        "pathPattern": "(.*/)?[.](idea|vscode|vs|gradle|mvn|settings|metadata|circleci)/.*",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Hidden VCS/tool directories"
+      }
+    ],
+    "files": []
+  },
+  "other": {
+    "name": "other",
+    "sourceFileFilters": [
+      {
+        "pathPattern": ".*[.]json",
+        "contentPattern": "",
+        "exception": false,
+        "note": "JSON files"
+      },
+      {
+        "pathPattern": ".*[.]md",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Markdown files"
+      },
+      {
+        "pathPattern": ".*/README[.][a-z0-9]+",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Text files"
+      },
+      {
+        "pathPattern": ".*[.]txt",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Text files"
+      },
+      {
+        "pathPattern": ".*[.]svg",
+        "contentPattern": "",
+        "exception": false,
+        "note": "SVG files"
+      },
+      {
+        "pathPattern": ".*[.](ya?ml|json|jsonc|xml|toml|ini|cfg|conf|properties|plist|webmanifest)",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Configuration and non-build markup - OUT (scope policy sec.3). This is the rule that closes the 7,500 LOC/PY default over-valuation by SCOPE rather than by rate (MC-dvvjijla, 2026-07-12). READ THIS BEFORE ASSUMING IT ONLY AFFECTS MAIN. CodeConfiguration.updateScopesFiles removes 'other' from test and from buildAndDeployment as well as from main, so a file this rule matches leaves EVERY other scope. Verified against the shipped JAR: src/test/resources/*.xml and *.yaml land in other, not test, and pom.xml lands in other, not buildAndDeployment. Test LOC therefore shrinks too, and test LOC feeds TEST_VS_MAIN_LINES_OF_CODE_PERCENTAGE, which the active calibration scores - so this rule moves a score through TEST_RATIO as well as through volume, and not always in the same direction. Measured: mc-quality-engine's test LOC falls 4,783 to 4,770 and its maintainability falls 3.7701 to 3.7697. Whether to spare test-scope files via an `exception` rule is an open decision, not an oversight (MC-enutgcnt code review F3)."
+      },
+      {
+        "pathPattern": ".*[.](md|markdown|rst|rest|adoc|asciidoc|txt)",
+        "contentPattern": "",
+        "exception": false,
+        "note": "Documentation and prose markup - OUT (scope policy sec.3, end-user/operator documentation). The standard set ignores a docs/ FOLDER by path; this catches prose that lives outside one, which is most of it. Also catches the git-*.txt sidecars extractGitHistory writes into the work tree, whose standard ignore rules the shipped JAR does not all match."
+      }
+    ],
+    "files": []
+  },
+  "logicalDecompositions": [
+    {
+      "name": "modules",
+      "scope": "main",
+      "componentsFolderDepth": 0,
+      "minComponentsCount": 0,
+      "components": [],
+      "metaComponents": [
+        {
+          "pathPattern": "^apps/harness/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "apps/harness"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^apps/keymaxxer-sidecar/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "apps/keymaxxer-sidecar"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^apps/ready-for-agent/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "apps/ready-for-agent"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/acp-client/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/acp-client"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/agent-backend/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/agent-backend"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/azure-devops-service/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/azure-devops-service"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/claude/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/claude"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/codex/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/codex"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/db/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/db"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/db-schema/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/db-schema"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/db-service/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/db-service"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/forge-contract/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/forge-contract"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/github-service/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/github-service"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/gitlab-service/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/gitlab-service"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/graphql-api/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/graphql-api"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/graphql-client/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/graphql-client"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/graphql-schema/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/graphql-schema"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/grok/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/grok"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/issue-reconciler/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/issue-reconciler"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/keymaxxer-service/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/keymaxxer-service"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/layer-turso-local/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/layer-turso-local"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/lifecycle-model/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/lifecycle-model"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/local-git/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/local-git"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/opencode/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/opencode"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/queue-service/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/queue-service"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/ready-for-agent-darwin-arm64/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/ready-for-agent-darwin-arm64"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/ready-for-agent-darwin-x64/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/ready-for-agent-darwin-x64"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/ready-for-agent-linux-arm64/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/ready-for-agent-linux-arm64"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/ready-for-agent-linux-x64/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/ready-for-agent-linux-x64"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/ready-for-agent-win32-arm64/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/ready-for-agent-win32-arm64"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/ready-for-agent-win32-x64/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/ready-for-agent-win32-x64"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/release-versioning/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/release-versioning"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/sqlite-queue-service/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/sqlite-queue-service"
+              ]
+            }
+          ]
+        },
+        {
+          "pathPattern": "^packages/work-item-lifecycle/.*",
+          "contentPattern": "",
+          "use": "path",
+          "ignoreComments": false,
+          "nameOperations": [
+            {
+              "op": "replace",
+              "params": [
+                ".*",
+                "packages/work-item-lifecycle"
+              ]
+            }
+          ]
+        }
+      ],
+      "includeRemainingFiles": true,
+      "dependenciesFinder": {
+        "useBuiltInDependencyFinders": true,
+        "rules": [],
+        "metaRules": []
+      }
+    },
+    {
+      "name": "subcomponents",
+      "scope": "main",
+      "componentsFolderDepth": 2,
+      "minComponentsCount": 136,
+      "components": [],
+      "metaComponents": [],
+      "includeRemainingFiles": true,
+      "dependenciesFinder": {
+        "useBuiltInDependencyFinders": true,
+        "rules": [],
+        "metaRules": []
+      }
+    }
+  ],
+  "concernGroups": [
+    {
+      "name": "general",
+      "concerns": [
+        {
+          "name": "TODOs",
+          "sourceFileFilters": [
+            {
+              "pathPattern": "",
+              "contentPattern": ".*(TODO|FIXME)( |:|\t).*",
+              "exception": false,
+              "note": ""
+            }
+          ],
+          "files": [],
+          "textOperations": []
+        },
+        {
+          "name": "TODOs",
+          "sourceFileFilters": [
+            {
+              "pathPattern": "",
+              "contentPattern": ".*(TODO|FIXME)( |:|\t).*",
+              "exception": false,
+              "note": ""
+            }
+          ],
+          "files": [],
+          "textOperations": []
+        }
+      ],
+      "metaConcerns": []
+    }
+  ],
+  "goalsAndControls": [
+    {
+      "goal": "Keep the system simple and easy to change",
+      "description": "Aim at keeping the system size modest (less than 200,000 LOC is good), duplication low (less than 5% is good), files small (no files longer than 1000 LOC is good), and units simple (no units with more than 25 decision points is good).",
+      "controls": [
+        {
+          "metric": "LINES_OF_CODE_MAIN",
+          "description": "Total number of lines of main code",
+          "desiredRange": {
+            "min": "0",
+            "max": "200000",
+            "tolerance": "20000"
+          }
+        },
+        {
+          "metric": "DUPLICATION_PERCENTAGE",
+          "description": "System duplication",
+          "desiredRange": {
+            "min": "0",
+            "max": "5",
+            "tolerance": "1"
+          }
+        },
+        {
+          "metric": "VERY_HIGH_RISK_FILE_SIZE_COUNT",
+          "description": "The number of very large files",
+          "desiredRange": {
+            "min": "0",
+            "max": "0",
+            "tolerance": "1"
+          }
+        },
+        {
+          "metric": "CONDITIONAL_COMPLEXITY_VERY_HIGH_RISK_COUNT",
+          "description": "Number of very complex units",
+          "desiredRange": {
+            "min": "0",
+            "max": "0",
+            "tolerance": "1"
+          }
+        }
+      ]
+    }
+  ],
+  "fileHistoryAnalysis": {
+    "importPath": "../git-history.txt",
+    "ignoreContributors": [],
+    "bots": [
+      ".*\\[bot\\].*",
+      ".*[-]bot[@].*"
+    ],
+    "coAuthors": {
+      "enabled": true,
+      "trailerKeys": [
+        "Co-authored-by",
+        "Assisted-by",
+        "Generated-by",
+        "Message-Signature"
+      ],
+      "aiAgents": [
+        {
+          "name": "Claude Code",
+          "patterns": [
+            ".*noreply@anthropic\\.com.*",
+            ".*generated with \\[claude code\\].*",
+            ".*claude.*"
+          ]
+        },
+        {
+          "name": "GitHub Copilot",
+          "patterns": [
+            ".*copilot.*"
+          ]
+        },
+        {
+          "name": "Cursor",
+          "patterns": [
+            ".*cursoragent.*",
+            ".*@cursor\\.com.*"
+          ]
+        },
+        {
+          "name": "OpenAI Codex",
+          "patterns": [
+            ".*codex.*"
+          ]
+        },
+        {
+          "name": "Aider",
+          "patterns": [
+            ".*aider.*"
+          ]
+        },
+        {
+          "name": "Gemini",
+          "patterns": [
+            ".*gemini.*"
+          ]
+        },
+        {
+          "name": "Devin",
+          "patterns": [
+            ".*devin-ai.*"
+          ]
+        },
+        {
+          "name": "Jules",
+          "patterns": [
+            ".*google-labs-jules.*"
+          ]
+        }
+      ]
+    },
+    "anonymizeContributors": false,
+    "transformContributorEmails": []
+  },
+  "analysis": {
+    "skipDuplication": false,
+    "skipCorrelations": false,
+    "skipDependencies": false,
+    "saveSourceFiles": true,
+    "saveCodeFragments": true,
+    "maxFileSizeBytes": 1000000,
+    "maxLines": 10000,
+    "maxLineLength": 1000,
+    "maxTemporalDependenciesDepthDays": 180,
+    "locDuplicationThreshold": 10000000,
+    "minDuplicationBlockLoc": 6,
+    "maxTopListSize": 50,
+    "analyzerOverrides": [],
+    "fileSizeThresholds": {
+      "low": 100,
+      "medium": 200,
+      "high": 500,
+      "veryHigh": 1000
+    },
+    "fileAgeThresholds": {
+      "low": 30,
+      "medium": 90,
+      "high": 180,
+      "veryHigh": 365
+    },
+    "fileUpdateFrequencyThresholds": {
+      "low": 5,
+      "medium": 20,
+      "high": 50,
+      "veryHigh": 100
+    },
+    "fileContributorsCountThresholds": {
+      "low": 1,
+      "medium": 5,
+      "high": 10,
+      "veryHigh": 25
+    },
+    "unitSizeThresholds": {
+      "low": 10,
+      "medium": 20,
+      "high": 50,
+      "veryHigh": 100
+    },
+    "conditionalComplexityThresholds": {
+      "low": 5,
+      "medium": 10,
+      "high": 25,
+      "veryHigh": 50
+    },
+    "fileConditionalComplexityThresholds": {
+      "low": 5,
+      "medium": 10,
+      "high": 25,
+      "veryHigh": 50
+    },
+    "commitFilesCountThresholds": {
+      "low": 5,
+      "medium": 20,
+      "high": 50,
+      "veryHigh": 100
+    },
+    "customHtmlReportHeaderFragment": "",
+    "analyzeConcernOverlaps": false
+  },
+  "tagRules": [
+    {
+      "tag": "jenkins",
+      "color": "#7CB9E8",
+      "pathPatterns": [
+        "(|.*/)Jenkinsfile",
+        "(|.*/)Jenkinsfile[.][a-z0-9_]+"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "travis",
+      "color": "#7CB9E8",
+      "pathPatterns": [
+        "(|.*/)[.]travis[.]ya?ml"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "github actions",
+      "color": "#7CB9E8",
+      "pathPatterns": [
+        "(|.*/)[.]github[/]workflows[/].*"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "circleci",
+      "color": "#7CB9E8",
+      "pathPatterns": [
+        "(|.*/)[.]circleci.*"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "gitlab",
+      "color": "#7CB9E8",
+      "pathPatterns": [
+        "(|.*/)[.]gitlab.*"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "maven",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)pom[.]xml"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "pnpm",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)pnpm.*[.](ya?ml|json)"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "npm",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)package[.]json"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "yarn",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)[.]yarnrc",
+        "(|.*/)yarn[.]lock"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "jest",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)jest[.].*"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "babel",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)[.]babel[.]config[.]json"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "gradle",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)build[.]gradle"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "sbt",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)build[.]sbt"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "bazel",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)BUILD[.]bazel"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "pip",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)pip[.]conf",
+        "(|.*/)Pipfile"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "nuget",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)[.]nuget/.*",
+        "(|.*/)[.]nuget[.]config"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "aws codebuild",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)buildspec[.]yml"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "renovate",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)renovate[.]json5?"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "dependabot",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)dependabot[.]ya?ml"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "gemfile",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)Gemfile"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "podfile",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)Podfile"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "make",
+      "color": "#B9D9EB",
+      "pathPatterns": [
+        "(|.*/)Makefile"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "docker",
+      "color": "#A3C1AD",
+      "pathPatterns": [
+        "(|.*/)Dockerfile"
+      ],
+      "excludePathPatterns": []
+    },
+    {
+      "tag": "helm",
+      "color": "#A3C1AD",
+      "pathPatterns": [
+        "(|.*/)helmfile[.]ya?ml",
+        "(|.*/)[.]helmignore"
+      ],
+      "excludePathPatterns": []
+    }
+  ],
+  "customTabs": []
+}
