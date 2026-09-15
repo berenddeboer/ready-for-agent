@@ -20,6 +20,19 @@ than silently trusted.
 | `*.json`, `*.yaml`, `*.toml`, `*.xml` and other configuration | configuration, not behaviour |
 | `*.sh`, `package.json`, `.github/**`, editor and tool dotfiles | build and deployment |
 | tests (`*.test.*`, `*.spec.ts`, `**/e2e/**`, `*.feature`) | measured separately, as test code |
+| `.agents/**` and `.claude/**` | agent skill definitions and agent configuration, not production source |
+
+## Why `.claude/**` has to be excluded as well as `.agents/**`
+
+Skill content lives once, under `.agents/skills/`, and every directory under `.claude/skills/` is a
+symlink back into it. The analyser walks directories with `File.listFiles()`, which follows
+symlinks and cannot be told not to, so it saw each shared skill file twice under two different
+paths. Both copies were measured, and the duplication report ranked the pair as the second largest
+duplicated block in the repository — 709 lines of code that exist once on disk.
+
+Excluding both paths is what removes the phantom. Excluding only `.claude/**` would fix the
+duplication report but would still count skill definitions as production source, which they are
+not.
 
 ## One deliberate departure from the analyser's defaults
 
