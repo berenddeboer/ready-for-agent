@@ -49,6 +49,18 @@
       "contentPattern": "",
       "exception": false,
       "note": "Git data exports for sokrates analyses"
+    },
+    {
+      "pathPattern": ".*/[.]agents/.*",
+      "contentPattern": "",
+      "exception": false,
+      "note": "Agent skill definitions - shared multi-agent source of truth, not production source"
+    },
+    {
+      "pathPattern": ".*/[.]claude/.*",
+      "contentPattern": "",
+      "exception": false,
+      "note": "Claude Code agent configuration - symlinks into .agents, so every shared skill file would otherwise be counted and reported as duplicated twice"
     }
   ],
   "main": {
