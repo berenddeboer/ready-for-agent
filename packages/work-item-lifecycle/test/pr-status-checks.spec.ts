@@ -1266,6 +1266,11 @@ describe("PR status check steps", () => {
     expect(prompts[0]).not.toContain("curl")
     expect(prompts[0]).not.toMatch(/\bgh\b/i)
     expect(prompts[0]).not.toContain("GitHub")
+    expect(prompts[0]).toContain("even if you create no commit")
+    expect(prompts[0]).toContain("PR-visible explanation")
+    expect(prompts[0]).not.toContain(
+      "Do not post this summary comment when you did not create a commit",
+    )
   })
 
   it("watches GitLab head-pipeline jobs without querying GitHub", async () => {
@@ -1611,9 +1616,20 @@ describe("PR status check steps", () => {
     expect(prompts[1]).toContain("ActionLint failed on GitHub 503")
     expect(prompts[1]).toContain("process the PR Status Check Handoff")
     expect(prompts[1]).toContain("retry the failed inspection")
+    expect(prompts[1]).toContain(
+      "If declined or deferred feedback still lacks a PR-visible explanation, publish it before reporting PROCESSED",
+    )
     expect(prompts[1]).toContain("Do not create an empty or no-op commit")
     expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED")
     expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: FAILED:")
+    expect(prompts[1]).toContain("declined, deferred, or left unaddressed")
+    expect(prompts[1]).toContain("PR-visible explanation")
+    expect(prompts[1]).toContain(
+      "Do not report PROCESSED when publishing that explanation failed",
+    )
+    expect(prompts[1]).toContain(
+      "comment-only response does not require a replacement check execution",
+    )
   })
 
   it("fails retryably after the focused recovery attempt still cannot act", async () => {
@@ -1862,11 +1878,123 @@ describe("PR status check steps", () => {
       "post one comment on the existing pull request that includes the commit SHA",
     )
     expect(prompts[0]).toContain(
-      "lists any review feedback declined with a brief reason",
+      "lists any review feedback declined or deferred with a concrete reason",
     )
     expect(prompts[0]).toContain(
+      "Keep addressed and unaddressed feedback in that single summary",
+    )
+    expect(prompts[0]).toContain("even if you create no commit")
+    expect(prompts[0]).not.toContain(
       "Do not post this summary comment when you did not create a commit",
     )
+  })
+
+  it("requires a PR-visible explanation for declined or deferred feedback even without a commit", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "succeeded",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "review", outcome: "green" },
+              ],
+            }),
+            keymaxxer,
+            opencodeWith(
+              [
+                "Declined the shared-constant suggestion and posted the reason on the PR.\nREADY_FOR_AGENT_RESULT: PROCESSED",
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({
+      _tag: "processed",
+      handledCheckIds: [expect.any(String)],
+    })
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain(
+      "intentionally decline, defer, or leave requested PR feedback unaddressed",
+    )
+    expect(prompts[0]).toContain("even if you create no commit")
+    expect(prompts[0]).toContain("Identify the finding")
+    expect(prompts[0]).toContain(
+      "link the source review or comment when available",
+    )
+    expect(prompts[0]).toContain("state the disposition")
+    expect(prompts[0]).toContain("give a concrete reason")
+    expect(prompts[0]).toContain(
+      "known prerequisite or condition for revisiting",
+    )
+    expect(prompts[0]).toContain("do not invent a deadline or follow-up ticket")
+    expect(prompts[0]).toContain(
+      "session-only explanation, result marker, or source-code comment is not a substitute",
+    )
+    expect(prompts[0]).toContain("already explained on the PR")
+    expect(prompts[0]).toContain("must not duplicate that explanation")
+    expect(prompts[0]).toContain("new or changed decision must remain visible")
+    expect(prompts[0]).toContain(
+      "Existing pull-request body disclosure may be referenced",
+    )
+    expect(prompts[0]).not.toContain(
+      "Do not post this summary comment when you did not create a commit",
+    )
+  })
+
+  it("keeps genuine no-feedback handoffs quiet and distinguishes declined feedback", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "succeeded",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "review", outcome: "green" },
+              ],
+            }),
+            keymaxxer,
+            opencodeWith(
+              [
+                "Successful terminal review with no relevant comment; no feedback.\nREADY_FOR_AGENT_RESULT: PROCESSED",
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({
+      _tag: "processed",
+      handledCheckIds: [expect.any(String)],
+    })
+    expect(prompts[0]).toContain(
+      "Leave the pull request quiet when there is no relevant review",
+    )
+    expect(prompts[0]).toContain("skipped reviewer without output")
+    expect(prompts[0]).toContain("successful terminal review without a comment")
+    expect(prompts[0]).toContain("review with no requested changes")
+    expect(prompts[0]).toContain("declined as not worthwhile")
   })
 
   it("allows PROCESSED for a green-only handoff with no review or nothing to address", async () => {
@@ -1924,6 +2052,19 @@ describe("PR status check steps", () => {
     expect(prompts[0]).toContain(
       "technical or observability failure prevented you from determining the relevant review state",
     )
+    expect(prompts[0]).toContain("declined, deferred, or left unaddressed")
+    expect(prompts[0]).toContain("PR-visible explanation")
+    expect(prompts[0]).toContain("published on the existing pull request")
+    expect(prompts[0]).toContain(
+      "confirm the same decision and rationale are already published",
+    )
+    expect(prompts[0]).toContain(
+      "comment-only response does not require a replacement check execution",
+    )
+    expect(prompts[0]).toContain(
+      "Do not report PROCESSED when publishing that explanation failed",
+    )
+    expect(prompts[0]).toContain("technical inability to post or confirm")
   })
 
   it("processes ordinary green CI with no review evidence without an Agent Turn", async () => {
@@ -2564,6 +2705,11 @@ describe("PR status check steps", () => {
       "Based only on the PR status-check work you just did",
     )
     expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED")
+    expect(prompts[1]).toContain("declined, deferred, or left unaddressed")
+    expect(prompts[1]).toContain("PR-visible explanation")
+    expect(prompts[1]).toContain(
+      "Do not report PROCESSED when publishing that explanation failed",
+    )
   })
 
   it("uses one classification fallback when recovery omits the outcome", async () => {

@@ -756,8 +756,11 @@ const buildInvestigationWorkPrompt = (
     )
   }
   lines.push(
-    "If you create a commit during this handoff, after pushing it post one comment on the existing pull request that includes the commit SHA, summarizes the changes and verification, identifies the review feedback addressed, and lists any review feedback declined with a brief reason (or says none was declined).",
-    "Do not post this summary comment when you did not create a commit.",
+    "When you intentionally decline, defer, or leave requested PR feedback unaddressed, post one comment on the existing pull request even if you create no commit. Identify the finding (link the source review or comment when available), state the disposition, and give a concrete reason. For a deferral, include the known prerequisite or condition for revisiting it; do not invent a deadline or follow-up ticket.",
+    "A session-only explanation, result marker, or source-code comment is not a substitute for that PR-visible explanation.",
+    "When you create a commit during this handoff, after pushing it post one comment on the existing pull request that includes the commit SHA, summarizes the changes and verification, identifies the review feedback addressed, and lists any review feedback declined or deferred with a concrete reason (or says none was declined). Keep addressed and unaddressed feedback in that single summary.",
+    "Before posting, check whether the same decision and rationale are already explained on the PR. Reprocessing or retrying the same review must not duplicate that explanation; a new or changed decision must remain visible. Existing pull-request body disclosure may be referenced rather than copied at length.",
+    "Leave the pull request quiet when there is no relevant review, a skipped reviewer without output, a successful terminal review without a comment, or a review with no requested changes. Distinguish those cases from feedback considered but declined as not worthwhile.",
     "Do not create or merge another pull request.",
   )
   return lines.join("\n")
@@ -773,6 +776,8 @@ const investigationOutcomeContractLines = (
   "Use CHECKS_TRIGGERED when you completed an action expected to create replacement check executions (for example a commit and push, or successfully restarting failed checks).",
   "READY_FOR_AGENT_RESULT: PROCESSED",
   "Use PROCESSED when the handoff is handled and no replacement execution is expected: for example a green-only handoff with no relevant automated-review run or comment (including a skipped reviewer with no review output), a successful terminal review with no relevant comment (no feedback), or a genuinely completed review that had nothing to address.",
+  "When you declined, deferred, or left unaddressed requested review feedback, report PROCESSED or CHECKS_TRIGGERED only after the PR-visible explanation is published on the existing pull request, or after you confirm the same decision and rationale are already published there. A comment-only response does not require a replacement check execution.",
+  "Do not report PROCESSED when publishing that explanation failed. Use FAILED for a technical inability to post or confirm it, and NEEDS_HUMAN when an operator must perform or decide the publication.",
   "Do not report PROCESSED for a present, positively identified, visibly incomplete automated review that still needs a whole-workflow rerun. Request the rerun instead.",
   ...(forge === "github"
     ? [
@@ -807,6 +812,7 @@ export const buildInvestigationRecoveryPrompt = (
     "Your previous outcome was FAILED.",
     promptUserContentSection("failed_reason", reason),
     "Re-check the current pull request and retry the failed inspection or any safe action that can produce a replacement check execution, including restarting an appropriate failed workflow.",
+    "If declined or deferred feedback still lacks a PR-visible explanation, publish it before reporting PROCESSED.",
     "Do not create an empty or no-op commit merely to restart checks.",
     ...investigationOutcomeContractLines(forge),
   ].join("\n")
