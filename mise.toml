@@ -2,10 +2,14 @@ min_version = "2026.7.0"
 
 [tools]
 # Authoritative Bun pin. GitHub Actions must use the same version.
-bun = "1.4.0"
-hk = "1.54.1"
+bun = "1.4.2"
+hk = "2.0.1"
 # Authoritative Usage pin for the operator CLI contract.
 # GitHub Actions must install this same version before Usage-dependent targets.
+# Usage 6.9.1 fails `usage lint --warnings-as-errors` on the current contract:
+# example `ready-for-agent start --host` (optional-value flag; bare --host binds
+# 0.0.0.0) is treated as requiring an argument. Keep 5.1.0 until that surface
+# can change.
 usage = "5.1.0"
 
 [tasks.bootstrap]
