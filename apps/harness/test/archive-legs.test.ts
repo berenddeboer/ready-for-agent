@@ -262,6 +262,9 @@ describe("planArchiveLegs", () => {
     expect(formatArchiveLegDuration(14 * 60_000)).toBe("14m")
     expect(formatArchiveLegDuration(7 * 60_000 + 27_000)).toBe("7m27s")
     expect(formatArchiveLegDuration(45_000)).toBe("45s")
+    expect(formatArchiveLegDuration(4 * 60_000 + 15_000)).toBe("4m15s")
+    expect(formatArchiveLegDuration(3_600_000 + 5 * 60_000)).toBe("1h5m")
+    expect(formatArchiveLegDuration(-500)).toBe("0s")
   })
 })
 

@@ -149,6 +149,9 @@ describe("formatDuration", () => {
     expect(formatDuration(3_000)).toBe("3s")
     expect(formatDuration(78_000)).toBe("1m 18s")
     expect(formatDuration(120_000)).toBe("2m")
+    expect(formatDuration(4 * 60_000 + 15_000)).toBe("4m 15s")
+    expect(formatDuration(3_600_000 + 5 * 60_000)).toBe("1h 5m")
+    expect(formatDuration(-500)).toBe("0s")
   })
 })
 

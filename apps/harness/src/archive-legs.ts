@@ -13,6 +13,7 @@
  */
 
 import { forgeChangeRequestShort } from "./forge-change-request.js"
+import { formatClockDuration } from "./format-clock-duration.js"
 import {
   type LifecycleLabelChip,
   lifecycleLaneForPhase,
@@ -239,16 +240,7 @@ const failLeg = (
  * between units — "7m27s", "14m", "45s", "1h5m".
  */
 export function formatArchiveLegDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000))
-  if (totalSeconds < 60) return `${totalSeconds}s`
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  if (minutes < 60) {
-    return seconds === 0 ? `${minutes}m` : `${minutes}m${seconds}s`
-  }
-  const hours = Math.floor(minutes / 60)
-  const remainingMinutes = minutes % 60
-  return remainingMinutes === 0 ? `${hours}h` : `${hours}h${remainingMinutes}m`
+  return formatClockDuration({ ms, style: "compact" })
 }
 
 /**
