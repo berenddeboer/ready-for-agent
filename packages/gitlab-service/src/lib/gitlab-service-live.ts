@@ -20,6 +20,7 @@ import {
   type PullRequestMergeability,
   type TerminalPrStatusCheck,
   extractErrorCode,
+  isDecisiveCiGateObservedRun,
 } from "@ready-for-agent/forge-contract"
 import { GitLabProjectUnavailableError, GitLabRequestError } from "./errors.js"
 import {
@@ -907,6 +908,8 @@ export const makeGitLabService = (options: {
       try: async () => {
         const runs: CiGateObservedRun[] = []
         let page = 1
+        let reachedLastSeen = false
+        let collectedDecisiveAfterLastSeen = false
         const path = `${projectApiPath(repository)}/pipelines?ref=${encodeURIComponent(defaultBranch)}&order_by=id&sort=desc`
         while (true) {
           const response = await fetchImpl(
@@ -923,7 +926,6 @@ export const makeGitLabService = (options: {
           if (!Array.isArray(decoded)) {
             throw new Error(`${message}: GitLab returned a non-array page`)
           }
-          let reachedLastSeen = false
           for (const value of decoded) {
             const mapped = mapObservedPipeline(value, defaultBranch)
             if (mapped === null) {
@@ -935,11 +937,20 @@ export const makeGitLabService = (options: {
               isSameObservedPipeline(mapped.runIdentity, lastSeen)
             ) {
               reachedLastSeen = true
+              if (isDecisiveCiGateObservedRun(mapped)) {
+                collectedDecisiveAfterLastSeen = true
+                break
+              }
+              continue
+            }
+            if (reachedLastSeen && isDecisiveCiGateObservedRun(mapped)) {
+              collectedDecisiveAfterLastSeen = true
               break
             }
           }
           // First observation (no last-seen run) uses one official API page.
-          if (reachedLastSeen || lastSeen === null) {
+          // An unfinished last-seen run is not a stable cursor.
+          if (collectedDecisiveAfterLastSeen || lastSeen === null) {
             break
           }
           const nextPage = response.headers.get("x-next-page")?.trim() ?? ""

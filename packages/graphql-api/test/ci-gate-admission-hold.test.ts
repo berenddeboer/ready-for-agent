@@ -46,6 +46,7 @@ const catalog = [
 const observedRun = (input: {
   readonly runIdentity: string
   readonly rawConclusion: string | null
+  readonly rawStatus?: string
 }): CiGateObservation["observations"][number] extends infer Observation
   ? Observation extends { readonly kind: "observed" }
     ? Observation["runs"][number]
@@ -59,7 +60,7 @@ const observedRun = (input: {
   createdAt: new Date("2026-09-07T12:00:00.000Z"),
   updatedAt: new Date("2026-09-07T12:05:00.000Z"),
   startedAt: new Date("2026-09-07T12:00:01.000Z"),
-  rawStatus: "completed",
+  rawStatus: input.rawStatus ?? "completed",
   rawConclusion: input.rawConclusion,
 })
 
@@ -598,5 +599,253 @@ describe("Hold ordinary remote admission during CI failure", () => {
     })
     expect(result?.workItem.statusMessage).toContain("Waiting for CI Repair")
     expect(result?.workItem.statusMessage).toContain("CI")
+  })
+
+  const refreshGate = (repository: RepositoryRecord) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        yield* observeRepositoryCiGate({
+          repository,
+          origin: "polling",
+        })
+      }),
+    )
+
+  test("releases Waiting for CI Repair after a success newer than the failure while a later run is still pending", async () => {
+    const setup = await seedRepository(45)
+    await closeGate(setup.repository)
+    const created = await runtime.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        return yield* lifecycle.implementNow(
+          setup.repository.id,
+          setup.issue.issueNumber,
+        )
+      }),
+    )
+    expect(created.waitingForCiRepair).toBe(true)
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          {
+            identity: "161335",
+            kind: "observed" as const,
+            runs: [
+              observedRun({
+                runIdentity: "300:1",
+                rawConclusion: null,
+                rawStatus: "queued",
+              }),
+              observedRun({
+                runIdentity: "100:1",
+                rawConclusion: "failure",
+              }),
+            ],
+          },
+        ],
+      })
+    await refreshGate(setup.repository)
+    expect(
+      (
+        await runtime.runPromise(
+          Effect.gen(function* () {
+            const lifecycle = yield* WorkItemLifecycle
+            return yield* lifecycle.getWorkItem(created.id)
+          }),
+        )
+      ).waitingForCiRepair,
+    ).toBe(true)
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          {
+            identity: "161335",
+            kind: "observed" as const,
+            runs: [
+              observedRun({
+                runIdentity: "300:1",
+                rawConclusion: null,
+                rawStatus: "queued",
+              }),
+              observedRun({
+                runIdentity: "200:1",
+                rawConclusion: "success",
+              }),
+              observedRun({
+                runIdentity: "100:1",
+                rawConclusion: "failure",
+              }),
+            ],
+          },
+        ],
+      })
+    await refreshGate(setup.repository)
+    const recovered = await runtime.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        return yield* lifecycle.getWorkItem(created.id)
+      }),
+    )
+    expect(recovered.waitingForCiRepair).toBe(false)
+    expect(recovered.state).toBe("create_worktree")
+  })
+
+  test("keeps Pause after recovery behind a pending run and does not start the Work Item", async () => {
+    const setup = await seedRepository(46)
+    await closeGate(setup.repository)
+    const created = await runtime.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const held = yield* lifecycle.implementNow(
+          setup.repository.id,
+          setup.issue.issueNumber,
+        )
+        return yield* lifecycle.pause(held.id)
+      }),
+    )
+    expect(created.paused).toBe(true)
+    expect(created.waitingForCiRepair).toBe(true)
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          {
+            identity: "161335",
+            kind: "observed" as const,
+            runs: [
+              observedRun({
+                runIdentity: "300:1",
+                rawConclusion: null,
+                rawStatus: "queued",
+              }),
+              observedRun({
+                runIdentity: "200:1",
+                rawConclusion: "success",
+              }),
+              observedRun({
+                runIdentity: "100:1",
+                rawConclusion: "failure",
+              }),
+            ],
+          },
+        ],
+      })
+    await refreshGate(setup.repository)
+    const afterWake = await runtime.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        return yield* lifecycle.getWorkItem(created.id)
+      }),
+    )
+    expect(afterWake.paused).toBe(true)
+    expect(afterWake.waitingForCiRepair).toBe(false)
+    expect(afterWake.holdsWorkerSlot).toBe(false)
+    expect(afterWake.stepRuns).toHaveLength(0)
+  })
+
+  test("recovered work joins ordinary Worker Slot admission instead of jumping the queue", async () => {
+    const setup = await seedRepository(47)
+    const occupying = await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const config = yield* db.getConfig
+        yield* db.updateConfig({
+          selectedAgentBackend: config.selectedAgentBackend,
+          defaultModel: config.defaultModel,
+          defaultThinkingLevel: config.defaultThinkingLevel,
+          reviewModel: config.reviewModel,
+          reviewThinkingLevel: config.reviewThinkingLevel,
+          maxConcurrentAgentTurns: config.maxConcurrentAgentTurns,
+          maxConcurrentWorkItems: 1,
+        })
+        const lifecycle = yield* WorkItemLifecycle
+        return yield* lifecycle.implementNow(
+          setup.repository.id,
+          setup.issue.issueNumber,
+        )
+      }),
+    )
+    expect(occupying.holdsWorkerSlot).toBe(true)
+
+    const secondIssue = await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        return yield* db.storeIssue({
+          repositoryId: setup.repository.id,
+          issueNumber: 48,
+          title: "Held behind CI",
+          body: "Issue body",
+          url: "https://github.com/acme/widgets/issues/48",
+          state: "OPEN",
+          githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: false,
+          blockedBy: [],
+        })
+      }),
+    )
+    await closeGate(setup.repository)
+    const held = await runtime.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        return yield* lifecycle.implementNow(
+          setup.repository.id,
+          secondIssue.issueNumber,
+        )
+      }),
+    )
+    expect(held.waitingForCiRepair).toBe(true)
+    expect(held.holdsWorkerSlot).toBe(false)
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          {
+            identity: "161335",
+            kind: "observed" as const,
+            runs: [
+              observedRun({
+                runIdentity: "300:1",
+                rawConclusion: null,
+                rawStatus: "queued",
+              }),
+              observedRun({
+                runIdentity: "200:1",
+                rawConclusion: "success",
+              }),
+              observedRun({
+                runIdentity: "100:1",
+                rawConclusion: "failure",
+              }),
+            ],
+          },
+        ],
+      })
+    await refreshGate(setup.repository)
+    const recovered = await runtime.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        return yield* lifecycle.getWorkItem(held.id)
+      }),
+    )
+    expect(recovered.waitingForCiRepair).toBe(false)
+    expect(recovered.holdsWorkerSlot).toBe(false)
+    expect(recovered.waitingSince).not.toBeNull()
+    expect(recovered.stepRuns).toHaveLength(0)
+    const stillOccupying = await runtime.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        return yield* lifecycle.getWorkItem(occupying.id)
+      }),
+    )
+    expect(stillOccupying.holdsWorkerSlot).toBe(true)
   })
 })

@@ -271,6 +271,122 @@ describe("GitLab CI Gate observation", () => {
     expect(definition.runs).toHaveLength(51)
   })
 
+  test("returns a qualifying success behind a saved pending bookmark", async () => {
+    const service = makeGitLabServiceFromToken("token", (async (input) => {
+      const url = new URL(String(input))
+      if (isProjectUrl(url)) {
+        return jsonResponse(projectPayload)
+      }
+      if (!isPipelinesUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      return jsonResponse([
+        pipelinePayload({
+          id: 300,
+          iid: 300,
+          source: "push",
+          status: "pending",
+        }),
+        pipelinePayload({
+          id: 250,
+          iid: 250,
+          source: "merge_request_event",
+          status: "success",
+        }),
+        pipelinePayload({
+          id: 200,
+          iid: 200,
+          source: "push",
+          status: "success",
+        }),
+        pipelinePayload({
+          id: 100,
+          iid: 100,
+          source: "push",
+          status: "failed",
+        }),
+      ])
+    }) as typeof fetch)
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["42"],
+        lastRunIdentities: { "42": "300:300" },
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs.map((run) => run.runIdentity)).toEqual([
+      "300:300",
+      "200:200",
+    ])
+  })
+
+  test("pages past a pending bookmark to a qualifying success on a later API page", async () => {
+    const requestedPages: string[] = []
+    const pageOne = Array.from({ length: 100 }, (_, index) =>
+      pipelinePayload({
+        id: 2000 - index,
+        iid: 2000 - index,
+        source: "push",
+        status: index === 0 ? "pending" : "running",
+      }),
+    )
+    const pageTwo = [
+      pipelinePayload({
+        id: 1900,
+        iid: 1900,
+        source: "push",
+        status: "success",
+      }),
+      pipelinePayload({
+        id: 1899,
+        iid: 1899,
+        source: "push",
+        status: "failed",
+      }),
+    ]
+    const service = makeGitLabServiceFromToken("token", (async (input) => {
+      const url = new URL(String(input))
+      if (isProjectUrl(url)) {
+        return jsonResponse(projectPayload)
+      }
+      if (!isPipelinesUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      const page = url.searchParams.get("page") ?? "1"
+      requestedPages.push(page)
+      if (page === "1") {
+        return jsonResponse(pageOne, 200, { "x-next-page": "2" })
+      }
+      if (page === "2") {
+        return jsonResponse(pageTwo)
+      }
+      throw new Error(`unexpected extra page ${page}`)
+    }) as typeof fetch)
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["42"],
+        lastRunIdentities: { "42": "2000:2000" },
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(requestedPages).toEqual(["1", "2"])
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs[0]?.runIdentity).toBe("2000:2000")
+    expect(definition.runs.at(-1)?.runIdentity).toBe("1900:1900")
+    expect(definition.runs.some((run) => run.runIdentity === "1899:1899")).toBe(
+      false,
+    )
+  })
+
   test("marks disabled project CI unavailable without listing pipeline history", async () => {
     const requested: string[] = []
     const service = makeGitLabServiceFromToken("token", (async (input) => {

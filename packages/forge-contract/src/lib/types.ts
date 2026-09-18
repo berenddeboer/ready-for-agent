@@ -53,7 +53,11 @@ export interface CiGateObservation {
 
 export interface ObserveCiGateInput {
   readonly definitionIdentities: readonly string[]
-  /** Last included run identity per definition; empty when none yet. */
+  /**
+   * Latest observed run identity per definition; empty when none yet.
+   * Adapters treat a decisive last-seen run as a stable cursor and keep
+   * paging past an unfinished last-seen run until a decisive older result.
+   */
   readonly lastRunIdentities: { readonly [definitionIdentity: string]: string }
 }
 

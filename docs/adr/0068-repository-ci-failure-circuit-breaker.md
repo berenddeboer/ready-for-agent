@@ -2,6 +2,8 @@
 
 Each Repository may watch operator-selected, Forge-native CI Gate Definitions on its default branch. Observation is periodic and optimistic until an actual terminal failure is seen; that failure latches the Repository CI Gate Closed until a newer success is observed or the definition is removed, while unavailable definitions make the gate Degraded without blocking work.
 
+Newer is the Forge's authoritative run/source order, not wall-clock completion. A successful rerun of the failed run also clears that failure. Pending or running runs do not prevent recovery and must not hide a qualifying success that is already newer than the latched failure. A still-newer observed failure keeps the gate Closed, including when an older run later finishes green.
+
 A Closed gate holds every ordinary remote start path before Worker Slot admission and lets already-admitted remote work retain its merge decision before holding without a slot. Implement Locally may finish and pause on its local path but cannot continue remotely while Closed. Each closure is a durable CI Failure Incident: additional failures join it, and an explicit CI Repair authorization crosses the gate only for that incident, receives no reserved capacity, and bypasses none of the Work Item PR's checks, Merge Policy, conflict handling, or Forge rules.
 
 The circuit breaker governs Harness-initiated merges using the last observed state. It deliberately does not synchronously re-query CI before admission or merge, wait for green after each merge, cancel an in-flight merge, or control human and Forge-native auto-merges; these limits keep observation inexpensive and accept a small best-effort race.
