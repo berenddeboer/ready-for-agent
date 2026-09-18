@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query"
+import { configQueryKey } from "./config-query.js"
 import { openPullRequestCountsQueryKey } from "./refresh-open-pull-request-count-live.js"
 import { streamWorkItemsChanged } from "./work-items-live.js"
 
@@ -17,7 +18,6 @@ export const completedWorkItemsHistoryQueryKeyPrefix = [
  */
 export const kanbanStatusQueryKeyPrefix = ["kanban-status"] as const
 
-const configQueryKey = ["config"] as const
 /**
  * Per-repo unfinished gate (`blockingUnfinishedWorkItemCount`) lives here.
  * GitHub-authoritative open non-draft PR count is a dedicated projection
