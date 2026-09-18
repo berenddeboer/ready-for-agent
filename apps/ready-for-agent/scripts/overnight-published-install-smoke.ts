@@ -23,6 +23,7 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { waitForHttp } from "./wait-for-http.ts"
 import { parseMastheadProductVersion } from "./write-ready-for-agent-version.ts"
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -75,38 +76,6 @@ const runChecked = (
     )
   }
   return result
-}
-
-const waitForHttp = async (
-  url: string,
-  timeoutMs: number,
-  isAlive: () => boolean,
-): Promise<Response> => {
-  const deadline = Date.now() + timeoutMs
-  let lastError: unknown
-  while (Date.now() < deadline) {
-    if (!isAlive()) {
-      fail(
-        `Process exited before ${url} became ready: ${
-          lastError instanceof Error ? lastError.message : String(lastError)
-        }`,
-      )
-    }
-    try {
-      const response = await fetch(url, { redirect: "manual" })
-      if (response.status > 0) {
-        return response
-      }
-    } catch (error) {
-      lastError = error
-    }
-    await sleep(200)
-  }
-  fail(
-    `Timed out waiting for ${url}: ${
-      lastError instanceof Error ? lastError.message : String(lastError)
-    }`,
-  )
 }
 
 const killTree = async (child: ChildProcess) => {
