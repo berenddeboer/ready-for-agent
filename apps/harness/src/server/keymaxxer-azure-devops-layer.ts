@@ -17,17 +17,15 @@ import {
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { ambientAzureDevOpsLayer } from "./ambient-azure-devops-layer.js"
 import {
-  SerializedCiGateCatalog,
-  SerializedCiGateObservation,
   SerializedMergePullRequestResult,
   SerializedPrStatusCheckDiagnostics,
-  SerializedPullRequestCheckStatus,
   SerializedPullRequestLifecycleStatus,
   encodeArgument,
   encodedRepositoryArguments,
   makeRequestError,
   parseSerializedIssues,
 } from "./forge-helper-schemas.js"
+import { keymaxxerCiGateAndPrCheckOperations } from "./keymaxxer-ci-pr-check-operations.js"
 
 /**
  * Client-side budget for vault secret metadata before ambient fallback.
@@ -278,6 +276,12 @@ export const keymaxxerAzureDevOpsLayer = (options: {
           return yield* whenAmbient(ambient)
         })
 
+      const ciPrChecks = keymaxxerCiGateAndPrCheckOperations({
+        callHelper,
+        withVaultOrAmbient,
+        requestError,
+      })
+
       const service: AzureDevOpsServiceShape = {
         verifyProject: Effect.fn("KeymaxxerAzureDevOps.verifyProject")(
           (repository) =>
@@ -376,51 +380,10 @@ export const keymaxxerAzureDevOpsLayer = (options: {
             ),
         ),
         listCiGateCatalog: Effect.fn("KeymaxxerAzureDevOps.listCiGateCatalog")(
-          (repository) =>
-            withVaultOrAmbient(
-              repository,
-              (tokenName) =>
-                callHelper({
-                  operation: "list-ci-gate-catalog",
-                  repository,
-                  tokenName,
-                  describe: "list CI Gate Definitions",
-                  decode: decodeJson(
-                    SerializedCiGateCatalog,
-                    repository,
-                    "decode CI Gate catalog",
-                  ),
-                }),
-              (ambientService) => ambientService.listCiGateCatalog(repository),
-            ),
+          ciPrChecks.listCiGateCatalog,
         ),
         observeCiGate: Effect.fn("KeymaxxerAzureDevOps.observeCiGate")(
-          (repository, input) =>
-            withVaultOrAmbient(
-              repository,
-              (tokenName) =>
-                callHelper({
-                  operation: "observe-ci-gate",
-                  repository,
-                  tokenName,
-                  describe: "observe CI Gate Definitions",
-                  args: [
-                    encodeArgument(
-                      JSON.stringify({
-                        definitionIdentities: input.definitionIdentities,
-                        lastRunIdentities: input.lastRunIdentities,
-                      }),
-                    ),
-                  ],
-                  decode: decodeJson(
-                    SerializedCiGateObservation,
-                    repository,
-                    "decode CI Gate observation",
-                  ),
-                }),
-              (ambientService) =>
-                ambientService.observeCiGate(repository, input),
-            ),
+          ciPrChecks.observeCiGate,
         ),
         hasCredentials: Effect.fn("KeymaxxerAzureDevOps.hasCredentials")(
           (repository) =>
@@ -597,26 +560,7 @@ export const keymaxxerAzureDevOpsLayer = (options: {
         ),
         getPullRequestCheckStatus: Effect.fn(
           "KeymaxxerAzureDevOps.getPullRequestCheckStatus",
-        )((repository, headRefName) =>
-          withVaultOrAmbient(
-            repository,
-            (tokenName) =>
-              callHelper({
-                operation: "get-pr-check-status",
-                repository,
-                tokenName,
-                describe: "get pull request check status",
-                args: [encodeArgument(headRefName)],
-                decode: decodeJson(
-                  SerializedPullRequestCheckStatus,
-                  repository,
-                  "decode pull request check status",
-                ),
-              }),
-            (ambientService) =>
-              ambientService.getPullRequestCheckStatus(repository, headRefName),
-          ),
-        ),
+        )(ciPrChecks.getPullRequestCheckStatus),
         getPrStatusCheckDiagnostics: Effect.fn(
           "KeymaxxerAzureDevOps.getPrStatusCheckDiagnostics",
         )((repository, checks, options = {}) =>
