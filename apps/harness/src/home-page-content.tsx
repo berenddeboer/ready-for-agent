@@ -43,6 +43,7 @@ import {
 import { Banner } from "./banner.js"
 import { repositoryCardCollapseId, useCardCollapsed } from "./card-collapse.js"
 import { CardCollapseToggle } from "./card-collapse-toggle.js"
+import { createConfigQuery } from "./config-query.js"
 import { Copy } from "./copy.js"
 import type { ImplementWithSubmitInput } from "./execution-profile-draft.js"
 import { ExecutionProfileSummary } from "./execution-profile-summary.js"
@@ -148,28 +149,7 @@ const FORGE_TOKEN_SCOPES_DOC_URL =
 const graphql = createHarnessGraphqlClient({ batch: true })
 // Forge CI Gate catalog listing must not pin co-batched config/models/backends.
 const graphqlUnbatched = createHarnessGraphqlClient({ batch: false })
-
-const configQuery = {
-  queryKey: ["config"],
-  queryFn: async () => {
-    const result = await graphql.query({
-      config: {
-        selectedAgentBackend: true,
-        defaultModel: true,
-        defaultThinkingLevel: true,
-        reviewModel: true,
-        reviewThinkingLevel: true,
-        maxConcurrentAgentTurns: true,
-        maxConcurrentWorkItems: true,
-        // Keep selection aligned with Harness Settings so shared cache never
-        // drops unfinished / scoped gate fields.
-        unfinishedWorkItemCount: true,
-        blockingUnfinishedWorkItemCount: true,
-      },
-    })
-    return result.config
-  },
-}
+const configQuery = createConfigQuery(graphql)
 
 type AgentBackendInfo = {
   id: string

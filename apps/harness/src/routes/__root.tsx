@@ -45,6 +45,7 @@ import {
 } from "../agent-model-settings.js"
 import { Banner, BannerActionButton } from "../banner.js"
 import { CommittedPullRequestsDashboard } from "../committed-pr-dashboard.js"
+import { configSelection, createConfigQuery } from "../config-query.js"
 import { READY_FOR_AGENT_VERSION_LABEL } from "../generated/version"
 import { GitHubThrottleBanner } from "../github-throttle-banner.js"
 import { useGithubThrottleRetryAt } from "../github-throttle-errors.js"
@@ -84,27 +85,7 @@ export interface RouterContext {
 }
 
 const graphql = createHarnessGraphqlClient()
-
-const configQuery = {
-  queryKey: ["config"],
-  queryFn: async () => {
-    const result = await graphql.query({
-      config: {
-        selectedAgentBackend: true,
-        defaultModel: true,
-        defaultThinkingLevel: true,
-        reviewModel: true,
-        reviewThinkingLevel: true,
-        maxConcurrentAgentTurns: true,
-        maxConcurrentWorkItems: true,
-        unfinishedWorkItemCount: true,
-        // Scoped gate for changing the harness default (inheriting repos only).
-        blockingUnfinishedWorkItemCount: true,
-      },
-    })
-    return result.config
-  },
-}
+const configQuery = createConfigQuery(graphql)
 
 const agentBackendStatusSelection = {
   backend: { id: true, label: true },
@@ -620,15 +601,7 @@ function SettingsChrome() {
       graphql.mutation({
         updateConfig: {
           __args: { input },
-          selectedAgentBackend: true,
-          defaultModel: true,
-          defaultThinkingLevel: true,
-          reviewModel: true,
-          reviewThinkingLevel: true,
-          maxConcurrentAgentTurns: true,
-          maxConcurrentWorkItems: true,
-          unfinishedWorkItemCount: true,
-          blockingUnfinishedWorkItemCount: true,
+          ...configSelection,
         },
       }),
     onSuccess: ({ updateConfig: updatedConfig }) => {
