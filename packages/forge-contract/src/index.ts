@@ -1,3 +1,4 @@
+export * from "./lib/ci-gate-run.js"
 export * from "./lib/error-cause-chain.js"
 export * from "./lib/issue-operations.js"
 export * from "./lib/issue-presentation.js"

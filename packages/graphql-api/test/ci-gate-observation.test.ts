@@ -1032,4 +1032,606 @@ describe("Repository CI Gate observation", () => {
     )
     expect(gate.definitions[0]?.diagnostic).toBe("Not observed yet")
   })
+
+  test("a success newer than the latched failure opens the gate even when a newer run is still pending", async () => {
+    const repository = await addRepository()
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await saveSelection(repository.id, ["161335"])
+    expect((await fetchCiGate(repository.id)).status).toBe("CLOSED")
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "300:1",
+              rawStatus: "queued",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    expect((await fetchCiGate(repository.id)).status).toBe("CLOSED")
+    expect(
+      (await fetchCiGate(repository.id)).definitions[0]?.latestRun,
+    ).toMatchObject({ runIdentity: "300:1", rawStatus: "queued" })
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "300:1",
+              rawStatus: "queued",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "200:1",
+              rawStatus: "completed",
+              rawConclusion: "success",
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    const gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("OPEN")
+    expect(gate.definitions[0]?.failureLatched).toBe(false)
+    expect(gate.activeIncident).toBeNull()
+    expect(gate.latestResolvedIncident?.status).toBe("RESOLVED")
+    expect(gate.latestResolvedIncident?.recoveryReason).toBe("NEWER_SUCCESS")
+  })
+
+  test("running runs in front of a qualifying success do not keep the gate Closed across repeated polls", async () => {
+    const repository = await addRepository()
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await saveSelection(repository.id, ["161335"])
+
+    const runningAheadOfFailure = [
+      observedRun({
+        runIdentity: "500:1",
+        rawStatus: "in_progress",
+        rawConclusion: null,
+      }),
+      observedRun({
+        runIdentity: "400:1",
+        rawStatus: "in_progress",
+        rawConclusion: null,
+      }),
+      observedRun({
+        runIdentity: "300:1",
+        rawStatus: "in_progress",
+        rawConclusion: null,
+      }),
+      observedRun({
+        runIdentity: "100:1",
+        rawStatus: "completed",
+        rawConclusion: "failure",
+      }),
+    ]
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [observedDefinition("161335", runningAheadOfFailure)],
+      })
+    await refresh(repository.id)
+    await refresh(repository.id)
+    expect((await fetchCiGate(repository.id)).status).toBe("CLOSED")
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "500:1",
+              rawStatus: "in_progress",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "400:1",
+              rawStatus: "in_progress",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "300:1",
+              rawStatus: "in_progress",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "200:1",
+              rawStatus: "completed",
+              rawConclusion: "success",
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    const gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("OPEN")
+    expect(gate.activeIncident).toBeNull()
+    expect(gate.latestResolvedIncident?.recoveryReason).toBe("NEWER_SUCCESS")
+  })
+
+  test("an already-stuck bookmark ahead of a qualifying success recovers on ordinary refresh", async () => {
+    const repository = await addRepository()
+    await saveSelection(repository.id, ["161335"])
+    const observedAt = new Date("2026-09-18T08:35:58.000Z")
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: observedAt,
+          observations: [
+            {
+              identity: "161335",
+              lastObservedAt: observedAt,
+              lastRunIdentity: "300:1",
+              lastRunHtmlUrl:
+                "https://github.com/acme/widgets/actions/runs/300",
+              lastHeadSha: "sha-300:1",
+              lastHeadRef: "main",
+              lastEvent: "push",
+              lastRawStatus: "pending",
+              lastRawConclusion: null,
+              lastRunCreatedAt: observedAt,
+              lastRunUpdatedAt: observedAt,
+              failureLatched: true,
+              latchedRunIdentity: "100:1",
+              latchedRunHtmlUrl:
+                "https://github.com/acme/widgets/actions/runs/100",
+              observationError: null,
+              observationErrorKind: null,
+            },
+          ],
+          incidentsToUpsert: [
+            {
+              id: "cfi-01K5STUCK000000000000000000",
+              repositoryId: repository.id,
+              status: "open",
+              openedAt: observedAt,
+              resolvedAt: null,
+              recoveryReason: null,
+              summary: "CI Gate closed: CI failed.",
+              definitions: [
+                {
+                  identity: "161335",
+                  displayLabel: "CI",
+                  firstFailedRunIdentity: "100:1",
+                  firstFailedRunHtmlUrl:
+                    "https://github.com/acme/widgets/actions/runs/100",
+                  joinedAt: observedAt,
+                },
+              ],
+            },
+          ],
+        })
+      }),
+    )
+    expect((await fetchCiGate(repository.id)).status).toBe("CLOSED")
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "300:1",
+              rawStatus: "pending",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "200:1",
+              rawStatus: "completed",
+              rawConclusion: "success",
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    const gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("OPEN")
+    expect(gate.definitions[0]?.failureLatched).toBe(false)
+    expect(gate.activeIncident).toBeNull()
+    expect(gate.latestResolvedIncident?.recoveryReason).toBe("NEWER_SUCCESS")
+  })
+
+  test("failure then success then a newer failure stays Closed without a transient release", async () => {
+    const repository = await addRepository()
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "300:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+            observedRun({
+              runIdentity: "200:1",
+              rawStatus: "completed",
+              rawConclusion: "success",
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await saveSelection(repository.id, ["161335"])
+    const gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("CLOSED")
+    expect(gate.definitions[0]?.failureLatched).toBe(true)
+    expect(gate.definitions[0]?.latestRun?.runIdentity).toBe("300:1")
+    expect(gate.activeIncident?.status).toBe("OPEN")
+    expect(gate.latestResolvedIncident).toBeNull()
+  })
+
+  test("an older run finishing green later does not clear a newer failure", async () => {
+    const repository = await addRepository()
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "200:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "in_progress",
+              rawConclusion: null,
+            }),
+          ]),
+        ],
+      })
+    await saveSelection(repository.id, ["161335"])
+    expect((await fetchCiGate(repository.id)).status).toBe("CLOSED")
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "200:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "success",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    const gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("CLOSED")
+    expect(gate.activeIncident?.status).toBe("OPEN")
+    expect(gate.definitions[0]?.failureLatched).toBe(true)
+  })
+
+  test("two selected definitions stay Closed until each latched failure recovers", async () => {
+    const repository = await addRepository()
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+          observedDefinition("269289", [
+            observedRun({
+              runIdentity: "600:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await saveSelection(repository.id, ["161335", "269289"])
+    expect((await fetchCiGate(repository.id)).status).toBe("CLOSED")
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "300:1",
+              rawStatus: "queued",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+          observedDefinition("269289", [
+            observedRun({
+              runIdentity: "800:1",
+              rawStatus: "in_progress",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "600:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    expect((await fetchCiGate(repository.id)).status).toBe("CLOSED")
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "300:1",
+              rawStatus: "queued",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "200:1",
+              rawStatus: "completed",
+              rawConclusion: "success",
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+          observedDefinition("269289", [
+            observedRun({
+              runIdentity: "800:1",
+              rawStatus: "in_progress",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "600:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    let gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("CLOSED")
+    expect(
+      gate.definitions.find((definition) => definition.identity === "161335")
+        ?.failureLatched,
+    ).toBe(false)
+    expect(
+      gate.definitions.find((definition) => definition.identity === "269289")
+        ?.failureLatched,
+    ).toBe(true)
+    expect(gate.activeIncident?.status).toBe("OPEN")
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "300:1",
+              rawStatus: "queued",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "200:1",
+              rawStatus: "completed",
+              rawConclusion: "success",
+            }),
+          ]),
+          observedDefinition("269289", [
+            observedRun({
+              runIdentity: "700:1",
+              rawStatus: "completed",
+              rawConclusion: "success",
+            }),
+            observedRun({
+              runIdentity: "600:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("OPEN")
+    expect(gate.activeIncident).toBeNull()
+    expect(gate.latestResolvedIncident?.recoveryReason).toBe("NEWER_SUCCESS")
+  })
+
+  test("repeated recovered observations stay Open and do not reopen the incident", async () => {
+    const repository = await addRepository()
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await saveSelection(repository.id, ["161335"])
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "300:1",
+              rawStatus: "queued",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    const recovered = [
+      observedRun({
+        runIdentity: "300:1",
+        rawStatus: "queued",
+        rawConclusion: null,
+      }),
+      observedRun({
+        runIdentity: "200:1",
+        rawStatus: "completed",
+        rawConclusion: "success",
+      }),
+      observedRun({
+        runIdentity: "100:1",
+        rawStatus: "completed",
+        rawConclusion: "failure",
+      }),
+    ]
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [observedDefinition("161335", recovered)],
+      })
+    await refresh(repository.id)
+    const first = await fetchCiGate(repository.id)
+    expect(first.status).toBe("OPEN")
+    const resolvedSummary = first.latestResolvedIncident?.summary
+    expect(first.latestResolvedIncident?.status).toBe("RESOLVED")
+
+    await refresh(repository.id)
+    await refresh(repository.id)
+    const again = await fetchCiGate(repository.id)
+    expect(again.status).toBe("OPEN")
+    expect(again.activeIncident).toBeNull()
+    expect(again.latestResolvedIncident?.status).toBe("RESOLVED")
+    expect(again.latestResolvedIncident?.summary).toBe(resolvedSummary)
+  })
+
+  test("an observation error keeps an existing failure latch and its diagnostics", async () => {
+    const repository = await addRepository()
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await saveSelection(repository.id, ["161335"])
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "300:1",
+              rawStatus: "queued",
+              rawConclusion: null,
+            }),
+            observedRun({
+              runIdentity: "100:1",
+              rawStatus: "completed",
+              rawConclusion: "failure",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+
+    observe = () =>
+      Effect.fail(
+        new GitHubRequestError({
+          message:
+            "Failed to observe CI Gate Definitions for acme/widgets: Actions read required",
+          statusCode: 403,
+          retryable: false,
+        }),
+      )
+    await refresh(repository.id)
+    const gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("CLOSED")
+    expect(gate.definitions[0]?.failureLatched).toBe(true)
+    expect(gate.definitions[0]?.diagnostic).toContain("Actions read required")
+    expect(gate.activeIncident?.status).toBe("OPEN")
+  })
 })

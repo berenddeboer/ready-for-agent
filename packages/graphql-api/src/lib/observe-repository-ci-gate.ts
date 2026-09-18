@@ -15,6 +15,7 @@ import {
   type CiGateObservedRun,
   type ForgeOperationOrigin,
   type ObserveCiGateInput,
+  classifyCiGateObservedRun,
   formatUserFacingError,
 } from "@ready-for-agent/forge-contract"
 import {
@@ -23,16 +24,6 @@ import {
 } from "@ready-for-agent/work-item-lifecycle"
 
 export type RepositoryCiGateStatus = "disabled" | "open" | "closed" | "degraded"
-
-const FAILURE_CONCLUSIONS = new Set([
-  "failure",
-  "timed_out",
-  "action_required",
-  "failed",
-  "partiallysucceeded",
-])
-
-const SUCCESS_CONCLUSIONS = new Set(["success", "succeeded"])
 
 export const ciGateObservationErrorMessage = (error: unknown): string => {
   const formatted = formatUserFacingError(error, "CI Gate observation failed")
@@ -56,39 +47,6 @@ const isPermissionError = (error: unknown): boolean => {
       record.message.includes("API/pipeline read required") ||
       record.message.includes("Build read required"))
   )
-}
-
-const NON_DECISIVE_STATUSES = new Set([
-  "canceled",
-  "cancelled",
-  "skipped",
-  "manual",
-])
-
-const classifyRun = (
-  run: CiGateObservedRun,
-): "failure" | "success" | "pending" | "non_decisive" => {
-  const status = (run.rawStatus ?? "").trim().toLowerCase()
-  const conclusion = (run.rawConclusion ?? "").trim().toLowerCase()
-  if (status === "completed") {
-    if (conclusion !== "" && FAILURE_CONCLUSIONS.has(conclusion)) {
-      return "failure"
-    }
-    if (conclusion !== "" && SUCCESS_CONCLUSIONS.has(conclusion)) {
-      return "success"
-    }
-    return "non_decisive"
-  }
-  if (status === "failed" || status === "failure") {
-    return "failure"
-  }
-  if (status === "success" || SUCCESS_CONCLUSIONS.has(conclusion)) {
-    return "success"
-  }
-  if (NON_DECISIVE_STATUSES.has(status)) {
-    return "non_decisive"
-  }
-  return "pending"
 }
 
 const runIdFromIdentity = (runIdentity: string): string => {
@@ -120,19 +78,28 @@ const newlyObservedRuns = (
   return next
 }
 
-const reduceNewlyObserved = (runs: readonly CiGateObservedRun[]) => {
+const reduceObservedRuns = (
+  runs: readonly CiGateObservedRun[],
+  previousLatchIdentity: string | null,
+) => {
   let latestDecisive: {
     readonly kind: "failure" | "success"
     readonly run: CiGateObservedRun
   } | null = null
   let olderFailure: CiGateObservedRun | null = null
+  let latchedRunStillNewerThanSuccess = false
   for (const run of runs) {
-    const kind = classifyRun(run)
-    if (kind !== "failure" && kind !== "success") {
-      continue
-    }
+    const kind = classifyCiGateObservedRun(run)
+    const isPreviousLatch =
+      previousLatchIdentity !== null &&
+      isSameObservedRun(run.runIdentity, previousLatchIdentity)
     if (latestDecisive === null) {
-      latestDecisive = { kind, run }
+      if (isPreviousLatch && kind !== "success") {
+        latchedRunStillNewerThanSuccess = true
+      }
+      if (kind === "failure" || kind === "success") {
+        latestDecisive = { kind, run }
+      }
       continue
     }
     if (
@@ -143,7 +110,7 @@ const reduceNewlyObserved = (runs: readonly CiGateObservedRun[]) => {
       olderFailure = run
     }
   }
-  return { latestDecisive, olderFailure }
+  return { latestDecisive, olderFailure, latchedRunStillNewerThanSuccess }
 }
 
 const labelsFor = (
@@ -247,8 +214,14 @@ const applyObservedRuns = (input: {
   const lastSeen = input.ignorePreviousLatch
     ? null
     : (input.previous?.lastRunIdentity ?? null)
+  const previousLatchIdentity = input.ignorePreviousLatch
+    ? null
+    : input.previous?.failureLatched === true
+      ? input.previous.latchedRunIdentity
+      : null
   const fresh = newlyObservedRuns(input.runs, lastSeen)
-  const reduced = reduceNewlyObserved(fresh)
+  const reducedFresh = reduceObservedRuns(fresh, previousLatchIdentity)
+  const reduced = reduceObservedRuns(input.runs, previousLatchIdentity)
   const latest = input.runs[0]
   let failureLatched = input.ignorePreviousLatch
     ? false
@@ -264,15 +237,24 @@ const applyObservedRuns = (input: {
     latchedRunIdentity = reduced.latestDecisive.run.runIdentity
     latchedRunHtmlUrl = reduced.latestDecisive.run.htmlUrl
   } else if (reduced.latestDecisive?.kind === "success") {
-    failureLatched = false
-    latchedRunIdentity = null
-    latchedRunHtmlUrl = null
+    const successClearsLatch =
+      previousLatchIdentity === null ||
+      isSameObservedRun(
+        reduced.latestDecisive.run.runIdentity,
+        previousLatchIdentity,
+      ) ||
+      !reduced.latchedRunStillNewerThanSuccess
+    if (successClearsLatch) {
+      failureLatched = false
+      latchedRunIdentity = null
+      latchedRunHtmlUrl = null
+    }
   }
   const sameObservationResolvedFailure =
     !input.ignorePreviousLatch &&
     !(input.previous?.failureLatched ?? false) &&
-    reduced.latestDecisive?.kind === "success"
-      ? reduced.olderFailure
+    reducedFresh.latestDecisive?.kind === "success"
+      ? reducedFresh.olderFailure
       : null
   const previousRun = input.ignorePreviousLatch ? undefined : input.previous
   return {

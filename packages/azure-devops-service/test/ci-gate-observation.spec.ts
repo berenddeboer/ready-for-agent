@@ -400,6 +400,135 @@ describe("Azure DevOps CI Gate observation", () => {
     expect(definition.runs).toHaveLength(51)
   })
 
+  test("returns a qualifying success behind a saved pending bookmark", async () => {
+    const service = makeAzureDevOpsServiceFromToken("token", (async (input) => {
+      const url = new URL(String(input))
+      if (isRepositoryMetaUrl(url)) {
+        return json({
+          id: REPOSITORY_ID,
+          defaultBranch: "refs/heads/main",
+        })
+      }
+      if (isDefinitionUrl(url)) {
+        return json(definitionPayload({}))
+      }
+      if (!isBuildsUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      return json({
+        value: [
+          buildPayload({
+            id: 300,
+            reason: "individualCI",
+            status: "notStarted",
+            result: null,
+          }),
+          buildPayload({
+            id: 250,
+            reason: "pullRequest",
+            status: "completed",
+            result: "succeeded",
+          }),
+          buildPayload({
+            id: 200,
+            reason: "individualCI",
+            status: "completed",
+            result: "succeeded",
+          }),
+          buildPayload({
+            id: 100,
+            reason: "individualCI",
+            status: "completed",
+            result: "failed",
+          }),
+        ],
+      })
+    }) as typeof fetch)
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["12"],
+        lastRunIdentities: { "12": "300:20260907.300" },
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs.map((run) => run.runIdentity)).toEqual([
+      "300:20260907.300",
+      "200:20260907.200",
+    ])
+  })
+
+  test("pages past a pending bookmark to a qualifying success on a later API page", async () => {
+    const requestedTokens: Array<string | null> = []
+    const pageOne = Array.from({ length: 100 }, (_, index) =>
+      buildPayload({
+        id: 2000 - index,
+        reason: "individualCI",
+        status: index === 0 ? "notStarted" : "inProgress",
+        result: null,
+      }),
+    )
+    const pageTwo = [
+      buildPayload({
+        id: 1900,
+        reason: "individualCI",
+        status: "completed",
+        result: "succeeded",
+      }),
+      buildPayload({
+        id: 1899,
+        reason: "individualCI",
+        status: "completed",
+        result: "failed",
+      }),
+    ]
+    const service = makeAzureDevOpsServiceFromToken("token", (async (input) => {
+      const url = new URL(String(input))
+      if (isRepositoryMetaUrl(url)) {
+        return json({
+          id: REPOSITORY_ID,
+          defaultBranch: "refs/heads/main",
+        })
+      }
+      if (isDefinitionUrl(url)) {
+        return json(definitionPayload({}))
+      }
+      if (!isBuildsUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      requestedTokens.push(url.searchParams.get("continuationToken"))
+      if (url.searchParams.get("continuationToken") === null) {
+        return json({ value: pageOne }, { continuationToken: "page-2" })
+      }
+      if (url.searchParams.get("continuationToken") === "page-2") {
+        return json({ value: pageTwo })
+      }
+      throw new Error(`unexpected extra page ${url.search}`)
+    }) as typeof fetch)
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["12"],
+        lastRunIdentities: { "12": "2000:20260907.2000" },
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(requestedTokens).toEqual([null, "page-2"])
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs[0]?.runIdentity).toBe("2000:20260907.2000")
+    expect(definition.runs.at(-1)?.runIdentity).toBe("1900:20260907.1900")
+    expect(
+      definition.runs.some((run) => run.runIdentity === "1899:20260907.1899"),
+    ).toBe(false)
+  })
+
   test("marks deleted, disabled, and paused definitions unavailable without dropping others", async () => {
     const service = makeAzureDevOpsServiceFromToken("token", (async (input) => {
       const url = new URL(String(input))

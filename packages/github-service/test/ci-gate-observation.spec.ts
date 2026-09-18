@@ -253,6 +253,144 @@ describe("GitHub CI Gate observation", () => {
     expect(definition.runs).toHaveLength(51)
   })
 
+  it("returns a qualifying success behind a saved pending bookmark", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = new URL(String(input))
+      if (isRepoUrl(url)) {
+        return jsonResponse(repoPayload)
+      }
+      if (!isWorkflowRunsUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      expect(url.searchParams.get("branch")).toBe("main")
+      expect(url.searchParams.get("exclude_pull_requests")).toBe("true")
+      return jsonResponse({
+        total_count: 4,
+        workflow_runs: [
+          workflowRunPayload({
+            id: 300,
+            event: "push",
+            status: "queued",
+            conclusion: null,
+            createdAt: "2026-09-18T08:27:35Z",
+          }),
+          workflowRunPayload({
+            id: 250,
+            event: "push",
+            status: "completed",
+            conclusion: "success",
+            headBranch: "feature",
+            createdAt: "2026-09-18T07:00:00Z",
+          }),
+          workflowRunPayload({
+            id: 240,
+            event: "pull_request",
+            status: "completed",
+            conclusion: "success",
+            createdAt: "2026-09-18T06:50:00Z",
+          }),
+          workflowRunPayload({
+            id: 200,
+            event: "push",
+            status: "completed",
+            conclusion: "success",
+            createdAt: "2026-09-18T06:49:00Z",
+          }),
+          workflowRunPayload({
+            id: 100,
+            event: "push",
+            status: "completed",
+            conclusion: "failure",
+            createdAt: "2026-09-18T05:32:20Z",
+          }),
+        ],
+      })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["161335"],
+        lastRunIdentities: { "161335": "300:1" },
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs.map((run) => run.runIdentity)).toEqual([
+      "300:1",
+      "200:1",
+    ])
+    expect(definition.runs.some((run) => run.headRef === "feature")).toBe(false)
+    expect(definition.runs.some((run) => run.event === "pull_request")).toBe(
+      false,
+    )
+  })
+
+  it("pages past a pending bookmark to a qualifying success on a later API page", async () => {
+    const requestedPages: string[] = []
+    const pageOne = Array.from({ length: 100 }, (_, index) =>
+      workflowRunPayload({
+        id: 2000 - index,
+        event: "push",
+        status: index === 0 ? "queued" : "in_progress",
+        conclusion: null,
+      }),
+    )
+    const pageTwo = [
+      workflowRunPayload({
+        id: 1900,
+        event: "push",
+        status: "completed",
+        conclusion: "success",
+      }),
+      workflowRunPayload({
+        id: 1899,
+        event: "push",
+        status: "completed",
+        conclusion: "failure",
+      }),
+    ]
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = new URL(String(input))
+      if (isRepoUrl(url)) {
+        return jsonResponse(repoPayload)
+      }
+      if (!isWorkflowRunsUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      const page = url.searchParams.get("page") ?? "1"
+      requestedPages.push(page)
+      if (page === "1") {
+        return jsonResponse({ total_count: 102, workflow_runs: pageOne })
+      }
+      if (page === "2") {
+        return jsonResponse({ total_count: 102, workflow_runs: pageTwo })
+      }
+      throw new Error(`unexpected extra page ${page}`)
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["161335"],
+        lastRunIdentities: { "161335": "2000:1" },
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(requestedPages).toEqual(["1", "2"])
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs[0]?.runIdentity).toBe("2000:1")
+    expect(definition.runs.at(-1)?.runIdentity).toBe("1900:1")
+    expect(definition.runs.at(-1)?.rawConclusion).toBe("success")
+    expect(definition.runs.some((run) => run.runIdentity === "1899:1")).toBe(
+      false,
+    )
+  })
+
   it("stops paging at the latest attempt of the last-seen run", async () => {
     const requestedPages: string[] = []
     const pageOne = Array.from({ length: 100 }, (_, index) =>

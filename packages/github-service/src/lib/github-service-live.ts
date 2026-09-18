@@ -31,6 +31,7 @@ import {
   type ReadyLabeledIssue,
   type TerminalPrStatusCheck,
   extractErrorCode,
+  isDecisiveCiGateObservedRun,
 } from "@ready-for-agent/forge-contract"
 import {
   type FieldsSelection,
@@ -3532,6 +3533,7 @@ const makeObserveCiGate =
       const runs: CiGateObservedRun[] = []
       let unavailable: CiGateDefinitionObservation | null = null
       let reachedLastSeen = false
+      let collectedDecisiveAfterLastSeen = false
       for (let page = 1; ; page += 1) {
         const url = new URL(
           `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/workflows/${String(workflowId)}/runs`,
@@ -3588,12 +3590,22 @@ const makeObserveCiGate =
             isSameObservedRun(mapped.runIdentity, lastSeen)
           ) {
             reachedLastSeen = true
+            if (isDecisiveCiGateObservedRun(mapped)) {
+              collectedDecisiveAfterLastSeen = true
+              break
+            }
+            continue
+          }
+          if (reachedLastSeen && isDecisiveCiGateObservedRun(mapped)) {
+            collectedDecisiveAfterLastSeen = true
             break
           }
         }
         // First observation (no last-seen run) uses one official API page.
+        // An unfinished last-seen run is not a stable cursor: keep paging
+        // until a decisive older result is included.
         if (
-          reachedLastSeen ||
+          collectedDecisiveAfterLastSeen ||
           lastSeen === null ||
           workflowRuns.length < PAGE_SIZE
         ) {
