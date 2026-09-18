@@ -13,6 +13,7 @@ import {
   type RunWithSecretsInput,
   keymaxxerError,
 } from "@ready-for-agent/keymaxxer-service"
+import { encodeArgument } from "../src/server/forge-helper-schemas.js"
 import { keymaxxerGitLabLayer } from "../src/server/keymaxxer-gitlab-layer.js"
 
 const platformLayer = BunChildProcessSpawner.layer.pipe(
@@ -900,7 +901,27 @@ describe("Keymaxxer-backed GitLab layer", () => {
             exitCode: 0,
             stdout: JSON.stringify({
               defaultBranch: "main",
-              observations: [{ identity: "42", kind: "observed", runs: [] }],
+              observations: [
+                {
+                  identity: "42",
+                  kind: "observed",
+                  runs: [
+                    {
+                      runIdentity: "47:12",
+                      htmlUrl:
+                        "https://git.drupalcode.org/project/oauth_client/-/pipelines/47",
+                      headSha: "abc123",
+                      headRef: "refs/heads/main",
+                      event: "push",
+                      createdAt: "2026-07-20T10:00:00.000Z",
+                      updatedAt: null,
+                      startedAt: null,
+                      rawStatus: "completed",
+                      rawConclusion: "success",
+                    },
+                  ],
+                },
+              ],
             }),
             stderr: "",
           })
@@ -916,17 +937,221 @@ describe("Keymaxxer-backed GitLab layer", () => {
           lastRunIdentities: { "42": "47:12" },
         })
       }).pipe(Effect.provide(layer))
-      expect(observation.defaultBranch).toBe("main")
+      expect(observation).toEqual({
+        defaultBranch: "main",
+        observations: [
+          {
+            identity: "42",
+            kind: "observed",
+            runs: [
+              {
+                runIdentity: "47:12",
+                htmlUrl:
+                  "https://git.drupalcode.org/project/oauth_client/-/pipelines/47",
+                headSha: "abc123",
+                headRef: "refs/heads/main",
+                event: "push",
+                createdAt: new Date("2026-07-20T10:00:00.000Z"),
+                updatedAt: null,
+                startedAt: null,
+                rawStatus: "completed",
+                rawConclusion: "success",
+              },
+            ],
+          },
+        ],
+      })
       expect(runs[0]?.command).toContain("observe-ci-gate")
       expect(runs[0]?.command).toContain(
-        Buffer.from(
+        encodeArgument(
           JSON.stringify({
             definitionIdentities: ["42"],
             lastRunIdentities: { "42": "47:12" },
           }),
-          "utf8",
-        ).toString("base64url"),
+        ),
       )
     }),
+  )
+
+  it.effect("lists CI Gate Definitions through the vault secret", () =>
+    Effect.gen(function* () {
+      const runs: RunWithSecretsInput[] = []
+      const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+        initialize: Effect.void,
+        findSecret: () => Effect.succeed("GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"),
+        findSecrets: () => Effect.die("not used"),
+        hasSecret: () => Effect.die("not used"),
+        addSecret: () => Effect.die("not used"),
+        runWithSecrets: (input) => {
+          runs.push(input)
+          return Effect.succeed({
+            exitCode: 0,
+            stdout: JSON.stringify([
+              {
+                identity: "42",
+                displayLabel: "Project pipeline",
+                kind: "project-pipeline",
+                diagnosticMetadata: ".gitlab-ci.yml",
+              },
+            ]),
+            stderr: "",
+          })
+        },
+      })
+      const layer = keymaxxerGitLabLayer({
+        workspaceRoot: "/workspace",
+      }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
+      const catalog = yield* Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        return yield* gitlab.listCiGateCatalog(repository)
+      }).pipe(Effect.provide(layer))
+      expect(catalog).toEqual([
+        {
+          identity: "42",
+          displayLabel: "Project pipeline",
+          kind: "project-pipeline",
+          diagnosticMetadata: ".gitlab-ci.yml",
+        },
+      ])
+      expect(runs[0]?.command).toContain("list-ci-gate-catalog")
+      expect(runs[0]?.secrets).toEqual(["GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"])
+    }),
+  )
+
+  it.effect(
+    "CI Gate and PR Status Check operations fall through to ambient when the vault misses",
+    () =>
+      Effect.gen(function* () {
+        const runs: RunWithSecretsInput[] = []
+        const ambient = { catalog: 0, observe: 0, checks: 0 }
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed(null),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) => {
+            runs.push(input)
+            return Effect.succeed({ exitCode: 0, stdout: "[]", stderr: "" })
+          },
+        })
+        const layer = keymaxxerGitLabLayer({
+          workspaceRoot: "/workspace",
+          environment: { GITLAB_TOKEN: "ambient-token" },
+          makeService: () => ({
+            verifyProject: (candidate) => Effect.succeed(candidate),
+            getAuthenticatedUserLogin: () => Effect.succeed("operator"),
+            listReadyIssues: () => Effect.succeed([]),
+            hasCredentials: () => Effect.succeed(true),
+            hasAmbientCredentials: () => Effect.succeed(true),
+            ...gitlabLifecycleStub,
+            listCiGateCatalog: () => {
+              ambient.catalog += 1
+              return Effect.succeed([
+                {
+                  identity: "ambient-def",
+                  displayLabel: "Ambient pipeline",
+                  kind: "project-pipeline",
+                  diagnosticMetadata: null,
+                },
+              ])
+            },
+            observeCiGate: () => {
+              ambient.observe += 1
+              return Effect.succeed({
+                defaultBranch: "ambient-main",
+                observations: [],
+              })
+            },
+            getPullRequestCheckStatus: () => {
+              ambient.checks += 1
+              return Effect.succeed({
+                _tag: "succeeded" as const,
+                terminalChecks: [],
+                mergeability: "mergeable" as const,
+                baseRefName: "main",
+                headPushedAt: null,
+                headSha: "ambient-head",
+                createdAt: null,
+                isDraft: null,
+              })
+            },
+          }),
+        }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
+
+        const result = yield* Effect.gen(function* () {
+          const gitlab = yield* GitLabService
+          const catalog = yield* gitlab.listCiGateCatalog(repository)
+          const observation = yield* gitlab.observeCiGate(repository, {
+            definitionIdentities: ["ambient-def"],
+            lastRunIdentities: {},
+          })
+          const status = yield* gitlab.getPullRequestCheckStatus(
+            repository,
+            "rfa/project-oauth-client/42/wi-test",
+          )
+          return { catalog, observation, status }
+        }).pipe(Effect.provide(layer))
+
+        expect(runs).toHaveLength(0)
+        expect(ambient).toEqual({ catalog: 1, observe: 1, checks: 1 })
+        expect(result.catalog[0]?.identity).toBe("ambient-def")
+        expect(result.observation.defaultBranch).toBe("ambient-main")
+        expect(result.status.headSha).toBe("ambient-head")
+      }),
+  )
+
+  it.effect(
+    "propagates helper decode errors for CI Gate catalog, observation, and PR Status Checks",
+    () =>
+      Effect.gen(function* () {
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.succeed({
+              exitCode: 0,
+              stdout: "not-json",
+              stderr: "",
+            }),
+        })
+        const layer = keymaxxerGitLabLayer({
+          workspaceRoot: "/workspace",
+          environment: { GITLAB_TOKEN: "must-not-fallback" },
+        }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
+
+        const errors = yield* Effect.gen(function* () {
+          const gitlab = yield* GitLabService
+          return {
+            catalog: yield* Effect.flip(gitlab.listCiGateCatalog(repository)),
+            observation: yield* Effect.flip(
+              gitlab.observeCiGate(repository, {
+                definitionIdentities: ["42"],
+                lastRunIdentities: {},
+              }),
+            ),
+            checks: yield* Effect.flip(
+              gitlab.getPullRequestCheckStatus(
+                repository,
+                "rfa/project-oauth-client/42/wi-test",
+              ),
+            ),
+          }
+        }).pipe(Effect.provide(layer))
+
+        expect(errors.catalog).toBeInstanceOf(GitLabRequestError)
+        expect(errors.catalog.message).toContain("decode CI Gate catalog")
+        expect(errors.observation).toBeInstanceOf(GitLabRequestError)
+        expect(errors.observation.message).toContain(
+          "decode CI Gate observation",
+        )
+        expect(errors.checks).toBeInstanceOf(GitLabRequestError)
+        expect(errors.checks.message).toContain(
+          "decode pull request check status",
+        )
+      }),
   )
 })

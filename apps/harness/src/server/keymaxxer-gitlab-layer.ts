@@ -16,17 +16,15 @@ import {
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { ambientGitLabLayer } from "./ambient-gitlab-layer.js"
 import {
-  SerializedCiGateCatalog,
-  SerializedCiGateObservation,
   SerializedMergePullRequestResult,
   SerializedPrStatusCheckDiagnostics,
-  SerializedPullRequestCheckStatus,
   SerializedPullRequestLifecycleStatus,
   encodeArgument,
   encodedRepositoryArguments,
   makeRequestError,
   parseSerializedIssues,
 } from "./forge-helper-schemas.js"
+import { keymaxxerCiGateAndPrCheckOperations } from "./keymaxxer-ci-pr-check-operations.js"
 
 type GitLabServiceError = GitLabProjectUnavailableError | GitLabRequestError
 
@@ -297,6 +295,12 @@ export const keymaxxerGitLabLayer = (options: {
           return yield* whenAmbient(ambient)
         })
 
+      const ciPrChecks = keymaxxerCiGateAndPrCheckOperations({
+        callHelper,
+        withVaultOrAmbient,
+        requestError,
+      })
+
       const service: GitLabServiceShape = {
         verifyProject: Effect.fn("KeymaxxerGitLab.verifyProject")(
           (repository) =>
@@ -396,51 +400,10 @@ export const keymaxxerGitLabLayer = (options: {
             ),
         ),
         listCiGateCatalog: Effect.fn("KeymaxxerGitLab.listCiGateCatalog")(
-          (repository) =>
-            withVaultOrAmbient(
-              repository,
-              (tokenName) =>
-                callHelper({
-                  operation: "list-ci-gate-catalog",
-                  repository,
-                  tokenName,
-                  describe: "list CI Gate Definitions",
-                  decode: decodeJson(
-                    SerializedCiGateCatalog,
-                    repository,
-                    "decode CI Gate catalog",
-                  ),
-                }),
-              (ambientService) => ambientService.listCiGateCatalog(repository),
-            ),
+          ciPrChecks.listCiGateCatalog,
         ),
         observeCiGate: Effect.fn("KeymaxxerGitLab.observeCiGate")(
-          (repository, input) =>
-            withVaultOrAmbient(
-              repository,
-              (tokenName) =>
-                callHelper({
-                  operation: "observe-ci-gate",
-                  repository,
-                  tokenName,
-                  describe: "observe CI Gate Definitions",
-                  args: [
-                    encodeArgument(
-                      JSON.stringify({
-                        definitionIdentities: input.definitionIdentities,
-                        lastRunIdentities: input.lastRunIdentities,
-                      }),
-                    ),
-                  ],
-                  decode: decodeJson(
-                    SerializedCiGateObservation,
-                    repository,
-                    "decode CI Gate observation",
-                  ),
-                }),
-              (ambientService) =>
-                ambientService.observeCiGate(repository, input),
-            ),
+          ciPrChecks.observeCiGate,
         ),
         hasCredentials: Effect.fn("KeymaxxerGitLab.hasCredentials")(
           (repository) =>
@@ -592,26 +555,7 @@ export const keymaxxerGitLabLayer = (options: {
         ),
         getPullRequestCheckStatus: Effect.fn(
           "KeymaxxerGitLab.getPullRequestCheckStatus",
-        )((repository, headRefName) =>
-          withVaultOrAmbient(
-            repository,
-            (tokenName) =>
-              callHelper({
-                operation: "get-pr-check-status",
-                repository,
-                tokenName,
-                describe: "get pull request check status",
-                args: [encodeArgument(headRefName)],
-                decode: decodeJson(
-                  SerializedPullRequestCheckStatus,
-                  repository,
-                  "decode pull request check status",
-                ),
-              }),
-            (ambientService) =>
-              ambientService.getPullRequestCheckStatus(repository, headRefName),
-          ),
-        ),
+        )(ciPrChecks.getPullRequestCheckStatus),
         getPrStatusCheckDiagnostics: Effect.fn(
           "KeymaxxerGitLab.getPrStatusCheckDiagnostics",
         )((repository, checks, options = {}) =>
