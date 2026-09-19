@@ -78,6 +78,11 @@ Feature: Route Repository settings by Repository ID
     Then the Repository settings dialog is hidden
     And the browser location is the repos path
 
+  Scenario: Failed Save preserves responses for batched background queries
+    When I open the Repos page
+    And Repository settings Save is forced to fail
+    Then a batched Repository settings Save fails without failing background queries
+
   Scenario: Direct repository settings navigation shows the dialog over Repos
     When I open the repository settings path directly
     Then the Repository settings dialog is visible

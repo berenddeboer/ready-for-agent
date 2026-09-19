@@ -31,7 +31,9 @@ import { describe, expect, it, setDefaultTimeout } from "bun:test"
 setDefaultTimeout(30_000)
 
 const PlatformLayer = BunServices.layer
-const REVIEW_INTERVAL = Duration.millis(120)
+// Leave room for real systemd/cgroup setup while preserving the timing ratios.
+const fixtureMillis = (ms: number) => Duration.millis(ms * 10)
+const REVIEW_INTERVAL = fixtureMillis(120)
 
 const successfulSteps: LifecycleStepsShape = {
   createWorktree: () =>
@@ -337,7 +339,7 @@ describe("Review no-progress timeout", () => {
       runWithSteps(
         reviewSteps(root, () =>
           Effect.gen(function* () {
-            yield* Effect.sleep(Duration.millis(250))
+            yield* Effect.sleep(fixtureMillis(250))
             return {
               sessionId: "ses_implement_session",
               assistantText: "still looking around with tools",
@@ -374,7 +376,7 @@ describe("Review no-progress timeout", () => {
           Effect.gen(function* () {
             if (isReviewingTurn(input.prompt)) {
               reviewingTurns += 1
-              yield* Effect.sleep(Duration.millis(80))
+              yield* Effect.sleep(fixtureMillis(80))
               return {
                 sessionId: "ses_implement_session",
                 assistantText:
@@ -413,7 +415,7 @@ describe("Review no-progress timeout", () => {
         reviewSteps(root, () =>
           Effect.gen(function* () {
             turn += 1
-            yield* Effect.sleep(Duration.millis(70))
+            yield* Effect.sleep(fixtureMillis(70))
             return {
               sessionId: "ses_implement_session",
               assistantText:
@@ -470,7 +472,7 @@ describe("Review no-progress timeout", () => {
                 assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
               }
             }
-            yield* Effect.sleep(Duration.millis(250))
+            yield* Effect.sleep(fixtureMillis(250))
             return {
               sessionId: "ses_implement_session",
               assistantText: "still fixing hooks",
@@ -505,7 +507,7 @@ describe("Review no-progress timeout", () => {
           Effect.gen(function* () {
             if (isReviewingTurn(input.prompt)) {
               reviewingTurns += 1
-              yield* Effect.sleep(Duration.millis(80))
+              yield* Effect.sleep(fixtureMillis(80))
               return {
                 sessionId: "ses_implement_session",
                 assistantText:
@@ -542,14 +544,14 @@ describe("Review no-progress timeout", () => {
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
             if (isReviewingTurn(input.prompt)) {
-              yield* simulateAdmissionWait(sql, Duration.millis(200))
+              yield* simulateAdmissionWait(sql, fixtureMillis(200))
               return {
                 sessionId: "ses_implement_session",
                 assistantText:
                   "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
               }
             }
-            yield* simulateAdmissionWait(sql, Duration.millis(200))
+            yield* simulateAdmissionWait(sql, fixtureMillis(200))
             return {
               sessionId: "ses_implement_session",
               assistantText:
@@ -576,14 +578,14 @@ describe("Review no-progress timeout", () => {
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
             if (isReviewingTurn(input.prompt)) {
-              yield* simulateAdmissionWait(sql, Duration.millis(200))
+              yield* simulateAdmissionWait(sql, fixtureMillis(200))
               return {
                 sessionId: "ses_implement_session",
                 assistantText:
                   "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
               }
             }
-            yield* Effect.sleep(Duration.millis(200))
+            yield* Effect.sleep(fixtureMillis(200))
             return {
               sessionId: "ses_implement_session",
               assistantText:
@@ -658,7 +660,7 @@ describe("Review no-progress timeout", () => {
           Effect.gen(function* () {
             attempts += 1
             if (attempts === 1) {
-              yield* Effect.sleep(Duration.millis(250))
+              yield* Effect.sleep(fixtureMillis(250))
               return {
                 sessionId: "ses_implement_session",
                 assistantText: "no verdict yet",
@@ -722,7 +724,7 @@ describe("Review no-progress timeout", () => {
                  started_at = ?,
                  updated_at = ?
              WHERE id = ?`,
-            [now - 1_000, now, stepRunId],
+            [now - 10_000, now, stepRunId],
           )
           yield* sql.unsafe(
             `UPDATE job_queue
@@ -812,7 +814,7 @@ describe("Review no-progress timeout", () => {
           const stepRunId = before.stepRuns.at(-1)!.id
           const jobId = before.stepRuns.at(-1)!.queueJobId!
           const now = Date.now()
-          const checkpointAt = now - 1_000
+          const checkpointAt = now - 10_000
           yield* sql.unsafe(
             `UPDATE step_run
              SET status = 'running',

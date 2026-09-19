@@ -87,12 +87,12 @@ jobs:
       - uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
 
       - name: Quality gates
-        run: bun nx affected -t lint knip test typecheck check-usage
+        run: bash scripts/ci-owned-execution.sh bun nx affected -t lint knip test typecheck check-usage
 
       # Production SSE idle-timeout (~13s) is excluded from harness:test so the
       # default suite can run with Bun --parallel. Keep the real heartbeat gate.
       - name: Harness slow tests
-        run: bunx nx run harness:slow-test
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:slow-test
 
   # Live-Forge e2e (issue #999): add/refresh, Intake, catalog-only fixture path.
   # Parallel with UI-history. Same-repo PRs fail closed without the vault
@@ -166,7 +166,7 @@ jobs:
           E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
           KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
           KEYMAXXER_APPROVE: deny
-        run: bunx nx run harness:e2e-live-forge
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:e2e-live-forge
 
       - name: Upload Playwright diagnostics (live-Forge)
         if: failure() && steps.live-e2e-live-forge.outcome == 'failure'
@@ -207,11 +207,11 @@ jobs:
 
       # Dev-path GraphQL smoke (Bun + Vite SSR); no fixture vault required.
       - name: Harness dev smoke
-        run: bunx nx run harness:smoke
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:smoke
 
       - name: Live Harness e2e (uninitialized Keymaxxer)
         id: live-e2e-no-vault
-        run: bunx nx run harness:e2e-no-vault
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:e2e-no-vault
 
       - name: Restore/install Playwright Chromium
         uses: ./.github/actions/playwright-chromium
@@ -220,7 +220,7 @@ jobs:
 
       - name: Live Harness e2e (no backend agents)
         id: live-e2e-no-backend
-        run: bunx nx run harness:e2e-no-backend
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:e2e-no-backend
 
       - name: Upload Playwright diagnostics (no backend)
         if: failure() && steps.live-e2e-no-backend.outcome == 'failure'
@@ -252,7 +252,7 @@ jobs:
 
       - name: UI-history Harness e2e
         id: live-e2e-ui-history
-        run: bunx nx run harness:e2e-ui-history
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:e2e-ui-history
 
       - name: Upload Playwright diagnostics (UI-history)
         if: failure() && steps.live-e2e-ui-history.outcome == 'failure'

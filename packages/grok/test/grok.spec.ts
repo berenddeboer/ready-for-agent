@@ -3,12 +3,14 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { PlatformError } from "effect/PlatformError"
 import { FAKE_ACP_ENV, fakeAcpAgentPath } from "@ready-for-agent/acp-client"
 import {
   AgentBackend,
   AgentBackendConfigError,
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
+  AgentBackendNotInstalledError,
   AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
   type OnSessionId,
@@ -48,6 +50,12 @@ const provide = (
       ? { forceKillAfter: options.forceKillAfter }
       : {}),
   }).pipe(Layer.provide(BunServices.layer))
+
+const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
+const orphanWorker = (pidFile: string, aliveFile: string) => {
+  const worker = `trap "" TERM; echo $$ > ${shellQuote(pidFile)}; while true; do touch ${shellQuote(aliveFile)}; sleep 0.05; done`
+  return `sh -c ${shellQuote(`setsid sh -c ${shellQuote(worker)} </dev/null >/dev/null 2>&1 &`)}`
+}
 
 const captureSessionScript = [
   'sid=""',
@@ -218,6 +226,36 @@ describe("Grok AgentBackend adapter", () => {
         }
       },
     )
+  })
+
+  it("preserves installation guidance when the ACP executable is missing", async () => {
+    await withExecutable("exit 0", async (binary) => {
+      await rm(binary)
+      const error = await Effect.runPromise(
+        continueTurn(binary).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(AgentBackendNotInstalledError)
+      if (!(error instanceof AgentBackendNotInstalledError))
+        throw new Error("Expected installation guidance")
+      expect(error.binary).toBe(binary)
+      expect(error.message).toContain("was not found on the Harness PATH")
+      expect(error.message).toContain("restart the Harness")
+    })
+  })
+
+  it("preserves permission errors when the ACP executable cannot run", async () => {
+    await withExecutable("exit 0", async (binary) => {
+      await chmod(binary, 0o600)
+      const error = await Effect.runPromise(
+        continueTurn(binary).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(PlatformError)
+      if (!(error instanceof PlatformError))
+        throw new Error("Expected executable permission failure")
+      expect(error.reason._tag).toBe("PermissionDenied")
+      expect(error.cause).toMatchObject({ code: "EACCES" })
+      expect(error.message).toContain(binary)
+    })
   })
 
   it("resumes exact session and can switch model/effort", async () => {
@@ -631,8 +669,8 @@ describe("Grok AgentBackend adapter", () => {
           expect(stillTouched).toBe(false)
         },
         [
-          `( while true; do touch ${JSON.stringify(childAlive)}; sleep 0.05; done ) &`,
-          `echo $! > ${JSON.stringify(grandPidFile)}`,
+          orphanWorker(grandPidFile, childAlive),
+          `while [ ! -s ${JSON.stringify(grandPidFile)} ]; do sleep 0.01; done`,
           `export ${FAKE_ACP_ENV.promptDelayMs}=30000`,
           `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
         ].join("\n"),
@@ -679,8 +717,8 @@ describe("Grok AgentBackend adapter", () => {
           expect(stillTouched).toBe(false)
         },
         [
-          `( while true; do touch ${JSON.stringify(childAlive)}; sleep 0.05; done ) &`,
-          `echo $! > ${JSON.stringify(grandPidFile)}`,
+          orphanWorker(grandPidFile, childAlive),
+          `while [ ! -s ${JSON.stringify(grandPidFile)} ]; do sleep 0.01; done`,
           `export ${FAKE_ACP_ENV.promptDelayMs}=30000`,
           `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
         ].join("\n"),

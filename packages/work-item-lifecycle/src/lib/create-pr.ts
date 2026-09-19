@@ -6,6 +6,7 @@ import {
   type ActiveAgentBackend,
   AgentBackend,
   agentBackendLabel,
+  spawnOwned,
 } from "@ready-for-agent/agent-backend"
 import {
   AZURE_DEVOPS_PAT_ENV_VAR,
@@ -66,6 +67,7 @@ import { repairFallback } from "./repair-fallback.js"
 import {
   SANITIZED_REPOSITORY_SHELL_PREFIX,
   repositoryProcessOptions,
+  runOwnedWithSecrets,
 } from "./repository-process-environment.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
@@ -166,7 +168,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
 
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwned(spawner, command)
         const [exitCode, stdout, stderr] = yield* Effect.all(
           [
             handle.exitCode,
@@ -424,22 +426,20 @@ const attemptAzureDevOpsHttpsPush = (
         shellQuote(refspec),
       ].join(" ")
 
-      const result = yield* keymaxxer
-        .runWithSecrets({
-          command,
-          cwd: worktreePath,
-          secrets: [tokenName],
-          timeoutMs: NATIVE_PUSH_TIMEOUT_MS,
-        })
-        .pipe(
-          Effect.catch((cause) =>
-            Effect.succeed({
-              exitCode: 1,
-              stdout: "",
-              stderr: `Keymaxxer runWithSecrets failed: ${errorMessage(cause)}`,
-            }),
-          ),
-        )
+      const result = yield* runOwnedWithSecrets(keymaxxer, {
+        command,
+        cwd: worktreePath,
+        secrets: [tokenName],
+        timeoutMs: NATIVE_PUSH_TIMEOUT_MS,
+      }).pipe(
+        Effect.catch((cause) =>
+          Effect.succeed({
+            exitCode: 1,
+            stdout: "",
+            stderr: `Keymaxxer runWithSecrets failed: ${errorMessage(cause)}`,
+          }),
+        ),
+      )
 
       if (result.exitCode !== 0) {
         const output = [result.stdout, result.stderr]
@@ -563,22 +563,20 @@ const attemptNativePush = (
       shellQuote(branch),
     ].join(" ")
 
-    const result = yield* keymaxxer
-      .runWithSecrets({
-        command,
-        cwd: worktreePath,
-        secrets: [tokenName],
-        timeoutMs: NATIVE_PUSH_TIMEOUT_MS,
-      })
-      .pipe(
-        Effect.catch((cause) =>
-          Effect.succeed({
-            exitCode: 1,
-            stdout: "",
-            stderr: `Keymaxxer runWithSecrets failed: ${errorMessage(cause)}`,
-          }),
-        ),
-      )
+    const result = yield* runOwnedWithSecrets(keymaxxer, {
+      command,
+      cwd: worktreePath,
+      secrets: [tokenName],
+      timeoutMs: NATIVE_PUSH_TIMEOUT_MS,
+    }).pipe(
+      Effect.catch((cause) =>
+        Effect.succeed({
+          exitCode: 1,
+          stdout: "",
+          stderr: `Keymaxxer runWithSecrets failed: ${errorMessage(cause)}`,
+        }),
+      ),
+    )
 
     if (result.exitCode !== 0) {
       const output = [result.stdout, result.stderr]
@@ -631,22 +629,20 @@ const attemptGitLabHttpsPush = (
         shellQuote(refspec),
       ].join(" ")
 
-      const result = yield* keymaxxer
-        .runWithSecrets({
-          command,
-          cwd: worktreePath,
-          secrets: [tokenName],
-          timeoutMs: NATIVE_PUSH_TIMEOUT_MS,
-        })
-        .pipe(
-          Effect.catch((cause) =>
-            Effect.succeed({
-              exitCode: 1,
-              stdout: "",
-              stderr: `Keymaxxer runWithSecrets failed: ${errorMessage(cause)}`,
-            }),
-          ),
-        )
+      const result = yield* runOwnedWithSecrets(keymaxxer, {
+        command,
+        cwd: worktreePath,
+        secrets: [tokenName],
+        timeoutMs: NATIVE_PUSH_TIMEOUT_MS,
+      }).pipe(
+        Effect.catch((cause) =>
+          Effect.succeed({
+            exitCode: 1,
+            stdout: "",
+            stderr: `Keymaxxer runWithSecrets failed: ${errorMessage(cause)}`,
+          }),
+        ),
+      )
 
       if (result.exitCode !== 0) {
         const output = [result.stdout, result.stderr]

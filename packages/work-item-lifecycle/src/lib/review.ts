@@ -6,6 +6,7 @@ import {
   AgentBackendStartupTimeoutError,
   agentBackendLabel,
   formatAgentBackendStartupTimeoutMessage,
+  spawnOwned,
 } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
@@ -477,7 +478,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
 
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwned(spawner, command)
         const [exitCode, stdout, stderr] = yield* Effect.all(
           [
             handle.exitCode,

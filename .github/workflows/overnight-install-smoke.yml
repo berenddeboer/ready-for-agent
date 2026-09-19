@@ -75,7 +75,7 @@ jobs:
         env:
           OVERNIGHT_INSTALL_DIAGNOSTICS_DIR: ${{ runner.temp }}/overnight-install-diagnostics
           OVERNIGHT_INSTALL_VERSION: ${{ github.event.inputs.version || 'latest' }}
-        run: bunx nx run ready-for-agent:overnight-published-install-smoke --args="--version=${OVERNIGHT_INSTALL_VERSION}"
+        run: bash scripts/ci-owned-execution.sh bunx nx run ready-for-agent:overnight-published-install-smoke --args="--version=${OVERNIGHT_INSTALL_VERSION}"
 
       - name: Upload overnight-install diagnostics
         if: failure() && steps.overnight.outcome == 'failure'

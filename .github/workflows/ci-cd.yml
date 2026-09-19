@@ -99,15 +99,15 @@ jobs:
       - name: Quality gates
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            bun nx run-many -t lint knip test typecheck check-usage
+            bash scripts/ci-owned-execution.sh bun nx run-many -t lint knip test typecheck check-usage
           else
-            bun nx affected -t lint knip test typecheck check-usage
+            bash scripts/ci-owned-execution.sh bun nx affected -t lint knip test typecheck check-usage
           fi
 
       # Production SSE idle-timeout (~13s) is excluded from harness:test so the
       # default suite can run with Bun --parallel. Keep the real heartbeat gate.
       - name: Harness slow tests
-        run: bunx nx run harness:slow-test
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:slow-test
 
       # Nx Cloud recommends fixes for failures to help you get CI green faster. Learn more: https://nx.dev/ci/features/self-healing-ci
       # - run: bun nx fix-ci
@@ -140,11 +140,11 @@ jobs:
 
       # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
       - name: Harness dev smoke
-        run: bunx nx run harness:smoke
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:smoke
 
       - name: Live Harness e2e (uninitialized Keymaxxer)
         id: live-e2e-no-vault
-        run: bunx nx run harness:e2e-no-vault
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:e2e-no-vault
 
       # Chromium once for both live suites.
       - name: Install Playwright Chromium
@@ -154,7 +154,7 @@ jobs:
       # Product default-backend / first-run without OpenCode (vault-free).
       - name: Live Harness e2e (no backend agents)
         id: live-e2e-no-backend
-        run: bunx nx run harness:e2e-no-backend
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:e2e-no-backend
 
       - name: Upload Playwright diagnostics (no backend)
         if: failure() && steps.live-e2e-no-backend.outcome == 'failure'
@@ -201,7 +201,7 @@ jobs:
           E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
           KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
           KEYMAXXER_APPROVE: deny
-        run: bunx nx run harness:e2e
+        run: bash scripts/ci-owned-execution.sh bunx nx run harness:e2e
 
       - name: Upload Playwright diagnostics
         if: failure() && steps.live-e2e.outcome == 'failure'
@@ -261,7 +261,7 @@ jobs:
         id: packed-install
         env:
           PACKED_INSTALL_DIAGNOSTICS_DIR: ${{ runner.temp }}/packed-install-diagnostics
-        run: bunx nx run ready-for-agent:packed-install-smoke
+        run: bash scripts/ci-owned-execution.sh bunx nx run ready-for-agent:packed-install-smoke
 
       - name: Upload packed-install diagnostics
         if: failure() && steps.packed-install.outcome == 'failure'
@@ -362,7 +362,7 @@ jobs:
         id: release-packed-install
         env:
           PACKED_INSTALL_DIAGNOSTICS_DIR: ${{ runner.temp }}/packed-install-diagnostics
-        run: bunx nx run ready-for-agent:packed-install-smoke --args=--skip-compile
+        run: bash scripts/ci-owned-execution.sh bunx nx run ready-for-agent:packed-install-smoke --args=--skip-compile
 
       - name: Upload release packed-install diagnostics
         if: failure() && steps.release-packed-install.outcome == 'failure'

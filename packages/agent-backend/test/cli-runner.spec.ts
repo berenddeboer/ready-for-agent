@@ -1,9 +1,9 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Deferred, Duration, Effect, Exit, Fiber } from "effect"
-import { systemError } from "effect/PlatformError"
+import { PlatformError, systemError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   AgentBackendExitError,
@@ -1490,13 +1490,91 @@ const eaccesPlatformError = systemError({
 const failingSpawner = (error: ReturnType<typeof systemError>) =>
   ChildProcessSpawner.make(() => Effect.fail(error))
 
+// Inject spawn failures only after executable preflight succeeds, independently
+// of which agent CLIs are installed on the test host.
+const spawnFailureBinary = process.execPath
+
 describe("runCliCapture spawn not-found", () => {
+  for (const searchPath of [false, true]) {
+    it(`preserves real executable permission errors via ${searchPath ? "PATH" : "absolute path"}`, async () => {
+      await withExecutable("exit 0", async (binary) => {
+        await chmod(binary, 0o600)
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              backend: TEST_BACKEND,
+              binary: searchPath ? "fake-cli" : binary,
+              args: [],
+              cwd: process.cwd(),
+              env: {
+                PATH: `${dirname(binary)}:${join(dirname(binary), "absent")}`,
+              },
+              timeout: Duration.seconds(2),
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toBeInstanceOf(PlatformError)
+        if (!(error instanceof PlatformError))
+          throw new Error("Expected executable permission failure")
+        expect(error.reason._tag).toBe("PermissionDenied")
+        expect(error.cause).toMatchObject({ code: "EACCES" })
+        expect(error.message).toContain(binary)
+      })
+    })
+  }
+
+  it("continues PATH search past a non-executable candidate", async () => {
+    await withExecutable("exit 99", async (denied) => {
+      await chmod(denied, 0o600)
+      await withExecutable("printf resolved", async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              backend: TEST_BACKEND,
+              binary: "fake-cli",
+              args: [],
+              cwd: process.cwd(),
+              env: { PATH: `${dirname(denied)}:${dirname(binary)}` },
+              timeout: Duration.seconds(2),
+            }),
+          ),
+        )
+        expect(result.stdout).toBe("resolved")
+      })
+    })
+  })
+
+  it("rejects an executable path that is a directory", async () => {
+    await withExecutable("exit 0", async (binary) => {
+      const error = await Effect.runPromise(
+        withSpawner((spawner) =>
+          runCliCapture({
+            spawner,
+            backend: TEST_BACKEND,
+            binary: dirname(binary),
+            args: [],
+            cwd: process.cwd(),
+            env: sanitizeInheritedEnvironment(),
+            timeout: Duration.seconds(2),
+          }).pipe(Effect.flip),
+        ),
+      )
+      expect(error).toBeInstanceOf(PlatformError)
+      if (!(error instanceof PlatformError))
+        throw new Error("Expected executable file-type failure")
+      expect(error.reason._tag).toBe("PermissionDenied")
+      expect(error.message).toContain("not a regular file")
+    })
+  })
+
   it("maps an ENOENT spawn failure to AgentBackendNotInstalledError", async () => {
     const error = await Effect.runPromise(
       runCliCapture({
         spawner: failingSpawner(enoentPlatformError),
         backend: TEST_BACKEND,
-        binary: "claude",
+        binary: spawnFailureBinary,
         args: [],
         cwd: process.cwd(),
         env: sanitizeInheritedEnvironment(),
@@ -1505,12 +1583,12 @@ describe("runCliCapture spawn not-found", () => {
     )
     expect(error).toBeInstanceOf(AgentBackendNotInstalledError)
     if (error instanceof AgentBackendNotInstalledError) {
-      expect(error.binary).toBe("claude")
+      expect(error.binary).toBe(spawnFailureBinary)
       expect(error.backend).toEqual(TEST_BACKEND)
       expect(error.message).toContain(
-        'Claude Code CLI "claude" was not found on the Harness PATH.',
+        `Claude Code CLI "${spawnFailureBinary}" was not found on the Harness PATH.`,
       )
-      expect(error.message).toContain("`command -v claude`")
+      expect(error.message).toContain(`\`command -v ${spawnFailureBinary}\``)
       expect(error.message).toContain("restart the Harness")
     }
   })
@@ -1520,7 +1598,7 @@ describe("runCliCapture spawn not-found", () => {
       runCliCapture({
         spawner: failingSpawner(eaccesPlatformError),
         backend: TEST_BACKEND,
-        binary: "claude",
+        binary: spawnFailureBinary,
         args: [],
         cwd: process.cwd(),
         env: sanitizeInheritedEnvironment(),
@@ -1528,7 +1606,7 @@ describe("runCliCapture spawn not-found", () => {
       }).pipe(Effect.flip),
     )
     expect(error).not.toBeInstanceOf(AgentBackendNotInstalledError)
-    expect((error as { _tag?: string })._tag).toBe("PlatformError")
+    expect(error).toBe(eaccesPlatformError)
   })
 
   it("leaves a missing cwd as PlatformError, not a missing CLI", async () => {
@@ -1562,7 +1640,7 @@ describe("runCliTurn spawn not-found", () => {
       runCliTurn({
         spawner: failingSpawner(enoentPlatformError),
         backend: TEST_BACKEND,
-        binary: "claude",
+        binary: spawnFailureBinary,
         args: [],
         cwd: process.cwd(),
         env: sanitizeInheritedEnvironment(),
@@ -1573,7 +1651,7 @@ describe("runCliTurn spawn not-found", () => {
     expect(error).toBeInstanceOf(AgentBackendNotInstalledError)
     if (error instanceof AgentBackendNotInstalledError) {
       expect(error.message).toContain(
-        'Claude Code CLI "claude" was not found on the Harness PATH.',
+        `Claude Code CLI "${spawnFailureBinary}" was not found on the Harness PATH.`,
       )
     }
   })

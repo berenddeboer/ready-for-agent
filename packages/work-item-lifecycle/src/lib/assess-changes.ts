@@ -1,6 +1,10 @@
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import {
+  AgentBackend,
+  agentBackendLabel,
+  spawnOwned,
+} from "@ready-for-agent/agent-backend"
 import {
   AssessChangesInvalidWorktreeContextError,
   AssessChangesOpenCodeError,
@@ -90,7 +94,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
 
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwned(spawner, command)
         const [exitCode, stdout, stderr] = yield* Effect.all(
           [
             handle.exitCode,

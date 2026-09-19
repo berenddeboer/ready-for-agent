@@ -1,7 +1,6 @@
 import { Clock, Duration, Effect, Fiber, Queue, Ref, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process"
-import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
 import {
   AgentBackendConfigError,
   AgentBackendNotInstalledError,
@@ -11,8 +10,8 @@ import {
   collectChildStderrTail,
   findSpawnNotFoundCode,
   formatAgentCliNotFoundRemediation,
-  killProcessTree,
   scrubProviderCredentialSecrets,
+  spawnOwned,
 } from "@ready-for-agent/agent-backend"
 import { projectAppServerModelList } from "./catalog.js"
 import { CODEX_APP_SERVER_DISCOVERY_FAILED_MESSAGE } from "./types.js"
@@ -181,15 +180,6 @@ const mapSpawnError = (
   })
 }
 
-const terminateCliTree = (
-  handle: ChildProcessHandle,
-  forceKillAfter: Duration.Input,
-): Effect.Effect<void> =>
-  killProcessTree(Number(handle.pid), { forceKillAfter }).pipe(
-    Effect.timeout(Duration.millis(Duration.toMillis(forceKillAfter) + 1_000)),
-    Effect.ignore,
-  )
-
 const nextCursorOf = (result: unknown): string | null => {
   if (!isRecord(result)) {
     return null
@@ -338,12 +328,11 @@ export const discoverAppServerModels = (input: {
 
     return yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* input.spawner
-          .spawn(command)
-          .pipe(Effect.mapError((error) => mapSpawnError(error, input)))
+        const handle = yield* spawnOwned(input.spawner, command).pipe(
+          Effect.mapError((error) => mapSpawnError(error, input)),
+        )
         yield* Effect.addFinalizer(() =>
-          terminateCliTree(handle, forceKillAfter).pipe(
-            Effect.andThen(Queue.shutdown(stdinQueue)),
+          Queue.shutdown(stdinQueue).pipe(
             Effect.andThen(Queue.shutdown(incoming)),
           ),
         )

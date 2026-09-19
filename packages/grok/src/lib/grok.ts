@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { Duration, Effect, FileSystem, Layer } from "effect"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   AcpClient,
   type AcpClientError,
@@ -23,9 +23,12 @@ import {
   DEFAULT_STARTUP_TIMEOUT,
   type InspectInput,
   type StartTurnInput,
+  acquireInvocation,
+  findSpawnNotFoundCode,
   formatAgentCliNotFoundRemediation,
-  killProcessTree,
+  invocationCommand,
   malformedOutput,
+  resolveInvocationExecutable,
   retrySilentKnownSessionStartup,
   runCliCapture,
   runCliTurn,
@@ -75,18 +78,22 @@ export const Grok = {
         const mapAcpError =
           (input: { readonly cwd: string; readonly sessionId: string }) =>
           (error: AcpClientError | AgentBackendError): AgentBackendError => {
-            if (error instanceof AcpSpawnError) {
-              if (error.message.includes("not found")) {
-                return new AgentBackendNotInstalledError({
-                  message: formatAgentCliNotFoundRemediation({
-                    backendLabel: GROK_BACKEND.label,
-                    binary,
-                  }),
-                  backend: GROK_BACKEND,
+            if (
+              findSpawnNotFoundCode(error) !== undefined ||
+              (error instanceof AcpSpawnError &&
+                error.message.includes("not found"))
+            ) {
+              return new AgentBackendNotInstalledError({
+                message: formatAgentCliNotFoundRemediation({
+                  backendLabel: GROK_BACKEND.label,
                   binary,
-                  cause: error,
-                })
-              }
+                }),
+                backend: GROK_BACKEND,
+                binary,
+                cause: error,
+              })
+            }
+            if (error instanceof AcpSpawnError) {
               return AgentBackendExitError.new({
                 exitCode: 1,
                 cwd: input.cwd,
@@ -301,25 +308,31 @@ export const Grok = {
               const runContinue = () =>
                 Effect.scoped(
                   Effect.gen(function* () {
-                    const connection = yield* acp.connect({
-                      command: binary,
-                      args: buildAcpContinueArgs({
+                    const resolvedBinary = yield* resolveInvocationExecutable(
+                      ChildProcess.make(binary, [], {
+                        cwd: input.cwd,
+                        env: environment,
+                        extendEnv: false,
+                      }),
+                    )
+                    const boundary = yield* acquireInvocation({
+                      cwd: input.cwd,
+                      forceKillAfter,
+                    })
+                    const command = invocationCommand(
+                      boundary.membership,
+                      resolvedBinary,
+                      buildAcpContinueArgs({
                         model: input.model,
                         thinkingLevel: input.thinkingLevel,
                       }),
+                    )
+                    const connection = yield* acp.connect({
+                      command: command.command,
+                      args: command.args,
                       cwd: input.cwd,
                       env: environment,
                     })
-                    yield* Effect.addFinalizer(() =>
-                      killProcessTree(connection.pid, { forceKillAfter }).pipe(
-                        Effect.timeout(
-                          Duration.millis(
-                            Duration.toMillis(forceKillAfter) + 1_000,
-                          ),
-                        ),
-                        Effect.ignore,
-                      ),
-                    )
                     const initialized = yield* connection.initialize().pipe(
                       Effect.timeoutOrElse({
                         duration: startupTimeout,

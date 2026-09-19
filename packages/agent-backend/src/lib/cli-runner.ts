@@ -20,7 +20,7 @@ import {
   AgentBackendTimeoutError,
   formatSilentAgentBackendExitMessage,
 } from "./errors.js"
-import { killProcessTree } from "./kill-process-tree.js"
+import { spawnOwned } from "./invocation-ownership.js"
 import { sanitizeAgentBackendStderrTail } from "./sanitize-exit-message.js"
 import type { AgentBackendDescriptor, OnSessionId } from "./types.js"
 
@@ -156,8 +156,7 @@ const commandOptions = (input: {
   stderr: (input.captureStderr === true ? "pipe" : "ignore") as
     | "pipe"
     | "ignore",
-  // Own process group on POSIX so group signals reach every CLI worker that
-  // stayed in the session. Combined with killProcessTree for setsid stragglers.
+  // Keep terminal signals separate; the invocation cgroup owns descendants.
   detached: process.platform !== "win32",
   killSignal: "SIGTERM" as const,
   forceKillAfter: input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER,
@@ -184,28 +183,11 @@ const mapSpawnError = (
   })
 }
 
-/**
- * Terminate the harness-spawned CLI and every process it started.
- *
- * Snapshots the PPID tree then SIGTERM→SIGKILL escalates across the process
- * group and known descendants. Runs as a scope finalizer (timeout / interrupt)
- * and on the finalizeText early-exit path.
- *
- * `killProcessTree` always escalates to SIGKILL via `Effect.ensuring`, so an
- * outer bound only caps the interruptible wait loop — hard kill still runs.
- * The ensuring body is uninterruptible: it SIGKILLs the starttime-checked
- * snapshot and, only while the original root is still ours, a short PPID
- * re-scan for late-spawned children.
- */
+/** Stop the durable invocation boundary and await verified emptiness. */
 const terminateCliTree = (
   handle: ChildProcessHandle,
-  forceKillAfter: Duration.Input,
-): Effect.Effect<void> =>
-  killProcessTree(Number(handle.pid), { forceKillAfter }).pipe(
-    // Bounds the wait loop if it hangs; cannot cut short the ensuring escalate.
-    Effect.timeout(Duration.millis(Duration.toMillis(forceKillAfter) + 1_000)),
-    Effect.ignore,
-  )
+  _forceKillAfter: Duration.Input,
+): Effect.Effect<void> => handle.kill().pipe(Effect.orDie)
 
 /**
  * Run a CLI once, capture full stdout and a bounded stderr tail, map non-zero
@@ -227,7 +209,6 @@ export const runCliCapture = (
   Effect.gen(function* () {
     const spawner = input.spawner
     const timeoutMs = Duration.toMillis(input.timeout)
-    const forceKillAfter = input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER
     const command = ChildProcess.make(
       input.binary,
       [...input.args],
@@ -236,13 +217,8 @@ export const runCliCapture = (
 
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* spawner
-          .spawn(command)
-          .pipe(Effect.mapError((error) => mapSpawnError(error, input)))
-        // Finalizer runs before Effect's handle cleanup (LIFO): snapshot the
-        // tree while the root is still alive, then reap group + descendants.
-        yield* Effect.addFinalizer(() =>
-          terminateCliTree(handle, forceKillAfter),
+        const handle = yield* spawnOwned(spawner, command).pipe(
+          Effect.mapError((error) => mapSpawnError(error, input)),
         )
         return yield* collectChildStdoutAndStderr(handle)
       }),
@@ -310,11 +286,8 @@ export const runCliTurn = (
 
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* spawner
-          .spawn(command)
-          .pipe(Effect.mapError((error) => mapSpawnError(error, input)))
-        yield* Effect.addFinalizer(() =>
-          terminateCliTree(handle, forceKillAfter),
+        const handle = yield* spawnOwned(spawner, command).pipe(
+          Effect.mapError((error) => mapSpawnError(error, input)),
         )
 
         // Disarms the startup bound on the first stdout output rather than the
