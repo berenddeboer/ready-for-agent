@@ -1490,6 +1490,10 @@ const eaccesPlatformError = systemError({
 const failingSpawner = (error: ReturnType<typeof systemError>) =>
   ChildProcessSpawner.make(() => Effect.fail(error))
 
+// Inject spawn failures only after executable preflight succeeds, independently
+// of which agent CLIs are installed on the test host.
+const spawnFailureBinary = process.execPath
+
 describe("runCliCapture spawn not-found", () => {
   for (const searchPath of [false, true]) {
     it(`preserves real executable permission errors via ${searchPath ? "PATH" : "absolute path"}`, async () => {
@@ -1570,7 +1574,7 @@ describe("runCliCapture spawn not-found", () => {
       runCliCapture({
         spawner: failingSpawner(enoentPlatformError),
         backend: TEST_BACKEND,
-        binary: "claude",
+        binary: spawnFailureBinary,
         args: [],
         cwd: process.cwd(),
         env: sanitizeInheritedEnvironment(),
@@ -1579,12 +1583,12 @@ describe("runCliCapture spawn not-found", () => {
     )
     expect(error).toBeInstanceOf(AgentBackendNotInstalledError)
     if (error instanceof AgentBackendNotInstalledError) {
-      expect(error.binary).toBe("claude")
+      expect(error.binary).toBe(spawnFailureBinary)
       expect(error.backend).toEqual(TEST_BACKEND)
       expect(error.message).toContain(
-        'Claude Code CLI "claude" was not found on the Harness PATH.',
+        `Claude Code CLI "${spawnFailureBinary}" was not found on the Harness PATH.`,
       )
-      expect(error.message).toContain("`command -v claude`")
+      expect(error.message).toContain(`\`command -v ${spawnFailureBinary}\``)
       expect(error.message).toContain("restart the Harness")
     }
   })
@@ -1594,7 +1598,7 @@ describe("runCliCapture spawn not-found", () => {
       runCliCapture({
         spawner: failingSpawner(eaccesPlatformError),
         backend: TEST_BACKEND,
-        binary: "claude",
+        binary: spawnFailureBinary,
         args: [],
         cwd: process.cwd(),
         env: sanitizeInheritedEnvironment(),
@@ -1602,7 +1606,7 @@ describe("runCliCapture spawn not-found", () => {
       }).pipe(Effect.flip),
     )
     expect(error).not.toBeInstanceOf(AgentBackendNotInstalledError)
-    expect((error as { _tag?: string })._tag).toBe("PlatformError")
+    expect(error).toBe(eaccesPlatformError)
   })
 
   it("leaves a missing cwd as PlatformError, not a missing CLI", async () => {
@@ -1636,7 +1640,7 @@ describe("runCliTurn spawn not-found", () => {
       runCliTurn({
         spawner: failingSpawner(enoentPlatformError),
         backend: TEST_BACKEND,
-        binary: "claude",
+        binary: spawnFailureBinary,
         args: [],
         cwd: process.cwd(),
         env: sanitizeInheritedEnvironment(),
@@ -1647,7 +1651,7 @@ describe("runCliTurn spawn not-found", () => {
     expect(error).toBeInstanceOf(AgentBackendNotInstalledError)
     if (error instanceof AgentBackendNotInstalledError) {
       expect(error.message).toContain(
-        'Claude Code CLI "claude" was not found on the Harness PATH.',
+        `Claude Code CLI "${spawnFailureBinary}" was not found on the Harness PATH.`,
       )
     }
   })
