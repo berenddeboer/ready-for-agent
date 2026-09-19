@@ -103,8 +103,10 @@ const installUpdateRepositorySettingsRoute = async (page: Page) => {
       return
     }
     let query = ""
+    let postData: unknown
     try {
-      query = graphqlQueryText(request.postDataJSON())
+      postData = request.postDataJSON()
+      query = graphqlQueryText(postData)
     } catch {
       await route.continue()
       return
@@ -135,12 +137,30 @@ const installUpdateRepositorySettingsRoute = async (page: Page) => {
 
     if (state.failNext) {
       state.failNext = false
+      const failure = {
+        errors: [{ message: "Simulated repository settings save failure" }],
+      }
+      // Save can share a batch with background queries. Preserve one response
+      // per operation, in order, without ever executing the failed mutation.
+      const body = Array.isArray(postData)
+        ? await Promise.all(
+            postData.map(async (operation: unknown) => {
+              if (
+                graphqlQueryText(operation).includes("updateRepositorySettings")
+              ) {
+                return failure
+              }
+              const response = await route.fetch({
+                postData: JSON.stringify(operation),
+              })
+              return response.json()
+            }),
+          )
+        : failure
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          errors: [{ message: "Simulated repository settings save failure" }],
-        }),
+        body: JSON.stringify(body),
       })
       return
     }
@@ -379,6 +399,52 @@ Then("a repository settings save error is shown", async ({ page }) => {
   })
   await expect(saveError).toBeVisible()
 })
+
+Then(
+  "a batched Repository settings Save fails without failing background queries",
+  async ({ page }) => {
+    const repositoriesQuery = { query: "query { repositories { id paused } }" }
+    const before = await page.request.post("/graphql", {
+      data: repositoriesQuery,
+    })
+    const savedRepositories: unknown = await before.json()
+    const configQuery = { query: "query { config { defaultModel } }" }
+    const config = await page.request.post("/graphql", { data: configQuery })
+    const savedConfig: unknown = await config.json()
+    const responses: unknown = await page.evaluate(
+      async (operations) => {
+        const response = await fetch("/graphql", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(operations),
+        })
+        return response.json()
+      },
+      [
+        repositoriesQuery,
+        {
+          query: `mutation { updateRepositorySettings(input: {
+            repositoryId: "${PAUSED_REPOSITORY_FIXTURE.repositoryId}",
+            paused: false, mergePolicy: OFF, includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true
+          }) { id paused } }`,
+        },
+        configQuery,
+      ],
+    )
+    expect(responses).toEqual([
+      savedRepositories,
+      { errors: [{ message: "Simulated repository settings save failure" }] },
+      savedConfig,
+    ])
+    // The failed mutation must never reach the server, even while other
+    // operations in its batch are forwarded to the live Harness.
+    const after = await page.request.post("/graphql", {
+      data: repositoriesQuery,
+    })
+    expect(await after.json()).toEqual(savedRepositories)
+  },
+)
 
 const repositorySettingsSectionTitles = async (page: Page) => {
   const dialog = repositoryDialog(page)
