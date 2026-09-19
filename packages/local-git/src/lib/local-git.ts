@@ -6,9 +6,11 @@ import {
   Option,
   Path,
   Schema,
+  Stream,
 } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { spawnOwned } from "@ready-for-agent/agent-backend"
 import { parseForgeRemote } from "./parse-forge-remote.js"
 import type { LocalRepository } from "./types.js"
 
@@ -71,16 +73,30 @@ export class LocalGit extends Context.Service<
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
       const gitString = (cwd: string, args: ReadonlyArray<string>) =>
-        spawner
-          .string(ChildProcess.make("git", args, { cwd }))
-          .pipe(Effect.map((output) => output.trim()))
+        Effect.scoped(
+          Effect.gen(function* () {
+            const handle = yield* spawnOwned(
+              spawner,
+              ChildProcess.make("git", args, { cwd }),
+            )
+            return (yield* Stream.decodeText(handle.stdout).pipe(
+              Stream.mkString,
+            )).trim()
+          }),
+        )
 
       const gitExitCode = (cwd: string, args: ReadonlyArray<string>) =>
-        spawner.exitCode(
-          ChildProcess.make("git", args, {
-            cwd,
-            stdout: "ignore",
-            stderr: "ignore",
+        Effect.scoped(
+          Effect.gen(function* () {
+            const handle = yield* spawnOwned(
+              spawner,
+              ChildProcess.make("git", args, {
+                cwd,
+                stdout: "ignore",
+                stderr: "ignore",
+              }),
+            )
+            return yield* handle.exitCode
           }),
         )
 

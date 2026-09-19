@@ -614,7 +614,8 @@ describe("createPr", () => {
       // Real shell assignment before git — not BASIC=… git … $BASIC prefix form.
       expect(pushCommand).toContain(')" && git ')
       // Empty-username Basic auth (":<pat>"), not GitLab's "oauth2:<pat>".
-      expect(pushCommand).toContain("printf ':%s'")
+      // The launch gate shell-quotes the repository script as one argument.
+      expect(pushCommand.replaceAll(`'"'"'`, "'")).toContain("printf ':%s'")
     }))
 
   it("reuses an existing exact-branch open Azure DevOps PR without creation", () =>

@@ -96,7 +96,12 @@ action.
 
 ## Requirements
 
-A supported platform: Linux, macOS, or Windows (x64 or arm64).
+Local agent and repository execution requires Linux (x64 or arm64), cgroup v2,
+and a delegated systemd user manager (systemd 254 or newer). Run the Harness in
+a systemd user service or user scope. See [local process ownership](docs/process-ownership.md)
+for setup, cleanup diagnostics, and recovery. macOS and Windows packages can
+start the application, but refuse local execution until durable containment is
+implemented for those platforms.
 
 **Always required on PATH** (start fails fast if missing):
 

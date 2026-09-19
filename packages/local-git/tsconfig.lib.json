@@ -12,6 +12,9 @@
   "references": [
     {
       "path": "../lifecycle-model/tsconfig.lib.json"
+    },
+    {
+      "path": "../agent-backend/tsconfig.lib.json"
     }
   ]
 }

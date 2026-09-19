@@ -1,9 +1,9 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Deferred, Duration, Effect, Exit, Fiber } from "effect"
-import { systemError } from "effect/PlatformError"
+import { PlatformError, systemError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   AgentBackendExitError,
@@ -1491,6 +1491,80 @@ const failingSpawner = (error: ReturnType<typeof systemError>) =>
   ChildProcessSpawner.make(() => Effect.fail(error))
 
 describe("runCliCapture spawn not-found", () => {
+  for (const searchPath of [false, true]) {
+    it(`preserves real executable permission errors via ${searchPath ? "PATH" : "absolute path"}`, async () => {
+      await withExecutable("exit 0", async (binary) => {
+        await chmod(binary, 0o600)
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              backend: TEST_BACKEND,
+              binary: searchPath ? "fake-cli" : binary,
+              args: [],
+              cwd: process.cwd(),
+              env: {
+                PATH: `${dirname(binary)}:${join(dirname(binary), "absent")}`,
+              },
+              timeout: Duration.seconds(2),
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toBeInstanceOf(PlatformError)
+        if (!(error instanceof PlatformError))
+          throw new Error("Expected executable permission failure")
+        expect(error.reason._tag).toBe("PermissionDenied")
+        expect(error.cause).toMatchObject({ code: "EACCES" })
+        expect(error.message).toContain(binary)
+      })
+    })
+  }
+
+  it("continues PATH search past a non-executable candidate", async () => {
+    await withExecutable("exit 99", async (denied) => {
+      await chmod(denied, 0o600)
+      await withExecutable("printf resolved", async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              backend: TEST_BACKEND,
+              binary: "fake-cli",
+              args: [],
+              cwd: process.cwd(),
+              env: { PATH: `${dirname(denied)}:${dirname(binary)}` },
+              timeout: Duration.seconds(2),
+            }),
+          ),
+        )
+        expect(result.stdout).toBe("resolved")
+      })
+    })
+  })
+
+  it("rejects an executable path that is a directory", async () => {
+    await withExecutable("exit 0", async (binary) => {
+      const error = await Effect.runPromise(
+        withSpawner((spawner) =>
+          runCliCapture({
+            spawner,
+            backend: TEST_BACKEND,
+            binary: dirname(binary),
+            args: [],
+            cwd: process.cwd(),
+            env: sanitizeInheritedEnvironment(),
+            timeout: Duration.seconds(2),
+          }).pipe(Effect.flip),
+        ),
+      )
+      expect(error).toBeInstanceOf(PlatformError)
+      if (!(error instanceof PlatformError))
+        throw new Error("Expected executable file-type failure")
+      expect(error.reason._tag).toBe("PermissionDenied")
+      expect(error.message).toContain("not a regular file")
+    })
+  })
+
   it("maps an ENOENT spawn failure to AgentBackendNotInstalledError", async () => {
     const error = await Effect.runPromise(
       runCliCapture({

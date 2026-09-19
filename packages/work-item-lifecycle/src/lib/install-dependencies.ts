@@ -1,6 +1,10 @@
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import {
+  AgentBackend,
+  agentBackendLabel,
+  spawnOwned,
+} from "@ready-for-agent/agent-backend"
 import {
   type InstallCommand,
   type InstallPlan,
@@ -70,7 +74,7 @@ const runInstallCommand = (cwd: string, install: InstallCommand) =>
 
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwned(spawner, command)
         const [exitCode, stderr] = yield* Effect.all(
           [
             handle.exitCode,

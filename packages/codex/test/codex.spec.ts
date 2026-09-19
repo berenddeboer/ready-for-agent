@@ -535,8 +535,10 @@ describe("Codex AgentBackend adapter (readiness inspection)", () => {
 
   it("fails inspect when model/list discovery times out", async () => {
     await withFakeCodex(async (binary) => {
+      // Allow the login-status probe and containment setup to finish before
+      // exercising the deliberately stalled model/list discovery.
       const error = await Effect.runPromise(
-        inspect(binary, "200 millis", {
+        inspect(binary, "2 seconds", {
           environment: firstPartyDiscoverEnv({ FAKE_CODEX_MODE: "hang" }),
         }).pipe(Effect.flip),
       )

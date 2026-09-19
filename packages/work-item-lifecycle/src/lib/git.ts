@@ -1,5 +1,6 @@
 import { Effect, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { spawnOwned } from "@ready-for-agent/agent-backend"
 import { GitCommandError } from "./create-worktree-errors.js"
 import { repositoryProcessOptions } from "./repository-process-environment.js"
 
@@ -21,13 +22,14 @@ export const runGit = (
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const fullArgs = [...repositoryPrefix(repository), ...args]
     const command = ChildProcess.make("git", fullArgs, {
+      cwd: repository.localPath,
       ...repositoryProcessOptions(),
       stdin: "ignore",
     })
 
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwned(spawner, command)
         const [exitCode, stdout, stderr] = yield* Effect.all(
           [
             handle.exitCode,
@@ -69,12 +71,19 @@ export const gitExitCode = (
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const fullArgs = [...repositoryPrefix(repository), ...args]
-    const code = yield* spawner.exitCode(
-      ChildProcess.make("git", fullArgs, {
-        ...repositoryProcessOptions(),
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "ignore",
+    const code = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* spawnOwned(
+          spawner,
+          ChildProcess.make("git", fullArgs, {
+            cwd: repository.localPath,
+            ...repositoryProcessOptions(),
+            stdin: "ignore",
+            stdout: "ignore",
+            stderr: "ignore",
+          }),
+        )
+        return yield* handle.exitCode
       }),
     )
     return Number(code)
