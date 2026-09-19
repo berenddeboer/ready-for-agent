@@ -123,6 +123,11 @@ export class AgentBackendTimeoutError extends Schema.TaggedErrorClass<AgentBacke
     cwd: Schema.String,
     timeoutMs: Schema.Finite,
     sessionId: Schema.optionalKey(Schema.String),
+    /**
+     * Present when invocation-owned processes remained after SIGKILL. Timeout
+     * stays the initiating reason; this is the separate cleanup diagnostic.
+     */
+    cleanupFailure: Schema.optionalKey(Schema.String),
   },
 ) {}
 
@@ -144,6 +149,12 @@ export class AgentBackendStartupTimeoutError extends Schema.TaggedErrorClass<Age
      * continuation was replayed once and both attempts produced no output.
      */
     attemptCount: Schema.optionalKey(Schema.Literals([1, 2])),
+    /**
+     * Present when invocation-owned processes remained after SIGKILL. Startup
+     * timeout stays the initiating reason; this is the separate cleanup
+     * diagnostic.
+     */
+    cleanupFailure: Schema.optionalKey(Schema.String),
   },
 ) {}
 

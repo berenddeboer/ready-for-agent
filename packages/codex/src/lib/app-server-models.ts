@@ -1,18 +1,21 @@
 import { Clock, Duration, Effect, Fiber, Queue, Ref, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process"
-import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
+import type { ChildProcessSpawner } from "effect/unstable/process"
 import {
   AgentBackendConfigError,
   AgentBackendNotInstalledError,
   AgentBackendTimeoutError,
   type AgentModel,
   DEFAULT_FORCE_KILL_AFTER,
+  InvocationCleanupError,
+  InvocationCleanupSlot,
+  InvocationContainmentError,
   collectChildStderrTail,
   findSpawnNotFoundCode,
   formatAgentCliNotFoundRemediation,
-  killProcessTree,
+  scopedOwned,
   scrubProviderCredentialSecrets,
+  spawnOwnedProcess,
 } from "@ready-for-agent/agent-backend"
 import { projectAppServerModelList } from "./catalog.js"
 import { CODEX_APP_SERVER_DISCOVERY_FAILED_MESSAGE } from "./types.js"
@@ -162,11 +165,17 @@ const configError = (detail: string): AgentBackendConfigError =>
   })
 
 const mapSpawnError = (
-  error: PlatformError,
+  error: PlatformError | InvocationContainmentError | InvocationCleanupError,
   input: {
     readonly binary: string
   },
-): PlatformError | AgentBackendNotInstalledError => {
+): PlatformError | AgentBackendNotInstalledError | AgentBackendConfigError => {
+  if (
+    error instanceof InvocationContainmentError ||
+    error instanceof InvocationCleanupError
+  ) {
+    return configError(error.message)
+  }
   if (findSpawnNotFoundCode(error) === undefined) {
     return error
   }
@@ -180,15 +189,6 @@ const mapSpawnError = (
     cause: error,
   })
 }
-
-const terminateCliTree = (
-  handle: ChildProcessHandle,
-  forceKillAfter: Duration.Input,
-): Effect.Effect<void> =>
-  killProcessTree(Number(handle.pid), { forceKillAfter }).pipe(
-    Effect.timeout(Duration.millis(Duration.toMillis(forceKillAfter) + 1_000)),
-    Effect.ignore,
-  )
 
 const nextCursorOf = (result: unknown): string | null => {
   if (!isRecord(result)) {
@@ -247,8 +247,17 @@ export const discoverAppServerModels = (input: {
         Effect.map((now) => Duration.millis(Math.max(0, deadline - now))),
       )
 
-    const failTimeout = (): Effect.Effect<never, AgentBackendConfigError> =>
-      configError("model/list discovery timed out")
+    const leftoverSlot = yield* Ref.make<InvocationCleanupError | undefined>(
+      undefined,
+    )
+    const failTimeout = (
+      cleanup?: string,
+    ): Effect.Effect<never, AgentBackendConfigError> =>
+      configError(
+        cleanup !== undefined && cleanup.length > 0
+          ? `model/list discovery timed out\nInvocation cleanup failed: ${cleanup}`
+          : "model/list discovery timed out",
+      )
 
     const write = (text: string): Effect.Effect<boolean> =>
       Queue.offer(stdinQueue, text)
@@ -324,26 +333,26 @@ export const discoverAppServerModels = (input: {
         return yield* waitFor(String(id))
       })
 
-    const command = ChildProcess.make(input.binary, [...APP_SERVER_ARGS], {
-      cwd: input.cwd,
-      env: input.env,
-      extendEnv: false,
-      stdin: { stream: "pipe", endOnDone: false },
-      stdout: "pipe",
-      stderr: "pipe",
-      detached: false,
-      killSignal: "SIGTERM",
-      forceKillAfter,
-    })
-
-    return yield* Effect.scoped(
+    return yield* scopedOwned(
       Effect.gen(function* () {
-        const handle = yield* input.spawner
-          .spawn(command)
-          .pipe(Effect.mapError((error) => mapSpawnError(error, input)))
+        const handle = yield* spawnOwnedProcess(
+          input.spawner,
+          input.binary,
+          [...APP_SERVER_ARGS],
+          {
+            cwd: input.cwd,
+            env: input.env,
+            extendEnv: false,
+            stdin: { stream: "pipe", endOnDone: false },
+            stdout: "pipe",
+            stderr: "pipe",
+            detached: false,
+            killSignal: "SIGTERM",
+            forceKillAfter,
+          },
+        ).pipe(Effect.mapError((error) => mapSpawnError(error, input)))
         yield* Effect.addFinalizer(() =>
-          terminateCliTree(handle, forceKillAfter).pipe(
-            Effect.andThen(Queue.shutdown(stdinQueue)),
+          Queue.shutdown(stdinQueue).pipe(
             Effect.andThen(Queue.shutdown(incoming)),
           ),
         )
@@ -427,19 +436,49 @@ export const discoverAppServerModels = (input: {
         )
       }),
     ).pipe(
+      Effect.provideService(InvocationCleanupSlot, leftoverSlot),
+      Effect.mapError((error) =>
+        error instanceof InvocationCleanupError
+          ? configError(error.message)
+          : error,
+      ),
+      Effect.catch((error) =>
+        Ref.get(leftoverSlot).pipe(
+          Effect.flatMap((leftover) => {
+            if (
+              leftover !== undefined &&
+              error instanceof AgentBackendConfigError &&
+              error.message.includes("model/list discovery timed out") &&
+              !error.message.includes("Invocation cleanup failed")
+            ) {
+              return configError(
+                `${error.message}\nInvocation cleanup failed: ${leftover.message}`,
+              )
+            }
+            return Effect.fail(error)
+          }),
+        ),
+      ),
       Effect.timeout(input.timeout),
       Effect.catchTag("TimeoutError", () =>
-        Effect.fail(
-          new AgentBackendTimeoutError({
-            cwd: input.cwd,
-            timeoutMs,
-          }),
+        Ref.get(leftoverSlot).pipe(
+          Effect.flatMap((leftover) =>
+            Effect.fail(
+              new AgentBackendTimeoutError({
+                cwd: input.cwd,
+                timeoutMs,
+                ...(leftover !== undefined
+                  ? { cleanupFailure: leftover.message }
+                  : {}),
+              }),
+            ),
+          ),
         ),
       ),
       Effect.catchIf(
         (error): error is AgentBackendTimeoutError =>
           error instanceof AgentBackendTimeoutError,
-        () => failTimeout(),
+        (error) => failTimeout(error.cleanupFailure),
       ),
     )
   })

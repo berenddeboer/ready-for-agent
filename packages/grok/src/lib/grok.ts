@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { Duration, Effect, FileSystem, Layer } from "effect"
+import { Duration, Effect, FileSystem, Layer, Ref } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   AcpClient,
@@ -23,12 +23,14 @@ import {
   DEFAULT_STARTUP_TIMEOUT,
   type InspectInput,
   type StartTurnInput,
+  acquireInvocationBoundary,
   formatAgentCliNotFoundRemediation,
-  killProcessTree,
   malformedOutput,
   retrySilentKnownSessionStartup,
   runCliCapture,
   runCliTurn,
+  scopedOwned,
+  wrapSpawnForBoundary,
 } from "@ready-for-agent/agent-backend"
 import {
   buildAcpContinueArgs,
@@ -299,118 +301,132 @@ export const Grok = {
               const timeoutMs = Duration.toMillis(timeout)
               const startupTimeoutMs = Duration.toMillis(startupTimeout)
               const runContinue = () =>
-                Effect.scoped(
-                  Effect.gen(function* () {
-                    const connection = yield* acp.connect({
-                      command: binary,
-                      args: buildAcpContinueArgs({
-                        model: input.model,
-                        thinkingLevel: input.thinkingLevel,
-                      }),
-                      cwd: input.cwd,
-                      env: environment,
-                    })
-                    yield* Effect.addFinalizer(() =>
-                      killProcessTree(connection.pid, { forceKillAfter }).pipe(
-                        Effect.timeout(
-                          Duration.millis(
-                            Duration.toMillis(forceKillAfter) + 1_000,
-                          ),
-                        ),
-                        Effect.ignore,
-                      ),
-                    )
-                    const initialized = yield* connection.initialize().pipe(
-                      Effect.timeoutOrElse({
-                        duration: startupTimeout,
-                        orElse: () =>
-                          new AgentBackendStartupTimeoutError({
-                            cwd: input.cwd,
-                            startupTimeoutMs,
-                            sessionId: input.sessionId,
-                          }),
-                      }),
-                    )
-                    if (
-                      initialized.authMethods.some(
-                        (method) => method.id === "cached_token",
+                Effect.gen(function* () {
+                  const cleanupFailure = yield* Ref.make<string | undefined>(
+                    undefined,
+                  )
+                  return yield* scopedOwned(
+                    Effect.gen(function* () {
+                      const boundary = yield* acquireInvocationBoundary({
+                        forceKillAfter,
+                        onCleanupFailure: (error) =>
+                          Ref.set(cleanupFailure, error.message),
+                      })
+                      const spawned = wrapSpawnForBoundary(
+                        boundary,
+                        binary,
+                        buildAcpContinueArgs({
+                          model: input.model,
+                          thinkingLevel: input.thinkingLevel,
+                        }),
+                        environment,
                       )
-                    ) {
-                      yield* connection.authenticate({
-                        methodId: "cached_token",
-                      })
-                    }
-                    const sessionId = AcpSessionId.make(input.sessionId)
-                    const sessionMeta = { yoloMode: true }
-                    yield* connection
-                      .resumeSession({
-                        sessionId,
+                      const connection = yield* acp.connect({
+                        command: spawned.command,
+                        args: spawned.args,
                         cwd: input.cwd,
-                        _meta: sessionMeta,
+                        env: spawned.env,
                       })
-                      .pipe(
-                        Effect.catchTag("AcpProtocolError", () =>
-                          connection
-                            .loadSession({
-                              sessionId,
+                      boundary.bindRootPid(connection.pid)
+                      const initialized = yield* connection.initialize().pipe(
+                        Effect.timeoutOrElse({
+                          duration: startupTimeout,
+                          orElse: () =>
+                            new AgentBackendStartupTimeoutError({
                               cwd: input.cwd,
-                              _meta: sessionMeta,
-                            })
-                            .pipe(
-                              Effect.mapError((error) =>
-                                error instanceof AcpProtocolError
-                                  ? AgentBackendExitError.new({
-                                      exitCode: 1,
-                                      cwd: input.cwd,
-                                      sessionId: input.sessionId,
-                                      message: `Grok Build could not restore Session ${input.sessionId}: ${error.message}`,
-                                    })
-                                  : error,
+                              startupTimeoutMs,
+                              sessionId: input.sessionId,
+                            }),
+                        }),
+                      )
+                      if (
+                        initialized.authMethods.some(
+                          (method) => method.id === "cached_token",
+                        )
+                      ) {
+                        yield* connection.authenticate({
+                          methodId: "cached_token",
+                        })
+                      }
+                      const sessionId = AcpSessionId.make(input.sessionId)
+                      const sessionMeta = { yoloMode: true }
+                      yield* connection
+                        .resumeSession({
+                          sessionId,
+                          cwd: input.cwd,
+                          _meta: sessionMeta,
+                        })
+                        .pipe(
+                          Effect.catchTag("AcpProtocolError", () =>
+                            connection
+                              .loadSession({
+                                sessionId,
+                                cwd: input.cwd,
+                                _meta: sessionMeta,
+                              })
+                              .pipe(
+                                Effect.mapError((error) =>
+                                  error instanceof AcpProtocolError
+                                    ? AgentBackendExitError.new({
+                                        exitCode: 1,
+                                        cwd: input.cwd,
+                                        sessionId: input.sessionId,
+                                        message: `Grok Build could not restore Session ${input.sessionId}: ${error.message}`,
+                                      })
+                                    : error,
+                                ),
                               ),
-                            ),
-                        ),
-                      )
-                    const prompt = yield* connection.prompt({
-                      sessionId,
-                      prompt: buildPromptBody({
-                        prompt: input.prompt,
-                        ...(input.command !== undefined
-                          ? { command: input.command }
-                          : {}),
-                      }),
-                      _meta: { yoloMode: true },
-                    })
-                    if (prompt.sessionId !== input.sessionId) {
-                      return yield* malformedOutput(
-                        input.cwd,
-                        `(session id mismatch: expected ${input.sessionId}, got ${prompt.sessionId})`,
-                      )
-                    }
-                    if (prompt.stopReason !== "end_turn") {
-                      return yield* AgentBackendExitError.new({
-                        exitCode: 1,
-                        cwd: input.cwd,
-                        sessionId: input.sessionId,
-                        message: `Grok Build stopped: ${prompt.stopReason}`,
+                          ),
+                        )
+                      const prompt = yield* connection.prompt({
+                        sessionId,
+                        prompt: buildPromptBody({
+                          prompt: input.prompt,
+                          ...(input.command !== undefined
+                            ? { command: input.command }
+                            : {}),
+                        }),
+                        _meta: { yoloMode: true },
                       })
-                    }
-                    return {
-                      sessionId: input.sessionId,
-                      assistantText: prompt.assistantText,
-                    }
-                  }),
-                ).pipe(
-                  Effect.mapError(mapAcpError(input)),
-                  Effect.timeoutOrElse({
-                    duration: timeout,
-                    orElse: () =>
-                      new AgentBackendTimeoutError({
-                        cwd: input.cwd,
-                        timeoutMs,
+                      if (prompt.sessionId !== input.sessionId) {
+                        return yield* malformedOutput(
+                          input.cwd,
+                          `(session id mismatch: expected ${input.sessionId}, got ${prompt.sessionId})`,
+                        )
+                      }
+                      if (prompt.stopReason !== "end_turn") {
+                        return yield* AgentBackendExitError.new({
+                          exitCode: 1,
+                          cwd: input.cwd,
+                          sessionId: input.sessionId,
+                          message: `Grok Build stopped: ${prompt.stopReason}`,
+                        })
+                      }
+                      return {
                         sessionId: input.sessionId,
-                      }),
-                  }),
-                )
+                        assistantText: prompt.assistantText,
+                      }
+                    }),
+                  ).pipe(
+                    Effect.mapError(mapAcpError(input)),
+                    Effect.timeout(timeout),
+                    Effect.catchTag("TimeoutError", () =>
+                      Ref.get(cleanupFailure).pipe(
+                        Effect.flatMap(
+                          (cleanup) =>
+                            new AgentBackendTimeoutError({
+                              cwd: input.cwd,
+                              timeoutMs,
+                              sessionId: input.sessionId,
+                              ...(cleanup !== undefined
+                                ? { cleanupFailure: cleanup }
+                                : {}),
+                            }),
+                        ),
+                      ),
+                    ),
+                  )
+                })
 
               return retrySilentKnownSessionStartup(runContinue, {
                 sessionId: input.sessionId,

@@ -1,4 +1,8 @@
 import { Schema } from "effect"
+import type {
+  InvocationCleanupError,
+  InvocationContainmentError,
+} from "@ready-for-agent/agent-backend"
 
 export class WorktreeContextMissingError extends Schema.TaggedErrorClass<WorktreeContextMissingError>()(
   "WorktreeContextMissingError",
@@ -43,3 +47,5 @@ export type InstallDependenciesError =
   | InvalidWorktreeContextError
   | InstallCommandError
   | InstallDependenciesFallbackError
+  | InvocationContainmentError
+  | InvocationCleanupError

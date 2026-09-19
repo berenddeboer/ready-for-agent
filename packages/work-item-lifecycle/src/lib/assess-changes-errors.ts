@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import type { GitCommandError } from "./create-worktree-errors.js"
 
 export class AssessChangesWorktreeContextMissingError extends Schema.TaggedErrorClass<AssessChangesWorktreeContextMissingError>()(
   "AssessChangesWorktreeContextMissingError",
@@ -57,3 +58,4 @@ export type AssessChangesError =
   | AssessChangesSessionMissingError
   | AssessChangesOpenCodeError
   | AssessChangesResultError
+  | GitCommandError

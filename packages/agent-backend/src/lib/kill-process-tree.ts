@@ -6,7 +6,7 @@ import { Clock, Duration, Effect } from "effect"
  * Probe whether a pid still exists. `EPERM` means the process is present but
  * unsignallable from this uid — treat as alive so wait/escalate still runs.
  */
-const isAlive = (pid: number): boolean => {
+export const isProcessAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0)
     return true
@@ -54,7 +54,7 @@ const trackPid = (pid: number): TrackedPid => ({
  * - Prefer kill only when identity was never available at track time.
  */
 const isSameProcess = (tracked: TrackedPid): boolean => {
-  if (!isAlive(tracked.pid)) return false
+  if (!isProcessAlive(tracked.pid)) return false
   if (tracked.starttime === undefined) return true
   const current = readStarttime(tracked.pid)
   if (current === undefined) return false

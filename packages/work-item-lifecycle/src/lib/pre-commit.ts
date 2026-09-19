@@ -1,7 +1,13 @@
 import { dirname } from "node:path"
 import { Effect, FileSystem, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import { ChildProcessSpawner } from "effect/unstable/process"
+import {
+  AgentBackend,
+  agentBackendLabel,
+  scopedOwned,
+  spawnOwnedProcess,
+} from "@ready-for-agent/agent-backend"
+import { mapOwnedSpawnError } from "./git.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   PreCommitInvalidWorktreeContextError,
@@ -63,15 +69,16 @@ const resolveSessionId = (context: LifecycleStepContext) => {
 const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const command = ChildProcess.make("git", args, {
-      cwd,
-      ...repositoryProcessOptions(),
-      stdin: "ignore",
-    })
-
-    return yield* Effect.scoped(
+    const ownedContext = { command: "git", args, cwd }
+    return yield* scopedOwned(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwnedProcess(spawner, "git", args, {
+          cwd,
+          ...repositoryProcessOptions(),
+          stdin: "ignore",
+        }).pipe(
+          Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)),
+        )
         const [exitCode, stdout, stderr] = yield* Effect.all(
           [
             handle.exitCode,
@@ -89,7 +96,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
           output,
         }
       }),
-    )
+    ).pipe(Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)))
   })
 
 const writeHookOutputLog = (workItemId: string, output: string) =>

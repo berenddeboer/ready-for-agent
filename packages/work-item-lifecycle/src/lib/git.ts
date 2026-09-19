@@ -1,5 +1,12 @@
 import { Effect, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import type { PlatformError } from "effect/PlatformError"
+import { ChildProcessSpawner } from "effect/unstable/process"
+import {
+  InvocationCleanupError,
+  InvocationContainmentError,
+  scopedOwned,
+  spawnOwnedProcess,
+} from "@ready-for-agent/agent-backend"
 import { GitCommandError } from "./create-worktree-errors.js"
 import { repositoryProcessOptions } from "./repository-process-environment.js"
 
@@ -13,6 +20,37 @@ const repositoryPrefix = (repository: GitRepository): readonly string[] => [
   repository.localPath,
 ]
 
+export const mapOwnedSpawnError = (
+  error:
+    | PlatformError
+    | InvocationContainmentError
+    | InvocationCleanupError
+    | GitCommandError,
+  context: {
+    readonly command: string
+    readonly args: ReadonlyArray<string>
+    readonly cwd: string
+  },
+): PlatformError | GitCommandError => {
+  if (error instanceof GitCommandError) {
+    return error
+  }
+  if (
+    error instanceof InvocationContainmentError ||
+    error instanceof InvocationCleanupError
+  ) {
+    return new GitCommandError({
+      message: error.message,
+      command: context.command,
+      args: [...context.args],
+      cwd: context.cwd,
+      exitCode: -1,
+      stderr: error.message,
+    })
+  }
+  return error
+}
+
 export const runGit = (
   repository: GitRepository,
   args: ReadonlyArray<string>,
@@ -20,14 +58,19 @@ export const runGit = (
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const fullArgs = [...repositoryPrefix(repository), ...args]
-    const command = ChildProcess.make("git", fullArgs, {
-      ...repositoryProcessOptions(),
-      stdin: "ignore",
-    })
-
-    const result = yield* Effect.scoped(
+    const ownedContext = {
+      command: "git",
+      args: fullArgs,
+      cwd: repository.localPath,
+    }
+    const result = yield* scopedOwned(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwnedProcess(spawner, "git", fullArgs, {
+          ...repositoryProcessOptions(),
+          stdin: "ignore",
+        }).pipe(
+          Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)),
+        )
         const [exitCode, stdout, stderr] = yield* Effect.all(
           [
             handle.exitCode,
@@ -42,7 +85,7 @@ export const runGit = (
           stderr,
         }
       }),
-    )
+    ).pipe(Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)))
 
     if (result.exitCode !== 0) {
       const diagnostic = result.stderr.trim()
@@ -69,13 +112,23 @@ export const gitExitCode = (
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const fullArgs = [...repositoryPrefix(repository), ...args]
-    const code = yield* spawner.exitCode(
-      ChildProcess.make("git", fullArgs, {
-        ...repositoryProcessOptions(),
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "ignore",
+    const ownedContext = {
+      command: "git",
+      args: fullArgs,
+      cwd: repository.localPath,
+    }
+    const code = yield* scopedOwned(
+      Effect.gen(function* () {
+        const handle = yield* spawnOwnedProcess(spawner, "git", fullArgs, {
+          ...repositoryProcessOptions(),
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore",
+        }).pipe(
+          Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)),
+        )
+        return yield* handle.exitCode
       }),
-    )
+    ).pipe(Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)))
     return Number(code)
   })

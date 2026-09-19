@@ -1,7 +1,6 @@
 import { Deferred, Duration, Effect, Ref, Result, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process"
-import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
+import type { ChildProcessSpawner } from "effect/unstable/process"
 import {
   findSpawnNotFoundCode,
   formatAgentCliNotFoundRemediation,
@@ -20,7 +19,17 @@ import {
   AgentBackendTimeoutError,
   formatSilentAgentBackendExitMessage,
 } from "./errors.js"
-import { killProcessTree } from "./kill-process-tree.js"
+import type {
+  InvocationCleanupError,
+  InvocationContainmentError,
+} from "./invocation-ownership.js"
+import {
+  acquireInvocationBoundary,
+  isInvocationCleanupError,
+  makeOwnedCommand,
+  scopedOwned,
+  terminateInvocation,
+} from "./invocation-ownership.js"
 import { sanitizeAgentBackendStderrTail } from "./sanitize-exit-message.js"
 import type { AgentBackendDescriptor, OnSessionId } from "./types.js"
 
@@ -52,6 +61,8 @@ export type AgentBackendCliError =
   | AgentBackendSessionIdMissingError
   | AgentBackendMalformedOutputError
   | AgentBackendNotInstalledError
+  | InvocationContainmentError
+  | InvocationCleanupError
   | PlatformError
 
 export type CliLineEvent = {
@@ -156,8 +167,8 @@ const commandOptions = (input: {
   stderr: (input.captureStderr === true ? "pipe" : "ignore") as
     | "pipe"
     | "ignore",
-  // Own process group on POSIX so group signals reach every CLI worker that
-  // stayed in the session. Combined with killProcessTree for setsid stragglers.
+  // Own process group on POSIX so group signals reach workers that stayed in
+  // the session. Combined with the invocation cgroup for setsid stragglers.
   detached: process.platform !== "win32",
   killSignal: "SIGTERM" as const,
   forceKillAfter: input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER,
@@ -184,28 +195,20 @@ const mapSpawnError = (
   })
 }
 
-/**
- * Terminate the harness-spawned CLI and every process it started.
- *
- * Snapshots the PPID tree then SIGTERM→SIGKILL escalates across the process
- * group and known descendants. Runs as a scope finalizer (timeout / interrupt)
- * and on the finalizeText early-exit path.
- *
- * `killProcessTree` always escalates to SIGKILL via `Effect.ensuring`, so an
- * outer bound only caps the interruptible wait loop — hard kill still runs.
- * The ensuring body is uninterruptible: it SIGKILLs the starttime-checked
- * snapshot and, only while the original root is still ours, a short PPID
- * re-scan for late-spawned children.
- */
-const terminateCliTree = (
-  handle: ChildProcessHandle,
-  forceKillAfter: Duration.Input,
-): Effect.Effect<void> =>
-  killProcessTree(Number(handle.pid), { forceKillAfter }).pipe(
-    // Bounds the wait loop if it hangs; cannot cut short the ensuring escalate.
-    Effect.timeout(Duration.millis(Duration.toMillis(forceKillAfter) + 1_000)),
-    Effect.ignore,
-  )
+const timeoutError = (input: {
+  readonly cwd: string
+  readonly timeoutMs: number
+  readonly sessionId?: string
+  readonly cleanupFailure?: string
+}) =>
+  new AgentBackendTimeoutError({
+    cwd: input.cwd,
+    timeoutMs: input.timeoutMs,
+    ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
+    ...(input.cleanupFailure !== undefined
+      ? { cleanupFailure: input.cleanupFailure }
+      : {}),
+  })
 
 /**
  * Run a CLI once, capture full stdout and a bounded stderr tail, map non-zero
@@ -222,35 +225,55 @@ export const runCliCapture = (
   | AgentBackendExitError
   | AgentBackendTimeoutError
   | AgentBackendNotInstalledError
+  | InvocationContainmentError
+  | InvocationCleanupError
   | PlatformError
 > =>
   Effect.gen(function* () {
     const spawner = input.spawner
     const timeoutMs = Duration.toMillis(input.timeout)
     const forceKillAfter = input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER
-    const command = ChildProcess.make(
-      input.binary,
-      [...input.args],
-      commandOptions({ ...input, captureStderr: true }),
-    )
+    const cleanupFailure = yield* Ref.make<string | undefined>(undefined)
+    const commandOptionsResolved = commandOptions({
+      ...input,
+      captureStderr: true,
+    })
 
-    const result = yield* Effect.scoped(
+    const result = yield* scopedOwned(
       Effect.gen(function* () {
+        const boundary = yield* acquireInvocationBoundary({
+          forceKillAfter,
+          onCleanupFailure: (error) => Ref.set(cleanupFailure, error.message),
+        })
         const handle = yield* spawner
-          .spawn(command)
+          .spawn(
+            makeOwnedCommand(
+              boundary,
+              input.binary,
+              input.args,
+              commandOptionsResolved,
+            ),
+          )
           .pipe(Effect.mapError((error) => mapSpawnError(error, input)))
-        // Finalizer runs before Effect's handle cleanup (LIFO): snapshot the
-        // tree while the root is still alive, then reap group + descendants.
-        yield* Effect.addFinalizer(() =>
-          terminateCliTree(handle, forceKillAfter),
-        )
+        const pid = Number(handle.pid)
+        if (Number.isFinite(pid) && pid > 0) {
+          boundary.bindRootPid(pid)
+        }
         return yield* collectChildStdoutAndStderr(handle)
       }),
     ).pipe(
       Effect.timeout(input.timeout),
       Effect.catchTag("TimeoutError", () =>
-        Effect.fail(
-          new AgentBackendTimeoutError({ cwd: input.cwd, timeoutMs }),
+        Ref.get(cleanupFailure).pipe(
+          Effect.flatMap((cleanup) =>
+            Effect.fail(
+              timeoutError({
+                cwd: input.cwd,
+                timeoutMs,
+                ...(cleanup !== undefined ? { cleanupFailure: cleanup } : {}),
+              }),
+            ),
+          ),
         ),
       ),
     )
@@ -301,21 +324,32 @@ export const runCliTurn = (
     const seenSessionId = yield* Ref.make(knownSessionId)
     const sessionIdNotified = yield* Ref.make(false)
     const observerLabel = input.observerLabel ?? "AgentBackend"
+    const cleanupFailure = yield* Ref.make<string | undefined>(undefined)
+    const commandOptionsResolved = commandOptions({
+      ...input,
+      captureStderr: true,
+    })
 
-    const command = ChildProcess.make(
-      input.binary,
-      [...input.args],
-      commandOptions({ ...input, captureStderr: true }),
-    )
-
-    const result = yield* Effect.scoped(
+    const result = yield* scopedOwned(
       Effect.gen(function* () {
+        const boundary = yield* acquireInvocationBoundary({
+          forceKillAfter,
+          onCleanupFailure: (error) => Ref.set(cleanupFailure, error.message),
+        })
         const handle = yield* spawner
-          .spawn(command)
+          .spawn(
+            makeOwnedCommand(
+              boundary,
+              input.binary,
+              input.args,
+              commandOptionsResolved,
+            ),
+          )
           .pipe(Effect.mapError((error) => mapSpawnError(error, input)))
-        yield* Effect.addFinalizer(() =>
-          terminateCliTree(handle, forceKillAfter),
-        )
+        const pid = Number(handle.pid)
+        if (Number.isFinite(pid) && pid > 0) {
+          boundary.bindRootPid(pid)
+        }
 
         // Disarms the startup bound on the first stdout output rather than the
         // first parsed line, so a CLI that streams one large slow line still
@@ -408,9 +442,15 @@ export const runCliTurn = (
                 if (event.finalizeText !== undefined) {
                   const running = yield* handle.isRunning
                   if (running) {
-                    // Single authoritative tree kill; join exit without a
-                    // second full SIGTERM→SIGKILL budget on the direct child.
-                    yield* terminateCliTree(handle, forceKillAfter)
+                    yield* terminateInvocation(boundary, {
+                      forceKillAfter,
+                    }).pipe(
+                      Effect.catch((error) =>
+                        isInvocationCleanupError(error)
+                          ? Ref.set(cleanupFailure, error.message)
+                          : Effect.fail(error),
+                      ),
+                    )
                     yield* handle.exitCode.pipe(
                       Effect.timeout(
                         Duration.millis(
@@ -481,16 +521,16 @@ export const runCliTurn = (
     ).pipe(
       Effect.timeout(input.timeout),
       Effect.catchTag("TimeoutError", () =>
-        Ref.get(seenSessionId).pipe(
-          Effect.flatMap(
-            (sessionId) =>
-              new AgentBackendTimeoutError({
-                cwd: input.cwd,
-                timeoutMs,
-                ...(sessionId !== undefined ? { sessionId } : {}),
-              }),
-          ),
-        ),
+        Effect.gen(function* () {
+          const sessionId = yield* Ref.get(seenSessionId)
+          const cleanup = yield* Ref.get(cleanupFailure)
+          return yield* timeoutError({
+            cwd: input.cwd,
+            timeoutMs,
+            ...(sessionId !== undefined ? { sessionId } : {}),
+            ...(cleanup !== undefined ? { cleanupFailure: cleanup } : {}),
+          })
+        }),
       ),
     )
 

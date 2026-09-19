@@ -1,6 +1,11 @@
 import { Effect, FileSystem, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import { ChildProcessSpawner } from "effect/unstable/process"
+import {
+  AgentBackend,
+  agentBackendLabel,
+  scopedOwned,
+  spawnOwnedProcess,
+} from "@ready-for-agent/agent-backend"
 import {
   AssessChangesInvalidWorktreeContextError,
   AssessChangesOpenCodeError,
@@ -10,6 +15,7 @@ import {
   AssessChangesWorktreeContextMissingError,
 } from "./assess-changes-errors.js"
 import { GitCommandError } from "./create-worktree-errors.js"
+import { mapOwnedSpawnError } from "./git.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { repositoryProcessOptions } from "./repository-process-environment.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
@@ -82,15 +88,16 @@ const resolveSessionId = (context: LifecycleStepContext) => {
 const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const command = ChildProcess.make("git", args, {
-      cwd,
-      ...repositoryProcessOptions(),
-      stdin: "ignore",
-    })
-
-    return yield* Effect.scoped(
+    const ownedContext = { command: "git", args, cwd }
+    return yield* scopedOwned(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwnedProcess(spawner, "git", args, {
+          cwd,
+          ...repositoryProcessOptions(),
+          stdin: "ignore",
+        }).pipe(
+          Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)),
+        )
         const [exitCode, stdout, stderr] = yield* Effect.all(
           [
             handle.exitCode,
@@ -111,7 +118,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
         }
         return stdout
       }),
-    )
+    ).pipe(Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)))
   })
 
 const hasWorkingTreeChanges = (worktreePath: string) =>

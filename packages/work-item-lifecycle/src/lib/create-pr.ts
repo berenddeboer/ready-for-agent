@@ -1,11 +1,13 @@
 import { Effect, FileSystem, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
 import {
   type ActiveAgentBackend,
   AgentBackend,
   agentBackendLabel,
+  scopedOwned,
+  spawnOwnedProcess,
 } from "@ready-for-agent/agent-backend"
 import {
   AZURE_DEVOPS_PAT_ENV_VAR,
@@ -55,6 +57,7 @@ import {
   toForgeRepository,
 } from "./forge-mutation.js"
 import { forgeObservation } from "./forge-observation.js"
+import { mapOwnedSpawnError } from "./git.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   type PublicationCopy,
@@ -158,15 +161,16 @@ const errorMessage = (cause: unknown): string =>
 const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const command = ChildProcess.make("git", args, {
-      cwd,
-      ...repositoryProcessOptions(),
-      stdin: "ignore",
-    })
-
-    return yield* Effect.scoped(
+    const ownedContext = { command: "git", args, cwd }
+    return yield* scopedOwned(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwnedProcess(spawner, "git", args, {
+          cwd,
+          ...repositoryProcessOptions(),
+          stdin: "ignore",
+        }).pipe(
+          Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)),
+        )
         const [exitCode, stdout, stderr] = yield* Effect.all(
           [
             handle.exitCode,
@@ -185,7 +189,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
             .join("\n"),
         }
       }),
-    )
+    ).pipe(Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)))
   })
 
 /**

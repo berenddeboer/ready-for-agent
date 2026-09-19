@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import type { GitCommandError } from "./create-worktree-errors.js"
 
 export class ReviewWorktreeContextMissingError extends Schema.TaggedErrorClass<ReviewWorktreeContextMissingError>()(
   "ReviewWorktreeContextMissingError",
@@ -49,3 +50,4 @@ export type ReviewError =
   | ReviewSessionContextMissingError
   | ReviewOpenCodeError
   | ReviewResultError
+  | GitCommandError

@@ -11,6 +11,10 @@ import type {
   AgentBackendTimeoutError,
 } from "./errors.js"
 import type {
+  InvocationCleanupError,
+  InvocationContainmentError,
+} from "./invocation-ownership.js"
+import type {
   AgentTurnResult,
   ContinueTurnInput,
   InspectInput,
@@ -26,6 +30,8 @@ export type AgentBackendError =
   | AgentBackendSessionIdMissingError
   | AgentBackendMalformedOutputError
   | AgentBackendNotInstalledError
+  | InvocationContainmentError
+  | InvocationCleanupError
   | PlatformError
 
 /**

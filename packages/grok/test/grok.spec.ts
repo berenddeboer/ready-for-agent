@@ -13,6 +13,7 @@ import {
   AgentBackendTimeoutError,
   type OnSessionId,
   PROMPT_ARGV_BYTE_LIMIT,
+  findWritableLinuxCgroupParent,
 } from "@ready-for-agent/agent-backend"
 import { Grok } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -66,6 +67,21 @@ const withAcpGrok = async <A>(
 ): Promise<A> => withExecutable(script, use)
 
 const SESSION_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+
+const linuxCgroupAvailable = (): boolean =>
+  process.platform === "linux" && findWritableLinuxCgroupParent() !== undefined
+
+const requireLinuxCgroup = (): boolean => {
+  if (process.platform !== "linux") {
+    return false
+  }
+  if (!linuxCgroupAvailable()) {
+    throw new Error(
+      "Linux tests require a writable cgroup v2 parent so invocation ownership can contain reparented descendants",
+    )
+  }
+  return true
+}
 
 const continueTurn = (
   binary: string,
@@ -598,6 +614,43 @@ describe("Grok AgentBackend adapter", () => {
         }
       },
     )
+  })
+
+  it("terminates a reparented continueTurn worker on timeout", async () => {
+    if (!requireLinuxCgroup()) return
+    const markerDir = await mkdtemp(join(tmpdir(), "grok-acp-reparent-"))
+    const grandPidFile = join(markerDir, "grand.pid")
+    try {
+      await withAcpGrok(
+        async (binary) => {
+          const error = await Effect.runPromise(
+            continueTurn(binary, {
+              timeout: "500 millis",
+              forceKillAfter: "100 millis",
+            }).pipe(Effect.flip),
+          )
+          expect(error).toBeInstanceOf(AgentBackendTimeoutError)
+          await Bun.sleep(300)
+          const grandPid = Number(
+            (
+              await Bun.file(grandPidFile)
+                .text()
+                .catch(() => "")
+            ).trim(),
+          )
+          expect(Number.isFinite(grandPid) && grandPid > 0).toBe(true)
+          expect(isPidAlive(grandPid)).toBe(false)
+        },
+        [
+          `sh -c 'setsid -f sh -c "echo \\$\\$ > ${JSON.stringify(grandPidFile)}; exec sleep 100" </dev/null >/dev/null 2>&1'`,
+          `while [ ! -s ${JSON.stringify(grandPidFile)} ]; do sleep 0.01; done`,
+          `export ${FAKE_ACP_ENV.promptDelayMs}=30000`,
+          `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
+        ].join("\n"),
+      )
+    } finally {
+      await rm(markerDir, { recursive: true, force: true })
+    }
   })
 
   it("terminates the continueTurn process tree on turn timeout", async () => {

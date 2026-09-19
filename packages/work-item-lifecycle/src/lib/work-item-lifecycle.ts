@@ -9,6 +9,7 @@ import {
   Layer,
   Option,
   Predicate,
+  Ref,
   Result,
   Schema,
 } from "effect"
@@ -18,11 +19,16 @@ import {
   ActiveAgentBackend,
   type AgentBackendId,
   type AgentBackendProvider,
+  type InvocationCleanupError,
+  InvocationCleanupSlot,
   agentBackendLabel,
+  appendCleanupDiagnostics,
   classifyProviderCredentialText,
   findAgentBackendExitError,
   findAgentBackendNotInstalledError,
+  findInvocationCleanupFailure,
   formatTerminalAuthErrorMessage,
+  interruptIsInitiatingReason,
   isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
 import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
@@ -314,6 +320,28 @@ const terminalAuthFromCause = (
   return undefined
 }
 
+const causeIncludesTimeoutError = (cause: Cause.Cause<unknown>): boolean => {
+  const candidates: unknown[] = []
+  const direct = Cause.findErrorOption(cause)
+  if (Option.isSome(direct)) {
+    candidates.push(direct.value)
+  }
+  for (const error of Cause.prettyErrors(cause)) {
+    candidates.push(error)
+    if ("cause" in error) {
+      candidates.push(error.cause)
+    }
+  }
+  return candidates.some(
+    (error) =>
+      Predicate.isTagged(error, "TimeoutError") ||
+      (typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name: unknown }).name === "TimeoutError"),
+  )
+}
+
 const classifyHandlerFailure = (
   cause: Cause.Cause<HandlerExitError>,
   context: {
@@ -329,6 +357,13 @@ const classifyHandlerFailure = (
     return {
       reasonCode: eligibility.failureCode,
       reasonMessage: eligibility.failureMessage,
+    }
+  }
+
+  if (causeIncludesTimeoutError(cause)) {
+    return {
+      reasonCode: STEP_RUN_REASON.timeout,
+      reasonMessage: "Lifecycle Step exceeded its configured maximum duration",
     }
   }
 
@@ -5726,6 +5761,9 @@ export const makeWorkItemLifecycleLive = (
 
               const result = yield* Effect.uninterruptibleMask((restore) =>
                 Effect.gen(function* () {
+                  const leftoverSlot = yield* Ref.make<
+                    InvocationCleanupError | undefined
+                  >(undefined)
                   const handlerExit = yield* Effect.exit(
                     restore(
                       Effect.raceFirst(
@@ -5739,6 +5777,10 @@ export const makeWorkItemLifecycleLive = (
                           Effect.provideService(
                             CurrentCapturedAgentBackendId,
                             workItem.agent_backend,
+                          ),
+                          Effect.provideService(
+                            InvocationCleanupSlot,
+                            leftoverSlot,
                           ),
                           Effect.raceFirst(productiveTimeout),
                         ),
@@ -5812,17 +5854,25 @@ export const makeWorkItemLifecycleLive = (
                     }
                     const isTimeout =
                       classification.reasonCode === STEP_RUN_REASON.timeout
+                    const leftoverFromSlot = yield* Ref.get(leftoverSlot)
+                    const cleanup =
+                      findInvocationCleanupFailure(handlerExit.cause) ??
+                      leftoverFromSlot
                     if (
                       !isTimeout &&
-                      Cause.hasInterruptsOnly(handlerExit.cause)
+                      interruptIsInitiatingReason(handlerExit.cause)
                     ) {
+                      const interruptMessage =
+                        controller.reasonCode === STEP_RUN_REASON.paused
+                          ? "Work Item was interrupted while the Step Run was Running"
+                          : "Lifecycle Step was interrupted before an outcome could be established"
                       yield* completeInterruptedStep({
                         stepRun: afterStart,
                         reasonCode: controller.reasonCode,
-                        reasonMessage:
-                          controller.reasonCode === STEP_RUN_REASON.paused
-                            ? "Work Item was interrupted while the Step Run was Running"
-                            : "Lifecycle Step was interrupted before an outcome could be established",
+                        reasonMessage: appendCleanupDiagnostics(
+                          interruptMessage,
+                          cleanup,
+                        ),
                         cause: handlerExit.cause,
                       })
                       const interrupted = yield* getWorkItem(workItem.id).pipe(
@@ -5860,7 +5910,10 @@ export const makeWorkItemLifecycleLive = (
                       stepRun: afterStart,
                       workItem,
                       reasonCode: classification.reasonCode,
-                      reasonMessage: timeoutMessage,
+                      reasonMessage: appendCleanupDiagnostics(
+                        timeoutMessage,
+                        cleanup,
+                      ),
                       cause: handlerExit.cause,
                       terminalFailure:
                         eligibility === null

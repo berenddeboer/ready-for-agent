@@ -2,7 +2,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
-import { Duration, Effect, Ref } from "effect"
+import { Cause, Duration, Effect, Ref } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { runCliTurn } from "../src/lib/cli-runner.js"
 import { sanitizeInheritedEnvironment } from "../src/lib/environment.js"
@@ -12,6 +12,7 @@ import {
   AgentBackendTimeoutError,
   formatAgentBackendStartupTimeoutMessage,
 } from "../src/lib/errors.js"
+import { InvocationCleanupError } from "../src/lib/invocation-ownership.js"
 import { retrySilentKnownSessionStartup } from "../src/lib/retry-silent-startup.js"
 import { describe, expect, it } from "bun:test"
 
@@ -97,6 +98,38 @@ describe("retrySilentKnownSessionStartup", () => {
       assistantText: "recovered",
     })
     expect(await Effect.runPromise(Ref.get(calls))).toBe(2)
+  })
+
+  it("does not retry a silent startup timeout when leftovers remain", async () => {
+    const leftover = new InvocationCleanupError({
+      message: "Invocation cgroup still has processes after SIGKILL: 1234",
+      invocationId: "inv-leftover-retry",
+      leftoverPids: [1234],
+    })
+    const calls = await Effect.runPromise(Ref.make(0))
+    const error = await Effect.runPromise(
+      retrySilentKnownSessionStartup(
+        () =>
+          Effect.gen(function* () {
+            yield* Ref.update(calls, (value) => value + 1)
+            return yield* Effect.failCause(
+              Cause.combine(
+                Cause.fail(
+                  new AgentBackendStartupTimeoutError({
+                    cwd: "/tmp",
+                    startupTimeoutMs: 200,
+                    sessionId: "ses_retry",
+                  }),
+                ),
+                Cause.fail(leftover),
+              ),
+            )
+          }),
+        { sessionId: "ses_retry", model: "test/model" },
+      ).pipe(Effect.flip),
+    )
+    expect(error).toBeInstanceOf(AgentBackendStartupTimeoutError)
+    expect(await Effect.runPromise(Ref.get(calls))).toBe(1)
   })
 
   it("does not retry a full-turn timeout, nonzero exit, or malformed-style failure", async () => {

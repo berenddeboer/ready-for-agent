@@ -1,6 +1,13 @@
 import { Effect, FileSystem, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import { ChildProcessSpawner } from "effect/unstable/process"
+import {
+  AgentBackend,
+  InvocationCleanupError,
+  InvocationContainmentError,
+  agentBackendLabel,
+  scopedOwned,
+  spawnOwnedProcess,
+} from "@ready-for-agent/agent-backend"
 import {
   type InstallCommand,
   type InstallPlan,
@@ -61,16 +68,19 @@ const resolveWorktreePath = (context: LifecycleStepContext) =>
 const runInstallCommand = (cwd: string, install: InstallCommand) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const command = ChildProcess.make(install.command, install.args, {
-      cwd,
-      ...repositoryProcessOptions(),
-      stdin: "ignore",
-      stdout: "ignore",
-    })
-
-    const result = yield* Effect.scoped(
+    const result = yield* scopedOwned(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwnedProcess(
+          spawner,
+          install.command,
+          install.args,
+          {
+            cwd,
+            ...repositoryProcessOptions(),
+            stdin: "ignore",
+            stdout: "ignore",
+          },
+        )
         const [exitCode, stderr] = yield* Effect.all(
           [
             handle.exitCode,
@@ -86,17 +96,22 @@ const runInstallCommand = (cwd: string, install: InstallCommand) =>
         }
       }),
     ).pipe(
-      Effect.mapError(
-        (cause) =>
-          new InstallCommandError({
-            message: `Unable to run ${install.command} ${install.args.join(" ")}`,
-            command: install.command,
-            args: install.args,
-            cwd,
-            exitCode: -1,
-            stderr: String(cause),
-          }),
-      ),
+      Effect.mapError((cause) => {
+        if (
+          cause instanceof InvocationCleanupError ||
+          cause instanceof InvocationContainmentError
+        ) {
+          return cause
+        }
+        return new InstallCommandError({
+          message: `Unable to run ${install.command} ${install.args.join(" ")}`,
+          command: install.command,
+          args: install.args,
+          cwd,
+          exitCode: -1,
+          stderr: String(cause),
+        })
+      }),
     )
 
     if (result.exitCode !== 0) {

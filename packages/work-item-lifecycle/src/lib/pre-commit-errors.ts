@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import type { GitCommandError } from "./create-worktree-errors.js"
 
 export class PreCommitWorktreeContextMissingError extends Schema.TaggedErrorClass<PreCommitWorktreeContextMissingError>()(
   "PreCommitWorktreeContextMissingError",
@@ -62,3 +63,4 @@ export type PreCommitError =
   | PreCommitHookFailedError
   | PreCommitSessionContextMissingError
   | PreCommitOpenCodeError
+  | GitCommandError

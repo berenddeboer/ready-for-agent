@@ -1211,6 +1211,36 @@ rfa:AgentTurn
   rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn for this concept."@en ;
 ] .
 
+rfa:InvocationBoundary
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Invocation Boundary"@en ;
+  skos:definition "The invocation-scoped execution ownership the Harness establishes before an Agent Turn or native repository command can spawn children. On Linux it is a dedicated cgroup v2 so descendants remain owned after setsid, double-fork, or reparenting. Timeout and Interrupt terminate every process in that boundary before a replacement attempt runs against the same Work Item. A new Agent Turn on the same Session gets a new boundary. Independent Work Items keep independent boundaries."@en ;
+  skos:hiddenLabel "process group"@en, "tree kill"@en, "global execution lock"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InvocationBoundary ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "process group"@en ;
+  rfa:avoidanceRationale "as the ownership guarantee"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InvocationBoundary ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "tree kill"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Invocation Boundary for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:InvocationBoundary ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "global execution lock"@en ;
+  rfa:avoidanceRationale "independent Work Items keep independent boundaries"@en ;
+] .
+
 rfa:AgentTurnTail
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Agent Turn Tail"@en ;

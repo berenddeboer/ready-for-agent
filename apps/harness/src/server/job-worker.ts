@@ -11,6 +11,7 @@ import {
   Schedule,
   Schema,
 } from "effect"
+import { reapAbandonedInvocations } from "@ready-for-agent/agent-backend"
 import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import {
   DbService,
@@ -648,6 +649,14 @@ export const startJobWorker = Effect.fn("JobWorker.startJobWorker")(function* (
   options: JobWorkerOptions = {},
 ) {
   const lifecycle = yield* WorkItemLifecycle
+  yield* reapAbandonedInvocations.pipe(
+    Effect.catch((error) =>
+      Effect.logError(
+        "Failed to reap abandoned invocation boundaries on startup",
+        logErrorAnnotations(error),
+      ),
+    ),
+  )
   yield* lifecycle.interruptRunningStepRunsFromPriorWorker.pipe(
     Effect.tap((count) =>
       count > 0

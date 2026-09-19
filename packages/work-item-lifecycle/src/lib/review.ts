@@ -1,14 +1,17 @@
 import { Clock, Duration, Effect, FileSystem, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
 import {
   AgentBackend,
   AgentBackendStartupTimeoutError,
   agentBackendLabel,
   formatAgentBackendStartupTimeoutMessage,
+  scopedOwned,
+  spawnOwnedProcess,
 } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
+import { mapOwnedSpawnError } from "./git.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { preCommit } from "./pre-commit.js"
 import { repositoryProcessOptions } from "./repository-process-environment.js"
@@ -469,15 +472,16 @@ export const parseRerunAssessmentResult = (
 const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const command = ChildProcess.make("git", args, {
-      cwd,
-      ...repositoryProcessOptions(),
-      stdin: "ignore",
-    })
-
-    return yield* Effect.scoped(
+    const ownedContext = { command: "git", args, cwd }
+    return yield* scopedOwned(
       Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
+        const handle = yield* spawnOwnedProcess(spawner, "git", args, {
+          cwd,
+          ...repositoryProcessOptions(),
+          stdin: "ignore",
+        }).pipe(
+          Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)),
+        )
         const [exitCode, stdout, stderr] = yield* Effect.all(
           [
             handle.exitCode,
@@ -492,7 +496,7 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
           stderr,
         }
       }),
-    )
+    ).pipe(Effect.mapError((error) => mapOwnedSpawnError(error, ownedContext)))
   })
 
 const worktreeFingerprint = (worktreePath: string) =>
