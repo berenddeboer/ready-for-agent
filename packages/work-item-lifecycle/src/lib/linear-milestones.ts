@@ -51,6 +51,12 @@ export const linearHumanAttentionComment = (
     linearMilestoneMarker("human-attention", workItemId),
   )
 
+export const linearCompletionComment = (
+  workItemId: string,
+  summary: string,
+): string =>
+  commentBody([summary.trim()], linearMilestoneMarker("completion", workItemId))
+
 export const githubPullRequestUrl = (input: {
   readonly forgeHost: string
   readonly projectPath: string
@@ -133,4 +139,45 @@ export const notifyLinearHumanAttention = (input: {
       linearMilestoneMarker("human-attention", input.workItemId),
       linearHumanAttentionComment(input.workItemId, input.reason),
     )
+  })
+
+/**
+ * Close Issue for a Linear Original Issue Source: publish the completion
+ * summary once, then move to the configured Done status. Already completed
+ * or canceled Issues are accepted without a second transition.
+ */
+export const completeLinearIssue = (input: {
+  readonly repository: RepositoryRecord
+  readonly issueSource: IssueSource | undefined
+  readonly workItemId: string
+  readonly summary: string
+}): Effect.Effect<
+  void,
+  LinearRequestError | LinearNotConfiguredError,
+  LinearService
+> =>
+  Effect.gen(function* () {
+    if (!requireLinearSource(input.issueSource)) {
+      return
+    }
+    const linear = yield* LinearService
+    const issue = yield* linear.getIssue(input.issueSource.nativeId)
+    yield* linear.ensureMilestoneComment(
+      input.issueSource.nativeId,
+      linearMilestoneMarker("completion", input.workItemId),
+      linearCompletionComment(input.workItemId, input.summary),
+    )
+    const team = input.repository.linearWorkflowStatuses.find(
+      (status) => status.teamId === issue.teamId,
+    )
+    if (team === undefined) {
+      if (input.repository.issueTracker === "linear") {
+        return yield* new LinearNotConfiguredError({
+          repositoryId: input.repository.id,
+          message: `No Done workflow status is configured for Linear team ${issue.teamKey}. Choose Done in Repository settings, then Retry.`,
+        })
+      }
+      return
+    }
+    yield* linear.updateIssueState(input.issueSource.nativeId, team.doneStateId)
   })

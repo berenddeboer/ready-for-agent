@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect"
 import { AGENT_BACKEND_IDS } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
+import type { LinearServiceTestFixture } from "@ready-for-agent/linear-service"
 import {
   LinearRequestError,
   linearMilestoneMarker,
@@ -12,6 +13,8 @@ import {
   type LifecycleStepsShape,
   WorkItemLifecycle,
   WorkItemLifecycleLive,
+  closeIssue,
+  linearCompletionComment,
   stubActiveAgentBackendLayer,
   stubAzureDevOpsServiceLayer,
   stubGitHubServiceLayer,
@@ -75,6 +78,115 @@ const linearWorkflow = {
   doneStateId: "done",
   doneStateName: "Done",
 } as const
+
+const linearNativeId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+const noChangeMustNotPublish = {
+  preCommit: () => Effect.die("pre-commit must not run for NO_CHANGES"),
+  review: () => Effect.die("review must not run for NO_CHANGES"),
+  commit: () => Effect.die("commit must not run for NO_CHANGES"),
+  createPr: () => Effect.die("create PR must not run for NO_CHANGES"),
+  watchPrStatusChecks: () =>
+    Effect.die("status checks must not run for NO_CHANGES"),
+  resolvePrMergeConflict: () =>
+    Effect.die("merge conflict must not run for NO_CHANGES"),
+  investigatePrStatusChecks: () =>
+    Effect.die("investigate checks must not run for NO_CHANGES"),
+  markPrReadyForReview: () =>
+    Effect.die("mark ready must not run for NO_CHANGES"),
+  decidePrMerge: () => Effect.die("decide merge must not run for NO_CHANGES"),
+  mergePr: () => Effect.die("merge PR must not run for NO_CHANGES"),
+} satisfies Partial<LifecycleStepsShape>
+
+const linearLifecycleLayer = (
+  steps: LifecycleStepsShape,
+  linear: LinearServiceTestFixture = {},
+) =>
+  WorkItemLifecycleLive.pipe(
+    Layer.provideMerge(stubActiveAgentBackendLayer()),
+    Layer.provideMerge(
+      stubGitHubServiceLayer({
+        ensureIssueCompletedWithSummary: () =>
+          Effect.die("GitHub close-out must not run for a Linear Issue"),
+      }),
+    ),
+    Layer.provideMerge(stubGitLabServiceLayer()),
+    Layer.provideMerge(stubAzureDevOpsServiceLayer()),
+    Layer.provideMerge(stubLinearServiceLayer(linear)),
+    Layer.provideMerge(Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps))),
+    Layer.provideMerge(DbServiceLive),
+    Layer.provideMerge(SqliteQueueServiceLive),
+    Layer.provideMerge(DatabaseTest),
+  )
+
+const seedLinearNoChangeRepository = (localPath: string) =>
+  Effect.gen(function* () {
+    const db = yield* DbService
+    const repo = yield* db.addRepository({
+      forge: "github",
+      forgeHost: "github.com",
+      projectPath: "acme/widgets",
+      localPath,
+      isBare: true,
+    })
+    yield* db.updateRepositorySettings({
+      repositoryId: repo.id,
+      paused: true,
+      defaultModel: null,
+      defaultThinkingLevel: null,
+      reviewModel: null,
+      reviewThinkingLevel: null,
+      mergePolicy: "off",
+      includeAllIssueAuthors: false,
+      waitForReadyForReviewChecks: true,
+      issueTracker: "linear",
+      linearProjectId: "proj-1",
+      linearProjectName: "Widgets",
+      linearWorkflowStatuses: [linearWorkflow],
+    })
+    yield* db.updateConfig({
+      selectedAgentBackend: AGENT_BACKEND_IDS.opencode,
+      defaultModel: "opencode/deepseek-v4-flash-free",
+      defaultThinkingLevel: null,
+      reviewModel: null,
+      reviewThinkingLevel: null,
+      maxConcurrentAgentTurns: 2,
+      maxConcurrentWorkItems: 5,
+    })
+    yield* db.storeIssue({
+      repositoryId: repo.id,
+      issueNumber: 123,
+      issueTracker: "linear",
+      nativeId: linearNativeId,
+      displayId: "ENG-123",
+      title: "No repository change",
+      body: "Answer the question in Linear.",
+      url: "https://linear.app/acme/issue/ENG-123",
+      state: "OPEN",
+      githubCreatedAt: new Date(),
+      issueAuthor: null,
+      parent: null,
+      parentPosition: null,
+      hasChildren: false,
+      blockedBy: [],
+    })
+    return repo
+  })
+
+const runQueuedSteps = (workItemId: string) =>
+  Effect.gen(function* () {
+    const lifecycle = yield* WorkItemLifecycle
+    let current = yield* lifecycle.getWorkItem(workItemId)
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const queued = current.stepRuns.find((run) => run.status === "queued")
+      if (queued === undefined) {
+        return current
+      }
+      yield* lifecycle.runStep(queued.id)
+      current = yield* lifecycle.getWorkItem(workItemId)
+    }
+    return current
+  })
 
 describe("Linear Issue execution", () => {
   it("keeps GitHub Work Items on GitHub after the tracker switches, and starts Linear Work Items on Linear", async () => {
@@ -532,5 +644,249 @@ describe("Linear Issue execution", () => {
         ),
       ),
     )
+  })
+
+  it("completes a Linear No-Change Outcome through Close Issue without a GitHub PR", async () => {
+    const summary = "The answer is already in Linear; no repository changes."
+    const states: string[] = []
+    const comments: Array<{ nativeId: string; marker: string; body: string }> =
+      []
+    let implementCalls = 0
+    const completed = await Effect.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* seedLinearNoChangeRepository(
+          "/repos/acme/widgets-linear-no-change.git",
+        )
+        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const finished = yield* runQueuedSteps(created.id)
+        return { created, finished }
+      }).pipe(
+        Effect.provide(
+          linearLifecycleLayer(
+            {
+              ...successfulSteps,
+              ...noChangeMustNotPublish,
+              implement: () => {
+                implementCalls += 1
+                return Effect.succeed("ses_linear_no_change")
+              },
+              assessChanges: () =>
+                Effect.succeed({
+                  _tag: "no_changes",
+                  completionSummary: summary,
+                }),
+              closeIssue,
+            },
+            {
+              issue: {
+                id: linearNativeId,
+                identifier: "ENG-123",
+                url: "https://linear.app/acme/issue/ENG-123",
+                teamId: linearWorkflow.teamId,
+                teamKey: linearWorkflow.teamKey,
+                stateId: "todo",
+                stateName: "Todo",
+                stateType: "unstarted",
+              },
+              updateIssueState: (_id, stateId) =>
+                Effect.sync(() => {
+                  states.push(stateId)
+                }),
+              ensureMilestoneComment: (nativeId, marker, body) =>
+                Effect.sync(() => {
+                  comments.push({ nativeId, marker, body })
+                }),
+            },
+          ),
+        ),
+      ),
+    )
+
+    expect(completed.finished.state).toBe("complete")
+    expect(completed.finished.completionSummary).toBe(summary)
+    expect(completed.finished.pullRequestNumber).toBeNull()
+    expect(implementCalls).toBe(1)
+    expect(states).toEqual(["done"])
+    expect(comments).toEqual([
+      {
+        nativeId: linearNativeId,
+        marker: linearMilestoneMarker("completion", completed.created.id),
+        body: linearCompletionComment(completed.created.id, summary),
+      },
+    ])
+    expect(
+      completed.finished.stepRuns.map((run) => [run.step, run.status]),
+    ).toEqual([
+      ["create_worktree", "succeeded"],
+      ["install_dependencies", "succeeded"],
+      ["implement", "succeeded"],
+      ["assess_changes", "succeeded"],
+      ["close_issue", "succeeded"],
+      ["local_cleanup", "succeeded"],
+    ])
+  })
+
+  it("retries Linear Close Issue after a tracker failure without restarting implementation", async () => {
+    const summary = "Summary retained across Linear close-out retry."
+    const states: string[] = []
+    const comments: string[] = []
+    let implementCalls = 0
+    let closeAttempts = 0
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* seedLinearNoChangeRepository(
+          "/repos/acme/widgets-linear-no-change-retry.git",
+        )
+        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const afterFailure = yield* runQueuedSteps(created.id)
+        expect(afterFailure.state).toBe("close_issue")
+        expect(afterFailure.completionSummary).toBe(summary)
+        expect(afterFailure.pullRequestNumber).toBeNull()
+        expect(afterFailure.stepRuns.at(-1)?.status).toBe("failed")
+        expect(implementCalls).toBe(1)
+
+        yield* lifecycle.retry(afterFailure.id)
+        const finished = yield* runQueuedSteps(created.id)
+        return { created, finished }
+      }).pipe(
+        Effect.provide(
+          linearLifecycleLayer(
+            {
+              ...successfulSteps,
+              ...noChangeMustNotPublish,
+              implement: () => {
+                implementCalls += 1
+                return Effect.succeed("ses_linear_no_change_retry")
+              },
+              assessChanges: () =>
+                Effect.succeed({
+                  _tag: "no_changes",
+                  completionSummary: summary,
+                }),
+              closeIssue,
+            },
+            {
+              issue: {
+                id: linearNativeId,
+                identifier: "ENG-123",
+                url: "https://linear.app/acme/issue/ENG-123",
+                teamId: linearWorkflow.teamId,
+                teamKey: linearWorkflow.teamKey,
+                stateId: "todo",
+                stateName: "Todo",
+                stateType: "unstarted",
+              },
+              updateIssueState: (_id, stateId) =>
+                Effect.sync(() => {
+                  states.push(stateId)
+                }),
+              ensureMilestoneComment: (_id, marker) => {
+                closeAttempts += 1
+                if (closeAttempts === 1) {
+                  return Effect.fail(
+                    new LinearRequestError({
+                      message: "Linear comment API unavailable",
+                    }),
+                  )
+                }
+                return Effect.sync(() => {
+                  comments.push(marker)
+                })
+              },
+            },
+          ),
+        ),
+      ),
+    )
+
+    expect(result.finished.state).toBe("complete")
+    expect(result.finished.completionSummary).toBe(summary)
+    expect(result.finished.pullRequestNumber).toBeNull()
+    expect(implementCalls).toBe(1)
+    expect(closeAttempts).toBe(2)
+    expect(states).toEqual(["done"])
+    expect(comments).toEqual([
+      linearMilestoneMarker("completion", result.created.id),
+    ])
+  })
+
+  it("accepts an already-completed Linear Issue on the no-change Close Issue path", async () => {
+    const summary = "Decision already recorded; no repository changes."
+    const states: string[] = []
+    const comments: string[] = []
+    const finished = await Effect.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* seedLinearNoChangeRepository(
+          "/repos/acme/widgets-linear-already-done.git",
+        )
+        const created = yield* lifecycle.implementNow(repo.id, 123)
+        return yield* runQueuedSteps(created.id)
+      }).pipe(
+        Effect.provide(
+          linearLifecycleLayer(
+            {
+              ...successfulSteps,
+              ...noChangeMustNotPublish,
+              assessChanges: (context) =>
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  yield* db.storeIssue({
+                    repositoryId: context.repositoryId,
+                    issueNumber: 123,
+                    issueTracker: "linear",
+                    nativeId: linearNativeId,
+                    displayId: "ENG-123",
+                    title: "No repository change",
+                    body: "Answer the question in Linear.",
+                    url: "https://linear.app/acme/issue/ENG-123",
+                    state: "CLOSED",
+                    githubCreatedAt: new Date(),
+                    issueAuthor: null,
+                    parent: null,
+                    parentPosition: null,
+                    hasChildren: false,
+                    blockedBy: [],
+                  })
+                  return {
+                    _tag: "no_changes" as const,
+                    completionSummary: summary,
+                  }
+                }),
+              closeIssue,
+            },
+            {
+              issue: {
+                id: linearNativeId,
+                identifier: "ENG-123",
+                url: "https://linear.app/acme/issue/ENG-123",
+                teamId: linearWorkflow.teamId,
+                teamKey: linearWorkflow.teamKey,
+                stateId: "done",
+                stateName: "Done",
+                stateType: "completed",
+              },
+              updateIssueState: (_id, stateId) =>
+                Effect.sync(() => {
+                  states.push(stateId)
+                }),
+              ensureMilestoneComment: (_id, marker) =>
+                Effect.sync(() => {
+                  comments.push(marker)
+                }),
+            },
+          ),
+        ),
+      ),
+    )
+
+    expect(finished.state).toBe("complete")
+    expect(finished.completionSummary).toBe(summary)
+    expect(finished.pullRequestNumber).toBeNull()
+    expect(states).toEqual(["done"])
+    expect(comments).toHaveLength(1)
+    expect(comments[0]).toContain("completion")
   })
 })

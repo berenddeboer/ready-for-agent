@@ -72,6 +72,7 @@ export const LINEAR_MILESTONE_KINDS = [
   "work-started",
   "pull-request",
   "human-attention",
+  "completion",
 ] as const
 
 export type LinearMilestoneKind = (typeof LINEAR_MILESTONE_KINDS)[number]

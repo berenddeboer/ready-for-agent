@@ -700,6 +700,9 @@ describe("Linear execution mutations", () => {
       service.ensureMilestoneComment(ISSUE_UUID, marker, mixedBody),
     )
     expect(linearMilestoneMarker("work-started", "wi-1")).toBe(marker)
+    expect(linearMilestoneMarker("completion", "wi-1")).toBe(
+      "ready-for-agent:completion:wi-1",
+    )
     expect(marker.startsWith("<!--")).toBe(false)
     expect(comments.nodes).toHaveLength(1)
     expect(comments.nodes[0]?.body).toContain(marker)
