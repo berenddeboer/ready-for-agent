@@ -52,8 +52,8 @@ import {
   LINEAR_API_KEY_SECRET_NAME,
   LINEAR_VAULT_ACCOUNT,
   LINEAR_VAULT_PROVIDER,
+  LinearExecutionNotSupportedError,
   LinearService,
-  linearExecutionNotSupported,
 } from "@ready-for-agent/linear-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import type { QueueService } from "@ready-for-agent/queue-service"
@@ -632,7 +632,7 @@ export const createGraphqlApi = <R>(
     options.environment ?? (process.env as Record<string, string | undefined>)
   const harnessVersion = options.version ?? "0.0.0"
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
-  const rejectLinearExecution = (repositoryId: string) =>
+  const rejectLinearParentImplementAll = (repositoryId: string) =>
     Effect.gen(function* () {
       const db = yield* DbService
       const repositories = yield* db.listRepositories
@@ -641,7 +641,11 @@ export const createGraphqlApi = <R>(
         return yield* new RepositoryNotFoundError({ repositoryId })
       }
       if (repository.issueTracker === "linear") {
-        return yield* linearExecutionNotSupported(repository.id)
+        return yield* new LinearExecutionNotSupportedError({
+          repositoryId: repository.id,
+          message:
+            "Implement All is not available for Linear Issues in this release. Start eligible leaf Issues instead.",
+        })
       }
     })
 
@@ -1143,10 +1147,6 @@ export const createGraphqlApi = <R>(
                     repositoryId: args.repositoryId,
                   })
                 }
-                if (repository.issueTracker === "linear") {
-                  return { repository, candidates: [] }
-                }
-
                 // Current Issue projection only — never request or wait for Refresh.
                 const [issues, workItems] = yield* Effect.all([
                   db.listIssues(repository.id),
@@ -1156,10 +1156,13 @@ export const createGraphqlApi = <R>(
                   issues,
                   workItems.map((workItem) => ({
                     issueNumber: workItem.issueNumber,
+                    issueTracker: workItem.issueSource.tracker,
+                    nativeId: workItem.issueSource.nativeId,
                     id: workItem.id,
                     state: workItem.state,
                     canRetry: isRetryableFailedWorkItem(workItem),
                   })),
+                  repository.issueTracker,
                 )
 
                 // Empty classification is a successful no-op and skips preflight.
@@ -2783,7 +2786,6 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
-                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementNow(
                   args.repositoryId,
@@ -2799,7 +2801,6 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
-                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementCiRepair(
                   args.repositoryId,
@@ -2829,7 +2830,6 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
-                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementWith(
                   args.repositoryId,
@@ -2862,7 +2862,6 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
-                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementLocally(
                   args.repositoryId,
@@ -2878,7 +2877,7 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
-                yield* rejectLinearExecution(args.repositoryId)
+                yield* rejectLinearParentImplementAll(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementAllWithAutoMerge(
                   args.repositoryId,
@@ -2894,7 +2893,6 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
-                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.queue(
                   args.repositoryId,
@@ -2909,8 +2907,7 @@ export const createGraphqlApi = <R>(
             context: GraphqlRequestContext,
           ) =>
             runGraphql(
-              rejectLinearExecution(args.repositoryId).pipe(
-                Effect.andThen(startRepositoryIntake(args.repositoryId)),
+              startRepositoryIntake(args.repositoryId).pipe(
                 Effect.withSpan("graphql-api.startRepositoryIntake"),
               ),
               context,

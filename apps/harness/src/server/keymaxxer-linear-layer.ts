@@ -7,6 +7,7 @@ import {
   LINEAR_VAULT_ACCOUNT,
   LINEAR_VAULT_PROVIDER,
   type LinearHelperOperation,
+  type LinearIssueSnapshot,
   type LinearProject,
   LinearRequestError,
   LinearService,
@@ -60,6 +61,16 @@ const LinearTeamWorkflowSchema = Schema.Struct({
   states: Schema.Array(LinearWorkflowStateSchema),
   suggestedInProgressStateId: Schema.NullOr(Schema.String),
   suggestedDoneStateId: Schema.NullOr(Schema.String),
+})
+const LinearIssueSnapshotSchema = Schema.Struct({
+  id: Schema.String,
+  identifier: Schema.String,
+  url: Schema.String,
+  teamId: Schema.String,
+  teamKey: Schema.String,
+  stateId: Schema.String,
+  stateName: Schema.String,
+  stateType: Schema.String,
 })
 
 /**
@@ -248,6 +259,53 @@ export const keymaxxerLinearLayer = (options: {
                     LinearServiceError
                   >,
                 describe: `listing Linear workflow states for project ${projectId}`,
+              }),
+          ),
+        getIssue: (nativeId) =>
+          withToken(
+            () => ambient.getIssue(nativeId),
+            (tokenName) =>
+              callHelper({
+                operation: "get-issue",
+                args: [encodeArgument(nativeId)],
+                tokenName,
+                decode: (stdout) =>
+                  Schema.decodeUnknownEffect(
+                    Schema.fromJsonString(LinearIssueSnapshotSchema),
+                  )(stdout).pipe(
+                    Effect.mapError(() =>
+                      requestError("Linear returned an invalid Issue", stdout),
+                    ),
+                  ) as Effect.Effect<LinearIssueSnapshot, LinearServiceError>,
+                describe: `reading Linear Issue ${nativeId}`,
+              }),
+          ),
+        updateIssueState: (nativeId, stateId) =>
+          withToken(
+            () => ambient.updateIssueState(nativeId, stateId),
+            (tokenName) =>
+              callHelper({
+                operation: "update-issue-state",
+                args: [encodeArgument(nativeId), encodeArgument(stateId)],
+                tokenName,
+                decode: () => Effect.void,
+                describe: `updating Linear Issue ${nativeId} workflow state`,
+              }),
+          ),
+        ensureMilestoneComment: (nativeId, marker, body) =>
+          withToken(
+            () => ambient.ensureMilestoneComment(nativeId, marker, body),
+            (tokenName) =>
+              callHelper({
+                operation: "ensure-milestone-comment",
+                args: [
+                  encodeArgument(nativeId),
+                  encodeArgument(marker),
+                  encodeArgument(body),
+                ],
+                tokenName,
+                decode: () => Effect.void,
+                describe: `posting a Linear milestone comment on Issue ${nativeId}`,
               }),
           ),
         hasCredentials: () =>

@@ -10,6 +10,7 @@ import {
   LINEAR_API_KEY_ENV_VAR,
   LINEAR_API_URL,
   LINEAR_READY_LABEL,
+  type LinearIssueSnapshot,
   type LinearProject,
   type LinearReadyLabeledIssue,
   type LinearTeamWorkflow,
@@ -248,6 +249,128 @@ const READY_ISSUES_QUERY = `query ReadyIssues($projectId: ID!, $after: String) {
     pageInfo { hasNextPage endCursor }
   }
 }`
+
+const ISSUE_QUERY = `query Issue($id: String!) {
+  issue(id: $id) {
+    id
+    identifier
+    url
+    team { id key }
+    state { id name type }
+  }
+}`
+
+const ISSUE_COMMENTS_QUERY = `query IssueComments($id: String!, $after: String) {
+  issue(id: $id) {
+    id
+    comments(first: ${PAGE_SIZE}, after: $after) {
+      nodes { id body }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`
+
+const ISSUE_UPDATE_MUTATION = `mutation IssueUpdate($id: String!, $stateId: String!) {
+  issueUpdate(id: $id, input: { stateId: $stateId }) {
+    success
+    issue { id state { id type } }
+  }
+}`
+
+const COMMENT_CREATE_MUTATION = `mutation CommentCreate($issueId: String!, $body: String!) {
+  commentCreate(input: { issueId: $issueId, body: $body }) {
+    success
+    comment { id body }
+  }
+}`
+
+const COMMENT_UPDATE_MUTATION = `mutation CommentUpdate($id: String!, $body: String!) {
+  commentUpdate(id: $id, input: { body: $body }) {
+    success
+    comment { id body }
+  }
+}`
+
+const IssueSnapshotNodeSchema = Schema.Struct({
+  id: RequiredString,
+  identifier: RequiredString,
+  url: RequiredString,
+  team: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        id: RequiredString,
+        key: RequiredString,
+      }),
+    ),
+  ),
+  state: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        id: RequiredString,
+        name: RequiredString,
+        type: RequiredString,
+      }),
+    ),
+  ),
+})
+const IssueSnapshotSchema = Schema.Struct({
+  issue: Schema.NullOr(IssueSnapshotNodeSchema),
+})
+const CommentNodeSchema = Schema.Struct({
+  id: RequiredString,
+  body: Schema.optional(Schema.NullOr(Schema.String)),
+})
+const IssueCommentsSchema = Schema.Struct({
+  issue: Schema.NullOr(
+    Schema.Struct({
+      id: RequiredString,
+      comments: Schema.optional(
+        Schema.Struct({
+          nodes: Schema.Array(CommentNodeSchema),
+          pageInfo: Schema.optional(PageInfoSchema),
+        }),
+      ),
+    }),
+  ),
+})
+const IssueUpdateSchema = Schema.Struct({
+  issueUpdate: Schema.Struct({
+    success: Schema.optional(Schema.Boolean),
+    issue: Schema.optional(
+      Schema.NullOr(
+        Schema.Struct({
+          id: RequiredString,
+        }),
+      ),
+    ),
+  }),
+})
+const CommentCreateSchema = Schema.Struct({
+  commentCreate: Schema.Struct({
+    success: Schema.optional(Schema.Boolean),
+    comment: Schema.optional(
+      Schema.NullOr(
+        Schema.Struct({
+          id: RequiredString,
+          body: Schema.optional(Schema.NullOr(Schema.String)),
+        }),
+      ),
+    ),
+  }),
+})
+const CommentUpdateSchema = Schema.Struct({
+  commentUpdate: Schema.Struct({
+    success: Schema.optional(Schema.Boolean),
+    comment: Schema.optional(
+      Schema.NullOr(
+        Schema.Struct({
+          id: RequiredString,
+          body: Schema.optional(Schema.NullOr(Schema.String)),
+        }),
+      ),
+    ),
+  }),
+})
 
 const decode = <S extends { readonly Type: unknown }>(
   schema: S & Parameters<typeof Schema.decodeUnknownSync>[0],
@@ -570,6 +693,161 @@ export const makeLinearService = (options: {
         ),
       )
     }),
+    getIssue: Effect.fn("LinearService.getIssue")(function* (nativeId: string) {
+      const data = yield* graphql({
+        query: ISSUE_QUERY,
+        variables: { id: nativeId },
+        schema: IssueSnapshotSchema,
+        describe: `reading Linear Issue ${nativeId}`,
+      })
+      const issue = data.issue
+      if (issue === null) {
+        return yield* requestError(
+          `Linear Issue ${nativeId} was not found. Confirm the Issue still exists and the API key can read it.`,
+        )
+      }
+      const team = issue.team
+      const state = issue.state
+      if (team === null || team === undefined) {
+        return yield* requestError(
+          `Linear Issue ${issue.identifier} has no team. Choose an Issue on a team with In Progress and Done statuses configured.`,
+        )
+      }
+      if (state === null || state === undefined) {
+        return yield* requestError(
+          `Linear Issue ${issue.identifier} has no workflow state.`,
+        )
+      }
+      return {
+        id: issue.id,
+        identifier: issue.identifier,
+        url: issue.url,
+        teamId: team.id,
+        teamKey: team.key,
+        stateId: state.id,
+        stateName: state.name,
+        stateType: state.type,
+      } satisfies LinearIssueSnapshot
+    }),
+    updateIssueState: Effect.fn("LinearService.updateIssueState")(function* (
+      nativeId: string,
+      stateId: string,
+    ) {
+      const current = yield* graphql({
+        query: ISSUE_QUERY,
+        variables: { id: nativeId },
+        schema: IssueSnapshotSchema,
+        describe: `reading Linear Issue ${nativeId} before a workflow update`,
+      })
+      if (current.issue === null) {
+        return yield* requestError(
+          `Linear Issue ${nativeId} was not found. Confirm the Issue still exists and the API key can update it.`,
+        )
+      }
+      const currentState = current.issue.state
+      if (currentState?.id === stateId) {
+        return
+      }
+      if (
+        currentState !== null &&
+        currentState !== undefined &&
+        !isLinearOpenStateType(currentState.type)
+      ) {
+        return
+      }
+      const updated = yield* graphql({
+        query: ISSUE_UPDATE_MUTATION,
+        variables: { id: nativeId, stateId },
+        schema: IssueUpdateSchema,
+        describe: `updating Linear Issue ${nativeId} workflow state`,
+      })
+      if (updated.issueUpdate.success === false) {
+        return yield* requestError(
+          `Linear did not update Issue ${current.issue.identifier} to the configured workflow status.`,
+        )
+      }
+    }),
+    ensureMilestoneComment: Effect.fn("LinearService.ensureMilestoneComment")(
+      function* (nativeId: string, marker: string, body: string) {
+        if (marker.trim() === "" || body.trim() === "") {
+          return yield* requestError(
+            `Linear milestone comment for Issue ${nativeId} was empty.`,
+          )
+        }
+        let existingId: string | null = null
+        let existingBody: string | null = null
+        let after: string | undefined
+        for (;;) {
+          const data = yield* graphql({
+            query: ISSUE_COMMENTS_QUERY,
+            variables: { id: nativeId, after: after ?? null },
+            schema: IssueCommentsSchema,
+            describe: `listing comments for Linear Issue ${nativeId}`,
+          })
+          if (data.issue === null) {
+            return yield* requestError(
+              `Linear Issue ${nativeId} was not found. Confirm the Issue still exists and the API key can comment on it.`,
+            )
+          }
+          for (const comment of data.issue.comments?.nodes ?? []) {
+            const commentBody = comment.body ?? ""
+            if (commentBody.includes(marker)) {
+              existingId = comment.id
+              existingBody = commentBody
+              break
+            }
+          }
+          if (existingId !== null) {
+            break
+          }
+          const pageInfo = data.issue.comments?.pageInfo
+          if (
+            pageInfo?.hasNextPage !== true ||
+            pageInfo.endCursor === null ||
+            pageInfo.endCursor === undefined
+          ) {
+            break
+          }
+          after = pageInfo.endCursor
+        }
+
+        if (existingId !== null) {
+          if (existingBody === body) {
+            return
+          }
+          const updated = yield* graphql({
+            query: COMMENT_UPDATE_MUTATION,
+            variables: { id: existingId, body },
+            schema: CommentUpdateSchema,
+            describe: `updating a Linear milestone comment on Issue ${nativeId}`,
+          })
+          if (updated.commentUpdate.success === false) {
+            return yield* requestError(
+              `Linear did not update the existing milestone comment on Issue ${nativeId}.`,
+            )
+          }
+          return
+        }
+
+        const created = yield* graphql({
+          query: COMMENT_CREATE_MUTATION,
+          variables: { issueId: nativeId, body },
+          schema: CommentCreateSchema,
+          describe: `posting a Linear milestone comment on Issue ${nativeId}`,
+        })
+        if (created.commentCreate.success === false) {
+          return yield* requestError(
+            `Linear did not create a milestone comment on Issue ${nativeId}.`,
+          )
+        }
+        const posted = created.commentCreate.comment?.body ?? ""
+        if (!posted.includes(marker)) {
+          return yield* requestError(
+            `Linear did not return the marked milestone comment on Issue ${nativeId}.`,
+          )
+        }
+      },
+    ),
     hasCredentials: () => Effect.succeed(configured),
     hasAmbientCredentials: () => Effect.succeed(configured),
   } satisfies LinearServiceShape

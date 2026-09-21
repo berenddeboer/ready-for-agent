@@ -486,6 +486,37 @@ describe("publication copy parsing", () => {
     expect(copy.body.match(/Closes #12/g)?.length).toBe(1)
   })
 
+  it("uses a Linear Issue reference instead of a GitHub Closes line", () => {
+    const source = {
+      tracker: "linear" as const,
+      nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      displayId: "ENG-123",
+      url: "https://linear.app/acme/issue/ENG-123",
+    }
+    expect(
+      normalizePublicationCopy(
+        {
+          title: "feat: linear execution",
+          body: "Implements the Linear Issue in GitHub.\n\nCloses #123",
+        },
+        123,
+        source,
+      ),
+    ).toEqual({
+      title: "feat: linear execution",
+      body: "Implements the Linear Issue in GitHub.\n\nLinear: ENG-123\nhttps://linear.app/acme/issue/ENG-123",
+    })
+    const fallback = buildHarnessPublicationFallbackCopy({
+      issueNumber: 123,
+      issueTitle: null,
+      workItemId: "wi-linear",
+      issueSource: source,
+    })
+    expect(fallback.title).toBe("Implement ENG-123")
+    expect(fallback.body).toContain("Linear: ENG-123")
+    expect(fallback.body).not.toContain("Closes #123")
+  })
+
   it("formats commit message from title and body", () => {
     expect(
       formatPublicationCommitMessage({

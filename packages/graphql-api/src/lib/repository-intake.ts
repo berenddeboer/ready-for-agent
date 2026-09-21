@@ -13,6 +13,7 @@ import {
   type AgentBackendUnavailableError,
   type BuildModelNotConfiguredError,
   type IssueBlockedError,
+  type IssueIdentityAmbiguousError,
   type IssueNotBlockedError,
   type IssueNotFoundError,
   type IssueNotOpenError,
@@ -68,6 +69,7 @@ export type RepositoryIntakeResult = {
 
 type CandidateLocalTag =
   | "IssueNotFoundError"
+  | "IssueIdentityAmbiguousError"
   | "IssueNotOpenError"
   | "ParentIssueError"
   | "IssueBlockedError"
@@ -90,6 +92,7 @@ export const isCandidateLocalIntakeError = (
   error: unknown,
 ): error is
   | IssueNotFoundError
+  | IssueIdentityAmbiguousError
   | IssueNotOpenError
   | ParentIssueError
   | IssueBlockedError
@@ -100,6 +103,7 @@ export const isCandidateLocalIntakeError = (
   }
   switch (error._tag as CandidateLocalTag | string) {
     case "IssueNotFoundError":
+    case "IssueIdentityAmbiguousError":
     case "IssueNotOpenError":
     case "ParentIssueError":
     case "IssueBlockedError":
@@ -169,10 +173,13 @@ export const startRepositoryIntake = (
       issues,
       workItems.map((workItem) => ({
         issueNumber: workItem.issueNumber,
+        issueTracker: workItem.issueSource.tracker,
+        nativeId: workItem.issueSource.nativeId,
         id: workItem.id,
         state: workItem.state,
         canRetry: isRetryableFailedWorkItem(workItem),
       })),
+      repository.issueTracker,
     )
 
     if (candidates.length === 0) {

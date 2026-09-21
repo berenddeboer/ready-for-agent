@@ -18,6 +18,7 @@ import {
   stubAzureDevOpsServiceLayer,
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
+  stubLinearServiceLayer,
 } from "../src/index.js"
 import { describe, expect, it, setDefaultTimeout } from "bun:test"
 
@@ -77,6 +78,7 @@ describe("parked Attention when the Issue is no longer Relevant", () => {
       Layer.provideMerge(stubGitHubServiceLayer(github)),
       Layer.provideMerge(stubGitLabServiceLayer()),
       Layer.provideMerge(stubAzureDevOpsServiceLayer()),
+      Layer.provideMerge(stubLinearServiceLayer()),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),

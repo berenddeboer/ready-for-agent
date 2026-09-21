@@ -369,13 +369,17 @@ const persistPublicationCopy = (
 
 const parseAndNormalize = (
   assistantText: string,
-  issueNumber: number,
+  context: LifecycleStepContext,
 ): PublicationCopy | null => {
   const parsed = parsePublicationCopyResult(assistantText)
   if (parsed === null) {
     return null
   }
-  return normalizePublicationCopy(parsed, issueNumber)
+  return normalizePublicationCopy(
+    parsed,
+    context.issueNumber,
+    context.issueSource,
+  )
 }
 
 const publicationCopySourceOf = (
@@ -405,6 +409,7 @@ const generatePublicationCopy = (
         prompt: buildPublicationCopyPrompt({
           issueNumber: context.issueNumber,
           attachmentDirectory,
+          issueSource: context.issueSource,
         }),
         cwd: worktreePath,
         model: context.model,
@@ -423,7 +428,7 @@ const generatePublicationCopy = (
         ),
       )
 
-    let copy = parseAndNormalize(first.assistantText, context.issueNumber)
+    let copy = parseAndNormalize(first.assistantText, context)
     let lastOutput = first.assistantText
     let correctionUsed = false
     if (copy === null) {
@@ -434,6 +439,7 @@ const generatePublicationCopy = (
           prompt: buildPublicationCopyFormatCorrectionPrompt({
             issueNumber: context.issueNumber,
             attachmentDirectory,
+            issueSource: context.issueSource,
           }),
           cwd: worktreePath,
           model: context.model,
@@ -452,7 +458,7 @@ const generatePublicationCopy = (
           ),
         )
       lastOutput = correction.assistantText
-      copy = parseAndNormalize(correction.assistantText, context.issueNumber)
+      copy = parseAndNormalize(correction.assistantText, context)
     }
 
     if (copy === null) {
@@ -466,6 +472,7 @@ const generatePublicationCopy = (
         issueNumber: context.issueNumber,
         issueTitle: context.issueTitle,
         workItemId: context.workItemId,
+        issueSource: context.issueSource,
       })
       yield* Effect.logInfo("Commit using harness publication-copy fallback", {
         workItemId: context.workItemId,
@@ -510,6 +517,7 @@ const resolvePublicationCopy = (
       const seeded = publicationCopyFromCommitMessage(
         message,
         context.issueNumber,
+        context.issueSource,
       )
       if (seeded !== null) {
         const existingTitle = context.publicationTitle?.trim() ?? ""
@@ -526,7 +534,11 @@ const resolvePublicationCopy = (
     const existingBody = context.publicationBody?.trim() ?? ""
     if (existingTitle !== "" && existingBody !== "") {
       const stored = { title: existingTitle, body: existingBody }
-      const normalized = normalizePublicationCopy(stored, context.issueNumber)
+      const normalized = normalizePublicationCopy(
+        stored,
+        context.issueNumber,
+        context.issueSource,
+      )
       // Already-persisted copy is trusted even if slightly over bounds after deploy;
       // re-normalize when possible, otherwise reuse as stored. Harness fallback
       // copy is stored as-is (its body is not agent-substantive).
@@ -568,6 +580,7 @@ const alignCopyWithHeadCommit = (
     const fromCommit = publicationCopyFromCommitMessage(
       actualMessage,
       context.issueNumber,
+      context.issueSource,
     )
     if (fromCommit === null) {
       return preferred
@@ -703,6 +716,7 @@ const askAgentToRepairCommit = (
           title: copy.title,
           body: copy.body,
           diagnostics,
+          issueSource: context.issueSource,
         }),
         cwd: worktreePath,
         model: context.model,

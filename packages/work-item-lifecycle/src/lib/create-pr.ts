@@ -59,6 +59,10 @@ import { forgeObservation } from "./forge-observation.js"
 import { issueOperationsForge } from "./issue-source-execution.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
+  githubPullRequestUrl,
+  notifyLinearPullRequest,
+} from "./linear-milestones.js"
+import {
   type PublicationCopy,
   buildCreatePrFallbackPromptWithCopy,
   normalizePublicationCopy,
@@ -804,6 +808,7 @@ const resolvePublicationCopyForCreatePr = (
       const normalized = normalizePublicationCopy(
         { title, body },
         context.issueNumber,
+        context.issueSource,
       )
       if (normalized !== null) {
         return normalized
@@ -821,6 +826,7 @@ const resolvePublicationCopyForCreatePr = (
       const seeded = publicationCopyFromCommitMessage(
         head.stdout,
         context.issueNumber,
+        context.issueSource,
       )
       if (seeded !== null) {
         yield* softPersistPublicationCopy(context.workItemId, seeded)
@@ -1104,6 +1110,18 @@ export const createPr = (context: LifecycleStepContext) =>
             }),
         ),
       )
+    }
+
+    if (repository.forge === "github") {
+      yield* notifyLinearPullRequest({
+        issueSource: context.issueSource,
+        workItemId: context.workItemId,
+        pullRequestUrl: githubPullRequestUrl({
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
+          pullRequestNumber: outcome.value,
+        }),
+      })
     }
 
     return toCreatePrResult(outcome.value, outcome.completion, copy)

@@ -20,6 +20,7 @@ import {
   stubAzureDevOpsServiceLayer,
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
+  stubLinearServiceLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -208,6 +209,7 @@ describe("Original Issue Source execution", () => {
               }),
             ),
             Layer.provideMerge(stubAzureDevOpsServiceLayer()),
+            Layer.provideMerge(stubLinearServiceLayer()),
             Layer.provideMerge(
               Layer.succeed(LifecycleSteps, LifecycleSteps.of(successfulSteps)),
             ),

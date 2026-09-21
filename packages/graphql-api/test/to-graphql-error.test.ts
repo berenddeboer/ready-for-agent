@@ -21,6 +21,24 @@ describe("toGraphQLError", () => {
     })
   })
 
+  test("maps IssueIdentityAmbiguousError to ISSUE_IDENTITY_AMBIGUOUS", () => {
+    const error = {
+      _tag: "IssueIdentityAmbiguousError" as const,
+      repositoryId: "repo-1",
+      issueNumber: 123,
+      message: "Issue #123 matches 2 Issues on the current Issue Tracker.",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toContain("matches 2 Issues")
+    expect(gqlError.extensions).toMatchObject({
+      code: "ISSUE_IDENTITY_AMBIGUOUS",
+      repositoryId: "repo-1",
+      issueNumber: 123,
+    })
+  })
+
   test("maps LinearExecutionNotSupportedError to LINEAR_EXECUTION_NOT_SUPPORTED", () => {
     const error = {
       _tag: "LinearExecutionNotSupportedError" as const,

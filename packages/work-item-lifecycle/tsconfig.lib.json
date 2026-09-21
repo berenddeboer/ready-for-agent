@@ -17,6 +17,9 @@
       "path": "../lifecycle-model/tsconfig.lib.json"
     },
     {
+      "path": "../linear-service/tsconfig.lib.json"
+    },
+    {
       "path": "../keymaxxer-service/tsconfig.lib.json"
     },
     {

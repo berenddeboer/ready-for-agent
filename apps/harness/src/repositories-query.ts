@@ -103,7 +103,7 @@ type RepositoryCiGate = {
   } | null
 }
 
-export type LinearTeamWorkflowSelection = {
+type LinearTeamWorkflowSelection = {
   teamId: string
   teamKey: string
   teamName: string

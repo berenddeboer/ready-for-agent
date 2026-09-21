@@ -23,6 +23,10 @@ import type {
   GitLabRequestError,
 } from "@ready-for-agent/gitlab-service"
 import type { KeymaxxerError } from "@ready-for-agent/keymaxxer-service"
+import type {
+  LinearNotConfiguredError,
+  LinearRequestError,
+} from "@ready-for-agent/linear-service"
 import type { AssessChangesResult } from "./assess-changes.js"
 import type { AssessChangesError } from "./assess-changes-errors.js"
 import type { CloseIssueError } from "./close-issue-errors.js"
@@ -158,6 +162,8 @@ export type LifecycleStepError =
   | AzureDevOpsRequestError
   | AzureDevOpsProjectUnavailableError
   | AzureDevOpsNotImplementedError
+  | LinearRequestError
+  | LinearNotConfiguredError
   | KeymaxxerError
   | PlatformError
   | SqlError

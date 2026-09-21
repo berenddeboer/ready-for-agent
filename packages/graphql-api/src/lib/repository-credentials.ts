@@ -147,7 +147,7 @@ export const hasLinearAmbientCredential = (
   return typeof value === "string" && value.trim() !== ""
 }
 
-export const linearHasCredential = (
+const linearHasCredential = (
   keymaxxer: KeymaxxerServiceShape,
   metadataTimeout?: Duration.Duration,
 ): Effect.Effect<boolean> => {

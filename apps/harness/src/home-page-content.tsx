@@ -3870,9 +3870,8 @@ function RepositoryIssueRow({
     workItems: issueWorkItems,
     workItemsLoading,
   })
-  const canStartLinearExecution = repository.issueTracker !== "linear"
-  const canImplementNow = canImplement && canStartLinearExecution
-  const canQueueNow = canQueue && canStartLinearExecution
+  const canImplementNow = canImplement
+  const canQueueNow = canQueue
   const onImplementSuccess = (workItem: WorkItem) => {
     queryClient.setQueryData<readonly WorkItem[]>(query.queryKey, (current) => [
       ...(current ?? []),

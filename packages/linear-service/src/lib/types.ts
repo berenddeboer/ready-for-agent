@@ -67,3 +67,32 @@ export const unreadableLinearBlockerUrl = (relationId: string): string =>
 
 export const unreadableLinearBlockerNativeId = (relationId: string): string =>
   `unreadable:${relationId}`
+
+export const LINEAR_MILESTONE_KINDS = [
+  "work-started",
+  "pull-request",
+  "human-attention",
+] as const
+
+export type LinearMilestoneKind = (typeof LINEAR_MILESTONE_KINDS)[number]
+
+/**
+ * Markdown-visible unique line tying a Linear milestone notification to a
+ * Work Item. Linear comment `body` is markdown from ProseMirror and does not
+ * reliably round-trip HTML comments.
+ */
+export const linearMilestoneMarker = (
+  kind: LinearMilestoneKind,
+  workItemId: string,
+): string => `ready-for-agent:${kind}:${workItemId}`
+
+export interface LinearIssueSnapshot {
+  readonly id: string
+  readonly identifier: string
+  readonly url: string
+  readonly teamId: string
+  readonly teamKey: string
+  readonly stateId: string
+  readonly stateName: string
+  readonly stateType: string
+}

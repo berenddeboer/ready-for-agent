@@ -283,6 +283,9 @@ describe("Authorize incident-scoped CI Repair", () => {
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(SqliteQueueServiceLive),
         Layer.provideMerge(database),
+        Layer.provideMerge(
+          Layer.succeed(LinearService, defaultLinearServiceShape),
+        ),
       ),
       githubLayer,
       Layer.succeed(KeymaxxerService, {

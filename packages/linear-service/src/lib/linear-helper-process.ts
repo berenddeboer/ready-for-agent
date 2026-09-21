@@ -1,9 +1,12 @@
 import type { Effect } from "effect"
 import { runLinearCli } from "../bin/cli.js"
+import { ensureMilestoneCommentProgram } from "../bin/ensure-milestone-comment.js"
 import { getAuthenticatedUserLoginProgram } from "../bin/get-authenticated-user-login.js"
+import { getIssueProgram } from "../bin/get-issue.js"
 import { listProjectWorkflowProgram } from "../bin/list-project-workflow.js"
 import { listProjectsProgram } from "../bin/list-projects.js"
 import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
+import { updateIssueStateProgram } from "../bin/update-issue-state.js"
 import { linearServiceBinScriptPath } from "../bin-script-path.js"
 import type { LinearService } from "./linear-service.js"
 
@@ -16,6 +19,9 @@ export const LINEAR_HELPER_OPERATIONS = [
   "list-ready-issues",
   "list-projects",
   "list-project-workflow",
+  "get-issue",
+  "update-issue-state",
+  "ensure-milestone-comment",
 ] as const
 
 export type LinearHelperOperation = (typeof LINEAR_HELPER_OPERATIONS)[number]
@@ -106,6 +112,9 @@ const programs: Record<
   "list-ready-issues": listReadyIssuesProgram,
   "list-projects": listProjectsProgram,
   "list-project-workflow": listProjectWorkflowProgram,
+  "get-issue": getIssueProgram,
+  "update-issue-state": updateIssueStateProgram,
+  "ensure-milestone-comment": ensureMilestoneCommentProgram,
 }
 
 export const runLinearHelperProcess = (

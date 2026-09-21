@@ -23,6 +23,7 @@ import {
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
 import { forgeIssueSource } from "@ready-for-agent/lifecycle-model"
+import type { LinearService } from "@ready-for-agent/linear-service"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   ImplementInvalidWorktreeContextError,
@@ -33,6 +34,7 @@ import {
   implement,
   makeWorkItemId,
   stubActiveAgentBackendLayer,
+  stubLinearServiceLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -121,6 +123,7 @@ const run = <A, E>(
     | AgentBackend
     | ActiveAgentBackend
     | KeymaxxerService
+    | LinearService
   >,
   opencodeLayer: Layer.Layer<AgentBackend, never, never> = stubOpencode({}),
   forgeAuthLayer: Layer.Layer<
@@ -128,11 +131,13 @@ const run = <A, E>(
     never,
     never
   > = keymaxxerDisabled,
+  linearLayer: Layer.Layer<LinearService> = stubLinearServiceLayer(),
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(opencodeLayer),
       Effect.provide(forgeAuthLayer),
+      Effect.provide(linearLayer),
       Effect.provide(DbServiceLive),
       Effect.provide(DatabaseTest),
       Effect.provide(PlatformLayer),
@@ -1137,5 +1142,313 @@ describe("implement", () => {
       )
 
       expect(sessionId).toBe("ses_no_row")
+    }))
+
+  it("marks Linear In Progress, posts work-started, and implements against GitHub", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      const nativeId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      const issueUrl = "https://linear.app/acme/issue/ENG-123"
+      const states: string[] = []
+      const comments: Array<{ marker: string; body: string }> = []
+      let prompt = ""
+      const sessionId = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* seedRepository(root)
+          yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+            issueTracker: "linear",
+            linearProjectId: "proj-1",
+            linearProjectName: "Widgets",
+            linearWorkflowStatuses: [
+              {
+                teamId: "team-eng",
+                teamKey: "ENG",
+                teamName: "Engineering",
+                inProgressStateId: "progress",
+                inProgressStateName: "In Progress",
+                doneStateId: "done",
+                doneStateName: "Done",
+              },
+            ],
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 123,
+            issueTracker: "linear",
+            nativeId,
+            displayId: "ENG-123",
+            title: "Ship Linear execution",
+            body: "Use GitHub for the PR.",
+            url: issueUrl,
+            state: "OPEN",
+            githubCreatedAt: new Date(),
+            issueAuthor: null,
+            parent: null,
+            parentPosition: null,
+            hasChildren: false,
+            blockedBy: [],
+          })
+          return yield* implement(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              issueNumber: 123,
+              issueTitle: "Ship Linear execution",
+              issueSource: {
+                tracker: "linear",
+                nativeId,
+                displayId: "ENG-123",
+                url: issueUrl,
+              },
+            }),
+          )
+        }),
+        stubOpencode({
+          startTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: "ses_linear",
+              assistantText: "",
+            })
+          },
+        }),
+        keymaxxerDisabled,
+        stubLinearServiceLayer({
+          issue: {
+            id: nativeId,
+            identifier: "ENG-123",
+            url: issueUrl,
+            teamId: "team-eng",
+            teamKey: "ENG",
+            stateId: "todo",
+            stateName: "Todo",
+            stateType: "unstarted",
+          },
+          updateIssueState: (_id, stateId) =>
+            Effect.sync(() => {
+              states.push(stateId)
+            }),
+          ensureMilestoneComment: (_id, marker, body) =>
+            Effect.sync(() => {
+              comments.push({ marker, body })
+            }),
+        }),
+      )
+
+      expect(sessionId).toBe("ses_linear")
+      expect(states).toEqual(["progress"])
+      expect(comments).toHaveLength(1)
+      expect(comments[0]?.marker).toContain("work-started")
+      expect(comments[0]?.body).toContain(workItemId)
+      expect(prompt).toContain("Implement Linear issue ENG-123")
+      expect(prompt).toContain(issueUrl)
+      expect(prompt).toContain("Inspect the current Linear Issue")
+      expect(prompt).toContain("Ship Linear execution")
+      expect(prompt).toContain("Use GitHub for the PR.")
+      expect(prompt).toContain(
+        "Do not fabricate a GitHub numeric closing reference",
+      )
+      expect(prompt).not.toContain("Inspect the current GitHub Issue")
+      expect(prompt).not.toContain("Closes #123")
+    }))
+
+  it("loads Linear Implement content by native identity, not a colliding GitHub issue number", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      const nativeId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      const issueUrl = "https://linear.app/acme/issue/ENG-123"
+      let prompt = ""
+      await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* seedRepository(root)
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 123,
+            issueTracker: "github",
+            nativeId: "123",
+            displayId: "123",
+            title: "GitHub collision",
+            body: "Wrong body from GitHub issue 123.",
+            url: "https://github.com/acme/widgets/issues/123",
+            state: "OPEN",
+            githubCreatedAt: new Date(),
+            issueAuthor: null,
+            parent: null,
+            parentPosition: null,
+            hasChildren: false,
+            blockedBy: [],
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+            issueTracker: "linear",
+            linearProjectId: "proj-1",
+            linearProjectName: "Widgets",
+            linearWorkflowStatuses: [
+              {
+                teamId: "team-eng",
+                teamKey: "ENG",
+                teamName: "Engineering",
+                inProgressStateId: "progress",
+                inProgressStateName: "In Progress",
+                doneStateId: "done",
+                doneStateName: "Done",
+              },
+            ],
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 123,
+            issueTracker: "linear",
+            nativeId,
+            displayId: "ENG-123",
+            title: "Ship Linear execution",
+            body: "Use GitHub for the PR.",
+            url: issueUrl,
+            state: "OPEN",
+            githubCreatedAt: new Date(),
+            issueAuthor: null,
+            parent: null,
+            parentPosition: null,
+            hasChildren: false,
+            blockedBy: [],
+          })
+          return yield* implement(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              issueNumber: 123,
+              issueTitle: "Ship Linear execution",
+              issueSource: {
+                tracker: "linear",
+                nativeId,
+                displayId: "ENG-123",
+                url: issueUrl,
+              },
+            }),
+          )
+        }),
+        stubOpencode({
+          startTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: "ses_linear_native",
+              assistantText: "",
+            })
+          },
+        }),
+        keymaxxerDisabled,
+        stubLinearServiceLayer({
+          issue: {
+            id: nativeId,
+            identifier: "ENG-123",
+            url: issueUrl,
+            teamId: "team-eng",
+            teamKey: "ENG",
+            stateId: "todo",
+            stateName: "Todo",
+            stateType: "unstarted",
+          },
+        }),
+      )
+
+      expect(prompt).toContain("Ship Linear execution")
+      expect(prompt).toContain("Use GitHub for the PR.")
+      expect(prompt).not.toContain("GitHub collision")
+      expect(prompt).not.toContain("Wrong body from GitHub issue 123.")
+    }))
+
+  it("posts Linear work-started after the Repository leaves Linear without requiring In Progress mapping", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      const nativeId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      const issueUrl = "https://linear.app/acme/issue/ENG-123"
+      const states: string[] = []
+      const comments: Array<{ marker: string }> = []
+      await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* seedRepository(root)
+          yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+            issueTracker: "github",
+            linearProjectId: null,
+            linearProjectName: null,
+            linearWorkflowStatuses: [],
+          })
+          return yield* implement(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              issueNumber: 123,
+              issueTitle: "Ship Linear execution",
+              issueSource: {
+                tracker: "linear",
+                nativeId,
+                displayId: "ENG-123",
+                url: issueUrl,
+              },
+            }),
+          )
+        }),
+        stubOpencode({
+          startTurn: () =>
+            Effect.succeed({
+              sessionId: "ses_linear_after_tracker",
+              assistantText: "",
+            }),
+        }),
+        keymaxxerDisabled,
+        stubLinearServiceLayer({
+          issue: {
+            id: nativeId,
+            identifier: "ENG-123",
+            url: issueUrl,
+            teamId: "team-eng",
+            teamKey: "ENG",
+            stateId: "todo",
+            stateName: "Todo",
+            stateType: "unstarted",
+          },
+          updateIssueState: (_id, stateId) =>
+            Effect.sync(() => {
+              states.push(stateId)
+            }),
+          ensureMilestoneComment: (_id, marker) =>
+            Effect.sync(() => {
+              comments.push({ marker })
+            }),
+        }),
+      )
+
+      expect(states).toEqual([])
+      expect(comments).toHaveLength(1)
+      expect(comments[0]?.marker).toContain("work-started")
     }))
 })

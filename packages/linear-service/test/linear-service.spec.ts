@@ -2,6 +2,7 @@ import { Effect, Result } from "effect"
 import { LinearRequestError } from "../src/lib/errors.js"
 import { makeLinearServiceFromToken } from "../src/lib/linear-service-live.js"
 import {
+  linearMilestoneMarker,
   suggestDoneState,
   suggestInProgressState,
   unreadableLinearBlockerNativeId,
@@ -443,5 +444,268 @@ describe("Linear identity and listing", () => {
     expect(requestBody?.query).toContain("type")
     expect(requestBody?.query).not.toContain("blockedBy")
     expect(requestBody?.query).not.toContain("relations(first")
+  })
+})
+
+describe("Linear execution mutations", () => {
+  const issueNode = {
+    id: ISSUE_UUID,
+    identifier: "ENG-123",
+    url: "https://linear.app/acme/issue/ENG-123",
+    team: { id: "team-eng", key: "ENG" },
+    state: { id: "todo", name: "Todo", type: "unstarted" },
+  }
+  const marker = "ready-for-agent:work-started:wi-1"
+  const body = `Ready for Agent started implementation.\n\n${marker}`
+  /** Linear comment `body` is markdown from ProseMirror; HTML comments vanish. */
+  const linearStoredBody = (input: string): string =>
+    input.replace(/<!--[\s\S]*?-->/g, "").trim()
+
+  test("reads live Linear Issue identity, team, and workflow state", async () => {
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch((request) => {
+        expect(request.query).toContain("query Issue")
+        expect(request.variables).toEqual({ id: ISSUE_UUID })
+        return jsonResponse(200, { data: { issue: issueNode } })
+      }),
+    )
+    await expect(
+      Effect.runPromise(service.getIssue(ISSUE_UUID)),
+    ).resolves.toEqual({
+      id: ISSUE_UUID,
+      identifier: "ENG-123",
+      url: "https://linear.app/acme/issue/ENG-123",
+      teamId: "team-eng",
+      teamKey: "ENG",
+      stateId: "todo",
+      stateName: "Todo",
+      stateType: "unstarted",
+    })
+  })
+
+  test("moves an open Issue to In Progress and skips an already matching state", async () => {
+    const operations: string[] = []
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch((request) => {
+        operations.push(
+          request.query.includes("mutation IssueUpdate") ? "update" : "read",
+        )
+        if (request.query.includes("mutation IssueUpdate")) {
+          expect(request.variables).toEqual({
+            id: ISSUE_UUID,
+            stateId: "progress",
+          })
+          return jsonResponse(200, {
+            data: {
+              issueUpdate: {
+                success: true,
+                issue: {
+                  id: ISSUE_UUID,
+                  state: { id: "progress", type: "started" },
+                },
+              },
+            },
+          })
+        }
+        return jsonResponse(200, { data: { issue: issueNode } })
+      }),
+    )
+    await Effect.runPromise(service.updateIssueState(ISSUE_UUID, "progress"))
+    expect(operations).toEqual(["read", "update"])
+
+    const alreadyStarted = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch(() =>
+        jsonResponse(200, {
+          data: {
+            issue: {
+              ...issueNode,
+              state: { id: "progress", name: "In Progress", type: "started" },
+            },
+          },
+        }),
+      ),
+    )
+    await Effect.runPromise(
+      alreadyStarted.updateIssueState(ISSUE_UUID, "progress"),
+    )
+  })
+
+  test("does not reopen a completed Linear Issue", async () => {
+    let mutated = false
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch((request) => {
+        if (request.query.includes("mutation IssueUpdate")) {
+          mutated = true
+        }
+        return jsonResponse(200, {
+          data: {
+            issue: {
+              ...issueNode,
+              state: { id: "done", name: "Done", type: "completed" },
+            },
+          },
+        })
+      }),
+    )
+    await Effect.runPromise(service.updateIssueState(ISSUE_UUID, "progress"))
+    expect(mutated).toBe(false)
+  })
+
+  test("creates a milestone comment and reuses it on retry instead of duplicating", async () => {
+    const operations: string[] = []
+    const comments = { nodes: [] as Array<{ id: string; body: string }> }
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch((request) => {
+        if (request.query.includes("mutation CommentCreate")) {
+          operations.push("create")
+          const stored = linearStoredBody(
+            String(request.variables?.body ?? body),
+          )
+          comments.nodes.push({ id: "comment-1", body: stored })
+          return jsonResponse(200, {
+            data: {
+              commentCreate: {
+                success: true,
+                comment: { id: "comment-1", body: stored },
+              },
+            },
+          })
+        }
+        if (request.query.includes("mutation CommentUpdate")) {
+          operations.push("update")
+          return jsonResponse(200, {
+            data: {
+              commentUpdate: {
+                success: true,
+                comment: { id: "comment-1", body },
+              },
+            },
+          })
+        }
+        operations.push("list")
+        return jsonResponse(200, {
+          data: {
+            issue: {
+              id: ISSUE_UUID,
+              comments: {
+                nodes: comments.nodes,
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        })
+      }),
+    )
+    await Effect.runPromise(
+      service.ensureMilestoneComment(ISSUE_UUID, marker, body),
+    )
+    await Effect.runPromise(
+      service.ensureMilestoneComment(ISSUE_UUID, marker, body),
+    )
+    expect(operations).toEqual(["list", "create", "list"])
+  })
+
+  test("updates an existing milestone comment when the body changes", async () => {
+    const updatedBody = `Ready for Agent opened a pull request.\n\n${marker}`
+    let updated: string | undefined
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch((request) => {
+        if (request.query.includes("mutation CommentUpdate")) {
+          updated = String(request.variables?.body ?? "")
+          return jsonResponse(200, {
+            data: {
+              commentUpdate: {
+                success: true,
+                comment: { id: "comment-1", body: updatedBody },
+              },
+            },
+          })
+        }
+        return jsonResponse(200, {
+          data: {
+            issue: {
+              id: ISSUE_UUID,
+              comments: {
+                nodes: [{ id: "comment-1", body }],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        })
+      }),
+    )
+    await Effect.runPromise(
+      service.ensureMilestoneComment(ISSUE_UUID, marker, updatedBody),
+    )
+    expect(updated).toBe(updatedBody)
+  })
+
+  test("reuses a milestone after Linear strips HTML comments from the stored body", async () => {
+    const operations: string[] = []
+    const comments = { nodes: [] as Array<{ id: string; body: string }> }
+    const mixedBody = `${body}\n<!-- ready-for-agent:work-started:wi-1 -->`
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch((request) => {
+        if (request.query.includes("mutation CommentCreate")) {
+          operations.push("create")
+          const stored = linearStoredBody(String(request.variables?.body ?? ""))
+          comments.nodes.push({ id: "comment-1", body: stored })
+          return jsonResponse(200, {
+            data: {
+              commentCreate: {
+                success: true,
+                comment: { id: "comment-1", body: stored },
+              },
+            },
+          })
+        }
+        if (request.query.includes("mutation CommentUpdate")) {
+          operations.push("update")
+          const stored = linearStoredBody(String(request.variables?.body ?? ""))
+          comments.nodes[0] = { id: "comment-1", body: stored }
+          return jsonResponse(200, {
+            data: {
+              commentUpdate: {
+                success: true,
+                comment: { id: "comment-1", body: stored },
+              },
+            },
+          })
+        }
+        operations.push("list")
+        return jsonResponse(200, {
+          data: {
+            issue: {
+              id: ISSUE_UUID,
+              comments: {
+                nodes: comments.nodes,
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          },
+        })
+      }),
+    )
+    await Effect.runPromise(
+      service.ensureMilestoneComment(ISSUE_UUID, marker, mixedBody),
+    )
+    await Effect.runPromise(
+      service.ensureMilestoneComment(ISSUE_UUID, marker, mixedBody),
+    )
+    expect(linearMilestoneMarker("work-started", "wi-1")).toBe(marker)
+    expect(marker.startsWith("<!--")).toBe(false)
+    expect(comments.nodes).toHaveLength(1)
+    expect(comments.nodes[0]?.body).toContain(marker)
+    expect(comments.nodes[0]?.body).not.toContain("<!--")
+    expect(operations.filter((operation) => operation === "create")).toEqual([
+      "create",
+    ])
   })
 })
