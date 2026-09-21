@@ -1,0 +1,17 @@
+@prefix example: <https://ready-for-agent.dev/ontology/examples#> .
+@prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# A GitHub-hosted Repository can track Issues in Linear. Linear identity is
+# a tracker-native string, not a positive integer issue number.
+example:linear-source
+  a rfa:OriginalIssueSource ;
+  rfa:issueTracker rfa:Linear ;
+  rfa:issueNativeId "a1b2c3d4-e5f6-7890-abcd-ef1234567890" ;
+  rfa:issueDisplayId "ENG-123" ;
+  rfa:issueUrl "https://linear.app/acme/issue/ENG-123"^^xsd:anyURI .
+
+example:sourced-work-item
+  a rfa:WorkItem ;
+  rfa:currentState rfa:Implement ;
+  rfa:originalIssueSource example:linear-source .

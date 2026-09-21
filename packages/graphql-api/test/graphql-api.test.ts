@@ -160,6 +160,12 @@ const workItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: repository.id,
   issueNumber: issue.issueNumber,
+  issueSource: {
+    tracker: "github",
+    nativeId: String(issue.issueNumber),
+    displayId: String(issue.issueNumber),
+    url: issue.url,
+  },
   issueTitle: issue.title,
   agentBackend: "opencode",
   state: "create_worktree",
@@ -1556,6 +1562,7 @@ describe("GraphQL API", () => {
           repositories {
             id
             forge
+            issueTracker
             forgeHost
             projectPath
             localPath
@@ -1579,6 +1586,7 @@ describe("GraphQL API", () => {
           {
             id: repository.id,
             forge: repository.forge,
+            issueTracker: repository.issueTracker,
             forgeHost: repository.forgeHost,
             projectPath: repository.projectPath,
             localPath: repository.localPath,
@@ -1590,6 +1598,54 @@ describe("GraphQL API", () => {
             includeAllIssueAuthors: false,
             waitForReadyForReviewChecks: true,
             issuesReconciledAt: null,
+          },
+        ],
+      },
+    })
+  })
+
+  test("exposes Work Item Original Issue Source alongside issueNumber", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([workItem]),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItemSource($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            issueNumber
+            issueSource {
+              tracker
+              nativeId
+              displayId
+              url
+            }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            issueNumber: issue.issueNumber,
+            issueSource: {
+              tracker: "github",
+              nativeId: "42",
+              displayId: "42",
+              url: issue.url,
+            },
           },
         ],
       },

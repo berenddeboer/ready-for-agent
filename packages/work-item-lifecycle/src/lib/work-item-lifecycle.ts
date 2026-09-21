@@ -49,14 +49,19 @@ import {
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
   type CompetingIssueClosingPullRequestObservation,
+  type IssueSource,
   OperationalLifecycleStep as OperationalLifecycleStepSchema,
   type WorkItemPredicateShape,
   competingPullRequestIdentity,
+  defaultIssueTrackerForForge,
   evaluateActionableIssue,
   evaluateImplementableIssue,
   evaluateUnfinishedWorkItem,
+  forgeIssueSource,
   formatCompetingIssueClosingPullRequestMessage,
   isAgentDependentLifecycleStep,
+  isForge,
+  isIssueTracker,
 } from "@ready-for-agent/lifecycle-model"
 import {
   type AcknowledgeError,
@@ -415,6 +420,10 @@ type WorkItemRow = {
   readonly id: string
   readonly repository_id: string
   readonly issue_number: number
+  readonly issue_tracker: string | null
+  readonly issue_native_id: string | null
+  readonly issue_display_id: string | null
+  readonly issue_url: string | null
   readonly issue_title: string | null
   readonly pull_request_number: number | null
   readonly agent_backend: string
@@ -668,6 +677,68 @@ const toStepRunRecord = (row: StepRunRow, nowMs: number): StepRunRecord => {
   return { ...common, status: row.status, postponedUntil: null }
 }
 
+const captureIssueSource = (
+  repository:
+    | {
+        readonly issueTracker?: string | null
+        readonly forge?: string
+      }
+    | undefined,
+  issue: { readonly issueNumber: number; readonly url: string },
+): IssueSource | null => {
+  const tracker =
+    repository !== undefined && isIssueTracker(repository.issueTracker)
+      ? repository.issueTracker
+      : repository !== undefined && isForge(repository.forge)
+        ? defaultIssueTrackerForForge(repository.forge)
+        : null
+  if (tracker === null) return null
+  return forgeIssueSource({
+    tracker,
+    issueNumber: issue.issueNumber,
+    url: issue.url,
+  })
+}
+
+const requireIssueSource = (
+  repository:
+    | {
+        readonly issueTracker?: string | null
+        readonly forge?: string
+      }
+    | undefined,
+  issue: { readonly issueNumber: number; readonly url: string },
+  repositoryId: string,
+): Effect.Effect<IssueSource, RepositoryNotFoundError> => {
+  const source = captureIssueSource(repository, issue)
+  if (source === null) {
+    return Effect.fail(new RepositoryNotFoundError({ repositoryId }))
+  }
+  return Effect.succeed(source)
+}
+
+const toIssueSource = (row: WorkItemRow): IssueSource => {
+  const tracker = isIssueTracker(row.issue_tracker)
+    ? row.issue_tracker
+    : "github"
+  const nativeId =
+    row.issue_native_id !== null && row.issue_native_id.length > 0
+      ? row.issue_native_id
+      : String(row.issue_number)
+  const displayId =
+    row.issue_display_id !== null && row.issue_display_id.length > 0
+      ? row.issue_display_id
+      : nativeId
+  const url =
+    row.issue_url !== null && row.issue_url.length > 0 ? row.issue_url : ""
+  return {
+    tracker,
+    nativeId,
+    displayId,
+    url,
+  }
+}
+
 const toWorkItemRecord = (
   row: WorkItemRow,
   stepRuns: readonly StepRunRecord[],
@@ -676,6 +747,7 @@ const toWorkItemRecord = (
   id: row.id as WorkItemId,
   repositoryId: row.repository_id,
   issueNumber: row.issue_number,
+  issueSource: toIssueSource(row),
   issueTitle: row.issue_title,
   pullRequestNumber: row.pull_request_number,
   agentBackend: row.agent_backend,
@@ -707,7 +779,8 @@ const toWorkItemRecord = (
   stepRuns,
 })
 
-const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, issue_number, issue_title, agent_backend,
+const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, issue_number, issue_tracker, issue_native_id,
+                   issue_display_id, issue_url, issue_title, agent_backend,
                    execution_profile_present, execution_profile_build_model,
                    execution_profile_build_thinking_level,
                    execution_profile_review_same_as_build,
@@ -8262,6 +8335,11 @@ export const makeWorkItemLifecycleLive = (
               })
           }
           const matchedIssue = Option.getOrThrow(Option.fromNullishOr(issue))
+          const issueSource = yield* requireIssueSource(
+            (yield* db.listRepositories).find(({ id }) => id === repositoryId),
+            matchedIssue,
+            repositoryId,
+          )
 
           const existing = yield* listWorkItemsForIssue(
             repositoryId,
@@ -8438,7 +8516,8 @@ export const makeWorkItemLifecycleLive = (
                     if (explicitProfile !== undefined) {
                       yield* sql.unsafe(
                         `INSERT INTO work_item (
-                 id, repository_id, issue_number, agent_backend,
+                 id, repository_id, issue_number, issue_tracker, issue_native_id,
+                  issue_display_id, issue_url, agent_backend,
                   issue_title, state, state_ready_at, paused,
                   waiting_since, waiting_for_blockers, waiting_for_ci_repair,
                   merge_mode, auto_merge_override,
@@ -8451,11 +8530,15 @@ export const makeWorkItemLifecycleLive = (
                   execution_profile_review_model,
                   execution_profile_review_thinking_level,
                   created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 1, ?, ?, ?, ?, ?, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 1, ?, ?, ?, ?, ?, ?, ?)`,
                         [
                           workItemId,
                           repositoryId,
                           issueNumber,
+                          issueSource.tracker,
+                          issueSource.nativeId,
+                          issueSource.displayId,
+                          issueSource.url,
                           agentBackendId,
                           matchedIssue.title,
                           step,
@@ -8490,17 +8573,22 @@ export const makeWorkItemLifecycleLive = (
                     } else {
                       yield* sql.unsafe(
                         `INSERT INTO work_item (
-                 id, repository_id, issue_number, agent_backend,
+                 id, repository_id, issue_number, issue_tracker, issue_native_id,
+                  issue_display_id, issue_url, agent_backend,
                   issue_title, state, state_ready_at, paused,
                   waiting_since, waiting_for_blockers, waiting_for_ci_repair,
                   merge_mode, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
                         [
                           workItemId,
                           repositoryId,
                           issueNumber,
+                          issueSource.tracker,
+                          issueSource.nativeId,
+                          issueSource.displayId,
+                          issueSource.url,
                           agentBackendId,
                           matchedIssue.title,
                           step,
@@ -8858,6 +8946,9 @@ export const makeWorkItemLifecycleLive = (
         if (error instanceof ImplementAllWithAutoMergeNotEligibleError) {
           return Effect.fail(error)
         }
+        if (error instanceof RepositoryNotFoundError) {
+          return Effect.fail(error)
+        }
         if (
           typeof error === "object" &&
           error !== null &&
@@ -8890,6 +8981,7 @@ export const makeWorkItemLifecycleLive = (
         readonly openChildren: ReadonlyArray<{
           readonly issueNumber: number
           readonly title: string
+          readonly url: string
           readonly blockedBy: ReadonlyArray<unknown>
         }>
         readonly pin: {
@@ -8909,6 +9001,12 @@ export const makeWorkItemLifecycleLive = (
           const step: OperationalLifecycleStep = "create_worktree"
           const openChildren = input.openChildren
           const { repositoryId, parentIssueNumber, pin, create } = input
+          const enrollmentRepository = (yield* db.listRepositories).find(
+            ({ id }) => id === repositoryId,
+          )
+          if (enrollmentRepository === undefined) {
+            return yield* new RepositoryNotFoundError({ repositoryId })
+          }
 
           return yield* sql
             .withTransaction(
@@ -8979,9 +9077,15 @@ export const makeWorkItemLifecycleLive = (
                   const holdForCiRepair = !blocked && gateClosed
                   const admit = !blocked && !holdForCiRepair && occupied < limit
                   const executionProfile = create.executionProfile
+                  const childSource = yield* requireIssueSource(
+                    enrollmentRepository,
+                    child,
+                    repositoryId,
+                  )
                   yield* sql.unsafe(
                     `INSERT INTO work_item (
-                     id, repository_id, issue_number, agent_backend,
+                     id, repository_id, issue_number, issue_tracker, issue_native_id,
+                      issue_display_id, issue_url, agent_backend,
                       issue_title, state, state_ready_at, paused,
                       waiting_since, waiting_for_blockers, waiting_for_ci_repair,
                       merge_mode, auto_merge_override,
@@ -8994,11 +9098,15 @@ export const makeWorkItemLifecycleLive = (
                       execution_profile_review_model,
                       execution_profile_review_thinking_level,
                       created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                       workItemId,
                       repositoryId,
                       child.issueNumber,
+                      childSource.tracker,
+                      childSource.nativeId,
+                      childSource.displayId,
+                      childSource.url,
                       create.agentBackendId,
                       child.title,
                       step,
@@ -9347,6 +9455,11 @@ export const makeWorkItemLifecycleLive = (
             break
         }
         const matchedIssue = Option.getOrThrow(Option.fromNullishOr(issue))
+        const issueSource = yield* requireIssueSource(
+          (yield* db.listRepositories).find(({ id }) => id === repositoryId),
+          matchedIssue,
+          repositoryId,
+        )
 
         const existing = yield* listWorkItemsForIssue(repositoryId, issueNumber)
         const unfinished = existing.find(
@@ -9403,16 +9516,21 @@ export const makeWorkItemLifecycleLive = (
                 Effect.gen(function* () {
                   yield* sql.unsafe(
                     `INSERT INTO work_item (
-                 id, repository_id, issue_number, agent_backend,
+                 id, repository_id, issue_number, issue_tracker, issue_native_id,
+                  issue_display_id, issue_url, agent_backend,
                   issue_title, state, state_ready_at, paused,
                   waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, 'ordinary', 0, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, 'ordinary', 0, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
                     [
                       workItemId,
                       repositoryId,
                       issueNumber,
+                      issueSource.tracker,
+                      issueSource.nativeId,
+                      issueSource.displayId,
+                      issueSource.url,
                       agentBackendId,
                       matchedIssue.title,
                       step,

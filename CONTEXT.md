@@ -5,8 +5,8 @@ Opinionated agentic software engineering harness that works Forge issues into pu
 ## Language
 
 **Forge**:
-A code-hosting platform kind the harness supports as a Repository's source of git hosting, Issues, and Pull Requests: GitHub, GitLab, or Azure DevOps. A Repository belongs to exactly one Forge, chosen when the Repository is added. Azure DevOps now has the same end-to-end lifecycle as GitHub and GitLab: remote detection, PAT-based authentication, Ready Issue listing/reconciliation (including native Predecessor/Successor blocking links, surfaced as blockedBy), draft Pull Request creation, PR Status Checks (build validation / branch policy evaluations), merge, and work item close-out with a completion summary are all implemented.
-_Avoid_: Provider (overloaded with model provider and credential metadata), issue source (too narrow — the Forge also hosts Pull Requests and checks), platform
+A code-hosting platform kind the harness supports as a Repository's source of git hosting and Pull Requests: GitHub, GitLab, or Azure DevOps. A Repository belongs to exactly one Forge, chosen when the Repository is added. Each Forge is also that Repository's default Issue Tracker; Linear is not a Forge. Azure DevOps now has the same end-to-end lifecycle as GitHub and GitLab: remote detection, PAT-based authentication, Ready Issue listing/reconciliation (including native Predecessor/Successor blocking links, surfaced as blockedBy), draft Pull Request creation, PR Status Checks (build validation / branch policy evaluations), merge, and work item close-out with a completion summary are all implemented.
+_Avoid_: Provider (overloaded with model provider and credential metadata), issue source (Issue tracking is independently configurable; the Issue Tracker is the issue source), platform
 
 **Forge Host**:
 The hostname of the Forge instance serving a Repository — `github.com` for GitHub, or a self-managed GitLab instance such as `git.drupalcode.org`. It is part of Repository identity: the same Project Path on two different Forge Hosts denotes two different Repositories. The git remote's hostname is not authoritative for the Forge Host — an instance may serve SSH on a different hostname (git.drupal.org vs git.drupalcode.org).
@@ -17,7 +17,7 @@ The Forge's own slash-separated path addressing the project within its Forge Hos
 _Avoid_: Owner/repo pair (cannot express nested GitLab paths), clone URL (too many spellings for one project)
 
 **Repository**:
-A project on a Forge the harness is configured to work on, identified by Forge, Forge Host, and Project Path (case-insensitive identity; display casing preserved). One row per configured Repository identity; the harness keeps a single local clone of it (bare or working). Displayed as its Project Path — no separate display label. Forge, Forge Host, and Project Path are guessed from the local clone's remote when the Repository is added, verified against the Forge API, and may be corrected in Repository settings; changing them is rejected while any Work Item exists for the Repository.
+A project on a Forge the harness is configured to work on, identified by Forge, Forge Host, and Project Path (case-insensitive identity; display casing preserved). One row per configured Repository identity; the harness keeps a single local clone of it (bare or working). Displayed as its Project Path — no separate display label. Forge, Forge Host, and Project Path are guessed from the local clone's remote when the Repository is added, verified against the Forge API, and may be corrected in Repository settings; changing them is rejected while any Work Item exists for the Repository. Adding a Repository automatically selects its hosting Forge as the Issue Tracker.
 _Avoid_: Repo (in formal docs), target, project, checkout
 
 **End-to-End Fixture Repository**:
@@ -96,15 +96,31 @@ _Avoid_: Global GitHub queue, rate limiter
 A process-local flow-control condition established only by explicit GitHub throttle evidence. It closes GitHub Operation Coordinator admission until `retryAt`, immediately returns that deadline to pending and new Harness GitHub Operations, and clears when the deadline elapses. It reacts to GitHub’s stated limit; it does not reserve quota or perform proactive quota budgeting.
 _Avoid_: Rate limited, quota budget
 
+**Issue Tracker**:
+A platform kind the harness uses as a Repository's source of Issues, independently of the Repository's Forge: GitHub, GitLab, Azure DevOps, or Linear. Linear is an Issue Tracker only and is not a code-hosting Forge. A Repository has exactly one configured Issue Tracker; adding a Repository selects the hosting Forge's default without an extra onboarding choice.
+_Avoid_: Forge (when referring to issue tracking), Linear as a Forge, provider
+
+**Issue Native Identity**:
+The Issue Tracker's own durable identifier for an Issue, scoped to that Issue's Original Issue Source. Distinct from the Issue Display Identifier and URL; not required to be a positive integer.
+_Avoid_: issue number (too GitHub-specific as the only identity), iid (GitLab-specific)
+
+**Issue Display Identifier**:
+The human-readable identifier shown for an Issue, such as a GitHub issue number or a Linear issue key. It may change without changing Issue Native Identity.
+_Avoid_: Issue Native Identity, URL
+
+**Original Issue Source**:
+The Issue Tracker and Issue Native Identity captured on a Work Item at creation, together with the Issue Display Identifier and URL needed for historical references. Issue operations for that Work Item resolve against this source after the Repository's Issue Tracker setting changes. Other Issue contents remain live rather than snapshotted.
+_Avoid_: current tracker setting, issue snapshot
+
 **Issue**:
-An issue on the Repository's Forge, identified within that Repository by a positive integer issue number (the iid in GitLab) and represented locally with its title, body, web URL, creation time, Forge state, and optional Issue Author. The harness may retain a local representation for later use, but the Forge remains authoritative. GitLab issues and merge requests come from separate per-project number sequences, so a bare GitLab number is ambiguous across the two kinds — unlike GitHub's single shared sequence.
+An issue on the Repository's configured Issue Tracker, identified by a source-scoped Issue Native Identity distinct from its Issue Display Identifier and URL, and represented locally with its title, body, web URL, creation time, tracker state, and optional Issue Author. The harness may retain a local representation for later use, but the Issue Tracker remains authoritative. Existing Forge-hosted Issues still use a positive integer issue number (the iid in GitLab) as both native identity and display identifier. GitLab issues and merge requests come from separate per-project number sequences, so a bare GitLab number is ambiguous across the two kinds — unlike GitHub's single shared sequence.
 _Avoid_: Ticket, task (unless referring to a broader concept)
 
 **Issue store**:
 The harness capability that retains the Repository's current working set of Relevant Issue representations locally. It does not fetch, refresh, or establish the authoritative state of Issues.
 
 **Issue Reconciler**:
-The sole harness capability that changes the Issue store, deriving one Repository's Relevant Issues from the Forge's authoritative set of Ready-labeled Issues. Issues that are not Relevant, including Issues whose ready label was removed, are absent from the Issue store after reconciliation.
+The sole harness capability that changes the Issue store, deriving one Repository's Relevant Issues from the configured Issue Tracker's authoritative set of Ready-labeled Issues. Issues that are not Relevant, including Issues whose ready label was removed, are absent from the Issue store after reconciliation.
 _Avoid_: GitHub Reconciler (too broad), Issue Synchronizer (suggests bidirectional updates)
 
 **Refresh Job**:
@@ -260,7 +276,7 @@ An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf
 _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 
 **Work Item**:
-A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing an Agent Backend as provenance and routing authority, an optional Explicit Work Item Execution Profile, and an optional Work Item Merge Policy pin (`null` inherits the live Repository Merge Policy). Without an explicit profile, each Agent Turn resolves build and review selections from current backend-scoped Repository settings falling back to Harness Config. With one, the profile's build selection is used for Implement, Review Fix Rounds, Commit, and related steps, while its review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and issue number, captures the Issue title for identification after the Issue leaves the Issue store, records canonical publication title and body after Commit generates them (agent-authored when valid, with in-directory image links rewritten to GitHub user-attachment URLs before persist, otherwise harness fallback copy from the Issue identity; shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
+A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing an Agent Backend as provenance and routing authority, an optional Explicit Work Item Execution Profile, and an optional Work Item Merge Policy pin (`null` inherits the live Repository Merge Policy). Without an explicit profile, each Agent Turn resolves build and review selections from current backend-scoped Repository settings falling back to Harness Config. With one, the profile's build selection is used for Implement, Review Fix Rounds, Commit, and related steps, while its review selection is used only for reviewing passes inside Review. It captures the Original Issue Source and the Issue title for identification after the Issue leaves the Issue store, retains the positive integer issue number for existing Forge-hosted Issues, records canonical publication title and body after Commit generates them (agent-authored when valid, with in-directory image links rewritten to GitHub user-attachment URLs before persist, otherwise harness fallback copy from the Issue identity; shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
 
 **Explicit Work Item Execution Profile**:

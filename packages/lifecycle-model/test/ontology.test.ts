@@ -57,6 +57,9 @@ const shPath = iri(`${namespace.sh}path`)
 const operationalClass = term("OperationalLifecycleStep")
 const terminalClass = term("TerminalWorkItemState")
 const forgeClass = term("Forge")
+const issueTrackerClass = term("IssueTracker")
+const issueTrackerOnlyClass = term("IssueTrackerOnly")
+const defaultIssueTracker = term("defaultIssueTracker")
 const contextTermClass = term("ContextTerm")
 const avoidanceRationale = term("avoidanceRationale")
 const maximumDuration = term("maximumDuration")
@@ -187,6 +190,17 @@ const expectedForgeTerms = {
 } as const
 
 const expectedForgeIris = Object.keys(expectedForgeTerms).map(
+  (localName) => `${namespace.rfa}${localName}`,
+)
+
+const expectedIssueTrackerTerms = {
+  GitHub: "github",
+  GitLab: "gitlab",
+  AzureDevOps: "azure-devops",
+  Linear: "linear",
+} as const
+
+const expectedIssueTrackerIris = Object.keys(expectedIssueTrackerTerms).map(
   (localName) => `${namespace.rfa}${localName}`,
 )
 
@@ -712,6 +726,77 @@ describe("full vocabulary semantic distinctions", () => {
     expect(hasExactAllDifferent).toBe(true)
   })
 
+  it("declares Issue Tracker kinds including Linear without making Linear a Forge", () => {
+    const actualTerms = ontology.getSubjects(rdfType, issueTrackerClass, null)
+    expectExactIris(actualTerms, expectedIssueTrackerIris)
+
+    for (const [localName, notation] of Object.entries(
+      expectedIssueTrackerTerms,
+    )) {
+      const subject = term(localName)
+      expect(
+        ontology.countQuads(subject, rdfType, issueTrackerClass, null),
+      ).toBe(1)
+
+      const actualNotation = getOnlyLiteral(ontology, subject, skosNotation)
+      expect(actualNotation.value).toBe(notation)
+
+      const definition = getOnlyLiteral(ontology, subject, skosDefinition)
+      expect(definition.language).toBe("en")
+      expect(definition.value.length).toBeGreaterThan(20)
+    }
+
+    expect(ontology.countQuads(term("Linear"), rdfType, forgeClass, null)).toBe(
+      0,
+    )
+    expect(
+      ontology.countQuads(term("Linear"), rdfType, issueTrackerOnlyClass, null),
+    ).toBe(1)
+    expect(
+      ontology.countQuads(
+        issueTrackerOnlyClass,
+        owlDisjointWith,
+        forgeClass,
+        null,
+      ),
+    ).toBe(1)
+  })
+
+  it("proves the Issue Tracker kind vocabulary is complete and pairwise distinct", () => {
+    const equivalent = getOnlyObject(
+      ontology,
+      issueTrackerClass,
+      owlEquivalentClass,
+    )
+    const oneOf = getOnlyObject(ontology, equivalent, owlOneOf)
+    expectExactIris(readRdfList(ontology, oneOf), expectedIssueTrackerIris)
+
+    const oneOfOrder = readRdfList(ontology, oneOf).map(({ value }) => value)
+    expect(oneOfOrder).toEqual(expectedIssueTrackerIris)
+
+    const hasExactAllDifferent = ontology
+      .getSubjects(rdfType, owlAllDifferent, null)
+      .some((axiom) => {
+        const members = getOnlyObject(ontology, axiom, owlDistinctMembers)
+        const actual = readRdfList(ontology, members)
+          .map(({ value }) => value)
+          .sort()
+        return (
+          JSON.stringify(actual) ===
+          JSON.stringify([...expectedIssueTrackerIris].sort())
+        )
+      })
+    expect(hasExactAllDifferent).toBe(true)
+  })
+
+  it("maps each Forge to itself as the default Issue Tracker", () => {
+    for (const localName of Object.keys(expectedForgeTerms)) {
+      const subject = term(localName)
+      const tracker = getOnlyObject(ontology, subject, defaultIssueTracker)
+      expect(tracker.value).toBe(subject.value)
+    }
+  })
+
   it("attributes outcomes to an Agent Backend or the Harness", () => {
     expect(
       ontology.countQuads(
@@ -942,6 +1027,9 @@ describe("SHACL and consistency fixture corpus", () => {
     )
     expect(contradictorySubjects).toContain(
       "https://ready-for-agent.dev/ontology/examples#two-terminal-states",
+    )
+    expect(contradictorySubjects).toContain(
+      "https://ready-for-agent.dev/ontology/examples#linear-as-forge",
     )
   })
 

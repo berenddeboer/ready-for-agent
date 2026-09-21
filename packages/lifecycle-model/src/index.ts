@@ -1,6 +1,7 @@
 export * from "./generated/forge.js"
 export * from "./generated/work-item-state.js"
 export * from "./intake-candidates.js"
+export * from "./issue-source.js"
 export * from "./predicates.js"
 export * from "./relevance-policy.js"
 export * from "./work-item-branch.js"
