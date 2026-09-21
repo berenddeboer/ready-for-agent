@@ -2363,6 +2363,9 @@ describe("DbService", () => {
           expect(issue.id.startsWith("issue-")).toBe(true)
           expect(issue.repositoryId).toBe(repository.id)
           expect(issue.issueNumber).toBe(42)
+          expect(issue.issueTracker).toBe("github")
+          expect(issue.nativeId).toBe("42")
+          expect(issue.displayId).toBe("42")
           expect(issue.title).toBe("  Preserve title spacing  ")
           expect(issue.body).toBe("Issue body")
           expect(issue.url).toBe("https://github.com/acme/widgets/issues/42")
@@ -2370,6 +2373,47 @@ describe("DbService", () => {
           expect(issue.githubCreatedAt).toEqual(githubCreatedAt)
           expect(issue.issueAuthor).toBeNull()
           expect(issue.parent).toBeNull()
+        }),
+      ))
+
+    it("derives source identity from the Repository Issue Tracker and issue number", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const gitlab = yield* db.addRepository({
+            ...sampleInput,
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+            localPath: "/repos/gitlab/oauth.git",
+          })
+          const derived = yield* db.storeIssue({
+            repositoryId: gitlab.id,
+            issueNumber: 7,
+            title: "GitLab issue",
+            ...sampleIssueFields,
+            url: "https://git.drupalcode.org/project/oauth_client/-/issues/7",
+            githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+          })
+          expect(derived.issueTracker).toBe("gitlab")
+          expect(derived.nativeId).toBe("7")
+          expect(derived.displayId).toBe("7")
+
+          const explicit = yield* db.storeIssue({
+            repositoryId: gitlab.id,
+            issueNumber: 8,
+            issueTracker: "gitlab",
+            nativeId: "iid-8",
+            displayId: "oauth#8",
+            title: "Explicit identity",
+            ...sampleIssueFields,
+            url: "https://git.drupalcode.org/project/oauth_client/-/issues/8",
+            githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+          })
+          expect(explicit.issueTracker).toBe("gitlab")
+          expect(explicit.nativeId).toBe("iid-8")
+          expect(explicit.displayId).toBe("oauth#8")
+          expect((yield* db.listIssues(gitlab.id))[1]).toEqual(explicit)
         }),
       ))
 
@@ -2477,6 +2521,8 @@ describe("DbService", () => {
             {
               issueNumber: 5,
               issueUrl: "https://github.com/acme/widgets/issues/5",
+              nativeId: "5",
+              displayId: "5",
             },
           ])
           expect((yield* db.listIssues(repository.id))[0]?.blockedBy).toEqual(
@@ -2509,6 +2555,8 @@ describe("DbService", () => {
           expect(withParent.parent).toEqual({
             issueNumber: 7,
             issueUrl: "https://github.com/acme/widgets/issues/7",
+            nativeId: "7",
+            displayId: "7",
           })
           expect(withParent.parentPosition).toBe(4)
           expect((yield* db.listIssues(repository.id))[0]?.parent).toEqual(

@@ -125,6 +125,20 @@ export const issue = snakeCase.table(
       .notNull()
       .references(() => repository.id, { onDelete: "cascade" }),
     issueNumber: integer().notNull(),
+    /**
+     * Configured Issue Tracker that sourced this Issue. Distinct from the
+     * Repository hosting Forge when they later diverge.
+     */
+    issueTracker: text({ enum: ISSUE_TRACKERS }).notNull().default("github"),
+    /**
+     * Tracker-native identity. Existing Forge Issues store the issue number
+     * as text; Linear identity is not required to be a positive integer.
+     */
+    issueNativeId: text().notNull().default(""),
+    /**
+     * Human-readable identifier. May change without changing native identity.
+     */
+    issueDisplayId: text().notNull().default(""),
     title: text().notNull(),
     body: text().notNull(),
     url: text().notNull(),
@@ -133,6 +147,8 @@ export const issue = snakeCase.table(
     issueAuthor: text(),
     parentIssueNumber: integer(),
     parentIssueUrl: text(),
+    parentNativeId: text(),
+    parentDisplayId: text(),
     parentPosition: integer(),
     hasChildren: integer({ mode: "boolean" }).notNull().default(false),
     createdAt: integer({ mode: "number" })
@@ -146,6 +162,11 @@ export const issue = snakeCase.table(
     uniqueIndex("issue_repository_id_issue_number_uidx").on(
       t.repositoryId,
       t.issueNumber,
+    ),
+    uniqueIndex("issue_repository_id_tracker_native_id_uidx").on(
+      t.repositoryId,
+      t.issueTracker,
+      t.issueNativeId,
     ),
   ],
 )
@@ -161,6 +182,8 @@ export const issueDependency = snakeCase.table(
       .references(() => issue.id, { onDelete: "cascade" }),
     blockingIssueNumber: integer().notNull(),
     blockingIssueUrl: text().notNull(),
+    blockingNativeId: text().notNull().default(""),
+    blockingDisplayId: text().notNull().default(""),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),

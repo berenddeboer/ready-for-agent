@@ -115,12 +115,16 @@ export const seedImplementWithIssueFixtures = async (): Promise<void> => {
   const sql = [
     ...deleteExisting,
     `INSERT INTO issue (
-       id, repository_id, issue_number, title, body, url, state,
+       id, repository_id, issue_number, issue_tracker, issue_native_id,
+       issue_display_id, title, body, url, state,
        github_created_at, has_children, created_at, updated_at
      ) VALUES (
        ${sqlLiteral(IMPLEMENT_WITH_ISSUE_FIXTURE.leafIssueId)},
        ${repositoryId},
        ${IMPLEMENT_WITH_ISSUE_FIXTURE.leafIssueNumber},
+       'github',
+       ${sqlLiteral(String(IMPLEMENT_WITH_ISSUE_FIXTURE.leafIssueNumber))},
+       ${sqlLiteral(String(IMPLEMENT_WITH_ISSUE_FIXTURE.leafIssueNumber))},
        'E2E Implement With leaf',
        '',
        ${issueUrl(IMPLEMENT_WITH_ISSUE_FIXTURE.leafIssueNumber)},
@@ -131,12 +135,16 @@ export const seedImplementWithIssueFixtures = async (): Promise<void> => {
        ${now}
      );`,
     `INSERT INTO issue (
-       id, repository_id, issue_number, title, body, url, state,
+       id, repository_id, issue_number, issue_tracker, issue_native_id,
+       issue_display_id, title, body, url, state,
        github_created_at, has_children, created_at, updated_at
      ) VALUES (
        ${sqlLiteral(IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueId)},
        ${repositoryId},
        ${IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueNumber},
+       'github',
+       ${sqlLiteral(String(IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueNumber))},
+       ${sqlLiteral(String(IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueNumber))},
        'E2E Implement With parent',
        '',
        ${issueUrl(IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueNumber)},
@@ -147,13 +155,18 @@ export const seedImplementWithIssueFixtures = async (): Promise<void> => {
        ${now}
      );`,
     `INSERT INTO issue (
-       id, repository_id, issue_number, title, body, url, state,
+       id, repository_id, issue_number, issue_tracker, issue_native_id,
+       issue_display_id, title, body, url, state,
        github_created_at, parent_issue_number, parent_issue_url,
+       parent_native_id, parent_display_id,
        has_children, created_at, updated_at
      ) VALUES (
        ${sqlLiteral(IMPLEMENT_WITH_ISSUE_FIXTURE.childIssueId)},
        ${repositoryId},
        ${IMPLEMENT_WITH_ISSUE_FIXTURE.childIssueNumber},
+       'github',
+       ${sqlLiteral(String(IMPLEMENT_WITH_ISSUE_FIXTURE.childIssueNumber))},
+       ${sqlLiteral(String(IMPLEMENT_WITH_ISSUE_FIXTURE.childIssueNumber))},
        'E2E Implement With child',
        '',
        ${issueUrl(IMPLEMENT_WITH_ISSUE_FIXTURE.childIssueNumber)},
@@ -161,6 +174,8 @@ export const seedImplementWithIssueFixtures = async (): Promise<void> => {
        ${now},
        ${IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueNumber},
        ${issueUrl(IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueNumber)},
+       ${sqlLiteral(String(IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueNumber))},
+       ${sqlLiteral(String(IMPLEMENT_WITH_ISSUE_FIXTURE.parentIssueNumber))},
        0,
        ${now},
        ${now}

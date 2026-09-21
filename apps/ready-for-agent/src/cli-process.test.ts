@@ -349,12 +349,16 @@ describe("operator binary finite-command process contract", () => {
                 candidates: [
                   {
                     issueNumber: 7,
+                    nativeId: "7",
+                    displayId: "7",
                     title: "Ready",
                     url: "https://github.com/owner/repo/issues/7",
                     action: "IMPLEMENT_NOW",
                   },
                   {
                     issueNumber: 9,
+                    nativeId: "9",
+                    displayId: "9",
                     title: "Blocked",
                     url: "https://github.com/owner/repo/issues/9",
                     action: "QUEUE",
@@ -395,12 +399,16 @@ describe("operator binary finite-command process contract", () => {
           candidates: [
             {
               issueNumber: 7,
+              nativeId: "7",
+              displayId: "7",
               title: "Ready",
               url: "https://github.com/owner/repo/issues/7",
               action: "IMPLEMENT_NOW",
             },
             {
               issueNumber: 9,
+              nativeId: "9",
+              displayId: "9",
               title: "Blocked",
               url: "https://github.com/owner/repo/issues/9",
               action: "QUEUE",

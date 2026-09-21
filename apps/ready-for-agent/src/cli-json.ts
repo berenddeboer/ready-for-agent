@@ -45,6 +45,8 @@ export type CandidatesSuccessDocument = {
   readonly issuesReconciledAt: string | null
   readonly candidates: readonly {
     readonly issueNumber: number
+    readonly nativeId: string
+    readonly displayId: string
     readonly title: string
     readonly url: string
     readonly action: IntakeCandidateAction
@@ -284,6 +286,8 @@ export const buildCandidatesSuccessDocument = (input: {
   readonly issuesReconciledAt: string | null
   readonly candidates: readonly {
     readonly issueNumber: number
+    readonly nativeId: string
+    readonly displayId: string
     readonly title: string
     readonly url: string
     readonly action: IntakeCandidateAction

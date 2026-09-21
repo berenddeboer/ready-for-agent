@@ -27,6 +27,7 @@ import {
 import {
   IssueReconciler,
   IssueReconcilerLive,
+  IssueTrackerDiscoveryUnsupportedError,
   ReconciliationMutationError,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -68,6 +69,9 @@ const localIssue = (
     id: `issue-${number}`,
     repositoryId: repository.id,
     issueNumber: number,
+    issueTracker: "github",
+    nativeId: String(number),
+    displayId: String(number),
     title: remote.title,
     body: remote.body,
     url: remote.url,
@@ -440,8 +444,13 @@ describe("IssueReconciler", () => {
             issueNumber: 99,
             issueUrl:
               "https://git.drupalcode.org/project/oauth_client/-/issues/99",
+            nativeId: "99",
+            displayId: "99",
           },
         ])
+        expect(db.stored[0]?.issueTracker).toBe("gitlab")
+        expect(db.stored[0]?.nativeId).toBe("1")
+        expect(db.stored[0]?.displayId).toBe("1")
         expect(db.actions).toContain("gitlab:project/oauth_client")
       }),
       db.layer,
@@ -598,6 +607,8 @@ describe("IssueReconciler", () => {
           {
             issueNumber: 1,
             issueUrl: "https://github.com/acme/widgets/issues/1",
+            nativeId: "1",
+            displayId: "1",
           },
         ])
       }),
@@ -689,6 +700,8 @@ describe("IssueReconciler", () => {
         expect(db.stored[0]?.parent).toEqual({
           issueNumber: 9,
           issueUrl: "https://github.com/acme/widgets/issues/9",
+          nativeId: "9",
+          displayId: "9",
         })
         expect(db.stored[0]?.parentPosition).toBe(4)
       }),
@@ -1415,13 +1428,86 @@ describe("IssueReconciler", () => {
           {
             issueNumber: 99,
             issueUrl: "https://dev.azure.com/acme/widgets/_workitems/edit/99",
+            nativeId: "99",
+            displayId: "99",
           },
         ])
+        expect(db.stored[1]?.issueTracker).toBe("azure-devops")
+        expect(db.stored[1]?.nativeId).toBe("2")
       }),
       db.layer,
       github,
       defaultGitLabLayer,
       azureDevOps,
+    )
+  })
+
+  it("routes discovery through the configured Issue Tracker, not the hosting Forge", () => {
+    const githubHostedGitlabTracker = makeRepositoryRecord({
+      id: "repo-1",
+      forge: "github",
+      issueTracker: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+      includeAllIssueAuthors: true,
+    })
+    const db = makeDbFixture({ issues: [] })
+    const gitlab = Layer.succeed(GitLabService, {
+      ...defaultGitLabShape,
+      listReadyIssues: ({ projectPath }) =>
+        Effect.sync(() => {
+          db.actions.push(`gitlab:${projectPath}`)
+          return [remoteIssue(4)]
+        }),
+    } satisfies GitLabServiceShape)
+    const github = makeGitHubLayer([remoteIssue(99)], db.actions)
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(githubHostedGitlabTracker)
+
+        expect(summary.inserted).toBe(1)
+        expect(db.stored.map((issue) => issue.issueNumber)).toEqual([4])
+        expect(db.stored[0]?.issueTracker).toBe("gitlab")
+        expect(db.stored[0]?.nativeId).toBe("4")
+        expect(db.stored[0]?.displayId).toBe("4")
+        expect(db.actions).toContain("gitlab:project/oauth_client")
+        expect(db.actions.some((action) => action.startsWith("github:"))).toBe(
+          false,
+        )
+      }),
+      db.layer,
+      github,
+      gitlab,
+    )
+  })
+
+  it("does not list hosting-Forge Issues when the Issue Tracker is Linear", () => {
+    const linearTracked = makeRepositoryRecord({
+      id: "repo-1",
+      forge: "github",
+      issueTracker: "linear",
+      includeAllIssueAuthors: true,
+    })
+    const db = makeDbFixture({ issues: [] })
+    const github = makeGitHubLayer([remoteIssue(1)], db.actions)
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const error = yield* Effect.flip(reconciler.reconcile(linearTracked))
+
+        expect(error).toBeInstanceOf(IssueTrackerDiscoveryUnsupportedError)
+        if (error instanceof IssueTrackerDiscoveryUnsupportedError) {
+          expect(error.issueTracker).toBe("linear")
+          expect(error.repositoryId).toBe(linearTracked.id)
+        }
+        expect(db.actions).toEqual([])
+        expect(db.stored).toEqual([])
+      }),
+      db.layer,
+      github,
     )
   })
 })

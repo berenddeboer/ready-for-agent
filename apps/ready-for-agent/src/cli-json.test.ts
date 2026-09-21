@@ -326,6 +326,8 @@ describe("finite CLI JSON contract", () => {
       candidates: [
         {
           issueNumber: 3,
+          nativeId: "3",
+          displayId: "3",
           title: "Ready",
           url: "https://github.com/owner/repo/issues/3",
           action: "IMPLEMENT_NOW",
@@ -345,6 +347,8 @@ describe("finite CLI JSON contract", () => {
       candidates: [
         {
           issueNumber: 3,
+          nativeId: "3",
+          displayId: "3",
           title: "Ready",
           url: "https://github.com/owner/repo/issues/3",
           action: "IMPLEMENT_NOW",

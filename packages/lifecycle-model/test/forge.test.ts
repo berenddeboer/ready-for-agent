@@ -5,9 +5,12 @@ import {
   FORGES,
   ISSUE_TRACKERS,
   type IssueSource,
+  completeIssueIdentity,
   defaultIssueTrackerForForge,
+  existingProviderIssueIdentity,
   forgeForIssueSource,
   forgeIssueSource,
+  formatIssueDisplayId,
   isForge,
   isIssueTracker,
 } from "../src/index.js"
@@ -75,6 +78,29 @@ describe("generated Forge vocabulary", () => {
     expect(linearSource.displayId).toBe("ENG-123")
     expect(linearSource.nativeId).not.toBe(linearSource.displayId)
     expect(Number.parseInt(linearSource.nativeId, 10)).toBeNaN()
+    expect(
+      existingProviderIssueIdentity({ tracker: "gitlab", issueNumber: 7 }),
+    ).toEqual({
+      issueTracker: "gitlab",
+      nativeId: "7",
+      displayId: "7",
+    })
+    expect(completeIssueIdentity({ issueNumber: 42 })).toEqual({
+      nativeId: "42",
+      displayId: "42",
+    })
+    expect(
+      completeIssueIdentity({
+        issueNumber: 42,
+        nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        displayId: "ENG-123",
+      }),
+    ).toEqual({
+      nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      displayId: "ENG-123",
+    })
+    expect(formatIssueDisplayId("42")).toBe("#42")
+    expect(formatIssueDisplayId("ENG-123")).toBe("ENG-123")
   })
 
   it("maps Forge-hosted Original Issue Source to a Forge and Linear to none", () => {

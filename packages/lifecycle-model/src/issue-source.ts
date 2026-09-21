@@ -27,3 +27,47 @@ export const forgeIssueSource = (input: {
  */
 export const forgeForIssueSource = (source: IssueSource): Forge | null =>
   isForge(source.tracker) ? source.tracker : null
+
+/**
+ * Existing Forge-hosted Issues use a positive integer as both native identity
+ * and display identifier. Callers that still have only an issue number use
+ * this to populate the distinct store/API fields.
+ */
+export const existingProviderIssueIdentity = (input: {
+  readonly tracker: IssueTracker
+  readonly issueNumber: number
+}): {
+  readonly issueTracker: IssueTracker
+  readonly nativeId: string
+  readonly displayId: string
+} => ({
+  issueTracker: input.tracker,
+  nativeId: String(input.issueNumber),
+  displayId: String(input.issueNumber),
+})
+
+/**
+ * Fill native/display identity from a positive integer when a caller omitted
+ * the distinct fields. Empty strings are treated as omitted.
+ */
+export const completeIssueIdentity = (input: {
+  readonly issueNumber: number
+  readonly nativeId?: string
+  readonly displayId?: string
+}): { readonly nativeId: string; readonly displayId: string } => ({
+  nativeId:
+    input.nativeId !== undefined && input.nativeId.length > 0
+      ? input.nativeId
+      : String(input.issueNumber),
+  displayId:
+    input.displayId !== undefined && input.displayId.length > 0
+      ? input.displayId
+      : String(input.issueNumber),
+})
+
+/**
+ * Human-readable Issue label. Numeric display identifiers keep the existing
+ * `#42` form; tracker keys such as Linear's `ENG-123` are shown as-is.
+ */
+export const formatIssueDisplayId = (displayId: string): string =>
+  /^[0-9]+$/.test(displayId) ? `#${displayId}` : displayId

@@ -766,6 +766,20 @@ type Issue {
   id: ID!
   repositoryId: ID!
   issueNumber: Int!
+  """
+  Configured Issue Tracker that sourced this Issue. Distinct from the
+  Repository hosting Forge when they later diverge.
+  """
+  issueTracker: String!
+  """
+  Tracker-native identity. Existing Forge Issues use the issue number as
+  text; not required to be a positive integer.
+  """
+  nativeId: String!
+  """
+  Human-readable identifier, distinct from native identity.
+  """
+  displayId: String!
   title: String!
   body: String!
   url: String!
@@ -780,6 +794,8 @@ type Issue {
 type IssueReference {
   issueNumber: Int!
   issueUrl: String!
+  nativeId: String!
+  displayId: String!
 }
 
 type RefreshJob {
@@ -801,6 +817,8 @@ qualifies for Implement Now or Queue.
 """
 type IntakeCandidate {
   issueNumber: Int!
+  nativeId: String!
+  displayId: String!
   title: String!
   url: String!
   action: RepositoryIntakeAction!
@@ -830,6 +848,8 @@ Successful Intake of one Issue through ordinary Implement Now or Queue.
 """
 type RepositoryIntakeCreated {
   issueNumber: Int!
+  nativeId: String!
+  displayId: String!
   title: String!
   url: String!
   action: RepositoryIntakeAction!
@@ -842,6 +862,8 @@ candidates; earlier Work Items are not rolled back.
 """
 type RepositoryIntakeFailed {
   issueNumber: Int!
+  nativeId: String!
+  displayId: String!
   title: String!
   url: String!
   action: RepositoryIntakeAction!
