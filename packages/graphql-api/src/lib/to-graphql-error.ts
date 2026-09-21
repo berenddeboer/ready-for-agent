@@ -61,6 +61,13 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         `Issue #${error.issueNumber} was not found in repository ${error.repositoryId}`,
         "ISSUE_NOT_FOUND",
       )
+    case "IssueIdentityAmbiguousError":
+      return gql(
+        error.message ??
+          `Issue #${error.issueNumber} matches more than one Issue in repository ${error.repositoryId}`,
+        "ISSUE_IDENTITY_AMBIGUOUS",
+        { repositoryId: error.repositoryId, issueNumber: error.issueNumber },
+      )
     case "IssueNotOpenError":
       return gql(
         `Issue #${error.issueNumber} is ${error.state}, not OPEN`,

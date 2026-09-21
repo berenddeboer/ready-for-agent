@@ -1,3 +1,4 @@
+import { isIssueTracker } from "./generated/forge.js"
 import { completeIssueIdentity } from "./issue-source.js"
 import {
   type WorkItemPredicateShape,
@@ -27,6 +28,7 @@ export type IntakeCandidate = {
 /** Issue fields required to classify Intake Candidates. */
 export type IntakeCandidateIssueInput = {
   readonly issueNumber: number
+  readonly issueTracker?: string
   readonly nativeId?: string
   readonly displayId?: string
   readonly title: string
@@ -39,6 +41,45 @@ export type IntakeCandidateIssueInput = {
 /** Work Item fields required to exclude unfinished Issues. */
 export type IntakeCandidateWorkItemInput = WorkItemPredicateShape & {
   readonly issueNumber: number
+  readonly issueTracker?: string
+  readonly nativeId?: string
+}
+
+const intakeIdentityKey = (
+  item: {
+    readonly issueNumber: number
+    readonly issueTracker?: string
+    readonly nativeId?: string
+  },
+  liveTracker: string | null | undefined,
+): string => {
+  const { nativeId } = completeIssueIdentity(item)
+  const tracker = isIssueTracker(item.issueTracker)
+    ? item.issueTracker
+    : liveTracker !== undefined &&
+        liveTracker !== null &&
+        isIssueTracker(liveTracker)
+      ? liveTracker
+      : ""
+  return `${tracker}:${nativeId}`
+}
+
+const filterByLiveIssueTracker = <T extends { readonly issueTracker?: string }>(
+  items: readonly T[],
+  liveTracker: string | null | undefined,
+): readonly T[] => {
+  if (liveTracker === undefined || liveTracker === null) {
+    return items
+  }
+  if (!isIssueTracker(liveTracker)) {
+    return items
+  }
+  return items.filter((item) => {
+    const itemTracker = isIssueTracker(item.issueTracker)
+      ? item.issueTracker
+      : liveTracker
+    return itemTracker === liveTracker
+  })
 }
 
 /**
@@ -63,12 +104,16 @@ export type IntakeCandidateWorkItemInput = WorkItemPredicateShape & {
 export const classifyIntakeCandidates = (
   issues: readonly IntakeCandidateIssueInput[],
   workItems: readonly IntakeCandidateWorkItemInput[],
+  liveTracker?: string | null,
 ): readonly IntakeCandidate[] => {
-  const workItemsByIssue = new Map<number, WorkItemPredicateShape[]>()
-  for (const workItem of workItems) {
-    const existing = workItemsByIssue.get(workItem.issueNumber)
+  const scopedIssues = filterByLiveIssueTracker(issues, liveTracker)
+  const scopedWorkItems = filterByLiveIssueTracker(workItems, liveTracker)
+  const workItemsByIssue = new Map<string, WorkItemPredicateShape[]>()
+  for (const workItem of scopedWorkItems) {
+    const key = intakeIdentityKey(workItem, liveTracker)
+    const existing = workItemsByIssue.get(key)
     if (existing === undefined) {
-      workItemsByIssue.set(workItem.issueNumber, [workItem])
+      workItemsByIssue.set(key, [workItem])
     } else {
       existing.push(workItem)
     }
@@ -77,8 +122,9 @@ export const classifyIntakeCandidates = (
   const implementNow: IntakeCandidate[] = []
   const queue: IntakeCandidate[] = []
 
-  for (const issue of issues) {
-    const issueWorkItems = workItemsByIssue.get(issue.issueNumber) ?? []
+  for (const issue of scopedIssues) {
+    const issueWorkItems =
+      workItemsByIssue.get(intakeIdentityKey(issue, liveTracker)) ?? []
     if (shippedWorkItems(issueWorkItems).length > 0) {
       continue
     }

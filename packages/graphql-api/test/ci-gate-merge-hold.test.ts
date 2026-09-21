@@ -236,6 +236,9 @@ describe("Hold approved merges during CI failure", () => {
       Layer.provideMerge(DbServiceLive),
       Layer.provideMerge(SqliteQueueServiceLive),
       Layer.provideMerge(DatabaseTest),
+      Layer.provideMerge(
+        Layer.succeed(LinearService, defaultLinearServiceShape),
+      ),
     ),
     githubLayer,
     Layer.succeed(KeymaxxerService, {

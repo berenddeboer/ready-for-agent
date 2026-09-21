@@ -240,6 +240,9 @@ describe("Hold ordinary remote admission during CI failure", () => {
       Layer.provideMerge(DbServiceLive),
       Layer.provideMerge(SqliteQueueServiceLive),
       Layer.provideMerge(DatabaseTest),
+      Layer.provideMerge(
+        Layer.succeed(LinearService, defaultLinearServiceShape),
+      ),
     ),
     githubLayer,
     Layer.succeed(KeymaxxerService, {

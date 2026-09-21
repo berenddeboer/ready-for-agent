@@ -34,6 +34,7 @@ import {
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
 import { forgeIssueSource } from "@ready-for-agent/lifecycle-model"
+import type { LinearService } from "@ready-for-agent/linear-service"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CreatePrCredentialError,
@@ -49,6 +50,7 @@ import {
   makeWorkItemId,
   stubActiveAgentBackendLayer,
   stubGrokActiveAgentBackendLayer,
+  stubLinearServiceLayer,
   workItemBranchName,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -270,6 +272,7 @@ const run = <A, E>(
     | KeymaxxerService
     | AgentBackend
     | ActiveAgentBackend
+    | LinearService
   >,
   layers: {
     db?: Layer.Layer<DbService>
@@ -279,6 +282,7 @@ const run = <A, E>(
     gitlab?: Layer.Layer<GitLabService>
     azureDevOps?: Layer.Layer<AzureDevOpsService>
     activeBackend?: Layer.Layer<ActiveAgentBackend>
+    linear?: Layer.Layer<LinearService>
   } = {},
 ): Promise<A> =>
   Effect.runPromise(
@@ -292,6 +296,7 @@ const run = <A, E>(
           layers.keymaxxer ?? stubKeymaxxer(),
           layers.opencode ?? stubOpencode(),
           layers.activeBackend ?? stubActiveAgentBackendLayer(),
+          layers.linear ?? stubLinearServiceLayer(),
         ),
       ),
       Effect.provide(PlatformLayer),
@@ -894,6 +899,53 @@ describe("createPr", () => {
 
       expect(result.pullRequestNumber).toBe(77)
       expect(linked).toEqual([])
+    }))
+
+  it("publishes a GitHub PR with a Linear Issue reference and posts the PR link", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      const nativeId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      const issueUrl = "https://linear.app/acme/issue/ENG-123"
+      const comments: Array<{ marker: string; body: string }> = []
+      let reconciled: { title: string; body: string } | null = null
+      const context = baseContext(root, {
+        workItemId,
+        issueNumber: 123,
+        issueSource: {
+          tracker: "linear",
+          nativeId,
+          displayId: "ENG-123",
+          url: issueUrl,
+        },
+        publicationTitle: "feat: ship linear execution",
+        publicationBody:
+          "Implements Linear ENG-123 in the GitHub repository.\n\nCloses #123",
+      })
+      const result = await run(createPr(context), {
+        github: stubGitHub({
+          findOpenPullRequestNumber: () => Effect.succeed(777),
+          updateOpenDraftPullRequestCopy: (_repository, _branch, input) => {
+            reconciled = input
+            return Effect.succeed(777)
+          },
+        }),
+        linear: stubLinearServiceLayer({
+          ensureMilestoneComment: (_id, marker, body) =>
+            Effect.sync(() => {
+              comments.push({ marker, body })
+            }),
+        }),
+      })
+
+      expect(result.pullRequestNumber).toBe(777)
+      expect(reconciled?.body).toContain("Linear: ENG-123")
+      expect(reconciled?.body).toContain(issueUrl)
+      expect(reconciled?.body).not.toContain("Closes #123")
+      expect(comments).toHaveLength(1)
+      expect(comments[0]?.marker).toContain("pull-request")
+      expect(comments[0]?.body).toContain(
+        "https://github.com/acme/widgets/pull/777",
+      )
     }))
 
   it("uses persisted harness fallback publication copy as the PR title and body", () =>

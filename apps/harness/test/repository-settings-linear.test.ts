@@ -57,17 +57,11 @@ describe("Repository settings Linear discovery", () => {
     expect(source).toContain("linearWorkflowStatuses")
   })
 
-  test("does not start Linear Issue execution from Implement or Queue", () => {
+  test("starts Linear leaf Issues from Implement and Queue while hiding Implement All", () => {
     const source = indexSource()
-    expect(source).toContain(
-      'const canStartLinearExecution = repository.issueTracker !== "linear"',
-    )
-    expect(source).toContain(
-      "const canImplementNow = canImplement && canStartLinearExecution",
-    )
-    expect(source).toContain(
-      "const canQueueNow = canQueue && canStartLinearExecution",
-    )
+    expect(source).toContain("const canImplementNow = canImplement")
+    expect(source).toContain("const canQueueNow = canQueue")
+    expect(source).not.toContain("canStartLinearExecution")
     expect(source).toContain('repository.issueTracker !== "linear" &&')
   })
 })

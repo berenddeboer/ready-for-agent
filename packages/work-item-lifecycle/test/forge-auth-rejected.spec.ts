@@ -22,6 +22,7 @@ import {
   stubAzureDevOpsServiceLayer,
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
+  stubLinearServiceLayer,
 } from "../src/index.js"
 import { describe, expect, it, setDefaultTimeout } from "bun:test"
 
@@ -98,6 +99,7 @@ const makeTestLayer = (steps: LifecycleStepsShape) =>
     Layer.provideMerge(stubGitHubServiceLayer()),
     Layer.provideMerge(stubGitLabServiceLayer()),
     Layer.provideMerge(stubAzureDevOpsServiceLayer()),
+    Layer.provideMerge(stubLinearServiceLayer()),
     Layer.provideMerge(Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps))),
     Layer.provideMerge(DbServiceLive),
     Layer.provideMerge(SqliteQueueServiceLive),

@@ -242,4 +242,87 @@ describe("classifyIntakeCandidates", () => {
       },
     ])
   })
+
+  it("scopes candidates to the live Issue Tracker", () => {
+    const leftoverGithub = issue({
+      issueNumber: 123,
+      issueTracker: "github",
+      nativeId: "123",
+      displayId: "123",
+      title: "GitHub leftover",
+      url: "https://github.com/acme/widgets/issues/123",
+    })
+    const linearLeaf = issue({
+      issueNumber: 123,
+      issueTracker: "linear",
+      nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      displayId: "ENG-123",
+      title: "Linear leaf",
+      url: "https://linear.app/acme/issue/ENG-123",
+    })
+    expect(
+      classifyIntakeCandidates(
+        [leftoverGithub, linearLeaf],
+        [
+          workItem({
+            issueNumber: 123,
+            issueTracker: "github",
+            state: "complete",
+          }),
+        ],
+        "linear",
+      ),
+    ).toEqual([
+      {
+        issueNumber: 123,
+        nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        displayId: "ENG-123",
+        title: "Linear leaf",
+        url: "https://linear.app/acme/issue/ENG-123",
+        action: "IMPLEMENT_NOW",
+      },
+    ])
+  })
+
+  it("does not let a completed Linear Work Item veto another team-local number", () => {
+    const eng = issue({
+      issueNumber: 123,
+      issueTracker: "linear",
+      nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      displayId: "ENG-123",
+      title: "Eng leaf",
+      url: "https://linear.app/acme/issue/ENG-123",
+    })
+    const des = issue({
+      issueNumber: 123,
+      issueTracker: "linear",
+      nativeId: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      displayId: "DES-123",
+      title: "Des leaf",
+      url: "https://linear.app/acme/issue/DES-123",
+    })
+    expect(
+      classifyIntakeCandidates(
+        [eng, des],
+        [
+          workItem({
+            issueNumber: 123,
+            issueTracker: "linear",
+            nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            state: "complete",
+          }),
+        ],
+        "linear",
+      ),
+    ).toEqual([
+      {
+        issueNumber: 123,
+        nativeId: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+        displayId: "DES-123",
+        title: "Des leaf",
+        url: "https://linear.app/acme/issue/DES-123",
+        action: "IMPLEMENT_NOW",
+      },
+    ])
+  })
 })

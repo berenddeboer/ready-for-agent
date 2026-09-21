@@ -584,4 +584,42 @@ describe("closeIssue", () => {
       { issueNumber: 42, projectPath: "acme/widgets" },
     ])
   })
+
+  it("skips tracker close-out for a Linear Original Issue Source", async () => {
+    const db = stubDbServiceLayer({
+      listRepositories: Effect.succeed([repository]),
+      listIssues: () => Effect.succeed([openLeaf]),
+    })
+    let githubCalls = 0
+    const github = Layer.succeed(GitHubService, {
+      ...unusedGithub,
+      ensureIssueCompletedWithSummary: () => {
+        githubCalls += 1
+        return Effect.void
+      },
+    } satisfies GitHubServiceShape)
+
+    await Effect.runPromise(
+      closeIssue({
+        ...context,
+        issueSource: {
+          tracker: "linear",
+          nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          displayId: "ENG-123",
+          url: "https://linear.app/acme/issue/ENG-123",
+        },
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            github,
+            stubGitLabServiceLayer(),
+            stubAzureDevOpsServiceLayer(),
+          ),
+        ),
+      ),
+    )
+
+    expect(githubCalls).toBe(0)
+  })
 })

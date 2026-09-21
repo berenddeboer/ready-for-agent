@@ -11,6 +11,7 @@ import {
   DbServiceLive,
   type DbServiceShape,
 } from "@ready-for-agent/db-service"
+import { LinearExecutionNotSupportedError } from "@ready-for-agent/linear-service"
 import {
   EnqueueError,
   type JobId,
@@ -22,6 +23,7 @@ import {
   ImplementAllWithAutoMergeNotEligibleError,
   InstallCommandError,
   InvalidExecutionProfileError,
+  IssueIdentityAmbiguousError,
   type LifecycleStepContext,
   LifecycleSteps,
   type LifecycleStepsShape,
@@ -38,6 +40,7 @@ import {
   stubAzureDevOpsServiceLayer,
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
+  stubLinearServiceLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -252,6 +255,7 @@ const lifecycleLayer = (
     Layer.provideMerge(stubGitHubServiceLayer()),
     Layer.provideMerge(stubGitLabServiceLayer()),
     Layer.provideMerge(stubAzureDevOpsServiceLayer()),
+    Layer.provideMerge(stubLinearServiceLayer()),
     Layer.provideMerge(Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps))),
     Layer.provideMerge(DbServiceLive),
     Layer.provideMerge(SqliteQueueServiceLive),
@@ -561,6 +565,7 @@ describe("implementWith", () => {
         Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(stubGitLabServiceLayer()),
         Layer.provideMerge(stubAzureDevOpsServiceLayer()),
+        Layer.provideMerge(stubLinearServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(successfulSteps)),
         ),
@@ -781,6 +786,76 @@ describe("implementWith", () => {
           expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 120)).toEqual(
             [],
           )
+        }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+      )
+    })
+
+    it("enrolls GitHub children when leftover Linear parent shares the number", async () => {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const lifecycle = yield* WorkItemLifecycle
+          const repo = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath:
+              "/repos/acme/widgets-implement-with-linear-leftover-parent.git",
+            isBare: true,
+          })
+          yield* seedHarness(db, {
+            selectedAgentBackend: "opencode",
+            defaultModel: "settings-build",
+          })
+          yield* db.storeIssue({
+            repositoryId: repo.id,
+            issueNumber: 30,
+            issueTracker: "linear",
+            nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            displayId: "ENG-30",
+            title: "Linear leftover leaf",
+            body: "Wrong parent.",
+            url: "https://linear.app/acme/issue/ENG-30",
+            state: "OPEN",
+            githubCreatedAt: new Date(),
+            issueAuthor: null,
+            parent: null,
+            parentPosition: null,
+            hasChildren: false,
+            blockedBy: [],
+          })
+          yield* storeOpenParentIssue(db, repo.id, 30)
+          yield* storeOpenChildIssue(db, repo.id, 31, 30, { parentPosition: 0 })
+          yield* db.storeIssue({
+            repositoryId: repo.id,
+            issueNumber: 99,
+            issueTracker: "linear",
+            nativeId: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+            displayId: "ENG-99",
+            title: "Linear leftover child",
+            body: "body",
+            url: "https://linear.app/acme/issue/ENG-99",
+            state: "OPEN",
+            githubCreatedAt: new Date(),
+            issueAuthor: null,
+            parent: {
+              issueNumber: 30,
+              issueUrl: "https://linear.app/acme/issue/ENG-30",
+              nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+              displayId: "ENG-30",
+            },
+            parentPosition: 0,
+            hasChildren: false,
+            blockedBy: [],
+          })
+          const covered = yield* lifecycle.implementWith(
+            repo.id,
+            30,
+            explicitReviewProfile,
+            { mergePolicy: "classify", implementLocally: false },
+          )
+          expect(covered.map((item) => item.issueNumber)).toEqual([31])
+          expect(covered[0]?.issueSource.tracker).toBe("github")
         }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
       )
     })
@@ -1686,6 +1761,247 @@ describe("implementWith", () => {
         expect(started.mergeMode).toBe("ordinary")
         expect(started.autoMergeOverride).toBe(false)
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer(), noChangeSteps))),
+    )
+  })
+
+  it("starts a Linear leaf when leftover GitHub parent shares the team-local number", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-implement-with-linear-leaf.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* db.updateRepositorySettings({
+          repositoryId: repo.id,
+          paused: true,
+          defaultModel: null,
+          defaultThinkingLevel: null,
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          mergePolicy: "off",
+          includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
+          issueTracker: "linear",
+          linearProjectId: "proj-1",
+          linearProjectName: "Widgets",
+          linearWorkflowStatuses: [
+            {
+              teamId: "team-eng",
+              teamKey: "ENG",
+              teamName: "Engineering",
+              inProgressStateId: "progress",
+              inProgressStateName: "In Progress",
+              doneStateId: "done",
+              doneStateName: "Done",
+            },
+          ],
+        })
+        yield* db.storeIssue({
+          repositoryId: repo.id,
+          issueNumber: 123,
+          issueTracker: "github",
+          nativeId: "123",
+          displayId: "123",
+          title: "GitHub parent leftover",
+          body: "Wrong issue.",
+          url: "https://github.com/acme/widgets/issues/123",
+          state: "OPEN",
+          githubCreatedAt: new Date(),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: true,
+          blockedBy: [],
+        })
+        const nativeId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        yield* db.storeIssue({
+          repositoryId: repo.id,
+          issueNumber: 123,
+          issueTracker: "linear",
+          nativeId,
+          displayId: "ENG-123",
+          title: "Linear leaf",
+          body: "Implement in GitHub.",
+          url: "https://linear.app/acme/issue/ENG-123",
+          state: "OPEN",
+          githubCreatedAt: new Date(),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: false,
+          blockedBy: [],
+        })
+        const created = yield* lifecycle.implementWith(
+          repo.id,
+          123,
+          explicitReviewProfile,
+        )
+        expect(created).toHaveLength(1)
+        expect(created[0]?.issueSource).toEqual({
+          tracker: "linear",
+          nativeId,
+          displayId: "ENG-123",
+          url: "https://linear.app/acme/issue/ENG-123",
+        })
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
+  it("rejects Linear parent Implement With", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-implement-with-linear-parent.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* db.updateRepositorySettings({
+          repositoryId: repo.id,
+          paused: true,
+          defaultModel: null,
+          defaultThinkingLevel: null,
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          mergePolicy: "off",
+          includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
+          issueTracker: "linear",
+          linearProjectId: "proj-1",
+          linearProjectName: "Widgets",
+          linearWorkflowStatuses: [
+            {
+              teamId: "team-eng",
+              teamKey: "ENG",
+              teamName: "Engineering",
+              inProgressStateId: "progress",
+              inProgressStateName: "In Progress",
+              doneStateId: "done",
+              doneStateName: "Done",
+            },
+          ],
+        })
+        yield* db.storeIssue({
+          repositoryId: repo.id,
+          issueNumber: 10,
+          issueTracker: "linear",
+          nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          displayId: "ENG-10",
+          title: "Linear parent",
+          body: "body",
+          url: "https://linear.app/acme/issue/ENG-10",
+          state: "OPEN",
+          githubCreatedAt: new Date(),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: true,
+          blockedBy: [],
+        })
+        const error = yield* lifecycle
+          .implementWith(repo.id, 10, explicitReviewProfile)
+          .pipe(Effect.flip)
+        expect(error).toBeInstanceOf(LinearExecutionNotSupportedError)
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
+    )
+  })
+
+  it("rejects Implement With when two Linear Issues share a team-local number", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-implement-with-linear-ambiguous.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "settings-build",
+        })
+        yield* db.updateRepositorySettings({
+          repositoryId: repo.id,
+          paused: true,
+          defaultModel: null,
+          defaultThinkingLevel: null,
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          mergePolicy: "off",
+          includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
+          issueTracker: "linear",
+          linearProjectId: "proj-1",
+          linearProjectName: "Widgets",
+          linearWorkflowStatuses: [
+            {
+              teamId: "team-eng",
+              teamKey: "ENG",
+              teamName: "Engineering",
+              inProgressStateId: "progress",
+              inProgressStateName: "In Progress",
+              doneStateId: "done",
+              doneStateName: "Done",
+            },
+          ],
+        })
+        yield* db.storeIssue({
+          repositoryId: repo.id,
+          issueNumber: 123,
+          issueTracker: "linear",
+          nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          displayId: "ENG-123",
+          title: "Eng leaf",
+          body: "body",
+          url: "https://linear.app/acme/issue/ENG-123",
+          state: "OPEN",
+          githubCreatedAt: new Date(),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: false,
+          blockedBy: [],
+        })
+        yield* db.storeIssue({
+          repositoryId: repo.id,
+          issueNumber: 123,
+          issueTracker: "linear",
+          nativeId: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+          displayId: "DES-123",
+          title: "Des leaf",
+          body: "body",
+          url: "https://linear.app/acme/issue/DES-123",
+          state: "OPEN",
+          githubCreatedAt: new Date(),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: false,
+          blockedBy: [],
+        })
+        const error = yield* lifecycle
+          .implementWith(repo.id, 123, explicitReviewProfile)
+          .pipe(Effect.flip)
+        expect(error).toBeInstanceOf(IssueIdentityAmbiguousError)
+      }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
     )
   })
 })

@@ -1,6 +1,7 @@
 import { EnqueueError } from "@ready-for-agent/queue-service"
 import {
   IssueBlockedError,
+  IssueIdentityAmbiguousError,
   IssueNotBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
@@ -33,6 +34,11 @@ describe("Repository Intake candidate-local errors", () => {
         repositoryId: "r",
         issueNumber: 6,
         workItemId: "wi-6",
+      }),
+      new IssueIdentityAmbiguousError({
+        repositoryId: "r",
+        issueNumber: 7,
+        message: "Issue #7 matches 2 Issues on the current Issue Tracker.",
       }),
     ]
     for (const error of cases) {

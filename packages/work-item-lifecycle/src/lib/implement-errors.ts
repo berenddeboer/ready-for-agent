@@ -1,4 +1,8 @@
 import { Schema } from "effect"
+import type {
+  LinearNotConfiguredError,
+  LinearRequestError,
+} from "@ready-for-agent/linear-service"
 
 export class ImplementWorktreeContextMissingError extends Schema.TaggedErrorClass<ImplementWorktreeContextMissingError>()(
   "ImplementWorktreeContextMissingError",
@@ -58,3 +62,5 @@ export type ImplementError =
   | ImplementIssueContextMissingError
   | ImplementForgeCredentialError
   | ImplementOpenCodeError
+  | LinearRequestError
+  | LinearNotConfiguredError

@@ -23,6 +23,7 @@ import {
   stubActiveAgentBackendLayer,
   stubAzureDevOpsServiceLayer,
   stubGitLabServiceLayer,
+  stubLinearServiceLayer,
   syncNeedsHumanMergeHandoffs,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -184,6 +185,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       ),
       Layer.provideMerge(stubGitLabServiceLayer(gitlab)),
       Layer.provideMerge(stubAzureDevOpsServiceLayer(azureDevOps)),
+      Layer.provideMerge(stubLinearServiceLayer()),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),

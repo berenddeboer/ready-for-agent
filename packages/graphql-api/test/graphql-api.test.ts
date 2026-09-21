@@ -1817,7 +1817,85 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("does not start Linear Issue execution through GitHub Issue APIs", async () => {
+  test("starts a Linear leaf Issue through Implement Now using Original Issue Source", async () => {
+    await runtime.dispose()
+    const linearIssue = {
+      ...issue,
+      issueNumber: 123,
+      issueTracker: "linear" as const,
+      nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      displayId: "ENG-123",
+      url: "https://linear.app/acme/issue/ENG-123",
+      title: "Ship Linear execution",
+    }
+    const created = {
+      ...workItem,
+      issueNumber: 123,
+      issueSource: {
+        tracker: "linear" as const,
+        nativeId: linearIssue.nativeId,
+        displayId: linearIssue.displayId,
+        url: linearIssue.url,
+      },
+      issueTitle: linearIssue.title,
+    }
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            ...repository,
+            issueTracker: "linear",
+            linearProjectId: "proj-1",
+          }),
+        ]),
+        listIssues: () => Effect.succeed([linearIssue]),
+      },
+      {},
+      {},
+      {
+        implementNow: () => Effect.succeed(created),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          implementNow(repositoryId: "${repository.id}", issueNumber: 123) {
+            id
+            issueNumber
+            issueSource { tracker nativeId displayId url }
+          }
+        }`,
+      }),
+    )
+    const payload = (await response.json()) as {
+      data?: {
+        implementNow?: {
+          id: string
+          issueNumber: number
+          issueSource: {
+            tracker: string
+            nativeId: string
+            displayId: string
+            url: string
+          }
+        }
+      }
+      errors?: ReadonlyArray<{ extensions?: { code?: string } }>
+    }
+    expect(payload.errors).toBeUndefined()
+    expect(payload.data?.implementNow).toEqual({
+      id: created.id,
+      issueNumber: 123,
+      issueSource: {
+        tracker: "linear",
+        nativeId: linearIssue.nativeId,
+        displayId: "ENG-123",
+        url: linearIssue.url,
+      },
+    })
+  })
+
+  test("does not start Linear parent Implement All", async () => {
     await runtime.dispose()
     runtime = makeRuntime({
       listRepositories: Effect.succeed([
@@ -1831,7 +1909,7 @@ describe("GraphQL API", () => {
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `mutation {
-          implementNow(repositoryId: "${repository.id}", issueNumber: 42) { id }
+          implementAllWithAutoMerge(repositoryId: "${repository.id}", issueNumber: 1) { id }
         }`,
       }),
     )
@@ -1844,6 +1922,7 @@ describe("GraphQL API", () => {
     expect(payload.errors?.[0]?.extensions?.code).toBe(
       "LINEAR_EXECUTION_NOT_SUPPORTED",
     )
+    expect(payload.errors?.[0]?.message).toContain("leaf Issues")
   })
 
   test("reports Linear credential independently of GitHub", async () => {
@@ -10407,6 +10486,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-shipped",
       issueNumber: 8,
+      nativeId: "8",
+      displayId: "8",
       title: "Shipped but still tagged",
       url: "https://github.com/acme/widgets/issues/8",
       blockedBy: [],
@@ -10415,6 +10496,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-fresh-intake",
       issueNumber: 9,
+      nativeId: "9",
+      displayId: "9",
       title: "No Work Item yet",
       url: "https://gitlab.example.com/acme/widgets/-/issues/9",
       blockedBy: [],
@@ -10424,12 +10507,24 @@ describe("GraphQL API", () => {
       id: "wi-fresh-9",
       issueNumber: 9,
       issueTitle: fresh.title,
+      issueSource: {
+        ...workItem.issueSource,
+        nativeId: "9",
+        displayId: "9",
+        url: fresh.url,
+      },
     } as WorkItemRecord
     const complete = {
       ...workItem,
       id: "wi-complete-8",
       issueNumber: 8,
       issueTitle: shipped.title,
+      issueSource: {
+        ...workItem.issueSource,
+        nativeId: "8",
+        displayId: "8",
+        url: shipped.url,
+      },
       state: "complete",
       holdsWorkerSlot: false,
       waitingForBlockers: false,

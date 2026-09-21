@@ -11,6 +11,7 @@ import {
 } from "./close-issue-errors.js"
 import { issueOperationsForge } from "./issue-source-execution.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
+import { isLinearIssueSource } from "./linear-milestones.js"
 
 /**
  * Production Close Issue Lifecycle Step for a confirmed No-Change Outcome.
@@ -28,6 +29,10 @@ export const closeIssue = (context: LifecycleStepContext) =>
         message:
           "Close Issue requires a non-blank completion summary persisted by the confirming step",
       })
+    }
+
+    if (isLinearIssueSource(context.issueSource)) {
+      return
     }
 
     const db = yield* DbService
