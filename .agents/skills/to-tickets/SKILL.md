@@ -64,7 +64,7 @@ Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
 
-Do NOT close or modify any parent issue.
+Do NOT close or modify any parent issue except to create or link child issues and establish their native parent/child, blocking, and other required ticket relationships. Preserve the parent's title, body, labels, and status. Before finishing, verify that every child issue is linked to its parent and every declared blocker exists as a native relationship where supported.
 
 <local-ticket-template>
 
