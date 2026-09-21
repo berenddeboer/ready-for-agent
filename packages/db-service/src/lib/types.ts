@@ -1,7 +1,11 @@
 import { Schema } from "effect"
-import { Forge } from "@ready-for-agent/lifecycle-model"
+import {
+  Forge,
+  IssueTracker,
+  defaultIssueTrackerForForge,
+} from "@ready-for-agent/lifecycle-model"
 
-export { Forge }
+export { Forge, IssueTracker, defaultIssueTrackerForForge }
 
 export const RepositoryId = Schema.String.pipe(
   Schema.check(Schema.isPattern(/^repo-[0-9A-HJKMNP-TV-Z]{26}$/)),
@@ -38,6 +42,7 @@ export type AddRepositoryInput = typeof AddRepositoryInput.Type
 export const RepositoryRecord = Schema.Struct({
   id: RepositoryId,
   forge: Forge,
+  issueTracker: IssueTracker,
   forgeHost: Schema.String,
   projectPath: Schema.String,
   localPath: Schema.String,
@@ -308,6 +313,7 @@ export type UnfinishedCreatePrWorkItem = typeof UnfinishedCreatePrWorkItem.Type
 export const RepositorySqlRow = Schema.Struct({
   id: RepositoryId,
   forge: Forge,
+  issueTracker: IssueTracker,
   forgeHost: Schema.String,
   projectPath: Schema.String,
   localPath: Schema.String,
@@ -327,6 +333,7 @@ export const RepositorySqlRow = Schema.Struct({
 }).pipe(
   Schema.encodeKeys({
     forge: "forge",
+    issueTracker: "issue_tracker",
     forgeHost: "forge_host",
     projectPath: "project_path",
     localPath: "local_path",
@@ -504,6 +511,7 @@ export type RepositorySettingsConfigSqlRow =
 
 export const RepositorySettingsSqlRow = Schema.Struct({
   forge: Forge,
+  issueTracker: IssueTracker,
   forgeHost: Schema.String,
   projectPath: Schema.String,
   selectedAgentBackend: Schema.NullOr(Schema.String),

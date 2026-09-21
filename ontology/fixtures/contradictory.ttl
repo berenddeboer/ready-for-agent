@@ -14,3 +14,6 @@ example:merge-policy-off-and-always
 example:two-terminal-states
   a rfa:WorkItem, rfa:Complete, rfa:Failed ;
   rfa:currentState rfa:Complete, rfa:Failed .
+
+example:linear-as-forge
+  a rfa:Forge, rfa:IssueTrackerOnly .

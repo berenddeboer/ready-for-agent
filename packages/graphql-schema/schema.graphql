@@ -665,6 +665,11 @@ type RepositoryCiGate {
 type Repository {
   id: ID!
   forge: String!
+  """
+  Configured Issue Tracker. Defaults to the Repository's hosting Forge when
+  the Repository is added.
+  """
+  issueTracker: String!
   forgeHost: String!
   projectPath: String!
   localPath: String!
@@ -1107,10 +1112,26 @@ type StepRunReason {
   retryAt: String
 }
 
+"""
+Original Issue Source captured on a Work Item. Native identity is
+tracker-scoped and is not required to be a positive integer.
+"""
+type IssueSource {
+  tracker: String!
+  nativeId: String!
+  displayId: String!
+  url: String!
+}
+
 type WorkItem {
   id: ID!
   repositoryId: ID!
   issueNumber: Int!
+  """
+  Original Issue Source captured at creation. Survives later Repository
+  Issue Tracker changes. Other Issue contents remain live.
+  """
+  issueSource: IssueSource!
   issueTitle: String
   pullRequestNumber: Int
   """

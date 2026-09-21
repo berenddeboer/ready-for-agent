@@ -52,6 +52,7 @@ import {
   type UpdateRepositorySettingsInput,
   WorkItemPullRequest,
   WorkItemPullRequestSqlRow,
+  defaultIssueTrackerForForge,
   emptyBackendModelPrefs,
 } from "./types.js"
 
@@ -346,7 +347,7 @@ const decodeRunningStepRows = (rows: ReadonlyArray<unknown>) =>
     Effect.mapError(toSchemaDatabaseError),
   )
 
-const repositorySelectColumns = `id, forge, forge_host, project_path, local_path, is_bare, paused,
+const repositorySelectColumns = `id, forge, issue_tracker, forge_host, project_path, local_path, is_bare, paused,
              selected_agent_backend, default_model, default_thinking_level,
              review_model, review_thinking_level, backend_model_prefs, merge_policy,
              guaranteed_min_concurrent_agent_turns,
@@ -361,6 +362,7 @@ const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
   RepositoryRecord.make({
     id: row.id,
     forge: row.forge,
+    issueTracker: row.issueTracker,
     forgeHost: row.forgeHost,
     projectPath: row.projectPath,
     localPath: row.localPath,
@@ -1160,17 +1162,18 @@ export const DbServiceLive = Layer.effect(
       const result = yield* sql
         .unsafe(
           `INSERT INTO repository (
-               id, forge, forge_host, project_path, local_path, is_bare, paused,
+               id, forge, issue_tracker, forge_host, project_path, local_path, is_bare, paused,
                selected_agent_backend,
                default_model, default_thinking_level, review_model, review_thinking_level,
                backend_model_prefs,
                merge_policy, include_all_issue_authors, wait_for_ready_for_review_checks,
                created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, '{}', ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, '{}', ?, ?, ?, ?, ?)
              RETURNING ${repositorySelectColumns}`,
           [
             id,
             input.forge,
+            defaultIssueTrackerForForge(input.forge),
             forgeHost,
             projectPath,
             localPath,
@@ -1348,6 +1351,7 @@ export const DbServiceLive = Layer.effect(
             const existingRows = yield* sql
               .unsafe(
                 `SELECT forge,
+                        issue_tracker AS issueTracker,
                         forge_host AS forgeHost,
                         project_path AS projectPath,
                         selected_agent_backend AS selectedAgentBackend,
@@ -1366,6 +1370,10 @@ export const DbServiceLive = Layer.effect(
               })
             }
             const nextForge = input.forge ?? existing.forge
+            const nextIssueTracker =
+              existing.issueTracker === existing.forge
+                ? nextForge
+                : existing.issueTracker
             const nextForgeHost = requestedForgeHost ?? existing.forgeHost
             const nextProjectPath = requestedProjectPath ?? existing.projectPath
             const identityChanging =
@@ -1488,6 +1496,7 @@ export const DbServiceLive = Layer.effect(
               .unsafe(
                 `UPDATE repository
              SET forge = ?,
+                 issue_tracker = ?,
                  forge_host = ?,
                  project_path = ?,
                  paused = ?,
@@ -1506,6 +1515,7 @@ export const DbServiceLive = Layer.effect(
              RETURNING ${repositorySelectColumns}`,
                 [
                   nextForge,
+                  nextIssueTracker,
                   nextForgeHost,
                   nextProjectPath,
                   input.paused,

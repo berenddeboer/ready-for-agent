@@ -149,6 +149,70 @@ rfa:ForgeKindShape
     sh:languageIn ("en") ;
     sh:uniqueLang true ;
     sh:message "A Forge kind must have one English definition."@en ;
+  ] ;
+  sh:property [
+    sh:path rfa:defaultIssueTracker ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:class rfa:IssueTracker ;
+    sh:message "A Forge kind must declare one default Issue Tracker."@en ;
+  ] .
+
+rfa:IssueTrackerKindShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:IssueTracker ;
+  sh:property [
+    sh:path skos:notation ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype <http://www.w3.org/2001/XMLSchema#string> ;
+    sh:minLength 1 ;
+    sh:message "An Issue Tracker kind must have one runtime notation."@en ;
+  ] ;
+  sh:property [
+    sh:path skos:definition ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:languageIn ("en") ;
+    sh:uniqueLang true ;
+    sh:message "An Issue Tracker kind must have one English definition."@en ;
+  ] .
+
+rfa:OriginalIssueSourceShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:OriginalIssueSource ;
+  sh:property [
+    sh:path rfa:issueTracker ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:message "An Original Issue Source must name one Issue Tracker."@en ;
+  ] ;
+  sh:property [
+    sh:path rfa:issueNativeId ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype xsd:string ;
+    sh:minLength 1 ;
+    sh:message
+      "An Original Issue Source must have one non-empty tracker-native identity."@en ;
+  ] ;
+  sh:property [
+    sh:path rfa:issueDisplayId ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype xsd:string ;
+    sh:minLength 1 ;
+    sh:message
+      "An Original Issue Source must have one non-empty display identifier."@en ;
+  ] ;
+  sh:property [
+    sh:path rfa:issueUrl ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype xsd:anyURI ;
+    sh:minLength 1 ;
+    sh:message "An Original Issue Source must have one Issue URL."@en ;
   ] .
 
 rfa:OperationalLifecycleStepShape

@@ -30,6 +30,8 @@ const skosDefinition = iri(`${namespace.skos}definition`)
 const operationalLifecycleStep = term("OperationalLifecycleStep")
 const terminalWorkItemState = term("TerminalWorkItemState")
 const forgeClass = term("Forge")
+const issueTrackerClass = term("IssueTracker")
+const defaultIssueTracker = term("defaultIssueTracker")
 const stepRunReasonClass = term("StepRunReason")
 const transitionClass = term("Transition")
 const fromStep = term("fromStep")
@@ -434,29 +436,36 @@ const notationsForClass = (
   return values
 }
 
-const forgeKinds = (store: Store): readonly string[] => {
-  const equivalent = onlyObject(store, forgeClass, owlEquivalentClass)
+const oneOfKinds = (
+  store: Store,
+  classTerm: Term,
+  label: string,
+): {
+  readonly members: readonly Term[]
+  readonly values: readonly string[]
+} => {
+  const equivalent = onlyObject(store, classTerm, owlEquivalentClass)
   const listHead = onlyObject(store, equivalent, owlOneOf)
   const members = rdfList(store, listHead)
   if (members.length === 0) {
-    throw new Error("rfa:Forge owl:oneOf must declare at least one kind")
+    throw new Error(`rfa:${label} owl:oneOf must declare at least one kind`)
   }
 
   const memberIris = members.map((member) => {
     if (member.termType !== "NamedNode") {
       throw new Error(
-        `rfa:Forge owl:oneOf member must be an IRI: ${member.value}`,
+        `rfa:${label} owl:oneOf member must be an IRI: ${member.value}`,
       )
     }
-    if (store.countQuads(member, rdfType, forgeClass, null) !== 1) {
+    if (store.countQuads(member, rdfType, classTerm, null) !== 1) {
       throw new Error(
-        `${member.value} is in rfa:Forge owl:oneOf but is not typed as rfa:Forge`,
+        `${member.value} is in rfa:${label} owl:oneOf but is not typed as rfa:${label}`,
       )
     }
     return member
   })
 
-  const typed = store.getSubjects(rdfType, forgeClass, null)
+  const typed = store.getSubjects(rdfType, classTerm, null)
   const expected = new Set(memberIris.map((member) => member.value))
   const actual = new Set(typed.map((subject) => subject.value))
   if (
@@ -464,7 +473,7 @@ const forgeKinds = (store: Store): readonly string[] => {
     [...expected].some((iriValue) => !actual.has(iriValue))
   ) {
     throw new Error(
-      "rfa:Forge individuals must be exactly the owl:oneOf members",
+      `rfa:${label} individuals must be exactly the owl:oneOf members`,
     )
   }
 
@@ -472,11 +481,32 @@ const forgeKinds = (store: Store): readonly string[] => {
   const sorted = [...values].sort()
   const duplicate = sorted.find((value, index) => value === sorted[index - 1])
   if (duplicate !== undefined) {
-    throw new Error(`Duplicate Forge notation: ${duplicate}`)
+    throw new Error(`Duplicate ${label} notation: ${duplicate}`)
   }
 
-  return values
+  return { members: memberIris, values }
 }
+
+const defaultIssueTrackerByForge = (
+  store: Store,
+  forgeMembers: readonly Term[],
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    forgeMembers.map((member) => {
+      const tracker = onlyObject(store, member, defaultIssueTracker)
+      if (tracker.termType !== "NamedNode") {
+        throw new Error(
+          `${member.value} rfa:defaultIssueTracker must be an IRI`,
+        )
+      }
+      if (store.countQuads(tracker, rdfType, issueTrackerClass, null) !== 1) {
+        throw new Error(
+          `${member.value} default Issue Tracker ${tracker.value} is not typed as rfa:IssueTracker`,
+        )
+      }
+      return [onlyNotation(store, member), onlyNotation(store, tracker)]
+    }),
+  )
 
 interface GeneratedStepRunReason {
   readonly key: string
@@ -648,18 +678,47 @@ ${values.map((value) => `  ${JSON.stringify(value)},`).join("\n")}
 ] as const
 `
 
-const renderForgeSource = (values: readonly string[]) => `\
+const renderDefaultIssueTrackers = (
+  defaults: Readonly<Record<string, string>>,
+  forges: readonly string[],
+) =>
+  forges
+    .map(
+      (forge) =>
+        `  ${JSON.stringify(forge)}: ${JSON.stringify(defaults[forge])},`,
+    )
+    .join("\n")
+
+const renderForgeSource = (
+  forges: readonly string[],
+  issueTrackers: readonly string[],
+  defaults: Readonly<Record<string, string>>,
+) => `\
 // This file is generated from ontology/rfa.ttl.
 // Run \`bunx nx run lifecycle-model:generate\` to update it.
 
 import { Schema } from "effect"
 
-${renderTuple("FORGES", values)}
+${renderTuple("FORGES", forges)}
 export const Forge = Schema.Literals(FORGES)
 export type Forge = typeof Forge.Type
 
 export const isForge = (value: unknown): value is Forge =>
   FORGES.some((forge) => forge === value)
+
+${renderTuple("ISSUE_TRACKERS", issueTrackers)}
+export const IssueTracker = Schema.Literals(ISSUE_TRACKERS)
+export type IssueTracker = typeof IssueTracker.Type
+
+export const isIssueTracker = (value: unknown): value is IssueTracker =>
+  ISSUE_TRACKERS.some((tracker) => tracker === value)
+
+export const DEFAULT_ISSUE_TRACKER_BY_FORGE = {
+${renderDefaultIssueTrackers(defaults, forges)}
+} as const satisfies Record<Forge, IssueTracker>
+
+export const defaultIssueTrackerForForge = (forge: Forge): IssueTracker =>
+  DEFAULT_ISSUE_TRACKER_BY_FORGE[forge]
 `
 
 const renderTransitions = (values: readonly GeneratedTransition[]) => `\
@@ -800,7 +859,19 @@ const generate = async () => {
       ),
       lifecycleStepProperties,
     ),
-    forgeSource: renderForgeSource(forgeKinds(ontology)),
+    forgeSource: (() => {
+      const forges = oneOfKinds(ontology, forgeClass, "Forge")
+      const issueTrackers = oneOfKinds(
+        ontology,
+        issueTrackerClass,
+        "IssueTracker",
+      )
+      return renderForgeSource(
+        forges.values,
+        issueTrackers.values,
+        defaultIssueTrackerByForge(ontology, forges.members),
+      )
+    })(),
     predicateSource: renderPredicateExpressions(predicateExpressions(ontology)),
   }
 }

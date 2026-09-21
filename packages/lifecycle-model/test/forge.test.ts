@@ -1,6 +1,15 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { FORGES, isForge } from "../src/index.js"
+import {
+  DEFAULT_ISSUE_TRACKER_BY_FORGE,
+  FORGES,
+  ISSUE_TRACKERS,
+  type IssueSource,
+  defaultIssueTrackerForForge,
+  forgeIssueSource,
+  isForge,
+  isIssueTracker,
+} from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
 describe("generated Forge vocabulary", () => {
@@ -16,6 +25,55 @@ describe("generated Forge vocabulary", () => {
     expect(isForge("GitHub")).toBe(false)
     expect(isForge("")).toBe(false)
     expect(isForge(undefined)).toBe(false)
+  })
+
+  it("exports Issue Tracker kinds including Linear without making Linear a Forge", () => {
+    expect([...ISSUE_TRACKERS]).toEqual([
+      "github",
+      "gitlab",
+      "azure-devops",
+      "linear",
+    ])
+    expect(isIssueTracker("linear")).toBe(true)
+    expect(isForge("linear")).toBe(false)
+    expect(isIssueTracker("github")).toBe(true)
+    expect(isIssueTracker("bitbucket")).toBe(false)
+  })
+
+  it("defaults each Forge's Issue Tracker to itself", () => {
+    expect(DEFAULT_ISSUE_TRACKER_BY_FORGE).toEqual({
+      github: "github",
+      gitlab: "gitlab",
+      "azure-devops": "azure-devops",
+    })
+    expect(defaultIssueTrackerForForge("github")).toBe("github")
+    expect(defaultIssueTrackerForForge("gitlab")).toBe("gitlab")
+    expect(defaultIssueTrackerForForge("azure-devops")).toBe("azure-devops")
+  })
+
+  it("represents tracker-native identity separately from display identifiers and URLs", () => {
+    expect(
+      forgeIssueSource({
+        tracker: "github",
+        issueNumber: 42,
+        url: "https://github.com/acme/widgets/issues/42",
+      }),
+    ).toEqual({
+      tracker: "github",
+      nativeId: "42",
+      displayId: "42",
+      url: "https://github.com/acme/widgets/issues/42",
+    })
+    const linearSource: IssueSource = {
+      tracker: "linear",
+      nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      displayId: "ENG-123",
+      url: "https://linear.app/acme/issue/ENG-123",
+    }
+    expect(linearSource.nativeId).toBe("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+    expect(linearSource.displayId).toBe("ENG-123")
+    expect(linearSource.nativeId).not.toBe(linearSource.displayId)
+    expect(Number.parseInt(linearSource.nativeId, 10)).toBeNaN()
   })
 
   it("keeps generated runtime free of RDF tooling", () => {

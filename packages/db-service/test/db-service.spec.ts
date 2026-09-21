@@ -903,6 +903,7 @@ describe("DbService", () => {
 
           expect(repo.id.startsWith("repo-")).toBe(true)
           expect(repo.forge).toBe("github")
+          expect(repo.issueTracker).toBe("github")
           expect(repo.forgeHost).toBe("github.com")
           expect(repo.projectPath).toBe("acme/widgets")
           expect(repo.localPath).toBe("/repos/acme/widgets.git")
@@ -918,6 +919,30 @@ describe("DbService", () => {
           expect(repo.includeAllIssueAuthors).toBe(false)
           expect(repo.waitForReadyForReviewChecks).toBe(true)
           expect(repo.issuesReconciledAt).toBeNull()
+        }),
+      ))
+
+    it("selects each hosting Forge as the default Issue Tracker", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const gitlab = yield* db.addRepository({
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+            localPath: "/repos/gitlab/oauth_client",
+            isBare: true,
+          })
+          const azure = yield* db.addRepository({
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/azure/widgets",
+            isBare: true,
+          })
+
+          expect(gitlab.issueTracker).toBe("gitlab")
+          expect(azure.issueTracker).toBe("azure-devops")
         }),
       ))
 
@@ -1044,9 +1069,37 @@ describe("DbService", () => {
 
           expect(updated).toMatchObject({
             forge: "gitlab",
+            issueTracker: "gitlab",
             forgeHost: "git.drupalcode.org",
             projectPath: "project/oauth_client",
           })
+        }),
+      ))
+
+    it("follows the hosting Forge default Issue Tracker when identity is corrected", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          expect(repo.issueTracker).toBe("github")
+
+          const updated = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "off",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+
+          expect(updated.forge).toBe("gitlab")
+          expect(updated.issueTracker).toBe("gitlab")
         }),
       ))
 

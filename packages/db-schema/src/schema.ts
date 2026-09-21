@@ -9,6 +9,7 @@ import {
 import { ulid } from "ulidx"
 import {
   FORGES,
+  ISSUE_TRACKERS,
   OPERATIONAL_LIFECYCLE_STEPS,
   WORK_ITEM_STATES,
 } from "@ready-for-agent/lifecycle-model"
@@ -20,6 +21,10 @@ export const repository = snakeCase.table(
       .primaryKey()
       .$defaultFn(() => `repo-${ulid()}`),
     forge: text({ enum: FORGES }).notNull().default("github"),
+    /**
+     * Configured Issue Tracker. Adding a Repository selects the hosting Forge.
+     */
+    issueTracker: text({ enum: ISSUE_TRACKERS }).notNull().default("github"),
     forgeHost: text().notNull().default("github.com"),
     projectPath: text().notNull(),
     localPath: text().notNull().unique(),
@@ -249,6 +254,14 @@ export const workItem = snakeCase.table(
       .notNull()
       .references(() => repository.id, { onDelete: "cascade" }),
     issueNumber: integer().notNull(),
+    /**
+     * Original Issue Source captured at creation. Survives later Repository
+     * Issue Tracker changes.
+     */
+    issueTracker: text({ enum: ISSUE_TRACKERS }).notNull().default("github"),
+    issueNativeId: text().notNull().default(""),
+    issueDisplayId: text().notNull().default(""),
+    issueUrl: text().notNull().default(""),
     issueTitle: text(),
     pullRequestNumber: integer(),
     /** Active Agent Backend captured at Work Item creation (provenance). */

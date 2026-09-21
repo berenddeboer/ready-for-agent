@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { ulid } from "ulidx"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
+  type IssueSource,
   type LifecycleMaxDurations,
   OperationalLifecycleStep,
   STEP_RUN_REASON,
@@ -18,6 +19,7 @@ import {
   JOBS_COMPLETED_WINDOW_MS,
 } from "./jobs-completed-window.js"
 
+export type { IssueSource } from "@ready-for-agent/lifecycle-model"
 export {
   STEP_RUN_REASON,
   type StepRunReasonCode,
@@ -125,6 +127,7 @@ export interface WorkItemRecord {
   readonly id: WorkItemId
   readonly repositoryId: string
   readonly issueNumber: number
+  readonly issueSource: IssueSource
   readonly issueTitle: string | null
   readonly pullRequestNumber: number | null
   /**

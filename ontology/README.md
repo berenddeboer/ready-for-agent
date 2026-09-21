@@ -77,6 +77,10 @@ emits `packages/lifecycle-model/src/generated/work-item-state.ts` and
 - `FORGES` / `Forge` / `isForge` — the three supported Forge kinds
   (`github`, `gitlab`, `azure-devops`) from `rfa:Forge` `owl:oneOf`, in
   declared order. GraphQL keeps the existing string wire contract.
+- `ISSUE_TRACKERS` / `IssueTracker` / `isIssueTracker` — the Issue Tracker
+  kinds (`github`, `gitlab`, `azure-devops`, `linear`) from
+  `rfa:IssueTracker` `owl:oneOf`. Linear is an Issue Tracker only, not a
+  Forge. `DEFAULT_ISSUE_TRACKER_BY_FORGE` maps each Forge to itself.
 - `LIFECYCLE_TRANSITIONS` — every declared `rfa:Transition` as queryable data
   (`from`, `to`, `guard`, `reasonCode`).
 - `isDeclaredLifecycleTransition(from, to)` — membership in the declared
