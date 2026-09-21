@@ -16,6 +16,7 @@ import {
   GitLabService,
   type GitLabServiceShape,
 } from "@ready-for-agent/gitlab-service"
+import { forgeIssueSource } from "@ready-for-agent/lifecycle-model"
 import {
   type LifecycleStepContext,
   makeWorkItemId,
@@ -496,6 +497,47 @@ describe("mergePr", () => {
     )
 
     expect(summaries).toEqual(["Findings complete."])
+  })
+
+  it("does not complete an Azure Boards Issue when Original Issue Source is GitHub", async () => {
+    let closeOutCalls = 0
+    const azureDevOpsRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "azure-devops",
+      forgeHost: "dev.azure.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/widgets",
+    })
+    const azureDevOpsDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([azureDevOpsRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () =>
+        Effect.die("GitHub must not merge an Azure DevOps repo"),
+    } as GitHubServiceShape)
+    const azureDevOps = Layer.succeed(AzureDevOpsService, {
+      mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
+      ensureIssueCompletedWithSummary: () => {
+        closeOutCalls += 1
+        return Effect.void
+      },
+    } as AzureDevOpsServiceShape)
+
+    const result = await Effect.runPromise(
+      mergePr({
+        ...context,
+        issueSource: forgeIssueSource({
+          tracker: "github",
+          issueNumber: 42,
+          url: "https://github.com/acme/widgets/issues/42",
+        }),
+      }).pipe(
+        Effect.provide(Layer.mergeAll(azureDevOpsDb, github, azureDevOps)),
+      ),
+    )
+
+    expect(result).toEqual({ _tag: "merged" })
+    expect(closeOutCalls).toBe(0)
   })
 
   it("still asks Azure to complete the Boards Issue when merge already linked it", async () => {

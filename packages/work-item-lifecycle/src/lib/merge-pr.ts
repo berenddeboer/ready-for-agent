@@ -5,6 +5,7 @@ import {
   forgePullRequestMutations,
   toForgeRepository,
 } from "./forge-mutation.js"
+import { issueOperationsForge } from "./issue-source-execution.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { resolveEffectiveMergePolicy } from "./merge-policy.js"
 import { workItemBranchName } from "./worktree-names.js"
@@ -76,6 +77,13 @@ export const mergePr = (context: LifecycleStepContext) =>
       options,
     )
     if (mutations.forge !== "azure-devops") {
+      return result
+    }
+    const issueForge = issueOperationsForge(
+      context.issueSource,
+      mutations.forge,
+    )
+    if (issueForge !== "azure-devops") {
       return result
     }
     return yield* completeAzureBoardsIssueAfterNativeMerge({

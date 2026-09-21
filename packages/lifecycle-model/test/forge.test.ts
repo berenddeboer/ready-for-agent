@@ -6,6 +6,7 @@ import {
   ISSUE_TRACKERS,
   type IssueSource,
   defaultIssueTrackerForForge,
+  forgeForIssueSource,
   forgeIssueSource,
   isForge,
   isIssueTracker,
@@ -74,6 +75,35 @@ describe("generated Forge vocabulary", () => {
     expect(linearSource.displayId).toBe("ENG-123")
     expect(linearSource.nativeId).not.toBe(linearSource.displayId)
     expect(Number.parseInt(linearSource.nativeId, 10)).toBeNaN()
+  })
+
+  it("maps Forge-hosted Original Issue Source to a Forge and Linear to none", () => {
+    expect(
+      forgeForIssueSource(
+        forgeIssueSource({
+          tracker: "github",
+          issueNumber: 42,
+          url: "https://github.com/acme/widgets/issues/42",
+        }),
+      ),
+    ).toBe("github")
+    expect(
+      forgeForIssueSource(
+        forgeIssueSource({
+          tracker: "gitlab",
+          issueNumber: 9,
+          url: "https://git.drupalcode.org/project/oauth_client/-/issues/9",
+        }),
+      ),
+    ).toBe("gitlab")
+    expect(
+      forgeForIssueSource({
+        tracker: "linear",
+        nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        displayId: "ENG-123",
+        url: "https://linear.app/acme/issue/ENG-123",
+      }),
+    ).toBeNull()
   })
 
   it("keeps generated runtime free of RDF tooling", () => {

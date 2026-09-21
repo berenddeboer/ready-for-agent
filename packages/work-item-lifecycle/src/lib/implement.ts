@@ -20,6 +20,7 @@ import {
   ImplementRepositoryNotFoundError,
   ImplementWorktreeContextMissingError,
 } from "./implement-errors.js"
+import { issueOperationsForge } from "./issue-source-execution.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { workItemAttachmentDirectory } from "./work-item-attachment-directory.js"
@@ -128,21 +129,22 @@ const visualEvidencePromptLines = (workItemId: string): readonly string[] => {
 }
 
 /**
- * Issue identity plus Forge name in the prompt. GitHub stays ambient (no host,
- * no credential line); GitLab and Azure DevOps name the host and carry the
- * Forge-selected credential guidance.
+ * Issue identity and source-credential guidance in the prompt follow the
+ * Original Issue Source. GitHub stays ambient; GitLab and Azure DevOps name
+ * the host.
  */
 const buildImplementPrompt = (
-  repository: AgentTurnForgeRepository,
+  issueRepository: AgentTurnForgeRepository,
   issueNumber: number,
   workItemId: string,
   forgeAuth: AgentTurnForgeAuth,
   mode: "start" | "continue",
+  issueUrl: string | undefined,
 ) => {
   const presentation = resolveForgeIssuePresentation({
-    forge: repository.forge,
-    forgeHost: repository.forgeHost,
-    projectPath: repository.projectPath,
+    forge: issueRepository.forge,
+    forgeHost: issueRepository.forgeHost,
+    projectPath: issueRepository.projectPath,
     issueNumber,
   })
   const identityLine =
@@ -156,14 +158,17 @@ const buildImplementPrompt = (
   const credentialLine = presentation.includeCredentialGuidance
     ? [
         agentTurnForgeCredentialGuidance(
-          repository,
+          issueRepository,
           forgeAuth,
           presentation.implementAccessScope,
         ),
       ]
     : []
+  const urlLine =
+    issueUrl !== undefined && issueUrl.trim() !== "" ? [issueUrl] : []
   return [
     identityLine,
+    ...urlLine,
     ...(mode === "continue"
       ? [
           "A previous Implement attempt was interrupted or failed; resume from the existing session and worktree state.",
@@ -199,7 +204,22 @@ export const implement = (context: LifecycleStepContext) =>
     const worktreePath = yield* resolveWorktreePath(context)
     const repository = yield* resolveRepository(context)
     const issueNumber = yield* resolveIssueNumber(context)
-    const forgeAuth = yield* resolveAgentTurnForgeAuth(repository).pipe(
+    const issueForge = issueOperationsForge(
+      context.issueSource,
+      repository.forge,
+    )
+    if (issueForge === null) {
+      return yield* new ImplementIssueContextMissingError({
+        workItemId: context.workItemId,
+        message: "Implement requires a Forge-hosted Original Issue Source",
+      })
+    }
+    const issueRepository = {
+      forge: issueForge,
+      forgeHost: repository.forgeHost,
+      projectPath: repository.projectPath,
+    }
+    const forgeAuth = yield* resolveAgentTurnForgeAuth(issueRepository).pipe(
       Effect.mapError((cause) => {
         if (
           cause instanceof AgentTurnForgeCredentialMissingError ||
@@ -212,7 +232,7 @@ export const implement = (context: LifecycleStepContext) =>
         }
         return new ImplementForgeCredentialError({
           repositoryId: context.repositoryId,
-          message: `Failed to resolve the repository ${forgeDisplayName(repository.forge)} credential`,
+          message: `Failed to resolve the Original Issue Source ${forgeDisplayName(issueForge)} credential`,
           cause,
         })
       }),
@@ -220,11 +240,12 @@ export const implement = (context: LifecycleStepContext) =>
 
     const existingSessionId = priorSessionId(context)
     const prompt = buildImplementPrompt(
-      repository,
+      issueRepository,
       issueNumber,
       context.workItemId,
       forgeAuth,
       existingSessionId === null ? "start" : "continue",
+      context.issueSource?.url,
     )
 
     const agentBackend = yield* AgentBackend

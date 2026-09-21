@@ -9,13 +9,15 @@ import {
   CloseIssueEligibilityError,
   CloseIssueSummaryMissingError,
 } from "./close-issue-errors.js"
+import { issueOperationsForge } from "./issue-source-execution.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 
 /**
  * Production Close Issue Lifecycle Step for a confirmed No-Change Outcome.
  * Revalidates Issue eligibility immediately before mutation (open Leaf Issues
  * with no blockers; already-closed Issues are accepted), then idempotently
- * publishes the summary and closes the Issue via the Repository's Forge service.
+ * publishes the summary and closes the Issue via the Work Item's Original
+ * Issue Source rather than the Repository's current Issue Tracker.
  */
 export const closeIssue = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -69,15 +71,25 @@ export const closeIssue = (context: LifecycleStepContext) =>
       }
     }
 
+    const issueForge = issueOperationsForge(
+      context.issueSource,
+      repository.forge,
+    )
+    if (issueForge === null) {
+      return yield* new CloseIssueContextError({
+        workItemId: context.workItemId,
+        message: "Close Issue requires a Forge-hosted Original Issue Source",
+      })
+    }
     const forgeRepository = {
-      forge: repository.forge,
+      forge: issueForge,
       forgeHost: repository.forgeHost,
       projectPath: repository.projectPath,
     }
     const github = yield* GitHubService
     const gitlab = yield* GitLabService
     const azureDevOps = yield* AzureDevOpsService
-    yield* resolveForgeIssueOperations(repository.forge, {
+    yield* resolveForgeIssueOperations(issueForge, {
       github,
       gitlab,
       azureDevOps,
