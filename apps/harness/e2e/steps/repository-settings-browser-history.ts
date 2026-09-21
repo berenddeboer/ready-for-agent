@@ -510,7 +510,7 @@ When("I resize Repository settings to a mobile viewport", async ({ page }) => {
 })
 
 Then(
-  "the Repository settings sections are Forge identity, Options, Agent backend, Models, then CI Gate",
+  "the Repository settings sections are Forge identity, Issue Tracker, Options, Agent backend, Models, then CI Gate",
   async ({ page }) => {
     await expect
       .poll(async () => repositorySettingsSectionTitles(page), {
@@ -518,6 +518,7 @@ Then(
       })
       .toEqual([
         "Forge identity",
+        "Issue Tracker",
         "Options",
         "Agent backend",
         "Models",
