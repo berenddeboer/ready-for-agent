@@ -9,6 +9,7 @@ import {
 } from "@ready-for-agent/linear-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
+  LINEAR_MERGE_COMPLETION_SUMMARY,
   LifecycleSteps,
   type LifecycleStepsShape,
   WorkItemLifecycle,
@@ -173,11 +174,68 @@ const seedLinearNoChangeRepository = (localPath: string) =>
     return repo
   })
 
-const runQueuedSteps = (workItemId: string) =>
+const seedLinearMergeRepository = (localPath: string) =>
+  Effect.gen(function* () {
+    const db = yield* DbService
+    const repo = yield* db.addRepository({
+      forge: "github",
+      forgeHost: "github.com",
+      projectPath: "acme/widgets",
+      localPath,
+      isBare: true,
+    })
+    yield* db.updateRepositorySettings({
+      repositoryId: repo.id,
+      paused: true,
+      defaultModel: null,
+      defaultThinkingLevel: null,
+      reviewModel: null,
+      reviewThinkingLevel: null,
+      mergePolicy: "off",
+      includeAllIssueAuthors: false,
+      waitForReadyForReviewChecks: false,
+      issueTracker: "linear",
+      linearProjectId: "proj-1",
+      linearProjectName: "Widgets",
+      linearWorkflowStatuses: [linearWorkflow],
+    })
+    yield* db.updateConfig({
+      selectedAgentBackend: AGENT_BACKEND_IDS.opencode,
+      defaultModel: "opencode/deepseek-v4-flash-free",
+      defaultThinkingLevel: null,
+      reviewModel: null,
+      reviewThinkingLevel: null,
+      maxConcurrentAgentTurns: 2,
+      maxConcurrentWorkItems: 5,
+    })
+    yield* db.storeIssue({
+      repositoryId: repo.id,
+      issueNumber: 123,
+      issueTracker: "linear",
+      nativeId: linearNativeId,
+      displayId: "ENG-123",
+      title: "Linear leaf",
+      body: "Implement in GitHub.",
+      url: "https://linear.app/acme/issue/ENG-123",
+      state: "OPEN",
+      githubCreatedAt: new Date(),
+      issueAuthor: null,
+      parent: null,
+      parentPosition: null,
+      hasChildren: false,
+      blockedBy: [],
+    })
+    return repo
+  })
+
+const runQueuedSteps = (workItemId: string, stopAt?: string) =>
   Effect.gen(function* () {
     const lifecycle = yield* WorkItemLifecycle
     let current = yield* lifecycle.getWorkItem(workItemId)
-    for (let attempt = 0; attempt < 12; attempt += 1) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      if (stopAt !== undefined && current.state === stopAt) {
+        return current
+      }
       const queued = current.stepRuns.find((run) => run.status === "queued")
       if (queued === undefined) {
         return current
@@ -888,5 +946,254 @@ describe("Linear Issue execution", () => {
     expect(states).toEqual(["done"])
     expect(comments).toHaveLength(1)
     expect(comments[0]).toContain("completion")
+  })
+
+  it("completes Linear after a harness-performed GitHub merge", async () => {
+    const states: string[] = []
+    const comments: Array<{ nativeId: string; marker: string; body: string }> =
+      []
+    let mergeCalls = 0
+    let createPrCalls = 0
+    const finished = await Effect.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* seedLinearMergeRepository(
+          "/repos/acme/widgets-linear-merge.git",
+        )
+        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const current = yield* runQueuedSteps(created.id)
+        return { created, current }
+      }).pipe(
+        Effect.provide(
+          linearLifecycleLayer(
+            {
+              ...successfulSteps,
+              createPr: () => {
+                createPrCalls += 1
+                return successfulSteps.createPr({} as never)
+              },
+              mergePr: () => {
+                mergeCalls += 1
+                return Effect.succeed({ _tag: "merged" as const })
+              },
+              closeIssue,
+            },
+            {
+              issue: {
+                id: linearNativeId,
+                identifier: "ENG-123",
+                url: "https://linear.app/acme/issue/ENG-123",
+                teamId: linearWorkflow.teamId,
+                teamKey: linearWorkflow.teamKey,
+                stateId: "todo",
+                stateName: "Todo",
+                stateType: "unstarted",
+              },
+              updateIssueState: (_id, stateId) =>
+                Effect.sync(() => {
+                  states.push(stateId)
+                }),
+              ensureMilestoneComment: (nativeId, marker, body) =>
+                Effect.sync(() => {
+                  comments.push({ nativeId, marker, body })
+                }),
+            },
+          ),
+        ),
+      ),
+    )
+
+    expect(finished.current.state).toBe("complete")
+    expect(mergeCalls).toBe(1)
+    expect(createPrCalls).toBe(1)
+    expect(states).toEqual(["done"])
+    expect(comments).toEqual([
+      {
+        nativeId: linearNativeId,
+        marker: linearMilestoneMarker("completion", finished.created.id),
+        body: linearCompletionComment(
+          finished.created.id,
+          LINEAR_MERGE_COMPLETION_SUMMARY,
+        ),
+      },
+    ])
+    expect(
+      finished.current.stepRuns.map((run) => [run.step, run.status]),
+    ).toContainEqual(["close_issue", "succeeded"])
+    expect(
+      finished.current.stepRuns.some((run) => run.step === "merge_pr"),
+    ).toBe(true)
+  })
+
+  it("completes Linear after an observed human-performed GitHub merge", async () => {
+    const states: string[] = []
+    const comments: Array<{ marker: string; body: string }> = []
+    let mergeCalls = 0
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* seedLinearMergeRepository(
+          "/repos/acme/widgets-linear-human-merge.git",
+        )
+        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const parked = yield* runQueuedSteps(created.id, "needs_human")
+        expect(parked.state).toBe("needs_human")
+        expect(mergeCalls).toBe(0)
+
+        const resumed = yield* lifecycle.continueAfterHumanPrOutcome(
+          created.id,
+          "merged",
+        )
+        expect(resumed.state).toBe("close_issue")
+        expect(resumed.completionSummary).toBe(LINEAR_MERGE_COMPLETION_SUMMARY)
+        expect(mergeCalls).toBe(0)
+
+        const finished = yield* runQueuedSteps(created.id)
+        return { created, finished }
+      }).pipe(
+        Effect.provide(
+          linearLifecycleLayer(
+            {
+              ...successfulSteps,
+              decidePrMerge: () =>
+                Effect.succeed({
+                  _tag: "needs_human" as const,
+                  reason: "Repository merge policy requires a human merge",
+                }),
+              mergePr: () => {
+                mergeCalls += 1
+                return Effect.die("merge must not run after human merge")
+              },
+              closeIssue,
+            },
+            {
+              issue: {
+                id: linearNativeId,
+                identifier: "ENG-123",
+                url: "https://linear.app/acme/issue/ENG-123",
+                teamId: linearWorkflow.teamId,
+                teamKey: linearWorkflow.teamKey,
+                stateId: "todo",
+                stateName: "Todo",
+                stateType: "unstarted",
+              },
+              updateIssueState: (_id, stateId) =>
+                Effect.sync(() => {
+                  states.push(stateId)
+                }),
+              ensureMilestoneComment: (_id, marker, body) =>
+                Effect.sync(() => {
+                  comments.push({ marker, body })
+                }),
+            },
+          ),
+        ),
+      ),
+    )
+
+    expect(result.finished.state).toBe("complete")
+    expect(states).toEqual(["done"])
+    const completionComments = comments.filter((comment) =>
+      comment.marker.includes("completion"),
+    )
+    expect(completionComments).toHaveLength(1)
+    expect(completionComments[0]?.marker).toBe(
+      linearMilestoneMarker("completion", result.created.id),
+    )
+    expect(completionComments[0]?.body).toContain(
+      LINEAR_MERGE_COMPLETION_SUMMARY,
+    )
+    expect(
+      result.finished.stepRuns.some((run) => run.step === "merge_pr"),
+    ).toBe(false)
+  })
+
+  it("retries only Linear close-out after a confirmed merge when Linear fails", async () => {
+    const states: string[] = []
+    const comments: string[] = []
+    let mergeCalls = 0
+    let createPrCalls = 0
+    let closeAttempts = 0
+    const finished = await Effect.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* seedLinearMergeRepository(
+          "/repos/acme/widgets-linear-merge-retry.git",
+        )
+        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const afterFailure = yield* runQueuedSteps(created.id)
+        expect(afterFailure.state).toBe("close_issue")
+        expect(afterFailure.state).not.toBe("complete")
+        expect(mergeCalls).toBe(1)
+        expect(createPrCalls).toBe(1)
+        expect(closeAttempts).toBe(1)
+        expect(states).toEqual([])
+        expect(
+          afterFailure.stepRuns.some(
+            (run) => run.step === "close_issue" && run.status === "failed",
+          ),
+        ).toBe(true)
+
+        const retried = yield* lifecycle.retry(created.id)
+        return yield* runQueuedSteps(retried.id)
+      }).pipe(
+        Effect.provide(
+          linearLifecycleLayer(
+            {
+              ...successfulSteps,
+              createPr: () => {
+                createPrCalls += 1
+                return successfulSteps.createPr({} as never)
+              },
+              mergePr: () => {
+                mergeCalls += 1
+                return Effect.succeed({ _tag: "merged" as const })
+              },
+              closeIssue: (context) => {
+                closeAttempts += 1
+                if (closeAttempts === 1) {
+                  return Effect.fail(
+                    new LinearRequestError({
+                      message: "Linear comment API unavailable",
+                    }),
+                  )
+                }
+                return closeIssue(context)
+              },
+            },
+            {
+              issue: {
+                id: linearNativeId,
+                identifier: "ENG-123",
+                url: "https://linear.app/acme/issue/ENG-123",
+                teamId: linearWorkflow.teamId,
+                teamKey: linearWorkflow.teamKey,
+                stateId: "todo",
+                stateName: "Todo",
+                stateType: "unstarted",
+              },
+              updateIssueState: () =>
+                Effect.sync(() => {
+                  states.push("done")
+                }),
+              ensureMilestoneComment: (_id, marker) =>
+                Effect.sync(() => {
+                  comments.push(marker)
+                }),
+            },
+          ),
+        ),
+      ),
+    )
+
+    expect(finished.state).toBe("complete")
+    expect(mergeCalls).toBe(1)
+    expect(createPrCalls).toBe(1)
+    expect(closeAttempts).toBe(2)
+    expect(states).toEqual(["done"])
+    expect(comments).toHaveLength(1)
+    expect(
+      finished.stepRuns.filter((run) => run.step === "merge_pr"),
+    ).toHaveLength(1)
   })
 })

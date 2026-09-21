@@ -627,7 +627,7 @@ rfa:MergePr
   rfa:retryable true ;
   skos:prefLabel "Merge PR"@en ;
   skos:definition
-    "The Lifecycle Step that revalidates and merges an approved Work Item PR through its Forge. On Azure DevOps, a complete request that is still queued is in-flight merge work, not a Merge Revalidation Outcome or a rejected merge. After a successful merge on Azure DevOps, if the Forge Issue is still open, Merge PR completes it to that type's Completed-category state and posts the hidden-marker completion summary once; an already completed Boards item is left in state."@en .
+    "The Lifecycle Step that revalidates and merges an approved Work Item PR through its Forge. On Azure DevOps, a complete request that is still queued is in-flight merge work, not a Merge Revalidation Outcome or a rejected merge. After a successful merge on Azure DevOps, if the Forge Issue is still open, Merge PR completes it to that type's Completed-category state and posts the hidden-marker completion summary once; an already completed Boards item is left in state. When the Original Issue Source is Linear, a successful merge advances to Close Issue rather than local cleanup so tracker close-out can retry independently of the confirmed GitHub merge."@en .
 
 rfa:CloseIssue
   a owl:Class, owl:NamedIndividual, skos:Concept,
@@ -704,6 +704,7 @@ rfa:DecideAlwaysTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; r
 rfa:DecideClankerMergeTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:MergePr ; rfa:guard "clanker_merge_decision" ; rfa:reasonCode rfa:NativeReason .
 rfa:DecideNeedsHumanTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:NeedsHuman ; rfa:guard "human_merge_decision" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:MergeSucceededTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:LocalCleanup ; rfa:guard "pull_request_merged" ; rfa:reasonCode rfa:NativeReason .
+rfa:MergeSucceededTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:CloseIssue ; rfa:guard "pull_request_merged" ; rfa:reasonCode rfa:NativeReason .
 rfa:MergeNeedsHumanTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:NeedsHuman ; rfa:guard "merge_needs_human" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:MergeMissingSuccessfulChecksTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:NeedsHuman ; rfa:guard "autonomous_merge_without_successful_checks" ; rfa:reasonCode rfa:MissingSuccessfulChecksReason .
 rfa:MergeRevalidateTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "merge_revalidation_within_limit" ; rfa:reasonCode rfa:MergeRevalidationReason .
@@ -737,6 +738,13 @@ rfa:InvestigateMergedTransition a rfa:Transition ; rfa:fromStep rfa:InvestigateP
 rfa:MarkReadyMergedTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:LocalCleanup ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
 rfa:DecideMergedTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:LocalCleanup ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
 rfa:MergeObservedMergedTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:LocalCleanup ; rfa:guard "owned_pull_request_merge_observed_at_revalidation" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:CreatePrMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:CloseIssue ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:WatchMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:CloseIssue ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:ResolveMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:ResolvePrMergeConflict ; rfa:toStep rfa:CloseIssue ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:InvestigateMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:CloseIssue ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:MarkReadyMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:CloseIssue ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:DecideMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:CloseIssue ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:MergeObservedMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:CloseIssue ; rfa:guard "owned_pull_request_merge_observed_at_revalidation" ; rfa:reasonCode rfa:PrMergedReason .
 
 # Explicit operator and refresh transitions.
 rfa:CreateWorktreeAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
@@ -789,6 +797,21 @@ rfa:DecideRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMe
 rfa:MergeRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
 rfa:CloseIssueRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
 rfa:NeedsHumanRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:CreateWorktreeRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:InstallDependenciesRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:ImplementRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:AssessChangesRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:PreCommitRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:PreCommit ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:ReviewRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:CommitRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:CreatePrRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:WatchRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:ResolveRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:ResolvePrMergeConflict ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:InvestigateRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:MarkReadyRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:DecideRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:MergeRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:NeedsHumanRefreshMergedTrackerCloseOutTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:CloseIssue ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
 
 # Refresh (and Retry/Start on the same parked item) may Complete Attention
 # Work Items that do not own a Work Item PR once the Issue is no longer Relevant.

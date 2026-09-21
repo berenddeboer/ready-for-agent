@@ -295,6 +295,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "assess_changes",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "assess_changes",
     to: "failed",
     guard: "issue_revalidation_failed",
     reasonCode: "handler_failed",
@@ -373,6 +379,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "commit",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "commit",
     to: "create_pr",
     guard: "agent_fallback_completion",
     reasonCode: "agent_fallback",
@@ -412,6 +424,18 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "abandoned",
     guard: "operator_abandon",
     reasonCode: "abandoned",
+  },
+  {
+    from: "create_pr",
+    to: "close_issue",
+    guard: "owned_pull_request_merged",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "create_pr",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
   },
   {
     from: "create_pr",
@@ -463,6 +487,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "create_worktree",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "create_worktree",
     to: "failed",
     guard: "blocked_issue_became_invalid",
     reasonCode: "handler_failed",
@@ -502,6 +532,18 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "abandoned",
     guard: "operator_abandon",
     reasonCode: "abandoned",
+  },
+  {
+    from: "decide_pr_merge",
+    to: "close_issue",
+    guard: "owned_pull_request_merged",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "decide_pr_merge",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
   },
   {
     from: "decide_pr_merge",
@@ -625,6 +667,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "implement",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "implement",
     to: "failed",
     guard: "issue_revalidation_failed",
     reasonCode: "handler_failed",
@@ -652,6 +700,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "abandoned",
     guard: "operator_abandon",
     reasonCode: "abandoned",
+  },
+  {
+    from: "install_dependencies",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
   },
   {
     from: "install_dependencies",
@@ -688,6 +742,18 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "abandoned",
     guard: "operator_abandon",
     reasonCode: "abandoned",
+  },
+  {
+    from: "investigate_pr_status_checks",
+    to: "close_issue",
+    guard: "owned_pull_request_merged",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "investigate_pr_status_checks",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
   },
   {
     from: "investigate_pr_status_checks",
@@ -760,6 +826,18 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "abandoned",
     guard: "operator_abandon",
     reasonCode: "abandoned",
+  },
+  {
+    from: "mark_pr_ready_for_review",
+    to: "close_issue",
+    guard: "owned_pull_request_merged",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "mark_pr_ready_for_review",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
   },
   {
     from: "mark_pr_ready_for_review",
@@ -853,6 +931,24 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "merge_pr",
+    to: "close_issue",
+    guard: "owned_pull_request_merge_observed_at_revalidation",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "merge_pr",
+    to: "close_issue",
+    guard: "pull_request_merged",
+    reasonCode: "native",
+  },
+  {
+    from: "merge_pr",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "merge_pr",
     to: "failed",
     guard: "issue_revalidation_failed_without_owned_pr_stop",
     reasonCode: "handler_failed",
@@ -919,6 +1015,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "needs_human",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "needs_human",
     to: "investigate_pr_status_checks",
     guard: "retry_status_check_handoff",
     reasonCode: "handler_failed",
@@ -967,6 +1069,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "pre_commit",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "pre_commit",
     to: "failed",
     guard: "issue_revalidation_failed",
     reasonCode: "handler_failed",
@@ -1000,6 +1108,18 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "abandoned",
     guard: "operator_abandon",
     reasonCode: "abandoned",
+  },
+  {
+    from: "resolve_pr_merge_conflict",
+    to: "close_issue",
+    guard: "owned_pull_request_merged",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "resolve_pr_merge_conflict",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
   },
   {
     from: "resolve_pr_merge_conflict",
@@ -1048,6 +1168,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "abandoned",
     guard: "operator_abandon",
     reasonCode: "abandoned",
+  },
+  {
+    from: "review",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
   },
   {
     from: "review",
@@ -1108,6 +1234,18 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "abandoned",
     guard: "operator_abandon",
     reasonCode: "abandoned",
+  },
+  {
+    from: "watch_pr_status_checks",
+    to: "close_issue",
+    guard: "owned_pull_request_merged",
+    reasonCode: "pr_merged",
+  },
+  {
+    from: "watch_pr_status_checks",
+    to: "close_issue",
+    guard: "refresh_observed_merged_work_item_pr",
+    reasonCode: "pr_merged",
   },
   {
     from: "watch_pr_status_checks",
