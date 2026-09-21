@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { IssueTracker } from "./generated/forge.js"
+import { type Forge, IssueTracker, isForge } from "./generated/forge.js"
 
 export const IssueSource = Schema.Struct({
   tracker: IssueTracker,
@@ -19,3 +19,11 @@ export const forgeIssueSource = (input: {
   displayId: String(input.issueNumber),
   url: input.url,
 })
+
+/**
+ * Forge-hosted Original Issue Source, or null when the tracker is not a
+ * code-hosting Forge (Linear). Issue mutations and prompt identity use this
+ * rather than the Repository's current Issue Tracker setting.
+ */
+export const forgeForIssueSource = (source: IssueSource): Forge | null =>
+  isForge(source.tracker) ? source.tracker : null

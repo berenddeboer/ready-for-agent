@@ -22,6 +22,7 @@ import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
+import { forgeIssueSource } from "@ready-for-agent/lifecycle-model"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   ImplementInvalidWorktreeContextError,
@@ -327,6 +328,90 @@ describe("implement", () => {
       expectImplementLeavesTrackerIssueOpen(started!.prompt, "github")
       expectVisualEvidencePrompt(started!.prompt, workItemId)
       expect(continued).toBe(false)
+    }))
+
+  it("keeps GitHub Implement identity after the Repository Issue Tracker changes", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      const issueUrl = "https://github.com/acme/widgets/issues/80"
+      let prompt = ""
+      await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.unsafe(
+            `UPDATE repository SET issue_tracker = 'linear' WHERE id = ?`,
+            [repository.id],
+          )
+          return yield* implement(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              issueNumber: 80,
+              issueSource: forgeIssueSource({
+                tracker: "github",
+                issueNumber: 80,
+                url: issueUrl,
+              }),
+            }),
+          )
+        }),
+        stubOpencode({
+          startTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: "ses_source_github",
+              assistantText: "",
+            })
+          },
+        }),
+      )
+
+      expect(prompt).toContain("Inspect the current GitHub Issue")
+      expect(prompt).toContain("acme/widgets#80")
+      expect(prompt).toContain(issueUrl)
+      expect(prompt).not.toContain("Linear")
+      expectImplementLeavesTrackerIssueOpen(prompt, "github")
+    }))
+
+  it("uses a GitLab Original Issue Source on a GitHub-hosted Repository", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      const issueUrl =
+        "https://git.drupalcode.org/project/oauth_client/-/issues/3601642"
+      let prompt = ""
+      await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          return yield* implement(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+              issueNumber: 3601642,
+              issueSource: forgeIssueSource({
+                tracker: "gitlab",
+                issueNumber: 3601642,
+                url: issueUrl,
+              }),
+            }),
+          )
+        }),
+        stubOpencode({
+          startTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: "ses_source_gitlab",
+              assistantText: "",
+            })
+          },
+        }),
+      )
+
+      expect(prompt).toContain("Inspect the current GitLab Issue")
+      expect(prompt).toContain(issueUrl)
+      expect(prompt).toContain("glab")
+      expect(prompt).not.toContain("Inspect the current GitHub Issue")
+      expectImplementLeavesTrackerIssueOpen(prompt, "gitlab")
     }))
 
   it("does not write attachment files into the target worktree", () =>

@@ -56,6 +56,7 @@ import {
   toForgeRepository,
 } from "./forge-mutation.js"
 import { forgeObservation } from "./forge-observation.js"
+import { issueOperationsForge } from "./issue-source-execution.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   type PublicationCopy,
@@ -1083,21 +1084,27 @@ export const createPr = (context: LifecycleStepContext) =>
     })
 
     const mutations = yield* forgePullRequestMutations(repository)
-    yield* associateNativePullRequestWithIssue({
-      mutations,
-      repository: toForgeRepository(repository),
-      pullRequestNumber: outcome.value,
-      issueNumber: context.issueNumber,
-    }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new CreatePrPostconditionError({
-            repositoryId: context.repositoryId,
-            message: `Failed to associate Azure Boards Issue #${context.issueNumber} with pull request ${outcome.value}`,
-            diagnostics: boundDiagnostics(errorMessage(cause)),
-          }),
-      ),
+    const issueForge = issueOperationsForge(
+      context.issueSource,
+      repository.forge,
     )
+    if (issueForge === "azure-devops") {
+      yield* associateNativePullRequestWithIssue({
+        mutations,
+        repository: toForgeRepository(repository),
+        pullRequestNumber: outcome.value,
+        issueNumber: context.issueNumber,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new CreatePrPostconditionError({
+              repositoryId: context.repositoryId,
+              message: `Failed to associate Azure Boards Issue #${context.issueNumber} with pull request ${outcome.value}`,
+              diagnostics: boundDiagnostics(errorMessage(cause)),
+            }),
+        ),
+      )
+    }
 
     return toCreatePrResult(outcome.value, outcome.completion, copy)
   })

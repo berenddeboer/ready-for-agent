@@ -61,7 +61,7 @@ import type {
 } from "./resolve-pr-merge-conflict.js"
 import type { ReviewResult } from "./review.js"
 import type { ReviewError } from "./review-errors.js"
-import type { MergeMode, WorkItemId } from "./types.js"
+import type { IssueSource, MergeMode, WorkItemId } from "./types.js"
 
 /**
  * Context supplied to every Lifecycle Step handler.
@@ -71,6 +71,13 @@ export interface LifecycleStepContext {
   readonly workItemId: WorkItemId
   readonly repositoryId: string
   readonly issueNumber: number
+  /**
+   * Original Issue Source captured on the Work Item. Issue reads, prompt
+   * identity, links, mutations, and source credentials resolve against this
+   * rather than the Repository's current Issue Tracker. Absent only for
+   * legacy step-handler tests; production always sets it.
+   */
+  readonly issueSource?: IssueSource
   /**
    * Issue title captured on the Work Item for identification after the Issue
    * leaves the store.

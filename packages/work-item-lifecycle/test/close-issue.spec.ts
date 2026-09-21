@@ -17,6 +17,7 @@ import {
   GitLabService,
   type GitLabServiceShape,
 } from "@ready-for-agent/gitlab-service"
+import { forgeIssueSource } from "@ready-for-agent/lifecycle-model"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CloseIssueContextError,
@@ -490,5 +491,97 @@ describe("closeIssue", () => {
       ),
     )
     expect(calls).toEqual(["Findings complete."])
+  })
+
+  it("closes via Original Issue Source after the Repository Issue Tracker changes", async () => {
+    const switched = makeRepositoryRecord({
+      localPath: "/repos/widgets",
+      issueTracker: "linear",
+    })
+    const db = stubDbServiceLayer({
+      listRepositories: Effect.succeed([switched]),
+      listIssues: () => Effect.succeed([openLeaf]),
+    })
+    const githubCalls: string[] = []
+    let gitlabCalls = 0
+    const github = Layer.succeed(GitHubService, {
+      ...unusedGithub,
+      ensureIssueCompletedWithSummary: (_repo, issueNumber) =>
+        Effect.sync(() => {
+          githubCalls.push(String(issueNumber))
+        }),
+    } satisfies GitHubServiceShape)
+    const gitlab = Layer.succeed(GitLabService, {
+      ensureIssueCompletedWithSummary: () => {
+        gitlabCalls += 1
+        return Effect.void
+      },
+    } as GitLabServiceShape)
+
+    await Effect.runPromise(
+      closeIssue({
+        ...context,
+        issueSource: forgeIssueSource({
+          tracker: "github",
+          issueNumber: 42,
+          url: openLeaf.url,
+        }),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(db, github, gitlab, stubAzureDevOpsServiceLayer()),
+        ),
+      ),
+    )
+
+    expect(githubCalls).toEqual(["42"])
+    expect(gitlabCalls).toBe(0)
+  })
+
+  it("closes a GitLab Original Issue Source on a GitHub-hosted Repository", async () => {
+    const db = stubDbServiceLayer({
+      listRepositories: Effect.succeed([repository]),
+      listIssues: () => Effect.succeed([openLeaf]),
+    })
+    let githubCalls = 0
+    const gitlabCalls: Array<{
+      issueNumber: number
+      projectPath: string
+    }> = []
+    const github = Layer.succeed(GitHubService, {
+      ...unusedGithub,
+      ensureIssueCompletedWithSummary: () => {
+        githubCalls += 1
+        return Effect.void
+      },
+    } satisfies GitHubServiceShape)
+    const gitlab = Layer.succeed(GitLabService, {
+      ensureIssueCompletedWithSummary: (forgeRepository, issueNumber) =>
+        Effect.sync(() => {
+          gitlabCalls.push({
+            issueNumber,
+            projectPath: forgeRepository.projectPath,
+          })
+        }),
+    } as GitLabServiceShape)
+
+    await Effect.runPromise(
+      closeIssue({
+        ...context,
+        issueSource: forgeIssueSource({
+          tracker: "gitlab",
+          issueNumber: 42,
+          url: "https://git.drupalcode.org/project/widgets/-/issues/42",
+        }),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(db, github, gitlab, stubAzureDevOpsServiceLayer()),
+        ),
+      ),
+    )
+
+    expect(githubCalls).toBe(0)
+    expect(gitlabCalls).toEqual([
+      { issueNumber: 42, projectPath: "acme/widgets" },
+    ])
   })
 })
