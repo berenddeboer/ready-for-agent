@@ -5,7 +5,6 @@ import {
   FORGES,
   ISSUE_TRACKERS,
   type IssueSource,
-  completeIssueIdentity,
   defaultIssueTrackerForForge,
   existingProviderIssueIdentity,
   forgeForIssueSource,
@@ -13,6 +12,7 @@ import {
   formatIssueDisplayId,
   isForge,
   isIssueTracker,
+  persistedIssueIdentity,
   relevancePolicyForIssueTracker,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -90,12 +90,12 @@ describe("generated Forge vocabulary", () => {
       nativeId: "7",
       displayId: "7",
     })
-    expect(completeIssueIdentity({ issueNumber: 42 })).toEqual({
+    expect(persistedIssueIdentity({ issueNumber: 42 })).toEqual({
       nativeId: "42",
       displayId: "42",
     })
     expect(
-      completeIssueIdentity({
+      persistedIssueIdentity({
         issueNumber: 42,
         nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
         displayId: "ENG-123",

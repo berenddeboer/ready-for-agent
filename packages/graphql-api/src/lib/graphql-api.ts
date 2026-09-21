@@ -45,8 +45,8 @@ import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   classifyIntakeCandidates,
-  completeIssueIdentity,
   isIssueTracker,
+  persistedIssueIdentity,
 } from "@ready-for-agent/lifecycle-model"
 import {
   LINEAR_API_KEY_SECRET_NAME,
@@ -231,7 +231,7 @@ type IssuesArgs = {
 }
 
 type WorkItemsArgs = IssuesArgs & {
-  issueNumber?: number
+  nativeId?: string
   listKind?: "WORKING" | "FAILED" | "COMPLETED"
   limit?: number
 }
@@ -427,7 +427,7 @@ const toWorkItemsListKind = (
 }
 
 type ImplementNowArgs = IssuesArgs & {
-  issueNumber: number
+  nativeId: string
 }
 
 type ImplementWithArgs = ImplementNowArgs & {
@@ -452,7 +452,7 @@ type WorkItemArgs = {
 type RetryWorkItemsArgs = {
   repositoryId: string
   selector: {
-    issueNumber?: number | null
+    nativeId?: string | null
     workItemId?: string | null
     allRetryable?: boolean | null
   }
@@ -1189,10 +1189,10 @@ export const createGraphqlApi = <R>(
                 const listKind = toWorkItemsListKind(args.listKind)
                 const limit = args.limit
                 const nowMs = Date.now()
-                if (args.issueNumber !== undefined) {
+                if (args.nativeId !== undefined) {
                   const workItems = yield* lifecycle.listWorkItemsForIssue(
                     args.repositoryId,
-                    args.issueNumber,
+                    args.nativeId,
                   )
                   return filterWorkItemsByListKind(
                     workItems,
@@ -1206,14 +1206,14 @@ export const createGraphqlApi = <R>(
                   lifecycle.listWorkItemsForRepository(args.repositoryId),
                   db.listIssues(args.repositoryId),
                 ])
-                const relevantIssueNumbers = new Set(
-                  issues.map((issue) => issue.issueNumber),
+                const relevantNativeIds = new Set(
+                  issues.map((issue) => persistedIssueIdentity(issue).nativeId),
                 )
                 const visible = workItems.filter(
                   (workItem) =>
                     isJobsCompletedWorkItemState(workItem.state) ||
                     isJobsWorkingWorkItem(workItem) ||
-                    relevantIssueNumbers.has(workItem.issueNumber),
+                    relevantNativeIds.has(workItem.issueSource.nativeId),
                 )
                 return filterWorkItemsByListKind(
                   visible,
@@ -1395,14 +1395,16 @@ export const createGraphqlApi = <R>(
                         lifecycle.listWorkItemsForRepository(repository.id),
                         db.listIssues(repository.id),
                       ])
-                      const relevantIssueNumbers = new Set(
-                        issues.map((issue) => issue.issueNumber),
+                      const relevantNativeIds = new Set(
+                        issues.map(
+                          (issue) => persistedIssueIdentity(issue).nativeId,
+                        ),
                       )
                       return workItems.filter(
                         (workItem) =>
                           isJobsCompletedWorkItemState(workItem.state) ||
                           isJobsWorkingWorkItem(workItem) ||
-                          relevantIssueNumbers.has(workItem.issueNumber),
+                          relevantNativeIds.has(workItem.issueSource.nativeId),
                       )
                     }),
                   { concurrency: "unbounded" },
@@ -1461,64 +1463,24 @@ export const createGraphqlApi = <R>(
             issue.githubCreatedAt.toISOString(),
           issueTracker: (issue: { issueTracker?: string }) =>
             issue.issueTracker,
-          nativeId: (issue: {
-            issueNumber: number
-            nativeId?: string
-            displayId?: string
-          }) => completeIssueIdentity(issue).nativeId,
-          displayId: (issue: {
-            issueNumber: number
-            nativeId?: string
-            displayId?: string
-          }) => completeIssueIdentity(issue).displayId,
+          nativeId: (issue: { nativeId: string }) => issue.nativeId,
+          displayId: (issue: { displayId: string }) => issue.displayId,
         },
         IssueReference: {
-          nativeId: (reference: {
-            issueNumber: number
-            nativeId?: string
-            displayId?: string
-          }) => completeIssueIdentity(reference).nativeId,
-          displayId: (reference: {
-            issueNumber: number
-            nativeId?: string
-            displayId?: string
-          }) => completeIssueIdentity(reference).displayId,
+          nativeId: (reference: { nativeId: string }) => reference.nativeId,
+          displayId: (reference: { displayId: string }) => reference.displayId,
         },
         IntakeCandidate: {
-          nativeId: (candidate: {
-            issueNumber: number
-            nativeId?: string
-            displayId?: string
-          }) => completeIssueIdentity(candidate).nativeId,
-          displayId: (candidate: {
-            issueNumber: number
-            nativeId?: string
-            displayId?: string
-          }) => completeIssueIdentity(candidate).displayId,
+          nativeId: (candidate: { nativeId: string }) => candidate.nativeId,
+          displayId: (candidate: { displayId: string }) => candidate.displayId,
         },
         RepositoryIntakeCreated: {
-          nativeId: (result: {
-            issueNumber: number
-            nativeId?: string
-            displayId?: string
-          }) => completeIssueIdentity(result).nativeId,
-          displayId: (result: {
-            issueNumber: number
-            nativeId?: string
-            displayId?: string
-          }) => completeIssueIdentity(result).displayId,
+          nativeId: (result: { nativeId: string }) => result.nativeId,
+          displayId: (result: { displayId: string }) => result.displayId,
         },
         RepositoryIntakeFailed: {
-          nativeId: (result: {
-            issueNumber: number
-            nativeId?: string
-            displayId?: string
-          }) => completeIssueIdentity(result).nativeId,
-          displayId: (result: {
-            issueNumber: number
-            nativeId?: string
-            displayId?: string
-          }) => completeIssueIdentity(result).displayId,
+          nativeId: (result: { nativeId: string }) => result.nativeId,
+          displayId: (result: { displayId: string }) => result.displayId,
         },
         Repository: {
           mergePolicy: (repository: { mergePolicy: MergePolicy }) =>
@@ -1700,7 +1662,9 @@ export const createGraphqlApi = <R>(
                   ? yield* db.listIssues(workItem.repositoryId)
                   : []
                 const issue = issues.find(
-                  (candidate) => candidate.issueNumber === workItem.issueNumber,
+                  (candidate) =>
+                    persistedIssueIdentity(candidate).nativeId ===
+                    workItem.issueSource.nativeId,
                 )
                 const snapshot = workItem.waitingForCiRepair
                   ? yield* db.loadCiGateSnapshot(workItem.repositoryId)
@@ -1714,9 +1678,8 @@ export const createGraphqlApi = <R>(
                     .map((observation) => observation.identity) ??
                   []
                 return workItemStatusMessage(workItem, {
-                  blockerIssueNumbers:
-                    issue?.blockedBy.map((blocker) => blocker.issueNumber) ??
-                    [],
+                  blockerDisplayIds:
+                    issue?.blockedBy.map((blocker) => blocker.displayId) ?? [],
                   failedCiGateDefinitionLabels,
                   ciFailureIncidentSummary:
                     snapshot?.activeIncident?.summary ?? null,
@@ -2789,7 +2752,7 @@ export const createGraphqlApi = <R>(
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementNow(
                   args.repositoryId,
-                  args.issueNumber,
+                  args.nativeId,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementNow")),
               context,
@@ -2804,7 +2767,7 @@ export const createGraphqlApi = <R>(
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementCiRepair(
                   args.repositoryId,
-                  args.issueNumber,
+                  args.nativeId,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementCiRepair")),
               context,
@@ -2833,7 +2796,7 @@ export const createGraphqlApi = <R>(
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementWith(
                   args.repositoryId,
-                  args.issueNumber,
+                  args.nativeId,
                   {
                     agentBackendId: args.profile.agentBackendId,
                     buildModel: args.profile.buildModel,
@@ -2865,7 +2828,7 @@ export const createGraphqlApi = <R>(
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementLocally(
                   args.repositoryId,
-                  args.issueNumber,
+                  args.nativeId,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementLocally")),
               context,
@@ -2881,7 +2844,7 @@ export const createGraphqlApi = <R>(
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementAllWithAutoMerge(
                   args.repositoryId,
-                  args.issueNumber,
+                  args.nativeId,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementAllWithAutoMerge")),
               context,
@@ -2894,10 +2857,7 @@ export const createGraphqlApi = <R>(
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
-                return yield* lifecycle.queue(
-                  args.repositoryId,
-                  args.issueNumber,
-                )
+                return yield* lifecycle.queue(args.repositoryId, args.nativeId)
               }).pipe(Effect.withSpan("graphql-api.queue")),
               context,
             ),

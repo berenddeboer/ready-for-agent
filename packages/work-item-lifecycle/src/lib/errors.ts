@@ -15,6 +15,7 @@ export class IssueNotFoundError extends Schema.TaggedErrorClass<IssueNotFoundErr
   {
     repositoryId: Schema.String,
     issueNumber: Schema.Finite,
+    nativeId: Schema.optionalKey(Schema.String),
   },
 ) {}
 

@@ -21,13 +21,13 @@ import { toGraphQLError } from "./to-graphql-error.js"
 import { workItemCanAutonomousRetry } from "./work-item-projection.js"
 
 export type RetryWorkItemsSelectorInput = {
-  readonly issueNumber?: number | null
+  readonly nativeId?: string | null
   readonly workItemId?: string | null
   readonly allRetryable?: boolean | null
 }
 
 export type RetryWorkItemsSelector =
-  | { readonly kind: "issue"; readonly issueNumber: number }
+  | { readonly kind: "issue"; readonly nativeId: string }
   | { readonly kind: "work-item"; readonly workItemId: string }
   | { readonly kind: "all-retryable" }
 
@@ -100,7 +100,7 @@ export class NoUnfinishedWorkItemError extends Schema.TaggedErrorClass<NoUnfinis
   "NoUnfinishedWorkItemError",
   {
     repositoryId: Schema.String,
-    issueNumber: Schema.Finite,
+    nativeId: Schema.String,
   },
 ) {}
 
@@ -128,10 +128,11 @@ const isUnfinishedWorkItem = (workItem: WorkItemRecord): boolean =>
 export const parseRetryWorkItemsSelector = (
   input: RetryWorkItemsSelectorInput,
 ): RetryWorkItemsSelector | InvalidRetrySelectorError => {
-  const issueNumber = input.issueNumber
+  const nativeId =
+    typeof input.nativeId === "string" ? input.nativeId.trim() : ""
   const workItemId =
     typeof input.workItemId === "string" ? input.workItemId.trim() : ""
-  const hasIssue = issueNumber !== null && issueNumber !== undefined
+  const hasIssue = nativeId.length > 0
   const hasWorkItem = workItemId.length > 0
   const hasAllRetryable = input.allRetryable === true
   const selectedCount =
@@ -141,18 +142,12 @@ export const parseRetryWorkItemsSelector = (
     return new InvalidRetrySelectorError({
       reason: "exactly_one_selector",
       message:
-        "Exactly one of issueNumber, workItemId, or allRetryable=true is required",
+        "Exactly one of nativeId, workItemId, or allRetryable=true is required",
     })
   }
 
   if (hasIssue) {
-    if (!Number.isInteger(issueNumber) || issueNumber < 1) {
-      return new InvalidRetrySelectorError({
-        reason: "invalid_issue_number",
-        message: "issueNumber must be a positive integer",
-      })
-    }
-    return { kind: "issue", issueNumber }
+    return { kind: "issue", nativeId }
   }
 
   if (hasWorkItem) {
@@ -230,7 +225,7 @@ export const snapshotRetryTargets = (input: {
       const unfinished = input.workItems
         .filter(
           (workItem) =>
-            workItem.issueNumber === selector.issueNumber &&
+            workItem.issueSource.nativeId === selector.nativeId &&
             isUnfinishedWorkItem(workItem),
         )
         .slice()
@@ -243,7 +238,7 @@ export const snapshotRetryTargets = (input: {
       if (current === undefined) {
         return new NoUnfinishedWorkItemError({
           repositoryId: input.repositoryId,
-          issueNumber: selector.issueNumber,
+          nativeId: selector.nativeId,
         })
       }
       return [current]
@@ -384,7 +379,7 @@ export const retryWorkItems = (
         : selector.kind === "issue"
           ? yield* lifecycle.listWorkItemsForIssue(
               repository.id,
-              selector.issueNumber,
+              selector.nativeId,
             )
           : yield* lifecycle.listWorkItemsForRepository(repository.id)
 

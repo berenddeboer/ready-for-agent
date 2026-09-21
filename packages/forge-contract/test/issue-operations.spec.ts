@@ -16,6 +16,8 @@ const repository: ForgeRepository = {
 
 const issue = (number: number): ReadyLabeledIssue => ({
   number,
+  nativeId: String(number),
+  displayId: String(number),
   title: `Issue ${number}`,
   body: "",
   url: `https://github.com/acme/widgets/issues/${number}`,

@@ -37,8 +37,8 @@ export type LinearTeamWorkflowSelection =
 export const IssueReference = Schema.Struct({
   issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
   issueUrl: Schema.String,
-  nativeId: Schema.optionalKey(Schema.String),
-  displayId: Schema.optionalKey(Schema.String),
+  nativeId: Schema.String,
+  displayId: Schema.String,
 })
 export type IssueReference = typeof IssueReference.Type
 
@@ -312,8 +312,8 @@ export const IssueRecord = Schema.Struct({
   repositoryId: RepositoryId,
   issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
   issueTracker: Schema.optionalKey(IssueTracker),
-  nativeId: Schema.optionalKey(Schema.String),
-  displayId: Schema.optionalKey(Schema.String),
+  nativeId: Schema.String,
+  displayId: Schema.String,
   title: Schema.String,
   body: Schema.String,
   url: Schema.String,

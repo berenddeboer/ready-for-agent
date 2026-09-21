@@ -179,7 +179,7 @@ describe("Assess Changes lifecycle routes", () => {
             )
           })
 
-          yield* lifecycle.implementNow(repository.id, 283)
+          yield* lifecycle.implementNow(repository.id, "283")
 
           const afterCreate = yield* claimAndRun
           expect(afterCreate._tag).toBe("processed")
@@ -343,7 +343,7 @@ describe("Assess Changes lifecycle routes", () => {
             )
           })
 
-          yield* lifecycle.implementNow(repository.id, 284)
+          yield* lifecycle.implementNow(repository.id, "284")
           yield* claimAndRun
           yield* claimAndRun
           yield* claimAndRun
@@ -477,7 +477,7 @@ describe("Assess Changes lifecycle routes", () => {
             )
           })
 
-          yield* lifecycle.implementNow(repository.id, 285)
+          yield* lifecycle.implementNow(repository.id, "285")
           yield* claimAndRun
           yield* claimAndRun
           yield* claimAndRun
@@ -648,7 +648,7 @@ describe("Assess Changes lifecycle routes", () => {
             )
           })
 
-          const created = yield* lifecycle.implementNow(repository.id, 290)
+          const created = yield* lifecycle.implementNow(repository.id, "290")
           yield* claimAndRun // create_worktree
           yield* claimAndRun // install
           yield* claimAndRun // implement
@@ -844,7 +844,7 @@ describe("Assess Changes lifecycle routes", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issueNumber,
+            String(issueNumber),
           )
           yield* claimAndRun // create_worktree
           yield* claimAndRun // install
@@ -1089,7 +1089,7 @@ describe("Assess Changes lifecycle routes", () => {
               )
             })
 
-            yield* lifecycle.implementNow(repository.id, issueNumber)
+            yield* lifecycle.implementNow(repository.id, String(issueNumber))
             yield* claimAndRun
             yield* claimAndRun
             yield* claimAndRun
@@ -1233,7 +1233,7 @@ describe("Assess Changes lifecycle routes", () => {
             )
           })
 
-          yield* lifecycle.implementNow(repository.id, 291)
+          yield* lifecycle.implementNow(repository.id, "291")
           yield* claimAndRun
           yield* claimAndRun
           yield* claimAndRun
@@ -1373,7 +1373,7 @@ describe("Assess Changes lifecycle routes", () => {
             )
           })
 
-          yield* lifecycle.implementNow(repository.id, 292)
+          yield* lifecycle.implementNow(repository.id, "292")
           yield* claimAndRun
           yield* claimAndRun
           yield* claimAndRun
@@ -1512,7 +1512,10 @@ describe("Assess Changes lifecycle routes", () => {
             )
           })
 
-          const created = yield* lifecycle.implementLocally(repository.id, 293)
+          const created = yield* lifecycle.implementLocally(
+            repository.id,
+            "293",
+          )
           expect(created.pauseBeforeStep).toBe("commit")
 
           yield* claimAndRun // create
@@ -1698,7 +1701,7 @@ describe("Assess Changes lifecycle routes", () => {
             )
           })
 
-          yield* lifecycle.implementNow(repository.id, 294)
+          yield* lifecycle.implementNow(repository.id, "294")
           yield* claimAndRun
           yield* claimAndRun
           yield* claimAndRun

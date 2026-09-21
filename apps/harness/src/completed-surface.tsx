@@ -18,9 +18,9 @@ export type CompletedIssueLookup = {
 
 export function repositoryIssueKey(
   repositoryId: string,
-  issueNumber: number,
+  nativeId: string,
 ): string {
-  return `${repositoryId}:${issueNumber}`
+  return `${repositoryId}:${nativeId}`
 }
 
 /**
@@ -78,7 +78,10 @@ export function CompletedCardGrid({
           workItem={workItem}
           repository={repositoryById.get(workItem.repositoryId)}
           issue={issueByRepoAndNumber.get(
-            repositoryIssueKey(workItem.repositoryId, workItem.issueNumber),
+            repositoryIssueKey(
+              workItem.repositoryId,
+              workItem.issueSource.nativeId,
+            ),
           )}
           onOpenSession={onOpenSession}
         />

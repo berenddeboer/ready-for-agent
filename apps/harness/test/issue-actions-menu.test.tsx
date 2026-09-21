@@ -65,7 +65,7 @@ const installDom = () => {
 }
 
 const defaultProps = {
-  issueNumber: 1034,
+  displayId: "1034",
   issueId: "issue-1034",
   implementPending: false,
   implementNowPending: false,

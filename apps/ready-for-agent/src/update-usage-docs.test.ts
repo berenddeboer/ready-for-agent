@@ -204,7 +204,7 @@ describe("operator CLI command-reference documentation", () => {
     expect(managed).toContain("#### `<session-id>`")
     expect(managed).toContain("#### `--forge-host <host>`")
     expect(managed).toContain("#### `--project-path <project-path>`")
-    expect(managed).toContain("#### `--issue <number>`")
+    expect(managed).toContain("#### `--issue <id>`")
     expect(managed).toContain("#### `--work-item <id>`")
     expect(managed).toContain("#### `--all-retryable`")
     expect(managed).toContain("#### `--max-autonomous-retries <count>`")

@@ -29,7 +29,7 @@ const agentBackendsQuery = {
 }
 
 export type ImplementWithIssueDialogProps = {
-  readonly issueNumber: number
+  readonly displayId: string
   readonly target?: "leaf" | "parent"
   readonly repositoryId: string
   readonly initialBackendId: string
@@ -47,7 +47,7 @@ export type ImplementWithIssueDialogProps = {
  * settings or the Active set.
  */
 export function ImplementWithIssueDialog({
-  issueNumber,
+  displayId,
   target = "leaf",
   repositoryId,
   initialBackendId,
@@ -215,7 +215,7 @@ export function ImplementWithIssueDialog({
 
   return (
     <ImplementWithDialog
-      issueNumber={issueNumber}
+      displayId={displayId}
       target={target}
       backendId={backendId}
       backends={

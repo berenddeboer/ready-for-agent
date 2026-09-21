@@ -1,8 +1,9 @@
 import { type ReactNode, useEffect, useState } from "react"
+import { formatIssueDisplayId } from "@ready-for-agent/lifecycle-model"
 import { cx, ui } from "./ui.js"
 
 export type IssueActionsMenuProps = {
-  readonly issueNumber: number
+  readonly displayId: string
   readonly issueId: string
   readonly canImplement: boolean
   readonly canQueue: boolean
@@ -26,7 +27,7 @@ export type IssueActionsMenuProps = {
  * can be tested without the Repos list.
  */
 export function IssueActionsMenu({
-  issueNumber,
+  displayId,
   issueId,
   canImplement,
   canQueue,
@@ -77,7 +78,7 @@ export function IssueActionsMenu({
       <button
         type="button"
         className={ui.iconBtn}
-        aria-label={`Actions for issue #${issueNumber}`}
+        aria-label={`Actions for issue ${formatIssueDisplayId(displayId)}`}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         onClick={() => setMenuOpen((open) => !open)}

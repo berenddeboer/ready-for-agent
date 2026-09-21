@@ -74,7 +74,7 @@ describe("ParentIssueActionsMenu", () => {
   test("renders accessible Actions control for the Parent Issue", () => {
     const html = renderToStaticMarkup(
       <ParentIssueActionsMenu
-        parentIssueNumber={42}
+        displayId="42"
         menuId="issue-parent-42"
         implementAllPending={false}
         implementWithPending={false}
@@ -95,7 +95,7 @@ describe("ParentIssueActionsMenu", () => {
   test("shows parent-level error alert without partial-success copy", () => {
     const html = renderToStaticMarkup(
       <ParentIssueActionsMenu
-        parentIssueNumber={7}
+        displayId="7"
         menuId="issue-parent-7"
         implementAllPending={true}
         implementWithPending={false}

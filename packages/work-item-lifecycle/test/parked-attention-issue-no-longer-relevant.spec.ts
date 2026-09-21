@@ -164,10 +164,7 @@ describe("parked Attention when the Issue is no longer Relevant", () => {
   const driveToFailedCommit = Effect.gen(function* () {
     const lifecycle = yield* WorkItemLifecycle
     const { repository, issue } = yield* seedIssue({})
-    const created = yield* lifecycle.implementNow(
-      repository.id,
-      issue.issueNumber,
-    )
+    const created = yield* lifecycle.implementNow(repository.id, issue.nativeId)
     for (let index = 0; index < 7; index += 1) {
       yield* makeQueuedJobsAvailable
       yield* claimAndRunPending
@@ -186,7 +183,7 @@ describe("parked Attention when the Issue is no longer Relevant", () => {
     })
     const created = yield* lifecycle.implementLocally(
       repository.id,
-      issue.issueNumber,
+      issue.nativeId,
     )
     for (let index = 0; index < 6; index += 1) {
       yield* makeQueuedJobsAvailable
@@ -471,7 +468,7 @@ describe("parked Attention when the Issue is no longer Relevant", () => {
         })
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         const sql = yield* SqlClient.SqlClient
         yield* sql.unsafe(
@@ -502,7 +499,7 @@ describe("parked Attention when the Issue is no longer Relevant", () => {
         })
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         for (let index = 0; index < 8; index += 1) {
           yield* makeQueuedJobsAvailable
@@ -553,7 +550,7 @@ describe("parked Attention when the Issue is no longer Relevant", () => {
         })
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* makeQueuedJobsAvailable
         yield* claimAndRunPending
@@ -612,7 +609,7 @@ describe("parked Attention when the Issue is no longer Relevant", () => {
             },
           ],
         })
-        const held = yield* lifecycle.queue(repository.id, 201)
+        const held = yield* lifecycle.queue(repository.id, "201")
         expect(held.waitingForBlockers).toBe(true)
         yield* db.deleteIssue(repository.id, issue.issueNumber)
 
@@ -643,7 +640,7 @@ describe("parked Attention when the Issue is no longer Relevant", () => {
           })
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           for (let index = 0; index < 7; index += 1) {
             yield* makeQueuedJobsAvailable

@@ -19,8 +19,10 @@ import {
   SESSION_TELEMETRY_FIXTURE_WORK_ITEM_COUNT,
   SESSION_TELEMETRY_FIXTURE_WORK_ITEM_IDS,
   TELEMETRY_FIXTURE,
+  sessionTelemetryFixtureSql,
   sessionTelemetryFixturesArePresent,
 } from "../e2e/support/session-telemetry-fixture.ts"
+import { Database } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 
 const state: LiveHarnessState = {
@@ -159,6 +161,79 @@ describe("sessionTelemetryFixturesArePresent", () => {
           .concat(fillers),
       ),
     ).toBe(false)
+  })
+
+  test("unfinished Work Items insert under v5 native-id uniqueness", () => {
+    const db = new Database(":memory:")
+    db.exec(`
+      CREATE TABLE work_item (
+        id TEXT PRIMARY KEY,
+        repository_id TEXT NOT NULL,
+        issue_number INTEGER NOT NULL,
+        issue_tracker TEXT NOT NULL DEFAULT 'github',
+        issue_native_id TEXT NOT NULL DEFAULT '',
+        issue_display_id TEXT NOT NULL DEFAULT '',
+        issue_url TEXT NOT NULL DEFAULT '',
+        issue_title TEXT,
+        agent_backend TEXT NOT NULL DEFAULT 'opencode',
+        state TEXT NOT NULL,
+        state_ready_at INTEGER NOT NULL,
+        paused INTEGER NOT NULL DEFAULT 0,
+        holds_worker_slot INTEGER NOT NULL DEFAULT 0,
+        session_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE UNIQUE INDEX work_item_one_unfinished_v5_uidx
+        ON work_item (repository_id, issue_tracker, issue_native_id)
+        WHERE "work_item"."state" NOT IN ('complete', 'failed', 'abandoned');
+    `)
+    const sql = sessionTelemetryFixtureSql(1)
+    const workItemSql = [
+      ...sql.matchAll(/INSERT INTO work_item \([\s\S]*?\);/g),
+    ]
+      .map((match) => match[0])
+      .join("\n")
+    db.exec(workItemSql)
+
+    const unfinished = db
+      .query(
+        `SELECT id, issue_native_id AS nativeId FROM work_item
+         WHERE state NOT IN ('complete', 'failed', 'abandoned')
+         ORDER BY id`,
+      )
+      .all() as ReadonlyArray<{
+      readonly id: string
+      readonly nativeId: string
+    }>
+    expect(unfinished).toEqual([
+      {
+        id: TELEMETRY_FIXTURE.missingSessionWorkItemId,
+        nativeId: String(TELEMETRY_FIXTURE.missingSessionIssueNumber),
+      },
+      {
+        id: TELEMETRY_FIXTURE.codexMissingWorkItemId,
+        nativeId: String(TELEMETRY_FIXTURE.codexMissingIssueNumber),
+      },
+      {
+        id: TELEMETRY_FIXTURE.idleWorkItemId,
+        nativeId: String(TELEMETRY_FIXTURE.idleIssueNumber),
+      },
+    ])
+    const namedCount = (
+      db
+        .query(
+          `SELECT COUNT(*) AS count FROM work_item WHERE id IN (${SESSION_TELEMETRY_FIXTURE_WORK_ITEM_IDS.map((id) => `'${id}'`).join(", ")})`,
+        )
+        .get() as { readonly count: number }
+    ).count
+    expect(namedCount).toBe(SESSION_TELEMETRY_FIXTURE_WORK_ITEM_IDS.length)
+    const total = (
+      db.query("SELECT COUNT(*) AS count FROM work_item").get() as {
+        readonly count: number
+      }
+    ).count
+    expect(total).toBe(SESSION_TELEMETRY_FIXTURE_WORK_ITEM_COUNT)
   })
 })
 

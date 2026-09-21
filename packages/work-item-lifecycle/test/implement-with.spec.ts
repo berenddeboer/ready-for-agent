@@ -23,7 +23,6 @@ import {
   ImplementAllWithAutoMergeNotEligibleError,
   InstallCommandError,
   InvalidExecutionProfileError,
-  IssueIdentityAmbiguousError,
   type LifecycleStepContext,
   LifecycleSteps,
   type LifecycleStepsShape,
@@ -305,7 +304,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 1)
         const created = yield* lifecycle.implementWith(
           repo.id,
-          1,
+          "1",
           explicitReviewProfile,
           { mergePolicy: "classify", implementLocally: true },
         )
@@ -366,12 +365,12 @@ describe("implementWith", () => {
 
           const covered = yield* lifecycle.implementWith(
             repo.id,
-            30,
+            "30",
             explicitReviewProfile,
             { mergePolicy: "classify", implementLocally: false },
           )
           expect(covered.map((item) => item.issueNumber)).toEqual([31, 32])
-          expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 30)).toEqual(
+          expect(yield* lifecycle.listWorkItemsForIssue(repo.id, "30")).toEqual(
             [],
           )
 
@@ -397,14 +396,14 @@ describe("implementWith", () => {
           expect(blocked.holdsWorkerSlot).toBe(false)
           expect(blocked.stepRuns).toHaveLength(0)
 
-          expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 33)).toEqual(
+          expect(yield* lifecycle.listWorkItemsForIssue(repo.id, "33")).toEqual(
             [],
           )
 
           yield* storeOpenChildIssue(db, repo.id, 34, 30, { parentPosition: 3 })
           const again = yield* lifecycle.implementWith(
             repo.id,
-            30,
+            "30",
             explicitReviewProfile,
             { mergePolicy: "off", implementLocally: false },
           )
@@ -439,7 +438,7 @@ describe("implementWith", () => {
           yield* storeOpenParentIssue(db, repo.id, 40)
           yield* storeOpenChildIssue(db, repo.id, 41, 40)
 
-          const existing = yield* lifecycle.implementNow(repo.id, 41)
+          const existing = yield* lifecycle.implementNow(repo.id, "41")
           expect(existing.executionProfile).toBeNull()
           expect(existing.mergeMode).toBe("ordinary")
           expect(existing.autoMergeOverride).toBeNull()
@@ -466,7 +465,7 @@ describe("implementWith", () => {
 
           const covered = yield* lifecycle.implementWith(
             repo.id,
-            40,
+            "40",
             explicitReviewProfile,
             { mergePolicy: "always", implementLocally: false },
           )
@@ -520,7 +519,7 @@ describe("implementWith", () => {
 
           const [held] = yield* lifecycle.implementWith(
             repo.id,
-            50,
+            "50",
             explicitReviewProfile,
             { mergePolicy: "off", implementLocally: false },
           )
@@ -596,7 +595,7 @@ describe("implementWith", () => {
           yield* storeOpenChildIssue(db, repo.id, 62, 60, { parentPosition: 1 })
 
           const error = yield* Effect.flip(
-            lifecycle.implementWith(repo.id, 60, explicitReviewProfile, {
+            lifecycle.implementWith(repo.id, "60", explicitReviewProfile, {
               mergePolicy: "classify",
               implementLocally: false,
             }),
@@ -629,7 +628,7 @@ describe("implementWith", () => {
           yield* storeOpenChildIssue(db, repo.id, 71, 70)
 
           const error = yield* Effect.flip(
-            lifecycle.implementWith(repo.id, 70, explicitReviewProfile, {
+            lifecycle.implementWith(repo.id, "70", explicitReviewProfile, {
               mergePolicy: "classify",
               implementLocally: true,
             }),
@@ -663,7 +662,7 @@ describe("implementWith", () => {
             hasChildren: true,
           })
           const unsupported = yield* Effect.flip(
-            lifecycle.implementWith(repo.id, 80, explicitReviewProfile, {
+            lifecycle.implementWith(repo.id, "80", explicitReviewProfile, {
               mergePolicy: "off",
               implementLocally: false,
             }),
@@ -673,7 +672,7 @@ describe("implementWith", () => {
           yield* storeOpenParentIssue(db, repo.id, 90)
           yield* storeOpenChildIssue(db, repo.id, 91, 90, { state: "CLOSED" })
           const noOpen = yield* Effect.flip(
-            lifecycle.implementWith(repo.id, 90, explicitReviewProfile, {
+            lifecycle.implementWith(repo.id, "90", explicitReviewProfile, {
               mergePolicy: "off",
               implementLocally: false,
             }),
@@ -711,12 +710,12 @@ describe("implementWith", () => {
           })
           yield* storeOpenParentIssue(db, repo.id, 100)
           yield* storeOpenChildIssue(db, repo.id, 101, 100)
-          const existing = yield* lifecycle.implementNow(repo.id, 101)
+          const existing = yield* lifecycle.implementNow(repo.id, "101")
           expect(existing.mergeMode).toBe("ordinary")
           liveCatalog.splice(0, liveCatalog.length)
 
           const error = yield* Effect.flip(
-            lifecycle.implementWith(repo.id, 100, explicitReviewProfile, {
+            lifecycle.implementWith(repo.id, "100", explicitReviewProfile, {
               mergePolicy: "always",
               implementLocally: false,
             }),
@@ -749,7 +748,7 @@ describe("implementWith", () => {
           yield* storeOpenChildIssue(db, repo.id, 111, 110)
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repo.id,
-            110,
+            "110",
           )
           expect(covered).toHaveLength(1)
           expect(covered[0]!.executionProfile).toBeNull()
@@ -777,15 +776,15 @@ describe("implementWith", () => {
           })
           yield* storeOpenParentIssue(db, repo.id, 120)
           yield* storeOpenChildIssue(db, repo.id, 121, 120)
-          const now = yield* Effect.flip(lifecycle.implementNow(repo.id, 120))
+          const now = yield* Effect.flip(lifecycle.implementNow(repo.id, "120"))
           expect(now).toBeInstanceOf(ParentIssueError)
           const locally = yield* Effect.flip(
-            lifecycle.implementLocally(repo.id, 120),
+            lifecycle.implementLocally(repo.id, "120"),
           )
           expect(locally).toBeInstanceOf(ParentIssueError)
-          expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 120)).toEqual(
-            [],
-          )
+          expect(
+            yield* lifecycle.listWorkItemsForIssue(repo.id, "120"),
+          ).toEqual([])
         }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
       )
     })
@@ -850,7 +849,7 @@ describe("implementWith", () => {
           })
           const covered = yield* lifecycle.implementWith(
             repo.id,
-            30,
+            "30",
             explicitReviewProfile,
             { mergePolicy: "classify", implementLocally: false },
           )
@@ -880,7 +879,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 1)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          1,
+          "1",
           explicitReviewProfile,
         )
         expect(created.agentBackend).toBe("opencode")
@@ -918,7 +917,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 2)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          2,
+          "2",
           sameAsBuildProfile,
         )
         expect(created.executionProfile).toEqual({
@@ -948,13 +947,13 @@ describe("implementWith", () => {
         })
         yield* storeOpenLeafIssue(db, repo.id, 3)
         const error = yield* Effect.flip(
-          lifecycle.implementWith(repo.id, 3, {
+          lifecycle.implementWith(repo.id, "3", {
             ...explicitReviewProfile,
             reviewModel: null,
           }),
         )
         expect(error).toBeInstanceOf(InvalidExecutionProfileError)
-        const items = yield* lifecycle.listWorkItemsForIssue(repo.id, 3)
+        const items = yield* lifecycle.listWorkItemsForIssue(repo.id, "3")
         expect(items).toEqual([])
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
     )
@@ -978,11 +977,11 @@ describe("implementWith", () => {
         })
         yield* storeOpenLeafIssue(db, repo.id, 4)
         const error = yield* Effect.flip(
-          lifecycle.implementWith(repo.id, 4, sameAsBuildProfile),
+          lifecycle.implementWith(repo.id, "4", sameAsBuildProfile),
         )
         expect(error).toBeInstanceOf(InvalidExecutionProfileError)
         expect(error.message).toContain("non-empty Agent Model catalog")
-        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 4)).toEqual([])
+        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, "4")).toEqual([])
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer([])))),
     )
   })
@@ -1012,7 +1011,7 @@ describe("implementWith", () => {
         expect(
           yield* backends.getBackendStatus(AGENT_BACKEND_IDS.grok),
         ).toBeNull()
-        const [created] = yield* lifecycle.implementWith(repo.id, 5, {
+        const [created] = yield* lifecycle.implementWith(repo.id, "5", {
           ...sameAsBuildProfile,
           agentBackendId: "grok",
         })
@@ -1063,14 +1062,16 @@ describe("implementWith", () => {
         })
         yield* storeOpenLeafIssue(db, repo.id, 15)
         const error = yield* Effect.flip(
-          lifecycle.implementWith(repo.id, 15, {
+          lifecycle.implementWith(repo.id, "15", {
             ...sameAsBuildProfile,
             agentBackendId: "grok",
           }),
         )
         expect(error).toBeInstanceOf(LifecycleUnavailableError)
         expect(error.message).toContain("Grok Build CLI is not installed")
-        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 15)).toEqual([])
+        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, "15")).toEqual(
+          [],
+        )
         expect(yield* db.getConfig).toMatchObject({
           selectedAgentBackend: "opencode",
           defaultModel: "settings-build",
@@ -1101,7 +1102,7 @@ describe("implementWith", () => {
           defaultModel: "build-model",
         })
         yield* storeOpenLeafIssue(db, repo.id, 6)
-        const created = yield* lifecycle.implementNow(repo.id, 6)
+        const created = yield* lifecycle.implementNow(repo.id, "6")
         expect(created.executionProfile).toBeNull()
         expect(created.agentBackend).toBe("opencode")
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
@@ -1127,14 +1128,14 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 7)
         const [first] = yield* lifecycle.implementWith(
           repo.id,
-          7,
+          "7",
           sameAsBuildProfile,
         )
         const error = yield* Effect.flip(
-          lifecycle.implementWith(repo.id, 7, explicitReviewProfile),
+          lifecycle.implementWith(repo.id, "7", explicitReviewProfile),
         )
         expect(error).toBeInstanceOf(UnfinishedWorkItemExistsError)
-        const items = yield* lifecycle.listWorkItemsForIssue(repo.id, 7)
+        const items = yield* lifecycle.listWorkItemsForIssue(repo.id, "7")
         expect(items.map((item) => item.id)).toEqual([first.id])
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
     )
@@ -1166,7 +1167,7 @@ describe("implementWith", () => {
           defaultModel: "settings-build",
         })
         yield* storeOpenLeafIssue(db, repo.id, 16)
-        const [created] = yield* lifecycle.implementWith(repo.id, 16, {
+        const [created] = yield* lifecycle.implementWith(repo.id, "16", {
           ...sameAsBuildProfile,
           agentBackendId: "grok",
         })
@@ -1223,7 +1224,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 8)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          8,
+          "8",
           explicitReviewProfile,
         )
         yield* seedHarness(db, {
@@ -1311,7 +1312,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 9)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          9,
+          "9",
           sameAsBuildProfile,
           { mergePolicy: "always", implementLocally: false },
         )
@@ -1374,7 +1375,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 10)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          10,
+          "10",
           sameAsBuildProfile,
         )
         liveCatalog.splice(0, liveCatalog.length, {
@@ -1431,11 +1432,11 @@ describe("implementWith", () => {
         })
         yield* storeOpenLeafIssue(db, repo.id, 11)
         yield* storeOpenLeafIssue(db, repo.id, 12)
-        const first = yield* lifecycle.implementNow(repo.id, 11)
+        const first = yield* lifecycle.implementNow(repo.id, "11")
         expect(first.waitingSince).toBeNull()
         const [waiter] = yield* lifecycle.implementWith(
           repo.id,
-          12,
+          "12",
           sameAsBuildProfile,
         )
         expect(waiter.waitingSince).not.toBeNull()
@@ -1470,7 +1471,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 20)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          20,
+          "20",
           sameAsBuildProfile,
         )
         expect(created.mergeMode).toBe("ordinary")
@@ -1514,7 +1515,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 21)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          21,
+          "21",
           sameAsBuildProfile,
           { mergePolicy: "off", implementLocally: false },
         )
@@ -1558,7 +1559,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 22)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          22,
+          "22",
           sameAsBuildProfile,
           { mergePolicy: "classify", implementLocally: false },
         )
@@ -1611,7 +1612,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 25)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          25,
+          "25",
           sameAsBuildProfile,
           { mergePolicy: "always", implementLocally: false },
         )
@@ -1643,7 +1644,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 23)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          23,
+          "23",
           explicitReviewProfile,
           { mergePolicy: "classify", implementLocally: true },
         )
@@ -1724,7 +1725,7 @@ describe("implementWith", () => {
         yield* storeOpenLeafIssue(db, repo.id, 24)
         const [created] = yield* lifecycle.implementWith(
           repo.id,
-          24,
+          "24",
           sameAsBuildProfile,
           { mergePolicy: "off", implementLocally: true },
         )
@@ -1842,7 +1843,7 @@ describe("implementWith", () => {
         })
         const created = yield* lifecycle.implementWith(
           repo.id,
-          123,
+          nativeId,
           explicitReviewProfile,
         )
         expect(created).toHaveLength(1)
@@ -1915,14 +1916,18 @@ describe("implementWith", () => {
           blockedBy: [],
         })
         const error = yield* lifecycle
-          .implementWith(repo.id, 10, explicitReviewProfile)
+          .implementWith(
+            repo.id,
+            "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            explicitReviewProfile,
+          )
           .pipe(Effect.flip)
         expect(error).toBeInstanceOf(LinearExecutionNotSupportedError)
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
     )
   })
 
-  it("rejects Implement With when two Linear Issues share a team-local number", async () => {
+  it("starts distinct Linear leaves that share a team-local number", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = yield* DbService
@@ -1997,10 +2002,14 @@ describe("implementWith", () => {
           hasChildren: false,
           blockedBy: [],
         })
-        const error = yield* lifecycle
-          .implementWith(repo.id, 123, explicitReviewProfile)
-          .pipe(Effect.flip)
-        expect(error).toBeInstanceOf(IssueIdentityAmbiguousError)
+        const created = yield* lifecycle.implementWith(
+          repo.id,
+          "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          explicitReviewProfile,
+        )
+        expect(created[0]?.issueSource.nativeId).toBe(
+          "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        )
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
     )
   })

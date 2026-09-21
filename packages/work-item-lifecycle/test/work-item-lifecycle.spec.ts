@@ -303,7 +303,7 @@ describe("WorkItemLifecycle", () => {
 
           const workItem = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           expect(workItem.id).toMatch(/^wi-[0-9A-HJKMNP-TV-Z]{26}$/)
@@ -358,7 +358,7 @@ describe("WorkItemLifecycle", () => {
           })
 
           const error = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.issueNumber),
+            lifecycle.implementNow(repository.id, issue.nativeId),
           )
 
           expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
@@ -395,7 +395,7 @@ describe("WorkItemLifecycle", () => {
 
           const workItem = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           expect(workItem.state).toBe("create_worktree")
@@ -410,13 +410,35 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository(sampleRepository)
 
           const error = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, 999),
+            lifecycle.implementNow(repository.id, "999"),
           )
 
           expect(error).toBeInstanceOf(IssueNotFoundError)
           if (error instanceof IssueNotFoundError) {
             expect(error.repositoryId).toBe(repository.id)
             expect(error.issueNumber).toBe(999)
+            expect(error.nativeId).toBe("999")
+          }
+        }),
+      ))
+
+    it("rejects a missing Linear native identity without substituting issue number 0", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const repository = yield* db.addRepository(sampleRepository)
+          const nativeId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+          const error = yield* Effect.flip(
+            lifecycle.implementNow(repository.id, nativeId),
+          )
+
+          expect(error).toBeInstanceOf(IssueNotFoundError)
+          if (error instanceof IssueNotFoundError) {
+            expect(error.repositoryId).toBe(repository.id)
+            expect(error.issueNumber).toBe(0)
+            expect(error.nativeId).toBe(nativeId)
           }
         }),
       ))
@@ -436,7 +458,7 @@ describe("WorkItemLifecycle", () => {
           })
 
           const error = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, 7),
+            lifecycle.implementNow(repository.id, "7"),
           )
 
           expect(error).toBeInstanceOf(IssueNotOpenError)
@@ -459,7 +481,7 @@ describe("WorkItemLifecycle", () => {
           })
 
           const error = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, 1),
+            lifecycle.implementNow(repository.id, "1"),
           )
 
           expect(error).toBeInstanceOf(ParentIssueError)
@@ -486,7 +508,7 @@ describe("WorkItemLifecycle", () => {
           })
 
           const error = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, 3),
+            lifecycle.implementNow(repository.id, "3"),
           )
 
           expect(error).toBeInstanceOf(IssueBlockedError)
@@ -504,10 +526,10 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const error = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.issueNumber),
+            lifecycle.implementNow(repository.id, issue.nativeId),
           )
 
           expect(error).toBeInstanceOf(UnfinishedWorkItemExistsError)
@@ -526,10 +548,10 @@ describe("WorkItemLifecycle", () => {
           const results = yield* Effect.all(
             [
               lifecycle
-                .implementNow(repository.id, issue.issueNumber)
+                .implementNow(repository.id, issue.nativeId)
                 .pipe(Effect.result),
               lifecycle
-                .implementNow(repository.id, issue.issueNumber)
+                .implementNow(repository.id, issue.nativeId)
                 .pipe(Effect.result),
             ],
             { concurrency: "unbounded" },
@@ -542,7 +564,7 @@ describe("WorkItemLifecycle", () => {
           expect(failures).toHaveLength(1)
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(listed).toHaveLength(1)
           expect(listed[0]!.stepRuns).toHaveLength(1)
@@ -602,14 +624,14 @@ describe("WorkItemLifecycle", () => {
           })
 
           const error = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, 42),
+            lifecycle.implementNow(repository.id, "42"),
           )
           expect(error).toBeInstanceOf(EnqueueError)
           expect(enqueueCalls).toBe(1)
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            42,
+            "42",
           )
           expect(listed).toEqual([])
         }).pipe(Effect.provide(layer)),
@@ -638,7 +660,7 @@ describe("WorkItemLifecycle", () => {
 
           const workItem = yield* lifecycle.implementLocally(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           expect(workItem.state).toBe("create_worktree")
@@ -659,7 +681,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementLocally(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           // create_worktree → install → implement → assess_changes → pre_commit → review
@@ -725,7 +747,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementLocally(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(created.pauseBeforeStep).toBe("commit")
 
@@ -807,7 +829,7 @@ describe("WorkItemLifecycle", () => {
 
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.issueNumber,
+            parent.nativeId,
           )
 
           expect(covered).toHaveLength(1)
@@ -819,7 +841,7 @@ describe("WorkItemLifecycle", () => {
 
           const parentItems = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            parent.issueNumber,
+            parent.nativeId,
           )
           expect(parentItems).toHaveLength(0)
         }),
@@ -832,7 +854,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const workItem = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(workItem.mergeMode).toBe("ordinary")
         }),
@@ -846,7 +868,7 @@ describe("WorkItemLifecycle", () => {
           const { repository } = yield* seedParentWithOneActionableChild
 
           const missing = yield* Effect.flip(
-            lifecycle.implementAllWithAutoMerge(repository.id, 999),
+            lifecycle.implementAllWithAutoMerge(repository.id, "999"),
           )
           expect(missing).toBeInstanceOf(IssueNotFoundError)
 
@@ -858,7 +880,7 @@ describe("WorkItemLifecycle", () => {
             hasChildren: false,
           })
           const notParent = yield* Effect.flip(
-            lifecycle.implementAllWithAutoMerge(repository.id, 50),
+            lifecycle.implementAllWithAutoMerge(repository.id, "50"),
           )
           expect(notParent).toBeInstanceOf(NotAParentIssueError)
 
@@ -889,7 +911,7 @@ describe("WorkItemLifecycle", () => {
             hasChildren: true,
           })
           const unsupported = yield* Effect.flip(
-            lifecycle.implementAllWithAutoMerge(grandRepo.id, 300),
+            lifecycle.implementAllWithAutoMerge(grandRepo.id, "300"),
           )
           expect(unsupported).toBeInstanceOf(UnsupportedIssueHierarchyError)
 
@@ -920,7 +942,7 @@ describe("WorkItemLifecycle", () => {
             },
           })
           const noOpen = yield* Effect.flip(
-            lifecycle.implementAllWithAutoMerge(closedOnlyRepo.id, 400),
+            lifecycle.implementAllWithAutoMerge(closedOnlyRepo.id, "400"),
           )
           expect(noOpen).toBeInstanceOf(
             ImplementAllWithAutoMergeNotEligibleError,
@@ -993,7 +1015,7 @@ describe("WorkItemLifecycle", () => {
 
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            500,
+            "500",
           )
 
           expect(covered).toHaveLength(2)
@@ -1017,13 +1039,13 @@ describe("WorkItemLifecycle", () => {
 
           const closedItems = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            503,
+            "503",
           )
           expect(closedItems).toHaveLength(0)
 
           const parentItems = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            500,
+            "500",
           )
           expect(parentItems).toHaveLength(0)
         }),
@@ -1076,7 +1098,7 @@ describe("WorkItemLifecycle", () => {
 
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            600,
+            "600",
           )
           expect(covered).toHaveLength(2)
           const admitted = covered.filter((item) => item.holdsWorkerSlot)
@@ -1158,7 +1180,7 @@ describe("WorkItemLifecycle", () => {
           }
 
           const error = yield* Effect.flip(
-            lifecycle.implementAllWithAutoMerge(repository.id, 700),
+            lifecycle.implementAllWithAutoMerge(repository.id, "700"),
           )
           expect(error).toBeInstanceOf(EnqueueError)
           expect(enqueueCalls).toBe(2)
@@ -1182,7 +1204,7 @@ describe("WorkItemLifecycle", () => {
           // Ordinary unfinished Work Item created outside the parent command.
           const ordinary = yield* lifecycle.implementNow(
             repository.id,
-            child.issueNumber,
+            child.nativeId,
           )
           expect(ordinary.mergeMode).toBe("ordinary")
           const stepRunCount = ordinary.stepRuns.length
@@ -1191,7 +1213,7 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.issueNumber,
+            parent.nativeId,
           )
           expect(first).toHaveLength(1)
           expect(first[0]!.id).toBe(ordinary.id)
@@ -1216,7 +1238,7 @@ describe("WorkItemLifecycle", () => {
 
           const second = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.issueNumber,
+            parent.nativeId,
           )
           expect(second).toHaveLength(2)
           const byIssue = new Map(
@@ -1235,7 +1257,7 @@ describe("WorkItemLifecycle", () => {
           // No duplicate unfinished Work Item for the original child.
           const originalList = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            child.issueNumber,
+            child.nativeId,
           )
           expect(originalList).toHaveLength(1)
         }),
@@ -1251,7 +1273,7 @@ describe("WorkItemLifecycle", () => {
 
           const ordinary = yield* lifecycle.implementNow(
             repository.id,
-            child.issueNumber,
+            child.nativeId,
           )
           yield* sql.unsafe(
             `UPDATE work_item
@@ -1267,7 +1289,7 @@ describe("WorkItemLifecycle", () => {
           const before = yield* lifecycle.getWorkItem(ordinary.id)
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.issueNumber,
+            parent.nativeId,
           )
 
           expect(covered).toHaveLength(1)
@@ -1296,7 +1318,7 @@ describe("WorkItemLifecycle", () => {
 
           const ordinary = yield* lifecycle.implementNow(
             repository.id,
-            child.issueNumber,
+            child.nativeId,
           )
           // Simulate a merge-related Needs Human handoff with ordinary mode.
           yield* sql.unsafe(
@@ -1326,7 +1348,7 @@ describe("WorkItemLifecycle", () => {
 
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.issueNumber,
+            parent.nativeId,
           )
 
           expect(covered).toHaveLength(1)
@@ -1436,7 +1458,7 @@ describe("WorkItemLifecycle", () => {
           )
 
           const error = yield* Effect.flip(
-            lifecycle.implementAllWithAutoMerge(repository.id, 800),
+            lifecycle.implementAllWithAutoMerge(repository.id, "800"),
           )
           expect(error).toBeInstanceOf(EnqueueError)
           expect(enqueueCalls).toBe(1)
@@ -1447,7 +1469,7 @@ describe("WorkItemLifecycle", () => {
 
           const newChildItems = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            802,
+            "802",
           )
           expect(newChildItems).toEqual([])
         }).pipe(Effect.provide(layer)),
@@ -1499,13 +1521,13 @@ describe("WorkItemLifecycle", () => {
           })
 
           // Child-level Implement Now wins first for A.
-          const childA = yield* lifecycle.implementNow(repository.id, 901)
+          const childA = yield* lifecycle.implementNow(repository.id, "901")
           expect(childA.mergeMode).toBe("ordinary")
 
           // Parent command adopts A and creates B.
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            900,
+            "900",
           )
           expect(covered).toHaveLength(2)
           const byIssue = new Map(
@@ -1517,18 +1539,18 @@ describe("WorkItemLifecycle", () => {
 
           // Second Implement Now on A is rejected (one unfinished invariant).
           const conflict = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, 901),
+            lifecycle.implementNow(repository.id, "901"),
           )
           expect(conflict).toBeInstanceOf(UnfinishedWorkItemExistsError)
 
           const listA = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            901,
+            "901",
           )
           expect(listA).toHaveLength(1)
           const listB = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            902,
+            "902",
           )
           expect(listB).toHaveLength(1)
 
@@ -1536,7 +1558,7 @@ describe("WorkItemLifecycle", () => {
           const stepRunsBBefore = listB[0]!.stepRuns.length
           const again = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            900,
+            "900",
           )
           expect(again).toHaveLength(2)
           expect(new Set(again.map((item) => item.id))).toEqual(
@@ -1544,7 +1566,7 @@ describe("WorkItemLifecycle", () => {
           )
           const listBAfter = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            902,
+            "902",
           )
           expect(listBAfter[0]!.stepRuns).toHaveLength(stepRunsBBefore)
         }),
@@ -1559,14 +1581,14 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             repository.id,
-            child.issueNumber,
+            child.nativeId,
           )
           yield* lifecycle.abandon(first.id)
           expect(first.mergeMode).toBe("ordinary")
 
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.issueNumber,
+            parent.nativeId,
           )
           expect(covered).toHaveLength(1)
           expect(covered[0]!.id).not.toBe(first.id)
@@ -1574,7 +1596,7 @@ describe("WorkItemLifecycle", () => {
 
           const history = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            child.issueNumber,
+            child.nativeId,
           )
           expect(history).toHaveLength(2)
           expect(history[0]!.id).toBe(first.id)
@@ -1595,7 +1617,7 @@ describe("WorkItemLifecycle", () => {
               yield* seedParentWithOneActionableChild
             const covered = yield* lifecycle.implementAllWithAutoMerge(
               repository.id,
-              parent.issueNumber,
+              parent.nativeId,
             )
             return covered[0]!.id
           }).pipe(Effect.provide(createLayer)),
@@ -1649,7 +1671,7 @@ describe("WorkItemLifecycle", () => {
 
             const covered = yield* lifecycle.implementAllWithAutoMerge(
               repository.id,
-              parent.issueNumber,
+              parent.nativeId,
             )
             const workItemId = covered[0]!.id
 
@@ -1722,7 +1744,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, parent } = yield* seedParentWithOneActionableChild
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.issueNumber,
+            parent.nativeId,
           )
           const workItemId = covered[0]!.id
 
@@ -1770,7 +1792,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const retrieved = yield* lifecycle.getWorkItem(created.id)
 
@@ -1788,7 +1810,7 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           yield* lifecycle.abandon(first.id)
@@ -1796,12 +1818,12 @@ describe("WorkItemLifecycle", () => {
 
           const second = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           expect(listed.map((item) => item.id)).toEqual([first.id, second.id])
@@ -1845,7 +1867,7 @@ describe("WorkItemLifecycle", () => {
 
           const complete = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           for (let i = 0; i < 8; i++) {
             yield* claimAndRun
@@ -1860,7 +1882,7 @@ describe("WorkItemLifecycle", () => {
 
           const failed = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* db.deleteIssue(repository.id, issue.issueNumber)
           const failJob = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
@@ -1880,13 +1902,13 @@ describe("WorkItemLifecycle", () => {
 
           const abandonedQueued = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* lifecycle.abandon(abandonedQueued.id)
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(listed.map((item) => item.state)).toEqual([
             "complete",
@@ -1910,7 +1932,7 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           for (let i = 0; i < 8; i++) {
             const sql = yield* SqlClient.SqlClient
@@ -1943,13 +1965,13 @@ describe("WorkItemLifecycle", () => {
 
           const second = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(second.id).not.toBe(first.id)
           expect(second.state).toBe("create_worktree")
 
           const unfinishedBlocks = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.issueNumber),
+            lifecycle.implementNow(repository.id, issue.nativeId),
           )
           expect(unfinishedBlocks).toBeInstanceOf(UnfinishedWorkItemExistsError)
         }),
@@ -1965,7 +1987,7 @@ describe("WorkItemLifecycle", () => {
           yield* TestClock.setTime(1_000)
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           yield* TestClock.setTime(4_000)
@@ -2031,7 +2053,7 @@ describe("WorkItemLifecycle", () => {
               yield* TestClock.setTime(10_000)
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               yield* TestClock.setTime(12_000)
@@ -2242,7 +2264,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(created.state).toBe("create_worktree")
           expect(created.stepRuns).toHaveLength(1)
@@ -2445,7 +2467,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* sql.unsafe(
             `INSERT INTO pr_status_check
@@ -2535,7 +2557,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 3; index += 1) {
@@ -2575,7 +2597,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 3; index += 1) {
@@ -2622,7 +2644,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           yield* driveThroughCreatePrAlreadyReady(created.id)
@@ -2686,7 +2708,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -2789,7 +2811,7 @@ describe("WorkItemLifecycle", () => {
                 const { repository, issue } = yield* seedActionableIssue
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.issueNumber,
+                  issue.nativeId,
                 )
                 yield* setup({ repository, createdId: created.id })
                 yield* driveThroughCreatePrAlreadyReady(created.id)
@@ -2831,7 +2853,7 @@ describe("WorkItemLifecycle", () => {
                 yield* enableRepositoryAutoMerge(repository)
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.issueNumber,
+                  issue.nativeId,
                 )
                 yield* driveThroughCreatePrAlreadyReady(created.id)
 
@@ -2998,7 +3020,7 @@ describe("WorkItemLifecycle", () => {
                 yield* setRepositoryMergePolicy(repository, "classify")
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.issueNumber,
+                  issue.nativeId,
                 )
                 expect(created.autoMergeOverride).toBeNull()
                 yield* driveThroughCreatePrAlreadyReady(created.id)
@@ -3054,7 +3076,7 @@ describe("WorkItemLifecycle", () => {
                 yield* setRepositoryMergePolicy(repository, "always")
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.issueNumber,
+                  issue.nativeId,
                 )
                 expect(created.autoMergeOverride).toBeNull()
                 yield* driveThroughCreatePrAlreadyReady(created.id)
@@ -3196,7 +3218,7 @@ describe("WorkItemLifecycle", () => {
                 const { repository, issue } = yield* seedActionableIssue
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.issueNumber,
+                  issue.nativeId,
                 )
                 yield* setWorkItemMergeModeAlways(created.id)
                 yield* driveThroughCreatePrAlreadyReady(created.id)
@@ -3334,7 +3356,7 @@ describe("WorkItemLifecycle", () => {
                 })
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.issueNumber,
+                  issue.nativeId,
                 )
                 yield* setWorkItemMergeModeAlways(created.id)
 
@@ -3423,7 +3445,7 @@ describe("WorkItemLifecycle", () => {
                 yield* enableRepositoryAutoMerge(repository, {
                   waitForReadyForReviewChecks: false,
                 })
-                yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+                yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
                 for (let index = 0; index < 8; index += 1) {
                   yield* TestClock.adjust(1_000)
@@ -3492,7 +3514,7 @@ describe("WorkItemLifecycle", () => {
                 yield* enableRepositoryAutoMerge(repository, {
                   waitForReadyForReviewChecks: false,
                 })
-                yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+                yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
                 for (let index = 0; index < 8; index += 1) {
                   yield* TestClock.adjust(1_000)
@@ -3555,7 +3577,7 @@ describe("WorkItemLifecycle", () => {
                 yield* enableRepositoryAutoMerge(repository)
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.issueNumber,
+                  issue.nativeId,
                 )
                 yield* driveThroughCreatePrAlreadyReady(created.id)
                 yield* TestClock.setTime(1_000_000 + CHECK_START_DEADLINE_MS)
@@ -3618,7 +3640,7 @@ describe("WorkItemLifecycle", () => {
             yield* enableRepositoryAutoMerge(repository)
             const created = yield* lifecycle.implementNow(
               repository.id,
-              issue.issueNumber,
+              issue.nativeId,
             )
             yield* driveThroughCreatePrAlreadyReady(created.id)
             yield* makeQueuedJobsAvailable
@@ -3679,7 +3701,7 @@ describe("WorkItemLifecycle", () => {
                 const { repository, issue } = yield* seedActionableIssue
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.issueNumber,
+                  issue.nativeId,
                 )
 
                 for (let index = 0; index < 8; index += 1) {
@@ -3821,7 +3843,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -3914,7 +3936,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -3985,7 +4007,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4067,7 +4089,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4142,7 +4164,7 @@ describe("WorkItemLifecycle", () => {
               const lifecycle = yield* WorkItemLifecycle
               const sql = yield* SqlClient.SqlClient
               const { repository, issue } = yield* seedActionableIssue
-              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+              yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
               for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
@@ -4196,7 +4218,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4239,7 +4261,7 @@ describe("WorkItemLifecycle", () => {
               yield* TestClock.setTime(1_000_000)
               const lifecycle = yield* WorkItemLifecycle
               const { repository, issue } = yield* seedActionableIssue
-              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+              yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
               for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
@@ -4290,7 +4312,7 @@ describe("WorkItemLifecycle", () => {
                 const lifecycle = yield* WorkItemLifecycle
                 const sql = yield* SqlClient.SqlClient
                 const { repository, issue } = yield* seedActionableIssue
-                yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+                yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
                 for (let index = 0; index < 8; index += 1) {
                   yield* TestClock.adjust(1_000)
@@ -4366,7 +4388,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4472,7 +4494,7 @@ describe("WorkItemLifecycle", () => {
                 includeAllIssueAuthors: repository.includeAllIssueAuthors,
                 waitForReadyForReviewChecks: false,
               })
-              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+              yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
               for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
@@ -4538,7 +4560,7 @@ describe("WorkItemLifecycle", () => {
                 includeAllIssueAuthors: repository.includeAllIssueAuthors,
                 waitForReadyForReviewChecks: false,
               })
-              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+              yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
               for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
@@ -4613,7 +4635,7 @@ describe("WorkItemLifecycle", () => {
               })
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4706,7 +4728,7 @@ describe("WorkItemLifecycle", () => {
               })
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4788,7 +4810,7 @@ describe("WorkItemLifecycle", () => {
               })
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4850,7 +4872,7 @@ describe("WorkItemLifecycle", () => {
               const db = yield* DbService
               const { repository, issue } = yield* seedActionableIssue
               // Default true: reach Mark Ready under the safe policy.
-              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+              yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
               for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
@@ -4925,7 +4947,7 @@ describe("WorkItemLifecycle", () => {
                 const { repository, issue } = yield* seedActionableIssue
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.issueNumber,
+                  issue.nativeId,
                 )
 
                 for (let index = 0; index < 8; index += 1) {
@@ -5119,7 +5141,7 @@ describe("WorkItemLifecycle", () => {
                 yield* TestClock.setTime(1_000_000)
                 const lifecycle = yield* WorkItemLifecycle
                 const { repository, issue } = yield* seedActionableIssue
-                yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+                yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
                 for (let index = 0; index < 8; index += 1) {
                   yield* TestClock.adjust(1_000)
@@ -5206,7 +5228,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -5309,7 +5331,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -5404,7 +5426,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -5489,7 +5511,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -5585,7 +5607,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -5635,7 +5657,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -5707,7 +5729,7 @@ describe("WorkItemLifecycle", () => {
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("needs_human")
           const blocked = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.issueNumber),
+            lifecycle.implementNow(repository.id, issue.nativeId),
           )
           expect(blocked).toBeInstanceOf(UnfinishedWorkItemExistsError)
 
@@ -5796,7 +5818,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -5864,7 +5886,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -5937,7 +5959,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -6025,7 +6047,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -6117,7 +6139,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
@@ -6183,7 +6205,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           for (let index = 0; index < 9; index += 1) {
             yield* claimAndRunPending
           }
@@ -6222,7 +6244,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           for (let index = 0; index < 9; index += 1) {
@@ -6300,7 +6322,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -6372,7 +6394,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -6463,7 +6485,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -6563,7 +6585,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -6654,7 +6676,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           for (let index = 0; index < 9; index += 1) {
             yield* claimAndRunPending
@@ -6760,10 +6782,10 @@ describe("WorkItemLifecycle", () => {
             maxConcurrentWorkItems: 5,
           })
 
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           const wi = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const workItemId = wi[0]!.id
           yield* driveThroughCreatePrAlreadyReady(workItemId)
@@ -6861,7 +6883,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           yield* claimAndRunPending
@@ -6932,7 +6954,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 2; index += 1) {
@@ -6967,7 +6989,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 2; index += 1) {
@@ -7015,7 +7037,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           const watching = yield* lifecycle.getWorkItem(created.id)
@@ -7078,7 +7100,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -7145,7 +7167,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -7269,7 +7291,7 @@ describe("WorkItemLifecycle", () => {
             issueNumber: 42,
             ...sampleIssueFields,
           })
-          const pausedItem = yield* lifecycle.implementNow(repository.id, 42)
+          const pausedItem = yield* lifecycle.implementNow(repository.id, "42")
           yield* driveThroughCreatePrAlreadyReady(pausedItem.id)
           yield* makeQueuedJobsAvailable
           yield* claimAndRunPending
@@ -7289,7 +7311,7 @@ describe("WorkItemLifecycle", () => {
             title: "Occupies the only slot",
             url: "https://github.com/acme/widgets/issues/43",
           })
-          const occupant = yield* lifecycle.implementNow(repository.id, 43)
+          const occupant = yield* lifecycle.implementNow(repository.id, "43")
           expect(occupant.holdsWorkerSlot).toBe(true)
 
           const advanced = yield* lifecycle.continueAfterHumanPrOutcome(
@@ -7355,7 +7377,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -7423,7 +7445,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -7536,7 +7558,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -7611,7 +7633,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -7675,7 +7697,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -7746,7 +7768,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -7803,7 +7825,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -7896,7 +7918,7 @@ describe("WorkItemLifecycle", () => {
           })
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -7989,7 +8011,7 @@ describe("WorkItemLifecycle", () => {
           })
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -8045,7 +8067,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -8104,7 +8126,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 2; index += 1) {
@@ -8145,7 +8167,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 2; index += 1) {
@@ -8182,14 +8204,14 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           for (let index = 0; index < 10; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
 
           const blocked = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.issueNumber),
+            lifecycle.implementNow(repository.id, issue.nativeId),
           )
           expect(blocked).toBeInstanceOf(UnfinishedWorkItemExistsError)
         }),
@@ -8218,7 +8240,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 2; index += 1) {
@@ -8249,7 +8271,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -8282,7 +8304,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -8319,7 +8341,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -8362,7 +8384,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -8404,7 +8426,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -8447,7 +8469,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -8476,7 +8498,7 @@ describe("WorkItemLifecycle", () => {
           expect(Number(queued[0]?.count)).toBe(0)
 
           const blocked = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.issueNumber),
+            lifecycle.implementNow(repository.id, issue.nativeId),
           )
           expect(blocked).toBeInstanceOf(UnfinishedWorkItemExistsError)
 
@@ -8511,7 +8533,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -8568,7 +8590,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -8622,13 +8644,13 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           for (let index = 0; index < 6; index += 1) {
             yield* claimAndRunPending
           }
           const beforeCommit = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const queuedCommit = beforeCommit[0]?.stepRuns.at(-1)
           expect(queuedCommit).toMatchObject({
@@ -8675,7 +8697,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -8715,7 +8737,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -8760,7 +8782,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           yield* db.deleteIssue(repository.id, issue.issueNumber)
@@ -8853,7 +8875,7 @@ describe("WorkItemLifecycle", () => {
             yield* Effect.gen(function* () {
               const lifecycle = yield* WorkItemLifecycle
               const { repository, issue } = yield* seedActionableIssue
-              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+              yield* lifecycle.implementNow(repository.id, issue.nativeId)
               yield* testCase.mutate(repository.id, issue.issueNumber)
               const result = yield* claimAndRunPending
               expect(result._tag).toBe("processed")
@@ -8875,7 +8897,7 @@ describe("WorkItemLifecycle", () => {
           const db = yield* DbService
           const { repository, issue } = yield* seedActionableIssue
 
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
           yield* db.deleteIssue(repository.id, issue.issueNumber)
           yield* db.storeIssue({
@@ -8942,7 +8964,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.issueNumber,
+                issue.nativeId,
               )
               yield* claimAndRunPending
               yield* claimAndRunPending
@@ -9048,7 +9070,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -9093,7 +9115,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
 
@@ -9127,7 +9149,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
 
@@ -9194,7 +9216,7 @@ describe("WorkItemLifecycle", () => {
             ...sampleIssueFields,
           })
 
-          const created = yield* lifecycle.implementNow(repository.id, 42)
+          const created = yield* lifecycle.implementNow(repository.id, "42")
           const stepRunId = created.stepRuns[0]!.id
 
           const error = yield* Effect.flip(lifecycle.runStep(stepRunId))
@@ -9233,7 +9255,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           // Create Worktree through Create PR, then the first Watch attempt.
@@ -9338,7 +9360,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           // Create PR is the eighth step in the normal path.
@@ -9403,7 +9425,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* claimAndRunPending
@@ -9480,7 +9502,7 @@ describe("WorkItemLifecycle", () => {
 
           const throttled = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* driveThroughCreatePrAlreadyReady(throttled.id)
 
@@ -9504,11 +9526,11 @@ describe("WorkItemLifecycle", () => {
           const secondWaiterIssue = yield* seedWaiter("second")
           const firstWaiter = yield* lifecycle.implementNow(
             firstWaiterIssue.waiterRepository.id,
-            firstWaiterIssue.waiterIssue.issueNumber,
+            firstWaiterIssue.waiterIssue.nativeId,
           )
           const secondWaiter = yield* lifecycle.implementNow(
             secondWaiterIssue.waiterRepository.id,
-            secondWaiterIssue.waiterIssue.issueNumber,
+            secondWaiterIssue.waiterIssue.nativeId,
           )
           expect(firstWaiter.waitingSince).not.toBeNull()
           expect(secondWaiter.waitingSince).not.toBeNull()
@@ -9599,7 +9621,7 @@ describe("WorkItemLifecycle", () => {
                 const { repository, issue } = yield* seedActionableIssue
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.issueNumber,
+                  issue.nativeId,
                 )
                 yield* driveThroughCreatePrAlreadyReady(created.id)
                 yield* claimAndRunPending
@@ -9679,7 +9701,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const result = yield* claimAndRunPending
 
@@ -9750,7 +9772,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
 
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           const result = yield* claimAndRunPending
 
           expect(result._tag).toBe("processed")
@@ -9783,7 +9805,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const result = yield* claimAndRunPending
 
@@ -9864,7 +9886,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const claimed = yield* queue.rawClaim(
             WORK_ITEM_LIFECYCLE_QUEUE,
@@ -9940,7 +9962,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const failed = yield* claimAndRunPending
           expect(failed._tag).toBe("processed")
@@ -10001,7 +10023,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* claimAndRunPending
           yield* lifecycle.retry(created.id)
@@ -10036,7 +10058,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
           const now = Date.now()
@@ -10070,7 +10092,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const now = Date.now()
 
@@ -10093,7 +10115,7 @@ describe("WorkItemLifecycle", () => {
           )
 
           const duplicate = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.issueNumber),
+            lifecycle.implementNow(repository.id, issue.nativeId),
           )
           expect(duplicate).toBeInstanceOf(UnfinishedWorkItemExistsError)
 
@@ -10130,7 +10152,7 @@ describe("WorkItemLifecycle", () => {
             })
             const obsolete = yield* lifecycle.implementNow(
               repository.id,
-              issueNumber,
+              String(issueNumber),
             )
             yield* sql.unsafe(`DELETE FROM job_queue`)
             yield* sql.unsafe(
@@ -10148,7 +10170,7 @@ describe("WorkItemLifecycle", () => {
 
             const newer = yield* lifecycle.implementNow(
               repository.id,
-              issueNumber,
+              String(issueNumber),
             )
             yield* sql.unsafe(
               `UPDATE work_item
@@ -10198,7 +10220,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           const queuedError = yield* Effect.flip(lifecycle.retry(created.id))
@@ -10256,7 +10278,7 @@ describe("WorkItemLifecycle", () => {
           )
           const runningItem = yield* lifecycle.implementNow(
             repo2.id,
-            issue2.issueNumber,
+            issue2.nativeId,
           )
           yield* sql.unsafe(
             `UPDATE step_run
@@ -10304,7 +10326,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* claimAndRunPending
 
@@ -10346,7 +10368,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           yield* db.deleteIssue(repository.id, issue.issueNumber)
@@ -10388,7 +10410,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           yield* db.storeIssue({
@@ -10432,7 +10454,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           yield* db.storeIssue({
@@ -10486,7 +10508,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           // Reach Review pending (create_worktree, install_dependencies,
           // implement, assess_changes, pre_commit) before closing the Issue,
@@ -10556,7 +10578,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           // Reach Assess Changes pending (create_worktree,
           // install_dependencies, implement) before deleting the Issue.
@@ -10627,7 +10649,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.queue(
             repository.id,
-            heldIssue.issueNumber,
+            heldIssue.nativeId,
           )
           expect(created.waitingForBlockers).toBe(true)
           expect(created.worktreePath).toBeNull()
@@ -10678,7 +10700,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRun = created.stepRuns[0]!
           const now = Date.now()
@@ -10722,7 +10744,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRun = created.stepRuns[0]!
           const now = Date.now()
@@ -10774,7 +10796,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRun = created.stepRuns[0]!
           const now = Date.now()
@@ -10844,7 +10866,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRun = created.stepRuns[0]!
           const now = Date.now()
@@ -10891,7 +10913,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
           const jobId = created.stepRuns[0]!.queueJobId!
@@ -10942,7 +10964,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
           const jobId = created.stepRuns[0]!.queueJobId!
@@ -11019,7 +11041,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
           const jobId = created.stepRuns[0]!.queueJobId!
@@ -11156,7 +11178,7 @@ describe("WorkItemLifecycle", () => {
           const queue = yield* QueueService
           const { repository, issue } = yield* seedActionableIssue
 
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isSome(claimed)).toBe(true)
           if (Option.isNone(claimed)) {
@@ -11258,7 +11280,7 @@ describe("WorkItemLifecycle", () => {
           const queue = yield* QueueService
           const { repository, issue } = yield* seedActionableIssue
 
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
           const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isSome(claimed)).toBe(true)
           if (Option.isNone(claimed)) {
@@ -11300,7 +11322,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
 
@@ -11335,7 +11357,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           const abandoned = yield* lifecycle.abandon(created.id)
@@ -11356,14 +11378,14 @@ describe("WorkItemLifecycle", () => {
 
           const next = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(next.id).not.toBe(created.id)
           expect(next.state).toBe("create_worktree")
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(listed.map((item) => item.id)).toEqual([created.id, next.id])
           expect(listed[0]!.state).toBe("abandoned")
@@ -11389,7 +11411,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isSome(job)).toBe(true)
@@ -11413,7 +11435,7 @@ describe("WorkItemLifecycle", () => {
 
           const second = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const now = Date.now()
           yield* sql.unsafe(
@@ -11445,14 +11467,14 @@ describe("WorkItemLifecycle", () => {
 
           const third = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(third.id).not.toBe(created.id)
           expect(third.id).not.toBe(second.id)
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(listed).toHaveLength(3)
           expect(listed.map((item) => item.state)).toEqual([
@@ -11473,7 +11495,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           yield* sql.unsafe(
@@ -11540,7 +11562,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           const running = yield* Effect.forkChild(
@@ -11572,7 +11594,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* sql.unsafe(
             `UPDATE step_run
@@ -11593,7 +11615,7 @@ describe("WorkItemLifecycle", () => {
           expect(
             yield* lifecycle.listWorkItemsForIssue(
               repository.id,
-              issue.issueNumber,
+              issue.nativeId,
             ),
           ).toHaveLength(1)
           const jobs = yield* sql.unsafe(
@@ -11627,7 +11649,7 @@ describe("WorkItemLifecycle", () => {
 
           const failed = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const failedJob = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           if (Option.isNone(failedJob)) {
@@ -11643,13 +11665,13 @@ describe("WorkItemLifecycle", () => {
 
           const stillQueued = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(stillQueued.state).toBe("create_worktree")
           expect(
             (yield* lifecycle.listWorkItemsForIssue(
               repository.id,
-              issue.issueNumber,
+              issue.nativeId,
             )).map((item) => item.state),
           ).toEqual(["abandoned", "create_worktree"])
 
@@ -11680,7 +11702,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* sql.unsafe(
             `CREATE TRIGGER reject_repository_removal
@@ -11718,7 +11740,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           const deletedId = yield* lifecycle.reset(created.id)
@@ -11732,13 +11754,13 @@ describe("WorkItemLifecycle", () => {
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(listed).toHaveLength(0)
 
           const next = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(next.id).not.toBe(created.id)
           expect(next.state).toBe("create_worktree")
@@ -11755,7 +11777,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* sql.unsafe(
             `UPDATE step_run
@@ -11775,7 +11797,7 @@ describe("WorkItemLifecycle", () => {
 
           const next = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(next.id).not.toBe(created.id)
         }),
@@ -11807,7 +11829,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           if (Option.isNone(job)) {
@@ -11846,7 +11868,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
 
           const error = yield* Effect.flip(lifecycle.reset(created.id))
@@ -11868,7 +11890,7 @@ describe("WorkItemLifecycle", () => {
 
           const abandoned = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* lifecycle.abandon(abandoned.id)
 
@@ -11877,13 +11899,13 @@ describe("WorkItemLifecycle", () => {
 
           const afterAbandoned = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(afterAbandoned).toHaveLength(0)
 
           const failed = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const now = Date.now()
           yield* sql.unsafe(`DELETE FROM job_queue`)
@@ -11916,7 +11938,7 @@ describe("WorkItemLifecycle", () => {
 
           const afterFailed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(afterFailed).toHaveLength(0)
         }),
@@ -11946,7 +11968,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isSome(job)).toBe(true)
@@ -12021,7 +12043,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(created.paused).toBe(false)
           expect(created.stepRuns[0]!.status).toBe("queued")
@@ -12048,7 +12070,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* lifecycle.pause(created.id)
 
@@ -12091,7 +12113,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
 
@@ -12146,7 +12168,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* claimAndRunPending
           yield* lifecycle.pause(created.id)
@@ -12179,7 +12201,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           yield* sql.unsafe(
             `UPDATE work_item SET state = 'complete', updated_at = ? WHERE id = ?`,
@@ -12225,7 +12247,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
           expect(created.sessionId).toBeNull()
@@ -12278,7 +12300,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const notPaused = yield* Effect.flip(lifecycle.interrupt(created.id))
           expect(notPaused).toBeInstanceOf(InterruptNotEligibleError)
@@ -12322,7 +12344,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
           const fiber = yield* Effect.forkChild(lifecycle.runStep(stepRunId))
@@ -12386,7 +12408,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = created.stepRuns[0]!.id
           const runFiber = yield* Effect.forkChild(lifecycle.runStep(stepRunId))
@@ -12443,7 +12465,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const fiber = yield* Effect.forkChild(
             lifecycle.runStep(created.stepRuns[0]!.id),
@@ -12490,7 +12512,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const fiber = yield* Effect.forkChild(
             lifecycle.runStep(created.stepRuns[0]!.id),
@@ -12560,11 +12582,11 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             firstIssue.repository.id,
-            firstIssue.issue.issueNumber,
+            firstIssue.issue.nativeId,
           )
           const waiter = yield* lifecycle.implementNow(
             waiterRepo.id,
-            waiterIssue.issueNumber,
+            waiterIssue.nativeId,
           )
           expect(waiter.waitingSince).not.toBeNull()
 
@@ -12615,7 +12637,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const fiber = yield* Effect.forkChild(
             lifecycle.runStep(created.stepRuns[0]!.id),
@@ -12652,7 +12674,7 @@ describe("WorkItemLifecycle", () => {
           )
           yield* Effect.yieldNow
 
-          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.nativeId)
 
           expect(yield* Fiber.join(changes)).toEqual([repository.id])
         }),
@@ -12671,7 +12693,7 @@ describe("WorkItemLifecycle", () => {
           )
 
           const error = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, 999_999),
+            lifecycle.implementNow(repository.id, "999999"),
           )
           expect(error).toBeInstanceOf(IssueNotFoundError)
 
@@ -12699,7 +12721,7 @@ describe("WorkItemLifecycle", () => {
 
           const workItem = yield* lifecycle.implementNow(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           const stepRunId = workItem.stepRuns[0]!.id
 
@@ -12766,15 +12788,15 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             a.repository.id,
-            a.issue.issueNumber,
+            a.issue.nativeId,
           )
           const second = yield* lifecycle.implementNow(
             b.repository.id,
-            b.issue.issueNumber,
+            b.issue.nativeId,
           )
           const third = yield* lifecycle.implementNow(
             c.repository.id,
-            c.issue.issueNumber,
+            c.issue.nativeId,
           )
 
           expect(first.holdsWorkerSlot).toBe(true)
@@ -12804,15 +12826,15 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             a.repository.id,
-            a.issue.issueNumber,
+            a.issue.nativeId,
           )
           const second = yield* lifecycle.implementNow(
             b.repository.id,
-            b.issue.issueNumber,
+            b.issue.nativeId,
           )
           const third = yield* lifecycle.implementNow(
             c.repository.id,
-            c.issue.issueNumber,
+            c.issue.nativeId,
           )
 
           expect(first.holdsWorkerSlot).toBe(true)
@@ -12844,11 +12866,11 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             a.repository.id,
-            a.issue.issueNumber,
+            a.issue.nativeId,
           )
           const waiter = yield* lifecycle.implementNow(
             b.repository.id,
-            b.issue.issueNumber,
+            b.issue.nativeId,
           )
           expect(waiter.waitingSince).not.toBeNull()
 
@@ -12885,11 +12907,11 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             a.repository.id,
-            a.issue.issueNumber,
+            a.issue.nativeId,
           )
           const waiter = yield* lifecycle.implementNow(
             b.repository.id,
-            b.issue.issueNumber,
+            b.issue.nativeId,
           )
 
           const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
@@ -12926,10 +12948,10 @@ describe("WorkItemLifecycle", () => {
           const a = yield* seedIssue(501)
           const b = yield* seedIssue(502)
 
-          yield* lifecycle.implementNow(a.repository.id, a.issue.issueNumber)
+          yield* lifecycle.implementNow(a.repository.id, a.issue.nativeId)
           const waiter = yield* lifecycle.implementNow(
             b.repository.id,
-            b.issue.issueNumber,
+            b.issue.nativeId,
           )
           expect(waiter.waitingSince).not.toBeNull()
 
@@ -12981,10 +13003,7 @@ describe("WorkItemLifecycle", () => {
           const queue = yield* QueueService
           const { repository, issue } = yield* seedBlockedIssue
 
-          const created = yield* lifecycle.queue(
-            repository.id,
-            issue.issueNumber,
-          )
+          const created = yield* lifecycle.queue(repository.id, issue.nativeId)
 
           expect(created.waitingForBlockers).toBe(true)
           expect(created.holdsWorkerSlot).toBe(false)
@@ -13011,7 +13030,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
 
           const error = yield* Effect.flip(
-            lifecycle.queue(repository.id, issue.issueNumber),
+            lifecycle.queue(repository.id, issue.nativeId),
           )
 
           expect(error).toBeInstanceOf(IssueNotBlockedError)
@@ -13024,9 +13043,9 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedBlockedIssue
 
-          const first = yield* lifecycle.queue(repository.id, issue.issueNumber)
+          const first = yield* lifecycle.queue(repository.id, issue.nativeId)
           const error = yield* Effect.flip(
-            lifecycle.queue(repository.id, issue.issueNumber),
+            lifecycle.queue(repository.id, issue.nativeId),
           )
 
           expect(error).toBeInstanceOf(UnfinishedWorkItemExistsError)
@@ -13053,7 +13072,7 @@ describe("WorkItemLifecycle", () => {
           })
 
           const missing = yield* Effect.flip(
-            lifecycle.queue(repository.id, 999),
+            lifecycle.queue(repository.id, "999"),
           )
           expect(missing).toBeInstanceOf(IssueNotFoundError)
 
@@ -13070,7 +13089,7 @@ describe("WorkItemLifecycle", () => {
               },
             ],
           })
-          const closed = yield* Effect.flip(lifecycle.queue(repository.id, 8))
+          const closed = yield* Effect.flip(lifecycle.queue(repository.id, "8"))
           expect(closed).toBeInstanceOf(IssueNotOpenError)
 
           yield* db.storeIssue({
@@ -13087,7 +13106,7 @@ describe("WorkItemLifecycle", () => {
               },
             ],
           })
-          const parent = yield* Effect.flip(lifecycle.queue(repository.id, 9))
+          const parent = yield* Effect.flip(lifecycle.queue(repository.id, "9"))
           expect(parent).toBeInstanceOf(ParentIssueError)
         }),
       ))
@@ -13098,10 +13117,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedBlockedIssue
 
-          const created = yield* lifecycle.queue(
-            repository.id,
-            issue.issueNumber,
-          )
+          const created = yield* lifecycle.queue(repository.id, issue.nativeId)
 
           const pauseError = yield* Effect.flip(lifecycle.pause(created.id))
           expect(pauseError).toBeInstanceOf(WorkItemWaitingForBlockersError)
@@ -13127,10 +13143,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedBlockedIssue
 
-          const created = yield* lifecycle.queue(
-            repository.id,
-            issue.issueNumber,
-          )
+          const created = yield* lifecycle.queue(repository.id, issue.nativeId)
           const deletedId = yield* lifecycle.reset(created.id)
           expect(deletedId).toBe(created.id)
 
@@ -13139,11 +13152,11 @@ describe("WorkItemLifecycle", () => {
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.issueNumber,
+            issue.nativeId,
           )
           expect(listed).toHaveLength(0)
 
-          const again = yield* lifecycle.queue(repository.id, issue.issueNumber)
+          const again = yield* lifecycle.queue(repository.id, issue.nativeId)
           expect(again.id).not.toBe(created.id)
           expect(again.waitingForBlockers).toBe(true)
         }),
@@ -13155,10 +13168,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedBlockedIssue
 
-          const created = yield* lifecycle.queue(
-            repository.id,
-            issue.issueNumber,
-          )
+          const created = yield* lifecycle.queue(repository.id, issue.nativeId)
           expect(created.waitingForBlockers).toBe(true)
 
           const abandoned = yield* lifecycle.abandon(created.id)
@@ -13204,7 +13214,7 @@ describe("WorkItemLifecycle", () => {
               },
             ],
           })
-          const held = yield* lifecycle.queue(blockedRepo.id, 88)
+          const held = yield* lifecycle.queue(blockedRepo.id, "88")
           expect(held.holdsWorkerSlot).toBe(false)
 
           const actionableRepo = yield* db.addRepository({
@@ -13218,7 +13228,10 @@ describe("WorkItemLifecycle", () => {
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/89",
           })
-          const admitted = yield* lifecycle.implementNow(actionableRepo.id, 89)
+          const admitted = yield* lifecycle.implementNow(
+            actionableRepo.id,
+            "89",
+          )
           expect(admitted.holdsWorkerSlot).toBe(true)
           expect(admitted.waitingSince).toBeNull()
           expect(admitted.stepRuns).toHaveLength(1)
@@ -13238,7 +13251,7 @@ describe("WorkItemLifecycle", () => {
           const queue = yield* QueueService
           const { repository, issue } = yield* seedBlockedIssue
 
-          const held = yield* lifecycle.queue(repository.id, issue.issueNumber)
+          const held = yield* lifecycle.queue(repository.id, issue.nativeId)
           expect(held.waitingForBlockers).toBe(true)
           expect(held.holdsWorkerSlot).toBe(false)
           expect(held.stepRuns).toHaveLength(0)
@@ -13280,7 +13293,7 @@ describe("WorkItemLifecycle", () => {
           const db = yield* DbService
           const { repository, issue } = yield* seedBlockedIssue
 
-          const held = yield* lifecycle.queue(repository.id, issue.issueNumber)
+          const held = yield* lifecycle.queue(repository.id, issue.nativeId)
 
           // Partial clearance: one blocker remains — still not Implementable.
           yield* db.storeIssue({
@@ -13335,7 +13348,7 @@ describe("WorkItemLifecycle", () => {
               },
             ],
           })
-          const closedHeld = yield* lifecycle.queue(repository.id, 201)
+          const closedHeld = yield* lifecycle.queue(repository.id, "201")
           yield* db.storeIssue({
             repositoryId: repository.id,
             issueNumber: 201,
@@ -13359,7 +13372,7 @@ describe("WorkItemLifecycle", () => {
               },
             ],
           })
-          const missingHeld = yield* lifecycle.queue(repository.id, 202)
+          const missingHeld = yield* lifecycle.queue(repository.id, "202")
           yield* db.deleteIssue(repository.id, missing.issueNumber)
 
           const parent = yield* db.storeIssue({
@@ -13375,7 +13388,7 @@ describe("WorkItemLifecycle", () => {
               },
             ],
           })
-          const parentHeld = yield* lifecycle.queue(repository.id, 203)
+          const parentHeld = yield* lifecycle.queue(repository.id, "203")
           yield* db.storeIssue({
             repositoryId: repository.id,
             issueNumber: 203,
@@ -13443,7 +13456,7 @@ describe("WorkItemLifecycle", () => {
               },
             ],
           })
-          const held = yield* lifecycle.queue(heldRepo.id, 301)
+          const held = yield* lifecycle.queue(heldRepo.id, "301")
 
           const admittedRepo = yield* db.addRepository({
             ...sampleRepository,
@@ -13456,7 +13469,10 @@ describe("WorkItemLifecycle", () => {
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/302",
           })
-          const occupying = yield* lifecycle.implementNow(admittedRepo.id, 302)
+          const occupying = yield* lifecycle.implementNow(
+            admittedRepo.id,
+            "302",
+          )
           expect(occupying.holdsWorkerSlot).toBe(true)
 
           const waiterRepo = yield* db.addRepository({
@@ -13470,7 +13486,7 @@ describe("WorkItemLifecycle", () => {
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/303",
           })
-          const slotWaiter = yield* lifecycle.implementNow(waiterRepo.id, 303)
+          const slotWaiter = yield* lifecycle.implementNow(waiterRepo.id, "303")
           expect(slotWaiter.holdsWorkerSlot).toBe(false)
           expect(slotWaiter.waitingSince).not.toBeNull()
 
@@ -13518,7 +13534,7 @@ describe("WorkItemLifecycle", () => {
           const db = yield* DbService
           const { repository, issue } = yield* seedBlockedIssue
 
-          const held = yield* lifecycle.queue(repository.id, issue.issueNumber)
+          const held = yield* lifecycle.queue(repository.id, issue.nativeId)
           yield* db.storeIssue({
             repositoryId: repository.id,
             issueNumber: issue.issueNumber,

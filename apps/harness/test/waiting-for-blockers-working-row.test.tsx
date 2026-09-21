@@ -21,6 +21,12 @@ const runningWorkItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: "repo-1",
   issueNumber: 26,
+  issueSource: {
+    tracker: "github",
+    nativeId: "26",
+    displayId: "26",
+    url: "https://github.com/acme/widgets/issues/26",
+  },
   issueTitle: "Pause a running Work Item",
   pullRequestNumber: null,
   agentBackend: { id: "opencode", label: "OpenCode" },

@@ -7,7 +7,7 @@ import {
 } from "@ready-for-agent/db-service"
 import {
   classifyIntakeCandidates,
-  completeIssueIdentity,
+  persistedIssueIdentity,
 } from "@ready-for-agent/lifecycle-model"
 import {
   type AgentBackendUnavailableError,
@@ -198,8 +198,8 @@ export const startRepositoryIntake = (
       // Widen error channel so Implement Now and Queue share one sequential path.
       const attempt: Effect.Effect<WorkItemRecord, unknown> =
         candidate.action === "IMPLEMENT_NOW"
-          ? lifecycle.implementNow(repository.id, candidate.issueNumber)
-          : lifecycle.queue(repository.id, candidate.issueNumber)
+          ? lifecycle.implementNow(repository.id, candidate.nativeId)
+          : lifecycle.queue(repository.id, candidate.nativeId)
 
       // Capture candidate-local failures as result data; rethrow operation-level.
       const outcome = yield* Effect.result(attempt)
@@ -207,7 +207,7 @@ export const startRepositoryIntake = (
         results.push({
           __typename: "RepositoryIntakeCreated",
           issueNumber: candidate.issueNumber,
-          ...completeIssueIdentity(candidate),
+          ...persistedIssueIdentity(candidate),
           title: candidate.title,
           url: candidate.url,
           action: candidate.action,
@@ -221,7 +221,7 @@ export const startRepositoryIntake = (
         results.push({
           __typename: "RepositoryIntakeFailed",
           issueNumber: candidate.issueNumber,
-          ...completeIssueIdentity(candidate),
+          ...persistedIssueIdentity(candidate),
           title: candidate.title,
           url: candidate.url,
           action: candidate.action,

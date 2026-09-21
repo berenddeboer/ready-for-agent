@@ -626,6 +626,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
               stdout: JSON.stringify([
                 {
                   number: 7,
+                  nativeId: "7",
+                  displayId: "7",
                   title: "Ready issue",
                   body: "Issue body",
                   url: "https://github.com/acme/widgets/issues/7",
@@ -639,6 +641,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
                   parent: {
                     number: 1,
                     url: "https://github.com/acme/widgets/issues/1",
+                    nativeId: "1",
+                    displayId: "1",
                     state: "OPEN",
                     isReadyLabeled: true,
                   },
@@ -646,6 +650,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
                     {
                       number: 3,
                       url: "https://github.com/acme/widgets/issues/3",
+                      nativeId: "3",
+                      displayId: "3",
                     },
                   ],
                 },
@@ -684,11 +690,15 @@ describe("Keymaxxer-backed GitHub layer", () => {
           {
             number: 3,
             url: "https://github.com/acme/widgets/issues/3",
+            nativeId: "3",
+            displayId: "3",
           },
         ])
         expect(results[0]?.[0]?.parent).toEqual({
           number: 1,
           url: "https://github.com/acme/widgets/issues/1",
+          nativeId: "1",
+          displayId: "1",
           state: "OPEN",
           isReadyLabeled: true,
         })

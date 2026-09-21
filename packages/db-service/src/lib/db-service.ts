@@ -4,9 +4,9 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 import { ulid } from "ulidx"
 import { isSelectableAgentBackendId } from "@ready-for-agent/agent-backend"
 import {
-  completeIssueIdentity,
   isForge,
   isIssueTracker,
+  persistedIssueIdentity,
 } from "@ready-for-agent/lifecycle-model"
 import {
   AgentBackendChangeBlockedError,
@@ -371,7 +371,7 @@ const issueSelectColumns = `id, repository_id, issue_number, issue_tracker,
 const completeIssueReference = (
   reference: IssueDependency,
 ): IssueDependency => {
-  const identity = completeIssueIdentity({
+  const identity = persistedIssueIdentity({
     issueNumber: reference.issueNumber,
     nativeId: reference.nativeId,
     displayId: reference.displayId,
@@ -428,7 +428,7 @@ const toIssueRecord = (
   row: IssueSqlRow,
   blockedBy: readonly IssueDependency[],
 ): IssueRecord => {
-  const identity = completeIssueIdentity({
+  const identity = persistedIssueIdentity({
     issueNumber: row.issueNumber,
     nativeId: row.nativeId,
     displayId: row.displayId,
@@ -454,8 +454,8 @@ const toIssueRecord = (
         : completeIssueReference({
             issueNumber: row.parentIssueNumber,
             issueUrl: row.parentIssueUrl,
-            nativeId: row.parentNativeId ?? undefined,
-            displayId: row.parentDisplayId ?? undefined,
+            nativeId: row.parentNativeId ?? "",
+            displayId: row.parentDisplayId ?? "",
           }),
     blockedBy: blockedBy.map(completeIssueReference),
   }
@@ -2381,7 +2381,7 @@ export const DbServiceLive = Layer.effect(
         })
       }
       const issueTracker = input.issueTracker ?? repositoryTracker
-      const identity = completeIssueIdentity({
+      const identity = persistedIssueIdentity({
         issueNumber: input.issueNumber,
         nativeId: input.nativeId?.trim(),
         displayId: input.displayId?.trim(),

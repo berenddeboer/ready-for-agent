@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { formatIssueDisplayId } from "@ready-for-agent/lifecycle-model"
 import { AgentModelSelect } from "./agent-model-select.js"
 import {
   type AgentModelOption,
@@ -41,7 +42,7 @@ type ImplementWithBackendOption = {
 }
 
 export type ImplementWithDialogProps = {
-  readonly issueNumber: number
+  readonly displayId: string
   readonly target?: "leaf" | "parent"
   readonly backendId: string
   readonly backends: readonly ImplementWithBackendOption[]
@@ -122,7 +123,7 @@ const sameAsBuildDraft = (
  * route, no history entry, drafts die when this unmounts.
  */
 export function ImplementWithDialog({
-  issueNumber,
+  displayId,
   target = "leaf",
   backendId,
   backends,
@@ -147,7 +148,7 @@ export function ImplementWithDialog({
   )
   const [mergePolicy, setMergePolicy] = useState(initialMergePolicy)
   const [implementLocally, setImplementLocally] = useState(false)
-  const titleId = `implement-with-title-${issueNumber}`
+  const titleId = `implement-with-title-${displayId}`
   const backendLabel =
     backends.find((backend) => backend.id === backendId)?.label ?? backendId
 
@@ -283,7 +284,7 @@ export function ImplementWithDialog({
       <h2 id={titleId} className={ui.dialogTitle}>
         {target === "parent"
           ? "Implement all with..."
-          : `Implement issue #${issueNumber} with...`}
+          : `Implement issue ${formatIssueDisplayId(displayId)} with...`}
       </h2>
       <p className={ui.dialogLede}>
         {target === "parent"

@@ -686,11 +686,9 @@ export const makeLinearService = (options: {
         after = data.issues.pageInfo.endCursor
       }
       return issues.sort((left, right) =>
-        (left.displayId ?? String(left.number)).localeCompare(
-          right.displayId ?? String(right.number),
-          undefined,
-          { numeric: true },
-        ),
+        left.displayId.localeCompare(right.displayId, undefined, {
+          numeric: true,
+        }),
       )
     }),
     getIssue: Effect.fn("LinearService.getIssue")(function* (nativeId: string) {

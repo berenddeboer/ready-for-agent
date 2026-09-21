@@ -947,7 +947,12 @@ const toIssueReference = (
   issue: GitHubApiIssueReference,
 ): GitHubIssueReference => {
   const decoded = decodeSync(GitHubIssueReferenceSchema, issue)
-  return { number: decoded.number, url: decoded.url }
+  return {
+    number: decoded.number,
+    url: decoded.url,
+    nativeId: String(decoded.number),
+    displayId: String(decoded.number),
+  }
 }
 
 const mapBlockedByPage = (
@@ -1067,6 +1072,8 @@ const toReadyLabeledIssue = (
 
   return {
     number: decoded.number,
+    nativeId: String(decoded.number),
+    displayId: String(decoded.number),
     title: decoded.title,
     body: decoded.body,
     url: decoded.url,
@@ -2947,6 +2954,8 @@ const makeGitHubApiService = (
           const issueHierarchy = hierarchy(issue)
           return {
             number: issue.number,
+            nativeId: String(issue.number),
+            displayId: String(issue.number),
             title: issue.title,
             body: issue.body,
             url: issue.url,
@@ -2964,6 +2973,8 @@ const makeGitHubApiService = (
                 : {
                     number: issue.parent.number,
                     url: issue.parent.url,
+                    nativeId: String(issue.parent.number),
+                    displayId: String(issue.parent.number),
                     state: issue.parent.state,
                     isReadyLabeled: readyIssueUrls.has(
                       issueUrlKey(issue.parent.url),

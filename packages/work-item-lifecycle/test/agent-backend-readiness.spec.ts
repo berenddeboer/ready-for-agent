@@ -144,7 +144,7 @@ describe("Agent Backend readiness gates", () => {
           hasChildren: false,
           blockedBy: [],
         })
-        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 1))
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, "1"))
         expect(error).toBeInstanceOf(LifecycleUnavailableError)
       }).pipe(Effect.provide(layer)),
     )
@@ -253,7 +253,7 @@ describe("Agent Backend readiness gates", () => {
           blockedBy: [],
         })
         // Force-ready require so create succeeds, then run agent-free step.
-        const created = yield* lifecycle.implementNow(repo.id, 1)
+        const created = yield* lifecycle.implementNow(repo.id, "1")
         expect(created.agentBackend).toBe("opencode")
         const stepRunId = created.stepRuns[0]?.id
         expect(stepRunId).toBeDefined()
@@ -419,7 +419,7 @@ const seedReadyWorkItem = Effect.gen(function* () {
     hasChildren: false,
     blockedBy: [],
   })
-  const created = yield* lifecycle.implementNow(repo.id, 1)
+  const created = yield* lifecycle.implementNow(repo.id, "1")
   const createRun = created.stepRuns[0]
   if (createRun === undefined) {
     throw new Error("expected create_worktree Step Run")

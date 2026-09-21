@@ -558,9 +558,16 @@ const toReadyLabeledIssue = (
   const blockedBy = [...blockerIds]
     .filter((id) => isOpenState(stateById.get(id)))
     .sort((left, right) => left - right)
-    .map((id) => ({ number: id, url: workItemUrl(identity, id) }))
+    .map((id) => ({
+      number: id,
+      nativeId: String(id),
+      displayId: String(id),
+      url: workItemUrl(identity, id),
+    }))
   return {
     number: item.id,
+    nativeId: String(item.id),
+    displayId: String(item.id),
     title: fields["System.Title"] ?? "",
     body: fields["System.Description"] ?? "",
     url: workItemUrl(identity, item.id),

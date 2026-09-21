@@ -81,9 +81,9 @@ const projectPathFlag = Flag.string("project-path").pipe(
   Flag.optional,
 )
 
-const retryIssueFlag = Flag.integer("issue").pipe(
+const retryIssueFlag = Flag.string("issue").pipe(
   Flag.withDescription(
-    "Retry the current unfinished Work Item for this Issue number",
+    "Retry the current unfinished Work Item for this Issue Native Identity",
   ),
   Flag.optional,
 )
@@ -307,7 +307,7 @@ const intakeWorkflow = Effect.fn("Cli.intake")(function* (
 const retryWorkflow = Effect.fn("Cli.retry")(function* (
   repositoryArgument: string,
   selector: {
-    readonly issue: number | undefined
+    readonly issue: string | undefined
     readonly workItem: string | undefined
     readonly allRetryable: boolean
     readonly maxAutonomousRetries: number | undefined
@@ -350,7 +350,7 @@ const retryWorkflow = Effect.fn("Cli.retry")(function* (
 
   const graphqlSelector =
     selector.issue !== undefined
-      ? { issueNumber: selector.issue }
+      ? { nativeId: selector.issue }
       : selector.workItem !== undefined
         ? { workItemId: selector.workItem }
         : { allRetryable: true as const }

@@ -83,7 +83,7 @@ type Query {
   models: [AgentModel!]!
   issues(repositoryId: ID!): [Issue!]!
   """
-  Work Items for a repository (or one issue when issueNumber is set).
+  Work Items for a repository (or one issue when nativeId is set).
   Omit listKind/limit for the full list (backward-compatible default).
   listKind WORKING: unfinished Work Items (including retryable failed or
   interrupted Step Runs) plus Needs Human (no history cap from the Jobs card).
@@ -96,7 +96,7 @@ type Query {
   """
   workItems(
     repositoryId: ID!
-    issueNumber: Int
+    nativeId: String
     listKind: WorkItemsListKind
     limit: Int
   ): [WorkItem!]!
@@ -897,7 +897,7 @@ type IntakeCandidate {
 
 """
 Ordered Intake Candidates for one Repository. Candidate order is Implement Now
-by ascending Issue number, then Queue by ascending Issue number.
+by display identifier, then Queue by display identifier.
 """
 type RepositoryIntakeCandidates {
   repository: Repository!
@@ -958,13 +958,13 @@ type RepositoryIntakeResult {
 }
 
 """
-Exactly one of issueNumber, workItemId, or allRetryable=true must be set.
+Exactly one of nativeId, workItemId, or allRetryable=true must be set.
 """
 input RetryWorkItemsSelector {
   """
-  Retry the current unfinished Work Item for this Issue number.
+  Retry the current unfinished Work Item for this Issue Native Identity.
   """
-  issueNumber: Int
+  nativeId: String
   """
   Retry this Work Item after verifying it belongs to the selected Repository.
   """
@@ -1422,13 +1422,13 @@ type Mutation {
   addLinearApiKey: LinearCredential!
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!
-  implementNow(repositoryId: ID!, issueNumber: Int!): WorkItem!
+  implementNow(repositoryId: ID!, nativeId: String!): WorkItem!
   """
   Create a Work Item authorized as CI Repair for the active Closed CI Failure
   Incident. Fails when no Closed incident is active. Competes for ordinary
   Worker Slots and does not bypass Work Item-local PR safety.
   """
-  implementCiRepair(repositoryId: ID!, issueNumber: Int!): WorkItem!
+  implementCiRepair(repositoryId: ID!, nativeId: String!): WorkItem!
   """
   Authorize an unfinished Work Item as CI Repair for the active Closed incident
   without resetting worktree, Session, profile, Merge Policy, PR, or history.
@@ -1446,14 +1446,14 @@ type Mutation {
   """
   implementWith(
     repositoryId: ID!
-    issueNumber: Int!
+    nativeId: String!
     profile: ExplicitWorkItemExecutionProfileInput!
     options: ImplementWithOptionsInput
   ): [WorkItem!]!
   """
   Create a Work Item that runs local steps through Review, then pauses before Commit.
   """
-  implementLocally(repositoryId: ID!, issueNumber: Int!): WorkItem!
+  implementLocally(repositoryId: ID!, nativeId: String!): WorkItem!
   """
   Parent-level Implement all with auto-merge. Snapshots open direct Child Issues
   and atomically enrolls them: creates ordinary Work Items with Merge Mode ALWAYS
@@ -1464,12 +1464,12 @@ type Mutation {
   handoff stays stopped. Returns covered child Work Items. Does not create a
   Parent Work Item.
   """
-  implementAllWithAutoMerge(repositoryId: ID!, issueNumber: Int!): [WorkItem!]!
+  implementAllWithAutoMerge(repositoryId: ID!, nativeId: String!): [WorkItem!]!
   """
   Queue a Relevant open leaf Issue that has listed blockers: creates a Work Item
   in Waiting for blockers (no Worker Slot, no Step Run).
   """
-  queue(repositoryId: ID!, issueNumber: Int!): WorkItem!
+  queue(repositoryId: ID!, nativeId: String!): WorkItem!
   """
   Synchronous best-effort Repository Intake: reclassify current Intake
   Candidates for one Repository, run one shared Repository preflight when the

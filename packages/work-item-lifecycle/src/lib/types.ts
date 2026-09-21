@@ -10,6 +10,7 @@ import {
   TerminalWorkItemState,
   WorkItemState,
   evaluateUnfinishedWorkItem,
+  formatIssueDisplayId,
 } from "@ready-for-agent/lifecycle-model"
 import type { ExplicitWorkItemExecutionProfile } from "./execution-profile.js"
 import {
@@ -206,15 +207,15 @@ export const WAITING_FOR_WORKER_SLOT_MESSAGE =
 
 /**
  * Operator-facing copy for Waiting for blockers.
- * Lists live blocker numbers when provided; otherwise a generic hold message.
+ * Lists live blocker display identifiers when provided; otherwise a generic hold.
  */
 export const formatWaitingForBlockersMessage = (
-  blockerIssueNumbers: readonly number[] = [],
+  blockerDisplayIds: readonly string[] = [],
 ): string => {
-  if (blockerIssueNumbers.length === 0) {
+  if (blockerDisplayIds.length === 0) {
     return "Queued — waiting for blockers"
   }
-  const listed = blockerIssueNumbers.map((n) => `#${n}`).join(", ")
+  const listed = blockerDisplayIds.map(formatIssueDisplayId).join(", ")
   return `Queued — waiting for ${listed}`
 }
 

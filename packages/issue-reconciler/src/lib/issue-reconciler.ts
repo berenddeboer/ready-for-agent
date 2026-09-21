@@ -32,9 +32,9 @@ import {
 import {
   classifyActiveClosingPullRequests,
   competingPullRequestIdentity,
-  completeIssueIdentity,
   evaluateRelevantIssue,
   isForge,
+  persistedIssueIdentity,
   relevantIssuePredicateContext,
   workItemBranchName,
 } from "@ready-for-agent/lifecycle-model"
@@ -124,23 +124,19 @@ export class IssueReconciler extends Context.Service<
   IssueReconcilerShape
 >()("@ready-for-agent/issue-reconciler/IssueReconciler") {}
 
-const remoteIdentity = (remote: ReadyLabeledIssue) =>
-  completeIssueIdentity({
-    issueNumber: remote.number,
-    nativeId: remote.nativeId,
-    displayId: remote.displayId,
-  })
+const remoteIdentity = (remote: ReadyLabeledIssue) => ({
+  nativeId: remote.nativeId,
+  displayId: remote.displayId,
+})
 
 const referenceIdentity = (reference: {
   readonly number: number
-  readonly nativeId?: string
-  readonly displayId?: string
-}) =>
-  completeIssueIdentity({
-    issueNumber: reference.number,
-    nativeId: reference.nativeId,
-    displayId: reference.displayId,
-  })
+  readonly nativeId: string
+  readonly displayId: string
+}) => ({
+  nativeId: reference.nativeId,
+  displayId: reference.displayId,
+})
 
 const matches = (
   local: IssueRecord,
@@ -164,18 +160,14 @@ const matches = (
     local.parentPosition === remote.parentPosition &&
     local.parent?.issueNumber === remote.parent?.number &&
     local.parent?.issueUrl === remote.parent?.url &&
-    (local.parent?.nativeId ??
-      (local.parent === null
-        ? undefined
-        : String(local.parent.issueNumber))) === parentIdentity?.nativeId &&
+    local.parent?.nativeId === parentIdentity?.nativeId &&
     local.blockedBy.length === remote.blockedBy.length &&
     local.blockedBy.every((dependency) =>
       remote.blockedBy.some((remoteDependency) => {
         const blockingIdentity = referenceIdentity(remoteDependency)
         return (
           dependency.issueUrl === remoteDependency.url &&
-          (dependency.nativeId ?? String(dependency.issueNumber)) ===
-            blockingIdentity.nativeId
+          dependency.nativeId === blockingIdentity.nativeId
         )
       }),
     )
@@ -258,7 +250,7 @@ export const IssueReconcilerLive = Layer.effect(
 
       const localByNativeId = new Map(
         localIssues.map((issue) => [
-          issue.nativeId ?? String(issue.issueNumber),
+          persistedIssueIdentity(issue).nativeId,
           issue,
         ]),
       )
@@ -354,7 +346,7 @@ export const IssueReconcilerLive = Layer.effect(
       const deletions = localIssues
         .filter(
           (issue) =>
-            !remoteByNumber.has(issue.nativeId ?? String(issue.issueNumber)),
+            !remoteByNumber.has(persistedIssueIdentity(issue).nativeId),
         )
         .sort((left, right) => left.issueNumber - right.issueNumber)
 
@@ -426,7 +418,7 @@ export const IssueReconcilerLive = Layer.effect(
           .deleteIssueByNativeId(
             repository.id,
             issue.issueTracker ?? issueTracker,
-            issue.nativeId ?? String(issue.issueNumber),
+            persistedIssueIdentity(issue).nativeId,
           )
           .pipe(
             Effect.mapError((cause) =>

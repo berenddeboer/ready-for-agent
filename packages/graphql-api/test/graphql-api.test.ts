@@ -1650,8 +1650,8 @@ describe("GraphQL API", () => {
     )
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItemSource($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItemSource($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             issueNumber
             issueSource {
               tracker
@@ -1663,7 +1663,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -1673,7 +1673,7 @@ describe("GraphQL API", () => {
       data: {
         workItems: [
           {
-            issueNumber: issue.issueNumber,
+            issueNumber: 42,
             issueSource: {
               tracker: "github",
               nativeId: "42",
@@ -1859,7 +1859,7 @@ describe("GraphQL API", () => {
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `mutation {
-          implementNow(repositoryId: "${repository.id}", issueNumber: 123) {
+          implementNow(repositoryId: "${repository.id}", nativeId: "${linearIssue.nativeId}") {
             id
             issueNumber
             issueSource { tracker nativeId displayId url }
@@ -1909,7 +1909,7 @@ describe("GraphQL API", () => {
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `mutation {
-          implementAllWithAutoMerge(repositoryId: "${repository.id}", issueNumber: 1) { id }
+          implementAllWithAutoMerge(repositoryId: "${repository.id}", nativeId: "1") { id }
         }`,
       }),
     )
@@ -5928,14 +5928,14 @@ describe("GraphQL API", () => {
     )
     const unavailable = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
-          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation ImplementNow($repositoryId: ID!, $nativeId: String!) {
+          implementNow(repositoryId: $repositoryId, nativeId: $nativeId) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -5969,14 +5969,14 @@ describe("GraphQL API", () => {
     )
     const missingModel = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
-          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation ImplementNow($repositoryId: ID!, $nativeId: String!) {
+          implementNow(repositoryId: $repositoryId, nativeId: $nativeId) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -6011,7 +6011,7 @@ describe("GraphQL API", () => {
       {
         implementWith: (repositoryId, issueNumber, profile, options) => {
           expect(repositoryId).toBe(repository.id)
-          expect(issueNumber).toBe(issue.issueNumber)
+          expect(issueNumber).toBe(issue.nativeId)
           expect(profile).toEqual({
             agentBackendId: "opencode",
             buildModel: "build-model",
@@ -6036,12 +6036,12 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementWith(
           $repositoryId: ID!
-          $issueNumber: Int!
+          $nativeId: String!
           $profile: ExplicitWorkItemExecutionProfileInput!
         ) {
           implementWith(
             repositoryId: $repositoryId
-            issueNumber: $issueNumber
+            nativeId: $nativeId
             profile: $profile
           ) {
             id
@@ -6060,7 +6060,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
           profile: {
             agentBackendId: "opencode",
             buildModel: "build-model",
@@ -6114,12 +6114,12 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementWith(
           $repositoryId: ID!
-          $issueNumber: Int!
+          $nativeId: String!
           $profile: ExplicitWorkItemExecutionProfileInput!
         ) {
           implementWith(
             repositoryId: $repositoryId
-            issueNumber: $issueNumber
+            nativeId: $nativeId
             profile: $profile
           ) {
             id
@@ -6127,7 +6127,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
           profile: {
             agentBackendId: "opencode",
             buildModel: "build-model",
@@ -6177,9 +6177,9 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        implementWith: (repositoryId, issueNumber, profile, options) => {
+        implementWith: (repositoryId, nativeId, profile, options) => {
           expect(repositoryId).toBe(repository.id)
-          expect(issueNumber).toBe(10)
+          expect(nativeId).toBe("10")
           expect(profile.agentBackendId).toBe("opencode")
           expect(options).toEqual({
             mergePolicy: "classify",
@@ -6193,13 +6193,13 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementWith(
           $repositoryId: ID!
-          $issueNumber: Int!
+          $nativeId: String!
           $profile: ExplicitWorkItemExecutionProfileInput!
           $options: ImplementWithOptionsInput
         ) {
           implementWith(
             repositoryId: $repositoryId
-            issueNumber: $issueNumber
+            nativeId: $nativeId
             profile: $profile
             options: $options
           ) {
@@ -6211,7 +6211,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: 10,
+          nativeId: "10",
           profile: {
             agentBackendId: "opencode",
             buildModel: "build-model",
@@ -6262,13 +6262,13 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementWith(
           $repositoryId: ID!
-          $issueNumber: Int!
+          $nativeId: String!
           $profile: ExplicitWorkItemExecutionProfileInput!
           $options: ImplementWithOptionsInput
         ) {
           implementWith(
             repositoryId: $repositoryId
-            issueNumber: $issueNumber
+            nativeId: $nativeId
             profile: $profile
             options: $options
           ) {
@@ -6277,7 +6277,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: 10,
+          nativeId: "10",
           profile: {
             agentBackendId: "opencode",
             buildModel: "build-model",
@@ -6305,20 +6305,20 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementWith(
           $repositoryId: ID!
-          $issueNumber: Int!
+          $nativeId: String!
           $profile: ExplicitWorkItemExecutionProfileInput!
           $options: ImplementWithOptionsInput
         ) {
           implementWith(
             repositoryId: $repositoryId
-            issueNumber: $issueNumber
+            nativeId: $nativeId
             profile: $profile
             options: $options
           ) { id }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
           profile: {
             agentBackendId: "opencode",
             buildModel: "build-model",
@@ -6380,13 +6380,13 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementWith(
           $repositoryId: ID!
-          $issueNumber: Int!
+          $nativeId: String!
           $profile: ExplicitWorkItemExecutionProfileInput!
           $options: ImplementWithOptionsInput
         ) {
           implementWith(
             repositoryId: $repositoryId
-            issueNumber: $issueNumber
+            nativeId: $nativeId
             profile: $profile
             options: $options
           ) {
@@ -6397,7 +6397,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
           profile: {
             agentBackendId: "opencode",
             buildModel: "build-model",
@@ -6451,13 +6451,13 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementWith(
           $repositoryId: ID!
-          $issueNumber: Int!
+          $nativeId: String!
           $profile: ExplicitWorkItemExecutionProfileInput!
           $options: ImplementWithOptionsInput
         ) {
           implementWith(
             repositoryId: $repositoryId
-            issueNumber: $issueNumber
+            nativeId: $nativeId
             profile: $profile
             options: $options
           ) {
@@ -6468,7 +6468,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
           profile: {
             agentBackendId: "opencode",
             buildModel: "build-model",
@@ -6522,13 +6522,13 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementWith(
           $repositoryId: ID!
-          $issueNumber: Int!
+          $nativeId: String!
           $profile: ExplicitWorkItemExecutionProfileInput!
           $options: ImplementWithOptionsInput
         ) {
           implementWith(
             repositoryId: $repositoryId
-            issueNumber: $issueNumber
+            nativeId: $nativeId
             profile: $profile
             options: $options
           ) {
@@ -6539,7 +6539,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
           profile: {
             agentBackendId: "opencode",
             buildModel: "build-model",
@@ -6575,15 +6575,15 @@ describe("GraphQL API", () => {
     )
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
-          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation ImplementNow($repositoryId: ID!, $nativeId: String!) {
+          implementNow(repositoryId: $repositoryId, nativeId: $nativeId) {
             id
             executionProfile { buildModel }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -6618,12 +6618,12 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementWith(
           $repositoryId: ID!
-          $issueNumber: Int!
+          $nativeId: String!
           $profile: ExplicitWorkItemExecutionProfileInput!
         ) {
           implementWith(
             repositoryId: $repositoryId
-            issueNumber: $issueNumber
+            nativeId: $nativeId
             profile: $profile
           ) {
             id
@@ -6631,7 +6631,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
           profile: {
             agentBackendId: "opencode",
             buildModel: "build-model",
@@ -6936,6 +6936,8 @@ describe("GraphQL API", () => {
     const parentReference = {
       issueNumber: 10,
       issueUrl: parent.url,
+      nativeId: "10",
+      displayId: "10",
     }
     await runtime.dispose()
     runtime = makeRuntime({
@@ -7034,7 +7036,7 @@ describe("GraphQL API", () => {
   })
 
   test("lists Work Items with serialized lifecycle progress", async () => {
-    let receivedArgs: readonly [string, number] | undefined
+    let receivedArgs: readonly [string, string] | undefined
     await runtime.dispose()
     runtime = makeRuntime(
       {},
@@ -7050,8 +7052,8 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             id state stateLabel status statusLabel statusMessage paused canRetry isTerminal
             stateReadyAt createdAt updatedAt
             lifecycleLabels { phase label status durationMs }
@@ -7059,7 +7061,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7092,7 +7094,7 @@ describe("GraphQL API", () => {
         ],
       },
     })
-    expect(receivedArgs).toEqual([repository.id, issue.issueNumber])
+    expect(receivedArgs).toEqual([repository.id, issue.nativeId])
   })
 
   test("serializes local_cleanup as a lifecycle phase", async () => {
@@ -7117,14 +7119,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7200,15 +7202,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             stateLabel status statusLabel statusMessage canRetry isTerminal
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7299,15 +7301,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state stateLabel status statusLabel
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7370,15 +7372,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state stateLabel status statusLabel paused isTerminal
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7451,14 +7453,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state status statusLabel paused isTerminal
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7508,15 +7510,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state status statusLabel paused isTerminal canRetry hasActiveStepRun
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7587,14 +7589,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state status statusLabel paused isTerminal
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7651,14 +7653,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state status statusLabel statusMessage paused isTerminal canRetry
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7716,15 +7718,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state stateLabel status statusLabel statusMessage paused isTerminal canRetry
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7795,15 +7797,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state stateLabel status statusLabel statusMessage paused isTerminal canRetry
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7865,14 +7867,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state status statusLabel statusMessage paused isTerminal
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7920,15 +7922,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -7981,15 +7983,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -8042,15 +8044,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -8103,15 +8105,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -8164,15 +8166,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -8225,15 +8227,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             status statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -8294,8 +8296,8 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             status
             statusMessage
             latestStepRunDetail {
@@ -8306,7 +8308,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -8439,8 +8441,8 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             id
             state
             status
@@ -8458,7 +8460,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -8565,8 +8567,8 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             id
             state
             status
@@ -8578,7 +8580,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -8627,15 +8629,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             status statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -9349,10 +9351,17 @@ describe("GraphQL API", () => {
   })
 
   test("keeps Working Work Items whose Issue is no longer Relevant", async () => {
+    const orphanSource = (issueNumber: number) => ({
+      tracker: "github" as const,
+      nativeId: String(issueNumber),
+      displayId: String(issueNumber),
+      url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+    })
     const needsHumanOrphan = {
       ...workItem,
       id: makeWorkItemId(),
       issueNumber: 120,
+      issueSource: orphanSource(120),
       state: "needs_human" as const,
       stepRuns: [],
     }
@@ -9360,6 +9369,7 @@ describe("GraphQL API", () => {
       ...workItem,
       id: makeWorkItemId(),
       issueNumber: 122,
+      issueSource: orphanSource(122),
       state: "failed" as const,
       stepRuns: [],
     }
@@ -9367,6 +9377,7 @@ describe("GraphQL API", () => {
       ...workItem,
       id: makeWorkItemId(),
       issueNumber: 121,
+      issueSource: orphanSource(121),
       state: "implement" as const,
       stepRuns: [],
     }
@@ -9374,6 +9385,7 @@ describe("GraphQL API", () => {
       ...workItem,
       id: makeWorkItemId(),
       issueNumber: 123,
+      issueSource: orphanSource(123),
       state: "complete" as const,
       stepRuns: [],
     }
@@ -9381,6 +9393,7 @@ describe("GraphQL API", () => {
       ...workItem,
       id: makeWorkItemId(),
       issueNumber: 124,
+      issueSource: orphanSource(124),
       state: "abandoned" as const,
       stepRuns: [],
     }
@@ -9534,7 +9547,7 @@ describe("GraphQL API", () => {
   })
 
   test("starts a Work Item for Implement Now", async () => {
-    let receivedArgs: readonly [string, number] | undefined
+    let receivedArgs: readonly [string, string] | undefined
     await runtime.dispose()
     runtime = makeRuntime(
       {},
@@ -9550,15 +9563,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
-          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation ImplementNow($repositoryId: ID!, $nativeId: String!) {
+          implementNow(repositoryId: $repositoryId, nativeId: $nativeId) {
             id state
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -9578,11 +9591,11 @@ describe("GraphQL API", () => {
         },
       },
     })
-    expect(receivedArgs).toEqual([repository.id, issue.issueNumber])
+    expect(receivedArgs).toEqual([repository.id, issue.nativeId])
   })
 
   test("starts a Work Item for Implement Locally", async () => {
-    let receivedArgs: readonly [string, number] | undefined
+    let receivedArgs: readonly [string, string] | undefined
     await runtime.dispose()
     runtime = makeRuntime(
       {},
@@ -9598,14 +9611,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementLocally($repositoryId: ID!, $issueNumber: Int!) {
-          implementLocally(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation ImplementLocally($repositoryId: ID!, $nativeId: String!) {
+          implementLocally(repositoryId: $repositoryId, nativeId: $nativeId) {
             id state
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -9618,11 +9631,11 @@ describe("GraphQL API", () => {
         },
       },
     })
-    expect(receivedArgs).toEqual([repository.id, issue.issueNumber])
+    expect(receivedArgs).toEqual([repository.id, issue.nativeId])
   })
 
   test("implements all with auto-merge for a Parent Issue's covered children", async () => {
-    let receivedArgs: readonly [string, number] | undefined
+    let receivedArgs: readonly [string, string] | undefined
     const actionableChild = {
       ...workItem,
       id: makeWorkItemId(),
@@ -9653,14 +9666,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $issueNumber: Int!) {
-          implementAllWithAutoMerge(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $nativeId: String!) {
+          implementAllWithAutoMerge(repositoryId: $repositoryId, nativeId: $nativeId) {
             id issueNumber mergeMode mergePolicy state status statusLabel
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: 10,
+          nativeId: "10",
         },
       }),
     )
@@ -9689,7 +9702,7 @@ describe("GraphQL API", () => {
         ],
       },
     })
-    expect(receivedArgs).toEqual([repository.id, 10])
+    expect(receivedArgs).toEqual([repository.id, "10"])
   })
 
   test("maps Implement all with auto-merge domain failures", async () => {
@@ -9711,14 +9724,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $issueNumber: Int!) {
-          implementAllWithAutoMerge(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $nativeId: String!) {
+          implementAllWithAutoMerge(repositoryId: $repositoryId, nativeId: $nativeId) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: 10,
+          nativeId: "10",
         },
       }),
     )
@@ -9734,7 +9747,7 @@ describe("GraphQL API", () => {
   })
 
   test("queues a blocked Issue Work Item", async () => {
-    let receivedArgs: readonly [string, number] | undefined
+    let receivedArgs: readonly [string, string] | undefined
     const held = {
       ...workItem,
       waitingForBlockers: true,
@@ -9759,14 +9772,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation Queue($repositoryId: ID!, $issueNumber: Int!) {
-          queue(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation Queue($repositoryId: ID!, $nativeId: String!) {
+          queue(repositoryId: $repositoryId, nativeId: $nativeId) {
             id state status statusLabel statusMessage canRetry isTerminal
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -9784,7 +9797,7 @@ describe("GraphQL API", () => {
         },
       },
     })
-    expect(receivedArgs).toEqual([repository.id, issue.issueNumber])
+    expect(receivedArgs).toEqual([repository.id, issue.nativeId])
   })
 
   test("surfaces Queue errors for unblocked Issues and unfinished Work Items", async () => {
@@ -9808,14 +9821,14 @@ describe("GraphQL API", () => {
     )
     const notBlocked = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation Queue($repositoryId: ID!, $issueNumber: Int!) {
-          queue(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation Queue($repositoryId: ID!, $nativeId: String!) {
+          queue(repositoryId: $repositoryId, nativeId: $nativeId) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -9848,14 +9861,14 @@ describe("GraphQL API", () => {
     )
     const unfinished = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation Queue($repositoryId: ID!, $issueNumber: Int!) {
-          queue(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation Queue($repositoryId: ID!, $nativeId: String!) {
+          queue(repositoryId: $repositoryId, nativeId: $nativeId) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -10543,9 +10556,9 @@ describe("GraphQL API", () => {
       {},
       {
         listWorkItemsForRepository: () => Effect.succeed([complete]),
-        implementNow: (_repositoryId, issueNumber) =>
+        implementNow: (_repositoryId, nativeId) =>
           Effect.sync(() => {
-            implementCalls.push(issueNumber)
+            implementCalls.push(Number(nativeId))
             return createdFresh
           }),
       },
@@ -10592,6 +10605,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-actionable",
       issueNumber: 12,
+      nativeId: "12",
+      displayId: "12",
       title: "Actionable leaf",
       url: "https://github.com/acme/widgets/issues/12",
       blockedBy: [],
@@ -10600,12 +10615,16 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-blocked",
       issueNumber: 5,
+      nativeId: "5",
+      displayId: "5",
       title: "Blocked leaf",
       url: "https://github.com/acme/widgets/issues/5",
       blockedBy: [
         {
           issueNumber: 1,
           issueUrl: "https://github.com/acme/widgets/issues/1",
+          nativeId: "1",
+          displayId: "1",
         },
       ],
     }
@@ -10725,6 +10744,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-first",
       issueNumber: 10,
+      nativeId: "10",
+      displayId: "10",
       title: "First actionable",
       url: "https://github.com/acme/widgets/issues/10",
       blockedBy: [],
@@ -10733,6 +10754,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-second",
       issueNumber: 11,
+      nativeId: "11",
+      displayId: "11",
       title: "Second actionable",
       url: "https://github.com/acme/widgets/issues/11",
       blockedBy: [],
@@ -10754,13 +10777,13 @@ describe("GraphQL API", () => {
       {},
       {
         listWorkItemsForRepository: () => Effect.succeed([]),
-        implementNow: (_repositoryId, issueNumber) =>
+        implementNow: (_repositoryId, nativeId) =>
           Effect.gen(function* () {
-            callOrder.push(issueNumber)
-            if (issueNumber === 10) {
+            callOrder.push(Number(nativeId))
+            if (nativeId === "10") {
               return yield* new UnfinishedWorkItemExistsError({
                 repositoryId: repository.id,
-                issueNumber,
+                issueNumber: 10,
                 workItemId: "wi-existing",
               })
             }
@@ -10819,6 +10842,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-first",
       issueNumber: 20,
+      nativeId: "20",
+      displayId: "20",
       title: "First",
       url: "https://github.com/acme/widgets/issues/20",
       blockedBy: [],
@@ -10827,6 +10852,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-second",
       issueNumber: 21,
+      nativeId: "21",
+      displayId: "21",
       title: "Second",
       url: "https://github.com/acme/widgets/issues/21",
       blockedBy: [],
@@ -10848,10 +10875,10 @@ describe("GraphQL API", () => {
       {},
       {
         listWorkItemsForRepository: () => Effect.succeed([]),
-        implementNow: (_repositoryId, issueNumber) =>
+        implementNow: (_repositoryId, nativeId) =>
           Effect.gen(function* () {
-            callOrder.push(issueNumber)
-            if (issueNumber === 20) {
+            callOrder.push(Number(nativeId))
+            if (nativeId === "20") {
               return createdFirst
             }
             return yield* new EnqueueError({
@@ -10896,6 +10923,8 @@ describe("GraphQL API", () => {
     const actionable = {
       ...issue,
       issueNumber: 30,
+      nativeId: "30",
+      displayId: "30",
       blockedBy: [],
     }
     let requireAgentTurnsCalls = 0
@@ -10957,6 +10986,8 @@ describe("GraphQL API", () => {
     const actionable = {
       ...issue,
       issueNumber: 31,
+      nativeId: "31",
+      displayId: "31",
       blockedBy: [],
     }
     await runtime.dispose()
@@ -11013,6 +11044,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-abort-1",
       issueNumber: 40,
+      nativeId: "40",
+      displayId: "40",
       title: "First",
       url: "https://github.com/acme/widgets/issues/40",
       blockedBy: [],
@@ -11021,6 +11054,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-abort-2",
       issueNumber: 41,
+      nativeId: "41",
+      displayId: "41",
       title: "Second",
       url: "https://github.com/acme/widgets/issues/41",
       blockedBy: [],
@@ -11043,10 +11078,10 @@ describe("GraphQL API", () => {
       {},
       {
         listWorkItemsForRepository: () => Effect.succeed([]),
-        implementNow: (_repositoryId, issueNumber) =>
+        implementNow: (_repositoryId, nativeId) =>
           Effect.gen(function* () {
             implementCalls += 1
-            if (issueNumber === 40) {
+            if (nativeId === "40") {
               return createdFirst
             }
             secondStarted = true
@@ -11145,15 +11180,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             status statusLabel statusMessage canRetry isTerminal paused
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -11269,14 +11304,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             id status canRetry isTerminal
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -11347,14 +11382,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
             state status statusLabel statusMessage isTerminal
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -11487,7 +11522,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          selector: { issueNumber: 7, allRetryable: true },
+          selector: { nativeId: "7", allRetryable: true },
         },
       }),
     )
@@ -11557,6 +11592,12 @@ describe("GraphQL API", () => {
       ...workItem,
       id: "wi-failed",
       issueNumber: 10,
+      issueSource: {
+        tracker: "github",
+        nativeId: "10",
+        displayId: "10",
+        url: "https://github.com/acme/widgets/issues/10",
+      },
       state: "implement",
       stepRuns: [
         {
@@ -11570,6 +11611,12 @@ describe("GraphQL API", () => {
       ...workItem,
       id: "wi-interrupted",
       issueNumber: 11,
+      issueSource: {
+        tracker: "github",
+        nativeId: "11",
+        displayId: "11",
+        url: "https://github.com/acme/widgets/issues/11",
+      },
       state: "commit",
       stepRuns: [
         {
@@ -11584,6 +11631,12 @@ describe("GraphQL API", () => {
       ...workItem,
       id: "wi-nh",
       issueNumber: 12,
+      issueSource: {
+        tracker: "github",
+        nativeId: "12",
+        displayId: "12",
+        url: "https://github.com/acme/widgets/issues/12",
+      },
       state: "needs_human",
       stepRuns: [
         {
@@ -11714,7 +11767,7 @@ describe("GraphQL API", () => {
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `mutation RetryIssue($repositoryId: ID!) {
-          retryWorkItems(repositoryId: $repositoryId, selector: { issueNumber: 42 }) {
+          retryWorkItems(repositoryId: $repositoryId, selector: { nativeId: "42" }) {
             results {
               __typename
               ... on RetryWorkItemsRetried {
@@ -12031,7 +12084,7 @@ describe("GraphQL API", () => {
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `mutation RetryIssue($repositoryId: ID!) {
-          retryWorkItems(repositoryId: $repositoryId, selector: { issueNumber: 42 }) {
+          retryWorkItems(repositoryId: $repositoryId, selector: { nativeId: "42" }) {
             results { __typename }
           }
         }`,
@@ -13288,14 +13341,14 @@ describe("GraphQL API", () => {
     const fetchPromise = createGraphqlApi(runtime).fetch(
       graphqlRequest(
         {
-          query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
-            implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+          query: `mutation ImplementNow($repositoryId: ID!, $nativeId: String!) {
+            implementNow(repositoryId: $repositoryId, nativeId: $nativeId) {
               id
             }
           }`,
           variables: {
             repositoryId: repository.id,
-            issueNumber: issue.issueNumber,
+            nativeId: issue.nativeId,
           },
         },
         undefined,
@@ -13343,14 +13396,14 @@ describe("GraphQL API", () => {
     const aborted = api.fetch(
       graphqlRequest(
         {
-          query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
-            implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+          query: `mutation ImplementNow($repositoryId: ID!, $nativeId: String!) {
+            implementNow(repositoryId: $repositoryId, nativeId: $nativeId) {
               id state
             }
           }`,
           variables: {
             repositoryId: repository.id,
-            issueNumber: issue.issueNumber,
+            nativeId: issue.nativeId,
           },
         },
         undefined,
@@ -13365,14 +13418,14 @@ describe("GraphQL API", () => {
     // A subsequent request without abort retains existing success behavior.
     const response = await api.fetch(
       graphqlRequest({
-        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
-          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation ImplementNow($repositoryId: ID!, $nativeId: String!) {
+          implementNow(repositoryId: $repositoryId, nativeId: $nativeId) {
             id state
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )
@@ -13407,14 +13460,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
-          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation ImplementNow($repositoryId: ID!, $nativeId: String!) {
+          implementNow(repositoryId: $repositoryId, nativeId: $nativeId) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          issueNumber: issue.issueNumber,
+          nativeId: issue.nativeId,
         },
       }),
     )

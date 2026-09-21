@@ -394,7 +394,7 @@ describe("Hold approved merges during CI failure", () => {
         const sql = yield* SqlClient.SqlClient
         const created = yield* lifecycle.implementNow(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
         )
         observe = () =>
           Effect.succeed({

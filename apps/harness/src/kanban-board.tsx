@@ -1,6 +1,7 @@
 import { useQueries, useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { type CSSProperties, Suspense, useMemo, useState } from "react"
+import { formatIssueDisplayId } from "@ready-for-agent/lifecycle-model"
 import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
 import { ExecutionProfileSummary } from "./execution-profile-summary.js"
@@ -41,10 +42,8 @@ import {
 } from "./work-item-progress-chrome.js"
 import { workItemPullRequestUrl } from "./work-item-pull-request-url.js"
 
-const repositoryIssueKey = (
-  repositoryId: string,
-  issueNumber: number,
-): string => `${repositoryId}:${issueNumber}`
+const repositoryIssueKey = (repositoryId: string, nativeId: string): string =>
+  `${repositoryId}:${nativeId}`
 
 /**
  * Kanban board content for the home page (`/`) when at least one repository
@@ -142,12 +141,14 @@ function PipelineTicket({
       ? issue.url
       : repository === undefined
         ? null
-        : workItemIssueUrl(
-            repository.forge,
-            repository.forgeHost,
-            repository.projectPath,
-            workItem.issueNumber,
-          )
+        : workItem.issueSource.url !== ""
+          ? workItem.issueSource.url
+          : workItemIssueUrl(
+              repository.forge,
+              repository.forgeHost,
+              repository.projectPath,
+              workItem.issueNumber,
+            )
   const pullRequestUrl =
     repository === undefined
       ? null
@@ -207,12 +208,16 @@ function PipelineTicket({
           className={cx(ui.jobTicketTitle, ui.jobTicketTitleLink)}
           href={issueUrl}
         >
-          <span className={ui.jobTicketNum}>#{workItem.issueNumber}</span>
+          <span className={ui.jobTicketNum}>
+            {formatIssueDisplayId(workItem.issueSource.displayId)}
+          </span>
           {issueTitle === undefined ? null : ` ${issueTitle}`}
         </a>
       ) : (
         <span className={ui.jobTicketTitle}>
-          <span className={ui.jobTicketNum}>#{workItem.issueNumber}</span>
+          <span className={ui.jobTicketNum}>
+            {formatIssueDisplayId(workItem.issueSource.displayId)}
+          </span>
           {issueTitle === undefined ? null : ` ${issueTitle}`}
         </span>
       )}
@@ -329,7 +334,7 @@ function KanbanJobsBoard() {
   for (const query of issueQueries) {
     for (const issue of query.data ?? []) {
       issueByRepoAndNumber.set(
-        repositoryIssueKey(issue.repositoryId, issue.issueNumber),
+        repositoryIssueKey(issue.repositoryId, issue.nativeId),
         { title: issue.title, url: issue.url },
       )
     }
@@ -453,7 +458,7 @@ function KanbanJobsBoard() {
                           issue={issueByRepoAndNumber.get(
                             repositoryIssueKey(
                               workItem.repositoryId,
-                              workItem.issueNumber,
+                              workItem.issueSource.nativeId,
                             ),
                           )}
                           laneId={lane.id}

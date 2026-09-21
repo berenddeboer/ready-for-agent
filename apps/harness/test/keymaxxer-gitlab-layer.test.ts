@@ -166,6 +166,8 @@ describe("Keymaxxer-backed GitLab layer", () => {
             stdout: JSON.stringify([
               {
                 number: 7,
+                nativeId: "7",
+                displayId: "7",
                 title: "Ready issue",
                 body: "Issue body",
                 url: "https://git.drupalcode.org/project/oauth_client/-/issues/7",

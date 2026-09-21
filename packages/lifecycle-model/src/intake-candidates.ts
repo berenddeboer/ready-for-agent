@@ -1,5 +1,5 @@
 import { isIssueTracker } from "./generated/forge.js"
-import { completeIssueIdentity } from "./issue-source.js"
+import { persistedIssueIdentity } from "./issue-source.js"
 import {
   type WorkItemPredicateShape,
   evaluateActionableIssue,
@@ -53,7 +53,7 @@ const intakeIdentityKey = (
   },
   liveTracker: string | null | undefined,
 ): string => {
-  const { nativeId } = completeIssueIdentity(item)
+  const { nativeId } = persistedIssueIdentity(item)
   const tracker = isIssueTracker(item.issueTracker)
     ? item.issueTracker
     : liveTracker !== undefined &&
@@ -86,8 +86,8 @@ const filterByLiveIssueTracker = <T extends { readonly issueTracker?: string }>(
  * Pure classifier over a Repository's current Issue projection and Work Items.
  *
  * Returns only ordered Intake Candidates:
- * 1. Actionable Issues as `IMPLEMENT_NOW` (ascending Issue number)
- * 2. Blocked open leaves with no unfinished Work Item as `QUEUE` (ascending)
+ * 1. Actionable Issues as `IMPLEMENT_NOW` (by display identifier)
+ * 2. Blocked open leaves with no unfinished Work Item as `QUEUE` (by display identifier)
  *
  * Uses the same leaf / implementable / actionable / unfinished predicates as
  * Implement Now and Queue so candidate listing cannot drift from admission.
@@ -139,7 +139,7 @@ export const classifyIntakeCandidates = (
     if (actionable._tag === "match") {
       implementNow.push({
         issueNumber: issue.issueNumber,
-        ...completeIssueIdentity(issue),
+        ...persistedIssueIdentity(issue),
         title: issue.title,
         url: issue.url,
         action: "IMPLEMENT_NOW",
@@ -161,14 +161,16 @@ export const classifyIntakeCandidates = (
     }
     queue.push({
       issueNumber: issue.issueNumber,
-      ...completeIssueIdentity(issue),
+      ...persistedIssueIdentity(issue),
       title: issue.title,
       url: issue.url,
       action: "QUEUE",
     })
   }
 
-  implementNow.sort((a, b) => a.issueNumber - b.issueNumber)
-  queue.sort((a, b) => a.issueNumber - b.issueNumber)
+  const byDisplayId = (left: IntakeCandidate, right: IntakeCandidate) =>
+    left.displayId.localeCompare(right.displayId, undefined, { numeric: true })
+  implementNow.sort(byDisplayId)
+  queue.sort(byDisplayId)
   return [...implementNow, ...queue]
 }

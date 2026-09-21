@@ -1,10 +1,13 @@
 import { type MouseEvent, type ReactNode, useEffect, useState } from "react"
-import { evaluateLeafIssue } from "@ready-for-agent/lifecycle-model"
+import {
+  evaluateLeafIssue,
+  formatIssueDisplayId,
+} from "@ready-for-agent/lifecycle-model"
 import { Banner } from "./banner.js"
 import { cx, ui } from "./ui.js"
 
 export type ParentIssueActionsMenuProps = {
-  readonly parentIssueNumber: number
+  readonly displayId: string
   readonly menuId: string
   readonly implementAllPending: boolean
   readonly implementWithPending: boolean
@@ -19,7 +22,7 @@ export type ParentIssueActionsMenuProps = {
  * without the full Issues list.
  */
 export function ParentIssueActionsMenu({
-  parentIssueNumber,
+  displayId,
   menuId,
   implementAllPending,
   implementWithPending,
@@ -58,7 +61,7 @@ export function ParentIssueActionsMenu({
         <button
           type="button"
           className={ui.iconBtn}
-          aria-label={`Actions for parent issue #${parentIssueNumber}`}
+          aria-label={`Actions for parent issue ${formatIssueDisplayId(displayId)}`}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           disabled={pending}

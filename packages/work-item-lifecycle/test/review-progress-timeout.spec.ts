@@ -226,10 +226,7 @@ const claimAndRunPending = Effect.gen(function* () {
 const driveToQueuedReview = Effect.gen(function* () {
   const lifecycle = yield* WorkItemLifecycle
   const { repository, issue } = yield* seedActionableIssue
-  const created = yield* lifecycle.implementNow(
-    repository.id,
-    issue.issueNumber,
-  )
+  const created = yield* lifecycle.implementNow(repository.id, issue.nativeId)
   for (let index = 0; index < 5; index += 1) {
     const result = yield* claimAndRunPending
     expect(result._tag).toBe("processed")

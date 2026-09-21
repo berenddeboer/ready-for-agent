@@ -1,4 +1,5 @@
 import { GraphQLError } from "graphql"
+import { formatIssueDisplayId } from "@ready-for-agent/lifecycle-model"
 
 type TaggedError = {
   readonly _tag: string
@@ -8,6 +9,7 @@ type TaggedError = {
   readonly workItemId?: string
   readonly stepRunId?: string
   readonly issueNumber?: number
+  readonly nativeId?: string
   readonly state?: string
   readonly blockerCount?: number
   readonly reason?: string
@@ -38,6 +40,16 @@ const gql = (message: string, code: string, extensions?: object) =>
     extensions: { code, ...extensions },
   })
 
+const issueLabel = (error: TaggedError): string => {
+  if (error.nativeId !== undefined && error.nativeId.length > 0) {
+    return formatIssueDisplayId(error.nativeId)
+  }
+  if (error.issueNumber !== undefined) {
+    return `#${String(error.issueNumber)}`
+  }
+  return "unknown"
+}
+
 /**
  * Map tagged domain failures (and GraphQLError) to GraphQL errors with
  * `extensions.code`. Dispatch is by `_tag` only — never `instanceof`.
@@ -58,7 +70,7 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
   switch (error._tag) {
     case "IssueNotFoundError":
       return gql(
-        `Issue #${error.issueNumber} was not found in repository ${error.repositoryId}`,
+        `Issue ${issueLabel(error)} was not found in repository ${error.repositoryId}`,
         "ISSUE_NOT_FOUND",
       )
     case "IssueIdentityAmbiguousError":
@@ -239,7 +251,7 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
     case "InvalidRetrySelectorError":
       return gql(
         error.message ??
-          "Exactly one of issueNumber, workItemId, or allRetryable=true is required",
+          "Exactly one of nativeId, workItemId, or allRetryable=true is required",
         "INVALID_RETRY_SELECTOR",
         { reason: error.reason },
       )
@@ -254,11 +266,11 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
       )
     case "NoUnfinishedWorkItemError":
       return gql(
-        `Issue #${error.issueNumber} has no unfinished Work Item in repository ${error.repositoryId}`,
+        `Issue ${issueLabel(error)} has no unfinished Work Item in repository ${error.repositoryId}`,
         "NO_UNFINISHED_WORK_ITEM",
         {
           repositoryId: error.repositoryId,
-          issueNumber: error.issueNumber,
+          nativeId: error.nativeId,
         },
       )
     case "RepositoryCredentialError":

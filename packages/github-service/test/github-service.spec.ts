@@ -75,6 +75,8 @@ const issue = (
   state: "OPEN" | "CLOSED" = "OPEN",
 ): ReadyLabeledIssue => ({
   number,
+  nativeId: String(number),
+  displayId: String(number),
   title: `Issue ${number}`,
   body: `Body ${number}`,
   url: `https://github.com/acme/widgets/issues/${number}`,
@@ -3922,6 +3924,8 @@ describe("GitHubService live implementation", () => {
     expect(result.map(({ number }) => number)).toEqual([2, 9])
     expect(result[0]).toEqual({
       number: 2,
+      nativeId: "2",
+      displayId: "2",
       title: "Earlier issue",
       body: "Earlier body",
       url: "https://github.com/acme/widgets/issues/2",
@@ -3938,6 +3942,8 @@ describe("GitHubService live implementation", () => {
     expect(result[1]?.parent).toEqual({
       number: 1,
       url: "https://github.com/acme/widgets/issues/1",
+      nativeId: "1",
+      displayId: "1",
       state: "OPEN",
       isReadyLabeled: false,
     })
@@ -3945,6 +3951,8 @@ describe("GitHubService live implementation", () => {
       {
         number: 3,
         url: "https://github.com/acme/widgets/issues/3",
+        nativeId: "3",
+        displayId: "3",
       },
     ])
     expect(result[1]?.closingPullRequests).toEqual([

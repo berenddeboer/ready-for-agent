@@ -126,6 +126,8 @@ describe("GitLab issue-source adapter", () => {
     expect(issues).toEqual([
       {
         number: 3601642,
+        nativeId: "3601642",
+        displayId: "3601642",
         title: "Refresh tokens",
         body: "Context\n\nBlocked by: #3601000, #3601001",
         url: "https://git.drupalcode.org/project/oauth_client/-/issues/3601642",
@@ -139,10 +141,14 @@ describe("GitLab issue-source adapter", () => {
         blockedBy: [
           {
             number: 3601000,
+            nativeId: "3601000",
+            displayId: "3601000",
             url: "https://git.drupalcode.org/project/oauth_client/-/issues/3601000",
           },
           {
             number: 3601001,
+            nativeId: "3601001",
+            displayId: "3601001",
             url: "https://git.drupalcode.org/project/oauth_client/-/issues/3601001",
           },
         ],
@@ -183,6 +189,8 @@ describe("GitLab issue-source adapter", () => {
       },
       {
         number: 3601643,
+        nativeId: "3601643",
+        displayId: "3601643",
         title: "Ghost author",
         body: "",
         url: "https://git.drupalcode.org/project/oauth_client/-/issues/3601643",

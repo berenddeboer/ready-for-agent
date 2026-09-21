@@ -41,11 +41,33 @@ const repository = makeRepositoryRecord({
   waitForReadyForReviewChecks: true,
 })
 
+const forgeIssueRef = (number: number, url: string) => ({
+  number,
+  url,
+  nativeId: String(number),
+  displayId: String(number),
+})
+
+const forgeIssueParent = (
+  number: number,
+  url: string,
+  extra: {
+    readonly state?: "OPEN" | "CLOSED"
+    readonly isReadyLabeled?: boolean
+  } = {},
+) => ({
+  ...forgeIssueRef(number, url),
+  state: extra.state ?? "OPEN",
+  isReadyLabeled: extra.isReadyLabeled ?? true,
+})
+
 const remoteIssue = (
   number: number,
   overrides: Partial<ReadyLabeledIssue> = {},
 ): ReadyLabeledIssue => ({
   number,
+  nativeId: String(number),
+  displayId: String(number),
   title: `Issue ${number}`,
   body: `Body ${number}`,
   url: `https://github.com/acme/widgets/issues/${number}`,
@@ -89,10 +111,14 @@ const localIssue = (
         : {
             issueNumber: remote.parent.number,
             issueUrl: remote.parent.url,
+            nativeId: remote.parent.nativeId,
+            displayId: remote.parent.displayId,
           },
     blockedBy: remote.blockedBy.map((dependency) => ({
       issueNumber: dependency.number,
       issueUrl: dependency.url,
+      nativeId: dependency.nativeId,
+      displayId: dependency.displayId,
     })),
     ...overrides,
   }
@@ -159,7 +185,7 @@ const makeDbFixture = (options: DbFixtureOptions) => {
         const index = stored.findIndex(
           (issue) =>
             (issue.issueTracker ?? "github") === issueTracker &&
-            (issue.nativeId ?? String(issue.issueNumber)) === nativeId,
+            issue.nativeId === nativeId,
         )
         if (index >= 0) stored.splice(index, 1)
       }),
@@ -370,10 +396,10 @@ describe("IssueReconciler", () => {
       remoteIssue(1, {
         hierarchySupported: false,
         blockedBy: [
-          {
-            number: 99,
-            url: "https://git.drupalcode.org/project/oauth_client/-/issues/99",
-          },
+          forgeIssueRef(
+            99,
+            "https://git.drupalcode.org/project/oauth_client/-/issues/99",
+          ),
         ],
       }),
       remoteIssue(2, {
@@ -578,17 +604,12 @@ describe("IssueReconciler", () => {
         remoteIssue(3),
         remoteIssue(2, {
           state: "CLOSED",
-          parent: {
-            number: 1,
-            url: "https://github.com/acme/widgets/issues/1",
-            state: "OPEN",
-            isReadyLabeled: true,
-          },
+          parent: forgeIssueParent(
+            1,
+            "https://github.com/acme/widgets/issues/1",
+          ),
           blockedBy: [
-            {
-              number: 1,
-              url: "https://github.com/acme/widgets/issues/1",
-            },
+            forgeIssueRef(1, "https://github.com/acme/widgets/issues/1"),
           ],
         }),
         remoteIssue(1),
@@ -675,10 +696,7 @@ describe("IssueReconciler", () => {
       [
         remoteIssue(1, {
           blockedBy: [
-            {
-              number: 2,
-              url: "https://github.com/acme/widgets/issues/2",
-            },
+            forgeIssueRef(2, "https://github.com/acme/widgets/issues/2"),
           ],
         }),
       ],
@@ -709,12 +727,10 @@ describe("IssueReconciler", () => {
       [
         remoteIssue(1, {
           parentPosition: 4,
-          parent: {
-            number: 9,
-            url: "https://github.com/acme/widgets/issues/9",
-            state: "OPEN",
-            isReadyLabeled: true,
-          },
+          parent: forgeIssueParent(
+            9,
+            "https://github.com/acme/widgets/issues/9",
+          ),
         }),
       ],
       db.actions,
@@ -763,12 +779,10 @@ describe("IssueReconciler", () => {
     const db = makeDbFixture({
       issues: [localIssue(3), localIssue(4), localIssue(5), localIssue(6)],
     })
-    const parent = {
-      number: 1,
-      url: "https://github.com/acme/widgets/issues/1",
-      state: "OPEN" as const,
-      isReadyLabeled: true,
-    }
+    const parent = forgeIssueParent(
+      1,
+      "https://github.com/acme/widgets/issues/1",
+    )
     const github = makeGitHubLayer(
       [
         remoteIssue(1),
@@ -1192,22 +1206,18 @@ describe("IssueReconciler", () => {
           remoteIssue(4, { author: null }),
           remoteIssue(5, {
             author: "operator",
-            parent: {
-              number: 99,
-              url: "https://github.com/acme/widgets/issues/99",
-              state: "OPEN",
-              isReadyLabeled: true,
-            },
+            parent: forgeIssueParent(
+              99,
+              "https://github.com/acme/widgets/issues/99",
+            ),
             parentPosition: 0,
           }),
           remoteIssue(6, {
             author: "teammate",
-            parent: {
-              number: 1,
-              url: "https://github.com/acme/widgets/issues/1",
-              state: "OPEN",
-              isReadyLabeled: true,
-            },
+            parent: forgeIssueParent(
+              1,
+              "https://github.com/acme/widgets/issues/1",
+            ),
             parentPosition: 0,
           }),
         ],
@@ -1400,10 +1410,10 @@ describe("IssueReconciler", () => {
       remoteIssue(2, {
         hierarchySupported: false,
         blockedBy: [
-          {
-            number: 99,
-            url: "https://dev.azure.com/acme/widgets/_workitems/edit/99",
-          },
+          forgeIssueRef(
+            99,
+            "https://dev.azure.com/acme/widgets/_workitems/edit/99",
+          ),
         ],
       }),
       remoteIssue(3, {
