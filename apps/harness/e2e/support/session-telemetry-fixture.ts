@@ -84,6 +84,41 @@ export const sessionTelemetryFixturesArePresent = (
 
 const sqlLiteral = (value: string) => `'${value.replaceAll("'", "''")}'`
 
+const workItemInsert = (input: {
+  readonly id: string
+  readonly issueNumber: number
+  readonly issueTitle: string
+  readonly agentBackend: "opencode" | "codex"
+  readonly state: "implement" | "complete"
+  readonly stateReadyAt: number
+  readonly paused: 0 | 1
+  readonly sessionId: string | null
+  readonly createdAt: number
+  readonly updatedAt: number
+}): string => `INSERT INTO work_item (
+       id, repository_id, issue_number, issue_tracker, issue_native_id,
+       issue_display_id, issue_url, issue_title, agent_backend,
+       state, state_ready_at, paused, holds_worker_slot, session_id,
+       created_at, updated_at
+     ) VALUES (
+       ${sqlLiteral(input.id)},
+       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
+       ${input.issueNumber},
+       'github',
+       ${sqlLiteral(String(input.issueNumber))},
+       ${sqlLiteral(String(input.issueNumber))},
+       ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${input.issueNumber}`)},
+       ${sqlLiteral(input.issueTitle)},
+       ${sqlLiteral(input.agentBackend)},
+       ${sqlLiteral(input.state)},
+       ${input.stateReadyAt},
+       ${input.paused},
+       0,
+       ${input.sessionId === null ? "NULL" : sqlLiteral(input.sessionId)},
+       ${input.createdAt},
+       ${input.updatedAt}
+     );`
+
 const sessionTelemetryFixturesPresent = async (): Promise<boolean> => {
   try {
     const response = await fetch(E2E_GRAPHQL_URL, {
@@ -113,18 +148,13 @@ const sessionTelemetryFixturesPresent = async (): Promise<boolean> => {
 }
 
 /**
- * Seed a paused Repository, projected Issues, and Work Items so Session
- * Telemetry openers are clickable on Pipeline, Repos, and Completed.
- * Paused unfinished Work Items do not enqueue Step Runs.
- *
- * Does not write `config.default_model`: a non-catalog seed would leave Save
- * blocked for later settings-history scenarios in the same live Harness
- * process, and `ensureConfiguredDefaultBuildModel` is the shared catalog-safe
- * path for that. Callers that need first-run suppressed should use that helper
- * after seeding.
+ * SQL that seeds Session Telemetry fixtures. Unfinished Work Items must carry
+ * distinct `(issue_tracker, issue_native_id)` values: bun:sqlite `exec` skips
+ * unique-index failures without throwing, and
+ * `work_item_one_unfinished_v5_uidx` would otherwise keep only the first
+ * unfinished row (empty native-id default).
  */
-export const seedSessionTelemetryFixtures = async (): Promise<void> => {
-  const now = Date.now()
+export const sessionTelemetryFixtureSql = (now: number): string => {
   // Keep both Completed pages deterministic even when other e2e scenarios have
   // terminal Work Items. Future fixture timestamps sort ahead of all ordinary
   // rows: page 1 has the existing telemetry fixture + 19 fillers, and page 2
@@ -141,27 +171,21 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
             ? completedOrderBase + 69 - (index - 19)
             : completedOrderBase + 49 - (index - 33)
       const id = `wi-01KZD5SESS10NTE0F${String(index + 1).padStart(9, "0")}`
-      return `INSERT INTO work_item (
-       id, repository_id, issue_number, issue_title, agent_backend,
-       state, state_ready_at, paused, holds_worker_slot, session_id,
-       created_at, updated_at
-     ) VALUES (
-       ${sqlLiteral(id)},
-       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
-       ${issueNumber},
-       ${sqlLiteral(`E2E Completed pagination filler ${index + 1}`)},
-       'opencode',
-       'complete',
-       ${order},
-       0,
-       0,
-       NULL,
-       ${order},
-       ${order}
-     );`
+      return workItemInsert({
+        id,
+        issueNumber,
+        issueTitle: `E2E Completed pagination filler ${index + 1}`,
+        agentBackend: "opencode",
+        state: "complete",
+        stateReadyAt: order,
+        paused: 0,
+        sessionId: null,
+        createdAt: order,
+        updatedAt: order,
+      })
     },
   )
-  const sql = [
+  return [
     // Clear prior fixture rows so scenarios can re-seed safely.
     `DELETE FROM work_item WHERE repository_id = ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)};`,
     `DELETE FROM issue WHERE repository_id = ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)};`,
@@ -284,102 +308,85 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        ${now},
        ${now}
      );`,
-    `INSERT INTO work_item (
-       id, repository_id, issue_number, issue_title, agent_backend,
-       state, state_ready_at, paused, holds_worker_slot, session_id,
-       created_at, updated_at
-     ) VALUES (
-       ${sqlLiteral(TELEMETRY_FIXTURE.missingSessionWorkItemId)},
-       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
-       ${TELEMETRY_FIXTURE.missingSessionIssueNumber},
-       'E2E Session Telemetry missing',
-       'opencode',
-       'implement',
-       ${now},
-       1,
-       0,
-       ${sqlLiteral(TELEMETRY_FIXTURE.missingSessionId)},
-       ${now},
-       ${now}
-     );`,
-    `INSERT INTO work_item (
-       id, repository_id, issue_number, issue_title, agent_backend,
-       state, state_ready_at, paused, holds_worker_slot, session_id,
-       created_at, updated_at
-     ) VALUES (
-       ${sqlLiteral(TELEMETRY_FIXTURE.idleWorkItemId)},
-       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
-       ${TELEMETRY_FIXTURE.idleIssueNumber},
-       'E2E Session usage idle OpenCode tail',
-       'opencode',
-       'implement',
-       ${now},
-       1,
-       0,
-       ${sqlLiteral(TELEMETRY_FIXTURE.idleSessionId)},
-       ${now},
-       ${now}
-     );`,
-    `INSERT INTO work_item (
-       id, repository_id, issue_number, issue_title, agent_backend,
-       state, state_ready_at, paused, holds_worker_slot, session_id,
-       created_at, updated_at
-     ) VALUES (
-       ${sqlLiteral(TELEMETRY_FIXTURE.codexMissingWorkItemId)},
-       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
-       ${TELEMETRY_FIXTURE.codexMissingIssueNumber},
-       'E2E Codex Session Telemetry missing',
-       'codex',
-       'implement',
-       ${now},
-       1,
-       0,
-       ${sqlLiteral(TELEMETRY_FIXTURE.codexMissingSessionId)},
-       ${now},
-       ${now}
-     );`,
-    `INSERT INTO work_item (
-       id, repository_id, issue_number, issue_title, agent_backend,
-       state, state_ready_at, paused, holds_worker_slot, session_id,
-       created_at, updated_at
-     ) VALUES (
-       ${sqlLiteral(TELEMETRY_FIXTURE.completedWorkItemId)},
-       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
-       ${TELEMETRY_FIXTURE.completedIssueNumber},
-       'E2E Session Telemetry completed',
-       'opencode',
-       'complete',
-       ${completedOrderBase + 200},
-       0,
-       0,
-       ${sqlLiteral(TELEMETRY_FIXTURE.completedSessionId)},
-       ${completedOrderBase + 200},
-       ${completedOrderBase + 200}
-     );`,
+    workItemInsert({
+      id: TELEMETRY_FIXTURE.missingSessionWorkItemId,
+      issueNumber: TELEMETRY_FIXTURE.missingSessionIssueNumber,
+      issueTitle: "E2E Session Telemetry missing",
+      agentBackend: "opencode",
+      state: "implement",
+      stateReadyAt: now,
+      paused: 1,
+      sessionId: TELEMETRY_FIXTURE.missingSessionId,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    workItemInsert({
+      id: TELEMETRY_FIXTURE.idleWorkItemId,
+      issueNumber: TELEMETRY_FIXTURE.idleIssueNumber,
+      issueTitle: "E2E Session usage idle OpenCode tail",
+      agentBackend: "opencode",
+      state: "implement",
+      stateReadyAt: now,
+      paused: 1,
+      sessionId: TELEMETRY_FIXTURE.idleSessionId,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    workItemInsert({
+      id: TELEMETRY_FIXTURE.codexMissingWorkItemId,
+      issueNumber: TELEMETRY_FIXTURE.codexMissingIssueNumber,
+      issueTitle: "E2E Codex Session Telemetry missing",
+      agentBackend: "codex",
+      state: "implement",
+      stateReadyAt: now,
+      paused: 1,
+      sessionId: TELEMETRY_FIXTURE.codexMissingSessionId,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    workItemInsert({
+      id: TELEMETRY_FIXTURE.completedWorkItemId,
+      issueNumber: TELEMETRY_FIXTURE.completedIssueNumber,
+      issueTitle: "E2E Session Telemetry completed",
+      agentBackend: "opencode",
+      state: "complete",
+      stateReadyAt: completedOrderBase + 200,
+      paused: 0,
+      sessionId: TELEMETRY_FIXTURE.completedSessionId,
+      createdAt: completedOrderBase + 200,
+      updatedAt: completedOrderBase + 200,
+    }),
     ...fillerWorkItems.slice(0, 19),
-    `INSERT INTO work_item (
-       id, repository_id, issue_number, issue_title, agent_backend,
-       state, state_ready_at, paused, holds_worker_slot, session_id,
-       created_at, updated_at
-     ) VALUES (
-       ${sqlLiteral(TELEMETRY_FIXTURE.completedPageTwoWorkItemId)},
-       ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
-       ${TELEMETRY_FIXTURE.completedPageTwoIssueNumber},
-       'E2E Session Telemetry completed page two',
-       'opencode',
-       'complete',
-       ${completedOrderBase + 50},
-       0,
-       0,
-       ${sqlLiteral(TELEMETRY_FIXTURE.completedPageTwoSessionId)},
-       ${completedOrderBase + 50},
-       ${completedOrderBase + 50}
-     );`,
+    workItemInsert({
+      id: TELEMETRY_FIXTURE.completedPageTwoWorkItemId,
+      issueNumber: TELEMETRY_FIXTURE.completedPageTwoIssueNumber,
+      issueTitle: "E2E Session Telemetry completed page two",
+      agentBackend: "opencode",
+      state: "complete",
+      stateReadyAt: completedOrderBase + 50,
+      paused: 0,
+      sessionId: TELEMETRY_FIXTURE.completedPageTwoSessionId,
+      createdAt: completedOrderBase + 50,
+      updatedAt: completedOrderBase + 50,
+    }),
     ...fillerWorkItems.slice(19),
   ].join("\n")
+}
 
+/**
+ * Seed a paused Repository, projected Issues, and Work Items so Session
+ * Telemetry openers are clickable on Pipeline, Repos, and Completed.
+ * Paused unfinished Work Items do not enqueue Step Runs.
+ *
+ * Does not write `config.default_model`: a non-catalog seed would leave Save
+ * blocked for later settings-history scenarios in the same live Harness
+ * process, and `ensureConfiguredDefaultBuildModel` is the shared catalog-safe
+ * path for that. Callers that need first-run suppressed should use that helper
+ * after seeding.
+ */
+export const seedSessionTelemetryFixtures = async (): Promise<void> => {
   await ensureLiveHarnessPersistence({
     alreadyPresent: sessionTelemetryFixturesPresent,
-    sql,
+    sql: sessionTelemetryFixtureSql(Date.now()),
   })
 }
