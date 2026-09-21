@@ -17,6 +17,10 @@ import {
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import {
+  LinearService,
+  defaultLinearServiceShape,
+} from "@ready-for-agent/linear-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import { QueueService, makeJobId } from "@ready-for-agent/queue-service"
 import { stubQueueService } from "@ready-for-agent/queue-service/test"
@@ -352,6 +356,7 @@ describe("Repository CI Gate observation", () => {
           jumpHint: false,
         }),
     }),
+    Layer.succeed(LinearService, defaultLinearServiceShape),
     Layer.succeed(LocalGit, {
       inspect: (path) =>
         Effect.succeed({

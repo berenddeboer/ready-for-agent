@@ -103,9 +103,20 @@ type RepositoryCiGate = {
   } | null
 }
 
+export type LinearTeamWorkflowSelection = {
+  teamId: string
+  teamKey: string
+  teamName: string
+  inProgressStateId: string
+  inProgressStateName: string
+  doneStateId: string
+  doneStateName: string
+}
+
 export type Repository = {
   id: string
   forge: Forge
+  issueTracker: string
   forgeHost: string
   projectPath: string
   localPath: string
@@ -122,6 +133,9 @@ export type Repository = {
   waitForReadyForReviewChecks: boolean
   selectedCiGateDefinitions: readonly CiGateDefinition[]
   ciGate: RepositoryCiGate
+  linearProjectId: string | null
+  linearProjectName: string | null
+  linearWorkflowStatuses: readonly LinearTeamWorkflowSelection[]
   issuesReconciledAt: string | null
   blockingUnfinishedWorkItemCount: number
   credential: RepositoryCredential
@@ -138,6 +152,7 @@ export const repositoriesQuery = {
       repositories: {
         id: true,
         forge: true,
+        issueTracker: true,
         forgeHost: true,
         projectPath: true,
         localPath: true,
@@ -152,6 +167,17 @@ export const repositoriesQuery = {
         mergePolicy: true,
         includeAllIssueAuthors: true,
         waitForReadyForReviewChecks: true,
+        linearProjectId: true,
+        linearProjectName: true,
+        linearWorkflowStatuses: {
+          teamId: true,
+          teamKey: true,
+          teamName: true,
+          inProgressStateId: true,
+          inProgressStateName: true,
+          doneStateId: true,
+          doneStateName: true,
+        },
         selectedCiGateDefinitions: {
           identity: true,
           displayLabel: true,

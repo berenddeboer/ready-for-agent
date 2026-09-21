@@ -26,6 +26,9 @@
       "path": "../keymaxxer-service/tsconfig.lib.json"
     },
     {
+      "path": "../linear-service/tsconfig.lib.json"
+    },
+    {
       "path": "../graphql-schema/tsconfig.lib.json"
     },
     {

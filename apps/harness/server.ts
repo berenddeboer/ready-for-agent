@@ -14,6 +14,10 @@ import {
   isInternalKeymaxxerSidecarMode,
   runKeymaxxerSidecarProcess,
 } from "@ready-for-agent/keymaxxer-service"
+import {
+  isInternalLinearHelperMode,
+  runLinearHelperProcess,
+} from "@ready-for-agent/linear-service"
 
 if (isInternalKeymaxxerSidecarMode(process.argv)) {
   await runKeymaxxerSidecarProcess()
@@ -23,6 +27,8 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
   runGitLabHelperProcess()
 } else if (isInternalAzureDevOpsHelperMode(process.argv)) {
   runAzureDevOpsHelperProcess()
+} else if (isInternalLinearHelperMode(process.argv)) {
+  runLinearHelperProcess()
 } else {
   const { startProductionLifecycle } = await import(
     "./src/server/production-lifecycle.js"

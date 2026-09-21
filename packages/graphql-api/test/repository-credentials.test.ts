@@ -5,6 +5,13 @@ import {
   keymaxxerError,
 } from "@ready-for-agent/keymaxxer-service"
 import {
+  LINEAR_API_KEY_CREATION_URL,
+  LINEAR_API_KEY_ENV_VAR,
+  LINEAR_API_KEY_SECRET_NAME,
+  LINEAR_VAULT_ACCOUNT,
+  LINEAR_VAULT_PROVIDER,
+} from "@ready-for-agent/linear-service"
+import {
   QueueService,
   type QueueServiceShape,
 } from "@ready-for-agent/queue-service"
@@ -17,6 +24,8 @@ import {
   githubTokenSecretName,
   gitlabTokenSecretName,
   hasAzureDevOpsAmbientCredential,
+  hasLinearAmbientCredential,
+  linearCredential,
   repositoryCredential,
 } from "../src/lib/repository-credentials.js"
 import { describe, expect, test } from "bun:test"
@@ -40,6 +49,14 @@ const azureDevOpsRepo: Repository = {
   forge: "azure-devops",
   forgeHost: "dev.azure.com",
   projectPath: "acme/widgets",
+}
+
+const linearTrackedRepo: Repository = {
+  id: "repo-01J00000000000000000000013",
+  forge: "github",
+  forgeHost: "github.com",
+  projectPath: "acme/widgets",
+  issueTracker: "linear",
 }
 
 describe("repositoryCredential", () => {
@@ -439,5 +456,184 @@ describe("activatePollingIfCredentialed (Azure DevOps)", () => {
       if (previous === undefined) delete process.env.AZURE_DEVOPS_EXT_PAT
       else process.env.AZURE_DEVOPS_EXT_PAT = previous
     }
+  })
+})
+
+describe("linearCredential", () => {
+  test("suggests the personal Linear API key independently of GitHub", () => {
+    const missing = linearCredential(null)
+    expect(missing.configured).toBe(false)
+    expect(missing.secretName).toBe(LINEAR_API_KEY_SECRET_NAME)
+    expect(missing.creationUrl).toBe(LINEAR_API_KEY_CREATION_URL)
+
+    const stored = linearCredential("LINEAR_API_KEY_RENAMED")
+    expect(stored.configured).toBe(true)
+    expect(stored.secretName).toBe("LINEAR_API_KEY_RENAMED")
+  })
+})
+
+describe("activatePollingIfCredentialed (Linear)", () => {
+  const withLinearEnv = async (
+    value: string | undefined,
+    run: () => Promise<void>,
+  ) => {
+    const previous = process.env[LINEAR_API_KEY_ENV_VAR]
+    if (value === undefined) delete process.env[LINEAR_API_KEY_ENV_VAR]
+    else process.env[LINEAR_API_KEY_ENV_VAR] = value
+    try {
+      await run()
+    } finally {
+      if (previous === undefined) delete process.env[LINEAR_API_KEY_ENV_VAR]
+      else process.env[LINEAR_API_KEY_ENV_VAR] = previous
+    }
+  }
+
+  test("activates polling from ambient LINEAR_API_KEY when Keymaxxer is disabled", async () => {
+    await withLinearEnv("lin_api_test", async () => {
+      expect(hasLinearAmbientCredential()).toBe(true)
+      const activated: string[] = []
+      const runtime = makeRuntime(
+        ambientOnlyKeymaxxer,
+        stubQueueService({
+          enqueue: (queueName, payload) =>
+            Effect.sync(() => {
+              if (queueName === ISSUE_REFRESH_QUEUE) {
+                activated.push(
+                  (payload as { repositoryId: string }).repositoryId,
+                )
+              }
+              return "job-1" as never
+            }),
+          ensureKeyed: () =>
+            Effect.succeed({ jobId: "job-1" as never, created: true }),
+        }),
+      )
+      try {
+        await runtime.runPromise(
+          activatePollingIfCredentialed(linearTrackedRepo).pipe(
+            Random.withSeed(1),
+          ),
+        )
+        expect(activated).toEqual([linearTrackedRepo.id])
+      } finally {
+        await runtime.dispose()
+      }
+    })
+  })
+
+  test("does not activate Linear polling without a Linear credential", async () => {
+    await withLinearEnv(undefined, async () => {
+      expect(hasLinearAmbientCredential()).toBe(false)
+      const activated: string[] = []
+      const runtime = makeRuntime(
+        ambientOnlyKeymaxxer,
+        stubQueueService({
+          enqueue: (_queueName, payload) =>
+            Effect.sync(() => {
+              activated.push((payload as { repositoryId: string }).repositoryId)
+              return "job-1" as never
+            }),
+          ensureKeyed: () =>
+            Effect.succeed({ jobId: "job-1" as never, created: true }),
+        }),
+      )
+      try {
+        await runtime.runPromise(
+          activatePollingIfCredentialed(linearTrackedRepo).pipe(
+            Random.withSeed(1),
+          ),
+        )
+        expect(activated).toEqual([])
+      } finally {
+        await runtime.dispose()
+      }
+    })
+  })
+
+  test("activates Linear polling from the Linear vault, not GitHub", async () => {
+    await withLinearEnv(undefined, async () => {
+      const findSecretCalls: { provider: string; account: string }[] = []
+      const activated: string[] = []
+      const runtime = makeRuntime(
+        {
+          initialize: Effect.void,
+          hasSecret: () => Effect.succeed(true),
+          findSecret: (input) => {
+            findSecretCalls.push(input)
+            return Effect.succeed(
+              input.provider === LINEAR_VAULT_PROVIDER &&
+                input.account === LINEAR_VAULT_ACCOUNT
+                ? LINEAR_API_KEY_SECRET_NAME
+                : null,
+            )
+          },
+          findSecrets: () => Effect.succeed([]),
+          addSecret: () => Effect.succeed(true),
+          runWithSecrets: () =>
+            Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+        } satisfies KeymaxxerServiceShape,
+        stubQueueService({
+          enqueue: (_queueName, payload) =>
+            Effect.sync(() => {
+              activated.push((payload as { repositoryId: string }).repositoryId)
+              return "job-1" as never
+            }),
+          ensureKeyed: () =>
+            Effect.succeed({ jobId: "job-1" as never, created: true }),
+        }),
+      )
+      try {
+        await runtime.runPromise(
+          activatePollingIfCredentialed(linearTrackedRepo).pipe(
+            Random.withSeed(1),
+          ),
+        )
+        expect(findSecretCalls).toEqual([
+          { provider: LINEAR_VAULT_PROVIDER, account: LINEAR_VAULT_ACCOUNT },
+        ])
+        expect(activated).toEqual([linearTrackedRepo.id])
+      } finally {
+        await runtime.dispose()
+      }
+    })
+  })
+
+  test("does not start GitHub polling when Linear has no credential", async () => {
+    await withLinearEnv(undefined, async () => {
+      const activated: string[] = []
+      const runtime = makeRuntime(
+        {
+          initialize: Effect.void,
+          hasSecret: () => Effect.succeed(true),
+          findSecret: (input) =>
+            Effect.succeed(
+              input.provider === "github" ? "GITHUB_TOKEN_ACME_WIDGETS" : null,
+            ),
+          findSecrets: () => Effect.succeed([]),
+          addSecret: () => Effect.succeed(true),
+          runWithSecrets: () =>
+            Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+        } satisfies KeymaxxerServiceShape,
+        stubQueueService({
+          enqueue: (_queueName, payload) =>
+            Effect.sync(() => {
+              activated.push((payload as { repositoryId: string }).repositoryId)
+              return "job-1" as never
+            }),
+          ensureKeyed: () =>
+            Effect.succeed({ jobId: "job-1" as never, created: true }),
+        }),
+      )
+      try {
+        await runtime.runPromise(
+          activatePollingIfCredentialed(linearTrackedRepo).pipe(
+            Random.withSeed(1),
+          ),
+        )
+        expect(activated).toEqual([])
+      } finally {
+        await runtime.dispose()
+      }
+    })
   })
 })

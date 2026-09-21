@@ -38,6 +38,9 @@
       "path": "../../packages/azure-devops-service/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/linear-service/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/github-service/tsconfig.lib.json"
     },
     {

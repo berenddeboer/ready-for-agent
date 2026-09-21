@@ -62,6 +62,20 @@ type Query {
   """
   ciGateCatalog(repositoryId: ID!): CiGateCatalog!
   """
+  Personal Linear API key status for the operator. Independent of GitHub
+  Repository credentials.
+  """
+  linearCredential: LinearCredential!
+  """
+  Linear projects visible to the stored personal API key.
+  """
+  linearProjects: [LinearProject!]!
+  """
+  Team-specific workflow states for one Linear project, with suggested
+  In Progress and Done defaults.
+  """
+  linearProjectWorkflow(projectId: ID!): [LinearTeamWorkflow!]!
+  """
   Agent Models available from the Active Agent Backend, each with optional
   Thinking Levels. Empty thinkingLevels means the model has no Thinking Levels.
   Empty when the backend is unavailable.
@@ -740,6 +754,63 @@ type Repository {
   and does not close ordinary work.
   """
   ciGate: RepositoryCiGate!
+  """
+  Mapped Linear project id when Issue Tracker is Linear.
+  """
+  linearProjectId: String
+  linearProjectName: String
+  """
+  Per-team In Progress and Done statuses for Linear close-out.
+  """
+  linearWorkflowStatuses: [LinearTeamWorkflowSelection!]!
+}
+
+type LinearCredential {
+  configured: Boolean!
+  secretName: String!
+  creationUrl: String!
+}
+
+type LinearProject {
+  id: ID!
+  name: String!
+  url: String
+}
+
+type LinearWorkflowState {
+  id: ID!
+  name: String!
+  type: String!
+  position: Float!
+}
+
+type LinearTeamWorkflow {
+  teamId: ID!
+  teamKey: String!
+  teamName: String!
+  states: [LinearWorkflowState!]!
+  suggestedInProgressStateId: String
+  suggestedDoneStateId: String
+}
+
+type LinearTeamWorkflowSelection {
+  teamId: ID!
+  teamKey: String!
+  teamName: String!
+  inProgressStateId: String!
+  inProgressStateName: String!
+  doneStateId: String!
+  doneStateName: String!
+}
+
+input LinearTeamWorkflowSelectionInput {
+  teamId: ID!
+  teamKey: String!
+  teamName: String!
+  inProgressStateId: String!
+  inProgressStateName: String!
+  doneStateId: String!
+  doneStateName: String!
 }
 
 type LocalRepositoryInspection {
@@ -1308,6 +1379,14 @@ input UpdateRepositorySettingsInput {
   must exist in the current live catalog.
   """
   selectedCiGateDefinitionIdentities: [String!]
+  """
+  Configured Issue Tracker. Omitted leaves the stored tracker unchanged.
+  Linear is available only for GitHub-hosted Repositories.
+  """
+  issueTracker: String
+  linearProjectId: String
+  linearProjectName: String
+  linearWorkflowStatuses: [LinearTeamWorkflowSelectionInput!]
 }
 
 type Mutation {
@@ -1336,6 +1415,11 @@ type Mutation {
   azure-devops, account <project-path>) and activate Issue Polling.
   """
   addRepositoryAzureDevOpsToken(repositoryId: ID!): RepositoryCredential!
+  """
+  Store a personal Linear API key in Keymaxxer, independently of GitHub
+  credentials, and activate Issue Polling for Linear-tracked Repositories.
+  """
+  addLinearApiKey: LinearCredential!
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!
   implementNow(repositoryId: ID!, issueNumber: Int!): WorkItem!

@@ -385,6 +385,7 @@ describe("runMigrations", () => {
           { name: "20260911120000_step_run_review_progress_checkpoint" },
           { name: "20260921120000_independent_issue_tracker" },
           { name: "20260921140000_issue_store_tracker_identity" },
+          { name: "20260921180000_linear_discovery_settings" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

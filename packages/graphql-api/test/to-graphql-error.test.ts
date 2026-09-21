@@ -21,6 +21,23 @@ describe("toGraphQLError", () => {
     })
   })
 
+  test("maps LinearExecutionNotSupportedError to LINEAR_EXECUTION_NOT_SUPPORTED", () => {
+    const error = {
+      _tag: "LinearExecutionNotSupportedError" as const,
+      repositoryId: "repo-1",
+      message:
+        "Linear Issue execution is not available yet. Discovery and settings work; implementation lands in a follow-up.",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toContain("not available yet")
+    expect(gqlError.extensions).toMatchObject({
+      code: "LINEAR_EXECUTION_NOT_SUPPORTED",
+      repositoryId: "repo-1",
+    })
+  })
+
   test("maps InvalidExecutionProfileError to INVALID_EXECUTION_PROFILE", () => {
     const error = {
       _tag: "InvalidExecutionProfileError" as const,

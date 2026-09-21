@@ -128,7 +128,7 @@ describe("Waiting for blockers Working-row polish", () => {
   test("Issue row keeps direct Implement and restores the complete kebab", () => {
     const source = homeSource()
     expect(source).toContain("issueActionEligibility({")
-    expect(source).toContain("{canImplement && (")
+    expect(source).toContain("{canImplementNow && (")
     expect(source).toContain("<IssueActionsMenu")
     // Primary blue cue after the title for implementable issues only.
     expect(source).toContain("ui.repoIssueImplementBtn")

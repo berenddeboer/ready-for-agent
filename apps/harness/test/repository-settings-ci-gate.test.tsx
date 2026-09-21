@@ -78,6 +78,7 @@ describe("Repository settings CI Gate Definitions", () => {
     )
     expect(dialogSectionHeadingIds(dialog)).toEqual([
       "identity",
+      "tracker",
       "options",
       "agent",
       "models",

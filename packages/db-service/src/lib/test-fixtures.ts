@@ -36,6 +36,9 @@ export const makeRepositoryRecord = (
     guaranteedMinConcurrentAgentTurns: null,
     includeAllIssueAuthors: false,
     waitForReadyForReviewChecks: true,
+    linearProjectId: null,
+    linearProjectName: null,
+    linearWorkflowStatuses: [],
     issuesReconciledAt: null,
     ...rest,
   }
@@ -98,6 +101,7 @@ export const stubDbService = (
   listWorkItemPullRequests: unused,
   listUnfinishedCreatePrWorkItems: unused,
   deleteIssue: unused,
+  deleteIssueByNativeId: unused,
   markIssuesReconciled: unused,
   ...overrides,
 })
