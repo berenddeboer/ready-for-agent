@@ -25,6 +25,7 @@ import {
   ReviewSessionContextMissingError,
   ReviewWorktreeContextMissingError,
 } from "./review-errors.js"
+import { loadScopeHandoff } from "./scope-handoff.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
@@ -131,8 +132,8 @@ export const REVIEW_UNPARSEABLE_APPLY_REASON =
   "Apply-findings outcome was unparseable after one verdict-repair turn; inspect the worktree or address remaining findings, then Retry."
 
 /**
- * Needs Human when the builder leaves an original high-severity review
- * unchanged or disputes it without fixing.
+ * Needs Human when the builder defers an original high-severity review
+ * rather than resolving or clearing it with evidence.
  */
 export const REVIEW_HIGH_UNCHANGED_REASON =
   "High-severity Review Findings were not fixed; human attention required."
@@ -195,6 +196,12 @@ const SEVERITY_RUBRIC = [
   "high = security, data-loss, major-contract, or broad/systemic impact.",
 ].join(" ")
 
+const FINDING_VALIDITY = [
+  "Validate evidence and scope before assigning severity. A Review Finding must identify a regression introduced by this change or an unmet requirement within the agreed scope.",
+  "For each finding, cite the requirement or changed behavior, a failing example or concrete code path with applicable preconditions, and the resulting impact. A production incident is not required, but an unverified possibility is not a demonstrated defect.",
+  "Keep pre-existing out-of-scope limitations and speculative hardening in a separate non-blocking Follow-up observations section; exclude them from the Review Findings severity and result marker. Respect operator-accepted limitations. Potential impact alone does not authorize broader implementation.",
+].join("\n")
+
 /** Persist deferred severity + rationale on the completed Review Step Run. */
 export const formatDeferredReviewSummary = (
   severity: DeferredReviewSeverity,
@@ -216,11 +223,13 @@ export const formatAcceptedReviewSummary = (
 export const buildReviewingPrompt = () =>
   [
     "Review uncommitted worktree changes.",
-    "Do not edit files, commit, push, open pull requests, or apply findings in this turn.",
+    "Review product changes; exclude `.ready-for-agent/` harness metadata from the product diff.",
+    "Do not edit product files, commit, push, open pull requests, or apply findings in this turn. Only the harness scope handoff may be updated to record existing scope decisions.",
+    FINDING_VALIDITY,
     SEVERITY_RUBRIC,
     "End your final response with exactly one machine-readable result line:",
     "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
-    "when there are no Review Findings, or",
+    "when there are no in-scope, evidenced Review Findings (follow-up observations do not prevent CLEAN), or",
     "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
     "using the highest Review Severity among the findings.",
   ].join("\n")
@@ -229,6 +238,7 @@ export const buildReviewVerdictPrompt = () =>
   [
     "The reviewing pass immediately above has completed.",
     "Do not review again, edit files, or add explanatory prose.",
+    "Use only in-scope, evidenced Review Findings from the existing report. Follow-up observations are non-blocking and do not contribute severity.",
     SEVERITY_RUBRIC,
     "Classify the existing report. If it reported any Review Findings, respond exactly:",
     "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
@@ -241,7 +251,11 @@ const buildApplyFindingsPrompt = (severity: ReviewSeverity) =>
   [
     `The previous reviewing pass reported Review Findings at severity ${severity} (REVIEW_HAS_FINDINGS: ${severity}).`,
     "Interpret those findings. Fix only what should be fixed now.",
-    "Low- and medium-severity findings may be deferred or cleared with a reason; high-severity findings must be fixed (with optional lower-severity deferrals) or left unresolved for a human.",
+    FINDING_VALIDITY,
+    "A severity label is not proof. Findings of any reported severity may be cleared with evidence that they are disproven, pre-existing and outside the agreed scope, or covered by an explicit operator-accepted limitation. Cite the code evidence or operator decision for every clearance; uncertainty or implementation cost alone is not a clearance.",
+    "Valid low- and medium-severity findings may be deferred with a reason. Valid unresolved high-severity findings require a fix within the agreed scope or a human decision; do not silently defer them or expand scope to satisfy them.",
+    "Prefer the smallest sufficient correction. Consider removing unnecessary work that caused a finding before extending it. If meeting a requirement needs broader work, request a scope decision instead of implementing that expansion.",
+    "Verify the reported defects and regressions caused by their fixes, then return the result. The harness owns the next full review. Do not launch another full-worktree review or review subagents during this repair pass.",
     "Do not commit, push, open pull requests, or start unrelated rework.",
     "End your final response with exactly one machine-readable result line:",
     "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
@@ -251,7 +265,7 @@ const buildApplyFindingsPrompt = (severity: ReviewSeverity) =>
     "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <low|medium>: <short reason>",
     "when you did not change the worktree and only low/medium findings remain (defer them),",
     "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: <short reason>",
-    "when you reject all low/medium findings as invalid without changing the worktree,",
+    "when you clear every finding, of any reported severity, with an evidence-backed reason and no product changes,",
     "or",
     "READY_FOR_AGENT_RESULT: REVIEW_UNRESOLVED_HIGH: <short reason>",
     "when high-severity findings remain unresolved or disputed without a fix.",
@@ -700,10 +714,12 @@ export const review = (context: LifecycleStepContext) =>
     for (;;) {
       yield* markReviewingPhase
 
+      const reviewingScope = yield* loadScopeHandoff(context, worktreePath)
+
       const reviewing = yield* agentBackend
         .continueTurn({
           sessionId,
-          prompt: buildReviewingPrompt(),
+          prompt: `${buildReviewingPrompt()}\n\n${reviewingScope}`,
           cwd: worktreePath,
           model: context.reviewModel,
           thinkingLevel: context.reviewThinkingLevel,
@@ -807,11 +823,12 @@ export const review = (context: LifecycleStepContext) =>
       yield* markApplyingFindingsPhase
 
       const fingerprintBefore = yield* worktreeFingerprint(worktreePath)
+      const applyingScope = yield* loadScopeHandoff(context, worktreePath)
 
       const applying = yield* agentBackend
         .continueTurn({
           sessionId,
-          prompt: buildApplyFindingsPrompt(originalSeverity),
+          prompt: `${buildApplyFindingsPrompt(originalSeverity)}\n\n${applyingScope}`,
           cwd: worktreePath,
           model: context.model,
           thinkingLevel: context.thinkingLevel,
@@ -943,11 +960,16 @@ export const review = (context: LifecycleStepContext) =>
       }
 
       if (applyParsed._tag === "cleared") {
-        if (originalSeverity === "high") {
-          return {
-            _tag: "needs_human" as const,
-            reason: REVIEW_HIGH_UNCHANGED_REASON,
-          }
+        // A clearance explains why no repair was needed. Product changes still
+        // need verification, even when the agent calls its result a clearance.
+        if (worktreeChanged) {
+          fixRoundsUsed += 1
+          yield* markReviewPreCommitPhase
+          yield* preCommit(context)
+          yield* recordReviewProgressCheckpoint(
+            REVIEW_PROGRESS_CHECKPOINT_KIND.verifiedApply,
+          )
+          continue
         }
         return {
           _tag: "cleared" as const,

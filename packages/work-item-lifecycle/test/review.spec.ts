@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
@@ -43,6 +43,7 @@ import {
   parseReviewResult,
   review,
 } from "../src/index.js"
+import { scopeHandoffPath } from "../src/lib/scope-handoff.js"
 import { describe, expect, it } from "bun:test"
 
 const PlatformLayer = BunServices.layer
@@ -634,7 +635,7 @@ describe("parseRerunAssessmentResult", () => {
 })
 
 const isReviewingTurn = (input: { readonly prompt: string }): boolean =>
-  input.prompt === buildReviewingPrompt()
+  input.prompt.startsWith(buildReviewingPrompt())
 
 const isAssessmentTurn = (input: { readonly prompt: string }): boolean =>
   input.prompt === buildRerunAssessmentPrompt() ||
@@ -645,7 +646,7 @@ describe("buildReviewingPrompt", () => {
     const prompt = buildReviewingPrompt()
     expect(prompt).toContain("Review uncommitted worktree changes.")
     expect(prompt).toContain(
-      "Do not edit files, commit, push, open pull requests, or apply findings in this turn.",
+      "Do not edit product files, commit, push, open pull requests, or apply findings in this turn.",
     )
     expect(prompt).toContain("low = no plausible runtime or contract impact")
     expect(prompt).toContain("medium = bounded behavior or correctness impact")
@@ -663,6 +664,103 @@ describe("buildReviewingPrompt", () => {
 })
 
 describe("review", () => {
+  it("persists operator scope across review, repair, and Retry without treating handoff edits as product changes", () =>
+    withTempGit(async (root) => {
+      const sessionId = "ses_scope_handoff"
+      const context = baseContext(root, { sessionId })
+      const amendment =
+        "Operator: Sum existing recorded costs as-is. Completion reliability and attribution are deferred to #3146."
+      let turn = 0
+      const backend = stubOpencode({
+        continueTurn: (input) =>
+          Effect.promise(async () => {
+            turn += 1
+            expect(input.prompt).toContain(scopeHandoffPath(root))
+            expect(input.prompt).toContain(
+              "Pass the complete reconciled scope handoff",
+            )
+            if (turn === 1) {
+              expect(await readFile(scopeHandoffPath(root), "utf8")).toContain(
+                context.workItemId,
+              )
+              // The operator amends scope during this session; the reviewing
+              // agent records it before handing findings back to the builder.
+              await writeFile(scopeHandoffPath(root), amendment)
+              return {
+                sessionId,
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high",
+              }
+            }
+            expect(input.prompt).toContain(amendment)
+            if (turn === 2) {
+              expect(input.prompt).toContain("A severity label is not proof")
+              expect(input.prompt).toContain(
+                "Do not launch another full-worktree review",
+              )
+              await writeFile(
+                scopeHandoffPath(root),
+                `${amendment}\nThe operator amendment supersedes the original ingestion requirement.`,
+              )
+              return {
+                sessionId,
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: Operator explicitly deferred upstream collection reliability to #3146; the finding is outside the agreed scope.",
+              }
+            }
+            expect(input.prompt).toContain(
+              "supersedes the original ingestion requirement",
+            )
+            return {
+              sessionId,
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+            }
+          }),
+      })
+      expect(await run(review(context), backend)).toEqual({
+        _tag: "cleared",
+        reason:
+          "Operator explicitly deferred upstream collection reliability to #3146; the finding is outside the agreed scope.",
+      })
+      // A separate lifecycle invocation reloads the persisted handoff.
+      expect(await run(review(context), backend)).toEqual({ _tag: "clean" })
+      expect(turn).toBe(3)
+    }))
+
+  it("verifies and re-reviews product changes even when the builder claims high findings were cleared", () =>
+    withTempGit(async (root) => {
+      await writeHook(
+        root,
+        "#!/usr/bin/env bash\necho verified > .ready-for-agent/verified\n",
+      )
+      let turn = 0
+      const outcome = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continueTurn: () =>
+            Effect.promise(async () => {
+              turn += 1
+              if (turn === 2)
+                await writeFile(join(root, "repair.txt"), "product change\n")
+              return {
+                sessionId: "ses_implement_session",
+                assistantText:
+                  turn === 1
+                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high"
+                    : turn === 2
+                      ? "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: false positive"
+                      : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+              }
+            }),
+        }),
+      )
+      expect(outcome).toEqual({ _tag: "clean" })
+      expect(turn).toBe(3)
+      expect(
+        await readFile(join(root, ".ready-for-agent", "verified"), "utf8"),
+      ).toBe("verified\n")
+    }))
+
   it("rejects missing worktree context", async () => {
     const error = await run(review(baseContext(null)).pipe(Effect.flip))
     expect(error).toBeInstanceOf(ReviewWorktreeContextMissingError)
@@ -740,12 +838,12 @@ describe("review", () => {
         Duration.toMillis(Duration.minutes(45)),
       )
       expect(continued!.command).toBeUndefined()
-      expect(continued!.prompt).toBe(buildReviewingPrompt())
+      expect(continued!.prompt).toContain(buildReviewingPrompt())
       expect(continued!.prompt.startsWith('"')).toBe(false)
       expect(continued!.prompt.endsWith('"')).toBe(false)
       expect(continued!.prompt.startsWith("/review")).toBe(false)
       expect(continued!.prompt).toContain(
-        "Do not edit files, commit, push, open pull requests, or apply findings",
+        "Do not edit product files, commit, push, open pull requests, or apply findings",
       )
       expect(continued!.prompt).toContain(
         "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
@@ -968,7 +1066,7 @@ describe("review", () => {
       expect(continues[0]!.model).toBe("opencode/review-model")
       expect(continues[0]!.thinkingLevel).toBe("max")
       expect(continues[0]!.command).toBeUndefined()
-      expect(continues[0]!.prompt).toBe(buildReviewingPrompt())
+      expect(continues[0]!.prompt).toContain(buildReviewingPrompt())
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[1]!.thinkingLevel).toBe("high")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
@@ -1126,7 +1224,7 @@ describe("review", () => {
         ),
       ).toBe(false)
       expect(
-        prompts.filter((prompt) => prompt === buildReviewingPrompt()),
+        prompts.filter((prompt) => isReviewingTurn({ prompt })),
       ).toHaveLength(1)
     }))
 
@@ -1154,7 +1252,7 @@ describe("review", () => {
       })
     }))
 
-  it("returns Needs Human when high findings are cleared without a fix", () =>
+  it("accepts evidence-backed clearance of high findings without a fix", () =>
     withTemp(async (root) => {
       let turn = 0
       const result = await run(
@@ -1167,15 +1265,17 @@ describe("review", () => {
               assistantText:
                 turn === 1
                   ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high"
-                  : "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: disagree with critic",
+                  : "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: auth middleware rejects missing JWTs before the resolver; the claimed unauthenticated path is unreachable",
             })
           },
         }),
       )
       expect(result).toEqual({
-        _tag: "needs_human",
-        reason: REVIEW_HIGH_UNCHANGED_REASON,
+        _tag: "cleared",
+        reason:
+          "auth middleware rejects missing JWTs before the resolver; the claimed unauthenticated path is unreachable",
       })
+      expect(turn).toBe(2)
     }))
 
   it("runs Pre-Commit then re-reviews after medium FIXED without assessment", () =>
@@ -1235,14 +1335,14 @@ describe("review", () => {
       expect(continues[0]!.model).toBe("opencode/review-model")
       expect(continues[0]!.thinkingLevel).toBe("max")
       expect(continues[0]!.command).toBeUndefined()
-      expect(continues[0]!.prompt).toBe(buildReviewingPrompt())
+      expect(continues[0]!.prompt).toContain(buildReviewingPrompt())
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[1]!.thinkingLevel).toBe("high")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
       expect(continues[2]!.model).toBe("opencode/review-model")
       expect(continues[2]!.thinkingLevel).toBe("max")
       expect(continues[2]!.command).toBeUndefined()
-      expect(continues[2]!.prompt).toBe(buildReviewingPrompt())
+      expect(continues[2]!.prompt).toContain(buildReviewingPrompt())
       expect(continues.some((turn) => isAssessmentTurn(turn))).toBe(false)
     }))
 
@@ -1897,7 +1997,11 @@ describe("review", () => {
                 continueTurn: (input) =>
                   Effect.gen(function* () {
                     turn += 1
-                    if (input.prompt.includes("pre-commit")) {
+                    if (
+                      input.prompt.startsWith(
+                        "The repository pre-commit hook failed",
+                      )
+                    ) {
                       const rows = (yield* sql.unsafe(
                         `SELECT reason_code, reason_message FROM step_run WHERE id = ?`,
                         [stepRunId],
@@ -2285,9 +2389,8 @@ describe("review", () => {
                 return {
                   sessionId: "ses_implement_session",
                   assistantText:
-                    prompts.filter(
-                      (prompt) => prompt === buildReviewingPrompt(),
-                    ).length === 1
+                    prompts.filter((prompt) => isReviewingTurn({ prompt }))
+                      .length === 1
                       ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
                       : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
                 }
@@ -2321,7 +2424,7 @@ describe("review", () => {
         ),
       ).toBe(true)
       expect(
-        prompts.filter((prompt) => prompt === buildReviewingPrompt()),
+        prompts.filter((prompt) => isReviewingTurn({ prompt })),
       ).toHaveLength(2)
     }))
 
@@ -2339,9 +2442,8 @@ describe("review", () => {
                 return {
                   sessionId: "ses_implement_session",
                   assistantText:
-                    prompts.filter(
-                      (prompt) => prompt === buildReviewingPrompt(),
-                    ).length === 1
+                    prompts.filter((prompt) => isReviewingTurn({ prompt }))
+                      .length === 1
                       ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
                       : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
                 }
@@ -2368,7 +2470,7 @@ describe("review", () => {
         ),
       ).toHaveLength(1)
       expect(
-        prompts.filter((prompt) => prompt === buildReviewingPrompt()),
+        prompts.filter((prompt) => isReviewingTurn({ prompt })),
       ).toHaveLength(2)
     }))
 
@@ -2403,9 +2505,8 @@ describe("review", () => {
                 return {
                   sessionId: "ses_implement_session",
                   assistantText:
-                    prompts.filter(
-                      (prompt) => prompt === buildReviewingPrompt(),
-                    ).length === 1
+                    prompts.filter((prompt) => isReviewingTurn({ prompt }))
+                      .length === 1
                       ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
                       : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
                 }
@@ -2432,7 +2533,7 @@ describe("review", () => {
         ),
       ).toHaveLength(1)
       expect(
-        prompts.filter((prompt) => prompt === buildReviewingPrompt()),
+        prompts.filter((prompt) => isReviewingTurn({ prompt })),
       ).toHaveLength(2)
     }))
 

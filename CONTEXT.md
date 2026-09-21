@@ -324,7 +324,7 @@ A successful Review outcome in which a Review Rerun Assessment determines, with 
 _Avoid_: Clean review, skipped review, deferred finding
 
 **Cleared Review Outcome**:
-A successful Review outcome in which the build model rejects all low- or medium-severity Review Findings as invalid without changing the worktree. It advances to Commit with a recorded rationale; high-severity findings cannot be cleared this way.
+A successful Review outcome in which the build model clears all Review Findings of any reported severity without product changes, citing evidence that they are disproven, pre-existing and outside the agreed scope, or covered by an explicit operator-accepted limitation. It advances to Commit with a recorded rationale; valid unresolved high-severity findings still require human attention.
 _Avoid_: Clean review, deferred finding, fixed finding
 
 **Review Fix Round**:

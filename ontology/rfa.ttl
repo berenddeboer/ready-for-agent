@@ -432,7 +432,7 @@ rfa:ReviewClearedReason
   a rfa:StepRunReason ;
   skos:notation "review_cleared" ;
   skos:definition
-    "A successful Review that cleared low or medium findings without changes."@en .
+    "A successful Review that cleared all findings of any reported severity with evidence and without product changes."@en .
 
 rfa:ReviewDeferredReason
   a rfa:StepRunReason ;

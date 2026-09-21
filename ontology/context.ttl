@@ -2112,7 +2112,7 @@ rfa:AcceptedReviewOutcome
 rfa:ClearedReviewOutcome
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Cleared Review Outcome"@en ;
-  skos:definition "A successful Review outcome in which the build model rejects all low- or medium-severity Review Findings as invalid without changing the worktree. It advances to Commit with a recorded rationale; high-severity findings cannot be cleared this way."@en ;
+  skos:definition "A successful Review outcome in which the build model clears all Review Findings of any reported severity without product changes, citing evidence that they are disproven, pre-existing and outside the agreed scope, or covered by an explicit operator-accepted limitation. It advances to Commit with a recorded rationale; valid unresolved high-severity findings still require human attention."@en ;
   skos:hiddenLabel "Clean review"@en, "deferred finding"@en, "fixed finding"@en .
 
 [
