@@ -28,6 +28,7 @@ import {
   notifyLinearWorkStarted,
 } from "./linear-milestones.js"
 import { promptUserContentSection } from "./sanitize-prompt-user-content.js"
+import { loadScopeHandoff } from "./scope-handoff.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { workItemAttachmentDirectory } from "./work-item-attachment-directory.js"
 
@@ -226,6 +227,8 @@ const buildImplementPrompt = (
       ? "Make the implementation in this worktree and run appropriate verification."
       : "Finish the implementation in this worktree and run appropriate verification.",
     implementTheIssuePromptLine,
+    "Deliver the smallest change satisfying the agreed scope. Existing upstream limitations and speculative hardening are follow-up observations, not new requirements. If a requirement genuinely needs broader work, request a scope decision before expanding it.",
+    "Run appropriate verification; the harness owns the full review cycle. Do not launch your own full-worktree reviews.",
     ...visualEvidencePromptLines(workItemId),
   ].join("\n")
 }
@@ -310,7 +313,7 @@ export const implement = (context: LifecycleStepContext) =>
         : { title: storedIssue.title, body: storedIssue.body }
 
     const existingSessionId = priorSessionId(context)
-    const prompt = buildImplementPrompt(
+    const implementationPrompt = buildImplementPrompt(
       gitRepository,
       issueNumber,
       context.workItemId,
@@ -320,6 +323,8 @@ export const implement = (context: LifecycleStepContext) =>
       context.issueSource,
       isLinearIssueSource(context.issueSource) ? liveIssue : null,
     )
+    const scopeHandoff = yield* loadScopeHandoff(context, worktreePath)
+    const prompt = `${implementationPrompt}\n\n${scopeHandoff}`
 
     const agentBackend = yield* AgentBackend
     const sql = yield* SqlClient.SqlClient

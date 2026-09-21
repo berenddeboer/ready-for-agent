@@ -144,7 +144,7 @@ export const STEP_RUN_REASON = {
   reviewApplyingFindings: "review_applying_findings",
   /** Mid-run: Review is assessing whether low-severity remediation needs a rerun. */
   reviewAssessingRerun: "review_assessing_rerun",
-  /** A successful Review that cleared low or medium findings without changes. */
+  /** A successful Review that cleared all findings of any reported severity with evidence and without product changes. */
   reviewCleared: "review_cleared",
   /** A successful Review that deferred findings and advanced to Commit. */
   reviewDeferred: "review_deferred",
@@ -192,7 +192,7 @@ export const STEP_RUN_REASON_DEFINITIONS = {
   review_accepted: "A successful Review that accepted low-severity remediation without a full rerun.",
   review_applying_findings: "Mid-run: Review is applying findings with the build model.",
   review_assessing_rerun: "Mid-run: Review is assessing whether low-severity remediation needs a rerun.",
-  review_cleared: "A successful Review that cleared low or medium findings without changes.",
+  review_cleared: "A successful Review that cleared all findings of any reported severity with evidence and without product changes.",
   review_deferred: "A successful Review that deferred findings and advanced to Commit.",
   review_pre_commit: "Mid-run: Review is re-running Pre-Commit after FIXED before re-review.",
   review_reviewing: "Mid-run: Review is running the reviewing Agent Turn.",

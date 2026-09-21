@@ -284,7 +284,7 @@ const withTempGit = async (assert: (root: string) => Promise<void>) => {
 
 const isReviewingTurn = (prompt: string): boolean =>
   prompt.includes("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS") &&
-  prompt.includes("Do not edit files, commit, push")
+  prompt.includes("Do not edit product files, commit, push")
 
 const isApplyTurn = (prompt: string): boolean =>
   prompt.includes("READY_FOR_AGENT_RESULT: REVIEW_FIXED") &&

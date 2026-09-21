@@ -430,7 +430,12 @@ describe("implement", () => {
           )
         }),
       )
-      expect(await readdir(root)).toEqual(before)
+      expect(
+        (await readdir(root)).filter((name) => name !== ".ready-for-agent"),
+      ).toEqual(before)
+      expect(await readdir(join(root, ".ready-for-agent"))).toEqual([
+        "scope.md",
+      ])
     }))
 
   it("starts a GitLab Implement turn with glab credential guidance and no curl or gh guidance", () =>

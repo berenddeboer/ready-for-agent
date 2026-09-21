@@ -27,6 +27,7 @@ export const PROMPT_BOUNDARY_TAGS = [
   "diagnostics",
   "command_stderr",
   "failed_reason",
+  "scope_handoff",
 ] as const
 
 export type PromptBoundaryTag = (typeof PROMPT_BOUNDARY_TAGS)[number]
