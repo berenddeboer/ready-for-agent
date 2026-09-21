@@ -66,6 +66,8 @@ const OptionalInstantFromString = Schema.NullOr(Schema.String).pipe(
 
 const SerializedIssue = Schema.Struct({
   number: PositiveInt,
+  nativeId: Schema.optionalKey(Schema.String),
+  displayId: Schema.optionalKey(Schema.String),
   title: RequiredString,
   body: Schema.String,
   url: UrlString,
@@ -79,6 +81,8 @@ const SerializedIssue = Schema.Struct({
     Schema.Struct({
       number: PositiveInt,
       url: UrlString,
+      nativeId: Schema.optionalKey(Schema.String),
+      displayId: Schema.optionalKey(Schema.String),
       state: Schema.Literals(["OPEN", "CLOSED"]),
       isReadyLabeled: Schema.Boolean,
     }),
@@ -87,6 +91,8 @@ const SerializedIssue = Schema.Struct({
     Schema.Struct({
       number: PositiveInt,
       url: UrlString,
+      nativeId: Schema.optionalKey(Schema.String),
+      displayId: Schema.optionalKey(Schema.String),
     }),
   ),
   closingPullRequests: Schema.Array(

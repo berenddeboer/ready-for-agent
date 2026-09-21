@@ -166,7 +166,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(issues).toContain("disabled={implementPending}")
     const implementAction = sliceBetweenMarkers(
       issues,
-      "{canImplement && (",
+      "{canImplementNow && (",
       "{issue.issueAuthor !== null",
     )
     expect(implementAction).toContain("onClick={startImplementNow}")

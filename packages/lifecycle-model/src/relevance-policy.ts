@@ -1,4 +1,4 @@
-import type { Forge } from "./generated/forge.js"
+import { type Forge, type IssueTracker, isForge } from "./generated/forge.js"
 
 /**
  * How a `hierarchySupported: false` observation is interpreted.
@@ -58,5 +58,22 @@ export const relevancePolicyForForge = (forge: Forge): ForgeRelevancePolicy => {
       const _exhaustive: never = forge
       return _exhaustive
     }
+  }
+}
+
+/**
+ * Linear has native parent/child hierarchy like GitHub. Competing GitHub PRs
+ * are out of scope for Linear discovery, so draft closing-PR treatment is
+ * inactive.
+ */
+export const relevancePolicyForIssueTracker = (
+  tracker: IssueTracker,
+): ForgeRelevancePolicy => {
+  if (isForge(tracker)) {
+    return relevancePolicyForForge(tracker)
+  }
+  return {
+    hierarchyObservation: { kind: "required" },
+    openDraftClosingPullRequest: { kind: "inactive" },
   }
 }

@@ -24,6 +24,10 @@ import {
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import {
+  LinearService,
+  defaultLinearServiceShape,
+} from "@ready-for-agent/linear-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import { QueueService } from "@ready-for-agent/queue-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
@@ -328,6 +332,7 @@ describe("Authorize incident-scoped CI Repair", () => {
             jumpHint: false,
           }),
       }),
+      Layer.succeed(LinearService, defaultLinearServiceShape),
       Layer.succeed(LocalGit, {
         inspect: (path) =>
           Effect.succeed({

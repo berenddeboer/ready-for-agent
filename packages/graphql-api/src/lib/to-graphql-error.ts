@@ -287,6 +287,23 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         error.message ?? "Azure DevOps request failed",
         "AZURE_DEVOPS_REQUEST_FAILED",
       )
+    case "LinearRequestError":
+      return gql(
+        error.message ?? "Linear request failed",
+        "LINEAR_REQUEST_FAILED",
+      )
+    case "LinearNotConfiguredError":
+      return gql(
+        error.message ?? "Linear is not configured for this Repository",
+        "LINEAR_NOT_CONFIGURED",
+        { repositoryId: error.repositoryId },
+      )
+    case "LinearExecutionNotSupportedError":
+      return gql(
+        error.message ?? "Linear Issue execution is not available yet",
+        "LINEAR_EXECUTION_NOT_SUPPORTED",
+        { repositoryId: error.repositoryId },
+      )
     case "GitHubThrottledError": {
       const retryAt = error.retryAt
       const retryTime =

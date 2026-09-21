@@ -38,7 +38,7 @@ const relevantContext = (
   overrides: Partial<RelevantIssuePredicateContextInput> = {},
 ): RelevantIssuePredicateContext =>
   relevantIssuePredicateContext({
-    forge: "github",
+    issueTracker: "github",
     repositoryName: "owner/repository",
     workItemPullRequestNumbers: new Set(),
     authorScope: { includeAll: false, operatorLogin: "operator" },
@@ -287,7 +287,7 @@ describe("shared lifecycle predicates", () => {
           closingPullRequests: [mergedClosingPullRequest],
         }),
         relevantContext({
-          forge: "gitlab",
+          issueTracker: "gitlab",
           authorScope: { includeAll: true },
         }),
       ),
@@ -300,7 +300,7 @@ describe("shared lifecycle predicates", () => {
           closingPullRequests: [openClosingPullRequest],
         }),
         relevantContext({
-          forge: "gitlab",
+          issueTracker: "gitlab",
           authorScope: { includeAll: true },
         }),
       ),
@@ -314,7 +314,7 @@ describe("shared lifecycle predicates", () => {
           closingPullRequests: [mergedClosingPullRequest],
         }),
         relevantContext({
-          forge: "gitlab",
+          issueTracker: "gitlab",
           authorScope: { includeAll: true },
         }),
       ),
@@ -327,7 +327,7 @@ describe("shared lifecycle predicates", () => {
           closingPullRequests: [mergedClosingPullRequest],
         }),
         relevantContext({
-          forge: "azure-devops",
+          issueTracker: "azure-devops",
           ...includeAllAuthors,
         }),
       ),
@@ -340,7 +340,7 @@ describe("shared lifecycle predicates", () => {
           closingPullRequests: [openClosingPullRequest],
         }),
         relevantContext({
-          forge: "azure-devops",
+          issueTracker: "azure-devops",
           ...includeAllAuthors,
         }),
       ),
@@ -354,7 +354,7 @@ describe("shared lifecycle predicates", () => {
           closingPullRequests: [mergedClosingPullRequest],
         }),
         relevantContext({
-          forge: "azure-devops",
+          issueTracker: "azure-devops",
           ...includeAllAuthors,
         }),
       ),
@@ -386,7 +386,7 @@ describe("shared lifecycle predicates", () => {
       expect(
         evaluateRelevantIssue(
           relevantIssue({ hierarchySupported: false }),
-          relevantContext({ forge, ...includeAllAuthors }),
+          relevantContext({ issueTracker: forge, ...includeAllAuthors }),
         ),
       ).toEqual({ _tag: "match" })
       expect(
@@ -395,7 +395,7 @@ describe("shared lifecycle predicates", () => {
             hierarchySupported: false,
             hasChildren: true,
           }),
-          relevantContext({ forge, ...includeAllAuthors }),
+          relevantContext({ issueTracker: forge, ...includeAllAuthors }),
         ),
       ).toEqual({ _tag: "issue_hierarchy_unsupported" })
       expect(
@@ -404,7 +404,7 @@ describe("shared lifecycle predicates", () => {
             hierarchySupported: false,
             parent: { state: "OPEN", isReadyLabeled: true },
           }),
-          relevantContext({ forge, ...includeAllAuthors }),
+          relevantContext({ issueTracker: forge, ...includeAllAuthors }),
         ),
       ).toEqual({ _tag: "issue_hierarchy_unsupported" })
     }
@@ -434,7 +434,7 @@ describe("shared lifecycle predicates", () => {
           hierarchySupported: false,
           closingPullRequests: [unownedDraftClosingPullRequest],
         }),
-        relevantContext({ forge: "azure-devops", ...includeAllAuthors }),
+        relevantContext({ issueTracker: "azure-devops", ...includeAllAuthors }),
       ),
     ).toEqual({ _tag: "match" })
     expect(
@@ -443,7 +443,7 @@ describe("shared lifecycle predicates", () => {
           hierarchySupported: false,
           closingPullRequests: [unownedDraftClosingPullRequest],
         }),
-        relevantContext({ forge: "azure-devops" }),
+        relevantContext({ issueTracker: "azure-devops" }),
       ).active,
     ).toEqual([])
 
@@ -453,7 +453,7 @@ describe("shared lifecycle predicates", () => {
           hierarchySupported: false,
           closingPullRequests: [unownedDraftClosingPullRequest],
         }),
-        relevantContext({ forge: "gitlab", ...includeAllAuthors }),
+        relevantContext({ issueTracker: "gitlab", ...includeAllAuthors }),
       ),
     ).toEqual({ _tag: "issue_closing_pull_request_unowned" })
     expect(
@@ -462,7 +462,7 @@ describe("shared lifecycle predicates", () => {
           hierarchySupported: false,
           closingPullRequests: [unownedDraftClosingPullRequest],
         }),
-        relevantContext({ forge: "gitlab" }),
+        relevantContext({ issueTracker: "gitlab" }),
       ).competing,
     ).toEqual([
       {
@@ -496,7 +496,7 @@ describe("shared lifecycle predicates", () => {
       evaluateRelevantIssue(
         relevantIssue({ hierarchySupported: false }),
         relevantContext({
-          forge: "gitlab",
+          issueTracker: "gitlab",
           authorScope: { includeAll: true },
         }),
       ),
@@ -506,7 +506,7 @@ describe("shared lifecycle predicates", () => {
       evaluateRelevantIssue(
         relevantIssue({ hierarchySupported: false }),
         relevantContext({
-          forge: "azure-devops",
+          issueTracker: "azure-devops",
           ...includeAllAuthors,
         }),
       ),

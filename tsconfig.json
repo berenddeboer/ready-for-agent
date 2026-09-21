@@ -86,6 +86,9 @@
     },
     {
       "path": "./packages/azure-devops-service"
+    },
+    {
+      "path": "./packages/linear-service"
     }
   ]
 }

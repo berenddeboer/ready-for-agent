@@ -15,6 +15,7 @@ import {
   RepositoryHasRunningStepError,
   RepositoryIdentityChangeBlockedError,
   RepositoryNotFoundError,
+  type UpdateRepositorySettingsInput,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -45,6 +46,32 @@ describe("DbService", () => {
     hasChildren: false,
     blockedBy: [],
   }
+
+  const linearWorkflowSelection = {
+    teamId: "team-eng",
+    teamKey: "ENG",
+    teamName: "Engineering",
+    inProgressStateId: "progress",
+    inProgressStateName: "In Progress",
+    doneStateId: "done",
+    doneStateName: "Done",
+  }
+
+  const settingsInput = (
+    repositoryId: string,
+    extra: Partial<UpdateRepositorySettingsInput> = {},
+  ): UpdateRepositorySettingsInput => ({
+    repositoryId,
+    paused: true,
+    defaultModel: null,
+    defaultThinkingLevel: null,
+    reviewModel: null,
+    reviewThinkingLevel: null,
+    mergePolicy: "off",
+    includeAllIssueAuthors: false,
+    waitForReadyForReviewChecks: true,
+    ...extra,
+  })
 
   const insertWorkItem = (
     sql: SqlClient.SqlClient,
@@ -943,6 +970,8 @@ describe("DbService", () => {
 
           expect(gitlab.issueTracker).toBe("gitlab")
           expect(azure.issueTracker).toBe("azure-devops")
+          expect(gitlab.linearProjectId).toBeNull()
+          expect(azure.linearWorkflowStatuses).toEqual([])
         }),
       ))
 
@@ -2062,6 +2091,176 @@ describe("DbService", () => {
           expect(yield* db.listCiGateDefinitions(repo.id)).toEqual([])
         }),
       ))
+
+    it("maps one Linear project and team workflow statuses on a GitHub Repository", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          expect(repo.issueTracker).toBe("github")
+          expect(repo.linearProjectId).toBeNull()
+
+          const updated = yield* db.updateRepositorySettings(
+            settingsInput(repo.id, {
+              issueTracker: "linear",
+              linearProjectId: "proj-1",
+              linearProjectName: "Widgets",
+              linearWorkflowStatuses: [linearWorkflowSelection],
+            }),
+          )
+
+          expect(updated.forge).toBe("github")
+          expect(updated.issueTracker).toBe("linear")
+          expect(updated.linearProjectId).toBe("proj-1")
+          expect(updated.linearProjectName).toBe("Widgets")
+          expect(updated.linearWorkflowStatuses).toEqual([
+            linearWorkflowSelection,
+          ])
+        }),
+      ))
+
+    it("rejects Linear on a non-GitHub Repository", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const gitlab = yield* db.addRepository({
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+            localPath: "/repos/gitlab/oauth_client",
+            isBare: true,
+          })
+
+          const error = yield* Effect.flip(
+            db.updateRepositorySettings(
+              settingsInput(gitlab.id, {
+                issueTracker: "linear",
+                linearProjectId: "proj-1",
+                linearProjectName: "Widgets",
+                linearWorkflowStatuses: [linearWorkflowSelection],
+              }),
+            ),
+          )
+
+          expect(error).toBeInstanceOf(InvalidRepositorySettingsError)
+          expect(error).toMatchObject({ field: "issueTracker" })
+        }),
+      ))
+
+    it("rejects Linear without a mapped project or team statuses", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+
+          const missingProject = yield* Effect.flip(
+            db.updateRepositorySettings(
+              settingsInput(repo.id, {
+                issueTracker: "linear",
+                linearProjectId: "  ",
+                linearWorkflowStatuses: [linearWorkflowSelection],
+              }),
+            ),
+          )
+          expect(missingProject).toBeInstanceOf(InvalidRepositorySettingsError)
+          expect(missingProject).toMatchObject({ field: "linearProjectId" })
+
+          const missingStatuses = yield* Effect.flip(
+            db.updateRepositorySettings(
+              settingsInput(repo.id, {
+                issueTracker: "linear",
+                linearProjectId: "proj-1",
+                linearProjectName: "Widgets",
+                linearWorkflowStatuses: [],
+              }),
+            ),
+          )
+          expect(missingStatuses).toBeInstanceOf(InvalidRepositorySettingsError)
+          expect(missingStatuses).toMatchObject({
+            field: "linearWorkflowStatuses",
+          })
+        }),
+      ))
+
+    it("rejects mapping the same Linear project to two Repositories", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const first = yield* db.addRepository(sampleInput)
+          const second = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/other",
+            localPath: "/repos/acme/other.git",
+            isBare: true,
+          })
+          yield* db.updateRepositorySettings(
+            settingsInput(first.id, {
+              issueTracker: "linear",
+              linearProjectId: "proj-1",
+              linearProjectName: "Widgets",
+              linearWorkflowStatuses: [linearWorkflowSelection],
+            }),
+          )
+
+          const error = yield* Effect.flip(
+            db.updateRepositorySettings(
+              settingsInput(second.id, {
+                issueTracker: "linear",
+                linearProjectId: "proj-1",
+                linearProjectName: "Widgets",
+                linearWorkflowStatuses: [linearWorkflowSelection],
+              }),
+            ),
+          )
+
+          expect(error).toBeInstanceOf(InvalidRepositorySettingsError)
+          expect(error).toMatchObject({ field: "linearProjectId" })
+        }),
+      ))
+
+    it("releases a Linear project mapping when switching back to GitHub", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const first = yield* db.addRepository(sampleInput)
+          const second = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/other",
+            localPath: "/repos/acme/other.git",
+            isBare: true,
+          })
+          yield* db.updateRepositorySettings(
+            settingsInput(first.id, {
+              issueTracker: "linear",
+              linearProjectId: "proj-1",
+              linearProjectName: "Widgets",
+              linearWorkflowStatuses: [linearWorkflowSelection],
+            }),
+          )
+
+          const cleared = yield* db.updateRepositorySettings(
+            settingsInput(first.id, {
+              issueTracker: "github",
+            }),
+          )
+          expect(cleared.issueTracker).toBe("github")
+          expect(cleared.linearProjectId).toBeNull()
+          expect(cleared.linearProjectName).toBeNull()
+          expect(cleared.linearWorkflowStatuses).toEqual([])
+
+          const remapped = yield* db.updateRepositorySettings(
+            settingsInput(second.id, {
+              issueTracker: "linear",
+              linearProjectId: "proj-1",
+              linearProjectName: "Widgets",
+              linearWorkflowStatuses: [linearWorkflowSelection],
+            }),
+          )
+          expect(remapped.linearProjectId).toBe("proj-1")
+        }),
+      ))
   })
 
   describe("pauseRepository and unpauseRepository", () => {
@@ -2793,6 +2992,92 @@ describe("DbService", () => {
             [repository.id],
           )
           expect(rows[0]?.["issues_reconciled_at"]).toBe(reconciledAt.getTime())
+        }),
+      ))
+
+    it("upserts Linear Issues by native identity rather than leftover issue number", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* addTestRepository(db)
+          const nativeId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          const first = yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 123,
+            issueTracker: "linear",
+            nativeId,
+            displayId: "ENG-123",
+            title: "Original Linear issue",
+            ...sampleIssueFields,
+            url: "https://linear.app/acme/issue/ENG-123",
+            githubCreatedAt: new Date("2026-09-21T10:00:00.000Z"),
+          })
+          const updated = yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 999,
+            issueTracker: "linear",
+            nativeId,
+            displayId: "ENG-123",
+            title: "Updated Linear issue",
+            ...sampleIssueFields,
+            url: "https://linear.app/acme/issue/ENG-123",
+            githubCreatedAt: new Date("2026-09-21T10:00:00.000Z"),
+          })
+
+          expect(updated.id).toBe(first.id)
+          expect(updated.issueNumber).toBe(999)
+          expect(updated.nativeId).toBe(nativeId)
+          expect(updated.displayId).toBe("ENG-123")
+          expect(updated.title).toBe("Updated Linear issue")
+          expect(yield* db.listIssues(repository.id)).toHaveLength(1)
+        }),
+      ))
+
+    it("keeps Linear Issues distinct when leftover issue numbers collide", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* addTestRepository(db)
+          const first = yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 1,
+            issueTracker: "linear",
+            nativeId: "native-eng-1",
+            displayId: "ENG-1",
+            title: "Engineering leaf",
+            ...sampleIssueFields,
+            url: "https://linear.app/acme/issue/ENG-1",
+            githubCreatedAt: new Date("2026-09-21T10:00:00.000Z"),
+          })
+          const second = yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 1,
+            issueTracker: "linear",
+            nativeId: "native-des-1",
+            displayId: "DES-1",
+            title: "Design leaf",
+            ...sampleIssueFields,
+            url: "https://linear.app/acme/issue/DES-1",
+            githubCreatedAt: new Date("2026-09-21T11:00:00.000Z"),
+          })
+
+          expect(first.id).not.toBe(second.id)
+          expect(
+            (yield* db.listIssues(repository.id))
+              .map((issue) => issue.displayId)
+              .toSorted(),
+          ).toEqual(["DES-1", "ENG-1"])
+
+          yield* db.deleteIssueByNativeId(
+            repository.id,
+            "linear",
+            "native-eng-1",
+          )
+          expect(
+            (yield* db.listIssues(repository.id)).map(
+              (issue) => issue.displayId,
+            ),
+          ).toEqual(["DES-1"])
         }),
       ))
   })

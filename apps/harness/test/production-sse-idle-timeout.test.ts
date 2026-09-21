@@ -32,6 +32,10 @@ import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
+import {
+  LinearService,
+  defaultLinearServiceShape,
+} from "@ready-for-agent/linear-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import { QueueService } from "@ready-for-agent/queue-service"
 import { stubQueueService } from "@ready-for-agent/queue-service/test"
@@ -475,6 +479,7 @@ describe("production GraphQL SSE idle timeout", () => {
           Layer.succeed(GitHubService, defaultGithub),
           Layer.succeed(GitLabService, defaultGitlab),
           Layer.succeed(AzureDevOpsService, defaultAzureDevOps),
+          Layer.succeed(LinearService, defaultLinearServiceShape),
           Layer.succeed(LocalGit, {
             inspect: () => Effect.die("unused"),
           }),

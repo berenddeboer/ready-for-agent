@@ -44,6 +44,15 @@ import {
 } from "@ready-for-agent/keymaxxer-service"
 import { evaluateUnfinishedWorkItem } from "@ready-for-agent/lifecycle-model"
 import {
+  LINEAR_API_KEY_CREATION_URL,
+  LINEAR_API_KEY_SECRET_NAME,
+  LINEAR_VAULT_ACCOUNT,
+  LINEAR_VAULT_PROVIDER,
+  LinearService,
+  type LinearServiceShape,
+  defaultLinearServiceShape,
+} from "@ready-for-agent/linear-service"
+import {
   DirectoryPicker,
   LocalGit,
   type LocalRepository,
@@ -338,6 +347,7 @@ const makeRuntime = (
   githubOverrides: Partial<GitHubServiceShape> = {},
   gitlabOverrides: Partial<GitLabServiceShape> = {},
   azureDevOpsOverrides: Partial<AzureDevOpsServiceShape> = {},
+  linearOverrides: Partial<LinearServiceShape> = {},
 ) => {
   const db = stubDbService({
     getConfig: Effect.succeed(config),
@@ -367,6 +377,19 @@ const makeRuntime = (
         mergePolicy: input.mergePolicy,
         includeAllIssueAuthors: input.includeAllIssueAuthors,
         waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
+        issueTracker: input.issueTracker ?? repository.issueTracker,
+        linearProjectId:
+          input.linearProjectId === undefined
+            ? repository.linearProjectId
+            : input.linearProjectId,
+        linearProjectName:
+          input.linearProjectName === undefined
+            ? repository.linearProjectName
+            : input.linearProjectName,
+        linearWorkflowStatuses:
+          input.linearWorkflowStatuses === undefined
+            ? repository.linearWorkflowStatuses
+            : [...input.linearWorkflowStatuses],
       }),
     listRepositories: Effect.succeed([repository]),
     listSelectedOrInUseBackendIds: Effect.succeed([
@@ -553,6 +576,10 @@ const makeRuntime = (
       Layer.succeed(AzureDevOpsService, {
         ...defaultAzureDevOps,
         ...azureDevOpsOverrides,
+      }),
+      Layer.succeed(LinearService, {
+        ...defaultLinearServiceShape,
+        ...linearOverrides,
       }),
       localGit,
       directoryPicker,
@@ -1706,6 +1733,308 @@ describe("GraphQL API", () => {
       data: { updateRepositorySettings: { mergePolicy: "ALWAYS" } },
     })
     expect(savedPolicy).toBe("always")
+  })
+
+  test("defaults Issue Tracker to GitHub on add and configures Linear in settings", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `{ repositories { forge issueTracker linearProjectId linearWorkflowStatuses { teamId } } }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        repositories: [
+          {
+            forge: "github",
+            issueTracker: "github",
+            linearProjectId: null,
+            linearWorkflowStatuses: [],
+          },
+        ],
+      },
+    })
+
+    const saved = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) {
+            issueTracker
+            linearProjectId
+            linearProjectName
+            linearWorkflowStatuses {
+              teamId
+              teamKey
+              inProgressStateId
+              doneStateId
+            }
+          }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            mergePolicy: "OFF",
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+            issueTracker: "linear",
+            linearProjectId: "proj-1",
+            linearProjectName: "Widgets",
+            linearWorkflowStatuses: [
+              {
+                teamId: "team-eng",
+                teamKey: "ENG",
+                teamName: "Engineering",
+                inProgressStateId: "progress",
+                inProgressStateName: "In Progress",
+                doneStateId: "done",
+                doneStateName: "Done",
+              },
+            ],
+          },
+        },
+      }),
+    )
+    expect(await saved.json()).toEqual({
+      data: {
+        updateRepositorySettings: {
+          issueTracker: "linear",
+          linearProjectId: "proj-1",
+          linearProjectName: "Widgets",
+          linearWorkflowStatuses: [
+            {
+              teamId: "team-eng",
+              teamKey: "ENG",
+              inProgressStateId: "progress",
+              doneStateId: "done",
+            },
+          ],
+        },
+      },
+    })
+  })
+
+  test("does not start Linear Issue execution through GitHub Issue APIs", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime({
+      listRepositories: Effect.succeed([
+        makeRepositoryRecord({
+          ...repository,
+          issueTracker: "linear",
+          linearProjectId: "proj-1",
+        }),
+      ]),
+    })
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          implementNow(repositoryId: "${repository.id}", issueNumber: 42) { id }
+        }`,
+      }),
+    )
+    const payload = (await response.json()) as {
+      errors?: ReadonlyArray<{
+        message?: string
+        extensions?: { code?: string }
+      }>
+    }
+    expect(payload.errors?.[0]?.extensions?.code).toBe(
+      "LINEAR_EXECUTION_NOT_SUPPORTED",
+    )
+  })
+
+  test("reports Linear credential independently of GitHub", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {
+        findSecret: (input) =>
+          Effect.succeed(
+            input.provider === LINEAR_VAULT_PROVIDER &&
+              input.account === LINEAR_VAULT_ACCOUNT
+              ? LINEAR_API_KEY_SECRET_NAME
+              : null,
+          ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `{ linearCredential { configured secretName creationUrl } }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        linearCredential: {
+          configured: true,
+          secretName: LINEAR_API_KEY_SECRET_NAME,
+          creationUrl: LINEAR_API_KEY_CREATION_URL,
+        },
+      },
+    })
+  })
+
+  test("lists Linear projects and suggested team workflow statuses", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        listProjects: () =>
+          Effect.succeed([
+            {
+              id: "proj-1",
+              name: "Widgets",
+              url: "https://linear.app/acme/project/widgets",
+            },
+          ]),
+        listProjectWorkflow: (projectId) =>
+          Effect.succeed(
+            projectId === "proj-1"
+              ? [
+                  {
+                    teamId: "team-eng",
+                    teamKey: "ENG",
+                    teamName: "Engineering",
+                    states: [
+                      {
+                        id: "progress",
+                        name: "In Progress",
+                        type: "started",
+                        position: 1,
+                      },
+                      {
+                        id: "done",
+                        name: "Done",
+                        type: "completed",
+                        position: 2,
+                      },
+                    ],
+                    suggestedInProgressStateId: "progress",
+                    suggestedDoneStateId: "done",
+                  },
+                ]
+              : [],
+          ),
+      },
+    )
+
+    const projects = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `{ linearProjects { id name url } }`,
+      }),
+    )
+    expect(await projects.json()).toEqual({
+      data: {
+        linearProjects: [
+          {
+            id: "proj-1",
+            name: "Widgets",
+            url: "https://linear.app/acme/project/widgets",
+          },
+        ],
+      },
+    })
+
+    const workflow = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `{
+          linearProjectWorkflow(projectId: "proj-1") {
+            teamId
+            teamKey
+            suggestedInProgressStateId
+            suggestedDoneStateId
+          }
+        }`,
+      }),
+    )
+    expect(await workflow.json()).toEqual({
+      data: {
+        linearProjectWorkflow: [
+          {
+            teamId: "team-eng",
+            teamKey: "ENG",
+            suggestedInProgressStateId: "progress",
+            suggestedDoneStateId: "done",
+          },
+        ],
+      },
+    })
+  })
+
+  test("opens Keymaxxer setup for a missing Linear API key", async () => {
+    let tokenName: string | null = null
+    let addCalls = 0
+    let addedInput: Parameters<KeymaxxerServiceShape["addSecret"]>[0] | null =
+      null
+    const ensured: string[] = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            ...repository,
+            issueTracker: "linear",
+            linearProjectId: "proj-1",
+          }),
+        ]),
+      },
+      {
+        findSecret: () => Effect.succeed(tokenName),
+        addSecret: (input) =>
+          Effect.sync(() => {
+            addCalls += 1
+            addedInput = input
+            tokenName = LINEAR_API_KEY_SECRET_NAME
+            return true
+          }),
+      },
+      {
+        ensureKeyed: (_queue, key) =>
+          Effect.sync(() => {
+            ensured.push(key)
+            return { jobId: makeJobId(), created: true }
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          addLinearApiKey { configured secretName creationUrl }
+        }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        addLinearApiKey: {
+          configured: true,
+          secretName: LINEAR_API_KEY_SECRET_NAME,
+          creationUrl: LINEAR_API_KEY_CREATION_URL,
+        },
+      },
+    })
+    expect(addCalls).toBe(1)
+    expect(addedInput).toEqual({
+      name: LINEAR_API_KEY_SECRET_NAME,
+      provider: LINEAR_VAULT_PROVIDER,
+      account: LINEAR_VAULT_ACCOUNT,
+      environment: "prod",
+      access: "read-write",
+      description: "Linear personal API key for Ready for Agent",
+      tags: "ready-for-agent,harness,linear",
+    })
+    expect(ensured).toEqual([repository.id])
   })
 
   test("reports repository GitHub credential status", async () => {

@@ -54,6 +54,10 @@ import {
   KeymaxxerError,
   KeymaxxerService,
 } from "@ready-for-agent/keymaxxer-service"
+import {
+  LinearService,
+  defaultLinearServiceShape,
+} from "@ready-for-agent/linear-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import { OpencodeSessionStore } from "@ready-for-agent/opencode"
 import {
@@ -232,6 +236,11 @@ const defaultAzureDevOpsLayer = Layer.succeed(
   defaultAzureDevOpsShape,
 )
 
+const defaultLinearLayer = Layer.succeed(
+  LinearService,
+  defaultLinearServiceShape,
+)
+
 const defaultGithubLayer = Layer.mergeAll(
   Layer.succeed(GitHubService, {
     getOpenPullRequestNumber: () => Effect.succeed(1),
@@ -275,6 +284,7 @@ const defaultGithubLayer = Layer.mergeAll(
   } satisfies GitHubServiceShape),
   defaultGitlabLayer,
   defaultAzureDevOpsLayer,
+  defaultLinearLayer,
 )
 
 const queueLayer = (
@@ -886,6 +896,7 @@ describe("Job worker", () => {
         Layer.provideMerge(github),
         Layer.provideMerge(defaultGitlabLayer),
         Layer.provideMerge(defaultAzureDevOpsLayer),
+        Layer.provideMerge(defaultLinearLayer),
       )
       const layer = Layer.mergeAll(
         database,
@@ -1095,6 +1106,7 @@ describe("Job worker", () => {
               defaultGithubLayer,
               defaultGitlabLayer,
               defaultAzureDevOpsLayer,
+              defaultLinearLayer,
               localGit,
               directoryPicker,
             ),
@@ -2276,6 +2288,7 @@ describe("Job worker", () => {
               ...defaultAzureDevOpsShape,
               hasCredentials: () => Effect.succeed(true),
             }),
+            defaultLinearLayer,
             queueLayer(
               [job],
               undefined,

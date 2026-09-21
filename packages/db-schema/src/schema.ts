@@ -73,6 +73,17 @@ export const repository = snakeCase.table(
     waitForReadyForReviewChecks: integer({ mode: "boolean" })
       .notNull()
       .default(true),
+    /**
+     * Mapped Linear project id when Issue Tracker is Linear. Null otherwise.
+     * Unique among Repositories when set: one Linear project maps to one
+     * Repository.
+     */
+    linearProjectId: text(),
+    linearProjectName: text(),
+    /**
+     * JSON array of per-team In Progress/Done workflow status selections.
+     */
+    linearWorkflowStatuses: text().notNull().default("[]"),
     issuesReconciledAt: integer({ mode: "number" }),
     createdAt: integer({ mode: "number" })
       .notNull()
@@ -87,6 +98,11 @@ export const repository = snakeCase.table(
       t.forgeHost,
       sql`lower(${t.projectPath})`,
     ),
+    uniqueIndex("repository_linear_project_id_uidx")
+      .on(t.linearProjectId)
+      .where(
+        sql`${t.linearProjectId} IS NOT NULL AND ${t.linearProjectId} != ''`,
+      ),
   ],
 )
 
@@ -159,7 +175,7 @@ export const issue = snakeCase.table(
       .$defaultFn(() => Date.now()),
   },
   (t) => [
-    uniqueIndex("issue_repository_id_issue_number_uidx").on(
+    index("issue_repository_id_issue_number_idx").on(
       t.repositoryId,
       t.issueNumber,
     ),

@@ -46,7 +46,15 @@ import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   classifyIntakeCandidates,
   completeIssueIdentity,
+  isIssueTracker,
 } from "@ready-for-agent/lifecycle-model"
+import {
+  LINEAR_API_KEY_SECRET_NAME,
+  LINEAR_VAULT_ACCOUNT,
+  LINEAR_VAULT_PROVIDER,
+  LinearService,
+  linearExecutionNotSupported,
+} from "@ready-for-agent/linear-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import type { QueueService } from "@ready-for-agent/queue-service"
 import {
@@ -93,6 +101,8 @@ import {
   gitlabHasAmbientCredentialsBounded,
   gitlabTokenSecretName,
   hasAzureDevOpsAmbientCredential,
+  hasLinearAmbientCredential,
+  linearCredential,
   repositoryCredential,
   withKeymaxxerMetadataTimeout,
 } from "./repository-credentials.js"
@@ -175,6 +185,20 @@ type UpdateRepositorySettingsArgs = {
     includeAllIssueAuthors: boolean
     waitForReadyForReviewChecks: boolean
     selectedCiGateDefinitionIdentities?: readonly string[] | null
+    issueTracker?: string | null
+    linearProjectId?: string | null
+    linearProjectName?: string | null
+    linearWorkflowStatuses?:
+      | readonly {
+          readonly teamId: string
+          readonly teamKey: string
+          readonly teamName: string
+          readonly inProgressStateId: string
+          readonly inProgressStateName: string
+          readonly doneStateId: string
+          readonly doneStateName: string
+        }[]
+      | null
   }
 }
 
@@ -442,6 +466,7 @@ export type GraphqlServices =
   | GitHubService
   | GitLabService
   | AzureDevOpsService
+  | LinearService
   | KeymaxxerService
   | ActiveAgentBackend
   | QueueService
@@ -607,6 +632,18 @@ export const createGraphqlApi = <R>(
     options.environment ?? (process.env as Record<string, string | undefined>)
   const harnessVersion = options.version ?? "0.0.0"
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
+  const rejectLinearExecution = (repositoryId: string) =>
+    Effect.gen(function* () {
+      const db = yield* DbService
+      const repositories = yield* db.listRepositories
+      const repository = repositories.find(({ id }) => id === repositoryId)
+      if (repository === undefined) {
+        return yield* new RepositoryNotFoundError({ repositoryId })
+      }
+      if (repository.issueTracker === "linear") {
+        return yield* linearExecutionNotSupported(repository.id)
+      }
+    })
 
   /**
    * Run a resolver Effect with the HTTP request's AbortSignal so client
@@ -1016,6 +1053,60 @@ export const createGraphqlApi = <R>(
               }).pipe(Effect.withSpan("graphql-api.ciGateCatalog")),
               context,
             ),
+          linearCredential: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const keymaxxer = yield* KeymaxxerService
+                if (keymaxxer.enabled === false) {
+                  return linearCredential(
+                    null,
+                    hasLinearAmbientCredential(environment),
+                  )
+                }
+                const existingToken = yield* withKeymaxxerMetadataTimeout(
+                  keymaxxer.findSecret({
+                    provider: LINEAR_VAULT_PROVIDER,
+                    account: LINEAR_VAULT_ACCOUNT,
+                  }),
+                  keymaxxerMetadataTimeout,
+                  "findSecret",
+                )
+                return linearCredential(
+                  existingToken,
+                  existingToken !== null ||
+                    hasLinearAmbientCredential(environment),
+                )
+              }).pipe(Effect.withSpan("graphql-api.linearCredential")),
+              context,
+            ),
+          linearProjects: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const linear = yield* LinearService
+                return yield* linear.listProjects()
+              }).pipe(Effect.withSpan("graphql-api.linearProjects")),
+              context,
+            ),
+          linearProjectWorkflow: async (
+            _parent: unknown,
+            args: { projectId: string },
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const linear = yield* LinearService
+                return yield* linear.listProjectWorkflow(args.projectId)
+              }).pipe(Effect.withSpan("graphql-api.linearProjectWorkflow")),
+              context,
+            ),
           models: async (
             _parent: unknown,
             _args: unknown,
@@ -1051,6 +1142,9 @@ export const createGraphqlApi = <R>(
                   return yield* new RepositoryNotFoundError({
                     repositoryId: args.repositoryId,
                   })
+                }
+                if (repository.issueTracker === "linear") {
+                  return { repository, candidates: [] }
                 }
 
                 // Current Issue projection only — never request or wait for Refresh.
@@ -1968,6 +2062,17 @@ export const createGraphqlApi = <R>(
                       onInvalid: (field, message) =>
                         new InvalidRepositorySettingsError({ field, message }),
                     })
+                    if (
+                      args.input.issueTracker !== undefined &&
+                      args.input.issueTracker !== null &&
+                      !isIssueTracker(args.input.issueTracker)
+                    ) {
+                      return yield* new InvalidRepositorySettingsError({
+                        field: "issueTracker",
+                        message:
+                          "issueTracker must be a supported Issue Tracker",
+                      })
+                    }
                     const updated = yield* db.updateRepositorySettings({
                       repositoryId: args.input.repositoryId,
                       ...(args.input.forge === undefined && !identityChanging
@@ -2000,6 +2105,23 @@ export const createGraphqlApi = <R>(
                       includeAllIssueAuthors: args.input.includeAllIssueAuthors,
                       waitForReadyForReviewChecks:
                         args.input.waitForReadyForReviewChecks,
+                      ...(args.input.issueTracker !== undefined &&
+                      args.input.issueTracker !== null
+                        ? { issueTracker: args.input.issueTracker }
+                        : {}),
+                      ...(args.input.linearProjectId !== undefined
+                        ? { linearProjectId: args.input.linearProjectId }
+                        : {}),
+                      ...(args.input.linearProjectName !== undefined
+                        ? { linearProjectName: args.input.linearProjectName }
+                        : {}),
+                      ...(args.input.linearWorkflowStatuses !== undefined &&
+                      args.input.linearWorkflowStatuses !== null
+                        ? {
+                            linearWorkflowStatuses:
+                              args.input.linearWorkflowStatuses,
+                          }
+                        : {}),
                       ...(args.input.selectedCiGateDefinitionIdentities ===
                         undefined ||
                       args.input.selectedCiGateDefinitionIdentities === null
@@ -2046,17 +2168,20 @@ export const createGraphqlApi = <R>(
                     return updated
                   }),
                 )
-                if (identityChanging) {
+                if (
+                  identityChanging ||
+                  updated.issueTracker !== repository.issueTracker
+                ) {
                   yield* suspendRepositoryPolling(updated.id).pipe(
                     Effect.andThen(
                       activatePollingIfCredentialed(updated, {
                         metadataTimeout: keymaxxerMetadataTimeout,
                       }),
                     ),
-                    Effect.catch((error) =>
+                    Effect.catchCause((cause) =>
                       Effect.logWarning(
-                        "Repository polling was not updated after Forge identity correction",
-                        { repositoryId: updated.id, error },
+                        "Repository polling was not updated after settings save",
+                        { repositoryId: updated.id, cause },
                       ),
                     ),
                   )
@@ -2496,6 +2621,92 @@ export const createGraphqlApi = <R>(
                 ),
               context,
             ),
+          addLinearApiKey: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              tokenProvisioning
+                .withPermits(1)(
+                  Effect.gen(function* () {
+                    const keymaxxer = yield* KeymaxxerService
+                    const existingToken = yield* withKeymaxxerMetadataTimeout(
+                      keymaxxer.findSecret({
+                        provider: LINEAR_VAULT_PROVIDER,
+                        account: LINEAR_VAULT_ACCOUNT,
+                      }),
+                      keymaxxerMetadataTimeout,
+                      "findSecret",
+                    )
+                    let tokenName = existingToken
+                    if (tokenName === null) {
+                      tokenName = LINEAR_API_KEY_SECRET_NAME
+                      if (
+                        yield* withKeymaxxerMetadataTimeout(
+                          keymaxxer.hasSecret(tokenName),
+                          keymaxxerMetadataTimeout,
+                          "hasSecret",
+                        )
+                      ) {
+                        return yield* new RepositoryCredentialError({
+                          message: `Keymaxxer secret ${tokenName} already exists for another account`,
+                        })
+                      }
+                      const added = yield* keymaxxer.addSecret({
+                        name: tokenName,
+                        provider: LINEAR_VAULT_PROVIDER,
+                        account: LINEAR_VAULT_ACCOUNT,
+                        environment: "prod",
+                        access: "read-write",
+                        description:
+                          "Linear personal API key for Ready for Agent",
+                        tags: "ready-for-agent,harness,linear",
+                      })
+                      if (!added) {
+                        return yield* new RepositoryCredentialError({
+                          message:
+                            "Keymaxxer Linear API key setup was cancelled",
+                        })
+                      }
+                      tokenName = yield* withKeymaxxerMetadataTimeout(
+                        keymaxxer.findSecret({
+                          provider: LINEAR_VAULT_PROVIDER,
+                          account: LINEAR_VAULT_ACCOUNT,
+                        }),
+                        keymaxxerMetadataTimeout,
+                        "findSecret",
+                      )
+                      if (tokenName === null) {
+                        return yield* new RepositoryCredentialError({
+                          message:
+                            "The saved Keymaxxer secret does not match the Linear API key account",
+                        })
+                      }
+                    }
+                    const db = yield* DbService
+                    const repositories = yield* db.listRepositories
+                    for (const repository of repositories) {
+                      if (repository.issueTracker === "linear") {
+                        yield* activateRepositoryPolling(repository.id).pipe(
+                          Effect.catch((error) =>
+                            Effect.logWarning(
+                              "Automatic Repository polling was not activated",
+                              {
+                                repositoryId: repository.id,
+                                error,
+                              },
+                            ),
+                          ),
+                        )
+                      }
+                    }
+                    return linearCredential(tokenName)
+                  }),
+                )
+                .pipe(Effect.withSpan("graphql-api.addLinearApiKey")),
+              context,
+            ),
           removeRepository: async (
             _parent: unknown,
             args: RemoveRepositoryArgs,
@@ -2572,6 +2783,7 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
+                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementNow(
                   args.repositoryId,
@@ -2587,6 +2799,7 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
+                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementCiRepair(
                   args.repositoryId,
@@ -2616,6 +2829,7 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
+                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementWith(
                   args.repositoryId,
@@ -2648,6 +2862,7 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
+                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementLocally(
                   args.repositoryId,
@@ -2663,6 +2878,7 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
+                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementAllWithAutoMerge(
                   args.repositoryId,
@@ -2678,6 +2894,7 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
+                yield* rejectLinearExecution(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.queue(
                   args.repositoryId,
@@ -2692,7 +2909,8 @@ export const createGraphqlApi = <R>(
             context: GraphqlRequestContext,
           ) =>
             runGraphql(
-              startRepositoryIntake(args.repositoryId).pipe(
+              rejectLinearExecution(args.repositoryId).pipe(
+                Effect.andThen(startRepositoryIntake(args.repositoryId)),
                 Effect.withSpan("graphql-api.startRepositoryIntake"),
               ),
               context,

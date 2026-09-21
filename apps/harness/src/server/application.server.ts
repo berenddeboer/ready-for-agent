@@ -49,6 +49,7 @@ import { READY_FOR_AGENT_VERSION } from "../generated/version.js"
 import { ambientAzureDevOpsLayer } from "./ambient-azure-devops-layer.js"
 import { ambientGitHubLayer } from "./ambient-github-layer.js"
 import { ambientGitLabLayer } from "./ambient-gitlab-layer.js"
+import { ambientLinearLayer } from "./ambient-linear-layer.js"
 import {
   environmentConfigLayer,
   loadApplicationConfig,
@@ -58,6 +59,7 @@ import { JobWorkerLive } from "./job-worker.js"
 import { keymaxxerAzureDevOpsLayer } from "./keymaxxer-azure-devops-layer.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
 import { keymaxxerGitLabLayer } from "./keymaxxer-gitlab-layer.js"
+import { keymaxxerLinearLayer } from "./keymaxxer-linear-layer.js"
 import { inspectBackendsAtStartup } from "./startup-backend-inspection.js"
 
 export interface Application {
@@ -162,11 +164,19 @@ export const createApplication = async (
           workspaceRoot: toolCwd,
           environment,
         }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
+  const linearLayer =
+    sidecarUrl === undefined
+      ? ambientLinearLayer({ environment })
+      : keymaxxerLinearLayer({
+          workspaceRoot: toolCwd,
+          environment,
+        }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
   const reconcilerLayer = IssueReconcilerLive.pipe(
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),
     Layer.provideMerge(gitlabLayer),
     Layer.provideMerge(azureDevOpsLayer),
+    Layer.provideMerge(linearLayer),
   )
   const queueLayer = SqliteQueueServiceLive.pipe(
     Layer.provideMerge(databaseLayer),
@@ -231,6 +241,7 @@ export const createApplication = async (
     Layer.provideMerge(githubLayer),
     Layer.provideMerge(gitlabLayer),
     Layer.provideMerge(azureDevOpsLayer),
+    Layer.provideMerge(linearLayer),
     Layer.provide(platformLayer),
   )
   const workerLayer = JobWorkerLive.pipe(
@@ -240,6 +251,7 @@ export const createApplication = async (
     Layer.provideMerge(keymaxxerLayer),
     Layer.provideMerge(gitlabLayer),
     Layer.provideMerge(azureDevOpsLayer),
+    Layer.provideMerge(linearLayer),
   )
   const loggingLayer = Logger.layer([Logger.consolePretty({ colors: false })])
   const localGitLayer = LocalGit.layer.pipe(Layer.provide(platformLayer))
@@ -253,6 +265,7 @@ export const createApplication = async (
           queueLayer,
           keymaxxerLayer,
           gitlabLayer,
+          linearLayer,
           activeLayer,
           lifecycleLayer,
           localGitLayer,
@@ -265,6 +278,7 @@ export const createApplication = async (
           queueLayer,
           keymaxxerLayer,
           gitlabLayer,
+          linearLayer,
           activeLayer,
           lifecycleLayer,
           localGitLayer,

@@ -22,6 +22,18 @@ export type IssueState = typeof IssueState.Type
 export const MergePolicy = Schema.Literals(["off", "classify", "always"])
 export type MergePolicy = typeof MergePolicy.Type
 
+export const LinearTeamWorkflowSelection = Schema.Struct({
+  teamId: Schema.String,
+  teamKey: Schema.String,
+  teamName: Schema.String,
+  inProgressStateId: Schema.String,
+  inProgressStateName: Schema.String,
+  doneStateId: Schema.String,
+  doneStateName: Schema.String,
+})
+export type LinearTeamWorkflowSelection =
+  typeof LinearTeamWorkflowSelection.Type
+
 export const IssueReference = Schema.Struct({
   issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
   issueUrl: Schema.String,
@@ -68,6 +80,9 @@ export const RepositoryRecord = Schema.Struct({
   ),
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
+  linearProjectId: Schema.NullOr(Schema.String),
+  linearProjectName: Schema.NullOr(Schema.String),
+  linearWorkflowStatuses: Schema.Array(LinearTeamWorkflowSelection),
   issuesReconciledAt: Schema.NullOr(Schema.Date),
 })
 export type RepositoryRecord = typeof RepositoryRecord.Type
@@ -208,6 +223,15 @@ export const UpdateRepositorySettingsInput = Schema.Struct({
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
   /**
+   * Configured Issue Tracker. Omitted leaves the stored tracker unchanged.
+   */
+  issueTracker: Schema.optionalKey(IssueTracker),
+  linearProjectId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  linearProjectName: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  linearWorkflowStatuses: Schema.optionalKey(
+    Schema.Array(LinearTeamWorkflowSelection),
+  ),
+  /**
    * Selected CI Gate Definitions. Omitted leaves stored selections unchanged.
    * Empty array clears every selection and disables the Repository CI Gate.
    */
@@ -337,6 +361,9 @@ export const RepositorySqlRow = Schema.Struct({
   guaranteedMinConcurrentAgentTurns: Schema.NullOr(Schema.Int),
   includeAllIssueAuthors: SqlBoolean,
   waitForReadyForReviewChecks: SqlBoolean,
+  linearProjectId: Schema.NullOr(Schema.String),
+  linearProjectName: Schema.NullOr(Schema.String),
+  linearWorkflowStatuses: Schema.String,
   issuesReconciledAt: Schema.NullOr(Schema.DateFromMillis),
 }).pipe(
   Schema.encodeKeys({
@@ -356,6 +383,9 @@ export const RepositorySqlRow = Schema.Struct({
     guaranteedMinConcurrentAgentTurns: "guaranteed_min_concurrent_agent_turns",
     includeAllIssueAuthors: "include_all_issue_authors",
     waitForReadyForReviewChecks: "wait_for_ready_for_review_checks",
+    linearProjectId: "linear_project_id",
+    linearProjectName: "linear_project_name",
+    linearWorkflowStatuses: "linear_workflow_statuses",
     issuesReconciledAt: "issues_reconciled_at",
   }),
 )
@@ -525,6 +555,9 @@ export const RepositorySettingsSqlRow = Schema.Struct({
   selectedAgentBackend: Schema.NullOr(Schema.String),
   backendModelPrefs: Schema.String,
   guaranteedMinConcurrentAgentTurns: Schema.NullOr(Schema.Int),
+  linearProjectId: Schema.NullOr(Schema.String),
+  linearProjectName: Schema.NullOr(Schema.String),
+  linearWorkflowStatuses: Schema.String,
 })
 export type RepositorySettingsSqlRow = typeof RepositorySettingsSqlRow.Type
 

@@ -1,4 +1,4 @@
-import type { Forge } from "./generated/forge.js"
+import type { IssueTracker } from "./generated/forge.js"
 import {
   type LifecyclePredicateName,
   matchesLifecyclePredicateExpression,
@@ -12,7 +12,7 @@ import {
   type ForgeRelevancePolicy,
   type HierarchyObservationPolicy,
   type OpenDraftClosingPullRequestPolicy,
-  relevancePolicyForForge,
+  relevancePolicyForIssueTracker,
 } from "./relevance-policy.js"
 
 export interface IssuePredicateShape {
@@ -67,18 +67,19 @@ export type RelevantIssuePredicateContextInput = Omit<
   RelevantIssuePredicateContext,
   keyof ForgeRelevancePolicy
 > & {
-  readonly forge: Forge
+  readonly issueTracker: IssueTracker
 }
 
 /**
- * Resolve current-Forge policy facts and assemble the relevance context.
- * Callers pass the Repository Forge; decision functions never see the name.
+ * Resolve current-tracker policy facts and assemble the relevance context.
+ * Callers pass the configured Issue Tracker; decision functions never see
+ * the name.
  */
 export const relevantIssuePredicateContext = ({
-  forge,
+  issueTracker,
   ...rest
 }: RelevantIssuePredicateContextInput): RelevantIssuePredicateContext => ({
-  ...relevancePolicyForForge(forge),
+  ...relevancePolicyForIssueTracker(issueTracker),
   ...rest,
 })
 

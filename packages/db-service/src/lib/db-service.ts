@@ -5,6 +5,7 @@ import { ulid } from "ulidx"
 import { isSelectableAgentBackendId } from "@ready-for-agent/agent-backend"
 import {
   completeIssueIdentity,
+  isForge,
   isIssueTracker,
 } from "@ready-for-agent/lifecycle-model"
 import {
@@ -44,6 +45,7 @@ import {
   IssueRecord,
   IssueSqlRow,
   IssueTracker,
+  LinearTeamWorkflowSelection,
   RepositoryId,
   RepositoryRecord,
   RepositorySettingsConfigSqlRow,
@@ -357,6 +359,7 @@ const repositorySelectColumns = `id, forge, issue_tracker, forge_host, project_p
              review_model, review_thinking_level, backend_model_prefs, merge_policy,
              guaranteed_min_concurrent_agent_turns,
              include_all_issue_authors, wait_for_ready_for_review_checks,
+             linear_project_id, linear_project_name, linear_workflow_statuses,
              issues_reconciled_at`
 
 const issueSelectColumns = `id, repository_id, issue_number, issue_tracker,
@@ -381,6 +384,19 @@ const completeIssueReference = (
   }
 }
 
+const parseLinearWorkflowStatuses = (
+  raw: string,
+): readonly LinearTeamWorkflowSelection[] => {
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Schema.decodeUnknownSync(Schema.Array(LinearTeamWorkflowSelection))(
+      parsed,
+    )
+  } catch {
+    return []
+  }
+}
+
 const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
   RepositoryRecord.make({
     id: row.id,
@@ -400,6 +416,11 @@ const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
     guaranteedMinConcurrentAgentTurns: row.guaranteedMinConcurrentAgentTurns,
     includeAllIssueAuthors: row.includeAllIssueAuthors,
     waitForReadyForReviewChecks: row.waitForReadyForReviewChecks,
+    linearProjectId: row.linearProjectId,
+    linearProjectName: row.linearProjectName,
+    linearWorkflowStatuses: parseLinearWorkflowStatuses(
+      row.linearWorkflowStatuses,
+    ),
     issuesReconciledAt: row.issuesReconciledAt,
   })
 
@@ -601,6 +622,11 @@ export interface DbServiceShape {
   readonly deleteIssue: (
     repositoryId: string,
     issueNumber: number,
+  ) => Effect.Effect<void, RepositoryNotFoundError | DatabaseError>
+  readonly deleteIssueByNativeId: (
+    repositoryId: string,
+    issueTracker: IssueTracker,
+    nativeId: string,
   ) => Effect.Effect<void, RepositoryNotFoundError | DatabaseError>
   /**
    * Record reconciliation completion. Does not publish `issueChanges`; call
@@ -1391,7 +1417,10 @@ export const DbServiceLive = Layer.effect(
                         project_path AS projectPath,
                         selected_agent_backend AS selectedAgentBackend,
                         backend_model_prefs AS backendModelPrefs,
-                        guaranteed_min_concurrent_agent_turns AS guaranteedMinConcurrentAgentTurns
+                        guaranteed_min_concurrent_agent_turns AS guaranteedMinConcurrentAgentTurns,
+                        linear_project_id AS linearProjectId,
+                        linear_project_name AS linearProjectName,
+                        linear_workflow_statuses AS linearWorkflowStatuses
                  FROM repository WHERE id = ?`,
                 [input.repositoryId],
               )
@@ -1406,9 +1435,100 @@ export const DbServiceLive = Layer.effect(
             }
             const nextForge = input.forge ?? existing.forge
             const nextIssueTracker =
-              existing.issueTracker === existing.forge
+              input.issueTracker ??
+              (existing.issueTracker === existing.forge
                 ? nextForge
-                : existing.issueTracker
+                : existing.issueTracker)
+            if (nextIssueTracker === "linear" && nextForge !== "github") {
+              return yield* new InvalidRepositorySettingsError({
+                field: "issueTracker",
+                message:
+                  "Linear is available only for GitHub-hosted Repositories",
+              })
+            }
+            if (
+              isForge(nextIssueTracker) &&
+              nextIssueTracker !== nextForge &&
+              nextIssueTracker !== existing.issueTracker
+            ) {
+              return yield* new InvalidRepositorySettingsError({
+                field: "issueTracker",
+                message:
+                  "Forge-hosted Issue Trackers must match the Repository hosting Forge",
+              })
+            }
+            const existingLinearWorkflowStatuses = parseLinearWorkflowStatuses(
+              existing.linearWorkflowStatuses,
+            )
+            let nextLinearProjectId =
+              input.linearProjectId === undefined
+                ? existing.linearProjectId
+                : input.linearProjectId === null ||
+                    input.linearProjectId.trim() === ""
+                  ? null
+                  : input.linearProjectId.trim()
+            let nextLinearProjectName =
+              input.linearProjectName === undefined
+                ? existing.linearProjectName
+                : input.linearProjectName === null ||
+                    input.linearProjectName.trim() === ""
+                  ? null
+                  : input.linearProjectName.trim()
+            let nextLinearWorkflowStatuses =
+              input.linearWorkflowStatuses === undefined
+                ? existingLinearWorkflowStatuses
+                : input.linearWorkflowStatuses
+            if (nextIssueTracker !== "linear") {
+              nextLinearProjectId = null
+              nextLinearProjectName = null
+              nextLinearWorkflowStatuses = []
+            }
+            if (nextIssueTracker === "linear") {
+              if (nextLinearProjectId === null) {
+                return yield* new InvalidRepositorySettingsError({
+                  field: "linearProjectId",
+                  message: "Select a Linear project mapped to this Repository",
+                })
+              }
+              if (nextLinearWorkflowStatuses.length === 0) {
+                return yield* new InvalidRepositorySettingsError({
+                  field: "linearWorkflowStatuses",
+                  message:
+                    "Choose In Progress and Done statuses for each Linear team",
+                })
+              }
+              for (const selection of nextLinearWorkflowStatuses) {
+                if (
+                  selection.teamId.trim() === "" ||
+                  selection.inProgressStateId.trim() === "" ||
+                  selection.doneStateId.trim() === ""
+                ) {
+                  return yield* new InvalidRepositorySettingsError({
+                    field: "linearWorkflowStatuses",
+                    message:
+                      "Each Linear team needs In Progress and Done statuses",
+                  })
+                }
+              }
+              const mappedRows = (yield* sql
+                .unsafe(
+                  `SELECT id FROM repository
+                   WHERE linear_project_id = ?
+                     AND id <> ?
+                   LIMIT 1`,
+                  [nextLinearProjectId, input.repositoryId],
+                )
+                .pipe(Effect.mapError(toDatabaseError))) as readonly {
+                readonly id: string
+              }[]
+              if (mappedRows.length > 0) {
+                return yield* new InvalidRepositorySettingsError({
+                  field: "linearProjectId",
+                  message:
+                    "That Linear project is already mapped to another Repository",
+                })
+              }
+            }
             const nextForgeHost = requestedForgeHost ?? existing.forgeHost
             const nextProjectPath = requestedProjectPath ?? existing.projectPath
             const identityChanging =
@@ -1545,6 +1665,9 @@ export const DbServiceLive = Layer.effect(
                  guaranteed_min_concurrent_agent_turns = ?,
                  include_all_issue_authors = ?,
                  wait_for_ready_for_review_checks = ?,
+                 linear_project_id = ?,
+                 linear_project_name = ?,
+                 linear_workflow_statuses = ?,
                  updated_at = ?
              WHERE id = ?
              RETURNING ${repositorySelectColumns}`,
@@ -1564,6 +1687,9 @@ export const DbServiceLive = Layer.effect(
                   nextGuaranteedMin,
                   input.includeAllIssueAuthors,
                   input.waitForReadyForReviewChecks,
+                  nextLinearProjectId,
+                  nextLinearProjectName,
+                  JSON.stringify(nextLinearWorkflowStatuses),
                   now,
                   input.repositoryId,
                 ],
@@ -2282,7 +2408,8 @@ export const DbServiceLive = Layer.effect(
                  parent_position, has_children,
                  created_at, updated_at
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (repository_id, issue_number) DO UPDATE SET
+             ON CONFLICT (repository_id, issue_tracker, issue_native_id) DO UPDATE SET
+               issue_number = excluded.issue_number,
                issue_tracker = excluded.issue_tracker,
                issue_native_id = excluded.issue_native_id,
                issue_display_id = excluded.issue_display_id,
@@ -2503,6 +2630,33 @@ export const DbServiceLive = Layer.effect(
         .pipe(Effect.mapError(toDatabaseError))
     })
 
+    const deleteIssueByNativeId = Effect.fn("DbService.deleteIssueByNativeId")(
+      function* (
+        repositoryId: string,
+        issueTracker: IssueTracker,
+        nativeId: string,
+      ) {
+        yield* ensureRepositoryExists(repositoryId)
+        yield* sql
+          .unsafe(
+            `DELETE FROM issue_dependency
+             WHERE issue_id IN (
+               SELECT id FROM issue
+               WHERE repository_id = ? AND issue_tracker = ? AND issue_native_id = ?
+             )`,
+            [repositoryId, issueTracker, nativeId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+        yield* sql
+          .unsafe(
+            `DELETE FROM issue
+             WHERE repository_id = ? AND issue_tracker = ? AND issue_native_id = ?`,
+            [repositoryId, issueTracker, nativeId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+      },
+    )
+
     const markIssuesReconciled = Effect.fn("DbService.markIssuesReconciled")(
       function* (repositoryId: string, reconciledAt: Date) {
         const now = yield* Clock.currentTimeMillis
@@ -2563,6 +2717,7 @@ export const DbServiceLive = Layer.effect(
       listWorkItemPullRequests,
       listUnfinishedCreatePrWorkItems,
       deleteIssue,
+      deleteIssueByNativeId,
       markIssuesReconciled,
     })
   }),

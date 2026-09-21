@@ -13,6 +13,7 @@ import {
   formatIssueDisplayId,
   isForge,
   isIssueTracker,
+  relevancePolicyForIssueTracker,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -40,6 +41,10 @@ describe("generated Forge vocabulary", () => {
     ])
     expect(isIssueTracker("linear")).toBe(true)
     expect(isForge("linear")).toBe(false)
+    expect(relevancePolicyForIssueTracker("linear")).toEqual({
+      hierarchyObservation: { kind: "required" },
+      openDraftClosingPullRequest: { kind: "inactive" },
+    })
     expect(isIssueTracker("github")).toBe(true)
     expect(isIssueTracker("bitbucket")).toBe(false)
   })

@@ -12,6 +12,13 @@ import {
   type KeymaxxerServiceShape,
   keymaxxerError,
 } from "@ready-for-agent/keymaxxer-service"
+import {
+  LINEAR_API_KEY_CREATION_URL,
+  LINEAR_API_KEY_ENV_VAR,
+  LINEAR_API_KEY_SECRET_NAME,
+  LINEAR_VAULT_ACCOUNT,
+  LINEAR_VAULT_PROVIDER,
+} from "@ready-for-agent/linear-service"
 import { activateRepositoryPolling } from "./issue-polling.js"
 
 /**
@@ -27,6 +34,7 @@ export type Repository = {
   forge: string
   forgeHost: string
   projectPath: string
+  issueTracker?: string
 }
 
 export class RepositoryCredentialError extends Data.TaggedError(
@@ -121,6 +129,40 @@ const tokenCreationUrl = (repository: Repository) => {
     default:
       return githubTokenCreationUrl(repository)
   }
+}
+
+export const linearCredential = (
+  existingToken: string | null,
+  configured = existingToken !== null,
+) => ({
+  configured,
+  secretName: existingToken ?? LINEAR_API_KEY_SECRET_NAME,
+  creationUrl: LINEAR_API_KEY_CREATION_URL,
+})
+
+export const hasLinearAmbientCredential = (
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): boolean => {
+  const value = environment[LINEAR_API_KEY_ENV_VAR]
+  return typeof value === "string" && value.trim() !== ""
+}
+
+export const linearHasCredential = (
+  keymaxxer: KeymaxxerServiceShape,
+  metadataTimeout?: Duration.Duration,
+): Effect.Effect<boolean> => {
+  if (keymaxxer.enabled === false) {
+    return Effect.succeed(hasLinearAmbientCredential())
+  }
+  return probeVaultSecret(
+    keymaxxer,
+    { provider: LINEAR_VAULT_PROVIDER, account: LINEAR_VAULT_ACCOUNT },
+    metadataTimeout,
+  ).pipe(
+    Effect.map((probe) =>
+      probe.kind === "secret" ? true : hasLinearAmbientCredential(),
+    ),
+  )
 }
 
 export const repositoryCredential = (
@@ -247,6 +289,12 @@ export const activatePollingIfCredentialed = Effect.fn(
   options?: { readonly metadataTimeout?: Duration.Duration },
 ) {
   const keymaxxer = yield* KeymaxxerService
+  if (repository.issueTracker === "linear") {
+    if (yield* linearHasCredential(keymaxxer, options?.metadataTimeout)) {
+      yield* activateRepositoryPolling(repository.id)
+    }
+    return
+  }
   if (keymaxxer.enabled === false) {
     switch (repository.forge) {
       case "gitlab": {

@@ -20,6 +20,10 @@ import {
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import {
+  LinearService,
+  defaultLinearServiceShape,
+} from "@ready-for-agent/linear-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
@@ -285,6 +289,7 @@ describe("Hold ordinary remote admission during CI failure", () => {
           jumpHint: false,
         }),
     }),
+    Layer.succeed(LinearService, defaultLinearServiceShape),
     Layer.succeed(LocalGit, {
       inspect: (path) =>
         Effect.succeed({
