@@ -135,7 +135,9 @@ describe("Waiting for blockers Working-row polish", () => {
     expect(source).toContain("ui.repoIssueImplementIcon")
     expect(source).toContain("ui.repoIssueTitleRow")
     expect(source).toContain("ui.repoIssueTitleInline")
-    expect(source).toContain("Implement issue #")
+    expect(source).toContain(
+      "Implement issue ${formatIssueDisplayId(issue.displayId)}",
+    )
     expect(source).toContain("queueIssue.reset()")
     expect(source).toContain("implementNow.mutate()")
     expect(source).toContain("implementCiRepair.mutate()")

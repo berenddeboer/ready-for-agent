@@ -4,6 +4,10 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 import { ulid } from "ulidx"
 import { isSelectableAgentBackendId } from "@ready-for-agent/agent-backend"
 import {
+  completeIssueIdentity,
+  isIssueTracker,
+} from "@ready-for-agent/lifecycle-model"
+import {
   AgentBackendChangeBlockedError,
   DatabaseError,
   GuaranteedMinAgentTurnsExceedsCapError,
@@ -39,6 +43,7 @@ import {
   IssueDependencySqlRow,
   IssueRecord,
   IssueSqlRow,
+  IssueTracker,
   RepositoryId,
   RepositoryRecord,
   RepositorySettingsConfigSqlRow,
@@ -354,9 +359,27 @@ const repositorySelectColumns = `id, forge, issue_tracker, forge_host, project_p
              include_all_issue_authors, wait_for_ready_for_review_checks,
              issues_reconciled_at`
 
-const issueSelectColumns = `id, repository_id, issue_number, title, body, url, state,
+const issueSelectColumns = `id, repository_id, issue_number, issue_tracker,
+                issue_native_id, issue_display_id, title, body, url, state,
                 github_created_at, issue_author, parent_issue_number,
-                parent_issue_url, parent_position, has_children`
+                parent_issue_url, parent_native_id, parent_display_id,
+                parent_position, has_children`
+
+const completeIssueReference = (
+  reference: IssueDependency,
+): IssueDependency => {
+  const identity = completeIssueIdentity({
+    issueNumber: reference.issueNumber,
+    nativeId: reference.nativeId,
+    displayId: reference.displayId,
+  })
+  return {
+    issueNumber: reference.issueNumber,
+    issueUrl: reference.issueUrl,
+    nativeId: identity.nativeId,
+    displayId: identity.displayId,
+  }
+}
 
 const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
   RepositoryRecord.make({
@@ -383,27 +406,39 @@ const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
 const toIssueRecord = (
   row: IssueSqlRow,
   blockedBy: readonly IssueDependency[],
-): IssueRecord => ({
-  id: row.id,
-  repositoryId: row.repositoryId,
-  issueNumber: row.issueNumber,
-  title: row.title,
-  body: row.body,
-  url: row.url,
-  state: row.state,
-  githubCreatedAt: new Date(row.githubCreatedAt),
-  issueAuthor: row.issueAuthor,
-  parentPosition: row.parentPosition,
-  hasChildren: row.hasChildren,
-  parent:
-    row.parentIssueNumber === null || row.parentIssueUrl === null
-      ? null
-      : {
-          issueNumber: row.parentIssueNumber,
-          issueUrl: row.parentIssueUrl,
-        },
-  blockedBy,
-})
+): IssueRecord => {
+  const identity = completeIssueIdentity({
+    issueNumber: row.issueNumber,
+    nativeId: row.nativeId,
+    displayId: row.displayId,
+  })
+  return {
+    id: row.id,
+    repositoryId: row.repositoryId,
+    issueNumber: row.issueNumber,
+    issueTracker: row.issueTracker,
+    nativeId: identity.nativeId,
+    displayId: identity.displayId,
+    title: row.title,
+    body: row.body,
+    url: row.url,
+    state: row.state,
+    githubCreatedAt: new Date(row.githubCreatedAt),
+    issueAuthor: row.issueAuthor,
+    parentPosition: row.parentPosition,
+    hasChildren: row.hasChildren,
+    parent:
+      row.parentIssueNumber === null || row.parentIssueUrl === null
+        ? null
+        : completeIssueReference({
+            issueNumber: row.parentIssueNumber,
+            issueUrl: row.parentIssueUrl,
+            nativeId: row.parentNativeId ?? undefined,
+            displayId: row.parentDisplayId ?? undefined,
+          }),
+    blockedBy: blockedBy.map(completeIssueReference),
+  }
+}
 
 export interface DbServiceShape {
   readonly repositoryChanges: Stream.Stream<void>
@@ -2111,6 +2146,30 @@ export const DbServiceLive = Layer.effect(
           message: "issueNumber must be a positive integer",
         })
       }
+      if (
+        input.issueTracker !== undefined &&
+        !isIssueTracker(input.issueTracker)
+      ) {
+        return yield* new InvalidIssueInputError({
+          field: "issueTracker",
+          message: "issueTracker must be a supported Issue Tracker",
+        })
+      }
+      if (input.nativeId !== undefined && input.nativeId.trim().length === 0) {
+        return yield* new InvalidIssueInputError({
+          field: "nativeId",
+          message: "nativeId cannot be empty",
+        })
+      }
+      if (
+        input.displayId !== undefined &&
+        input.displayId.trim().length === 0
+      ) {
+        return yield* new InvalidIssueInputError({
+          field: "displayId",
+          message: "displayId cannot be empty",
+        })
+      }
       if (input.title.trim().length === 0) {
         return yield* new InvalidIssueInputError({
           field: "title",
@@ -2177,6 +2236,32 @@ export const DbServiceLive = Layer.effect(
       }
 
       yield* ensureRepositoryExists(input.repositoryId)
+      const trackerRows = yield* sql
+        .unsafe(`SELECT issue_tracker FROM repository WHERE id = ? LIMIT 1`, [
+          input.repositoryId,
+        ])
+        .pipe(Effect.mapError(toDatabaseError))
+      const decodedTracker = yield* Schema.decodeUnknownEffect(
+        Schema.Array(
+          Schema.Struct({ issueTracker: IssueTracker }).pipe(
+            Schema.encodeKeys({ issueTracker: "issue_tracker" }),
+          ),
+        ),
+      )(trackerRows).pipe(Effect.mapError(toSchemaDatabaseError))
+      const repositoryTracker = decodedTracker[0]?.issueTracker
+      if (repositoryTracker === undefined) {
+        return yield* new DatabaseError({
+          message: `Repository ${input.repositoryId} has an invalid Issue Tracker`,
+        })
+      }
+      const issueTracker = input.issueTracker ?? repositoryTracker
+      const identity = completeIssueIdentity({
+        issueNumber: input.issueNumber,
+        nativeId: input.nativeId?.trim(),
+        displayId: input.displayId?.trim(),
+      })
+      const parent =
+        input.parent === null ? null : completeIssueReference(input.parent)
 
       const now = yield* Clock.currentTimeMillis
       return yield* sql
@@ -2190,12 +2275,17 @@ export const DbServiceLive = Layer.effect(
             const result = yield* sql
               .unsafe(
                 `INSERT INTO issue (
-               id, repository_id, issue_number, title, body, url, state,
+               id, repository_id, issue_number, issue_tracker,
+                issue_native_id, issue_display_id, title, body, url, state,
                 github_created_at, issue_author, parent_issue_number,
-                 parent_issue_url, parent_position, has_children,
+                 parent_issue_url, parent_native_id, parent_display_id,
+                 parent_position, has_children,
                  created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (repository_id, issue_number) DO UPDATE SET
+               issue_tracker = excluded.issue_tracker,
+               issue_native_id = excluded.issue_native_id,
+               issue_display_id = excluded.issue_display_id,
                title = excluded.title,
                body = excluded.body,
                url = excluded.url,
@@ -2204,6 +2294,8 @@ export const DbServiceLive = Layer.effect(
                  issue_author = excluded.issue_author,
                  parent_issue_number = excluded.parent_issue_number,
                  parent_issue_url = excluded.parent_issue_url,
+                 parent_native_id = excluded.parent_native_id,
+                 parent_display_id = excluded.parent_display_id,
                  parent_position = excluded.parent_position,
                  has_children = excluded.has_children,
                  updated_at = excluded.updated_at
@@ -2212,14 +2304,19 @@ export const DbServiceLive = Layer.effect(
                   `issue-${ulid()}`,
                   input.repositoryId,
                   input.issueNumber,
+                  issueTracker,
+                  identity.nativeId,
+                  identity.displayId,
                   input.title,
                   input.body,
                   input.url,
                   input.state,
                   input.githubCreatedAt.getTime(),
                   issueAuthor,
-                  input.parent?.issueNumber ?? null,
-                  input.parent?.issueUrl ?? null,
+                  parent?.issueNumber ?? null,
+                  parent?.issueUrl ?? null,
+                  parent?.nativeId ?? null,
+                  parent?.displayId ?? null,
                   input.parentPosition,
                   input.hasChildren,
                   now,
@@ -2243,7 +2340,7 @@ export const DbServiceLive = Layer.effect(
               ...new Map(
                 input.blockedBy.map((dependency) => [
                   dependency.issueUrl,
-                  dependency,
+                  completeIssueReference(dependency),
                 ]),
               ).values(),
             ].sort(
@@ -2256,13 +2353,16 @@ export const DbServiceLive = Layer.effect(
                 .unsafe(
                   `INSERT INTO issue_dependency (
                  id, issue_id, blocking_issue_number,
-                 blocking_issue_url, created_at
-               ) VALUES (?, ?, ?, ?, ?)`,
+                 blocking_issue_url, blocking_native_id, blocking_display_id,
+                 created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
                   [
                     `issue-dependency-${ulid()}`,
                     row.id,
                     dependency.issueNumber,
                     dependency.issueUrl,
+                    dependency.nativeId,
+                    dependency.displayId,
                     now,
                   ],
                 )
@@ -2299,7 +2399,8 @@ export const DbServiceLive = Layer.effect(
       const dependencyRows = yield* sql
         .unsafe(
           `SELECT d.issue_id, d.blocking_issue_number,
-               d.blocking_issue_url
+               d.blocking_issue_url, d.blocking_native_id,
+               d.blocking_display_id
              FROM issue_dependency d
              INNER JOIN issue i ON i.id = d.issue_id
              WHERE i.repository_id = ?
@@ -2312,10 +2413,14 @@ export const DbServiceLive = Layer.effect(
       const dependenciesByIssue = new Map<string, IssueDependency[]>()
       for (const dependency of dependencies) {
         const records = dependenciesByIssue.get(dependency.issueId) ?? []
-        records.push({
-          issueNumber: dependency.issueNumber,
-          issueUrl: dependency.issueUrl,
-        })
+        records.push(
+          completeIssueReference({
+            issueNumber: dependency.issueNumber,
+            issueUrl: dependency.issueUrl,
+            nativeId: dependency.nativeId,
+            displayId: dependency.displayId,
+          }),
+        )
         dependenciesByIssue.set(dependency.issueId, records)
       }
 

@@ -78,6 +78,8 @@ export type IntakeCandidatesResult = {
   }
   readonly candidates: readonly {
     readonly issueNumber: number
+    readonly nativeId: string
+    readonly displayId: string
     readonly title: string
     readonly url: string
     readonly action: IntakeCandidateAction
@@ -507,6 +509,8 @@ export class GraphqlApi extends Context.Service<
                     },
                     candidates: {
                       issueNumber: true,
+                      nativeId: true,
+                      displayId: true,
                       title: true,
                       url: true,
                       action: true,
@@ -529,11 +533,15 @@ export class GraphqlApi extends Context.Service<
                   candidates: payload.candidates.map(
                     (candidate: {
                       readonly issueNumber: number
+                      readonly nativeId: string
+                      readonly displayId: string
                       readonly title: string
                       readonly url: string
                       readonly action: IntakeCandidateAction
                     }) => ({
                       issueNumber: candidate.issueNumber,
+                      nativeId: candidate.nativeId,
+                      displayId: candidate.displayId,
                       title: candidate.title,
                       url: candidate.url,
                       action: candidate.action,

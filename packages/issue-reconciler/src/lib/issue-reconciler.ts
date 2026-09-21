@@ -32,7 +32,10 @@ import {
 import {
   classifyActiveClosingPullRequests,
   competingPullRequestIdentity,
+  completeIssueIdentity,
   evaluateRelevantIssue,
+  existingProviderIssueIdentity,
+  isForge,
   relevantIssuePredicateContext,
   workItemBranchName,
 } from "@ready-for-agent/lifecycle-model"
@@ -84,6 +87,14 @@ export class ReconciliationMutationError extends Schema.TaggedErrorClass<Reconci
   },
 ) {}
 
+export class IssueTrackerDiscoveryUnsupportedError extends Schema.TaggedErrorClass<IssueTrackerDiscoveryUnsupportedError>()(
+  "IssueTrackerDiscoveryUnsupportedError",
+  {
+    repositoryId: Schema.String,
+    issueTracker: Schema.Literals(["linear"]),
+  },
+) {}
+
 export type ReconciliationError =
   | GitHubRepositoryUnavailableError
   | GitHubRequestError
@@ -94,6 +105,7 @@ export type ReconciliationError =
   | AzureDevOpsProjectUnavailableError
   | AzureDevOpsRequestError
   | AzureDevOpsNotImplementedError
+  | IssueTrackerDiscoveryUnsupportedError
   | ReconciliationMutationError
   | RepositoryNotFoundError
   | DatabaseError
@@ -115,25 +127,53 @@ export class IssueReconciler extends Context.Service<
   IssueReconcilerShape
 >()("@ready-for-agent/issue-reconciler/IssueReconciler") {}
 
-const matches = (local: IssueRecord, remote: ReadyLabeledIssue): boolean =>
-  local.title === remote.title &&
-  local.body === remote.body &&
-  local.url === remote.url &&
-  local.state === remote.state &&
-  local.githubCreatedAt.getTime() === remote.createdAt.getTime() &&
-  local.issueAuthor === remote.author &&
-  local.hasChildren === remote.hasChildren &&
-  local.parentPosition === remote.parentPosition &&
-  local.parent?.issueNumber === remote.parent?.number &&
-  local.parent?.issueUrl === remote.parent?.url &&
-  local.blockedBy.length === remote.blockedBy.length &&
-  local.blockedBy.every((dependency) =>
-    remote.blockedBy.some(
-      (remoteDependency) =>
-        dependency.issueNumber === remoteDependency.number &&
-        dependency.issueUrl === remoteDependency.url,
-    ),
+const remoteIdentity = (remote: ReadyLabeledIssue) =>
+  completeIssueIdentity({ issueNumber: remote.number })
+
+const matches = (
+  local: IssueRecord,
+  remote: ReadyLabeledIssue,
+  issueTracker: IssueRecord["issueTracker"],
+): boolean => {
+  const identity = remoteIdentity(remote)
+  const parentIdentity =
+    remote.parent === null
+      ? null
+      : completeIssueIdentity({ issueNumber: remote.parent.number })
+  return (
+    local.issueTracker === issueTracker &&
+    local.nativeId === identity.nativeId &&
+    local.displayId === identity.displayId &&
+    local.title === remote.title &&
+    local.body === remote.body &&
+    local.url === remote.url &&
+    local.state === remote.state &&
+    local.githubCreatedAt.getTime() === remote.createdAt.getTime() &&
+    local.issueAuthor === remote.author &&
+    local.hasChildren === remote.hasChildren &&
+    local.parentPosition === remote.parentPosition &&
+    local.parent?.issueNumber === remote.parent?.number &&
+    local.parent?.issueUrl === remote.parent?.url &&
+    (local.parent?.nativeId ??
+      (local.parent === null
+        ? undefined
+        : String(local.parent.issueNumber))) === parentIdentity?.nativeId &&
+    local.blockedBy.length === remote.blockedBy.length &&
+    local.blockedBy.every((dependency) =>
+      remote.blockedBy.some((remoteDependency) => {
+        const blockingIdentity = completeIssueIdentity({
+          issueNumber: remoteDependency.number,
+        })
+        return (
+          dependency.issueNumber === remoteDependency.number &&
+          dependency.issueUrl === remoteDependency.url &&
+          (dependency.nativeId ?? String(dependency.issueNumber)) ===
+            blockingIdentity.nativeId
+        )
+      }),
+    )
   )
+}
 
 export const IssueReconcilerLive = Layer.effect(
   IssueReconciler,
@@ -147,15 +187,22 @@ export const IssueReconcilerLive = Layer.effect(
       repository: RepositoryRecord,
       options?: ReconciliationOptions,
     ) {
+      const issueTracker = repository.issueTracker
+      if (!isForge(issueTracker)) {
+        return yield* new IssueTrackerDiscoveryUnsupportedError({
+          repositoryId: repository.id,
+          issueTracker,
+        })
+      }
       const forgeRepository = {
-        forge: repository.forge,
+        forge: issueTracker,
         forgeHost: repository.forgeHost,
         projectPath: repository.projectPath,
       }
       const localIssues = yield* db.listIssues(repository.id)
 
       const issueOperations = resolveForgeIssueOperations(
-        repository.forge,
+        issueTracker,
         { github, gitlab, azureDevOps },
         options?.githubOperation,
       )
@@ -171,8 +218,11 @@ export const IssueReconcilerLive = Layer.effect(
       const unfinishedCreatePrWorkItems =
         yield* db.listUnfinishedCreatePrWorkItems(repository.id)
 
-      const localByNumber = new Map(
-        localIssues.map((issue) => [issue.issueNumber, issue]),
+      const localByNativeId = new Map(
+        localIssues.map((issue) => [
+          issue.nativeId ?? String(issue.issueNumber),
+          issue,
+        ]),
       )
       const workItemPullRequestsByIssue = new Map<number, Set<number>>()
       for (const workItemPullRequest of workItemPullRequests) {
@@ -210,7 +260,7 @@ export const IssueReconcilerLive = Layer.effect(
         remoteIssues
           .filter((issue) => {
             const context = relevantIssuePredicateContext({
-              forge: repository.forge,
+              forge: issueTracker,
               repositoryName,
               workItemPullRequestNumbers:
                 workItemPullRequestsByIssue.get(issue.number) ?? new Set(),
@@ -244,7 +294,7 @@ export const IssueReconcilerLive = Layer.effect(
             }
             return evaluateRelevantIssue(issue, context)._tag === "match"
           })
-          .map((issue) => [issue.number, issue]),
+          .map((issue) => [remoteIdentity(issue).nativeId, issue]),
       )
       competingObservations.sort(
         (left, right) => left.issueNumber - right.issueNumber,
@@ -252,11 +302,11 @@ export const IssueReconcilerLive = Layer.effect(
       const authoritativeIssues = [...remoteByNumber.values()]
       const upserts = authoritativeIssues
         .map((issue) => {
-          const local = localByNumber.get(issue.number)
+          const local = localByNativeId.get(remoteIdentity(issue).nativeId)
           if (!local) {
             return { operation: "insert" as const, issue }
           }
-          if (!matches(local, issue)) {
+          if (!matches(local, issue, issueTracker)) {
             return { operation: "update" as const, issue }
           }
           return undefined
@@ -264,7 +314,10 @@ export const IssueReconcilerLive = Layer.effect(
         .filter((entry) => entry !== undefined)
         .sort((left, right) => left.issue.number - right.issue.number)
       const deletions = localIssues
-        .filter((issue) => !remoteByNumber.has(issue.issueNumber))
+        .filter(
+          (issue) =>
+            !remoteByNumber.has(issue.nativeId ?? String(issue.issueNumber)),
+        )
         .sort((left, right) => left.issueNumber - right.issueNumber)
 
       const progress = {
@@ -294,6 +347,10 @@ export const IssueReconcilerLive = Layer.effect(
           .storeIssue({
             repositoryId: repository.id,
             issueNumber: issue.number,
+            ...existingProviderIssueIdentity({
+              tracker: issueTracker,
+              issueNumber: issue.number,
+            }),
             title: issue.title,
             body: issue.body,
             url: issue.url,
@@ -308,10 +365,14 @@ export const IssueReconcilerLive = Layer.effect(
                 : {
                     issueNumber: issue.parent.number,
                     issueUrl: issue.parent.url,
+                    ...completeIssueIdentity({
+                      issueNumber: issue.parent.number,
+                    }),
                   },
             blockedBy: issue.blockedBy.map((dependency) => ({
               issueNumber: dependency.number,
               issueUrl: dependency.url,
+              ...completeIssueIdentity({ issueNumber: dependency.number }),
             })),
           })
           .pipe(

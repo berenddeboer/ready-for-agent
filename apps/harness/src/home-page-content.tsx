@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { formatIssueDisplayId } from "@ready-for-agent/lifecycle-model"
 import { COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE as completedWorkItemsDefaultPageSize } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
 import { formatAgentBackendStatusLabel } from "./agent-backend-status-label.js"
 import { AgentBackendWarnings } from "./agent-backend-warnings.js"
@@ -237,6 +238,9 @@ export const issuesQuery = (repositoryId: string) => ({
         id: true,
         repositoryId: true,
         issueNumber: true,
+        issueTracker: true,
+        nativeId: true,
+        displayId: true,
         title: true,
         url: true,
         state: true,
@@ -244,11 +248,15 @@ export const issuesQuery = (repositoryId: string) => ({
         parent: {
           issueNumber: true,
           issueUrl: true,
+          nativeId: true,
+          displayId: true,
         },
         hasChildren: true,
         blockedBy: {
           issueNumber: true,
           issueUrl: true,
+          nativeId: true,
+          displayId: true,
         },
       },
     })
@@ -260,6 +268,9 @@ type RepositoryIssue = {
   id: string
   repositoryId: string
   issueNumber: number
+  issueTracker: string
+  nativeId: string
+  displayId: string
   title: string
   url: string
   state: "OPEN" | "CLOSED"
@@ -267,11 +278,15 @@ type RepositoryIssue = {
   parent: {
     issueNumber: number
     issueUrl: string
+    nativeId: string
+    displayId: string
   } | null
   hasChildren: boolean
   blockedBy: readonly {
     issueNumber: number
     issueUrl: string
+    nativeId: string
+    displayId: string
   }[]
 }
 
@@ -3139,12 +3154,13 @@ function RepositoryIssues({
     )
   }
 
-  const childrenByParent = new Map<number, RepositoryIssue[]>()
+  const childrenByParent = new Map<string, RepositoryIssue[]>()
   for (const issue of issues) {
     if (issue.parent === null) continue
-    const children = childrenByParent.get(issue.parent.issueNumber) ?? []
+    const parentKey = issue.parent.nativeId
+    const children = childrenByParent.get(parentKey) ?? []
     children.push(issue)
-    childrenByParent.set(issue.parent.issueNumber, children)
+    childrenByParent.set(parentKey, children)
   }
 
   return (
@@ -3164,7 +3180,7 @@ function RepositoryIssues({
           )
         }
 
-        const children = childrenByParent.get(issue.issueNumber) ?? []
+        const children = childrenByParent.get(issue.nativeId) ?? []
         const closedChildren = children.filter(
           (child) => child.state === "CLOSED",
         ).length
@@ -3287,7 +3303,9 @@ function ParentIssueGroup({
     <li className="min-w-0">
       <details className={ui.parentIssue} open>
         <summary className={ui.parentIssueSummary}>
-          <span className={ui.repoIssueNum}>#{parent.issueNumber}</span>
+          <span className={ui.repoIssueNum}>
+            {formatIssueDisplayId(parent.displayId)}
+          </span>
           <span className="min-w-0">
             <a
               className={ui.repoIssueTitle}
@@ -3569,7 +3587,9 @@ function RepositoryIssueRow({
   return (
     <li className={ui.repoIssue}>
       <div className={ui.repoIssueRow}>
-        <span className={ui.repoIssueNum}>#{issue.issueNumber}</span>
+        <span className={ui.repoIssueNum}>
+          {formatIssueDisplayId(issue.displayId)}
+        </span>
         {/*
           Flow container (div, not span): title column holds block companions
           (lifecycle, Banner, blocked-by <p>) under the title when the number
@@ -3584,7 +3604,7 @@ function RepositoryIssueRow({
               <button
                 type="button"
                 className={ui.repoIssueImplementBtn}
-                aria-label={`Implement issue #${issue.issueNumber}`}
+                aria-label={`Implement issue ${formatIssueDisplayId(issue.displayId)}`}
                 disabled={implementPending}
                 onClick={startImplementNow}
               >
@@ -3660,7 +3680,9 @@ function RepositoryIssueRow({
               {issue.blockedBy.map((blocker, index) => (
                 <span key={blocker.issueUrl}>
                   {index > 0 && ", "}
-                  <a href={blocker.issueUrl}>#{blocker.issueNumber}</a>
+                  <a href={blocker.issueUrl}>
+                    {formatIssueDisplayId(blocker.displayId)}
+                  </a>
                 </span>
               ))}
             </p>

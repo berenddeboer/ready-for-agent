@@ -25,6 +25,8 @@ export type MergePolicy = typeof MergePolicy.Type
 export const IssueReference = Schema.Struct({
   issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
   issueUrl: Schema.String,
+  nativeId: Schema.optionalKey(Schema.String),
+  displayId: Schema.optionalKey(Schema.String),
 })
 export type IssueReference = typeof IssueReference.Type
 
@@ -265,6 +267,9 @@ export type UpdateConfigInput = typeof UpdateConfigInput.Type
 export const StoreIssueInput = Schema.Struct({
   repositoryId: Schema.String,
   issueNumber: Schema.Finite,
+  issueTracker: Schema.optionalKey(IssueTracker),
+  nativeId: Schema.optionalKey(Schema.String),
+  displayId: Schema.optionalKey(Schema.String),
   title: Schema.String,
   body: Schema.String,
   url: Schema.String,
@@ -282,6 +287,9 @@ export const IssueRecord = Schema.Struct({
   id: Schema.String,
   repositoryId: RepositoryId,
   issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+  issueTracker: Schema.optionalKey(IssueTracker),
+  nativeId: Schema.optionalKey(Schema.String),
+  displayId: Schema.optionalKey(Schema.String),
   title: Schema.String,
   body: Schema.String,
   url: Schema.String,
@@ -524,6 +532,9 @@ export const IssueSqlRow = Schema.Struct({
   id: Schema.String,
   repositoryId: RepositoryId,
   issueNumber: Schema.Int,
+  issueTracker: IssueTracker,
+  nativeId: Schema.String,
+  displayId: Schema.String,
   title: Schema.String,
   body: Schema.String,
   url: Schema.String,
@@ -532,16 +543,23 @@ export const IssueSqlRow = Schema.Struct({
   issueAuthor: Schema.NullOr(Schema.String),
   parentIssueNumber: Schema.NullOr(Schema.Int),
   parentIssueUrl: Schema.NullOr(Schema.String),
+  parentNativeId: Schema.NullOr(Schema.String),
+  parentDisplayId: Schema.NullOr(Schema.String),
   parentPosition: Schema.NullOr(Schema.Int),
   hasChildren: SqlBoolean,
 }).pipe(
   Schema.encodeKeys({
     repositoryId: "repository_id",
     issueNumber: "issue_number",
+    issueTracker: "issue_tracker",
+    nativeId: "issue_native_id",
+    displayId: "issue_display_id",
     githubCreatedAt: "github_created_at",
     issueAuthor: "issue_author",
     parentIssueNumber: "parent_issue_number",
     parentIssueUrl: "parent_issue_url",
+    parentNativeId: "parent_native_id",
+    parentDisplayId: "parent_display_id",
     parentPosition: "parent_position",
     hasChildren: "has_children",
   }),
@@ -552,11 +570,15 @@ export const IssueDependencySqlRow = Schema.Struct({
   issueId: Schema.String,
   issueNumber: Schema.Int,
   issueUrl: Schema.String,
+  nativeId: Schema.String,
+  displayId: Schema.String,
 }).pipe(
   Schema.encodeKeys({
     issueId: "issue_id",
     issueNumber: "blocking_issue_number",
     issueUrl: "blocking_issue_url",
+    nativeId: "blocking_native_id",
+    displayId: "blocking_display_id",
   }),
 )
 export type IssueDependencySqlRow = typeof IssueDependencySqlRow.Type

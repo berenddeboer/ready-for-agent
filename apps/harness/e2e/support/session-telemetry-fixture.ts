@@ -185,12 +185,16 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
      );`,
     // Projected issues so Repos lists lifecycle chrome (and Completed titles).
     `INSERT INTO issue (
-       id, repository_id, issue_number, title, body, url, state,
+       id, repository_id, issue_number, issue_tracker, issue_native_id,
+       issue_display_id, title, body, url, state,
        github_created_at, has_children, created_at, updated_at
      ) VALUES (
        ${sqlLiteral(TELEMETRY_FIXTURE.missingSessionIssueId)},
        ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
        ${TELEMETRY_FIXTURE.missingSessionIssueNumber},
+       'github',
+       ${sqlLiteral(String(TELEMETRY_FIXTURE.missingSessionIssueNumber))},
+       ${sqlLiteral(String(TELEMETRY_FIXTURE.missingSessionIssueNumber))},
        'E2E Session Telemetry missing',
        '',
        ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${TELEMETRY_FIXTURE.missingSessionIssueNumber}`)},
@@ -201,12 +205,16 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        ${now}
      );`,
     `INSERT INTO issue (
-       id, repository_id, issue_number, title, body, url, state,
+       id, repository_id, issue_number, issue_tracker, issue_native_id,
+       issue_display_id, title, body, url, state,
        github_created_at, has_children, created_at, updated_at
      ) VALUES (
        ${sqlLiteral(TELEMETRY_FIXTURE.completedPageTwoIssueId)},
        ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
        ${TELEMETRY_FIXTURE.completedPageTwoIssueNumber},
+       'github',
+       ${sqlLiteral(String(TELEMETRY_FIXTURE.completedPageTwoIssueNumber))},
+       ${sqlLiteral(String(TELEMETRY_FIXTURE.completedPageTwoIssueNumber))},
        'E2E Session Telemetry completed page two',
        '',
        ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${TELEMETRY_FIXTURE.completedPageTwoIssueNumber}`)},
@@ -217,12 +225,16 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        ${now}
      );`,
     `INSERT INTO issue (
-       id, repository_id, issue_number, title, body, url, state,
+       id, repository_id, issue_number, issue_tracker, issue_native_id,
+       issue_display_id, title, body, url, state,
        github_created_at, has_children, created_at, updated_at
      ) VALUES (
        ${sqlLiteral(TELEMETRY_FIXTURE.codexMissingIssueId)},
        ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
        ${TELEMETRY_FIXTURE.codexMissingIssueNumber},
+       'github',
+       ${sqlLiteral(String(TELEMETRY_FIXTURE.codexMissingIssueNumber))},
+       ${sqlLiteral(String(TELEMETRY_FIXTURE.codexMissingIssueNumber))},
        'E2E Codex Session Telemetry missing',
        '',
        ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${TELEMETRY_FIXTURE.codexMissingIssueNumber}`)},
@@ -233,12 +245,16 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        ${now}
      );`,
     `INSERT INTO issue (
-       id, repository_id, issue_number, title, body, url, state,
+       id, repository_id, issue_number, issue_tracker, issue_native_id,
+       issue_display_id, title, body, url, state,
        github_created_at, has_children, created_at, updated_at
      ) VALUES (
        ${sqlLiteral(TELEMETRY_FIXTURE.completedIssueId)},
        ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
        ${TELEMETRY_FIXTURE.completedIssueNumber},
+       'github',
+       ${sqlLiteral(String(TELEMETRY_FIXTURE.completedIssueNumber))},
+       ${sqlLiteral(String(TELEMETRY_FIXTURE.completedIssueNumber))},
        'E2E Session Telemetry completed',
        '',
        ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${TELEMETRY_FIXTURE.completedIssueNumber}`)},
@@ -249,12 +265,16 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        ${now}
      );`,
     `INSERT INTO issue (
-       id, repository_id, issue_number, title, body, url, state,
+       id, repository_id, issue_number, issue_tracker, issue_native_id,
+       issue_display_id, title, body, url, state,
        github_created_at, has_children, created_at, updated_at
      ) VALUES (
        ${sqlLiteral(TELEMETRY_FIXTURE.idleIssueId)},
        ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
        ${TELEMETRY_FIXTURE.idleIssueNumber},
+       'github',
+       ${sqlLiteral(String(TELEMETRY_FIXTURE.idleIssueNumber))},
+       ${sqlLiteral(String(TELEMETRY_FIXTURE.idleIssueNumber))},
        'E2E Session usage idle OpenCode tail',
        '',
        ${sqlLiteral(`https://github.com/${TELEMETRY_FIXTURE.projectPath}/issues/${TELEMETRY_FIXTURE.idleIssueNumber}`)},

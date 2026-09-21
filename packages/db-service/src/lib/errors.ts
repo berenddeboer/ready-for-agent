@@ -45,6 +45,9 @@ export class InvalidIssueInputError extends Schema.TaggedErrorClass<InvalidIssue
   {
     field: Schema.Literals([
       "issueNumber",
+      "issueTracker",
+      "nativeId",
+      "displayId",
       "title",
       "url",
       "state",

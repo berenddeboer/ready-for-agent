@@ -38,6 +38,8 @@ describe("classifyIntakeCandidates", () => {
     expect(candidates).toEqual([
       {
         issueNumber: 10,
+        nativeId: "10",
+        displayId: "10",
         title: "Issue 10",
         url: "https://github.com/acme/widgets/issues/10",
         action: "IMPLEMENT_NOW",
@@ -58,6 +60,8 @@ describe("classifyIntakeCandidates", () => {
     expect(candidates).toEqual([
       {
         issueNumber: 20,
+        nativeId: "20",
+        displayId: "20",
         title: "Issue 20",
         url: "https://github.com/acme/widgets/issues/20",
         action: "QUEUE",
@@ -182,6 +186,8 @@ describe("classifyIntakeCandidates", () => {
       expect(classifyIntakeCandidates([stillReady], [])).toEqual([
         {
           issueNumber: 14,
+          nativeId: "14",
+          displayId: "14",
           title: "Issue 14",
           url: "https://github.com/acme/widgets/issues/14",
           action: "IMPLEMENT_NOW",
@@ -212,5 +218,28 @@ describe("classifyIntakeCandidates", () => {
 
   it("returns empty for an empty Issue projection", () => {
     expect(classifyIntakeCandidates([], [])).toEqual([])
+  })
+
+  it("carries source-scoped native and display identity distinct from issueNumber", () => {
+    const candidates = classifyIntakeCandidates(
+      [
+        issue({
+          issueNumber: 1,
+          nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          displayId: "ENG-123",
+        }),
+      ],
+      [],
+    )
+    expect(candidates).toEqual([
+      {
+        issueNumber: 1,
+        nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        displayId: "ENG-123",
+        title: "Issue 1",
+        url: "https://github.com/acme/widgets/issues/1",
+        action: "IMPLEMENT_NOW",
+      },
+    ])
   })
 })

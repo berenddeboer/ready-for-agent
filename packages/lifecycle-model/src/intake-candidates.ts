@@ -1,3 +1,4 @@
+import { completeIssueIdentity } from "./issue-source.js"
 import {
   type WorkItemPredicateShape,
   evaluateActionableIssue,
@@ -16,6 +17,8 @@ export type IntakeCandidateAction = "IMPLEMENT_NOW" | "QUEUE"
  */
 export type IntakeCandidate = {
   readonly issueNumber: number
+  readonly nativeId: string
+  readonly displayId: string
   readonly title: string
   readonly url: string
   readonly action: IntakeCandidateAction
@@ -24,6 +27,8 @@ export type IntakeCandidate = {
 /** Issue fields required to classify Intake Candidates. */
 export type IntakeCandidateIssueInput = {
   readonly issueNumber: number
+  readonly nativeId?: string
+  readonly displayId?: string
   readonly title: string
   readonly url: string
   readonly state: string
@@ -88,6 +93,7 @@ export const classifyIntakeCandidates = (
     if (actionable._tag === "match") {
       implementNow.push({
         issueNumber: issue.issueNumber,
+        ...completeIssueIdentity(issue),
         title: issue.title,
         url: issue.url,
         action: "IMPLEMENT_NOW",
@@ -109,6 +115,7 @@ export const classifyIntakeCandidates = (
     }
     queue.push({
       issueNumber: issue.issueNumber,
+      ...completeIssueIdentity(issue),
       title: issue.title,
       url: issue.url,
       action: "QUEUE",

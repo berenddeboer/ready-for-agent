@@ -133,6 +133,9 @@ const issue = {
   id: "issue-test",
   repositoryId: repository.id,
   issueNumber: 42,
+  issueTracker: "github" as const,
+  nativeId: "42",
+  displayId: "42",
   title: "Make repository cards useful",
   body: "Show the Ready-labeled issues.",
   url: "https://github.com/acme/widgets/issues/42",
@@ -146,6 +149,8 @@ const issue = {
     {
       issueNumber: 17,
       issueUrl: "https://github.com/acme/widgets/issues/17",
+      nativeId: "17",
+      displayId: "17",
     },
   ],
 }
@@ -154,6 +159,8 @@ const openIssue = (issueNumber: number) => ({
   ...issue,
   id: `issue-${String(issueNumber)}`,
   issueNumber,
+  nativeId: String(issueNumber),
+  displayId: String(issueNumber),
 })
 
 const workItem = {
@@ -6418,11 +6425,12 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query ListIssues($repositoryId: ID!) {
           issues(repositoryId: $repositoryId) {
-            id repositoryId issueNumber title body url state githubCreatedAt
+            id repositoryId issueNumber issueTracker nativeId displayId
+            title body url state githubCreatedAt
             issueAuthor
-            parent { issueNumber issueUrl }
+            parent { issueNumber issueUrl nativeId displayId }
             hasChildren
-            blockedBy { issueNumber issueUrl }
+            blockedBy { issueNumber issueUrl nativeId displayId }
           }
         }`,
         variables: { repositoryId: repository.id },
@@ -6437,6 +6445,9 @@ describe("GraphQL API", () => {
             id: issue.id,
             repositoryId: issue.repositoryId,
             issueNumber: issue.issueNumber,
+            issueTracker: issue.issueTracker,
+            nativeId: issue.nativeId,
+            displayId: issue.displayId,
             title: issue.title,
             body: issue.body,
             url: issue.url,
@@ -6453,6 +6464,51 @@ describe("GraphQL API", () => {
     expect(requestedRepositoryId).toBe(repository.id)
   })
 
+  test("exposes source-scoped Issue identity distinct from issueNumber", async () => {
+    const linearShaped = {
+      ...issue,
+      issueTracker: "github" as const,
+      nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      displayId: "ENG-123",
+    }
+    await runtime.dispose()
+    runtime = makeRuntime({
+      listIssues: () => Effect.succeed([linearShaped]),
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query ListIssues($repositoryId: ID!) {
+          issues(repositoryId: $repositoryId) {
+            issueNumber issueTracker nativeId displayId
+            blockedBy { issueNumber nativeId displayId }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        issues: [
+          {
+            issueNumber: 42,
+            issueTracker: "github",
+            nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            displayId: "ENG-123",
+            blockedBy: [
+              {
+                issueNumber: 17,
+                nativeId: "17",
+                displayId: "17",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
   test("groups child work by actionability and preserves GitHub order", async () => {
     const makeIssue = (
       issueNumber: number,
@@ -6461,6 +6517,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: `issue-${issueNumber}`,
       issueNumber,
+      nativeId: String(issueNumber),
+      displayId: String(issueNumber),
       title: `Issue ${issueNumber}`,
       url: `https://github.com/acme/widgets/issues/${issueNumber}`,
       blockedBy: [],
@@ -9411,6 +9469,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-actionable",
       issueNumber: 12,
+      nativeId: "12",
+      displayId: "12",
       title: "Actionable leaf",
       url: "https://github.com/acme/widgets/issues/12",
       blockedBy: [],
@@ -9419,6 +9479,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-blocked",
       issueNumber: 5,
+      nativeId: "5",
+      displayId: "5",
       title: "Blocked leaf",
       url: "https://github.com/acme/widgets/issues/5",
       blockedBy: [
@@ -9489,6 +9551,8 @@ describe("GraphQL API", () => {
             }
             candidates {
               issueNumber
+              nativeId
+              displayId
               title
               url
               action
@@ -9510,12 +9574,16 @@ describe("GraphQL API", () => {
           candidates: [
             {
               issueNumber: 12,
+              nativeId: "12",
+              displayId: "12",
               title: "Actionable leaf",
               url: "https://github.com/acme/widgets/issues/12",
               action: "IMPLEMENT_NOW",
             },
             {
               issueNumber: 5,
+              nativeId: "5",
+              displayId: "5",
               title: "Blocked leaf",
               url: "https://github.com/acme/widgets/issues/5",
               action: "QUEUE",
@@ -9540,6 +9608,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-fresh",
       issueNumber: 9,
+      nativeId: "9",
+      displayId: "9",
       title: "No Work Item yet",
       url: "https://github.com/acme/widgets/issues/9",
       blockedBy: [],
@@ -9548,6 +9618,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-failed",
       issueNumber: 10,
+      nativeId: "10",
+      displayId: "10",
       title: "Failed with Issue still Ready",
       url: "https://gitlab.example.com/acme/widgets/-/issues/10",
       blockedBy: [],
@@ -9556,6 +9628,8 @@ describe("GraphQL API", () => {
       ...issue,
       id: "issue-abandoned",
       issueNumber: 15,
+      nativeId: "15",
+      displayId: "15",
       title: "Abandoned with Issue still Ready",
       url: "https://github.com/acme/widgets/issues/15",
       blockedBy: [],
@@ -9626,6 +9700,8 @@ describe("GraphQL API", () => {
           intakeCandidates(repositoryId: $repositoryId) {
             candidates {
               issueNumber
+              nativeId
+              displayId
               title
               url
               action
@@ -9642,18 +9718,24 @@ describe("GraphQL API", () => {
           candidates: [
             {
               issueNumber: 9,
+              nativeId: "9",
+              displayId: "9",
               title: "No Work Item yet",
               url: "https://github.com/acme/widgets/issues/9",
               action: "IMPLEMENT_NOW",
             },
             {
               issueNumber: 10,
+              nativeId: "10",
+              displayId: "10",
               title: "Failed with Issue still Ready",
               url: "https://gitlab.example.com/acme/widgets/-/issues/10",
               action: "IMPLEMENT_NOW",
             },
             {
               issueNumber: 15,
+              nativeId: "15",
+              displayId: "15",
               title: "Abandoned with Issue still Ready",
               url: "https://github.com/acme/widgets/issues/15",
               action: "IMPLEMENT_NOW",

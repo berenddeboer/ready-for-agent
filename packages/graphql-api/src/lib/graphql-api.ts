@@ -43,7 +43,10 @@ import {
 } from "@ready-for-agent/gitlab-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { classifyIntakeCandidates } from "@ready-for-agent/lifecycle-model"
+import {
+  classifyIntakeCandidates,
+  completeIssueIdentity,
+} from "@ready-for-agent/lifecycle-model"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import type { QueueService } from "@ready-for-agent/queue-service"
 import {
@@ -1359,6 +1362,66 @@ export const createGraphqlApi = <R>(
         Issue: {
           githubCreatedAt: (issue: { githubCreatedAt: Date }) =>
             issue.githubCreatedAt.toISOString(),
+          issueTracker: (issue: { issueTracker?: string }) =>
+            issue.issueTracker,
+          nativeId: (issue: {
+            issueNumber: number
+            nativeId?: string
+            displayId?: string
+          }) => completeIssueIdentity(issue).nativeId,
+          displayId: (issue: {
+            issueNumber: number
+            nativeId?: string
+            displayId?: string
+          }) => completeIssueIdentity(issue).displayId,
+        },
+        IssueReference: {
+          nativeId: (reference: {
+            issueNumber: number
+            nativeId?: string
+            displayId?: string
+          }) => completeIssueIdentity(reference).nativeId,
+          displayId: (reference: {
+            issueNumber: number
+            nativeId?: string
+            displayId?: string
+          }) => completeIssueIdentity(reference).displayId,
+        },
+        IntakeCandidate: {
+          nativeId: (candidate: {
+            issueNumber: number
+            nativeId?: string
+            displayId?: string
+          }) => completeIssueIdentity(candidate).nativeId,
+          displayId: (candidate: {
+            issueNumber: number
+            nativeId?: string
+            displayId?: string
+          }) => completeIssueIdentity(candidate).displayId,
+        },
+        RepositoryIntakeCreated: {
+          nativeId: (result: {
+            issueNumber: number
+            nativeId?: string
+            displayId?: string
+          }) => completeIssueIdentity(result).nativeId,
+          displayId: (result: {
+            issueNumber: number
+            nativeId?: string
+            displayId?: string
+          }) => completeIssueIdentity(result).displayId,
+        },
+        RepositoryIntakeFailed: {
+          nativeId: (result: {
+            issueNumber: number
+            nativeId?: string
+            displayId?: string
+          }) => completeIssueIdentity(result).nativeId,
+          displayId: (result: {
+            issueNumber: number
+            nativeId?: string
+            displayId?: string
+          }) => completeIssueIdentity(result).displayId,
         },
         Repository: {
           mergePolicy: (repository: { mergePolicy: MergePolicy }) =>

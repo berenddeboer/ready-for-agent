@@ -5,7 +5,10 @@ import {
   DbService,
   RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
-import { classifyIntakeCandidates } from "@ready-for-agent/lifecycle-model"
+import {
+  classifyIntakeCandidates,
+  completeIssueIdentity,
+} from "@ready-for-agent/lifecycle-model"
 import {
   type AgentBackendUnavailableError,
   type BuildModelNotConfiguredError,
@@ -34,6 +37,8 @@ export type RepositoryIntakeIssueResult =
   | {
       readonly __typename: "RepositoryIntakeCreated"
       readonly issueNumber: number
+      readonly nativeId: string
+      readonly displayId: string
       readonly title: string
       readonly url: string
       readonly action: RepositoryIntakeAction
@@ -42,6 +47,8 @@ export type RepositoryIntakeIssueResult =
   | {
       readonly __typename: "RepositoryIntakeFailed"
       readonly issueNumber: number
+      readonly nativeId: string
+      readonly displayId: string
       readonly title: string
       readonly url: string
       readonly action: RepositoryIntakeAction
@@ -193,6 +200,7 @@ export const startRepositoryIntake = (
         results.push({
           __typename: "RepositoryIntakeCreated",
           issueNumber: candidate.issueNumber,
+          ...completeIssueIdentity(candidate),
           title: candidate.title,
           url: candidate.url,
           action: candidate.action,
@@ -206,6 +214,7 @@ export const startRepositoryIntake = (
         results.push({
           __typename: "RepositoryIntakeFailed",
           issueNumber: candidate.issueNumber,
+          ...completeIssueIdentity(candidate),
           title: candidate.title,
           url: candidate.url,
           action: candidate.action,

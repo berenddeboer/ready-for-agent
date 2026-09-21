@@ -355,12 +355,16 @@ describe("operator binary CLI seam", () => {
                     candidates: [
                       {
                         issueNumber: 7,
+                        nativeId: "7",
+                        displayId: "7",
                         title: "Ready work",
                         url: "https://github.com/Owner/Repo/issues/7",
                         action: "IMPLEMENT_NOW" as const,
                       },
                       {
                         issueNumber: 9,
+                        nativeId: "9",
+                        displayId: "9",
                         title: "Blocked work",
                         url: "https://github.com/Owner/Repo/issues/9",
                         action: "QUEUE" as const,
@@ -389,12 +393,16 @@ describe("operator binary CLI seam", () => {
               candidates: [
                 {
                   issueNumber: 7,
+                  nativeId: "7",
+                  displayId: "7",
                   title: "Ready work",
                   url: "https://github.com/Owner/Repo/issues/7",
                   action: "IMPLEMENT_NOW",
                 },
                 {
                   issueNumber: 9,
+                  nativeId: "9",
+                  displayId: "9",
                   title: "Blocked work",
                   url: "https://github.com/Owner/Repo/issues/9",
                   action: "QUEUE",
