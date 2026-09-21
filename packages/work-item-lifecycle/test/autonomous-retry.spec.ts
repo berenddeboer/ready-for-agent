@@ -188,10 +188,7 @@ const claimAndRunPending = Effect.gen(function* () {
 const failInitialCreateWorktree = Effect.gen(function* () {
   const lifecycle = yield* WorkItemLifecycle
   const { repository, issue } = yield* seedIssue(42)
-  const created = yield* lifecycle.implementNow(
-    repository.id,
-    issue.issueNumber,
-  )
+  const created = yield* lifecycle.implementNow(repository.id, issue.nativeId)
   const failed = yield* claimAndRunPending
   expect(failed._tag).toBe("processed")
   return created
@@ -356,7 +353,7 @@ describe("Autonomous Retry Budget", () => {
         const holder = yield* seedIssue(101, "acme/holder")
         const held = yield* lifecycle.implementNow(
           holder.repository.id,
-          holder.issue.issueNumber,
+          holder.issue.nativeId,
         )
         expect(held.holdsWorkerSlot).toBe(true)
 

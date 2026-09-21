@@ -168,7 +168,7 @@ describe("competing Issue-closing PR stop", () => {
       Effect.gen(function* () {
         const lifecycle = yield* WorkItemLifecycle
         const { repository } = yield* seedActionableIssue
-        const created = yield* lifecycle.implementNow(repository.id, 42)
+        const created = yield* lifecycle.implementNow(repository.id, "42")
         const stopped =
           yield* lifecycle.stopForCompetingIssueClosingPullRequests(
             repository.id,
@@ -196,7 +196,7 @@ describe("competing Issue-closing PR stop", () => {
       Effect.gen(function* () {
         const lifecycle = yield* WorkItemLifecycle
         const { repository } = yield* seedActionableIssue
-        const created = yield* lifecycle.implementNow(repository.id, 42)
+        const created = yield* lifecycle.implementNow(repository.id, "42")
         expect(
           yield* lifecycle.stopForCompetingIssueClosingPullRequests(
             repository.id,
@@ -224,7 +224,7 @@ describe("competing Issue-closing PR stop", () => {
       Effect.gen(function* () {
         const lifecycle = yield* WorkItemLifecycle
         const { repository } = yield* seedActionableIssue
-        const created = yield* lifecycle.implementNow(repository.id, 42)
+        const created = yield* lifecycle.implementNow(repository.id, "42")
         yield* lifecycle.stopForCompetingIssueClosingPullRequests(
           repository.id,
           [competingObservation],
@@ -241,7 +241,7 @@ describe("competing Issue-closing PR stop", () => {
       Effect.gen(function* () {
         const lifecycle = yield* WorkItemLifecycle
         const { repository } = yield* seedActionableIssue
-        const created = yield* lifecycle.implementNow(repository.id, 42)
+        const created = yield* lifecycle.implementNow(repository.id, "42")
         yield* setWorkItemState(created.id, "needs_human")
         const sql = yield* SqlClient.SqlClient
         yield* sql.unsafe(
@@ -294,7 +294,7 @@ describe("competing Issue-closing PR stop", () => {
             },
           ],
         })
-        const queued = yield* lifecycle.queue(repository.id, 42)
+        const queued = yield* lifecycle.queue(repository.id, "42")
         expect(queued.waitingForBlockers).toBe(true)
         expect(
           yield* lifecycle.stopForCompetingIssueClosingPullRequests(
@@ -314,7 +314,7 @@ describe("competing Issue-closing PR stop", () => {
       Effect.gen(function* () {
         const lifecycle = yield* WorkItemLifecycle
         const { repository } = yield* seedActionableIssue
-        const created = yield* lifecycle.implementNow(repository.id, 42)
+        const created = yield* lifecycle.implementNow(repository.id, "42")
         for (const state of [
           "local_cleanup",
           "complete",
@@ -341,7 +341,7 @@ describe("competing Issue-closing PR stop", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository } = yield* seedActionableIssue
-          const created = yield* lifecycle.implementNow(repository.id, 42)
+          const created = yield* lifecycle.implementNow(repository.id, "42")
           yield* setWorkItemState(created.id, state)
           expect(
             yield* lifecycle.stopForCompetingIssueClosingPullRequests(
@@ -375,7 +375,7 @@ describe("competing Issue-closing PR stop", () => {
         const lifecycle = yield* WorkItemLifecycle
         const queue = yield* QueueService
         const { repository } = yield* seedActionableIssue
-        const created = yield* lifecycle.implementNow(repository.id, 42)
+        const created = yield* lifecycle.implementNow(repository.id, "42")
         const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
         if (Option.isNone(job)) {
           return yield* Effect.die("expected create worktree job")
@@ -414,7 +414,7 @@ describe("competing Issue-closing PR stop", () => {
       Effect.gen(function* () {
         const lifecycle = yield* WorkItemLifecycle
         const { repository } = yield* seedActionableIssue
-        const created = yield* lifecycle.implementNow(repository.id, 42)
+        const created = yield* lifecycle.implementNow(repository.id, "42")
         yield* lifecycle.stopForCompetingIssueClosingPullRequests(
           repository.id,
           [competingObservation],

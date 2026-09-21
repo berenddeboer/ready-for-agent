@@ -14,6 +14,12 @@ const waitingForGitHubWorkItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: "repo-1",
   issueNumber: 874,
+  issueSource: {
+    tracker: "github",
+    nativeId: "874",
+    displayId: "874",
+    url: "https://github.com/acme/widgets/issues/874",
+  },
   issueTitle: "Model Postponed Step Runs and Waiting for GitHub",
   pullRequestNumber: 42,
   agentBackend: { id: "opencode", label: "OpenCode" },

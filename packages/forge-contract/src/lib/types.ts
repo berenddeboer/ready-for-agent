@@ -199,8 +199,8 @@ export type GitHubIssueState = "OPEN" | "CLOSED"
 export interface GitHubIssueReference {
   readonly number: number
   readonly url: string
-  readonly nativeId?: string
-  readonly displayId?: string
+  readonly nativeId: string
+  readonly displayId: string
 }
 
 export type GitHubPullRequestLifecycleState = "OPEN" | "MERGED" | "CLOSED"
@@ -284,12 +284,12 @@ export interface GitHubIssueParent extends GitHubIssueReference {
 export interface ReadyLabeledIssue {
   readonly number: number
   /**
-   * Tracker-native identity. Existing Forge Issues omit this and use the
-   * issue number as text; Linear supplies a UUID distinct from the display key.
+   * Tracker-native identity. Forge Issues use the issue number as text;
+   * Linear supplies a UUID distinct from the display key.
    */
-  readonly nativeId?: string
+  readonly nativeId: string
   /** Human-readable identifier such as `ENG-123`. Distinct from native identity. */
-  readonly displayId?: string
+  readonly displayId: string
   readonly title: string
   readonly body: string
   readonly url: string

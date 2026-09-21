@@ -29,10 +29,16 @@ export const forgeForIssueSource = (source: IssueSource): Forge | null =>
   isForge(source.tracker) ? source.tracker : null
 
 /**
- * Existing Forge-hosted Issues use a positive integer as both native identity
- * and display identifier. Callers that still have only an issue number use
- * this to populate the distinct store/API fields.
+ * Forge-hosted Issues use a positive integer as both native identity and
+ * display identifier. Adapters emit this at the tracker boundary.
  */
+export const forgeNumericIdentity = (
+  issueNumber: number,
+): { readonly nativeId: string; readonly displayId: string } => ({
+  nativeId: String(issueNumber),
+  displayId: String(issueNumber),
+})
+
 export const existingProviderIssueIdentity = (input: {
   readonly tracker: IssueTracker
   readonly issueNumber: number
@@ -42,25 +48,27 @@ export const existingProviderIssueIdentity = (input: {
   readonly displayId: string
 } => ({
   issueTracker: input.tracker,
-  nativeId: String(input.issueNumber),
-  displayId: String(input.issueNumber),
+  ...forgeNumericIdentity(input.issueNumber),
 })
 
 /**
- * Fill native/display identity from a positive integer when a caller omitted
- * the distinct fields. Empty strings are treated as omitted.
+ * Empty persisted native/display columns still mean the issue number.
  */
-export const completeIssueIdentity = (input: {
+export const persistedIssueIdentity = (input: {
   readonly issueNumber: number
-  readonly nativeId?: string
-  readonly displayId?: string
+  readonly nativeId?: string | null
+  readonly displayId?: string | null
 }): { readonly nativeId: string; readonly displayId: string } => ({
   nativeId:
-    input.nativeId !== undefined && input.nativeId.length > 0
+    input.nativeId !== undefined &&
+    input.nativeId !== null &&
+    input.nativeId.length > 0
       ? input.nativeId
       : String(input.issueNumber),
   displayId:
-    input.displayId !== undefined && input.displayId.length > 0
+    input.displayId !== undefined &&
+    input.displayId !== null &&
+    input.displayId.length > 0
       ? input.displayId
       : String(input.issueNumber),
 })

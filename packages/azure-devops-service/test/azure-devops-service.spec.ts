@@ -364,6 +364,8 @@ describe("Azure DevOps listReadyIssues", () => {
     expect(issues).toEqual([
       {
         number: 10,
+        nativeId: "10",
+        displayId: "10",
         title: "First",
         body: "Body 1",
         url: "https://dev.azure.com/acme/widgets/_workitems/edit/10",
@@ -377,6 +379,8 @@ describe("Azure DevOps listReadyIssues", () => {
         blockedBy: [
           {
             number: 5,
+            nativeId: "5",
+            displayId: "5",
             url: "https://dev.azure.com/acme/widgets/_workitems/edit/5",
           },
         ],
@@ -384,6 +388,8 @@ describe("Azure DevOps listReadyIssues", () => {
       },
       {
         number: 11,
+        nativeId: "11",
+        displayId: "11",
         title: "Second",
         body: "",
         url: "https://dev.azure.com/acme/widgets/_workitems/edit/11",

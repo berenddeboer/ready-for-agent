@@ -19,9 +19,9 @@ Flag a **stall** when a `RUNNING` item has sat in one state far longer than that
 Consequences:
 
 - **"Nothing in Merged" does not mean nothing merged.** It means nothing merged *in the last 24 hours*. For real throughput use `committedPullRequestsCount` and `completedWorkItems`.
-- **A terminal-failed Work Item can vanish from every repo-wide listing.** Close the issue on the Forge and a failed attempt becomes invisible to `status` *and* to `workItems` — but `workItems(repositoryId:, issueNumber:)` still finds it.
+- **A terminal-failed Work Item can vanish from every repo-wide listing.** Close the issue on the Forge and a failed attempt becomes invisible to `status` *and* to `workItems` — but `workItems(repositoryId:, nativeId:)` still finds it.
 
-When a user says "issue #N disappeared", query that issue number before concluding anything was deleted.
+When a user says an issue disappeared, query that Issue Native Identity before concluding anything was deleted.
 
 ## Lifecycle chips collapse repeated attempts
 
@@ -67,7 +67,7 @@ Write the payload to a file; shell-escaping GraphQL inline wastes a turn.
 ## Hidden Work Item
 
 ```json
-{"query":"query($r:ID!,$n:Int!){ workItems(repositoryId:$r, issueNumber:$n){ id state status statusMessage failureCode lifecycleLabels { phase status durationMs } latestStepRunReason { code message retryAt } } }","variables":{"r":"repo-...","n":412}}
+{"query":"query($r:ID!,$n:String!){ workItems(repositoryId:$r, nativeId:$n){ id state status statusMessage failureCode lifecycleLabels { phase status durationMs } latestStepRunReason { code message retryAt } } }","variables":{"r":"repo-...","n":"412"}}
 ```
 
 ## Throughput (not windowed)
@@ -80,7 +80,7 @@ committedPullRequestsCount(from: "2026-08-01T00:00:00Z", to: "2026-09-01T00:00:0
 ## Error detail
 
 ```graphql
-{ workItems(repositoryId:"repo-...", issueNumber: 412) {
+{ workItems(repositoryId:"repo-...", nativeId: "412") {
     latestStepRunReason { code message retryAt
       detail { code causeChain { name message } } } } }
 ```

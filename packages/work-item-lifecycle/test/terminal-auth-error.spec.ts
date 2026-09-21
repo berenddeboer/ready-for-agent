@@ -121,7 +121,7 @@ const seedImplementRun = Effect.gen(function* () {
     hasChildren: false,
     blockedBy: [],
   })
-  const created = yield* lifecycle.implementNow(repo.id, 1)
+  const created = yield* lifecycle.implementNow(repo.id, "1")
   const createRun = created.stepRuns[0]
   if (createRun === undefined) {
     throw new Error("expected create_worktree Step Run")

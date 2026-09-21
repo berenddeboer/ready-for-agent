@@ -74,7 +74,7 @@ cmd "intake" help="Start every current Intake Candidate for one Repository as ve
 
 cmd "retry" help="Retry one Work Item, the unfinished Work Item for one Issue, or every currently retryable Work Item as versioned JSON" effect="write" {
   arg "<repository>" help="Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)"
-  flag "--issue <number>" help="Retry the current unfinished Work Item for this Issue number"
+  flag "--issue <id>" help="Retry the current unfinished Work Item for this Issue Native Identity (Forge issue number or Linear UUID)"
   flag "--work-item <id>" help="Retry this Work Item after verifying it belongs to the selected Repository"
   flag "--all-retryable" help="Retry every Work Item eligible for Autonomous Retry in the Repository (excludes paused Work Items)"
   flag "--max-autonomous-retries <count>" help="Maximum accepted Autonomous Retry execution attempts per Work Item at its current Lifecycle Step (default 3; --all-retryable only)"

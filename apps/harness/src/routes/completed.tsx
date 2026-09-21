@@ -111,7 +111,7 @@ function CompletedBoard() {
   for (const query of issueQueries) {
     for (const issue of query.data ?? []) {
       issueByRepoAndNumber.set(
-        repositoryIssueKey(issue.repositoryId, issue.issueNumber),
+        repositoryIssueKey(issue.repositoryId, issue.nativeId),
         { title: issue.title, url: issue.url },
       )
     }

@@ -588,9 +588,9 @@ Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path
 
 ### Flags
 
-#### `--issue <number>`
+#### `--issue <id>`
 
-Retry the current unfinished Work Item for this Issue number
+Retry the current unfinished Work Item for this Issue Native Identity (Forge issue number or Linear UUID)
 
 #### `--work-item <id>`
 

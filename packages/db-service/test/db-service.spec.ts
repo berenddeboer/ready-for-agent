@@ -94,17 +94,20 @@ describe("DbService", () => {
     const state = input.state ?? "implement"
     const agentBackend = input.agentBackend ?? "opencode"
     const profile = input.explicitProfile
+    const nativeId = String(input.issueNumber)
     if (profile === undefined) {
       return sql.unsafe(
         `INSERT INTO work_item (
-           id, repository_id, issue_number, state, state_ready_at,
-           agent_backend, worktree_path, session_id, failure_code,
-           failure_message, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+           id, repository_id, issue_number, issue_native_id, issue_display_id,
+           state, state_ready_at, agent_backend, worktree_path, session_id,
+           failure_code, failure_message, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
         [
           input.id,
           input.repositoryId,
           input.issueNumber,
+          nativeId,
+          nativeId,
           state,
           now,
           agentBackend,
@@ -116,18 +119,20 @@ describe("DbService", () => {
     const sameAsBuild = profile.reviewSameAsBuild !== false
     return sql.unsafe(
       `INSERT INTO work_item (
-         id, repository_id, issue_number, state, state_ready_at,
-         agent_backend, execution_profile_present,
+         id, repository_id, issue_number, issue_native_id, issue_display_id,
+         state, state_ready_at, agent_backend, execution_profile_present,
          execution_profile_build_model, execution_profile_build_thinking_level,
          execution_profile_review_same_as_build,
          execution_profile_review_model, execution_profile_review_thinking_level,
          worktree_path, session_id, failure_code, failure_message,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
       [
         input.id,
         input.repositoryId,
         input.issueNumber,
+        nativeId,
+        nativeId,
         state,
         now,
         agentBackend,

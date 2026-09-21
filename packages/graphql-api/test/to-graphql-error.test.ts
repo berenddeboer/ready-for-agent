@@ -21,6 +21,42 @@ describe("toGraphQLError", () => {
     })
   })
 
+  test("maps IssueNotFoundError to ISSUE_NOT_FOUND with Forge #label", () => {
+    const error = {
+      _tag: "IssueNotFoundError" as const,
+      repositoryId: "repo-1",
+      issueNumber: 412,
+      nativeId: "412",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toBe(
+      "Issue #412 was not found in repository repo-1",
+    )
+    expect(gqlError.extensions).toMatchObject({
+      code: "ISSUE_NOT_FOUND",
+    })
+  })
+
+  test("maps IssueNotFoundError to ISSUE_NOT_FOUND with Linear native identity", () => {
+    const error = {
+      _tag: "IssueNotFoundError" as const,
+      repositoryId: "repo-1",
+      issueNumber: 0,
+      nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    }
+
+    const gqlError = toGraphQLError(error)
+
+    expect(gqlError.message).toBe(
+      "Issue a1b2c3d4-e5f6-7890-abcd-ef1234567890 was not found in repository repo-1",
+    )
+    expect(gqlError.extensions).toMatchObject({
+      code: "ISSUE_NOT_FOUND",
+    })
+  })
+
   test("maps IssueIdentityAmbiguousError to ISSUE_IDENTITY_AMBIGUOUS", () => {
     const error = {
       _tag: "IssueIdentityAmbiguousError" as const,
@@ -145,15 +181,17 @@ describe("toGraphQLError", () => {
     const error = {
       _tag: "NoUnfinishedWorkItemError" as const,
       repositoryId: "repo-1",
-      issueNumber: 9,
+      nativeId: "9",
     }
 
     const gqlError = toGraphQLError(error)
 
-    expect(gqlError.message).toContain("#9")
+    expect(gqlError.message).toBe(
+      "Issue #9 has no unfinished Work Item in repository repo-1",
+    )
     expect(gqlError.extensions).toMatchObject({
       code: "NO_UNFINISHED_WORK_ITEM",
-      issueNumber: 9,
+      nativeId: "9",
     })
   })
 

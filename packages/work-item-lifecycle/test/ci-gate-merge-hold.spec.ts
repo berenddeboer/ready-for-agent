@@ -257,7 +257,7 @@ describe("Waiting for CI Repair merge hold", () => {
         yield* setMergePolicy(repository.id, "classify")
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* closeCiGate(repository.id)
         yield* driveThroughCreatePr(created.id)
@@ -297,7 +297,7 @@ describe("Waiting for CI Repair merge hold", () => {
         yield* setMergePolicy(repository.id, "always")
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* closeCiGate(repository.id)
         yield* driveThroughCreatePr(created.id)
@@ -331,7 +331,7 @@ describe("Waiting for CI Repair merge hold", () => {
 
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* driveThroughCreatePr(created.id)
         yield* claimAndRunPending
@@ -369,7 +369,7 @@ describe("Waiting for CI Repair merge hold", () => {
 
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* driveThroughCreatePr(created.id)
         yield* claimAndRunPending
@@ -425,7 +425,7 @@ describe("Waiting for CI Repair merge hold", () => {
 
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* driveThroughCreatePr(created.id)
         yield* claimAndRunPending
@@ -468,7 +468,7 @@ describe("Waiting for CI Repair merge hold", () => {
         yield* setMergePolicy(repository.id, "classify")
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* closeCiGate(repository.id)
         yield* driveThroughCreatePr(created.id)
@@ -509,7 +509,7 @@ describe("Waiting for CI Repair merge hold", () => {
         yield* setMergePolicy(repository.id, "classify")
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* closeCiGate(repository.id)
         yield* driveThroughCreatePr(created.id)
@@ -525,14 +525,14 @@ describe("Waiting for CI Repair merge hold", () => {
         const occupyingIssue = yield* seedSiblingIssue(repository.id, 43)
         const occupying = yield* lifecycle.implementLocally(
           repository.id,
-          occupyingIssue.issueNumber,
+          occupyingIssue.nativeId,
         )
         expect(occupying.holdsWorkerSlot).toBe(true)
 
         const waiterIssue = yield* seedSiblingIssue(repository.id, 44)
         const waiter = yield* lifecycle.implementLocally(
           repository.id,
-          waiterIssue.issueNumber,
+          waiterIssue.nativeId,
         )
         expect(waiter.holdsWorkerSlot).toBe(false)
         expect(waiter.waitingSince).not.toBeNull()
@@ -568,7 +568,7 @@ describe("Waiting for CI Repair merge hold", () => {
         yield* setMergePolicy(repository.id, "classify")
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* closeCiGate(repository.id)
         yield* driveThroughCreatePr(created.id)
@@ -622,7 +622,7 @@ describe("Waiting for CI Repair merge hold", () => {
         yield* setMergePolicy(repository.id, "classify")
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* closeCiGate(repository.id)
         yield* driveThroughCreatePr(created.id)
@@ -674,7 +674,7 @@ describe("Waiting for CI Repair merge hold", () => {
         yield* setMergePolicy(repository.id, "classify")
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* closeCiGate(repository.id)
         yield* driveThroughCreatePr(created.id)
@@ -711,7 +711,7 @@ describe("Waiting for CI Repair merge hold", () => {
             yield* setMergePolicy(repository.id, "classify")
             const created = yield* lifecycle.implementNow(
               repository.id,
-              issue.issueNumber,
+              issue.nativeId,
             )
             yield* closeCiGate(repository.id)
             yield* driveThroughCreatePr(created.id)
@@ -771,7 +771,7 @@ describe("Waiting for CI Repair merge hold", () => {
         yield* setMergePolicy(repository.id, "classify")
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* closeCiGate(repository.id)
         yield* driveThroughCreatePr(created.id)

@@ -88,7 +88,7 @@ describe("classifyIntakeCandidates", () => {
     expect(candidates).toEqual([])
   })
 
-  it("orders IMPLEMENT_NOW then QUEUE, each by ascending Issue number", () => {
+  it("orders IMPLEMENT_NOW then QUEUE, each by display identifier", () => {
     const candidates = classifyIntakeCandidates(
       [
         issue({

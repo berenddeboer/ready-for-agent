@@ -152,7 +152,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           defaultModel: "opencode/deepseek-v4-flash-free",
         })
         yield* storeOpenLeafIssue(db, repo.id, 1)
-        const created = yield* lifecycle.implementNow(repo.id, 1)
+        const created = yield* lifecycle.implementNow(repo.id, "1")
         expect(created.agentBackend).toBe("opencode")
         expect(repo.selectedAgentBackend).toBeNull()
       }).pipe(Effect.provide(lifecycleLayer(stubActiveAgentBackendLayer()))),
@@ -188,7 +188,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 2)
-        const created = yield* lifecycle.implementNow(repo.id, 2)
+        const created = yield* lifecycle.implementNow(repo.id, "2")
         expect(created.agentBackend).toBe("grok")
       }).pipe(
         Effect.provide(
@@ -242,7 +242,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 3)
-        const created = yield* lifecycle.implementNow(repo.id, 3)
+        const created = yield* lifecycle.implementNow(repo.id, "3")
         expect(created.agentBackend).toBe("grok")
 
         const createRun = created.stepRuns[0]
@@ -300,7 +300,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           defaultModel: "opencode/deepseek-v4-flash-free",
         })
         yield* storeOpenLeafIssue(db, repo.id, 7)
-        const created = yield* lifecycle.implementNow(repo.id, 7)
+        const created = yield* lifecycle.implementNow(repo.id, "7")
         // create_worktree is agent-free and should still succeed after corrupt.
         const createRun = created.stepRuns[0]
         expect(createRun?.step).toBe("create_worktree")
@@ -535,7 +535,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 4)
-        const created = yield* lifecycle.implementNow(repo.id, 4)
+        const created = yield* lifecycle.implementNow(repo.id, "4")
         expect(created.agentBackend).toBe("grok")
       }).pipe(
         Effect.provide(
@@ -588,7 +588,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 5)
-        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 5))
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, "5"))
         expect(error).toBeInstanceOf(LifecycleUnavailableError)
       }).pipe(
         Effect.provide(
@@ -637,7 +637,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 6)
-        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 6))
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, "6"))
         expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
         if (error instanceof BuildModelNotConfiguredError) {
           expect(error.message).toContain("No build model set")
@@ -707,13 +707,15 @@ describe("Agent Model catalog admission (issue #838)", () => {
           defaultModel: STALE_BEDROCK_PROFILE,
         })
         yield* storeOpenLeafIssue(db, repo.id, 20)
-        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 20))
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, "20"))
         expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
         expect(error.message).toContain(STALE_BEDROCK_PROFILE)
         expect(error.message).toContain("Agent Model catalog")
         expect(error.message).toContain("Settings")
         // No Work Item, and no Agent Backend CLI was ever reached.
-        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 20)).toEqual([])
+        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, "20")).toEqual(
+          [],
+        )
         expect(invoked).toEqual([])
       }).pipe(
         Effect.provide(
@@ -751,7 +753,7 @@ describe("Agent Model catalog admission (issue #838)", () => {
           maxConcurrentWorkItems: 5,
         })
         yield* storeOpenLeafIssue(db, repo.id, 21)
-        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 21))
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, "21"))
         expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
         expect(error.message).toContain("Review Agent Model")
         expect(error.message).toContain(STALE_BEDROCK_PROFILE)
@@ -785,7 +787,7 @@ describe("Agent Model catalog admission (issue #838)", () => {
           defaultModel: "opencode/deepseek-v4-flash-free",
         })
         yield* storeOpenLeafIssue(db, repo.id, 22)
-        const created = yield* lifecycle.implementNow(repo.id, 22)
+        const created = yield* lifecycle.implementNow(repo.id, "22")
         expect(created.agentBackend).toBe("opencode")
       }).pipe(
         Effect.provide(
@@ -818,7 +820,7 @@ describe("Agent Model catalog admission (issue #838)", () => {
           defaultModel: "opencode/deepseek-v4-flash-free",
         })
         yield* storeOpenLeafIssue(db, repo.id, 23)
-        const created = yield* lifecycle.implementNow(repo.id, 23)
+        const created = yield* lifecycle.implementNow(repo.id, "23")
         // The operator (or a legacy row) puts back a model the backend no
         // longer offers after the Work Item already exists.
         yield* seedHarness(db, {
@@ -887,12 +889,14 @@ describe("Agent Model catalog admission (issue #838)", () => {
           maxConcurrentWorkItems: 5,
         })
         yield* storeOpenLeafIssue(db, repo.id, 25)
-        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 25))
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, "25"))
         expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
         expect(error.message).toContain("medium")
         expect(error.message).toContain("opencode/deepseek-v4-flash-free")
         expect(error.message).toContain("Settings")
-        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 25)).toEqual([])
+        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, "25")).toEqual(
+          [],
+        )
         expect(invoked).toEqual([])
       }).pipe(
         Effect.provide(
@@ -930,7 +934,7 @@ describe("Agent Model catalog admission (issue #838)", () => {
           maxConcurrentWorkItems: 5,
         })
         yield* storeOpenLeafIssue(db, repo.id, 26)
-        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 26))
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, "26"))
         expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
         expect(error.message).toContain("Review Thinking Level")
         expect(error.message).toContain("medium")
@@ -969,7 +973,7 @@ describe("Agent Model catalog admission (issue #838)", () => {
           maxConcurrentWorkItems: 5,
         })
         yield* storeOpenLeafIssue(db, repo.id, 27)
-        const created = yield* lifecycle.implementNow(repo.id, 27)
+        const created = yield* lifecycle.implementNow(repo.id, "27")
         expect(created.agentBackend).toBe("opencode")
       }).pipe(
         Effect.provide(
@@ -1007,7 +1011,7 @@ describe("Agent Model catalog admission (issue #838)", () => {
           maxConcurrentWorkItems: 5,
         })
         yield* storeOpenLeafIssue(db, repo.id, 28)
-        const created = yield* lifecycle.implementNow(repo.id, 28)
+        const created = yield* lifecycle.implementNow(repo.id, "28")
         yield* db.updateConfig({
           selectedAgentBackend: "opencode",
           defaultModel: "opencode/deepseek-v4-flash-free",
@@ -1077,7 +1081,7 @@ describe("Agent Model catalog admission (issue #838)", () => {
           defaultModel: STALE_BEDROCK_PROFILE,
         })
         yield* storeOpenLeafIssue(db, repo.id, 24)
-        const created = yield* lifecycle.implementNow(repo.id, 24)
+        const created = yield* lifecycle.implementNow(repo.id, "24")
         expect(created.agentBackend).toBe("opencode")
       }).pipe(
         Effect.provide(

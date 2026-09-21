@@ -166,6 +166,8 @@ describe("Keymaxxer-backed Azure DevOps layer", () => {
               stdout: JSON.stringify([
                 {
                   number: 7,
+                  nativeId: "7",
+                  displayId: "7",
                   title: "Ready issue",
                   body: "Issue body",
                   url: "https://dev.azure.com/acme/widgets/_workitems/edit/7",

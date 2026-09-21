@@ -1,4 +1,5 @@
 import { type CSSProperties, useState } from "react"
+import { formatIssueDisplayId } from "@ready-for-agent/lifecycle-model"
 import {
   type ArchiveLeg,
   archiveLegLaneStyle,
@@ -65,12 +66,14 @@ export function CompletedWorkItemRow({
       ? issue.url
       : repository === undefined
         ? null
-        : workItemIssueUrl(
-            repository.forge,
-            repository.forgeHost,
-            repository.projectPath,
-            workItem.issueNumber,
-          )
+        : workItem.issueSource.url !== ""
+          ? workItem.issueSource.url
+          : workItemIssueUrl(
+              repository.forge,
+              repository.forgeHost,
+              repository.projectPath,
+              workItem.issueNumber,
+            )
   const pullRequestUrl =
     repository === undefined
       ? null
@@ -84,10 +87,9 @@ export function CompletedWorkItemRow({
   const forge = repository?.forge
   const changeShort = forgeChangeRequestShort(forge)
   const changeNoun = forgeChangeRequestNoun(forge)
+  const issueLabel = formatIssueDisplayId(workItem.issueSource.displayId)
   const issueIdentity =
-    issueTitle === undefined
-      ? `#${workItem.issueNumber}`
-      : `#${workItem.issueNumber} · ${issueTitle}`
+    issueTitle === undefined ? issueLabel : `${issueLabel} · ${issueTitle}`
   const { sessionId, worktreePath } = sessionWorktreeParts(
     workItem.sessionId,
     workItem.worktreePath,
@@ -157,7 +159,7 @@ export function CompletedWorkItemRow({
           href={issueUrl}
           title={issueIdentity}
         >
-          <span className={ui.archiveTitleNum}>#{workItem.issueNumber}</span>
+          <span className={ui.archiveTitleNum}>{issueLabel}</span>
           {issueTitle !== undefined ? issueTitle : null}
         </a>
       ) : (
@@ -165,7 +167,7 @@ export function CompletedWorkItemRow({
           className={cx(ui.archiveTitle, abandoned && ui.archiveTitleAbandoned)}
           title={issueIdentity}
         >
-          <span className={ui.archiveTitleNum}>#{workItem.issueNumber}</span>
+          <span className={ui.archiveTitleNum}>{issueLabel}</span>
           {issueTitle !== undefined ? issueTitle : null}
         </p>
       )}

@@ -313,6 +313,12 @@ export type WorkItem = {
   id: string
   repositoryId: string
   issueNumber: number
+  issueSource: {
+    tracker: string
+    nativeId: string
+    displayId: string
+    url: string
+  }
   issueTitle: string | null
   pullRequestNumber: number | null
   agentBackend: { id: string; label: string }
@@ -384,6 +390,12 @@ const workItemFields = {
   id: true,
   repositoryId: true,
   issueNumber: true,
+  issueSource: {
+    tracker: true,
+    nativeId: true,
+    displayId: true,
+    url: true,
+  },
   issueTitle: true,
   pullRequestNumber: true,
   agentBackend: { id: true, label: true },
@@ -3687,7 +3699,7 @@ function ParentIssueGroup({
         implementAllWithAutoMerge: {
           __args: {
             repositoryId: parent.repositoryId,
-            issueNumber: parent.issueNumber,
+            nativeId: parent.nativeId,
           },
           ...workItemFields,
         },
@@ -3705,7 +3717,7 @@ function ParentIssueGroup({
         implementWith: {
           __args: {
             repositoryId: parent.repositoryId,
-            issueNumber: parent.issueNumber,
+            nativeId: parent.nativeId,
             profile: input.profile,
             options: input.options,
           },
@@ -3760,7 +3772,7 @@ function ParentIssueGroup({
             </svg>
             {canImplementAll && (
               <ParentIssueActionsMenu
-                parentIssueNumber={parent.issueNumber}
+                displayId={parent.displayId}
                 menuId={parent.id}
                 implementAllPending={implementAll.isPending}
                 implementWithPending={implementWith.isPending}
@@ -3812,7 +3824,7 @@ function ParentIssueGroup({
       </details>
       {implementWithOpen && (
         <ImplementWithIssueDialog
-          issueNumber={parent.issueNumber}
+          displayId={parent.displayId}
           target="parent"
           repositoryId={repository.id}
           initialBackendId={repository.effectiveAgentBackend}
@@ -3862,7 +3874,7 @@ function RepositoryIssueRow({
   const queryClient = useQueryClient()
   const query = workItemsQuery(issue.repositoryId)
   const issueWorkItems = workItems.filter(
-    (workItem) => workItem.issueNumber === issue.issueNumber,
+    (workItem) => workItem.issueSource.nativeId === issue.nativeId,
   )
   const latestWorkItem = issueWorkItems.at(-1)
   const { canImplement, canQueue } = issueActionEligibility({
@@ -3884,7 +3896,7 @@ function RepositoryIssueRow({
         implementNow: {
           __args: {
             repositoryId: issue.repositoryId,
-            issueNumber: issue.issueNumber,
+            nativeId: issue.nativeId,
           },
           ...workItemFields,
         },
@@ -3899,7 +3911,7 @@ function RepositoryIssueRow({
         implementCiRepair: {
           __args: {
             repositoryId: issue.repositoryId,
-            issueNumber: issue.issueNumber,
+            nativeId: issue.nativeId,
           },
           ...workItemFields,
         },
@@ -3914,7 +3926,7 @@ function RepositoryIssueRow({
         implementWith: {
           __args: {
             repositoryId: issue.repositoryId,
-            issueNumber: issue.issueNumber,
+            nativeId: issue.nativeId,
             profile: input.profile,
             options: input.options,
           },
@@ -3939,7 +3951,7 @@ function RepositoryIssueRow({
         implementLocally: {
           __args: {
             repositoryId: issue.repositoryId,
-            issueNumber: issue.issueNumber,
+            nativeId: issue.nativeId,
           },
           ...workItemFields,
         },
@@ -3954,7 +3966,7 @@ function RepositoryIssueRow({
         queue: {
           __args: {
             repositoryId: issue.repositoryId,
-            issueNumber: issue.issueNumber,
+            nativeId: issue.nativeId,
           },
           ...workItemFields,
         },
@@ -4122,7 +4134,7 @@ function RepositoryIssueRow({
             <span className={cx(ui.stamp, ui.stampBlocked)}>Blocked</span>
           )}
           <IssueActionsMenu
-            issueNumber={issue.issueNumber}
+            displayId={issue.displayId}
             issueId={issue.id}
             canImplement={canImplementNow}
             canImplementCiRepair={canImplementCiRepair}
@@ -4142,7 +4154,7 @@ function RepositoryIssueRow({
       </div>
       {implementWithOpen && (
         <ImplementWithIssueDialog
-          issueNumber={issue.issueNumber}
+          displayId={issue.displayId}
           repositoryId={repository.id}
           initialBackendId={repository.effectiveAgentBackend}
           repositoryPrefs={{

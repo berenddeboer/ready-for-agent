@@ -54,15 +54,16 @@ import {
   OperationalLifecycleStep as OperationalLifecycleStepSchema,
   type WorkItemPredicateShape,
   competingPullRequestIdentity,
-  completeIssueIdentity,
   defaultIssueTrackerForForge,
   evaluateActionableIssue,
   evaluateImplementableIssue,
   evaluateUnfinishedWorkItem,
   formatCompetingIssueClosingPullRequestMessage,
+  formatIssueDisplayId,
   isAgentDependentLifecycleStep,
   isForge,
   isIssueTracker,
+  persistedIssueIdentity,
 } from "@ready-for-agent/lifecycle-model"
 import {
   LinearExecutionNotSupportedError,
@@ -246,8 +247,10 @@ const isUnfinishedWorkItemUniqueViolation = (error: SqlError): boolean => {
       message.includes("work_item_one_unfinished_v2_uidx") ||
       message.includes("work_item_one_unfinished_v3_uidx") ||
       message.includes("work_item_one_unfinished_v4_uidx") ||
+      message.includes("work_item_one_unfinished_v5_uidx") ||
       (message.includes("work_item.repository_id") &&
-        message.includes("work_item.issue_number")))
+        (message.includes("work_item.issue_number") ||
+          message.includes("work_item.issue_native_id"))))
   )
 }
 
@@ -711,7 +714,7 @@ const captureIssueSource = (
         ? defaultIssueTrackerForForge(repository.forge)
         : null
   if (tracker === null) return null
-  const identity = completeIssueIdentity({
+  const identity = persistedIssueIdentity({
     issueNumber: issue.issueNumber,
     nativeId: issue.nativeId,
     displayId: issue.displayId,
@@ -744,15 +747,16 @@ const liveIssueTracker = (
 const findLiveIssuesForStart = <
   T extends {
     readonly issueNumber: number
+    readonly nativeId?: string
     readonly issueTracker?: string
   },
 >(
   issues: readonly T[],
   tracker: IssueTracker | null,
-  issueNumber: number,
+  nativeId: string,
 ): readonly T[] =>
   issues.filter((candidate) => {
-    if (candidate.issueNumber !== issueNumber) {
+    if (persistedIssueIdentity(candidate).nativeId !== nativeId) {
       return false
     }
     if (tracker === null) {
@@ -776,17 +780,22 @@ const findStoredIssueForWorkItem = <
     readonly issue_native_id: string | null
   },
 ): T | undefined => {
-  const nativeId =
-    workItem.issue_native_id !== null && workItem.issue_native_id.length > 0
-      ? workItem.issue_native_id
-      : null
-  if (nativeId !== null) {
-    return issues.find((candidate) => candidate.nativeId === nativeId)
-  }
+  const nativeId = persistedIssueIdentity({
+    issueNumber: workItem.issue_number,
+    nativeId: workItem.issue_native_id,
+  }).nativeId
   return issues.find(
-    (candidate) => candidate.issueNumber === workItem.issue_number,
+    (candidate) => persistedIssueIdentity(candidate).nativeId === nativeId,
   )
 }
+
+const errorIssueNumber = (nativeId: string, issueNumber?: number): number => {
+  if (issueNumber !== undefined) return issueNumber
+  return /^[1-9][0-9]*$/.test(nativeId) ? Number(nativeId) : 0
+}
+
+const ambiguousStartMessage = (nativeId: string, matchCount: number): string =>
+  `Issue ${formatIssueDisplayId(nativeId)} matches ${String(matchCount)} Issues on the current Issue Tracker.`
 
 const requireIssueSource = (
   repository:
@@ -1251,7 +1260,7 @@ export interface WorkItemLifecycleShape {
   >
   readonly implementNow: (
     repositoryId: string,
-    issueNumber: number,
+    nativeId: string,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
   /**
    * Create a Work Item authorized as CI Repair for the active Closed
@@ -1259,7 +1268,7 @@ export interface WorkItemLifecycleShape {
    */
   readonly implementCiRepair: (
     repositoryId: string,
-    issueNumber: number,
+    nativeId: string,
   ) => Effect.Effect<WorkItemRecord, ImplementCiRepairError>
   /**
    * Authorize an unfinished Work Item as CI Repair for the active Closed
@@ -1278,13 +1287,13 @@ export interface WorkItemLifecycleShape {
    */
   readonly implementWith: (
     repositoryId: string,
-    issueNumber: number,
+    nativeId: string,
     profile: ImplementWithProfileInput,
     options?: ImplementWithOptionsInput,
   ) => Effect.Effect<readonly WorkItemRecord[], ImplementWithError>
   readonly implementLocally: (
     repositoryId: string,
-    issueNumber: number,
+    nativeId: string,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
   /**
    * Parent-level Implement all with auto-merge. Snapshots open direct Child
@@ -1297,7 +1306,7 @@ export interface WorkItemLifecycleShape {
    */
   readonly implementAllWithAutoMerge: (
     repositoryId: string,
-    parentIssueNumber: number,
+    parentNativeId: string,
   ) => Effect.Effect<readonly WorkItemRecord[], ImplementAllWithAutoMergeError>
   /**
    * Queue a Relevant open leaf Issue that has listed blockers: creates a Work
@@ -1305,7 +1314,7 @@ export interface WorkItemLifecycleShape {
    */
   readonly queue: (
     repositoryId: string,
-    issueNumber: number,
+    nativeId: string,
   ) => Effect.Effect<WorkItemRecord, QueueError>
   readonly runStep: (
     stepRunId: string,
@@ -1340,7 +1349,7 @@ export interface WorkItemLifecycleShape {
   ) => Effect.Effect<WorkItemRecord, GetWorkItemError>
   readonly listWorkItemsForIssue: (
     repositoryId: string,
-    issueNumber: number,
+    nativeId: string,
   ) => Effect.Effect<readonly WorkItemRecord[], ListWorkItemsError>
   readonly listWorkItemsForRepository: (
     repositoryId: string,
@@ -1694,17 +1703,25 @@ export const makeWorkItemLifecycleLive = (
       const findUnfinishedWorkItemId = (
         repositoryId: string,
         issueNumber: number,
+        nativeId?: string,
       ): Effect.Effect<string | null, WorkItemLifecycleDatabaseError> =>
         Effect.gen(function* () {
+          const identity = nativeId ?? String(issueNumber)
           const rows = (yield* sql
             .unsafe(
               `SELECT id FROM work_item
              WHERE repository_id = ?
-               AND issue_number = ?
+               AND (
+                 issue_native_id = ?
+                 OR (
+                   (issue_native_id IS NULL OR issue_native_id = '')
+                   AND CAST(issue_number AS TEXT) = ?
+                 )
+               )
                AND state NOT IN ('complete', 'failed', 'abandoned')
              ORDER BY created_at ASC, rowid ASC
              LIMIT 1`,
-              [repositoryId, issueNumber],
+              [repositoryId, identity, identity],
             )
             .pipe(Effect.mapError(toDatabaseError))) as readonly {
             id: string
@@ -1715,6 +1732,7 @@ export const makeWorkItemLifecycleLive = (
       const unfinishedWorkItemExistsError = (
         repositoryId: string,
         issueNumber: number,
+        nativeId: string,
         knownWorkItemId?: string,
       ): Effect.Effect<
         never,
@@ -1723,7 +1741,11 @@ export const makeWorkItemLifecycleLive = (
         Effect.gen(function* () {
           const workItemId =
             knownWorkItemId ??
-            (yield* findUnfinishedWorkItemId(repositoryId, issueNumber))
+            (yield* findUnfinishedWorkItemId(
+              repositoryId,
+              issueNumber,
+              nativeId,
+            ))
           return yield* new UnfinishedWorkItemExistsError({
             repositoryId,
             issueNumber,
@@ -1796,15 +1818,22 @@ export const makeWorkItemLifecycleLive = (
 
       const listWorkItemsForIssue = Effect.fn(
         "WorkItemLifecycle.listWorkItemsForIssue",
-      )(function* (repositoryId: string, issueNumber: number) {
+      )(function* (repositoryId: string, nativeId: string) {
         const nowMs = yield* Clock.currentTimeMillis
         const rows = (yield* sql
           .unsafe(
             `SELECT ${WORK_ITEM_SELECT_COLUMNS}
            FROM work_item
-           WHERE repository_id = ? AND issue_number = ?
+           WHERE repository_id = ?
+             AND (
+               issue_native_id = ?
+               OR (
+                 (issue_native_id IS NULL OR issue_native_id = '')
+                 AND CAST(issue_number AS TEXT) = ?
+               )
+             )
            ORDER BY created_at ASC, rowid ASC`,
-            [repositoryId, issueNumber],
+            [repositoryId, nativeId, nativeId],
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly WorkItemRow[]
 
@@ -8475,7 +8504,7 @@ export const makeWorkItemLifecycleLive = (
 
       const createWorkItem = (
         repositoryId: string,
-        issueNumber: number,
+        nativeId: string,
         options: {
           readonly pauseBeforeStep: OperationalLifecycleStep | null
           readonly mergeMode?: MergeMode
@@ -8492,23 +8521,25 @@ export const makeWorkItemLifecycleLive = (
           const matches = findLiveIssuesForStart(
             issues,
             liveIssueTracker(repository),
-            issueNumber,
+            nativeId,
           )
           if (matches.length > 1) {
             return yield* new IssueIdentityAmbiguousError({
               repositoryId,
-              issueNumber,
-              message: `Issue #${issueNumber} matches ${matches.length} Issues on the current Issue Tracker. Start by native identity instead.`,
+              issueNumber: errorIssueNumber(nativeId),
+              message: ambiguousStartMessage(nativeId, matches.length),
             })
           }
           const issue = matches[0]
           const currentIssue = currentIssuePredicateInput(issue)
           const implementable = evaluateImplementableIssue(currentIssue)
+          const issueNumber = errorIssueNumber(nativeId, issue?.issueNumber)
           switch (implementable._tag) {
             case "issue_missing":
               return yield* new IssueNotFoundError({
                 repositoryId,
                 issueNumber,
+                nativeId,
               })
             case "issue_not_open":
               return yield* new IssueNotOpenError({
@@ -8535,10 +8566,7 @@ export const makeWorkItemLifecycleLive = (
             repositoryId,
           )
 
-          const existing = yield* listWorkItemsForIssue(
-            repositoryId,
-            issueNumber,
-          )
+          const existing = yield* listWorkItemsForIssue(repositoryId, nativeId)
           const actionable = evaluateActionableIssue(
             currentIssue,
             existing.map(workItemPredicateInput),
@@ -8547,6 +8575,7 @@ export const makeWorkItemLifecycleLive = (
             return yield* unfinishedWorkItemExistsError(
               repositoryId,
               issueNumber,
+              nativeId,
               actionable.workItemId ?? undefined,
             )
           }
@@ -8842,6 +8871,7 @@ export const makeWorkItemLifecycleLive = (
                           return unfinishedWorkItemExistsError(
                             repositoryId,
                             issueNumber,
+                            nativeId,
                           )
                         }
                         return Effect.fail(toDatabaseError(sqlError))
@@ -8873,8 +8903,8 @@ export const makeWorkItemLifecycleLive = (
         })
 
       const implementNow = Effect.fn("WorkItemLifecycle.implementNow")(
-        function* (repositoryId: string, issueNumber: number) {
-          return yield* createWorkItem(repositoryId, issueNumber, {
+        function* (repositoryId: string, nativeId: string) {
+          return yield* createWorkItem(repositoryId, nativeId, {
             pauseBeforeStep: null,
           })
         },
@@ -8882,8 +8912,8 @@ export const makeWorkItemLifecycleLive = (
 
       const implementCiRepair = Effect.fn(
         "WorkItemLifecycle.implementCiRepair",
-      )(function* (repositoryId: string, issueNumber: number) {
-        return yield* createWorkItem(repositoryId, issueNumber, {
+      )(function* (repositoryId: string, nativeId: string) {
+        return yield* createWorkItem(repositoryId, nativeId, {
           pauseBeforeStep: null,
           ciRepair: true,
         })
@@ -9045,7 +9075,7 @@ export const makeWorkItemLifecycleLive = (
 
       const snapshotParentOpenChildren = (
         repositoryId: string,
-        parentIssueNumber: number,
+        parentNativeId: string,
       ) =>
         Effect.gen(function* () {
           const repository = (yield* db.listRepositories).find(
@@ -9055,13 +9085,17 @@ export const makeWorkItemLifecycleLive = (
           const matches = findLiveIssuesForStart(
             issues,
             liveIssueTracker(repository),
-            parentIssueNumber,
+            parentNativeId,
+          )
+          const parentIssueNumber = errorIssueNumber(
+            parentNativeId,
+            matches[0]?.issueNumber,
           )
           if (matches.length > 1) {
             return yield* new IssueIdentityAmbiguousError({
               repositoryId,
               issueNumber: parentIssueNumber,
-              message: `Issue #${parentIssueNumber} matches ${matches.length} Issues on the current Issue Tracker. Start by native identity instead.`,
+              message: ambiguousStartMessage(parentNativeId, matches.length),
             })
           }
           const parent = matches[0]
@@ -9070,6 +9104,7 @@ export const makeWorkItemLifecycleLive = (
             return yield* new IssueNotFoundError({
               repositoryId,
               issueNumber: parentIssueNumber,
+              nativeId: parentNativeId,
             })
           }
 
@@ -9080,20 +9115,17 @@ export const makeWorkItemLifecycleLive = (
             })
           }
 
-          const parentNativeId =
-            parent.nativeId !== undefined && parent.nativeId.length > 0
-              ? parent.nativeId
-              : String(parent.issueNumber)
+          const resolvedParentNativeId = persistedIssueIdentity(parent).nativeId
           const children = issues.filter((candidate) => {
             if (candidate.parent === null) {
               return false
             }
-            const parentRefNativeId =
-              candidate.parent.nativeId !== undefined &&
-              candidate.parent.nativeId.length > 0
-                ? candidate.parent.nativeId
-                : String(candidate.parent.issueNumber)
-            return parentRefNativeId === parentNativeId
+            return (
+              persistedIssueIdentity({
+                issueNumber: candidate.parent.issueNumber,
+                nativeId: candidate.parent.nativeId,
+              }).nativeId === resolvedParentNativeId
+            )
           })
 
           if (children.some((child) => child.hasChildren)) {
@@ -9125,16 +9157,16 @@ export const makeWorkItemLifecycleLive = (
           return openChildren
         })
 
-      const unfinishedIssueNumbers = (
+      const unfinishedNativeIds = (
         items: readonly WorkItemRecord[],
-      ): ReadonlySet<number> => {
-        const unfinished = new Set<number>()
+      ): ReadonlySet<string> => {
+        const unfinished = new Set<string>()
         for (const item of items) {
           if (
             evaluateUnfinishedWorkItem(workItemPredicateInput(item))._tag ===
             "match"
           ) {
-            unfinished.add(item.issueNumber)
+            unfinished.add(item.issueSource.nativeId)
           }
         }
         return unfinished
@@ -9234,14 +9266,21 @@ export const makeWorkItemLifecycleLive = (
                 const workItemIds: WorkItemId[] = []
 
                 for (const child of openChildren) {
+                  const childNativeId = persistedIssueIdentity(child).nativeId
                   const unfinishedRows = (yield* sql
                     .unsafe(
                       `SELECT id FROM work_item
                          WHERE repository_id = ?
-                           AND issue_number = ?
+                           AND (
+                             issue_native_id = ?
+                             OR (
+                               (issue_native_id IS NULL OR issue_native_id = '')
+                               AND CAST(issue_number AS TEXT) = ?
+                             )
+                           )
                            AND state NOT IN ('complete', 'failed', 'abandoned')
                          LIMIT 1`,
-                      [repositoryId, child.issueNumber],
+                      [repositoryId, childNativeId, childNativeId],
                     )
                     .pipe(Effect.mapError(toDatabaseError))) as readonly {
                     readonly id: string
@@ -9485,7 +9524,7 @@ export const makeWorkItemLifecycleLive = (
       const implementWith = Effect.fn("WorkItemLifecycle.implementWith")(
         function* (
           repositoryId: string,
-          issueNumber: number,
+          nativeId: string,
           profileInput: ImplementWithProfileInput,
           optionsInput?: ImplementWithOptionsInput,
         ) {
@@ -9508,13 +9547,17 @@ export const makeWorkItemLifecycleLive = (
           const matches = findLiveIssuesForStart(
             issues,
             liveIssueTracker(repository),
-            issueNumber,
+            nativeId,
+          )
+          const issueNumber = errorIssueNumber(
+            nativeId,
+            matches[0]?.issueNumber,
           )
           if (matches.length > 1) {
             return yield* new IssueIdentityAmbiguousError({
               repositoryId,
               issueNumber,
-              message: `Issue #${issueNumber} matches ${matches.length} Issues on the current Issue Tracker. Start by native identity instead.`,
+              message: ambiguousStartMessage(nativeId, matches.length),
             })
           }
           const issue = matches[0]
@@ -9534,13 +9577,14 @@ export const makeWorkItemLifecycleLive = (
             }
             const openChildren = yield* snapshotParentOpenChildren(
               repositoryId,
-              issueNumber,
+              nativeId,
             )
-            const unfinished = unfinishedIssueNumbers(
+            const unfinished = unfinishedNativeIds(
               yield* listWorkItemsForRepository(repositoryId),
             )
             const mayNeedCreate = openChildren.some(
-              (child) => !unfinished.has(child.issueNumber),
+              (child) =>
+                !unfinished.has(persistedIssueIdentity(child).nativeId),
             )
             const coveredIds = yield* activeAgentBackend.withConfigCoordination(
               Effect.gen(function* () {
@@ -9565,7 +9609,7 @@ export const makeWorkItemLifecycleLive = (
             )
             return yield* coveredWorkItems(coveredIds, repositoryId)
           }
-          const created = yield* createWorkItem(repositoryId, issueNumber, {
+          const created = yield* createWorkItem(repositoryId, nativeId, {
             pauseBeforeStep: options.implementLocally ? "commit" : null,
             executionProfile: decoded,
             mergeMode: pin.mergeMode,
@@ -9576,8 +9620,8 @@ export const makeWorkItemLifecycleLive = (
       )
 
       const implementLocally = Effect.fn("WorkItemLifecycle.implementLocally")(
-        function* (repositoryId: string, issueNumber: number) {
-          return yield* createWorkItem(repositoryId, issueNumber, {
+        function* (repositoryId: string, nativeId: string) {
+          return yield* createWorkItem(repositoryId, nativeId, {
             pauseBeforeStep: "commit",
           })
         },
@@ -9592,16 +9636,16 @@ export const makeWorkItemLifecycleLive = (
        */
       const implementAllWithAutoMerge = Effect.fn(
         "WorkItemLifecycle.implementAllWithAutoMerge",
-      )(function* (repositoryId: string, parentIssueNumber: number) {
+      )(function* (repositoryId: string, parentNativeId: string) {
         const openChildren = yield* snapshotParentOpenChildren(
           repositoryId,
-          parentIssueNumber,
+          parentNativeId,
         )
-        const unfinished = unfinishedIssueNumbers(
+        const unfinished = unfinishedNativeIds(
           yield* listWorkItemsForRepository(repositoryId),
         )
         const mayNeedCreate = openChildren.some(
-          (child) => !unfinished.has(child.issueNumber),
+          (child) => !unfinished.has(persistedIssueIdentity(child).nativeId),
         )
         const pin = encodeWorkItemMergePolicyPin("always")
         const coveredIds = mayNeedCreate
@@ -9638,7 +9682,10 @@ export const makeWorkItemLifecycleLive = (
                   yield* activeAgentBackend.getRegistration(captureBackendId)
                 return yield* enrollOpenChildren({
                   repositoryId,
-                  parentIssueNumber,
+                  parentIssueNumber: errorIssueNumber(
+                    parentNativeId,
+                    openChildren[0]?.parent?.issueNumber,
+                  ),
                   openChildren,
                   pin,
                   create: { agentBackendId: activeRegistration.descriptor.id },
@@ -9647,7 +9694,10 @@ export const makeWorkItemLifecycleLive = (
             )
           : yield* enrollOpenChildren({
               repositoryId,
-              parentIssueNumber,
+              parentIssueNumber: errorIssueNumber(
+                parentNativeId,
+                openChildren[0]?.parent?.issueNumber,
+              ),
               openChildren,
               pin,
               create: null,
@@ -9657,7 +9707,7 @@ export const makeWorkItemLifecycleLive = (
 
       const queueIssue = Effect.fn("WorkItemLifecycle.queue")(function* (
         repositoryId: string,
-        issueNumber: number,
+        nativeId: string,
       ) {
         const repository = (yield* db.listRepositories).find(
           ({ id }) => id === repositoryId,
@@ -9666,13 +9716,14 @@ export const makeWorkItemLifecycleLive = (
         const matches = findLiveIssuesForStart(
           issues,
           liveIssueTracker(repository),
-          issueNumber,
+          nativeId,
         )
+        const issueNumber = errorIssueNumber(nativeId, matches[0]?.issueNumber)
         if (matches.length > 1) {
           return yield* new IssueIdentityAmbiguousError({
             repositoryId,
             issueNumber,
-            message: `Issue #${issueNumber} matches ${matches.length} Issues on the current Issue Tracker. Start by native identity instead.`,
+            message: ambiguousStartMessage(nativeId, matches.length),
           })
         }
         const issue = matches[0]
@@ -9684,6 +9735,7 @@ export const makeWorkItemLifecycleLive = (
             return yield* new IssueNotFoundError({
               repositoryId,
               issueNumber,
+              nativeId,
             })
           case "issue_not_open":
             return yield* new IssueNotOpenError({
@@ -9711,7 +9763,7 @@ export const makeWorkItemLifecycleLive = (
           repositoryId,
         )
 
-        const existing = yield* listWorkItemsForIssue(repositoryId, issueNumber)
+        const existing = yield* listWorkItemsForIssue(repositoryId, nativeId)
         const unfinished = existing.find(
           (item) =>
             evaluateUnfinishedWorkItem(workItemPredicateInput(item))._tag ===
@@ -9721,6 +9773,7 @@ export const makeWorkItemLifecycleLive = (
           return yield* unfinishedWorkItemExistsError(
             repositoryId,
             issueNumber,
+            nativeId,
             unfinished.id,
           )
         }
@@ -9809,6 +9862,7 @@ export const makeWorkItemLifecycleLive = (
                       return unfinishedWorkItemExistsError(
                         repositoryId,
                         issueNumber,
+                        nativeId,
                       )
                     }
                     return Effect.fail(toDatabaseError(sqlError))

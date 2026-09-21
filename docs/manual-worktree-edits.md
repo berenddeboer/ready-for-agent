@@ -22,7 +22,7 @@ glossary — use them exactly as defined there.
 
    ```graphql
    query {
-     workItems(repositoryId: "<repositoryId>", issueNumber: <issueNumber>) {
+     workItems(repositoryId: "<repositoryId>", nativeId: "<nativeId>") {
        id
        paused
        hasActiveStepRun

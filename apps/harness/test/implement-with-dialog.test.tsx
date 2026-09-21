@@ -114,7 +114,7 @@ const grokCatalog = {
 }
 
 const baseProps = {
-  issueNumber: 1034,
+  displayId: "1034",
   backendId: "opencode",
   backends: shippedBackends,
   configurationMode: null,

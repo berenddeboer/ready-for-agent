@@ -876,6 +876,8 @@ describe("Job worker", () => {
           Effect.succeed([
             {
               number: 57,
+              nativeId: "57",
+              displayId: "57",
               title: "Execute queued Refresh Jobs in Harness",
               body: "Worker acceptance criteria",
               url: "https://github.com/acme/widgets/issues/57",

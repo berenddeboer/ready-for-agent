@@ -36,7 +36,7 @@ describe("independent Issue Tracker identity migration", () => {
     if (latest === undefined) {
       throw new Error(`Missing migration ${NEW_MIGRATION}`)
     }
-    const prior = sources.filter((source) => source.name !== NEW_MIGRATION)
+    const prior = sources.filter((source) => source.name < NEW_MIGRATION)
 
     await Effect.runPromise(
       Effect.gen(function* () {

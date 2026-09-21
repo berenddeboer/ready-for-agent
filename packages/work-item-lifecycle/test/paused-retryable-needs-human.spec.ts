@@ -178,7 +178,7 @@ describe("explicit Retry of a paused idle retryable Needs Human handoff", () => 
   const driveToReviewNeedsHuman = Effect.gen(function* () {
     const lifecycle = yield* WorkItemLifecycle
     const { repository, issue } = yield* seedIssue({})
-    yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+    yield* lifecycle.implementNow(repository.id, issue.nativeId)
     for (let index = 0; index < 5; index += 1) {
       yield* claimAndRunPending
     }
@@ -220,7 +220,7 @@ describe("explicit Retry of a paused idle retryable Needs Human handoff", () => 
         const { repository, issue } = yield* seedIssue({})
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         for (let index = 0; index < 5; index += 1) {
           yield* claimAndRunPending
@@ -355,7 +355,7 @@ describe("explicit Retry of a paused idle retryable Needs Human handoff", () => 
         })
         const held = yield* lifecycle.implementNow(
           holderSeed.repository.id,
-          holderSeed.issue.issueNumber,
+          holderSeed.issue.nativeId,
         )
         expect(held.holdsWorkerSlot).toBe(true)
 
@@ -475,7 +475,7 @@ describe("explicit Retry of a paused idle retryable Needs Human handoff", () => 
         })
         yield* lifecycle.implementNow(
           investigateSeed.repository.id,
-          investigateSeed.issue.issueNumber,
+          investigateSeed.issue.nativeId,
         )
         for (let index = 0; index < 8; index += 1) {
           yield* claimAndRunPending
@@ -510,7 +510,7 @@ describe("explicit Retry of a paused idle retryable Needs Human handoff", () => 
         })
         const decideItem = yield* lifecycle.implementNow(
           decideSeed.repository.id,
-          decideSeed.issue.issueNumber,
+          decideSeed.issue.nativeId,
         )
         yield* sql.unsafe(
           `UPDATE work_item

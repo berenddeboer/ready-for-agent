@@ -141,7 +141,7 @@ describe("Original Issue Source execution", () => {
         })
         const url = "https://github.com/acme/widgets/issues/17"
         yield* storeOpenLeafIssue(db, repo.id, 17, url)
-        const created = yield* lifecycle.implementNow(repo.id, 17)
+        const created = yield* lifecycle.implementNow(repo.id, "17")
         expect(created.issueSource).toEqual({
           tracker: "github",
           nativeId: "17",

@@ -1168,7 +1168,7 @@ describe("operator binary CLI seam", () => {
 
         expect(requested).toEqual({
           repositoryId: "repo-1",
-          selector: { issueNumber: 42 },
+          selector: { nativeId: "42" },
         })
         expect(JSON.parse(logs[0] ?? "")).toEqual({
           schemaVersion: CLI_SCHEMA_VERSION,

@@ -263,7 +263,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
 
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         expectPreAdmissionHold(created)
         expect(created.executionProfile).toBeNull()
@@ -294,7 +294,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
 
         const created = yield* lifecycle.implementCiRepair(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         expect(created.waitingForCiRepair).toBe(false)
         expect(created.holdsWorkerSlot).toBe(true)
@@ -312,7 +312,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
 
         const created = yield* lifecycle.implementWith(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
           implementWithProfile,
           { mergePolicy: "always" },
         )
@@ -386,7 +386,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
 
         const covered = yield* lifecycle.implementAllWithAutoMerge(
           repository.id,
-          100,
+          "100",
         )
         expect(covered).toHaveLength(2)
         const actionable = covered.find((item) => item.issueNumber === 101)
@@ -432,7 +432,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
         })
         yield* closeCiGate(repository.id)
 
-        const held = yield* lifecycle.queue(repository.id, issue.issueNumber)
+        const held = yield* lifecycle.queue(repository.id, issue.nativeId)
         expect(held.waitingForBlockers).toBe(true)
         expect(held.waitingForCiRepair).toBe(false)
         expect(held.holdsWorkerSlot).toBe(false)
@@ -479,7 +479,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
         const { repository, issue } = yield* seedActionableIssue
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         const failed = yield* claimAndRunPending
         expect(failed._tag).toBe("processed")
@@ -524,7 +524,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
         const { repository, issue } = yield* seedActionableIssue
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         const fiber = yield* Effect.forkChild(
           lifecycle.runStep(created.stepRuns[0]!.id),
@@ -560,7 +560,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
 
         const created = yield* lifecycle.implementLocally(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         expect(created.waitingForCiRepair).toBe(false)
         expect(created.holdsWorkerSlot).toBe(true)
@@ -613,7 +613,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
         yield* closeCiGate(repository.id)
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         const paused = yield* lifecycle.pause(created.id)
         expect(paused.paused).toBe(true)
@@ -640,14 +640,14 @@ describe("Waiting for CI Repair pre-admission hold", () => {
         yield* setMaxWorkItems(1)
         const occupying = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         expect(occupying.holdsWorkerSlot).toBe(true)
 
         const waiterIssue = yield* seedSiblingIssue(repository.id, 43)
         const waiter = yield* lifecycle.implementNow(
           repository.id,
-          waiterIssue.issueNumber,
+          waiterIssue.nativeId,
         )
         expect(waiter.holdsWorkerSlot).toBe(false)
         expect(waiter.waitingSince).not.toBeNull()
@@ -656,7 +656,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
         const heldIssue = yield* seedSiblingIssue(repository.id, 44)
         const held = yield* lifecycle.implementNow(
           repository.id,
-          heldIssue.issueNumber,
+          heldIssue.nativeId,
         )
         expectPreAdmissionHold(held)
 
@@ -687,14 +687,14 @@ describe("Waiting for CI Repair pre-admission hold", () => {
         yield* setMaxWorkItems(1)
         const occupying = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         expect(occupying.holdsWorkerSlot).toBe(true)
 
         const waiterIssue = yield* seedSiblingIssue(repository.id, 43)
         const waiter = yield* lifecycle.implementNow(
           repository.id,
-          waiterIssue.issueNumber,
+          waiterIssue.nativeId,
         )
         expect(waiter.waitingSince).not.toBeNull()
 
@@ -750,11 +750,11 @@ describe("Waiting for CI Repair pre-admission hold", () => {
           url: "https://github.com/acme/open/issues/42",
         })
 
-        const occupying = yield* lifecycle.implementNow(closedRepo.id, 42)
+        const occupying = yield* lifecycle.implementNow(closedRepo.id, "42")
         expect(occupying.holdsWorkerSlot).toBe(true)
-        const closedWaiter = yield* lifecycle.implementNow(closedRepo.id, 43)
+        const closedWaiter = yield* lifecycle.implementNow(closedRepo.id, "43")
         expect(closedWaiter.waitingSince).not.toBeNull()
-        const openWaiter = yield* lifecycle.implementNow(openRepo.id, 42)
+        const openWaiter = yield* lifecycle.implementNow(openRepo.id, "42")
         expect(openWaiter.waitingSince).not.toBeNull()
 
         yield* closeCiGate(closedRepo.id)
@@ -780,7 +780,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
         const { repository, issue } = yield* seedActionableIssue
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         yield* sql.unsafe(
           `UPDATE work_item
@@ -811,12 +811,12 @@ describe("Waiting for CI Repair pre-admission hold", () => {
         yield* closeCiGate(repository.id)
         const first = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         const secondIssue = yield* seedSiblingIssue(repository.id, 43)
         const second = yield* lifecycle.implementNow(
           repository.id,
-          secondIssue.issueNumber,
+          secondIssue.nativeId,
         )
         expectPreAdmissionHold(first)
         expectPreAdmissionHold(second)
@@ -853,7 +853,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
             yield* closeCiGate(repository.id)
             const created = yield* lifecycle.implementWith(
               repository.id,
-              issue.issueNumber,
+              issue.nativeId,
               implementWithProfile,
               { mergePolicy: "classify" },
             )
@@ -908,7 +908,7 @@ describe("Waiting for CI Repair pre-admission hold", () => {
         const { repository, issue } = yield* seedActionableIssue
         const created = yield* lifecycle.implementNow(
           repository.id,
-          issue.issueNumber,
+          issue.nativeId,
         )
         expect(created.waitingForCiRepair).toBe(false)
         expect(created.holdsWorkerSlot).toBe(true)

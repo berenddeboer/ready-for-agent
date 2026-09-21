@@ -74,10 +74,21 @@ const baseWorkItem = {
   stepRuns: [baseStepRun],
 } as WorkItemRecord
 
-const workItemWith = (overrides: Partial<WorkItemRecord>): WorkItemRecord => ({
-  ...baseWorkItem,
-  ...overrides,
-})
+const workItemWith = (overrides: Partial<WorkItemRecord>): WorkItemRecord => {
+  const issueNumber = overrides.issueNumber ?? baseWorkItem.issueNumber
+  return {
+    ...baseWorkItem,
+    ...overrides,
+    issueSource:
+      overrides.issueSource ??
+      ({
+        tracker: "github",
+        nativeId: String(issueNumber),
+        displayId: String(issueNumber),
+        url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+      } as WorkItemRecord["issueSource"]),
+  }
+}
 
 describe("parseMaxAutonomousRetries", () => {
   test("defaults to 3 and accepts a non-negative override", () => {
@@ -104,13 +115,13 @@ describe("parseRetryWorkItemsSelector", () => {
     )
     expect(
       parseRetryWorkItemsSelector({
-        issueNumber: 7,
+        nativeId: "7",
         workItemId: "wi-1",
       }),
     ).toBeInstanceOf(InvalidRetrySelectorError)
     expect(
       parseRetryWorkItemsSelector({
-        issueNumber: 7,
+        nativeId: "7",
         allRetryable: true,
       }),
     ).toBeInstanceOf(InvalidRetrySelectorError)
@@ -134,18 +145,16 @@ describe("parseRetryWorkItemsSelector", () => {
     })
   })
 
-  test("rejects a non-positive issue number", () => {
-    const parsed = parseRetryWorkItemsSelector({ issueNumber: 0 })
-    expect(parsed).toBeInstanceOf(InvalidRetrySelectorError)
-    if (parsed instanceof InvalidRetrySelectorError) {
-      expect(parsed.reason).toBe("invalid_issue_number")
-    }
+  test("treats a blank nativeId as unset", () => {
+    expect(parseRetryWorkItemsSelector({ nativeId: "  " })).toBeInstanceOf(
+      InvalidRetrySelectorError,
+    )
   })
 
   test("accepts each exclusive selector", () => {
-    expect(parseRetryWorkItemsSelector({ issueNumber: 12 })).toEqual({
+    expect(parseRetryWorkItemsSelector({ nativeId: "12" })).toEqual({
       kind: "issue",
-      issueNumber: 12,
+      nativeId: "12",
     })
     expect(parseRetryWorkItemsSelector({ workItemId: " wi-9 " })).toEqual({
       kind: "work-item",
@@ -357,7 +366,7 @@ describe("snapshotRetryTargets", () => {
       createdAt: new Date("2026-07-14T08:00:00.000Z"),
     })
     const snapshot = snapshotRetryTargets({
-      selector: { kind: "issue", issueNumber: 9 },
+      selector: { kind: "issue", nativeId: "9" },
       repositoryId: "repo-1",
       workItems: [older, current],
     })
@@ -366,7 +375,7 @@ describe("snapshotRetryTargets", () => {
 
   test("issue selector fails when there is no unfinished Work Item", () => {
     const snapshot = snapshotRetryTargets({
-      selector: { kind: "issue", issueNumber: 31 },
+      selector: { kind: "issue", nativeId: "31" },
       repositoryId: "repo-1",
       workItems: [complete],
     })

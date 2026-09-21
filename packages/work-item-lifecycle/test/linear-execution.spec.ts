@@ -283,7 +283,7 @@ describe("Linear Issue execution", () => {
           hasChildren: false,
           blockedBy: [],
         })
-        const githubWork = yield* lifecycle.implementNow(repo.id, 17)
+        const githubWork = yield* lifecycle.implementNow(repo.id, "17")
         expect(githubWork.issueSource).toEqual({
           tracker: "github",
           nativeId: "17",
@@ -333,7 +333,10 @@ describe("Linear Issue execution", () => {
           hasChildren: false,
           blockedBy: [],
         })
-        const linearWork = yield* lifecycle.implementNow(repo.id, 123)
+        const linearWork = yield* lifecycle.implementNow(
+          repo.id,
+          linearNativeId,
+        )
         expect(linearWork.issueSource).toEqual({
           tracker: "linear",
           nativeId,
@@ -425,7 +428,7 @@ describe("Linear Issue execution", () => {
           hasChildren: false,
           blockedBy: [],
         })
-        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const created = yield* lifecycle.implementNow(repo.id, linearNativeId)
         let current = created
         for (let attempt = 0; attempt < 8; attempt += 1) {
           if (current.state === "needs_human") {
@@ -536,7 +539,7 @@ describe("Linear Issue execution", () => {
           hasChildren: false,
           blockedBy: [],
         })
-        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const created = yield* lifecycle.implementNow(repo.id, linearNativeId)
         let current = created
         let failure: unknown
         for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -674,7 +677,7 @@ describe("Linear Issue execution", () => {
           hasChildren: false,
           blockedBy: [],
         })
-        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const created = yield* lifecycle.implementNow(repo.id, linearNativeId)
         const queued = created.stepRuns.find((run) => run.status === "queued")
         expect(queued).toBeDefined()
         const result = yield* lifecycle.runStep(queued!.id)
@@ -716,7 +719,7 @@ describe("Linear Issue execution", () => {
         const repo = yield* seedLinearNoChangeRepository(
           "/repos/acme/widgets-linear-no-change.git",
         )
-        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const created = yield* lifecycle.implementNow(repo.id, linearNativeId)
         const finished = yield* runQueuedSteps(created.id)
         return { created, finished }
       }).pipe(
@@ -797,7 +800,7 @@ describe("Linear Issue execution", () => {
         const repo = yield* seedLinearNoChangeRepository(
           "/repos/acme/widgets-linear-no-change-retry.git",
         )
-        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const created = yield* lifecycle.implementNow(repo.id, linearNativeId)
         const afterFailure = yield* runQueuedSteps(created.id)
         expect(afterFailure.state).toBe("close_issue")
         expect(afterFailure.completionSummary).toBe(summary)
@@ -880,7 +883,7 @@ describe("Linear Issue execution", () => {
         const repo = yield* seedLinearNoChangeRepository(
           "/repos/acme/widgets-linear-already-done.git",
         )
-        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const created = yield* lifecycle.implementNow(repo.id, linearNativeId)
         return yield* runQueuedSteps(created.id)
       }).pipe(
         Effect.provide(
@@ -960,7 +963,7 @@ describe("Linear Issue execution", () => {
         const repo = yield* seedLinearMergeRepository(
           "/repos/acme/widgets-linear-merge.git",
         )
-        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const created = yield* lifecycle.implementNow(repo.id, linearNativeId)
         const current = yield* runQueuedSteps(created.id)
         return { created, current }
       }).pipe(
@@ -1035,7 +1038,7 @@ describe("Linear Issue execution", () => {
         const repo = yield* seedLinearMergeRepository(
           "/repos/acme/widgets-linear-human-merge.git",
         )
-        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const created = yield* lifecycle.implementNow(repo.id, linearNativeId)
         const parked = yield* runQueuedSteps(created.id, "needs_human")
         expect(parked.state).toBe("needs_human")
         expect(mergeCalls).toBe(0)
@@ -1120,7 +1123,7 @@ describe("Linear Issue execution", () => {
         const repo = yield* seedLinearMergeRepository(
           "/repos/acme/widgets-linear-merge-retry.git",
         )
-        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const created = yield* lifecycle.implementNow(repo.id, linearNativeId)
         const afterFailure = yield* runQueuedSteps(created.id)
         expect(afterFailure.state).toBe("close_issue")
         expect(afterFailure.state).not.toBe("complete")

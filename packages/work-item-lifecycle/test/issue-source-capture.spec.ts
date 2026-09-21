@@ -11,7 +11,6 @@ import {
 } from "@ready-for-agent/db-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
-  IssueIdentityAmbiguousError,
   LifecycleSteps,
   type LifecycleStepsShape,
   WorkItemLifecycle,
@@ -128,7 +127,7 @@ describe("Original Issue Source capture", () => {
         })
         const url = "https://git.drupalcode.org/project/oauth_client/-/issues/9"
         yield* storeOpenLeafIssue(db, repo.id, 9, url)
-        const created = yield* lifecycle.implementNow(repo.id, 9)
+        const created = yield* lifecycle.implementNow(repo.id, "9")
         expect(created.issueNumber).toBe(9)
         expect(created.issueSource).toEqual({
           tracker: "gitlab",
@@ -224,7 +223,7 @@ describe("Original Issue Source capture", () => {
           hasChildren: false,
           blockedBy: [],
         })
-        const created = yield* lifecycle.implementNow(repo.id, 123)
+        const created = yield* lifecycle.implementNow(repo.id, nativeId)
         expect(created.issueNumber).toBe(123)
         expect(created.issueSource).toEqual({
           tracker: "linear",
@@ -236,7 +235,7 @@ describe("Original Issue Source capture", () => {
     )
   })
 
-  it("rejects Implement Now when two Linear Issues share a team-local number", async () => {
+  it("starts distinct Linear leaves that share a team-local number", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = yield* DbService
@@ -316,10 +315,21 @@ describe("Original Issue Source capture", () => {
           hasChildren: false,
           blockedBy: [],
         })
-        const error = yield* lifecycle
-          .implementNow(repo.id, 123)
-          .pipe(Effect.flip)
-        expect(error).toBeInstanceOf(IssueIdentityAmbiguousError)
+        const created = yield* lifecycle.implementNow(
+          repo.id,
+          "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        )
+        expect(created.issueSource).toEqual({
+          tracker: "linear",
+          nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+          displayId: "ENG-123",
+          url: "https://linear.app/acme/issue/ENG-123",
+        })
+        const sibling = yield* lifecycle.implementNow(
+          repo.id,
+          "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+        )
+        expect(sibling.issueSource.displayId).toBe("DES-123")
       }).pipe(Effect.provide(lifecycleLayer(stubActiveAgentBackendLayer()))),
     )
   })
@@ -365,7 +375,7 @@ describe("Original Issue Source capture", () => {
             },
           ],
         })
-        const created = yield* lifecycle.queue(repo.id, 11)
+        const created = yield* lifecycle.queue(repo.id, "11")
         expect(created.issueNumber).toBe(11)
         expect(created.issueSource).toEqual({
           tracker: "github",

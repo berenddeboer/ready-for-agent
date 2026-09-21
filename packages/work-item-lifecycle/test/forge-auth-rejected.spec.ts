@@ -181,10 +181,7 @@ const forgetCreatePrDraftProvenance = (workItemId: string) =>
 const runUntilLatestFailed = Effect.gen(function* () {
   const lifecycle = yield* WorkItemLifecycle
   const { repository, issue } = yield* seedIssue
-  const created = yield* lifecycle.implementNow(
-    repository.id,
-    issue.issueNumber,
-  )
+  const created = yield* lifecycle.implementNow(repository.id, issue.nativeId)
   let current: WorkItemRecord = created
   for (let index = 0; index < 8; index += 1) {
     const result = yield* claimAndRunPending

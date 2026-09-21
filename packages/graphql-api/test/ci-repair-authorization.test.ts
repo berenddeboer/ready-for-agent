@@ -550,8 +550,8 @@ describe("Authorize incident-scoped CI Repair", () => {
     repositoryId: string,
     issueNumber: number,
   ) => ({
-    query: `mutation ImplementCiRepair($repositoryId: ID!, $issueNumber: Int!) {
-      implementCiRepair(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+    query: `mutation ImplementCiRepair($repositoryId: ID!, $nativeId: String!) {
+      implementCiRepair(repositoryId: $repositoryId, nativeId: $nativeId) {
         id
         state
         status
@@ -559,7 +559,7 @@ describe("Authorize incident-scoped CI Repair", () => {
         ${ciRepairFields}
       }
     }`,
-    variables: { repositoryId, issueNumber },
+    variables: { repositoryId, nativeId: String(issueNumber) },
   })
 
   test("Implement CI Repair while Closed creates a Work Item authorized for the active incident", async () => {
@@ -719,7 +719,7 @@ describe("Authorize incident-scoped CI Repair", () => {
         const lifecycle = yield* WorkItemLifecycle
         const items = yield* lifecycle.implementWith(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
           {
             agentBackendId: "opencode",
             buildModel: "opencode/deepseek-v4-flash-free",
@@ -792,7 +792,7 @@ describe("Authorize incident-scoped CI Repair", () => {
         const lifecycle = yield* WorkItemLifecycle
         return yield* lifecycle.implementNow(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
         )
       }),
     )
@@ -845,9 +845,12 @@ describe("Authorize incident-scoped CI Repair", () => {
         const lifecycle = yield* WorkItemLifecycle
         const retryable = yield* lifecycle.implementNow(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
         )
-        const finished = yield* lifecycle.implementNow(setup.repository.id, 57)
+        const finished = yield* lifecycle.implementNow(
+          setup.repository.id,
+          "57",
+        )
         return { retryable, finished }
       }),
     )
@@ -1184,14 +1187,14 @@ describe("Authorize incident-scoped CI Repair", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementAll($repositoryId: ID!, $issueNumber: Int!) {
-          implementAllWithAutoMerge(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+        query: `mutation ImplementAll($repositoryId: ID!, $nativeId: String!) {
+          implementAllWithAutoMerge(repositoryId: $repositoryId, nativeId: $nativeId) {
             id
             status
             ${ciRepairFields}
           }
         }`,
-        variables: { repositoryId: setup.id, issueNumber: 100 },
+        variables: { repositoryId: setup.id, nativeId: "100" },
       }),
     )
     const payload = (await response.json()) as {
@@ -1226,7 +1229,7 @@ describe("Authorize incident-scoped CI Repair", () => {
         const sql = yield* SqlClient.SqlClient
         const workItem = yield* lifecycle.implementCiRepair(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
         )
         const claimAndRun = Effect.gen(function* () {
           yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
@@ -1284,7 +1287,7 @@ describe("Authorize incident-scoped CI Repair", () => {
         const sql = yield* SqlClient.SqlClient
         const created = yield* lifecycle.implementCiRepair(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
         )
         expect(created.waitingForCiRepair).toBe(false)
         const claimAndRun = Effect.gen(function* () {
@@ -1331,7 +1334,7 @@ describe("Authorize incident-scoped CI Repair", () => {
         const sql = yield* SqlClient.SqlClient
         const created = yield* lifecycle.implementCiRepair(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
         )
         const claimAndRun = Effect.gen(function* () {
           yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)

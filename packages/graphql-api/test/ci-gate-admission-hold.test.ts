@@ -429,7 +429,7 @@ describe("Hold ordinary remote admission during CI failure", () => {
         const lifecycle = yield* WorkItemLifecycle
         return yield* lifecycle.implementNow(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
         )
       }),
     )
@@ -494,7 +494,7 @@ describe("Hold ordinary remote admission during CI failure", () => {
         const lifecycle = yield* WorkItemLifecycle
         const items = yield* lifecycle.implementWith(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
           {
             agentBackendId: "opencode",
             buildModel: "opencode/deepseek-v4-flash-free",
@@ -627,7 +627,7 @@ describe("Hold ordinary remote admission during CI failure", () => {
         const lifecycle = yield* WorkItemLifecycle
         return yield* lifecycle.implementNow(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
         )
       }),
     )
@@ -710,7 +710,7 @@ describe("Hold ordinary remote admission during CI failure", () => {
         const lifecycle = yield* WorkItemLifecycle
         const held = yield* lifecycle.implementNow(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
         )
         return yield* lifecycle.pause(held.id)
       }),
@@ -774,7 +774,7 @@ describe("Hold ordinary remote admission during CI failure", () => {
         const lifecycle = yield* WorkItemLifecycle
         return yield* lifecycle.implementNow(
           setup.repository.id,
-          setup.issue.issueNumber,
+          setup.issue.nativeId,
         )
       }),
     )
@@ -805,7 +805,7 @@ describe("Hold ordinary remote admission during CI failure", () => {
         const lifecycle = yield* WorkItemLifecycle
         return yield* lifecycle.implementNow(
           setup.repository.id,
-          secondIssue.issueNumber,
+          secondIssue.nativeId,
         )
       }),
     )

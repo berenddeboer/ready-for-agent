@@ -727,6 +727,8 @@ const mapIssue = (
   }
   return {
     number: issue.iid,
+    nativeId: String(issue.iid),
+    displayId: String(issue.iid),
     title: issue.title,
     body,
     url: issue.web_url,
@@ -739,6 +741,8 @@ const mapIssue = (
     hierarchySupported: false,
     blockedBy: blockerNumbers(body).map((number) => ({
       number,
+      nativeId: String(number),
+      displayId: String(number),
       url: `https://${repository.forgeHost}/${repository.projectPath}/-/issues/${number}`,
     })),
     closingPullRequests: mergeRequests

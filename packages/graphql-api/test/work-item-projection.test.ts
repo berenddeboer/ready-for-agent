@@ -44,6 +44,12 @@ const baseWorkItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: "repo-1",
   issueNumber: 42,
+  issueSource: {
+    tracker: "github",
+    nativeId: "42",
+    displayId: "42",
+    url: "https://github.com/acme/widgets/issues/42",
+  },
   issueTitle: "Example",
   agentBackend: "opencode",
   state: "review",

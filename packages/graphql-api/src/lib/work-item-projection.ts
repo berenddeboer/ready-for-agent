@@ -29,15 +29,11 @@ const childIssueCategory = (issue: IssueRecord): number => {
   return issue.blockedBy.length === 0 ? 0 : 1
 }
 
-const issueIdentityKey = (issue: {
-  readonly issueNumber: number
-  readonly nativeId?: string
-}): string => issue.nativeId ?? String(issue.issueNumber)
+const issueIdentityKey = (issue: { readonly nativeId: string }): string =>
+  issue.nativeId
 
-const issueDisplayKey = (issue: {
-  readonly issueNumber: number
-  readonly displayId?: string
-}): string => issue.displayId ?? String(issue.issueNumber)
+const issueDisplayKey = (issue: { readonly displayId: string }): string =>
+  issue.displayId
 
 const compareChildIssues = (left: IssueRecord, right: IssueRecord): number =>
   childIssueCategory(left) - childIssueCategory(right) ||
@@ -55,7 +51,6 @@ export const workIssueProjection = (
   for (const issue of issues) {
     if (issue.parent === null) continue
     const parentKey = issueIdentityKey({
-      issueNumber: issue.parent.issueNumber,
       nativeId: issue.parent.nativeId,
     })
     const children = childrenByParent.get(parentKey) ?? []
@@ -311,7 +306,7 @@ const isRedundantReviewInProgressMessage = (stepRun: StepRunRecord): boolean =>
 export const workItemStatusMessage = (
   workItem: WorkItemRecord,
   options?: {
-    readonly blockerIssueNumbers?: readonly number[]
+    readonly blockerDisplayIds?: readonly string[]
     readonly failedCiGateDefinitionLabels?: readonly string[]
     readonly ciFailureIncidentSummary?: string | null
   },
@@ -320,7 +315,7 @@ export const workItemStatusMessage = (
     return workItem.failureMessage
   }
   if (workItem.waitingForBlockers) {
-    return formatWaitingForBlockersMessage(options?.blockerIssueNumbers ?? [])
+    return formatWaitingForBlockersMessage(options?.blockerDisplayIds ?? [])
   }
   if (workItem.waitingSince != null) {
     return WAITING_FOR_WORKER_SLOT_MESSAGE

@@ -98,7 +98,7 @@ export type RepositoryIntakeResult = {
 }
 
 export type RetryWorkItemsSelector =
-  | { readonly issueNumber: number }
+  | { readonly nativeId: string }
   | { readonly workItemId: string }
   | { readonly allRetryable: true }
 
