@@ -171,7 +171,7 @@ Notes on the modelling:
 
 ## The lifecycle state space
 
-16 operational Lifecycle Steps, 4 terminal Work Item states, and 141 declared
+16 operational Lifecycle Steps, 4 terminal Work Item states, and 180 declared
 transitions, each carrying a named guard and one Step Run reason code from the
 generated vocabulary.
 The happy path:
@@ -198,6 +198,7 @@ stateDiagram-v2
   mark_pr_ready_for_review --> merge_pr : settled, always merge mode
   decide_pr_merge --> merge_pr : clanker_merge_decision
   merge_pr --> local_cleanup : pull_request_merged
+  merge_pr --> close_issue : pull_request_merged (Linear tracker close-out)
   close_issue --> local_cleanup : issue_closed
   local_cleanup --> complete
   complete --> [*]
@@ -211,7 +212,9 @@ stateDiagram-v2
     Nearly every state can also reach
     failed (issue revalidation failed),
     abandoned (operator_abandon), or
-    local_cleanup (PR observed merged).
+    local_cleanup (PR observed merged), or
+    Close Issue then local cleanup when the
+    Original Issue Source is Linear.
   end note
 ```
 

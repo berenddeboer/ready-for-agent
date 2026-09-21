@@ -133,7 +133,11 @@ import {
   LifecycleSteps,
   type RunHandlerError,
 } from "./lifecycle-steps.js"
-import { notifyLinearHumanAttention } from "./linear-milestones.js"
+import {
+  linearMergeCompletionSummary,
+  nextStateAfterConfirmedMerge,
+  notifyLinearHumanAttention,
+} from "./linear-milestones.js"
 import {
   type MergePolicy,
   decodeMergeMode,
@@ -4138,6 +4142,19 @@ export const makeWorkItemLifecycleLive = (
               }
               const result = yield* steps.mergePr(context)
               if (result._tag === "merged") {
+                if (
+                  nextStateAfterConfirmedMerge(context.issueSource) ===
+                  "close_issue"
+                ) {
+                  return {
+                    completionSummary: linearMergeCompletionSummary(
+                      context.completionSummary,
+                    ),
+                    transition: {
+                      nextState: "close_issue" as const,
+                    },
+                  }
+                }
                 return {}
               }
               if (result._tag === "needs_human") {
@@ -4425,7 +4442,7 @@ export const makeWorkItemLifecycleLive = (
             ownedPrIssueStop?.reasonMessage ?? output.stepRunNote ?? null
           const appliedNextState =
             ownedPrIssueStop?._tag === "merged"
-              ? ("local_cleanup" as const)
+              ? nextStateAfterConfirmedMerge(toIssueSource(workItem))
               : ownedPrIssueStop?._tag === "pause"
                 ? null
                 : revalidationBlocksProgress
@@ -4512,10 +4529,18 @@ export const makeWorkItemLifecycleLive = (
 
                 if (ownedPrIssueStop?._tag === "merged") {
                   // Confirmed merge at revalidation seam: same destination as
-                  // Refresh / continueAfterHumanPrOutcome (local cleanup).
+                  // Refresh / continueAfterHumanPrOutcome (Close Issue for
+                  // Linear, otherwise local cleanup).
+                  const mergeNextState = nextStateAfterConfirmedMerge(
+                    toIssueSource(workItem),
+                  )
+                  const mergeSummary =
+                    mergeNextState === "close_issue"
+                      ? linearMergeCompletionSummary(completionSummary)
+                      : completionSummary
                   yield* sql.unsafe(
                     `UPDATE work_item
-                   SET state = 'local_cleanup',
+                   SET state = ?,
                        state_ready_at = ?,
                        paused = 0,
                        failure_code = NULL,
@@ -4532,10 +4557,11 @@ export const makeWorkItemLifecycleLive = (
                        updated_at = ?
                    WHERE id = ?`,
                     [
+                      mergeNextState,
                       now,
                       worktreePath,
                       startingCommitOid,
-                      completionSummary,
+                      mergeSummary,
                       publicationTitle,
                       publicationBody,
                       sessionId,
@@ -4548,7 +4574,7 @@ export const makeWorkItemLifecycleLive = (
                   if (acquired) {
                     yield* enqueueStepRunForWorkItem(
                       workItem.id,
-                      "local_cleanup",
+                      mergeNextState,
                       now,
                     )
                   }
@@ -7264,7 +7290,12 @@ export const makeWorkItemLifecycleLive = (
             reason: "Work Item has no Work Item PR",
           })
         }
-        if (workItem.state === "local_cleanup") {
+        if (
+          workItem.state === "local_cleanup" ||
+          (nextStateAfterConfirmedMerge(toIssueSource(workItem)) ===
+            "close_issue" &&
+            workItem.state === "close_issue")
+        ) {
           return yield* getWorkItem(workItemId)
         }
 
@@ -7325,7 +7356,13 @@ export const makeWorkItemLifecycleLive = (
                     reason: "Work Item has no Work Item PR",
                   })
                 }
-                if (current.state === "local_cleanup") {
+                const mergeNextState = nextStateAfterConfirmedMerge(
+                  toIssueSource(current),
+                )
+                if (
+                  current.state === "local_cleanup" ||
+                  current.state === mergeNextState
+                ) {
                   return
                 }
 
@@ -7423,21 +7460,33 @@ export const makeWorkItemLifecycleLive = (
                     }
                   }
 
+                  const mergeSummary =
+                    mergeNextState === "close_issue"
+                      ? linearMergeCompletionSummary(current.completion_summary)
+                      : current.completion_summary
                   const updated = (yield* sql.unsafe(
                     `UPDATE work_item
-                   SET state = 'local_cleanup',
+                   SET state = ?,
                        state_ready_at = ?,
                        paused = 0,
                        failure_code = NULL,
                        failure_message = NULL,
+                       completion_summary = ?,
                        waiting_since = NULL,
                        waiting_for_blockers = 0,
                        waiting_for_ci_repair = 0,
                        updated_at = ?
                    WHERE id = ?
-                     AND state NOT IN ('complete', 'failed', 'abandoned', 'local_cleanup')
+                     AND state NOT IN ('complete', 'failed', 'abandoned', 'local_cleanup', ?)
                    RETURNING id`,
-                    [now, now, workItemId],
+                    [
+                      mergeNextState,
+                      now,
+                      mergeSummary,
+                      now,
+                      workItemId,
+                      mergeNextState,
+                    ],
                   )) as readonly { readonly id: string }[]
 
                   if (!updated[0]) {
@@ -7466,13 +7515,13 @@ export const makeWorkItemLifecycleLive = (
 
                   yield* enqueueStepRunForWorkItem(
                     workItemId,
-                    "local_cleanup",
+                    mergeNextState,
                     now,
                   )
                 }).pipe((mutation) =>
                   applyLifecycleTransition(
                     workItemId,
-                    "local_cleanup",
+                    mergeNextState,
                     mutation,
                     () => true,
                   ),

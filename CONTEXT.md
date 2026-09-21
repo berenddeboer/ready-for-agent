@@ -124,7 +124,7 @@ The sole harness capability that changes the Issue store, deriving one Repositor
 _Avoid_: GitHub Reconciler (too broad), Issue Synchronizer (suggests bidirectional updates)
 
 **Refresh Job**:
-A durable request for the Issue Reconciler to reconcile one Repository. Acceptance of a Refresh Job does not mean reconciliation has completed. After reconciliation succeeds, competing active Issue-closing PRs stop eligible unfinished Work Items to Needs Human; then unfinished Work Items that own a Work Item PR are inspected for merge outcomes and, for certain Needs Human handoffs, mergeability: a merged PR advances local cleanup toward Complete (including Work Items paused because the Issue closed while the PR was open); closed-unmerged Abandon applies when the latest step was Decide PR Merge, Merge PR, or Resolve PR Merge Conflict; Decide/Merge Needs Human with a conflicting open PR advances to Resolve PR Merge Conflict; Resolve Needs Human whose open PR is no longer conflicting advances to Watch PR Status Checks. Refresh does not auto-Start a Work Item paused for a closed Issue with an open PR. After those owned-PR inspections, unfinished Attention Work Items that do not own a Work Item PR and whose Issue is no longer Relevant (closed, unlabelled, or gone from the Issue store) advance local cleanup toward Complete without posting an Issue comment; running Step Runs and Waiting for blockers are unchanged.
+A durable request for the Issue Reconciler to reconcile one Repository. Acceptance of a Refresh Job does not mean reconciliation has completed. After reconciliation succeeds, competing active Issue-closing PRs stop eligible unfinished Work Items to Needs Human; then unfinished Work Items that own a Work Item PR are inspected for merge outcomes and, for certain Needs Human handoffs, mergeability: a merged PR advances Close Issue when the Original Issue Source is Linear, otherwise local cleanup, toward Complete (including Work Items paused because the Issue closed while the PR was open); closed-unmerged Abandon applies when the latest step was Decide PR Merge, Merge PR, or Resolve PR Merge Conflict; Decide/Merge Needs Human with a conflicting open PR advances to Resolve PR Merge Conflict; Resolve Needs Human whose open PR is no longer conflicting advances to Watch PR Status Checks. Refresh does not auto-Start a Work Item paused for a closed Issue with an open PR. After those owned-PR inspections, unfinished Attention Work Items that do not own a Work Item PR and whose Issue is no longer Relevant (closed, unlabelled, or gone from the Issue store) advance local cleanup toward Complete without posting an Issue comment; running Step Runs and Waiting for blockers are unchanged.
 _Avoid_: Refresh (ambiguous between the request and its execution), sync job
 
 **Issue Polling**:
@@ -344,7 +344,7 @@ The Lifecycle Step after successful Review that creates the local git commit for
 _Avoid_: Create PR, git commit hook, Pre-Commit
 
 **Close Issue**:
-The Lifecycle Step that publishes the No-Change Outcome's completion summary on the Work Item's Issue and closes that Issue after Assess Changes or a confirmed late No-Change Outcome from Commit. It precedes local cleanup so the remote completion outcome is preserved even when cleanup must be retried.
+The Lifecycle Step that publishes a completion summary on the Work Item's Issue and closes that Issue. It runs after a confirmed No-Change Outcome from Assess Changes or Commit, and after a confirmed GitHub merge when the Original Issue Source is Linear. It precedes local cleanup so the remote completion outcome is preserved even when cleanup must be retried. An already-closed or already-completed Issue is accepted; retries reuse the existing summary instead of duplicating it.
 _Avoid_: Complete Work Item, local cleanup
 
 **Worker Slot**:
@@ -432,7 +432,7 @@ The Lifecycle Step that changes a Work Item PR from draft to ready for review af
 The Lifecycle Step that decides whether a settled Work Item PR may be merged by the harness or requires a human.
 
 **Merge PR**:
-The Lifecycle Step that revalidates and merges an approved Work Item PR through its Forge. On Azure DevOps, a complete request that is still queued is in-flight merge work, not a Merge Revalidation Outcome or a rejected merge. After a successful merge on Azure DevOps, if the Forge Issue is still open, Merge PR completes it to that type's Completed-category state and posts the hidden-marker completion summary once; an already completed Boards item is left in state.
+The Lifecycle Step that revalidates and merges an approved Work Item PR through its Forge. On Azure DevOps, a complete request that is still queued is in-flight merge work, not a Merge Revalidation Outcome or a rejected merge. After a successful merge on Azure DevOps, if the Forge Issue is still open, Merge PR completes it to that type's Completed-category state and posts the hidden-marker completion summary once; an already completed Boards item is left in state. When the Original Issue Source is Linear, a successful merge advances to Close Issue rather than local cleanup so tracker close-out can retry independently of the confirmed GitHub merge.
 
 
 **local cleanup**:

@@ -8,6 +8,24 @@ import {
   linearMilestoneMarker,
 } from "@ready-for-agent/linear-service"
 
+export const LINEAR_MERGE_COMPLETION_SUMMARY =
+  "Ready for Agent completed this Issue after the GitHub pull request merged."
+
+export const nextStateAfterConfirmedMerge = (
+  source: IssueSource | undefined,
+): "close_issue" | "local_cleanup" =>
+  isLinearIssueSource(source) ? "close_issue" : "local_cleanup"
+
+export const linearMergeCompletionSummary = (
+  existing: string | null | undefined,
+): string => {
+  const persisted = existing?.trim()
+  if (persisted !== undefined && persisted !== "") {
+    return persisted
+  }
+  return LINEAR_MERGE_COMPLETION_SUMMARY
+}
+
 export const isLinearIssueSource = (
   source: IssueSource | undefined,
 ): source is IssueSource & { readonly tracker: "linear" } =>

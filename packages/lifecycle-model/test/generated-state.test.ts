@@ -174,7 +174,9 @@ describe("generated lifecycle state", () => {
   it("declares Commit's confirmed No-Change Outcome to Close Issue", () => {
     const commitNoChange = LIFECYCLE_TRANSITIONS.filter(
       (transition) =>
-        transition.from === "commit" && transition.to === "close_issue",
+        transition.from === "commit" &&
+        transition.to === "close_issue" &&
+        transition.guard === "no_change_outcome",
     )
 
     expect(commitNoChange).toEqual([
@@ -185,5 +187,15 @@ describe("generated lifecycle state", () => {
         reasonCode: "native",
       },
     ])
+  })
+
+  it("declares confirmed-merge tracker close-out through Close Issue", () => {
+    expect(isDeclaredLifecycleTransition("merge_pr", "close_issue")).toBe(true)
+    expect(isDeclaredLifecycleTransition("needs_human", "close_issue")).toBe(
+      true,
+    )
+    expect(
+      isDeclaredLifecycleTransition("watch_pr_status_checks", "close_issue"),
+    ).toBe(true)
   })
 })
