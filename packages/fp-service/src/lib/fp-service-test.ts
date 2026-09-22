@@ -51,6 +51,12 @@ export const makeFpServiceTest = (
         ? fixture.getIssue(options, issueId)
         : failOr(() => Effect.succeed(fixture.issue ?? defaultFpIssueSnapshot)),
     checkReadiness: () =>
-      Effect.succeed(fixture.readiness ?? { _tag: "ready", version: "0.25.0" }),
+      Effect.succeed(
+        fixture.readiness ?? {
+          _tag: "ready",
+          version: "0.25.0",
+          remote: { workspaceSlug: "ws-test", projectId: "proj-test" },
+        },
+      ),
   })
 }

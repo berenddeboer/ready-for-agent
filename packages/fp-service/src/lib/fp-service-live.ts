@@ -464,7 +464,11 @@ export const makeFpService = (
         message: `${projectDirectory} is not a registered fp project (run \`fp init\` there, or configure the fp project directory).`,
       }
     }
-    return { _tag: "ready" as const, version }
+    // Readiness never fails; a remote lookup that errors reads as unlinked.
+    const remote = yield* projectRemote(projectDirectory).pipe(
+      Effect.orElseSucceed(() => null),
+    )
+    return { _tag: "ready" as const, version, remote }
   })
 
   return {

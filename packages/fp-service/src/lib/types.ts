@@ -111,7 +111,16 @@ export interface FpIssueSnapshot {
   readonly labels: readonly string[]
 }
 
+/**
+ * `remote` is null for a project that is not linked to the fp cloud. Such a
+ * project works for discovery, but its Issue urls are id-only placeholders
+ * the desktop app does not resolve; only linked projects have deep links.
+ */
 export type FpReadiness =
-  | { readonly _tag: "ready"; readonly version: string }
+  | {
+      readonly _tag: "ready"
+      readonly version: string
+      readonly remote: FpProjectRemote | null
+    }
   | { readonly _tag: "cli_missing"; readonly message: string }
   | { readonly _tag: "project_not_registered"; readonly message: string }

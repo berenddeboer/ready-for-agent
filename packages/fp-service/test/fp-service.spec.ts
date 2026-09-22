@@ -576,7 +576,23 @@ describe("FpService.checkReadiness", () => {
     const readiness = await run(
       withService((service) => service.checkReadiness(directory)),
     )
-    expect(readiness).toEqual({ _tag: "ready", version: "0.25.0" })
+    expect(readiness).toEqual({
+      _tag: "ready",
+      version: "0.25.0",
+      remote: { workspaceSlug: "ws-test", projectId: "proj-test" },
+    })
+  })
+
+  test("is ready without a remote for a local-only project, so callers can warn that links will not open", async () => {
+    await marker("unlinked")
+    const readiness = await run(
+      withService((service) => service.checkReadiness(directory)),
+    )
+    expect(readiness).toEqual({
+      _tag: "ready",
+      version: "0.25.0",
+      remote: null,
+    })
   })
 
   test("reports a missing CLI", async () => {
