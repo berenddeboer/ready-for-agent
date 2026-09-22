@@ -239,6 +239,18 @@
         "@types/bun": "^1.3.0",
       },
     },
+    "packages/fp-service": {
+      "name": "@ready-for-agent/fp-service",
+      "version": "0.0.1",
+      "dependencies": {
+        "@effect/platform-bun": "^4.0.0-beta.97",
+        "effect": "^4.0.0-beta.97",
+        "tslib": "^2.3.0",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.0",
+      },
+    },
     "packages/github-service": {
       "name": "@ready-for-agent/github-service",
       "version": "0.0.1",
@@ -1140,6 +1152,8 @@
     "@ready-for-agent/db-service": ["@ready-for-agent/db-service@workspace:packages/db-service"],
 
     "@ready-for-agent/forge-contract": ["@ready-for-agent/forge-contract@workspace:packages/forge-contract"],
+
+    "@ready-for-agent/fp-service": ["@ready-for-agent/fp-service@workspace:packages/fp-service"],
 
     "@ready-for-agent/github-service": ["@ready-for-agent/github-service@workspace:packages/github-service"],
 
