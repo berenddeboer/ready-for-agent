@@ -75,8 +75,12 @@ export interface FpIssueParent extends FpIssueReference {
 
 /**
  * Tracker-native Ready-labeled Issue record. Field names mirror the Forge
- * `ReadyLabeledIssue` so the seam mapping is a spread, except that fp has no
- * integer issue number: that field is the seam's decision, not the adapter's.
+ * `ReadyLabeledIssue` where the facts exist, so the seam mapping is mostly a
+ * spread; the divergences are deliberate and the seam's to bridge: fp has no
+ * integer issue `number`; it reports no `closingPullRequests` (a foreign
+ * Issue Tracker has none, as Azure Boards does today); `hierarchySupported`
+ * is always true; and `updatedAt`, `status` and `labels` are extra facts the
+ * fp side needs for caching, status writes and the Ready label.
  */
 export interface FpIssue {
   /** fp's 32-character issue id. */
