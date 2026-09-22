@@ -83,28 +83,22 @@ export const parseFpAuthStatus = (
   return { name, email }
 }
 
-const PROJECT_ID_LINE = /^\s*Project ID:\s*(\S+)\s*$/m
-const WORKSPACE_LINE = /^\s*Workspace:\s*(\S+)\s*$/m
-
 /**
- * `fp project remote` has no JSON mode. A linked project prints `Project ID:`
- * and `Workspace:` lines; an unlinked one prints `Project not linked to
- * remote` and exits 1, which parses to null.
+ * `fp project remote --format json` of a linked project: `projectId`,
+ * `workspaceSlug`, `serverUrl` and timestamps. An unlinked project prints
+ * `Project not linked to remote` and exits 1 instead; that is decided on
+ * the exit code, not here.
  */
+const FpProjectRemoteSchema = Schema.Struct({
+  projectId: Schema.String,
+  workspaceSlug: Schema.String,
+})
+
 export const parseFpProjectRemote = (
-  combinedOutput: string,
-): { readonly workspaceSlug: string; readonly projectId: string } | null => {
-  const projectId = PROJECT_ID_LINE.exec(combinedOutput)?.[1]
-  const workspaceSlug = WORKSPACE_LINE.exec(combinedOutput)?.[1]
-  if (
-    projectId === undefined ||
-    projectId === "" ||
-    workspaceSlug === undefined ||
-    workspaceSlug === ""
-  ) {
-    return null
-  }
-  return { workspaceSlug, projectId }
+  stdout: string,
+): { readonly workspaceSlug: string; readonly projectId: string } => {
+  const remote = decodeJson(FpProjectRemoteSchema, stdout)
+  return { workspaceSlug: remote.workspaceSlug, projectId: remote.projectId }
 }
 
 /** `fp --version` prints `0.25.0 (d818046)`. */

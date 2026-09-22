@@ -11,9 +11,11 @@ export type FpServiceError = FpRequestError
 
 /**
  * fp (Fiberplane's local-first tracker) as an Issue Tracker. Every operation
- * runs the fp CLI with the project directory as working directory; fp has no
- * HTTP API for us to call and no credential of its own for the harness to
- * hold (the operator's fp login on the machine is the identity).
+ * runs the fp CLI with the project directory as working directory: the CLI
+ * is fp's supported local interface (its REST mode is for sandboxes and CI
+ * against a linked project, not a documented API), and the harness holds no
+ * credential of its own; the operator's fp login on the machine is the
+ * identity.
  */
 export interface FpServiceShape {
   /**

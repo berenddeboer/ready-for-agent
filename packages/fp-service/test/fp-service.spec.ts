@@ -166,23 +166,31 @@ if [ "$1" = "auth" ]; then
   exit 0
 fi
 if [ "$1" = "project" ] && [ "$2" = "remote" ]; then
-  if [ -f "${fixtures}/unlinked" ]; then
-    printf '%s\\n' "Project not linked to remote" "  Suggestion: No local project is registered here and no remote identity was found."
+  if [ -f "${fixtures}/remote-broken" ]; then
+    printf '%s\\n' "Failed to read .fp/remote.toml: invalid TOML" >&2
     exit 1
   fi
-  printf '%s\\n' "Remote Project" "  Project ID:    proj-test" "  Workspace:     ws-test" "  Server URL:    https://app.fp.dev"
+  if [ -f "${fixtures}/unlinked" ]; then
+    printf '%s\\n' "Project not linked to remote" "  Suggestion: No local project is registered here and no remote identity was found." >&2
+    exit 1
+  fi
+  printf '%s\\n' '{"projectId":"proj-test","workspaceSlug":"ws-test","serverUrl":"https://app.fp.dev","linkedAt":"2026-09-21T06:17:07.152Z","lastSyncedAt":"2026-09-22T11:12:06.121Z"}'
   exit 0
 fi
 if [ -f "${fixtures}/unregistered" ]; then
-  printf '%s\\n' ".fp directory not found" "  Suggestion: Run 'fp init' to initialize a project"
+  printf '%s\\n' ".fp directory not found" "  Suggestion: Run 'fp init' to initialize a project" >&2
   exit 1
 fi
-if [ "$1" = "issue" ] && [ "$2" = "list" ]; then cat "${fixtures}/list.json"; exit 0; fi
+if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
+  if [ -f "${fixtures}/hang-list" ]; then sleep 30; exit 0; fi
+  if [ -f "${fixtures}/list-broken" ]; then printf '%s\\n' "database is locked" >&2; exit 1; fi
+  cat "${fixtures}/list.json"; exit 0
+fi
 if [ "$1" = "issue" ] && [ "$2" = "show" ]; then
   if [ -f "${fixtures}/malformed" ]; then echo "{not json"; exit 0; fi
   f="${fixtures}/show-$3.json"
   if [ -f "$f" ]; then cat "$f"; exit 0; fi
-  printf '%s\\n' "Issue $3 not found" "  Suggestion: Run 'fp issue list' to see available issues"
+  printf '%s\\n' "Issue $3 not found" "  Suggestion: Run 'fp issue list' to see available issues" >&2
   exit 1
 fi
 echo "Unknown arguments: $*" >&2
@@ -392,7 +400,8 @@ describe("FpService.listReadyIssues", () => {
     expect(second).toEqual(first)
     expect(await showCalls()).toBe(0)
 
-    // Removing the label bumps updatedAt in fp; only that Issue is re-read.
+    // A label edit moves updatedAt on fp 0.25.0 (as do parent, dependency
+    // and comment edits; measured 2026-09-22); only that Issue is re-read.
     await rm(logPath, { force: true })
     await writeProject(
       PROJECT.map((issue) =>
@@ -427,6 +436,94 @@ describe("FpService.listReadyIssues", () => {
     )
     expect(issues[0]?.url).toBe(`fp://issue?id=${ROOT_A}`)
     expect(issues[3]?.parent?.url).toBe(`fp://issue?id=${ROOT_A}`)
+  })
+
+  test("linking the project after the harness started takes effect on the next poll", async () => {
+    await marker("unlinked")
+    const service = await run(makeService())
+    const before = await run(service.listReadyIssues(project))
+    expect(before[0]?.url).toBe(`fp://issue?id=${ROOT_A}`)
+    await rm(join(fixturesDirectory, "unlinked"))
+    const after = await run(service.listReadyIssues(project))
+    expect(after[0]?.url).toBe(linkFor(ROOT_A))
+  })
+
+  test("a failing remote lookup is an error, not an unlinked project", async () => {
+    await marker("remote-broken")
+    const failure = await failureOf(
+      withService((service) => service.listReadyIssues(project)),
+    )
+    expect(failure.message).toContain("remote identity")
+    expect(failure.stderr).toContain("invalid TOML")
+  })
+
+  test("parent and blockers come from this poll's list, not from the cached show", async () => {
+    const service = await run(makeService())
+    await run(service.listReadyIssues(project))
+    // The operator adds a dependency C -> B and reparents G under E; fp
+    // moves updatedAt for both, but even a list that did not would carry
+    // the new facts, and the poll must use them.
+    const list = JSON.parse(
+      await readFile(join(fixturesDirectory, "list.json"), "utf8"),
+    ) as {
+      issues: { id: string; parent: string | null; dependencies: string[] }[]
+    }
+    for (const issue of list.issues) {
+      if (issue.id === ROOT_A) {
+        issue.dependencies = [ROOT_E]
+      }
+      if (issue.id === SELECTED_G) {
+        issue.parent = ROOT_E
+      }
+    }
+    await writeFile(join(fixturesDirectory, "list.json"), JSON.stringify(list))
+    await rm(logPath, { force: true })
+    const issues = await run(service.listReadyIssues(project))
+    expect(await showCalls()).toBe(0)
+    const rootA = issues.find((issue) => issue.nativeId === ROOT_A)
+    expect(rootA?.blockedBy.map((blocker) => blocker.nativeId)).toEqual([
+      ROOT_E,
+    ])
+    const selectedG = issues.find((issue) => issue.nativeId === SELECTED_G)
+    expect(selectedG?.parent?.nativeId).toBe(ROOT_E)
+  })
+
+  test("a blocker that was never shown gets its display id from the project prefix", async () => {
+    await writeProject([
+      fixture(ISSUE_ID("h"), {
+        title: "Blocked H",
+        status: "todo",
+        labels: ["ready-for-agent"],
+        dependencies: [DONE_D],
+      }),
+      fixture(DONE_D, { title: "Done D", status: "done" }),
+    ])
+    const issues = await run(
+      withService((service) => service.listReadyIssues(project)),
+    )
+    expect(issues).toHaveLength(1)
+    // D is closed, so it was never inspected; its display id is inferred.
+    expect(await showCalls()).toBe(1)
+    expect(issues[0]?.blockedBy).toEqual([
+      {
+        nativeId: DONE_D,
+        displayId: displayIdOf(DONE_D),
+        url: linkFor(DONE_D),
+      },
+    ])
+  })
+
+  test("forgets the cached show of an Issue that left the project", async () => {
+    const service = await run(makeService())
+    await run(service.listReadyIssues(project))
+    await writeProject(PROJECT.filter((issue) => issue.id !== ROOT_E))
+    await run(service.listReadyIssues(project))
+    // E returns with the same updatedAt: without eviction it would be served
+    // from the cache; with it, E is shown again.
+    await writeProject(PROJECT)
+    await rm(logPath, { force: true })
+    await run(service.listReadyIssues(project))
+    expect(await showCalls()).toBe(1)
   })
 
   test("an Issue that vanishes between list and show is dropped, not fatal", async () => {
@@ -559,6 +656,8 @@ describe("FpService.getIssue", () => {
     )
     expect(failure.message).toContain("the Issue does not exist")
     expect(failure.kind).toBe("issue_not_found")
+    // fp prints its diagnostics on stderr; the error carries them.
+    expect(failure.stderr).toContain("Issue FP-nope not found")
   })
 })
 
@@ -622,5 +721,37 @@ describe("FpService.checkReadiness", () => {
       withService((service) => service.checkReadiness(directory)),
     )
     expect(readiness._tag).toBe("project_not_registered")
+  })
+
+  test("reports an fp that hangs as a CLI error, not as an unregistered project", async () => {
+    await marker("hang-list")
+    const readiness = await run(
+      withService((service) => service.checkReadiness(directory), {
+        timeout: Duration.millis(300),
+      }),
+    )
+    expect(readiness._tag).toBe("cli_error")
+    if (readiness._tag === "cli_error") {
+      expect(readiness.message).toContain("did not finish")
+    }
+  })
+
+  test("reports an fp that fails for another reason as a CLI error with its message", async () => {
+    await marker("list-broken")
+    const readiness = await run(
+      withService((service) => service.checkReadiness(directory)),
+    )
+    expect(readiness).toEqual({
+      _tag: "cli_error",
+      message: expect.stringContaining("database is locked"),
+    })
+  })
+
+  test("reports a broken remote lookup as a CLI error, not as an unlinked project", async () => {
+    await marker("remote-broken")
+    const readiness = await run(
+      withService((service) => service.checkReadiness(directory)),
+    )
+    expect(readiness._tag).toBe("cli_error")
   })
 })

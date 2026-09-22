@@ -28,10 +28,11 @@ export interface FpProjectRemote {
 
 /**
  * Deep link the fp desktop app registers; fp has no web URL for an Issue.
- * The form is Fiberplane's (`fp-deeplink` utility, 2026-09-22): workspace,
- * remote project id and the 32-character issue id. A project that is not
- * linked to a remote has no workspace or project id; the id-only form is a
- * stable identifier for it, not a link the app is known to resolve.
+ * The app (0.19.1) opens the form with workspace slug, remote project id and
+ * the 32-character issue id, and rejects an id-only link with "Issue deep
+ * link missing required params" (its own log, 2026-09-22). A project that is
+ * not linked to a remote has no workspace or project id, so its id-only
+ * form is a stable identifier, not a link the app resolves.
  */
 export const fpIssueUrl = (
   remote: FpProjectRemote | null,
@@ -115,6 +116,9 @@ export interface FpIssueSnapshot {
  * `remote` is null for a project that is not linked to the fp cloud. Such a
  * project works for discovery, but its Issue urls are id-only placeholders
  * the desktop app does not resolve; only linked projects have deep links.
+ * `cli_error` is an fp that runs but could not answer (hung, crashed, or
+ * failed for a reason other than an unregistered directory), which is not
+ * something `fp init` would fix.
  */
 export type FpReadiness =
   | {
@@ -124,3 +128,4 @@ export type FpReadiness =
     }
   | { readonly _tag: "cli_missing"; readonly message: string }
   | { readonly _tag: "project_not_registered"; readonly message: string }
+  | { readonly _tag: "cli_error"; readonly message: string }

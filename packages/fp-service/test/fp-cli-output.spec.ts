@@ -51,7 +51,10 @@ const SHOW_OUTPUT = JSON.stringify({
   status: "todo",
   priority: "high",
   parent: "qnijsazsvqabyjjrappukabhccvtodey",
-  dependencies: ["peomwupiocfoiirgpjolwhfohsczfsde"],
+  dependencies: [
+    "peomwupiocfoiirgpjolwhfohsczfsde",
+    "xfuurawudexxmdrstcwirfnxyohgyzsz",
+  ],
   revisions: [],
   author: "github@hissinkmuller.nl",
   createdAt: "2026-09-20T16:11:26.316Z",
@@ -148,28 +151,29 @@ describe("fp auth status parsing", () => {
   })
 })
 
+// Captured from `fp project remote --format json` on fp 0.25.0, 2026-09-22.
+const PROJECT_REMOTE_OUTPUT = JSON.stringify({
+  projectId: "maj1jnV31wzqoUjtAXNMd",
+  workspaceSlug: "markhm-jcVg",
+  serverUrl: "https://app.fp.dev",
+  linkedAt: "2026-09-21T06:17:07.152Z",
+  lastSyncedAt: "2026-09-22T11:12:06.121Z",
+})
+
 describe("fp project remote parsing", () => {
   test("reads the workspace slug and remote project id of a linked project", () => {
-    expect(
-      parseFpProjectRemote(`Remote Project
-  Project ID:    maj1jnV31wzqoUjtAXNMd
-  Workspace:     markhm-jcVg
-  Server URL:    https://app.fp.dev
-  Linked At:     2026-09-21T06:17:07.152Z
-  Last Synced:   2026-09-21T06:17:13.027Z
-`),
-    ).toEqual({
+    expect(parseFpProjectRemote(PROJECT_REMOTE_OUTPUT)).toEqual({
       workspaceSlug: "markhm-jcVg",
       projectId: "maj1jnV31wzqoUjtAXNMd",
     })
   })
 
-  test("returns null for an unlinked project", () => {
-    expect(
+  test("rejects the unlinked project's prose, which fp prints with exit 1", () => {
+    expect(() =>
       parseFpProjectRemote(
         "Project not linked to remote\n  Suggestion: No local project is registered here and no remote identity was found.\n",
       ),
-    ).toBeNull()
+    ).toThrow()
   })
 })
 

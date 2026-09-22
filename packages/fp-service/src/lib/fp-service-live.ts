@@ -28,6 +28,8 @@ import {
 } from "./types.js"
 
 export const FP_CLI_TIMEOUT = Duration.seconds(60)
+/** Grace after SIGTERM before a timed-out fp is killed outright. */
+export const FP_FORCE_KILL_AFTER = Duration.seconds(5)
 /** `fp issue show` is one process per Issue; eight at once keeps a poll short. */
 export const FP_SHOW_CONCURRENCY = 8
 
@@ -87,9 +89,10 @@ const directoryExists = (path: string): Effect.Effect<boolean> =>
 /**
  * Every operation spawns the fp CLI with the project directory as working
  * directory. Two caches live as long as the service: `show` output keyed by
- * the list's `updatedAt`, so a poll re-reads only what changed, and the
- * project's remote identity for deep links, read once per directory and not
- * re-read if the project is linked later.
+ * the list's `updatedAt`, so a poll re-reads only what changed, pruned to
+ * the Issues the list still has, and the project's remote identity for deep
+ * links, read once per directory once it is known; an unlinked project is
+ * re-checked so linking it takes effect without a restart.
  */
 export const makeFpService = (
   options: MakeFpServiceOptions,
@@ -106,6 +109,9 @@ export const makeFpService = (
     const process = ChildProcess.make(command, [...args], {
       cwd,
       stdin: "ignore",
+      // On timeout the scope's release sends SIGTERM to the process group;
+      // an fp that ignores it is killed rather than holding the poll.
+      forceKillAfter: FP_FORCE_KILL_AFTER,
     })
     const invocation = `${command} ${args.join(" ")}`
     return yield* Effect.scoped(
@@ -220,6 +226,12 @@ export const makeFpService = (
     return yield* parseOrFail(describe, result, parseFpIssueShow)
   })
 
+  /**
+   * The project's remote identity, cached once known. An unlinked project
+   * (exit 1, "Project not linked to remote") reads as null and is not
+   * cached, so linking it later takes effect on the next call; any other
+   * failure is an error, not "unlinked".
+   */
   const projectRemote = Effect.fn("FpService.projectRemote")(function* (
     cwd: string,
   ) {
@@ -227,18 +239,29 @@ export const makeFpService = (
     if (cached !== undefined) {
       return cached
     }
-    const result = yield* runFp(cwd, ["project", "remote"])
-    // An unlinked project exits 1 with "Project not linked to remote".
-    const remote =
-      result.exitCode === 0 ? parseFpProjectRemote(result.stdout) : null
+    const describe = "reading the fp project's remote identity"
+    const result = yield* runFp(cwd, ["project", "remote", "--format", "json"])
+    if (result.exitCode !== 0) {
+      if (/not linked to remote/i.test(combinedOutput(result))) {
+        return null
+      }
+      return yield* requestError(
+        `Failed ${describe}: fp exited with code ${result.exitCode}.`,
+        { ...result, kind: classifyFpFailure(combinedOutput(result)) },
+      )
+    }
+    const remote = yield* parseOrFail(describe, result, parseFpProjectRemote)
     remoteCache.set(cwd, remote)
     return remote
   })
 
   /**
-   * `show`, served from the cache while the list's `updatedAt` matches.
-   * Null when the Issue vanished between list and show; that one Issue is
-   * dropped from the poll instead of failing discovery for every other one.
+   * `show`, served from the cache while the list's `updatedAt` matches. fp
+   * 0.25.0 moves `updatedAt` on every edit that matters here: a label,
+   * parent or dependency change and a comment (measured 2026-09-22), so an
+   * unchanged `updatedAt` means unchanged labels. Null when the Issue
+   * vanished between list and show; that one Issue is dropped from the poll
+   * instead of failing discovery for every other one.
    */
   const showCached = Effect.fn("FpService.showCached")(function* (
     cwd: string,
@@ -295,15 +318,27 @@ export const makeFpService = (
 
     // Labels are only visible through show; inspect each candidate, cached
     // by updatedAt so an unchanged Issue costs nothing on the next poll.
+    // Only the labels, title, body and author come from show; parent and
+    // dependencies are taken from this poll's list entry.
     const shown = yield* Effect.forEach(
       candidates,
       (listed) => showCached(cwd, listed),
       { concurrency: FP_SHOW_CONCURRENCY },
     )
-    const ready = shown.filter(
-      (issue): issue is FpShowIssue =>
-        issue !== null && fpIssueLabels(issue).includes(readyLabel),
-    )
+    // Issues that left the project take their cached show with them.
+    for (const cachedId of [...showCache.keys()]) {
+      if (!byId.has(cachedId)) {
+        showCache.delete(cachedId)
+      }
+    }
+    const ready = candidates.flatMap((listed, index) => {
+      const issue = shown[index]
+      return issue !== undefined &&
+        issue !== null &&
+        fpIssueLabels(issue).includes(readyLabel)
+        ? [{ listed, issue }]
+        : []
+    })
 
     // A reference to an Issue we did not show (a blocker, an absent parent)
     // gets its display id from the cache when we have shown it before, else
@@ -312,13 +347,12 @@ export const makeFpService = (
     // short id (a prefix may itself contain a dash).
     const prefix = (() => {
       const sample = ready[0]
-      const listed = sample === undefined ? undefined : byId.get(sample.id)
-      if (sample === undefined || listed === undefined) {
+      if (sample === undefined) {
         return null
       }
-      const suffix = `-${listed.shortId}`
-      return sample.displayId.endsWith(suffix)
-        ? sample.displayId.slice(0, -suffix.length)
+      const suffix = `-${sample.listed.shortId}`
+      return sample.issue.displayId.endsWith(suffix)
+        ? sample.issue.displayId.slice(0, -suffix.length)
         : null
     })()
     const referenceFor = (nativeId: string): FpIssueReference => {
@@ -333,7 +367,7 @@ export const makeFpService = (
     }
 
     const parentFor = Effect.fn("FpService.parentFor")(function* (
-      issue: FpShowIssue,
+      issue: FpListIssue,
     ) {
       const parentId = issue.parent
       if (parentId === null || parentId === undefined) {
@@ -368,25 +402,25 @@ export const makeFpService = (
     })
 
     const issues: FpIssue[] = []
-    for (const issue of ready) {
-      const { parent, parentPosition } = yield* parentFor(issue)
+    for (const { listed, issue } of ready) {
+      const { parent, parentPosition } = yield* parentFor(listed)
       issues.push({
         nativeId: issue.id,
         displayId: issue.displayId,
         title: issue.title,
         body: issue.description ?? "",
         url: fpIssueUrl(remote, issue.id),
-        createdAt: new Date(issue.createdAt),
-        updatedAt: new Date(issue.updatedAt),
-        status: issue.status,
-        state: stateOf(issue.status),
+        createdAt: new Date(listed.createdAt),
+        updatedAt: new Date(listed.updatedAt),
+        status: listed.status,
+        state: stateOf(listed.status),
         author: issue.author ?? null,
         labels: fpIssueLabels(issue),
         parent,
         parentPosition,
         hasChildren: (childrenOf.get(issue.id)?.length ?? 0) > 0,
         hierarchySupported: true,
-        blockedBy: (issue.dependencies ?? []).map(referenceFor),
+        blockedBy: (listed.dependencies ?? []).map(referenceFor),
       })
     }
     // fp short ids are random letters, so creation order is the meaningful
@@ -450,6 +484,8 @@ export const makeFpService = (
         message: `The fp CLI is not available as \`${command}\`; install it and make sure it is on the PATH.`,
       }
     }
+    // The CLI runs, so a probe that hangs, dies or fails for another reason
+    // is an fp problem, not an unregistered directory.
     const probe = yield* runFp(projectDirectory, [
       "issue",
       "list",
@@ -457,18 +493,42 @@ export const makeFpService = (
       "json",
       "--limit",
       "1",
-    ]).pipe(Effect.orElseSucceed(() => null))
-    if (probe === null || probe.exitCode !== 0) {
+    ]).pipe(
+      Effect.map((result) => ({ _tag: "exited" as const, result })),
+      Effect.catch((error) =>
+        Effect.succeed({ _tag: "failed" as const, error }),
+      ),
+    )
+    if (probe._tag === "failed") {
+      return { _tag: "cli_error" as const, message: probe.error.message }
+    }
+    if (probe.result.exitCode !== 0) {
+      if (
+        classifyFpFailure(combinedOutput(probe.result)) ===
+        "project_not_registered"
+      ) {
+        return {
+          _tag: "project_not_registered" as const,
+          message: `${projectDirectory} is not a registered fp project (run \`fp init\` there, or configure the fp project directory).`,
+        }
+      }
       return {
-        _tag: "project_not_registered" as const,
-        message: `${projectDirectory} is not a registered fp project (run \`fp init\` there, or configure the fp project directory).`,
+        _tag: "cli_error" as const,
+        message: `fp could not list issues in ${projectDirectory} (exit code ${probe.result.exitCode}): ${combinedOutput(probe.result).trim()}`,
       }
     }
-    // Readiness never fails; a remote lookup that errors reads as unlinked.
+    // Readiness never fails; a remote lookup that errors is reported as such,
+    // not as an unlinked project.
     const remote = yield* projectRemote(projectDirectory).pipe(
-      Effect.orElseSucceed(() => null),
+      Effect.map((value) => ({ _tag: "known" as const, value })),
+      Effect.catch((error) =>
+        Effect.succeed({ _tag: "failed" as const, message: error.message }),
+      ),
     )
-    return { _tag: "ready" as const, version, remote }
+    if (remote._tag === "failed") {
+      return { _tag: "cli_error" as const, message: remote.message }
+    }
+    return { _tag: "ready" as const, version, remote: remote.value }
   })
 
   return {
