@@ -119,9 +119,9 @@
         "{projectRoot}/scripts/update-usage-docs.ts",
         "{workspaceRoot}/scripts/run-pinned-usage.sh",
         "{workspaceRoot}/mise.toml",
-        "{workspaceRoot}/README.md"
+        "{workspaceRoot}/docs/command-reference.md"
       ],
-      "outputs": ["{workspaceRoot}/README.md"],
+      "outputs": ["{workspaceRoot}/docs/command-reference.md"],
       "cache": false
     },
     "check-usage-docs": {
@@ -135,7 +135,7 @@
         "{projectRoot}/scripts/update-usage-docs.ts",
         "{workspaceRoot}/scripts/run-pinned-usage.sh",
         "{workspaceRoot}/mise.toml",
-        "{workspaceRoot}/README.md"
+        "{workspaceRoot}/docs/command-reference.md"
       ],
       "cache": true
     },
@@ -168,7 +168,7 @@
         "{projectRoot}/src/generate-usage-completions.test.ts",
         "{workspaceRoot}/scripts/run-pinned-usage.sh",
         "{workspaceRoot}/mise.toml",
-        "{workspaceRoot}/README.md",
+        "{workspaceRoot}/docs/command-reference.md",
         "{workspaceRoot}/CONTRIBUTING.md"
       ],
       "cache": true
@@ -189,7 +189,7 @@
         "{projectRoot}/src/generate-usage-completions.test.ts",
         "{workspaceRoot}/scripts/run-pinned-usage.sh",
         "{workspaceRoot}/mise.toml",
-        "{workspaceRoot}/README.md",
+        "{workspaceRoot}/docs/command-reference.md",
         "{workspaceRoot}/CONTRIBUTING.md"
       ],
       "cache": true
@@ -218,6 +218,7 @@
         "default",
         "^production",
         "{workspaceRoot}/README.md",
+        "{workspaceRoot}/docs/command-reference.md",
         "{workspaceRoot}/CONTRIBUTING.md"
       ],
       "cache": true,

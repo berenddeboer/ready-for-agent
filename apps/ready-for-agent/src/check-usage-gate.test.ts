@@ -93,20 +93,20 @@ describe("ready-for-agent Usage quality gate", () => {
       expect.arrayContaining(["generate-embed"]),
     )
 
-    expect(inputText(gate)).toContain("README.md")
+    expect(inputText(gate)).toContain("docs/command-reference.md")
     expect(inputText(gate)).toContain("ready-for-agent.usage.kdl")
     expect(inputText(gate)).toContain("run-pinned-usage.sh")
     expect(inputText(gate)).toContain("mise.toml")
     expect(inputText(gate)).toContain("CONTRIBUTING.md")
 
     expect(inputText(project.targets["check-usage-docs"])).toContain(
-      "README.md",
+      "docs/command-reference.md",
     )
     expect(inputText(project.targets["check-usage-completions"])).toContain(
       "CONTRIBUTING.md",
     )
     expect(project.targets["check-usage-docs"]?.outputs ?? []).not.toContain(
-      "{workspaceRoot}/README.md",
+      "{workspaceRoot}/docs/command-reference.md",
     )
   })
 

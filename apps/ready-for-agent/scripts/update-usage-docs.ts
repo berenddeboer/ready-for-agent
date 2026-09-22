@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(appRoot, "../..")
-const defaultReadmePath = join(workspaceRoot, "README.md")
+const defaultReadmePath = join(workspaceRoot, "docs", "command-reference.md")
 const usageSpecPath = join(appRoot, "ready-for-agent.usage.kdl")
 const pinnedUsage = join(workspaceRoot, "scripts", "run-pinned-usage.sh")
 
@@ -70,7 +70,7 @@ const injectManagedSection = (readme: string, generated: string): string => {
   const bounds = markerBounds(readme)
   if (bounds === undefined) {
     throw new Error(
-      `README is missing ${USAGE_START_MARKER} / ${USAGE_END_MARKER} markers`,
+      `Command reference is missing ${USAGE_START_MARKER} / ${USAGE_END_MARKER} markers`,
     )
   }
   const section = normalizeGeneratedMarkdown(generated)
@@ -134,7 +134,7 @@ const checkMessage = (result: CheckUsageDocsResult): string => {
     case "nondeterministic":
       return "Generated command reference is nondeterministic."
     case "missing-markers":
-      return `README is missing ${USAGE_START_MARKER} / ${USAGE_END_MARKER} markers`
+      return `Command reference is missing ${USAGE_START_MARKER} / ${USAGE_END_MARKER} markers`
     default: {
       const _exhaustive: never = result
       return _exhaustive

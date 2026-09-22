@@ -1,6 +1,6 @@
 /**
  * Process-level command-reference generation: pinned Usage markdown,
- * README managed-section update/check, and public-doc inventory.
+ * Command-reference managed-section update/check, and public-doc inventory.
  */
 
 import { spawnSync } from "node:child_process"
@@ -20,6 +20,7 @@ const workspaceRoot = resolve(appRoot, "../..")
 const usageSpecPath = join(appRoot, "ready-for-agent.usage.kdl")
 const pinnedUsage = join(workspaceRoot, "scripts", "run-pinned-usage.sh")
 const publicReadmePath = join(workspaceRoot, "README.md")
+const commandReferencePath = join(workspaceRoot, "docs", "command-reference.md")
 
 const PUBLIC_COMMANDS = [
   "start",
@@ -176,15 +177,19 @@ describe("operator CLI command-reference documentation", () => {
     }
   })
 
-  test("checked-in README command reference covers the public operator CLI", () => {
+  test("checked-in command reference covers the public operator CLI", () => {
     const readme = readFileSync(publicReadmePath, "utf8")
-    const managed = extractManagedSection(readme)
+    const managed = extractManagedSection(
+      readFileSync(commandReferencePath, "utf8"),
+    )
 
     expect(readme).toContain("## Quick start")
     expect(readme).toContain("## Requirements")
     expect(readme).toContain("## Features")
     expect(readme).toContain("## How it works")
     expect(readme).toContain("## Configuration")
+    expect(readme).toContain("[full CLI reference](docs/command-reference.md)")
+    expect(readme).not.toContain(USAGE_START_MARKER)
     expect(managed).toBe(runPinnedMarkdown())
 
     expect(managed).toContain("# `ready-for-agent`")
@@ -255,7 +260,7 @@ describe("operator CLI command-reference documentation", () => {
 
   test("checked-in command reference omits hidden metadata and internal helpers", () => {
     const managed = extractManagedSection(
-      readFileSync(publicReadmePath, "utf8"),
+      readFileSync(commandReferencePath, "utf8"),
     )
     expect(managed).not.toContain("--usage")
     expect(managed).not.toContain("--no-no-open")
@@ -264,8 +269,8 @@ describe("operator CLI command-reference documentation", () => {
     }
   })
 
-  test("check CLI exits 0 without rewriting the public README", () => {
-    const before = readFileSync(publicReadmePath)
+  test("check CLI exits 0 without rewriting the command reference", () => {
+    const before = readFileSync(commandReferencePath)
     const result = spawnSync(
       "bun",
       [
@@ -280,7 +285,7 @@ describe("operator CLI command-reference documentation", () => {
       },
     )
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0)
-    expect(readFileSync(publicReadmePath).equals(before)).toBe(true)
+    expect(readFileSync(commandReferencePath).equals(before)).toBe(true)
   })
 
   test("Nx update and check targets keep generation explicit and non-writing", async () => {
@@ -306,15 +311,21 @@ describe("operator CLI command-reference documentation", () => {
       "scripts/update-usage-docs.ts",
     )
     expect(update?.options?.command ?? update?.command).not.toContain("--check")
-    expect(update?.outputs).toContain("{workspaceRoot}/README.md")
+    expect(update?.outputs).toContain(
+      "{workspaceRoot}/docs/command-reference.md",
+    )
     expect(update?.cache).toBe(false)
 
     expect(check?.options?.command ?? check?.command).toContain(
       "scripts/update-usage-docs.ts",
     )
     expect(check?.options?.command ?? check?.command).toContain("--check")
-    expect(check?.outputs ?? []).not.toContain("{workspaceRoot}/README.md")
-    expect(JSON.stringify(check?.inputs ?? [])).toContain("README.md")
+    expect(check?.outputs ?? []).not.toContain(
+      "{workspaceRoot}/docs/command-reference.md",
+    )
+    expect(JSON.stringify(check?.inputs ?? [])).toContain(
+      "docs/command-reference.md",
+    )
     expect(JSON.stringify(check?.inputs ?? [])).toContain(
       "ready-for-agent.usage.kdl",
     )
