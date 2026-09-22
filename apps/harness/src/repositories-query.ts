@@ -10,10 +10,7 @@ import { type Forge, isForge } from "@ready-for-agent/lifecycle-model"
 import type { RepositoryCiGateStatus } from "./ci-gate-status-label.js"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
 
-export {
-  type RepositoryCiGateStatus,
-  ciGateStatusLabel,
-} from "./ci-gate-status-label.js"
+export { ciGateStatusLabel } from "./ci-gate-status-label.js"
 
 const graphql = createHarnessGraphqlClient({ batch: true })
 
