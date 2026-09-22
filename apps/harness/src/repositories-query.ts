@@ -7,7 +7,10 @@
  */
 
 import { type Forge, isForge } from "@ready-for-agent/lifecycle-model"
+import type { RepositoryCiGateStatus } from "./ci-gate-status-label.js"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
+
+export { ciGateStatusLabel } from "./ci-gate-status-label.js"
 
 const graphql = createHarnessGraphqlClient({ batch: true })
 
@@ -29,19 +32,6 @@ const FORGE_DISPLAY_NAMES: Record<Forge, string> = {
 export const forgeDisplayName = (forge: Forge): string =>
   FORGE_DISPLAY_NAMES[forge]
 
-export const ciGateStatusLabel = (status: RepositoryCiGateStatus): string => {
-  switch (status) {
-    case "DISABLED":
-      return "Disabled"
-    case "OPEN":
-      return "Open"
-    case "CLOSED":
-      return "Closed"
-    case "DEGRADED":
-      return "Degraded"
-  }
-}
-
 export const decodeForge = (value: unknown): Forge => {
   if (isForge(value)) {
     return value
@@ -55,8 +45,6 @@ type CiGateDefinition = {
   kind: string
   diagnosticMetadata: string | null
 }
-
-export type RepositoryCiGateStatus = "DISABLED" | "OPEN" | "CLOSED" | "DEGRADED"
 
 type RepositoryCiGate = {
   enabled: boolean

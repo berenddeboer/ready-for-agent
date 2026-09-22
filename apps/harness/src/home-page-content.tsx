@@ -109,6 +109,7 @@ import {
   forgeDisplayName,
   repositoriesQuery,
 } from "./repositories-query.js"
+import { RepositoryCiGateCardDetails } from "./repository-ci-gate-card.js"
 import {
   RepositorySettingsCiGateSection,
   ciGateCatalogViewFromQuery,
@@ -3009,6 +3010,7 @@ function RepositoryCard({
                 selectedIdentities={selectedCiGateIdentities}
                 onSelectedIdentitiesChange={setSelectedCiGateIdentities}
                 status={{
+                  disabled: repository.ciGate.status === "DISABLED",
                   statusLabel: ciGateStatusLabel(repository.ciGate.status),
                   diagnostic: repository.ciGate.diagnostic,
                   activeIncidentSummary:
@@ -3145,59 +3147,7 @@ function RepositoryCard({
               <div className={ui.repoMetaRow}>
                 <dt>CI Gate</dt>
                 <dd>
-                  {ciGateStatusLabel(repository.ciGate.status)}
-                  {repository.ciGate.diagnostic !== null ? (
-                    <span className={ui.dialogFieldHint}>
-                      {repository.ciGate.diagnostic}
-                    </span>
-                  ) : null}
-                  {repository.ciGate.observedAt !== null ? (
-                    <span className={ui.dialogFieldHint}>
-                      Observed {repository.ciGate.observedAt}
-                      {repository.ciGate.defaultBranch !== null
-                        ? ` on ${repository.ciGate.defaultBranch}`
-                        : ""}
-                    </span>
-                  ) : null}
-                  {repository.ciGate.definitions.map((definition) => (
-                    <span
-                      key={definition.identity}
-                      className={ui.dialogFieldHint}
-                    >
-                      {definition.displayLabel}
-                      {definition.latestRun?.rawConclusion !== null &&
-                      definition.latestRun?.rawConclusion !== undefined
-                        ? ` · ${definition.latestRun.rawConclusion}`
-                        : definition.diagnostic !== null
-                          ? ` · ${definition.diagnostic}`
-                          : ""}
-                      {definition.latestRun?.htmlUrl !== null &&
-                      definition.latestRun?.htmlUrl !== undefined ? (
-                        <>
-                          {" "}
-                          <a
-                            href={definition.latestRun.htmlUrl}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            View run
-                          </a>
-                        </>
-                      ) : null}
-                    </span>
-                  ))}
-                  {repository.ciGate.activeIncident !== null ? (
-                    <span className={ui.dialogFieldHint}>
-                      Active incident:{" "}
-                      {repository.ciGate.activeIncident.summary}
-                    </span>
-                  ) : null}
-                  {repository.ciGate.latestResolvedIncident !== null ? (
-                    <span className={ui.dialogFieldHint}>
-                      Last resolved:{" "}
-                      {repository.ciGate.latestResolvedIncident.summary}
-                    </span>
-                  ) : null}
+                  <RepositoryCiGateCardDetails ciGate={repository.ciGate} />
                 </dd>
               </div>
             </dl>
