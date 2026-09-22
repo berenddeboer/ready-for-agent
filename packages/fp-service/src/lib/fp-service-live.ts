@@ -22,7 +22,6 @@ import {
   type FpIssueReference,
   type FpIssueSnapshot,
   type FpProjectOptions,
-  type FpProjectRemote,
   fpIssueState,
   fpIssueUrl,
 } from "./types.js"
@@ -88,11 +87,10 @@ const directoryExists = (path: string): Effect.Effect<boolean> =>
 
 /**
  * Every operation spawns the fp CLI with the project directory as working
- * directory. Two caches live as long as the service: `show` output keyed by
+ * directory. One cache lives as long as the service: `show` output keyed by
  * the list's `updatedAt`, so a poll re-reads only what changed, pruned to
- * the Issues the list still has, and the project's remote identity for deep
- * links, read once per directory once it is known; an unlinked project is
- * re-checked so linking it takes effect without a restart.
+ * the Issues the list still has. The project's remote identity is read on
+ * every poll so a link change takes effect without a restart.
  */
 export const makeFpService = (
   options: MakeFpServiceOptions,
@@ -100,7 +98,6 @@ export const makeFpService = (
   const command = options.command ?? FP_CLI_COMMAND
   const timeout = options.timeout ?? FP_CLI_TIMEOUT
   const showCache = new Map<string, ShowCacheEntry>()
-  const remoteCache = new Map<string, FpProjectRemote | null>()
 
   const runFp = Effect.fn("FpService.runFp")(function* (
     cwd: string,
@@ -227,18 +224,15 @@ export const makeFpService = (
   })
 
   /**
-   * The project's remote identity, cached once known. An unlinked project
-   * (exit 1, "Project not linked to remote") reads as null and is not
-   * cached, so linking it later takes effect on the next call; any other
-   * failure is an error, not "unlinked".
+   * The project's remote identity, read on every call: one short process
+   * per poll, so linking, unlinking or relinking the project takes effect
+   * on the next poll without a restart. An unlinked project (exit 1,
+   * "Project not linked to remote") reads as null; any other failure is an
+   * error, not "unlinked".
    */
   const projectRemote = Effect.fn("FpService.projectRemote")(function* (
     cwd: string,
   ) {
-    const cached = remoteCache.get(cwd)
-    if (cached !== undefined) {
-      return cached
-    }
     const describe = "reading the fp project's remote identity"
     const result = yield* runFp(cwd, ["project", "remote", "--format", "json"])
     if (result.exitCode !== 0) {
@@ -250,9 +244,7 @@ export const makeFpService = (
         { ...result, kind: classifyFpFailure(combinedOutput(result)) },
       )
     }
-    const remote = yield* parseOrFail(describe, result, parseFpProjectRemote)
-    remoteCache.set(cwd, remote)
-    return remote
+    return yield* parseOrFail(describe, result, parseFpProjectRemote)
   })
 
   /**

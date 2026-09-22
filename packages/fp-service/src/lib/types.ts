@@ -28,11 +28,11 @@ export interface FpProjectRemote {
 
 /**
  * Deep link the fp desktop app registers; fp has no web URL for an Issue.
- * The app (0.19.1) opens the form with workspace slug, remote project id and
- * the 32-character issue id, and rejects an id-only link with "Issue deep
- * link missing required params" (its own log, 2026-09-22). A project that is
- * not linked to a remote has no workspace or project id, so its id-only
- * form is a stable identifier, not a link the app resolves.
+ * The app's handler (0.19.1) requires exactly the workspace slug, the remote
+ * project id and the 32-character issue id, and logs "Issue deep link
+ * missing required params" for an id-only link (observed 2026-09-22). A
+ * project that is not linked to a remote has no workspace or project id, so
+ * its id-only form is a stable identifier, not a link the app resolves.
  */
 export const fpIssueUrl = (
   remote: FpProjectRemote | null,

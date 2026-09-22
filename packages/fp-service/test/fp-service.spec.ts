@@ -419,14 +419,17 @@ describe("FpService.listReadyIssues", () => {
     expect(await showCalls()).toBe(1)
   })
 
-  test("reads the remote identity once per project, not once per poll", async () => {
+  test("re-reads the remote identity every poll, so unlinking takes effect without a restart", async () => {
     const service = await run(makeService())
-    await run(service.listReadyIssues(project))
-    await run(service.listReadyIssues(project))
+    const before = await run(service.listReadyIssues(project))
+    expect(before[0]?.url).toBe(linkFor(ROOT_A))
+    await marker("unlinked")
+    const after = await run(service.listReadyIssues(project))
+    expect(after[0]?.url).toBe(`fp://issue?id=${ROOT_A}`)
     const remoteCalls = (await calls()).filter((line) =>
       line.startsWith("project remote"),
     )
-    expect(remoteCalls).toHaveLength(1)
+    expect(remoteCalls).toHaveLength(2)
   })
 
   test("links by id only when the project is not linked to a remote", async () => {
