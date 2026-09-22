@@ -2152,6 +2152,27 @@ describe("DbService", () => {
         }),
       ))
 
+    it("rejects fp until its adapter exists, leaving the Repository unchanged", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+
+          const error = yield* Effect.flip(
+            db.updateRepositorySettings(
+              settingsInput(repo.id, { issueTracker: "fp" }),
+            ),
+          )
+
+          expect(error).toBeInstanceOf(InvalidRepositorySettingsError)
+          expect(error).toMatchObject({ field: "issueTracker" })
+          const unchanged = (yield* db.listRepositories).find(
+            (r) => r.id === repo.id,
+          )
+          expect(unchanged?.issueTracker).toBe("github")
+        }),
+      ))
+
     it("rejects Linear without a mapped project or team statuses", () =>
       runTest(
         Effect.gen(function* () {

@@ -4,7 +4,6 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 import { ulid } from "ulidx"
 import { isSelectableAgentBackendId } from "@ready-for-agent/agent-backend"
 import {
-  isForge,
   isIssueTracker,
   persistedIssueIdentity,
 } from "@ready-for-agent/lifecycle-model"
@@ -1439,23 +1438,42 @@ export const DbServiceLive = Layer.effect(
               (existing.issueTracker === existing.forge
                 ? nextForge
                 : existing.issueTracker)
-            if (nextIssueTracker === "linear" && nextForge !== "github") {
-              return yield* new InvalidRepositorySettingsError({
-                field: "issueTracker",
-                message:
-                  "Linear is available only for GitHub-hosted Repositories",
-              })
-            }
-            if (
-              isForge(nextIssueTracker) &&
-              nextIssueTracker !== nextForge &&
-              nextIssueTracker !== existing.issueTracker
-            ) {
-              return yield* new InvalidRepositorySettingsError({
-                field: "issueTracker",
-                message:
-                  "Forge-hosted Issue Trackers must match the Repository hosting Forge",
-              })
+            // Every Issue Tracker kind decides here whether it may be
+            // selected; a kind added to the vocabulary without a decision
+            // fails compilation instead of being persisted unimplemented.
+            switch (nextIssueTracker) {
+              case "github":
+              case "gitlab":
+              case "azure-devops":
+                if (
+                  nextIssueTracker !== nextForge &&
+                  nextIssueTracker !== existing.issueTracker
+                ) {
+                  return yield* new InvalidRepositorySettingsError({
+                    field: "issueTracker",
+                    message:
+                      "Forge-hosted Issue Trackers must match the Repository hosting Forge",
+                  })
+                }
+                break
+              case "linear":
+                if (nextForge !== "github") {
+                  return yield* new InvalidRepositorySettingsError({
+                    field: "issueTracker",
+                    message:
+                      "Linear is available only for GitHub-hosted Repositories",
+                  })
+                }
+                break
+              case "fp":
+                return yield* new InvalidRepositorySettingsError({
+                  field: "issueTracker",
+                  message: "fp is not yet available as an Issue Tracker",
+                })
+              default: {
+                const _exhaustive: never = nextIssueTracker
+                return _exhaustive
+              }
             }
             const existingLinearWorkflowStatuses = parseLinearWorkflowStatuses(
               existing.linearWorkflowStatuses,

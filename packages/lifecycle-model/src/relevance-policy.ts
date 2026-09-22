@@ -62,9 +62,10 @@ export const relevancePolicyForForge = (forge: Forge): ForgeRelevancePolicy => {
 }
 
 /**
- * Linear has native parent/child hierarchy like GitHub. Competing GitHub PRs
- * are out of scope for Linear discovery, so draft closing-PR treatment is
- * inactive.
+ * Linear and fp have native parent/child hierarchy like GitHub. Competing
+ * GitHub PRs are out of scope for their discovery, so draft closing-PR
+ * treatment is inactive. A new tracker-only kind fails compilation here
+ * instead of inheriting these facts.
  */
 export const relevancePolicyForIssueTracker = (
   tracker: IssueTracker,
@@ -72,8 +73,16 @@ export const relevancePolicyForIssueTracker = (
   if (isForge(tracker)) {
     return relevancePolicyForForge(tracker)
   }
-  return {
-    hierarchyObservation: { kind: "required" },
-    openDraftClosingPullRequest: { kind: "inactive" },
+  switch (tracker) {
+    case "linear":
+    case "fp":
+      return {
+        hierarchyObservation: { kind: "required" },
+        openDraftClosingPullRequest: { kind: "inactive" },
+      }
+    default: {
+      const _exhaustive: never = tracker
+      return _exhaustive
+    }
   }
 }
