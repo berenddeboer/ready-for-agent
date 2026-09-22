@@ -1,9 +1,8 @@
+import { CI_GATE_DISABLED_LABEL } from "./ci-gate-status-label.js"
 import { cx, ui } from "./ui.js"
 
 export const CI_GATE_DEFINITIONS_LOADING_LABEL = "Loading CI Gate Definitions…"
-export const CI_GATE_DISABLED_HINT =
-  "No CI Gate Definitions selected — Repository CI Gate is disabled."
-const CI_GATE_SELECTED_HINT =
+export const CI_GATE_EMPTY_SELECTION_HINT =
   "Selected definitions watch default-branch CI. Empty selection disables the Repository CI Gate."
 
 export type CiGateDefinitionChoice = {
@@ -26,6 +25,7 @@ export type CiGateCatalogView =
     }
 
 type RepositoryCiGateStatusView = {
+  readonly disabled: boolean
   readonly statusLabel: string
   readonly diagnostic: string | null
   readonly activeIncidentSummary: string | null
@@ -238,14 +238,13 @@ export function RepositorySettingsCiGateSection({
         selectedIdentities={selectedIdentities}
         onToggle={onToggle}
       />
+      <span className={ui.dialogFieldHint}>{CI_GATE_EMPTY_SELECTION_HINT}</span>
       <span className={ui.dialogFieldHint}>
-        {selectedIdentities.length === 0
-          ? CI_GATE_DISABLED_HINT
-          : CI_GATE_SELECTED_HINT}
-      </span>
-      <span className={ui.dialogFieldHint}>
-        Current status: {status.statusLabel}
-        {status.diagnostic !== null ? ` — ${status.diagnostic}` : ""}
+        Current status:{" "}
+        {status.disabled ? CI_GATE_DISABLED_LABEL : status.statusLabel}
+        {!status.disabled && status.diagnostic !== null
+          ? ` — ${status.diagnostic}`
+          : ""}
       </span>
       {status.activeIncidentSummary !== null ? (
         <span className={ui.dialogFieldHint}>

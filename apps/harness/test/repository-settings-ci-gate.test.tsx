@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { renderToStaticMarkup } from "react-dom/server"
 import {
   CI_GATE_DEFINITIONS_LOADING_LABEL,
-  CI_GATE_DISABLED_HINT,
+  CI_GATE_EMPTY_SELECTION_HINT,
   RepositorySettingsCiGateSection,
   ciGateCatalogViewFromQuery,
 } from "../src/repository-settings-ci-gate.js"
@@ -46,7 +46,11 @@ const lintDefinition = {
   diagnosticMetadata: null,
 }
 
+const DISABLED_GATE_SENTENCE =
+  "No CI Gate Definitions selected — Repository CI Gate is disabled."
+
 const baseStatus = {
+  disabled: false,
   statusLabel: "Open",
   diagnostic: "Repository CI Gate is open.",
   activeIncidentSummary: null,
@@ -125,10 +129,20 @@ describe("Repository settings CI Gate Definitions", () => {
   test("shows persisted selections and empty default on the Repository card", () => {
     const source = indexSource()
     expect(source).toContain("<dt>CI Gate</dt>")
-    expect(source).toContain("ciGateStatusLabel(repository.ciGate.status)")
-    expect(source).toContain("repository.ciGate.activeIncident")
-    expect(source).toContain("repository.ciGate.latestResolvedIncident")
-    expect(source).toContain("View run")
+    expect(source).toContain("<RepositoryCiGateCardDetails")
+    expect(source).toContain("ciGate={repository.ciGate}")
+    expect(source).toContain(
+      'disabled: repository.ciGate.status === "DISABLED"',
+    )
+    const card = readFileSync(
+      join(import.meta.dir, "../src/repository-ci-gate-card.tsx"),
+      "utf8",
+    )
+    expect(card).toContain('ciGate.status === "DISABLED"')
+    expect(card).toContain("ciGate.activeIncident")
+    expect(card).toContain("ciGate.latestResolvedIncident")
+    expect(card).toContain("View run")
+    expect(card).toContain("Observed")
   })
 
   test("repositories query asks for selected CI Gate Definitions and gate projection", () => {
@@ -153,7 +167,8 @@ describe("Repository settings CI Gate catalog presentation", () => {
     expect(html).toContain("CI Gate")
     expect(html).not.toContain('name="selectedCiGateDefinitionIdentities"')
     expect(html).not.toContain("Ready for Agent CI")
-    expect(html).toContain(CI_GATE_DISABLED_HINT)
+    expect(html).toContain(CI_GATE_EMPTY_SELECTION_HINT)
+    expect(html).not.toContain(DISABLED_GATE_SENTENCE)
   })
 
   test("pending discovery keeps saved selections instead of clearing them", () => {
@@ -162,10 +177,8 @@ describe("Repository settings CI Gate catalog presentation", () => {
       selectedIdentities: [ciDefinition.identity],
     })
     expect(html).toContain(CI_GATE_DEFINITIONS_LOADING_LABEL)
-    expect(html).toContain(
-      "Selected definitions watch default-branch CI. Empty selection disables the Repository CI Gate.",
-    )
-    expect(html).not.toContain(CI_GATE_DISABLED_HINT)
+    expect(html).toContain(CI_GATE_EMPTY_SELECTION_HINT)
+    expect(html).not.toContain(DISABLED_GATE_SENTENCE)
   })
 
   test("resolved names replace the local loading indication", () => {
@@ -232,6 +245,7 @@ describe("Repository settings CI Gate catalog presentation", () => {
     const html = renderSection({
       catalog: { kind: "pending" },
       status: {
+        disabled: false,
         statusLabel: "Closed",
         diagnostic: "Repository CI Gate is closed: CI failed.",
         activeIncidentSummary: "CI Gate closed: CI failed.",
@@ -245,6 +259,45 @@ describe("Repository settings CI Gate catalog presentation", () => {
     expect(html).toContain(
       "Last resolved: CI Gate recovered: newer success on CI.",
     )
+  })
+
+  test("a disabled gate status line does not repeat the long sentence or a timestamp", () => {
+    const html = renderSection({
+      selectedIdentities: [],
+      status: {
+        disabled: true,
+        statusLabel: "Disabled",
+        diagnostic: `${DISABLED_GATE_SENTENCE} Observed 2026-09-22T02:21:07.785Z on main`,
+        activeIncidentSummary: "CI Gate closed: CI failed.",
+        latestResolvedIncidentSummary:
+          "CI Gate recovered: CI Gate selection cleared.",
+      },
+    })
+    expect(html).toContain("Current status: CI disabled")
+    expect(html).not.toContain(DISABLED_GATE_SENTENCE)
+    expect(html).not.toContain("Observed")
+    expect(html).not.toContain("2026-09-22T02:21:07.785Z")
+    expect(html).toContain("Active incident: CI Gate closed: CI failed.")
+    expect(html).toContain(
+      "Last resolved: CI Gate recovered: CI Gate selection cleared.",
+    )
+    expect(html).toContain(CI_GATE_EMPTY_SELECTION_HINT)
+  })
+
+  test("an enabled gate keeps its current status while the selection draft is empty", () => {
+    const html = renderSection({
+      selectedIdentities: [],
+      status: {
+        disabled: false,
+        statusLabel: "Closed",
+        diagnostic: "Repository CI Gate is closed: CI failed.",
+        activeIncidentSummary: null,
+        latestResolvedIncidentSummary: null,
+      },
+    })
+    expect(html).toContain("Current status: Closed")
+    expect(html).toContain("Repository CI Gate is closed: CI failed.")
+    expect(html).not.toContain("Current status: CI disabled")
   })
 
   test("ciGateCatalogViewFromQuery keeps saved selections out of the pending view", () => {
