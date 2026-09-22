@@ -2165,7 +2165,10 @@ describe("DbService", () => {
           )
 
           expect(error).toBeInstanceOf(InvalidRepositorySettingsError)
-          expect(error).toMatchObject({ field: "issueTracker" })
+          expect(error).toMatchObject({
+            field: "issueTracker",
+            message: "fp is not yet available as an Issue Tracker",
+          })
           const unchanged = (yield* db.listRepositories).find(
             (r) => r.id === repo.id,
           )
