@@ -4,6 +4,8 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 import { ulid } from "ulidx"
 import { isSelectableAgentBackendId } from "@ready-for-agent/agent-backend"
 import {
+  behaviourNotImplemented,
+  describeIssueTracker,
   isIssueTracker,
   persistedIssueIdentity,
 } from "@ready-for-agent/lifecycle-model"
@@ -1438,40 +1440,37 @@ export const DbServiceLive = Layer.effect(
               (existing.issueTracker === existing.forge
                 ? nextForge
                 : existing.issueTracker)
-            // Every Issue Tracker kind decides here whether it may be
-            // selected; a kind added to the vocabulary without a decision
-            // fails compilation instead of being persisted unimplemented.
-            switch (nextIssueTracker) {
-              case "github":
-              case "gitlab":
-              case "azure-devops":
+            // Each Issue Tracker kind's description decides whether it may
+            // be selected for this hosting Forge.
+            const trackerDescription = describeIssueTracker(nextIssueTracker)
+            const availability = trackerDescription.availability
+            switch (availability.kind) {
+              case "hosting_forge":
                 if (
                   nextIssueTracker !== nextForge &&
                   nextIssueTracker !== existing.issueTracker
                 ) {
                   return yield* new InvalidRepositorySettingsError({
                     field: "issueTracker",
-                    message:
-                      "Forge-hosted Issue Trackers must match the Repository hosting Forge",
+                    message: availability.mismatchMessage,
                   })
                 }
                 break
-              case "linear":
-                if (nextForge !== "github") {
+              case "forges":
+                if (!availability.forges.includes(nextForge)) {
                   return yield* new InvalidRepositorySettingsError({
                     field: "issueTracker",
-                    message:
-                      "Linear is available only for GitHub-hosted Repositories",
+                    message: availability.unavailableMessage,
                   })
                 }
                 break
-              case "fp":
+              case "not_selectable":
                 return yield* new InvalidRepositorySettingsError({
                   field: "issueTracker",
-                  message: "fp is not yet available as an Issue Tracker",
+                  message: availability.message,
                 })
               default: {
-                const _exhaustive: never = nextIssueTracker
+                const _exhaustive: never = availability
                 return _exhaustive
               }
             }
@@ -1496,12 +1495,16 @@ export const DbServiceLive = Layer.effect(
               input.linearWorkflowStatuses === undefined
                 ? existingLinearWorkflowStatuses
                 : input.linearWorkflowStatuses
-            if (nextIssueTracker !== "linear") {
+            const settings = trackerDescription.settings
+            if (settings.kind === "not_implemented") {
+              return behaviourNotImplemented(nextIssueTracker, "settings")
+            }
+            if (settings.kind !== "linear_project_mapping") {
               nextLinearProjectId = null
               nextLinearProjectName = null
               nextLinearWorkflowStatuses = []
             }
-            if (nextIssueTracker === "linear") {
+            if (settings.kind === "linear_project_mapping") {
               if (nextLinearProjectId === null) {
                 return yield* new InvalidRepositorySettingsError({
                   field: "linearProjectId",
