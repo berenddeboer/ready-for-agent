@@ -201,6 +201,28 @@ export const describeIssueTracker = (
   tracker: IssueTracker,
 ): IssueTrackerDescription => ISSUE_TRACKER_DESCRIPTIONS[tracker]
 
+/**
+ * Why a parent Issue of this Issue Tracker kind may not start Implement All,
+ * or null when it may.
+ */
+export const parentImplementAllRefusal = (
+  tracker: IssueTracker,
+): string | null => {
+  const implementAll = describeIssueTracker(tracker).parentImplementAll
+  switch (implementAll.kind) {
+    case "available":
+      return null
+    case "unavailable":
+      return implementAll.message
+    case "not_implemented":
+      return behaviourNotImplemented(tracker, "parent Implement All")
+    default: {
+      const _exhaustive: never = implementAll
+      return _exhaustive
+    }
+  }
+}
+
 /** Relevance policy facts for a Repository's Issue Tracker kind. */
 export const relevancePolicyForIssueTracker = (
   tracker: IssueTracker,

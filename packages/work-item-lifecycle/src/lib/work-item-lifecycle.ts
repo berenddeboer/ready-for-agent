@@ -63,6 +63,7 @@ import {
   isAgentDependentLifecycleStep,
   isForge,
   isIssueTracker,
+  parentImplementAllRefusal,
   persistedIssueIdentity,
 } from "@ready-for-agent/lifecycle-model"
 import {
@@ -128,6 +129,7 @@ import {
   validateExecutionProfileCatalog,
 } from "./execution-profile.js"
 import { resolveForgeObservation } from "./forge-observation.js"
+import { notifyHumanAttention } from "./issue-tracker-execution.js"
 import { selectJumpAgentModel } from "./jump-agent-model.js"
 import {
   type LifecycleStepContext,
@@ -137,7 +139,6 @@ import {
 import {
   linearMergeCompletionSummary,
   nextStateAfterConfirmedMerge,
-  notifyLinearHumanAttention,
 } from "./linear-milestones.js"
 import {
   type MergePolicy,
@@ -4483,7 +4484,7 @@ export const makeWorkItemLifecycleLive = (
               `${agentBackendLabel(workItem.agent_backend)} requested human intervention`)
             : null
           if (attentionReason !== null) {
-            yield* notifyLinearHumanAttention({
+            yield* notifyHumanAttention({
               issueSource: toIssueSource(workItem),
               workItemId: workItem.id,
               reason: attentionReason,
@@ -9562,11 +9563,13 @@ export const makeWorkItemLifecycleLive = (
           }
           const issue = matches[0]
           if (issue?.hasChildren) {
-            if (liveIssueTracker(repository) === "linear") {
+            const tracker = liveIssueTracker(repository)
+            const implementAllRefusal =
+              tracker === null ? null : parentImplementAllRefusal(tracker)
+            if (implementAllRefusal !== null) {
               return yield* new LinearExecutionNotSupportedError({
                 repositoryId,
-                message:
-                  "Implement All is not available for Linear Issues in this release. Start eligible leaf Issues instead.",
+                message: implementAllRefusal,
               })
             }
             if (options.implementLocally) {

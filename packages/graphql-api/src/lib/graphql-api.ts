@@ -44,10 +44,9 @@ import {
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
-  behaviourNotImplemented,
   classifyIntakeCandidates,
-  describeIssueTracker,
   isIssueTracker,
+  parentImplementAllRefusal,
   persistedIssueIdentity,
 } from "@ready-for-agent/lifecycle-model"
 import {
@@ -643,26 +642,12 @@ export const createGraphqlApi = <R>(
       if (repository === undefined) {
         return yield* new RepositoryNotFoundError({ repositoryId })
       }
-      const implementAll = describeIssueTracker(
-        repository.issueTracker,
-      ).parentImplementAll
-      switch (implementAll.kind) {
-        case "available":
-          return
-        case "unavailable":
-          return yield* new LinearExecutionNotSupportedError({
-            repositoryId: repository.id,
-            message: implementAll.message,
-          })
-        case "not_implemented":
-          return behaviourNotImplemented(
-            repository.issueTracker,
-            "parent Implement All",
-          )
-        default: {
-          const _exhaustive: never = implementAll
-          return _exhaustive
-        }
+      const refusal = parentImplementAllRefusal(repository.issueTracker)
+      if (refusal !== null) {
+        return yield* new LinearExecutionNotSupportedError({
+          repositoryId: repository.id,
+          message: refusal,
+        })
       }
     })
 
