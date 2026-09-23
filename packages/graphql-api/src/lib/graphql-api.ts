@@ -44,7 +44,9 @@ import {
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
+  behaviourNotImplemented,
   classifyIntakeCandidates,
+  describeIssueTracker,
   isIssueTracker,
   persistedIssueIdentity,
 } from "@ready-for-agent/lifecycle-model"
@@ -103,6 +105,7 @@ import {
   hasAzureDevOpsAmbientCredential,
   hasLinearAmbientCredential,
   linearCredential,
+  pollingCredentialFor,
   repositoryCredential,
   withKeymaxxerMetadataTimeout,
 } from "./repository-credentials.js"
@@ -632,7 +635,7 @@ export const createGraphqlApi = <R>(
     options.environment ?? (process.env as Record<string, string | undefined>)
   const harnessVersion = options.version ?? "0.0.0"
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
-  const rejectLinearParentImplementAll = (repositoryId: string) =>
+  const rejectUnavailableParentImplementAll = (repositoryId: string) =>
     Effect.gen(function* () {
       const db = yield* DbService
       const repositories = yield* db.listRepositories
@@ -640,12 +643,26 @@ export const createGraphqlApi = <R>(
       if (repository === undefined) {
         return yield* new RepositoryNotFoundError({ repositoryId })
       }
-      if (repository.issueTracker === "linear") {
-        return yield* new LinearExecutionNotSupportedError({
-          repositoryId: repository.id,
-          message:
-            "Implement All is not available for Linear Issues in this release. Start eligible leaf Issues instead.",
-        })
+      const implementAll = describeIssueTracker(
+        repository.issueTracker,
+      ).parentImplementAll
+      switch (implementAll.kind) {
+        case "available":
+          return
+        case "unavailable":
+          return yield* new LinearExecutionNotSupportedError({
+            repositoryId: repository.id,
+            message: implementAll.message,
+          })
+        case "not_implemented":
+          return behaviourNotImplemented(
+            repository.issueTracker,
+            "parent Implement All",
+          )
+        default: {
+          const _exhaustive: never = implementAll
+          return _exhaustive
+        }
       }
     })
 
@@ -2653,7 +2670,10 @@ export const createGraphqlApi = <R>(
                     const db = yield* DbService
                     const repositories = yield* db.listRepositories
                     for (const repository of repositories) {
-                      if (repository.issueTracker === "linear") {
+                      if (
+                        pollingCredentialFor(repository).kind ===
+                        "linear_api_key"
+                      ) {
                         yield* activateRepositoryPolling(repository.id).pipe(
                           Effect.catch((error) =>
                             Effect.logWarning(
@@ -2840,7 +2860,7 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
-                yield* rejectLinearParentImplementAll(args.repositoryId)
+                yield* rejectUnavailableParentImplementAll(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementAllWithAutoMerge(
                   args.repositoryId,

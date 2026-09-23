@@ -13,6 +13,11 @@ import {
   keymaxxerError,
 } from "@ready-for-agent/keymaxxer-service"
 import {
+  type IssueTrackerCredential,
+  describeIssueTracker,
+  isIssueTracker,
+} from "@ready-for-agent/lifecycle-model"
+import {
   LINEAR_API_KEY_CREATION_URL,
   LINEAR_API_KEY_ENV_VAR,
   LINEAR_API_KEY_SECRET_NAME,
@@ -281,7 +286,19 @@ export const githubRepositoryHasCredential = (
     metadataTimeout,
   ).pipe(Effect.map((probe) => probe.kind !== "miss"))
 
-/** Activate durable Issue Polling only when this repository has forge credentials. */
+/**
+ * Credential Issue Polling needs for this Repository, from its Issue Tracker
+ * description. A missing or unrecognized tracker keeps the hosting Forge
+ * credential path.
+ */
+export const pollingCredentialFor = (
+  repository: Pick<Repository, "issueTracker">,
+): IssueTrackerCredential =>
+  isIssueTracker(repository.issueTracker)
+    ? describeIssueTracker(repository.issueTracker).credential
+    : { kind: "hosting_forge" }
+
+/** Activate durable Issue Polling only when this repository has the credential its Issue Tracker needs. */
 export const activatePollingIfCredentialed = Effect.fn(
   "graphql-api.activatePollingIfCredentialed",
 )(function* (
@@ -289,11 +306,22 @@ export const activatePollingIfCredentialed = Effect.fn(
   options?: { readonly metadataTimeout?: Duration.Duration },
 ) {
   const keymaxxer = yield* KeymaxxerService
-  if (repository.issueTracker === "linear") {
-    if (yield* linearHasCredential(keymaxxer, options?.metadataTimeout)) {
+  const credential = pollingCredentialFor(repository)
+  switch (credential.kind) {
+    case "linear_api_key":
+      if (yield* linearHasCredential(keymaxxer, options?.metadataTimeout)) {
+        yield* activateRepositoryPolling(repository.id)
+      }
+      return
+    case "none":
       yield* activateRepositoryPolling(repository.id)
+      return
+    case "hosting_forge":
+      break
+    default: {
+      const _exhaustive: never = credential
+      return _exhaustive
     }
-    return
   }
   if (keymaxxer.enabled === false) {
     switch (repository.forge) {
