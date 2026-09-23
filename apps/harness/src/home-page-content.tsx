@@ -61,7 +61,7 @@ import {
   isIssueProjectionStale,
 } from "./issue-projection-freshness.js"
 import {
-  isTrackerOfferedForGitHub,
+  isTrackerOnlyKindSelectableFor,
   usesLinearProjectMapping,
 } from "./issue-tracker-settings.js"
 import {
@@ -2321,7 +2321,9 @@ function RepositoryCard({
                         setIssueTracker(next)
                         setLinearProjectId("")
                         setLinearWorkflowStatuses([])
-                      } else if (!isTrackerOfferedForGitHub(issueTracker)) {
+                      } else if (
+                        !isTrackerOnlyKindSelectableFor("github", issueTracker)
+                      ) {
                         setIssueTracker("github")
                       }
                     }}

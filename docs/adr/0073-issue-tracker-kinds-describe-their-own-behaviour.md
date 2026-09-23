@@ -24,9 +24,13 @@ path, writes `Closes #n` for an Issue that is not on the Forge, and never
 starts polling.
 
 This ADR decides that each Issue Tracker kind describes those behaviours in
-one place, and that the code that needs them dispatches on the kind
-exhaustively, so that a kind without a description is a compile error at
-every site. GitHub, GitLab, Azure DevOps and Linear move behind that
+one place, and that the code that needs them either reads that description
+or dispatches on the kind exhaustively. A kind without a description does
+not compile; a kind whose description still lacks a behaviour cannot be
+made selectable without a compile error; and a site that switches on the
+kind names every kind. A site that depends on the hosting Forge rather than
+the tracker, or whose source text an existing test pins, keeps its check
+and is named in the change that introduces the description. GitHub, GitLab, Azure DevOps and Linear move behind that
 description with no change in behaviour; every existing suite passes
 unchanged. Three consequences of ADR 0070 that Linear left implicit become
 explicit in the description:
@@ -77,8 +81,9 @@ exist; nothing in this ADR prevents it later.
 - One behaviour-preserving change lands first, before any fp behaviour: the
   description type, one entry per existing kind, and the dispatch at each
   of the sites above. It is reviewed on its own, and its evidence is the
-  unchanged suites of the four kinds plus a test that a kind without a
-  description does not compile.
+  unchanged suites of the four kinds plus the typecheck itself: the
+  description table and its reader refuse a kind without a description,
+  and a selectable kind without every behaviour.
 - fp then fills its description in the following changes, one behaviour at a
   time, and the compiler names what is still missing.
 - The Work Item lifecycle, the state machine and the Step Run reason codes

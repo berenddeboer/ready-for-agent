@@ -47,7 +47,7 @@ describe("Issue Tracker descriptions", () => {
     expect(linear.settings).toEqual({ kind: "linear_project_mapping" })
     expect(linear.credential).toEqual({ kind: "linear_api_key" })
     expect(linear.issueIdentity).toEqual({ kind: "native_id" })
-    expect(linear.afterConfirmedMerge).toEqual({ kind: "close_issue" })
+    expect(linear.afterConfirmedMerge.kind).toBe("close_issue")
     expect(linear.parentImplementAll.kind).toBe("unavailable")
   })
 

@@ -1,6 +1,6 @@
 import { ISSUE_TRACKERS } from "@ready-for-agent/lifecycle-model"
 import {
-  isTrackerOfferedForGitHub,
+  isTrackerOnlyKindSelectableFor,
   usesLinearProjectMapping,
 } from "../src/issue-tracker-settings.js"
 import { describe, expect, test } from "bun:test"
@@ -16,7 +16,9 @@ describe("Repository settings Issue Tracker facts", () => {
 
   test("keeps only Linear when a Repository moves back to GitHub hosting", () => {
     for (const value of values) {
-      expect(isTrackerOfferedForGitHub(value)).toBe(value === "linear")
+      expect(isTrackerOnlyKindSelectableFor("github", value)).toBe(
+        value === "linear",
+      )
     }
   })
 })

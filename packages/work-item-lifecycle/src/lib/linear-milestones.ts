@@ -1,8 +1,8 @@
 import { Effect } from "effect"
 import type { RepositoryRecord } from "@ready-for-agent/db-service"
 import {
+  ISSUE_TRACKER_DESCRIPTIONS,
   type IssueSource,
-  behaviourNotImplemented,
   describeIssueTracker,
 } from "@ready-for-agent/lifecycle-model"
 import {
@@ -13,45 +13,7 @@ import {
 } from "@ready-for-agent/linear-service"
 
 export const LINEAR_MERGE_COMPLETION_SUMMARY =
-  "Ready for Agent completed this Issue after the GitHub pull request merged."
-
-/**
- * Lifecycle Step after a confirmed merge, as the Original Issue Source's
- * Issue Tracker description decides. A context without a source keeps
- * local cleanup.
- */
-export const nextStateAfterConfirmedMerge = (
-  source: IssueSource | undefined,
-): "close_issue" | "local_cleanup" => {
-  if (source === undefined) {
-    return "local_cleanup"
-  }
-  const next = describeIssueTracker(source.tracker).afterConfirmedMerge
-  switch (next.kind) {
-    case "local_cleanup":
-    case "close_issue":
-      return next.kind
-    case "not_implemented":
-      return behaviourNotImplemented(
-        source.tracker,
-        "step after a confirmed merge",
-      )
-    default: {
-      const _exhaustive: never = next
-      return _exhaustive
-    }
-  }
-}
-
-export const linearMergeCompletionSummary = (
-  existing: string | null | undefined,
-): string => {
-  const persisted = existing?.trim()
-  if (persisted !== undefined && persisted !== "") {
-    return persisted
-  }
-  return LINEAR_MERGE_COMPLETION_SUMMARY
-}
+  ISSUE_TRACKER_DESCRIPTIONS.linear.afterConfirmedMerge.completionSummary
 
 /** An Original Issue Source already dispatched to Linear. */
 export type LinearIssueSource = IssueSource & { readonly tracker: "linear" }

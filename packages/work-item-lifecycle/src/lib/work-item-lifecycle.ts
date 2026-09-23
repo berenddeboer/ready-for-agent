@@ -80,6 +80,11 @@ import {
   QueueService,
 } from "@ready-for-agent/queue-service"
 import {
+  afterConfirmedMerge,
+  mergeCompletionSummary,
+  nextStateAfterConfirmedMerge,
+} from "./after-confirmed-merge.js"
+import {
   CurrentCapturedAgentBackendId,
   CurrentStepRun,
 } from "./agent-turn-limiter.js"
@@ -136,10 +141,6 @@ import {
   LifecycleSteps,
   type RunHandlerError,
 } from "./lifecycle-steps.js"
-import {
-  linearMergeCompletionSummary,
-  nextStateAfterConfirmedMerge,
-} from "./linear-milestones.js"
 import {
   type MergePolicy,
   decodeMergeMode,
@@ -4172,12 +4173,11 @@ export const makeWorkItemLifecycleLive = (
               }
               const result = yield* steps.mergePr(context)
               if (result._tag === "merged") {
-                if (
-                  nextStateAfterConfirmedMerge(context.issueSource) ===
-                  "close_issue"
-                ) {
+                const mergeNext = afterConfirmedMerge(context.issueSource)
+                if (mergeNext.kind === "close_issue") {
                   return {
-                    completionSummary: linearMergeCompletionSummary(
+                    completionSummary: mergeCompletionSummary(
+                      mergeNext,
                       context.completionSummary,
                     ),
                     transition: {
@@ -4561,12 +4561,11 @@ export const makeWorkItemLifecycleLive = (
                   // Confirmed merge at revalidation seam: same destination as
                   // Refresh / continueAfterHumanPrOutcome (Close Issue for
                   // Linear, otherwise local cleanup).
-                  const mergeNextState = nextStateAfterConfirmedMerge(
-                    toIssueSource(workItem),
-                  )
+                  const mergeNext = afterConfirmedMerge(toIssueSource(workItem))
+                  const mergeNextState = mergeNext.kind
                   const mergeSummary =
-                    mergeNextState === "close_issue"
-                      ? linearMergeCompletionSummary(completionSummary)
+                    mergeNext.kind === "close_issue"
+                      ? mergeCompletionSummary(mergeNext, completionSummary)
                       : completionSummary
                   yield* sql.unsafe(
                     `UPDATE work_item
@@ -7386,9 +7385,8 @@ export const makeWorkItemLifecycleLive = (
                     reason: "Work Item has no Work Item PR",
                   })
                 }
-                const mergeNextState = nextStateAfterConfirmedMerge(
-                  toIssueSource(current),
-                )
+                const mergeNext = afterConfirmedMerge(toIssueSource(current))
+                const mergeNextState = mergeNext.kind
                 if (
                   current.state === "local_cleanup" ||
                   current.state === mergeNextState
@@ -7491,8 +7489,11 @@ export const makeWorkItemLifecycleLive = (
                   }
 
                   const mergeSummary =
-                    mergeNextState === "close_issue"
-                      ? linearMergeCompletionSummary(current.completion_summary)
+                    mergeNext.kind === "close_issue"
+                      ? mergeCompletionSummary(
+                          mergeNext,
+                          current.completion_summary,
+                        )
                       : current.completion_summary
                   const updated = (yield* sql.unsafe(
                     `UPDATE work_item

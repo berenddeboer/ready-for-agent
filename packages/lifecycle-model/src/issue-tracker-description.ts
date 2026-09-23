@@ -72,10 +72,13 @@ export type PullRequestReference =
   | { readonly kind: "forge_closing_reference" }
   | { readonly kind: "tracker_identity" }
 
-/** Lifecycle Step that follows a confirmed merge. */
+/**
+ * Lifecycle Step that follows a confirmed merge. `close_issue` carries the
+ * completion summary published when no summary was persisted.
+ */
 export type AfterConfirmedMerge =
   | { readonly kind: "local_cleanup" }
-  | { readonly kind: "close_issue" }
+  | { readonly kind: "close_issue"; readonly completionSummary: string }
 
 /** Whether a parent Issue may start Implement All. */
 export type ParentImplementAll =
@@ -159,7 +162,11 @@ export const ISSUE_TRACKER_DESCRIPTIONS = {
     issueIdentity: { kind: "native_id" },
     presentation: { kind: "tracker_issue" },
     pullRequestReference: { kind: "tracker_identity" },
-    afterConfirmedMerge: { kind: "close_issue" },
+    afterConfirmedMerge: {
+      kind: "close_issue",
+      completionSummary:
+        "Ready for Agent completed this Issue after the GitHub pull request merged.",
+    },
     parentImplementAll: {
       kind: "unavailable",
       message:
