@@ -12,6 +12,7 @@ import { describe, expect, test } from "bun:test"
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(appRoot, "../..")
 const publicReadmePath = join(workspaceRoot, "README.md")
+const commandReferencePath = join(workspaceRoot, "docs/command-reference.md")
 const monorepoAddReadmePath = join(appRoot, "README.md")
 const usageSpecPath = join(appRoot, "ready-for-agent.usage.kdl")
 const cliPath = join(appRoot, "src/cli.ts")
@@ -38,7 +39,10 @@ describe("Azure DevOps operator documentation", () => {
     const features = markdownSection(readme, "## Features")
     const requirements = markdownSection(readme, "## Requirements")
     const quickStart = markdownSection(readme, "## Quick start")
-    const addReference = markdownSection(readme, "## `ready-for-agent add`")
+    const addReference = markdownSection(
+      readFileSync(commandReferencePath, "utf8"),
+      "## `ready-for-agent add`",
+    )
 
     expect(features).toContain("Azure DevOps")
     expect(features).toContain("GitHub")

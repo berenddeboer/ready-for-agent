@@ -1,8 +1,8 @@
 # Ready for Agent: Clanker Harness for 150+ PRs a week
 
-Ready for Agent turns GitHub, GitLab, or Azure DevOps issues into
+Ready for Agent turns GitHub, GitLab, Azure DevOps, or Linear issues into
 merged pull requests. You mark them `ready-for-agent` (a label on
-GitHub and GitLab, a Boards tag on Azure DevOps). The harness hands
+GitHub, GitLab, and Linear, a Boards tag on Azure DevOps). The harness hands
 each one to your preferred coding agent, which implements it, reviews
 the code, opens a PR, and merges when allowed. You design, you
 architect, you verify where needed — the harness removes the
@@ -18,13 +18,16 @@ action.
 
 - [Quick start](#quick-start)
 - [Requirements](#requirements)
-- [Forge token scopes](docs/forge-token-scopes.md)
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
-- [Azure DevOps](#azure-devops)
+  - [Supported ticket systems](#supported-ticket-systems)
+    - [GitHub](#github)
+    - [GitLab](#gitlab)
+    - [Azure DevOps](#azure-devops)
+    - [Linear](#linear)
+  - [Supported forges](#supported-forges)
 - [Command reference](#command-reference)
-- [Shell completions](#shell-completions)
 - [Troubleshooting](#troubleshooting)
 - [Frequently Asked Questions](#frequently-asked-questions)
 - [Glossary](#glossary)
@@ -73,7 +76,11 @@ action.
    ready-for-agent add /path/to/local/repo
    ```
 
-4. Mark a Ready Issue: label a GitHub or GitLab issue
+   To use Linear with a GitHub repository, change **Issue Tracker** to
+   **Linear** in the repository settings after adding it. Setup prompts
+   you for a separate Linear API key — see [Linear](#linear).
+
+4. Mark a Ready Issue: label a GitHub, GitLab, or Linear issue
    `ready-for-agent`, or tag an Azure Boards work item
    `ready-for-agent`. It shows up in the UI shortly. By default only
    issues you authored are listed — see
@@ -177,14 +184,15 @@ issues that come with running compute in the cloud.
   spend, no environment drift.
 - Works with your existing Claude (or other) subscription rather than
   metered API billing.
-- GitHub, GitLab, and Azure DevOps support.
+- GitHub, GitLab, and Azure DevOps support, plus Linear issues paired
+  with GitHub repositories.
 - Human in the loop where you want it: you design, you architect, you
   verify.
 
 ## How it works
 
-The harness is a loop around issues marked `ready-for-agent` (a GitHub
-or GitLab label, or an Azure Boards tag): it only shows those, you
+The harness is a loop around issues marked `ready-for-agent` (a GitHub,
+GitLab, or Linear label, or an Azure Boards tag): it only shows those, you
 pick the ones to work on, and it autonomously completes them using
 your selected coding agent. For each issue it creates a fresh
 worktree, installs packages, and asks the headless agent to implement
@@ -299,7 +307,25 @@ Disable with:
 KEYMAXXER_ENABLED=false npx ready-for-agent@latest
 ```
 
-## Azure DevOps
+### Supported ticket systems
+
+Ready for Agent supports GitHub Issues, GitLab Issues, Azure Boards,
+and Linear. Adding a repository automatically selects its code host's
+issue tracker. To use Linear, add a GitHub repository first, then
+change its issue tracker in the repository settings.
+
+#### GitHub
+
+GitHub Issues is the default tracker for GitHub repositories.
+Authenticate with the GitHub CLI (`gh`) and label issues `ready-for-agent`.
+
+#### GitLab
+
+GitLab Issues is the default tracker for GitLab repositories.
+Authenticate with the GitLab CLI (`glab`) for your GitLab host and
+label issues `ready-for-agent`.
+
+#### Azure DevOps
 
 Azure DevOps is a first-class Forge. Ready discovery is a Boards tag
 `ready-for-agent`, not a label. Auth is the ambient
@@ -312,507 +338,55 @@ item is still open the harness completes it.
 Details: [docs/azure-devops.md](docs/azure-devops.md). Token scopes:
 [issue #1213](https://github.com/berenddeboer/ready-for-agent/issues/1213).
 
+#### Linear
+
+Linear is supported as an issue tracker for GitHub repositories:
+issues live in Linear, while code, pull requests, reviews, and CI
+remain on GitHub.
+
+After initial repository setup:
+
+1. Open the repository settings and change **Issue Tracker** from
+   **GitHub** to **Linear**.
+2. Supply a **personal Linear API key**, separate from your GitHub
+   credentials. If it is missing, the UI prompts you to create one
+   and offers **Store in Keymaxxer**, using the secret name
+   `LINEAR_API_KEY`. Without Keymaxxer, set the `LINEAR_API_KEY`
+   environment variable before starting the harness.
+3. Select the **Linear project** to map to this repository, choose
+   the **In Progress** and **Done** statuses for its teams, and save.
+
+Only open issues in the mapped project with the `ready-for-agent`
+label are candidates. By default, only issues you authored are
+included; enable **Include all Issue Authors** in the repository
+settings to include other authors. The harness moves issues to
+In Progress when work starts and Done after a confirmed merge or a
+successful outcome requiring no code changes.
+
+### Supported forges
+
+A forge hosts your Git repository, pull requests, code reviews, and CI.
+Ready for Agent supports:
+
+- **GitHub** — authenticate with the GitHub CLI (`gh`).
+- **GitLab** — authenticate with the GitLab CLI (`glab`) for your GitLab host.
+- **Azure DevOps** — authenticate with a personal access token via
+  `AZURE_DEVOPS_EXT_PAT`.
+
+The issue tracker can be separate from the forge: Linear issues are
+currently supported with GitHub repositories.
+
 ## Command reference
 
-<!-- usage:start -->
-<!-- @generated by usage-cli from usage spec -->
-# `ready-for-agent`
+Use `jump` to continue a Work Item's coding-agent session interactively
+in your terminal or tmux. Pass the session's backend Session ID, for example:
 
-Default invocation (`ready-for-agent`) starts the Harness. It is classified write, matching `start`.
-
-Environment variables (documented here; runtime precedence and semantics are unchanged):
-
-NO_BROWSER
-  When set to a non-empty value other than 0, false, no, or off, the default start does not open a browser. The --no-open flag also disables the browser independently of this variable.
-
-HOST
-  Listen host for the default start and `start`. The --host flag wins when given. Bare --host binds all IPv4 interfaces (0.0.0.0).
-
-READY_FOR_AGENT_GRAPHQL_URL
-  GraphQL endpoint for finite commands (add, candidates, intake, retry, status, jump). Defaults to http://127.0.0.1:6056/graphql. Does not start the Harness. `skills` is offline and does not use this variable.
-
-
-## Examples
-
-**Default start**
-
-Start the Harness and open the UI
-
-```
-ready-for-agent
-```
-
-**Start without a browser**
-
-Start the Harness without opening the default browser
-
-```
-ready-for-agent start --no-open
-```
-
-**Add a Repository**
-
-Inspect a local clone and add it to the running Harness
-
-```
-ready-for-agent add /path/to/local/repo
-```
-
-**Repository host/path selector**
-
-List Intake Candidates using a forge-host/project-path selector
-
-```
-ready-for-agent candidates github.com/owner/repo
-```
-
-**Repository host://path selector**
-
-List Intake Candidates using a forge-host://project-path selector
-
-```
-ready-for-agent candidates github.com://owner/repo
-```
-
-**Repository project-path selector**
-
-List Intake Candidates using a unique project path
-
-```
-ready-for-agent candidates owner/repo
-```
-
-**Repository final-segment selector**
-
-List Intake Candidates using a unique final project-path segment
-
-```
-ready-for-agent candidates repo
-```
-
-**Session continuation**
-
-Continue a Work Item Session by opaque backend Session ID
-
-```
+```bash
 ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd
 ```
 
-- **Usage**: `ready-for-agent [FLAGS] <SUBCOMMAND>`
-
-## Global Flags
-
-### `-h --help`
-
-Show help information
-
-### `-v --version`
-
-Show version information
-
-### `--completions <shell>`
-
-Print shell completion script
-
-**Choices:**
-
-- `bash`
-- `zsh`
-- `fish`
-- `sh`
-
-### `--log-level <level>`
-
-Sets the minimum log level
-
-**Choices:**
-
-- `all`
-- `trace`
-- `debug`
-- `info`
-- `warn`
-- `warning`
-- `error`
-- `fatal`
-- `none`
-
-## Flags
-
-### `--no-open`
-
-Do not open the default browser after a successful start (also: NO_BROWSER)
-
-### `--host [addr]`
-
-Listen host (default 127.0.0.1). Bare --host binds all interfaces (0.0.0.0); --host <addr> binds that address. Env: HOST (flag wins)
-
-**Environment Variable:** `HOST`
-
-## `ready-for-agent start`
-
-- **Usage**: `ready-for-agent start [--no-open] [--host [addr]]`
-- **Effect**: modifies state
-
-Start the full Harness (UI + backend); opens the browser unless --no-open / NO_BROWSER
-
-### Flags
-
-#### `--no-open`
-
-Do not open the default browser after a successful start (also: NO_BROWSER)
-
-#### `--host [addr]`
-
-Listen host (default 127.0.0.1). Bare --host binds all interfaces (0.0.0.0); --host <addr> binds that address. Env: HOST (flag wins)
-
-**Environment Variable:** `HOST`
-
-### Examples
-
-**Start**
-
-Start the Harness and open the UI
-
-```
-ready-for-agent start
-```
-
-**Start on all interfaces**
-
-Bind 0.0.0.0 instead of loopback
-
-```
-ready-for-agent start --host
-```
-
-## `ready-for-agent add`
-
-- **Usage**: `ready-for-agent add [--forge-host <host>] [--project-path <project-path>] <path>`
-- **Effect**: modifies state
-
-Inspect and add a local GitHub, GitLab, or Azure DevOps repository; inferred identity can be corrected with flags
-
-### Arguments
-
-#### `<path>`
-
-Path to a local git repository
-
-### Flags
-
-#### `--forge-host <host>`
-
-Correct the forge host inferred from the repository remote
-
-#### `--project-path <project-path>`
-
-Correct the forge project path inferred from the repository remote
-
-### Examples
-
-**Add**
-
-Add a local git repository
-
-```
-ready-for-agent add /path/to/local/repo
-```
-
-**Correct inferred identity**
-
-Override the guessed GitLab host and project path
-
-```
-ready-for-agent add --forge-host git.drupalcode.org --project-path project/oauth_client /path/to/local/repo
-```
-
-## `ready-for-agent candidates`
-
-- **Usage**: `ready-for-agent candidates <repository>`
-- **Effect**: read-only
-
-List current Intake Candidates for one Repository as versioned JSON
-
-### Arguments
-
-#### `<repository>`
-
-Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)
-
-### Examples
-
-**Candidates**
-
-List Intake Candidates for one Repository
-
-```
-ready-for-agent candidates github.com/owner/repo
-```
-
-## `ready-for-agent intake`
-
-- **Usage**: `ready-for-agent intake <repository>`
-- **Effect**: modifies state
-
-Start every current Intake Candidate for one Repository as versioned JSON
-
-### Arguments
-
-#### `<repository>`
-
-Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)
-
-### Examples
-
-**Intake**
-
-Start every current Intake Candidate for one Repository
-
-```
-ready-for-agent intake github.com/owner/repo
-```
-
-## `ready-for-agent retry`
-
-- **Usage**: `ready-for-agent retry [FLAGS] <repository>`
-- **Effect**: modifies state
-
-Retry one Work Item, the unfinished Work Item for one Issue, or every currently retryable Work Item as versioned JSON
-
-### Arguments
-
-#### `<repository>`
-
-Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)
-
-### Flags
-
-#### `--issue <id>`
-
-Retry the current unfinished Work Item for this Issue Native Identity (Forge issue number or Linear UUID)
-
-#### `--work-item <id>`
-
-Retry this Work Item after verifying it belongs to the selected Repository
-
-#### `--all-retryable`
-
-Retry every Work Item eligible for Autonomous Retry in the Repository (excludes paused Work Items)
-
-#### `--max-autonomous-retries <count>`
-
-Maximum accepted Autonomous Retry execution attempts per Work Item at its current Lifecycle Step (default 3; --all-retryable only)
-
-### Examples
-
-**Retry all retryable**
-
-Retry every Work Item eligible for Autonomous Retry in the Repository
-
-```
-ready-for-agent retry github.com/owner/repo --all-retryable
-```
-
-## `ready-for-agent status`
-
-- **Usage**: `ready-for-agent status [repository]`
-- **Effect**: read-only
-
-Print the current six-lane Kanban status as versioned JSON (optional repository selector)
-
-### Arguments
-
-#### `[repository]`
-
-Optional repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)
-
-### Examples
-
-**Status**
-
-Print Kanban status for every configured Repository
-
-```
-ready-for-agent status
-```
-
-**Scoped status**
-
-Print Kanban status for one Repository
-
-```
-ready-for-agent status github.com/owner/repo
-```
-
-## `ready-for-agent jump`
-
-- **Usage**: `ready-for-agent jump <session-id>`
-- **Effect**: destructive — may delete or irreversibly overwrite
-
-Continue a Work Item Session (Interactive Session Continuation)
-
-### Arguments
-
-#### `<session-id>`
-
-Opaque backend Session ID to continue
-
-### Examples
-
-**Jump**
-
-Continue the Work Item Session in the current terminal or tmux
-
-```
-ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd
-```
-
-## `ready-for-agent skills`
-
-- **Usage**: `ready-for-agent skills [--json] <SUBCOMMAND>`
-- **Effect**: read-only
-
-Discover version-matched agent skills bundled with this CLI (offline; aliases skills list)
-
-### Flags
-
-#### `--json`
-
-Print a versioned JSON document
-
-### Examples
-
-**List skills**
-
-List bundled skills (alias for skills list)
-
-```
-ready-for-agent skills
-```
-
-**List skills as JSON**
-
-Print versioned skill discovery JSON
-
-```
-ready-for-agent skills list --json
-```
-
-## `ready-for-agent skills list`
-
-- **Usage**: `ready-for-agent skills list [--json]`
-- **Effect**: read-only
-
-List bundled agent skills matching this CLI version
-
-### Flags
-
-#### `--json`
-
-Print a versioned JSON document
-
-### Examples
-
-**List skills**
-
-List bundled skills as Markdown
-
-```
-ready-for-agent skills list
-```
-
-**List skills as JSON**
-
-Print versioned skill discovery JSON
-
-```
-ready-for-agent skills list --json
-```
-
-## `ready-for-agent skills get`
-
-- **Usage**: `ready-for-agent skills get [--json] <skill-id>`
-- **Effect**: read-only
-
-Print one bundled skill as Markdown (or a versioned JSON document with --json)
-
-### Arguments
-
-#### `<skill-id>`
-
-Stable skill identifier from `skills list` (core, reporting, operating, recovery, lifecycle)
-
-### Flags
-
-#### `--json`
-
-Print a versioned JSON document wrapping the same Markdown
-
-### Examples
-
-**Get core skill**
-
-Print core operational guidance as Markdown
-
-```
-ready-for-agent skills get core
-```
-
-**Get core skill as JSON**
-
-Wrap core guidance in a versioned JSON document
-
-```
-ready-for-agent skills get core --json
-```
-<!-- usage:end -->
-
-## Shell completions
-
-`ready-for-agent --completions` prints a standalone completion script
-for Bash, Zsh, Fish, or `sh`. That path does not require Usage:
-
-```bash
-ready-for-agent --completions bash
-ready-for-agent --completions zsh
-ready-for-agent --completions fish
-ready-for-agent --completions sh
-```
-
-Operators who install [Usage](https://usage.jdx.dev/) can generate
-richer completions for Bash, Zsh, Fish, Nushell, and PowerShell from
-`ready-for-agent --usage`. **Usage v5.1.0 is a runtime dependency** of
-those generated scripts — they call `usage complete-word` when you
-press Tab. The scripts are generated on demand and are not shipped in
-the npm packages.
-
-```bash
-# Bash (requires bash-completion)
-usage generate completion bash ready-for-agent \
-  --usage-cmd "ready-for-agent --usage" \
-  > ~/.local/share/bash-completion/completions/ready-for-agent
-
-# Zsh
-usage generate completion zsh ready-for-agent \
-  --usage-cmd "ready-for-agent --usage" \
-  > ~/.zsh/completions/_ready-for-agent
-
-# Fish
-usage generate completion fish ready-for-agent \
-  --usage-cmd "ready-for-agent --usage" \
-  > ~/.config/fish/completions/ready-for-agent.fish
-
-# Nushell
-usage generate completion nu ready-for-agent \
-  --usage-cmd "ready-for-agent --usage" \
-  > ~/.config/nushell/autoload/ready-for-agent.nu
-
-# PowerShell
-usage generate completion powershell ready-for-agent \
-  --usage-cmd "ready-for-agent --usage" \
-  > ready-for-agent.ps1
-```
+See the [full CLI reference](docs/command-reference.md) for all commands,
+flags, environment variables, and shell-completion instructions.
 
 ## Troubleshooting
 
@@ -843,9 +417,11 @@ unaffected (`bun run ready-for-agent`).
 
 ### A labelled issue does not show up
 
-- GitHub and GitLab: the issue must carry the `ready-for-agent` label.
+- GitHub, GitLab, and Linear: the issue must carry the `ready-for-agent` label.
   Azure DevOps: the Boards work item must carry the `ready-for-agent`
   tag — not a GitHub-style label. The harness only shows those.
+- Linear issues must also belong to the project mapped in the
+  repository settings — see [Linear](#linear).
 - By default only issues **you** authored are listed. If someone else's
   `ready-for-agent` issue is missing, enable **Include all Issue Authors**
   in the repo settings to include issues created by any author.
@@ -923,6 +499,9 @@ is `AZURE_DEVOPS_EXT_PAT`, and Merge Policy Always is the unattended
 setting when the Azure repo has no CI. See
 [Azure DevOps](#azure-devops).
 
+You can also use [Linear](#linear) for issue tracking with a GitHub
+repository; GitHub still hosts the code and pull requests.
+
 3. Can I use my Claude subscription?
 
 Yes, since we use Claude Code directly instead of the API, this is
@@ -977,13 +556,13 @@ from a versioned ontology under [`ontology/`](ontology/README.md).
 
 ## Architecture
 
-Issues on the Forge remain the source of truth; the local SQLite
+Issues in the configured issue tracker remain the source of truth; the local SQLite
 database is book-keeping. The backend serves a GraphQL API at
 `http://127.0.0.1:6056/graphql`, and the Work Item lifecycle is
 driven by a machine-readable ontology rather than ad-hoc enums.
 Details in [ARCHITECTURE.md](ARCHITECTURE.md),
 [CONTEXT.md](CONTEXT.md), [ontology/README.md](ontology/README.md),
-and
+[Forge token scopes](docs/forge-token-scopes.md), and
 [docs/why-agentic-systems-need-ontologies.md](docs/why-agentic-systems-need-ontologies.md).
 
 ## Contributing

@@ -28,7 +28,7 @@ const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(appRoot, "../..")
 const pinnedUsage = join(workspaceRoot, "scripts", "run-pinned-usage.sh")
 const mainPath = join(appRoot, "src/main.ts")
-const publicReadmePath = join(workspaceRoot, "README.md")
+const commandReferencePath = join(workspaceRoot, "docs", "command-reference.md")
 const contributingPath = join(workspaceRoot, "CONTRIBUTING.md")
 
 const PUBLIC_COMMANDS = [
@@ -463,7 +463,7 @@ describe("Usage-generated operator CLI completions", () => {
   })
 
   test("user documentation covers every Usage shell and the Usage 5.1.0 runtime dependency", () => {
-    const readme = readFileSync(publicReadmePath, "utf8")
+    const readme = readFileSync(commandReferencePath, "utf8")
     const managedStart = readme.indexOf("<!-- usage:start -->")
     const managedEnd = readme.indexOf("<!-- usage:end -->")
     expect(managedStart).toBeGreaterThanOrEqual(0)

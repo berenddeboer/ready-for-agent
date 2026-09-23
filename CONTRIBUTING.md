@@ -75,16 +75,16 @@ bunx nx run ready-for-agent:check-usage
 ```
 
 That target lints the KDL contract, compares the public Effect CLI
-inventory, checks generated README drift without rewriting the worktree,
+inventory, checks generated command-reference drift without rewriting the worktree,
 and verifies Usage completion behavior. It is the same gate pull-request
 and main-branch quality workflows run when `ready-for-agent` is affected.
 
 ## Operator CLI command reference
 
-The public README command reference is generated from the Usage contract
+The public [command reference](docs/command-reference.md) is generated from the Usage contract
 in `apps/ready-for-agent/ready-for-agent.usage.kdl` with the pinned Usage
 CLI (`5.1.0`). After changing that contract, refresh only the managed
-README section:
+command-reference section:
 
 ```bash
 bunx nx run ready-for-agent:update-usage-docs
