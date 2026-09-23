@@ -61,6 +61,10 @@ import {
   isIssueProjectionStale,
 } from "./issue-projection-freshness.js"
 import {
+  isTrackerOfferedForGitHub,
+  usesLinearProjectMapping,
+} from "./issue-tracker-settings.js"
+import {
   formatDuration,
   formatStartedAgo,
   isLiveDurationStatus,
@@ -948,7 +952,7 @@ function RepositoryCard({
     ...repository.linearWorkflowStatuses,
   ])
   const [linearTokenCreated, setLinearTokenCreated] = useState(false)
-  const linearEnabled = issueTracker === "linear"
+  const linearEnabled = usesLinearProjectMapping(issueTracker)
   const linearCredential = useQuery({
     queryKey: ["linearCredential"],
     enabled: dialogOpen && linearEnabled,
@@ -1870,17 +1874,17 @@ function RepositoryCard({
       waitForReadyForReviewChecks,
       issueTracker: forge === "github" ? issueTracker : forge,
       linearProjectId:
-        forge === "github" && issueTracker === "linear"
+        forge === "github" && usesLinearProjectMapping(issueTracker)
           ? linearProjectId
           : null,
       linearProjectName:
-        forge === "github" && issueTracker === "linear"
+        forge === "github" && usesLinearProjectMapping(issueTracker)
           ? (linearProjects.data?.find(
               (project) => project.id === linearProjectId,
             )?.name ?? repository.linearProjectName)
           : null,
       linearWorkflowStatuses:
-        forge === "github" && issueTracker === "linear"
+        forge === "github" && usesLinearProjectMapping(issueTracker)
           ? [...linearWorkflowStatuses]
           : [],
       selectedCiGateDefinitionIdentities: [...selectedCiGateIdentities],
@@ -2317,7 +2321,7 @@ function RepositoryCard({
                         setIssueTracker(next)
                         setLinearProjectId("")
                         setLinearWorkflowStatuses([])
-                      } else if (issueTracker !== "linear") {
+                      } else if (!isTrackerOfferedForGitHub(issueTracker)) {
                         setIssueTracker("github")
                       }
                     }}
@@ -2383,7 +2387,7 @@ function RepositoryCard({
                       need the ready-for-agent label.
                     </span>
                   </label>
-                  {issueTracker === "linear" && (
+                  {usesLinearProjectMapping(issueTracker) && (
                     <>
                       {linearCredential.data !== undefined &&
                         !linearCredential.data.configured && (
