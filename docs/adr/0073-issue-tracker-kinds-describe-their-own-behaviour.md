@@ -9,8 +9,8 @@ amends:
 ADR 0070 made issue tracking configurable independently of repository
 hosting and delivered Linear as the first Issue Tracker only kind. Linear
 was wired in as a special case: the lifecycle asks "is this Linear" at
-sixteen sites in five files and compares against the literal `linear` at
-twenty-two more (the reconciler, the GraphQL API, settings validation, the
+about twenty sites in four files and compares against the literal `linear`
+at about twenty more (the reconciler, the GraphQL API, settings validation, the
 settings screen). Those sites express seven behaviours that every tracker
 kind has an answer to: which service discovers and mutates Issues, how
 Implement presents the Issue to the agent, what the Pull Request body
@@ -52,7 +52,9 @@ explicit in the description:
   sanitiser for every kind; for the Forge kinds the display identifier is the
   issue number, so their names are byte-identical and pinned by tests. Implement
   requires an Original Issue Source, not a number. The historical GraphQL
-  `Int!` fields stay as ADR 0070's implementation left them.
+  `Int!` fields stay as ADR 0070's implementation left them. This part is
+  delivered with fp's identity work, after the description lands; the
+  behaviour-preserving change below does not touch it.
 - **Tracker-specific Repository settings follow the Linear precedent**:
   named columns and fields per kind, validated by that kind's description,
   visible in the settings screen when that kind is selected. A tracker kind

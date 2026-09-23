@@ -2322,7 +2322,7 @@ function RepositoryCard({
                         setLinearProjectId("")
                         setLinearWorkflowStatuses([])
                       } else if (
-                        !isTrackerOnlyKindSelectableFor("github", issueTracker)
+                        !isTrackerOnlyKindSelectableFor(next, issueTracker)
                       ) {
                         setIssueTracker("github")
                       }
