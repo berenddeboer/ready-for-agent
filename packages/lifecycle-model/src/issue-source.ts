@@ -22,7 +22,7 @@ export const forgeIssueSource = (input: {
 
 /**
  * Forge-hosted Original Issue Source, or null when the tracker is not a
- * code-hosting Forge (Linear). Issue mutations and prompt identity use this
+ * code-hosting Forge (a tracker-only kind such as Linear). Issue mutations and prompt identity use this
  * rather than the Repository's current Issue Tracker setting.
  */
 export const forgeForIssueSource = (source: IssueSource): Forge | null =>

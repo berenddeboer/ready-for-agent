@@ -15,3 +15,17 @@ example:sourced-work-item
   a rfa:WorkItem ;
   rfa:currentState rfa:Implement ;
   rfa:originalIssueSource example:linear-source .
+
+# fp identity is the tracker's 32-character id; the display identifier is the
+# project-prefixed short id, and the URL is an fp deep link.
+example:fp-source
+  a rfa:OriginalIssueSource ;
+  rfa:issueTracker rfa:Fp ;
+  rfa:issueNativeId "0f2c1b6a9d4e4c8b8a7f6e5d4c3b2a10" ;
+  rfa:issueDisplayId "MC-miygcidm" ;
+  rfa:issueUrl "fp://issue?workspace=acme&project=p1&id=0f2c1b6a9d4e4c8b8a7f6e5d4c3b2a10"^^xsd:anyURI .
+
+example:fp-sourced-work-item
+  a rfa:WorkItem ;
+  rfa:currentState rfa:Implement ;
+  rfa:originalIssueSource example:fp-source .

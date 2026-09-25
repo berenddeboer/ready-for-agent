@@ -8,11 +8,11 @@ import {
   type TerminalWorkItemState,
   type WorkItemState,
 } from "./generated/work-item-state.js"
-import {
-  type ForgeRelevancePolicy,
-  type HierarchyObservationPolicy,
-  type OpenDraftClosingPullRequestPolicy,
-  relevancePolicyForIssueTracker,
+import { relevancePolicyForIssueTracker } from "./issue-tracker-description.js"
+import type {
+  ForgeRelevancePolicy,
+  HierarchyObservationPolicy,
+  OpenDraftClosingPullRequestPolicy,
 } from "./relevance-policy.js"
 
 export interface IssuePredicateShape {
