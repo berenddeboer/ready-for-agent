@@ -57,11 +57,9 @@ import {
 } from "./forge-mutation.js"
 import { forgeObservation } from "./forge-observation.js"
 import { issueOperationsForge } from "./issue-source-execution.js"
+import { notifyPullRequest } from "./issue-tracker-execution.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
-import {
-  githubPullRequestUrl,
-  notifyLinearPullRequest,
-} from "./linear-milestones.js"
+import { githubPullRequestUrl } from "./linear-milestones.js"
 import {
   type PublicationCopy,
   buildCreatePrFallbackPromptWithCopy,
@@ -1113,7 +1111,7 @@ export const createPr = (context: LifecycleStepContext) =>
     }
 
     if (repository.forge === "github") {
-      yield* notifyLinearPullRequest({
+      yield* notifyPullRequest({
         issueSource: context.issueSource,
         workItemId: context.workItemId,
         pullRequestUrl: githubPullRequestUrl({

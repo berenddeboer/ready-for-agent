@@ -33,7 +33,6 @@ import {
   classifyActiveClosingPullRequests,
   competingPullRequestIdentity,
   evaluateRelevantIssue,
-  isForge,
   persistedIssueIdentity,
   relevantIssuePredicateContext,
   workItemBranchName,
@@ -190,56 +189,66 @@ export const IssueReconcilerLive = Layer.effect(
       const issueTracker = repository.issueTracker
       const localIssues = yield* db.listIssues(repository.id)
       const { authorScope, remoteIssues } = yield* (() => {
-        if (issueTracker === "linear") {
-          return Effect.gen(function* () {
-            const projectId = repository.linearProjectId?.trim() ?? ""
-            if (projectId === "") {
-              return yield* new LinearNotConfiguredError({
-                repositoryId: repository.id,
-                message:
-                  "Select a Linear project in Repository settings before refreshing Issues",
-              })
-            }
-            if (repository.includeAllIssueAuthors) {
+        const notSupported = (tracker: string) =>
+          Effect.fail(
+            new LinearNotConfiguredError({
+              repositoryId: repository.id,
+              message: `Issue Tracker ${tracker} is not supported for discovery`,
+            }),
+          )
+        switch (issueTracker) {
+          case "linear":
+            return Effect.gen(function* () {
+              const projectId = repository.linearProjectId?.trim() ?? ""
+              if (projectId === "") {
+                return yield* new LinearNotConfiguredError({
+                  repositoryId: repository.id,
+                  message:
+                    "Select a Linear project in Repository settings before refreshing Issues",
+                })
+              }
+              if (repository.includeAllIssueAuthors) {
+                const issues = yield* linear.listReadyIssues(projectId)
+                return {
+                  remoteIssues: issues,
+                  authorScope: { includeAll: true as const },
+                }
+              }
+              const operatorLogin = yield* linear.getAuthenticatedUserLogin()
               const issues = yield* linear.listReadyIssues(projectId)
               return {
                 remoteIssues: issues,
-                authorScope: { includeAll: true as const },
+                authorScope: {
+                  includeAll: false as const,
+                  operatorLogin,
+                },
               }
+            })
+          case "fp":
+            return notSupported(issueTracker)
+          case "github":
+          case "gitlab":
+          case "azure-devops": {
+            const forgeRepository = {
+              forge: issueTracker,
+              forgeHost: repository.forgeHost,
+              projectPath: repository.projectPath,
             }
-            const operatorLogin = yield* linear.getAuthenticatedUserLogin()
-            const issues = yield* linear.listReadyIssues(projectId)
-            return {
-              remoteIssues: issues,
-              authorScope: {
-                includeAll: false as const,
-                operatorLogin,
-              },
-            }
-          })
+            const issueOperations = resolveForgeIssueOperations(
+              issueTracker,
+              { github, gitlab, azureDevOps },
+              options?.githubOperation,
+            )
+            return issueOperations.listReadyIssuesWithAuthorScope(
+              forgeRepository,
+              repository.includeAllIssueAuthors,
+            )
+          }
+          default: {
+            const _exhaustive: never = issueTracker
+            return notSupported(_exhaustive)
+          }
         }
-        if (!isForge(issueTracker)) {
-          return Effect.fail(
-            new LinearNotConfiguredError({
-              repositoryId: repository.id,
-              message: `Issue Tracker ${issueTracker} is not supported for discovery`,
-            }),
-          )
-        }
-        const forgeRepository = {
-          forge: issueTracker,
-          forgeHost: repository.forgeHost,
-          projectPath: repository.projectPath,
-        }
-        const issueOperations = resolveForgeIssueOperations(
-          issueTracker,
-          { github, gitlab, azureDevOps },
-          options?.githubOperation,
-        )
-        return issueOperations.listReadyIssuesWithAuthorScope(
-          forgeRepository,
-          repository.includeAllIssueAuthors,
-        )
       })()
       const repositoryName = repository.projectPath.toLowerCase()
       const workItemPullRequests = yield* db.listWorkItemPullRequests(

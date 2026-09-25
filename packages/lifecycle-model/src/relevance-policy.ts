@@ -1,4 +1,4 @@
-import { type Forge, type IssueTracker, isForge } from "./generated/forge.js"
+import type { Forge } from "./generated/forge.js"
 
 /**
  * How a `hierarchySupported: false` observation is interpreted.
@@ -56,32 +56,6 @@ export const relevancePolicyForForge = (forge: Forge): ForgeRelevancePolicy => {
       }
     default: {
       const _exhaustive: never = forge
-      return _exhaustive
-    }
-  }
-}
-
-/**
- * Linear and fp have native parent/child hierarchy like GitHub. Competing
- * GitHub PRs are out of scope for their discovery, so draft closing-PR
- * treatment is inactive. A new tracker-only kind fails compilation here
- * instead of inheriting these facts.
- */
-export const relevancePolicyForIssueTracker = (
-  tracker: IssueTracker,
-): ForgeRelevancePolicy => {
-  if (isForge(tracker)) {
-    return relevancePolicyForForge(tracker)
-  }
-  switch (tracker) {
-    case "linear":
-    case "fp":
-      return {
-        hierarchyObservation: { kind: "required" },
-        openDraftClosingPullRequest: { kind: "inactive" },
-      }
-    default: {
-      const _exhaustive: never = tracker
       return _exhaustive
     }
   }

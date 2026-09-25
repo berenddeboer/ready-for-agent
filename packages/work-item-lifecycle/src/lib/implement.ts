@@ -3,7 +3,12 @@ import { SqlClient } from "effect/unstable/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { resolveForgeIssuePresentation } from "@ready-for-agent/forge-contract"
-import { formatIssueDisplayId } from "@ready-for-agent/lifecycle-model"
+import {
+  type IssueSource,
+  behaviourNotImplemented,
+  describeIssueTracker,
+  formatIssueDisplayId,
+} from "@ready-for-agent/lifecycle-model"
 import {
   type AgentTurnForgeAuth,
   AgentTurnForgeCredentialMissingError,
@@ -21,12 +26,12 @@ import {
   ImplementRepositoryNotFoundError,
   ImplementWorktreeContextMissingError,
 } from "./implement-errors.js"
-import { issueOperationsForge } from "./issue-source-execution.js"
-import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
-  isLinearIssueSource,
-  notifyLinearWorkStarted,
-} from "./linear-milestones.js"
+  findStoredIssueForSource,
+  issueOperationsForge,
+} from "./issue-source-execution.js"
+import { notifyWorkStarted } from "./issue-tracker-execution.js"
+import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { promptUserContentSection } from "./sanitize-prompt-user-content.js"
 import { loadScopeHandoff } from "./scope-handoff.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
@@ -136,6 +141,49 @@ const visualEvidencePromptLines = (workItemId: string): readonly string[] => {
 }
 
 /**
+ * How Implement presents the Issue to the agent. `tracker_issue` names the
+ * tracker and carries the Issue text, since the agent has no Forge Issue to
+ * open.
+ */
+type IssuePresentation =
+  | { readonly kind: "forge_issue" }
+  | {
+      readonly kind: "tracker_issue"
+      readonly source: IssueSource
+      readonly trackerName: string
+    }
+
+/**
+ * Presentation of the Original Issue Source, as its Issue Tracker
+ * description decides. A context without a source is a Forge Issue.
+ */
+const implementPresentation = (
+  source: IssueSource | undefined,
+): IssuePresentation => {
+  if (source === undefined) {
+    return { kind: "forge_issue" }
+  }
+  const description = describeIssueTracker(source.tracker)
+  const presentation = description.presentation
+  switch (presentation.kind) {
+    case "forge_issue":
+      return { kind: "forge_issue" }
+    case "tracker_issue":
+      return {
+        kind: "tracker_issue",
+        source,
+        trackerName: description.displayName,
+      }
+    case "not_implemented":
+      return behaviourNotImplemented(source.tracker, "Implement presentation")
+    default: {
+      const _exhaustive: never = presentation
+      return _exhaustive
+    }
+  }
+}
+
+/**
  * Issue identity and source-credential guidance in the prompt follow the
  * Original Issue Source. Git/PR credentials follow the Repository hosting
  * Forge. GitHub stays ambient; GitLab and Azure DevOps name the host.
@@ -147,19 +195,20 @@ const buildImplementPrompt = (
   forgeAuth: AgentTurnForgeAuth,
   mode: "start" | "continue",
   issueUrl: string | undefined,
-  issueSource: LifecycleStepContext["issueSource"],
+  issuePresentation: IssuePresentation,
   liveIssue: { readonly title: string; readonly body: string } | null,
 ) => {
-  if (isLinearIssueSource(issueSource)) {
+  if (issuePresentation.kind === "tracker_issue") {
+    const { source: issueSource, trackerName } = issuePresentation
     const display = formatIssueDisplayId(issueSource.displayId)
     const identityLine =
       mode === "start"
-        ? `Implement Linear issue ${display}.`
-        : `Continue implementing Linear issue ${display}.`
+        ? `Implement ${trackerName} issue ${display}.`
+        : `Continue implementing ${trackerName} issue ${display}.`
     const inspectLine =
       mode === "start"
-        ? "Inspect the current Linear Issue and this Repository's agent/project instructions."
-        : "Inspect the current Linear Issue, this Repository's agent/project instructions, and any partial work already present."
+        ? `Inspect the current ${trackerName} Issue and this Repository's agent/project instructions.`
+        : `Inspect the current ${trackerName} Issue, this Repository's agent/project instructions, and any partial work already present.`
     const contentLines =
       liveIssue === null
         ? []
@@ -177,8 +226,8 @@ const buildImplementPrompt = (
         : []),
       inspectLine,
       ...contentLines,
-      "Leave the tracker Issue open. Do not close, complete, or change its Linear workflow state.",
-      "Implement in this GitHub Repository. Do not fabricate a GitHub numeric closing reference for this Linear Issue.",
+      `Leave the tracker Issue open. Do not close, complete, or change its ${trackerName} workflow state.`,
+      `Implement in this GitHub Repository. Do not fabricate a GitHub numeric closing reference for this ${trackerName} Issue.`,
       mode === "start"
         ? "Make the implementation in this worktree and run appropriate verification."
         : "Finish the implementation in this worktree and run appropriate verification.",
@@ -256,9 +305,9 @@ export const implement = (context: LifecycleStepContext) =>
       context.issueSource,
       repository.forge,
     )
-    const gitForge = isLinearIssueSource(context.issueSource)
-      ? repository.forge
-      : issueForge
+    const issuePresentation = implementPresentation(context.issueSource)
+    const gitForge =
+      issuePresentation.kind === "tracker_issue" ? repository.forge : issueForge
     if (gitForge === null) {
       return yield* new ImplementIssueContextMissingError({
         workItemId: context.workItemId,
@@ -290,20 +339,17 @@ export const implement = (context: LifecycleStepContext) =>
       }),
     )
 
-    if (isLinearIssueSource(context.issueSource)) {
-      yield* notifyLinearWorkStarted({
-        repository,
-        issueSource: context.issueSource,
-        workItemId: context.workItemId,
-      })
-    }
+    yield* notifyWorkStarted({
+      repository,
+      issueSource: context.issueSource,
+      workItemId: context.workItemId,
+    })
 
     const db = yield* DbService
-    const storedIssue = (yield* db.listIssues(context.repositoryId)).find(
-      (candidate) =>
-        isLinearIssueSource(context.issueSource)
-          ? candidate.nativeId === context.issueSource.nativeId
-          : candidate.issueNumber === issueNumber,
+    const storedIssue = findStoredIssueForSource(
+      yield* db.listIssues(context.repositoryId),
+      context.issueSource,
+      issueNumber,
     )
     const liveIssue =
       storedIssue === undefined
@@ -320,8 +366,8 @@ export const implement = (context: LifecycleStepContext) =>
       forgeAuth,
       existingSessionId === null ? "start" : "continue",
       context.issueSource?.url,
-      context.issueSource,
-      isLinearIssueSource(context.issueSource) ? liveIssue : null,
+      issuePresentation,
+      issuePresentation.kind === "tracker_issue" ? liveIssue : null,
     )
     const scopeHandoff = yield* loadScopeHandoff(context, worktreePath)
     const prompt = `${implementationPrompt}\n\n${scopeHandoff}`
