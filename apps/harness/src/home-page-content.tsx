@@ -62,6 +62,7 @@ import {
 } from "./issue-projection-freshness.js"
 import {
   isTrackerOnlyKindSelectableFor,
+  offersParentImplementAll,
   usesLinearProjectMapping,
 } from "./issue-tracker-settings.js"
 import {
@@ -3612,7 +3613,7 @@ function ParentIssueGroup({
   const [implementWithOpen, setImplementWithOpen] = useState(false)
   const openChildren = childIssues.filter((child) => child.state === "OPEN")
   const canImplementAll =
-    repository.issueTracker !== "linear" &&
+    offersParentImplementAll(repository.issueTracker) &&
     isParentImplementAllWithAutoMergeEligible({
       openChildren,
       directChildren: childIssues,
