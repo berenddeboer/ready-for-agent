@@ -27,7 +27,8 @@ export const isTrackerOnlyKindSelectableFor = (
 /**
  * Whether a parent Issue shows Implement All for this Issue Tracker. A kind
  * without that behaviour hides it rather than offering an action the server
- * refuses; an unrecognized tracker keeps the action, as before.
+ * refuses or does not have; an unrecognized tracker keeps the action, as
+ * before.
  */
 export const offersParentImplementAll = (issueTracker: string): boolean => {
   if (!isIssueTracker(issueTracker)) {

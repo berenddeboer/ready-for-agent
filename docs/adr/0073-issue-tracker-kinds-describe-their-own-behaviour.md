@@ -9,7 +9,7 @@ amends:
 ADR 0070 made issue tracking configurable independently of repository
 hosting and delivered Linear as the first Issue Tracker only kind. Linear
 was wired in as a special case: the lifecycle asks "is this Linear" at
-about twenty sites in four files and compares against the literal `linear`
+sixteen sites in four files and compares against the literal `linear`
 at about twenty more (the reconciler, the GraphQL API, settings validation, the
 settings screen). Those sites express seven behaviours that every tracker
 kind has an answer to: which service discovers and mutates Issues, how
