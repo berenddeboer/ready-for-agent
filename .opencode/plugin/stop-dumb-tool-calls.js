@@ -48,24 +48,36 @@ const bashCommandRules = [
   },
 ]
 
-export const StopDumbToolCallsPlugin = async () => {
-  return {
-    "tool.execute.before": async (input, output) => {
-      if (input.tool !== "bash") {
+export default {
+  id: "stop-dumb-tool-calls",
+  async setup(ctx) {
+    await ctx.tool.hook("execute.before", (event) => {
+      if (event.tool !== "bash" && event.tool !== "shell") {
         return
       }
 
-      const command = output.args.command || ""
+      const input = event.input
+      const command =
+        typeof input === "string"
+          ? input
+          : typeof input?.command === "string"
+            ? input.command
+            : typeof input?.args?.command === "string"
+              ? input.args.command
+              : ""
 
       for (const rule of bashCommandRules) {
         if (rule.matches(command)) {
-          throw new Error(
+          const error = new Error(
             typeof rule.message === "function"
               ? rule.message(command)
               : rule.message,
           )
+          // OpenCode only rejects execution for tagged tool errors.
+          error._tag = "Tool.Error"
+          throw error
         }
       }
-    },
-  }
+    })
+  },
 }
