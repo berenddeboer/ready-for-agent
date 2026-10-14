@@ -20,6 +20,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.lib.json"
   },
   "devDependencies": {
-    "@genql/cli": "^6.3.3"
+    "@genql/cli": "^6.3.4"
   }
 }

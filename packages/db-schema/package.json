@@ -25,7 +25,7 @@
   "dependencies": {
     "@ready-for-agent/lifecycle-model": "workspace:*",
     "drizzle-orm": "1.0.0-rc.4-5d5b77c",
-    "tslib": "^2.3.0",
+    "tslib": "^2.8.1",
     "ulidx": "^2.4.1"
   },
   "devDependencies": {

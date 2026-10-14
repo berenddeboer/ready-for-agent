@@ -37,13 +37,6 @@ export interface TursoClientOptions {
 type TursoValue = string | number | bigint | boolean | Uint8Array | null
 type TursoRow = Record<string, TursoValue>
 
-const tursoRowValues = (row: TursoRow): TursoValue[] => {
-  const values: TursoValue[] = []
-  for (let index = 0; Object.hasOwn(row, String(index)); index++)
-    values.push(row[String(index)] ?? null)
-  return values.length > 0 ? values : Object.values(row)
-}
-
 const sqlError = (cause: unknown, operation: string) =>
   new SqlError({
     reason: classifySqliteError(cause, {
@@ -124,20 +117,27 @@ const makeClient = (path: string, options?: TursoClientOptions) =>
         catch: (cause) => sqlError(cause, "execute statement"),
       })
 
+    const executeValues = (sql: string, params: ReadonlyArray<unknown>) =>
+      Effect.tryPromise({
+        try: async (): Promise<ReadonlyArray<ReadonlyArray<unknown>>> => {
+          const statement = await db.prepare(sql)
+          try {
+            return await statement.raw(true).all([...params])
+          } finally {
+            statement.close()
+          }
+        },
+        catch: (cause) => sqlError(cause, "execute statement"),
+      })
+
     const connection: Connection = {
       execute: (sql, params, transformRows) =>
         execute(sql, params).pipe(
           Effect.map((rows) => (transformRows ? transformRows(rows) : rows)),
         ),
       executeRaw: execute,
-      executeValues: (sql, params) =>
-        execute(sql, params).pipe(
-          Effect.map((rows) => rows.map(tursoRowValues)),
-        ),
-      executeValuesUnprepared: (sql, params) =>
-        execute(sql, params).pipe(
-          Effect.map((rows) => rows.map(tursoRowValues)),
-        ),
+      executeValues,
+      executeValuesUnprepared: executeValues,
       executeUnprepared: (sql, params, transformRows) =>
         execute(sql, params).pipe(
           Effect.map((rows) => (transformRows ? transformRows(rows) : rows)),
