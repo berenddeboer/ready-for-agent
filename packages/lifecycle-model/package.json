@@ -17,11 +17,11 @@
   },
   "dependencies": {
     "effect": "4.0.4",
-    "tslib": "^2.3.0"
+    "tslib": "^2.8.1"
   },
   "devDependencies": {
-    "@types/n3": "^1.26.1",
-    "n3": "^2.2.0",
+    "@types/n3": "^1.26.4",
+    "n3": "^2.13.12",
     "rdf-validate-shacl": "^0.6.5"
   }
 }
