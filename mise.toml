@@ -11,6 +11,8 @@ hk = "2.0.1"
 # 0.0.0.0) is treated as requiring an argument. Keep 5.1.0 until that surface
 # can change.
 usage = "5.1.0"
+# Authoritative jactionlint pin. PR and main CI install this same version.
+jactionlint = "2.2.0"
 
 [tasks.bootstrap]
 description = "Install workspace dependencies"

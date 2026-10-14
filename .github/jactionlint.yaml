@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/jdx/jactionlint/main/schema/jactionlint-config.json
+# Default profile: correctness plus the security and policy rules that fail CI.
+profile: default
+
+ignores:
+  # The review must post with a base-repository token. pull_request from a fork
+  # cannot. First-time contributors are skipped until PR checks start and the
+  # approval relay dispatches this workflow; the job restores trusted Claude
+  # config from the base branch before the review action runs.
+  - rule: dangerous-triggers
+    file: .github/workflows/claude-code-review.yml
+    reason: pull_request_target is required to post the review; first-time contributors are gated by the PR approval relay
+
+  # pull_request_target cannot wait for the first-time-contributor Enable
+  # click, and GITHUB_TOKEN cannot fire labeled. This job does not check out
+  # pull-request code; it reads PR metadata and dispatches the review workflow
+  # on the default branch.
+  - rule: dangerous-triggers
+    file: .github/workflows/pr-approval-relay.yml
+    reason: workflow_run is how the relay observes that PR checks actually started
+
+  # The version comes from the GitHub API so the unauthenticated latest-release
+  # endpoint is not used. The official installer is what places the CLI at
+  # ~/.opencode/bin; pinning a tarball instead would change that install.
+  - rule: unverified-download
+    file: .github/workflows/pr.yml
+    step: Install OpenCode
+    reason: official OpenCode installer, version resolved from the GitHub API
+
+  - rule: unverified-download
+    file: .github/workflows/ci-cd.yml
+    step: Install OpenCode
+    reason: official OpenCode installer, version resolved from the GitHub API

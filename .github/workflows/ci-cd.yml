@@ -6,15 +6,21 @@ on:
       - main
   workflow_dispatch:
 
-permissions:
-  # actions: write — upload Playwright diagnostics on live e2e failure
-  actions: write
-  contents: read
+# Job permissions are set on each job so a later job does not inherit
+# actions: write. The release job publishes npm, so a newer run waits
+# instead of cancelling one that is in progress, and pending runs are kept.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   # Dependency pin integrity: full SHAs + version comments match upstream releases.
   pinact:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -32,15 +38,62 @@ jobs:
           # Built-in GITHUB_TOKEN only; pinact uses it for release/tag lookups.
           github_token: ${{ github.token }}
 
+  # Default-profile jactionlint for every workflow and local composite action.
+  # Not an Nx affected target: workflow-only and action-only changes still run.
+  jactionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          filter: tree:0
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install pinned jactionlint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^jactionlint = "\([^"]*\)"/\1/p' mise.toml)"
+          test -n "${VERSION}"
+          tmp="$(mktemp -d)"
+          archive="jactionlint_${VERSION}_linux_amd64.tar.gz"
+          checksums="jactionlint_${VERSION}_checksums.txt"
+          gh release download --repo jdx/jactionlint --dir "${tmp}" \
+            --pattern "${archive}" \
+            --pattern "${checksums}" \
+            "v${VERSION}"
+          (
+            cd "${tmp}"
+            sha256sum --check --ignore-missing "${checksums}"
+          )
+          gh attestation verify --repo jdx/jactionlint "${tmp}/${archive}"
+          tar -xzf "${tmp}/${archive}" -C "${tmp}" jactionlint
+          sudo install -m 0755 "${tmp}/jactionlint" /usr/local/bin/jactionlint
+          jactionlint --version
+          jactionlint --version | grep -F "${VERSION}"
+
+      - name: Lint GitHub Actions workflows
+        run: jactionlint --format github
+
   # Quality gates + cheap harness slow-test (SSE idle-timeout). Parallel with
   # `harness` (smoke + live e2e); no artifact handoff between the two.
   quality-gates:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      # actions: write — save the main-branch Nx cache
+      actions: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           filter: tree:0
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -120,11 +173,17 @@ jobs:
   # install smoke remains the packaging multi-arch gate.
   harness:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      # actions: write — upload Playwright diagnostics on live e2e failure
+      actions: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           filter: tree:0
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -218,11 +277,17 @@ jobs:
   # outside the checkout, run without Bun/Nx. Complementary to live Gherkin e2e.
   packed-install:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # actions: write — upload packed-install diagnostics on failure
+      actions: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           filter: tree:0
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -274,15 +339,18 @@ jobs:
 
   release:
     # Manual release only, from main (never on PR/push).
-    # Requires quality gates + harness smoke/e2e + packed-install before publish.
+    # Requires quality gates, harness, packed-install, pinact, and jactionlint
+    # before publish.
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    needs: [quality-gates, harness, packed-install, pinact]
+    needs: [quality-gates, harness, packed-install, pinact, jactionlint]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       actions: write
       contents: write
       id-token: write
     steps:
+      # Credentials stay in git config so the tag push below can authenticate.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           filter: tree:0

@@ -22,12 +22,14 @@ on:
         required: false
         default: "latest"
 
-permissions:
-  contents: read
-  actions: write
+permissions: {}
 
 jobs:
   published-install:
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: write
     strategy:
       fail-fast: false
       matrix:

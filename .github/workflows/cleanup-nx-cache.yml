@@ -8,15 +8,21 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
-permissions:
-  actions: write
-  contents: read
-  pull-requests: read
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   cleanup-pr-cache:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
     steps:
       - name: Delete PR caches
         env:
@@ -83,6 +89,11 @@ jobs:
   cleanup-stale-caches:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: read
     steps:
       - name: Prune Nx caches
         env:

@@ -47,12 +47,13 @@ describe("contributor environment pins", () => {
   const miseToml = readWorkspace("mise.toml")
   const hkPkl = readWorkspace("hk.pkl")
 
-  it("declares concrete Bun, hk, and Usage pins in mise.toml without machine-global bootstrap packages", () => {
+  it("declares concrete Bun, hk, Usage, and jactionlint pins in mise.toml without machine-global bootstrap packages", () => {
     const bunVersion = quotedAssignment(miseToml, "bun")
     expect(bunVersion).toMatch(/^\d+\.\d+\.\d+$/)
     expect(quotedAssignment(miseToml, "min_version")).toBe("2026.7.0")
     expect(quotedAssignment(miseToml, "hk")).toMatch(/^\d+\.\d+\.\d+$/)
     expect(quotedAssignment(miseToml, "usage")).toBe("5.1.0")
+    expect(quotedAssignment(miseToml, "jactionlint")).toBe("2.2.0")
     expect(miseToml).not.toContain("[bootstrap.packages]")
   })
 
@@ -148,6 +149,59 @@ describe("contributor environment pins", () => {
     )
     expect(cicd).toMatch(
       /bun nx run-many -t lint knip test typecheck check-usage/,
+    )
+  })
+
+  it("installs the mise.toml jactionlint pin in PR and main workflows", () => {
+    const jactionlintVersion = quotedAssignment(miseToml, "jactionlint")
+    expect(jactionlintVersion).toBe("2.2.0")
+
+    const workflowFiles = [
+      ".github/workflows/pr.yml",
+      ".github/workflows/ci-cd.yml",
+    ] as const
+    for (const relativePath of workflowFiles) {
+      const contents = readWorkspace(relativePath)
+      expect(contents, relativePath).toContain(
+        "name: Install pinned jactionlint",
+      )
+      expect(contents, relativePath).toContain(
+        'sed -n \'s/^jactionlint = "\\([^"]*\\)"/\\1/p\' mise.toml',
+      )
+      expect(contents, relativePath).toContain(
+        "gh release download --repo jdx/jactionlint",
+      )
+      expect(contents, relativePath).toContain(
+        "sha256sum --check --ignore-missing",
+      )
+      expect(contents, relativePath).toContain(
+        "gh attestation verify --repo jdx/jactionlint",
+      )
+      expect(contents, relativePath).toContain("jactionlint --format github")
+      expect(contents, relativePath).not.toMatch(/jactionlint@latest/i)
+      expect(contents, relativePath).not.toMatch(/VERSION=2\.2\.0/)
+      expect(contents, relativePath).toContain(
+        "name: Verify GitHub Action pins",
+      )
+
+      const jobStart = contents.indexOf("\n  jactionlint:")
+      expect(jobStart, relativePath).toBeGreaterThan(0)
+      const job = contents.slice(jobStart)
+      const nextJob = job.indexOf("\n  quality-gates:")
+      expect(nextJob, relativePath).toBeGreaterThan(0)
+      const jactionlintJob = job.slice(0, nextJob)
+      expect(jactionlintJob, relativePath).not.toContain("nx affected")
+      expect(jactionlintJob, relativePath).not.toContain("paths:")
+    }
+
+    const pr = readWorkspace(".github/workflows/pr.yml")
+    const cicd = readWorkspace(".github/workflows/ci-cd.yml")
+    expect(pr).toMatch(/^on:\n {2}pull_request:\n/m)
+    expect(pr).not.toMatch(/pull_request:\s*\n\s+paths:/)
+    expect(cicd).toMatch(/branches:\s*\n\s+- main/)
+    expect(cicd).not.toMatch(/push:\s*\n\s+paths:/)
+    expect(cicd).toContain(
+      "needs: [quality-gates, harness, packed-install, pinact, jactionlint]",
     )
   })
 

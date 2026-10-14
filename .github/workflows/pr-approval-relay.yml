@@ -4,19 +4,26 @@
 name: PR approval relay
 
 on:
+  # workflow_run is required: pull_request_target cannot wait for the
+  # first-time-contributor Enable click. See .github/jactionlint.yaml.
   workflow_run:
     workflows: ["PR"]
     types: [in_progress]
 
-permissions:
-  actions: write
-  contents: read
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_repository.full_name || github.repository }}-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   dispatch-first-timer-review:
     if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
     steps:
       - name: Dispatch Claude review for first-timer PRs
         env:
