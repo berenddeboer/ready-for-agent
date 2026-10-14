@@ -1,13 +1,13 @@
 import { Schema } from "effect"
 
-export class MarkPrReadyForReviewContextError extends Schema.TaggedErrorClass<MarkPrReadyForReviewContextError>()(
+export class MarkPrReadyForReviewContextError extends Schema.TaggedError<MarkPrReadyForReviewContextError>()(
   "MarkPrReadyForReviewContextError",
   {
     message: Schema.String,
   },
 ) {}
 
-export class MarkPrReadyForReviewSessionContextMissingError extends Schema.TaggedErrorClass<MarkPrReadyForReviewSessionContextMissingError>()(
+export class MarkPrReadyForReviewSessionContextMissingError extends Schema.TaggedError<MarkPrReadyForReviewSessionContextMissingError>()(
   "MarkPrReadyForReviewSessionContextMissingError",
   {
     workItemId: Schema.String,
@@ -15,7 +15,7 @@ export class MarkPrReadyForReviewSessionContextMissingError extends Schema.Tagge
   },
 ) {}
 
-export class MarkPrReadyForReviewOpenCodeError extends Schema.TaggedErrorClass<MarkPrReadyForReviewOpenCodeError>()(
+export class MarkPrReadyForReviewOpenCodeError extends Schema.TaggedError<MarkPrReadyForReviewOpenCodeError>()(
   "MarkPrReadyForReviewOpenCodeError",
   {
     message: Schema.String,
@@ -25,7 +25,7 @@ export class MarkPrReadyForReviewOpenCodeError extends Schema.TaggedErrorClass<M
   },
 ) {}
 
-export class MarkPrReadyForReviewPostconditionError extends Schema.TaggedErrorClass<MarkPrReadyForReviewPostconditionError>()(
+export class MarkPrReadyForReviewPostconditionError extends Schema.TaggedError<MarkPrReadyForReviewPostconditionError>()(
   "MarkPrReadyForReviewPostconditionError",
   {
     repositoryId: Schema.String,

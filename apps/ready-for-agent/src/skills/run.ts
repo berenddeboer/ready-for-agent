@@ -1,6 +1,7 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { Effect } from "effect"
-import { Command } from "effect/unstable/cli"
+import { Command } from "effect/cli"
+import { operatorCliConfigLayer } from "../cli-config.ts"
 import { encodeCompactJson } from "../cli-json.ts"
 import { READY_FOR_AGENT_VERSION } from "../generated/version.ts"
 import { skillsCommand } from "./command.ts"
@@ -41,6 +42,7 @@ export const runSkillsProcess = (userArgs: readonly string[]): void => {
     ),
     { version: READY_FOR_AGENT_VERSION },
   )(userArgs).pipe(
+    Effect.provide(operatorCliConfigLayer),
     Effect.provide(BunServices.layer),
     Effect.tapErrorTag("FiniteCommandFailed", (error) =>
       Effect.sync(() => {

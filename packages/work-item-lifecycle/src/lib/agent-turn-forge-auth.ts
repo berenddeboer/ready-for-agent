@@ -82,7 +82,7 @@ export const toAzureDevOpsRepository = (
   repository: AgentTurnForgeRepository,
 ): AzureDevOpsRepository => forgeRepositoryIdentity(repository)
 
-export class AgentTurnForgeCredentialMissingError extends Schema.TaggedErrorClass<AgentTurnForgeCredentialMissingError>()(
+export class AgentTurnForgeCredentialMissingError extends Schema.TaggedError<AgentTurnForgeCredentialMissingError>()(
   "AgentTurnForgeCredentialMissingError",
   {
     message: Schema.String,
@@ -94,7 +94,7 @@ export class AgentTurnForgeCredentialMissingError extends Schema.TaggedErrorClas
  * it. Fail closed rather than falling back to the process-wide Active
  * registration.
  */
-export class InvalidCapturedAgentBackendError extends Schema.TaggedErrorClass<InvalidCapturedAgentBackendError>()(
+export class InvalidCapturedAgentBackendError extends Schema.TaggedError<InvalidCapturedAgentBackendError>()(
   "InvalidCapturedAgentBackendError",
   {
     message: Schema.String,

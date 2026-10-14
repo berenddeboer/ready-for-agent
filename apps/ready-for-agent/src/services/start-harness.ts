@@ -1,5 +1,5 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { isStandaloneExecutable } from "@ready-for-agent/keymaxxer-service"
 import {
   resolveBrowserOpenUrl,
@@ -22,7 +22,7 @@ import {
 import { bootStandaloneProduction } from "../standalone-boot.ts"
 import { ApplicationConfig } from "./application-config.ts"
 
-export class StartHarnessFailed extends Schema.TaggedErrorClass<StartHarnessFailed>()(
+export class StartHarnessFailed extends Schema.TaggedError<StartHarnessFailed>()(
   "StartHarnessFailed",
   { detail: Schema.String },
 ) {

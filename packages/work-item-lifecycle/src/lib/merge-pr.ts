@@ -10,7 +10,7 @@ import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { resolveEffectiveMergePolicy } from "./merge-policy.js"
 import { workItemBranchName } from "./worktree-names.js"
 
-export class MergePrContextError extends Schema.TaggedErrorClass<MergePrContextError>()(
+export class MergePrContextError extends Schema.TaggedError<MergePrContextError>()(
   "MergePrContextError",
   {
     message: Schema.String,

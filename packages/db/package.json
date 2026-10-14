@@ -22,9 +22,9 @@
     }
   },
   "dependencies": {
-    "@effect/sql-sqlite-bun": "^4.0.0-beta.97",
+    "@effect/sql-sqlite-bun": "4.0.4",
     "@ready-for-agent/layer-turso-local": "workspace:*",
-    "effect": "^4.0.0-beta.97",
+    "effect": "4.0.4",
     "tslib": "^2.3.0"
   },
   "devDependencies": {

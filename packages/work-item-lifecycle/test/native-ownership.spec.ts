@@ -43,7 +43,7 @@ describe("native repository invocation ownership", () => {
           effect: Effect.Effect<
             A,
             E,
-            import("effect/unstable/process").ChildProcessSpawner.ChildProcessSpawner
+            import("effect/process").ChildProcessSpawner.ChildProcessSpawner
           >,
         ) => Effect.runPromise(effect.pipe(Effect.provide(BunServices.layer)))
         try {

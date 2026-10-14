@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Config, Effect, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 import { embeddedMigrationSources } from "./embedded-migrations.gen.js"
 
 const __filename = fileURLToPath(import.meta.url)
@@ -18,7 +18,7 @@ export const defaultMigrationsFolder = join(
  * Config for the migrations folder path.
  * Override with ConfigProvider.fromMap({ MIGRATIONS_FOLDER: "/custom/path" })
  */
-export const MigrationsFolderConfig = Config.string("MIGRATIONS_FOLDER").pipe(
+export const MigrationsFolderConfig = Config.String("MIGRATIONS_FOLDER").pipe(
   Config.withDefault(defaultMigrationsFolder),
 )
 
@@ -104,7 +104,7 @@ export const logMigrationsAppliedIfAny = (result: MigrationRunResult): void => {
   }
 }
 
-export class MigrationReadError extends Schema.TaggedErrorClass<MigrationReadError>()(
+export class MigrationReadError extends Schema.TaggedError<MigrationReadError>()(
   "MigrationReadError",
   { cause: Schema.Defect() },
 ) {}
@@ -120,7 +120,7 @@ const pluralizeMigrationCount = (count: number): string =>
  * ready-for-agent#18/#21). Continuing would otherwise re-run the same failing
  * queries against a schema this binary doesn't understand, forever.
  */
-export class StaleBinaryMigrationError extends Schema.TaggedErrorClass<StaleBinaryMigrationError>()(
+export class StaleBinaryMigrationError extends Schema.TaggedError<StaleBinaryMigrationError>()(
   "StaleBinaryMigrationError",
   {
     /** Names (or hashes, if unnamed) of DB migrations this binary doesn't recognize. */

@@ -5,7 +5,7 @@ import { GitLabProjectUnavailableError } from "../lib/errors.js"
 import type { GitLabService } from "../lib/gitlab-service.js"
 import { GitLabServiceLive } from "../lib/gitlab-service-live.js"
 
-export class CliArgumentError extends Schema.TaggedErrorClass<CliArgumentError>()(
+export class CliArgumentError extends Schema.TaggedError<CliArgumentError>()(
   "CliArgumentError",
   { message: Schema.String },
 ) {}

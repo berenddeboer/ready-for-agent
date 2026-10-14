@@ -124,7 +124,7 @@ export const toAgentBackendPreview = (
   warnings: status.warnings,
 })
 
-export class AgentBackendUnavailableError extends Schema.TaggedErrorClass<AgentBackendUnavailableError>()(
+export class AgentBackendUnavailableError extends Schema.TaggedError<AgentBackendUnavailableError>()(
   "AgentBackendUnavailableError",
   {
     message: Schema.String,

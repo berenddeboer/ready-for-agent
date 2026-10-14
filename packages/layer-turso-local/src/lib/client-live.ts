@@ -10,11 +10,11 @@ import {
   Semaphore,
   Stream,
 } from "effect"
-import * as Reactivity from "effect/unstable/reactivity/Reactivity"
-import * as Client from "effect/unstable/sql/SqlClient"
-import type { Connection } from "effect/unstable/sql/SqlConnection"
-import { SqlError, classifySqliteError } from "effect/unstable/sql/SqlError"
-import * as Statement from "effect/unstable/sql/Statement"
+import * as Reactivity from "effect/reactivity/Reactivity"
+import * as Client from "effect/sql/SqlClient"
+import type { Connection } from "effect/sql/SqlConnection"
+import { SqlError, classifySqliteError } from "effect/sql/SqlError"
+import * as Statement from "effect/sql/Statement"
 import {
   DatabaseConnectionInfo,
   DatabasePathConfig,
@@ -52,7 +52,7 @@ const sqlError = (cause: unknown, operation: string) =>
     }),
   })
 
-export class DatabaseDirectoryError extends Schema.TaggedErrorClass<DatabaseDirectoryError>()(
+export class DatabaseDirectoryError extends Schema.TaggedError<DatabaseDirectoryError>()(
   "DatabaseDirectoryError",
   {
     path: Schema.String,

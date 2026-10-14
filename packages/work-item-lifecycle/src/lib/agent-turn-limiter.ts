@@ -1,5 +1,5 @@
 import { Context, Duration, Effect, Option, Ref, Schema } from "effect"
-import type { SqlClient } from "effect/unstable/sql/SqlClient"
+import type { SqlClient } from "effect/sql/SqlClient"
 import type {
   AgentBackendError,
   AgentTurnResult,

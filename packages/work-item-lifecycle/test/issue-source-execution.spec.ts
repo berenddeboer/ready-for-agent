@@ -1,5 +1,5 @@
 import { Effect, Layer } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 import { AGENT_BACKEND_IDS } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {

@@ -80,7 +80,7 @@ export type RetryWorkItemsResult = {
   readonly results: readonly RetryWorkItemsItemResult[]
 }
 
-export class InvalidRetrySelectorError extends Schema.TaggedErrorClass<InvalidRetrySelectorError>()(
+export class InvalidRetrySelectorError extends Schema.TaggedError<InvalidRetrySelectorError>()(
   "InvalidRetrySelectorError",
   {
     reason: Schema.String,
@@ -88,7 +88,7 @@ export class InvalidRetrySelectorError extends Schema.TaggedErrorClass<InvalidRe
   },
 ) {}
 
-export class WorkItemNotInRepositoryError extends Schema.TaggedErrorClass<WorkItemNotInRepositoryError>()(
+export class WorkItemNotInRepositoryError extends Schema.TaggedError<WorkItemNotInRepositoryError>()(
   "WorkItemNotInRepositoryError",
   {
     workItemId: Schema.String,
@@ -96,7 +96,7 @@ export class WorkItemNotInRepositoryError extends Schema.TaggedErrorClass<WorkIt
   },
 ) {}
 
-export class NoUnfinishedWorkItemError extends Schema.TaggedErrorClass<NoUnfinishedWorkItemError>()(
+export class NoUnfinishedWorkItemError extends Schema.TaggedError<NoUnfinishedWorkItemError>()(
   "NoUnfinishedWorkItemError",
   {
     repositoryId: Schema.String,

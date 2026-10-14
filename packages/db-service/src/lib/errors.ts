@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class InvalidRepositoryInputError extends Schema.TaggedErrorClass<InvalidRepositoryInputError>()(
+export class InvalidRepositoryInputError extends Schema.TaggedError<InvalidRepositoryInputError>()(
   "InvalidRepositoryInputError",
   {
     field: Schema.Literals(["forge", "forgeHost", "projectPath", "localPath"]),
@@ -8,7 +8,7 @@ export class InvalidRepositoryInputError extends Schema.TaggedErrorClass<Invalid
   },
 ) {}
 
-export class RepositoryAlreadyExistsError extends Schema.TaggedErrorClass<RepositoryAlreadyExistsError>()(
+export class RepositoryAlreadyExistsError extends Schema.TaggedError<RepositoryAlreadyExistsError>()(
   "RepositoryAlreadyExistsError",
   {
     forge: Schema.String,
@@ -17,21 +17,21 @@ export class RepositoryAlreadyExistsError extends Schema.TaggedErrorClass<Reposi
   },
 ) {}
 
-export class LocalPathInUseError extends Schema.TaggedErrorClass<LocalPathInUseError>()(
+export class LocalPathInUseError extends Schema.TaggedError<LocalPathInUseError>()(
   "LocalPathInUseError",
   {
     localPath: Schema.String,
   },
 ) {}
 
-export class RepositoryNotFoundError extends Schema.TaggedErrorClass<RepositoryNotFoundError>()(
+export class RepositoryNotFoundError extends Schema.TaggedError<RepositoryNotFoundError>()(
   "RepositoryNotFoundError",
   {
     repositoryId: Schema.String,
   },
 ) {}
 
-export class RepositoryHasRunningStepError extends Schema.TaggedErrorClass<RepositoryHasRunningStepError>()(
+export class RepositoryHasRunningStepError extends Schema.TaggedError<RepositoryHasRunningStepError>()(
   "RepositoryHasRunningStepError",
   {
     repositoryId: Schema.String,
@@ -40,7 +40,7 @@ export class RepositoryHasRunningStepError extends Schema.TaggedErrorClass<Repos
   },
 ) {}
 
-export class InvalidIssueInputError extends Schema.TaggedErrorClass<InvalidIssueInputError>()(
+export class InvalidIssueInputError extends Schema.TaggedError<InvalidIssueInputError>()(
   "InvalidIssueInputError",
   {
     field: Schema.Literals([
@@ -60,7 +60,7 @@ export class InvalidIssueInputError extends Schema.TaggedErrorClass<InvalidIssue
   },
 ) {}
 
-export class InvalidConfigInputError extends Schema.TaggedErrorClass<InvalidConfigInputError>()(
+export class InvalidConfigInputError extends Schema.TaggedError<InvalidConfigInputError>()(
   "InvalidConfigInputError",
   {
     field: Schema.Literals([
@@ -76,7 +76,7 @@ export class InvalidConfigInputError extends Schema.TaggedErrorClass<InvalidConf
   },
 ) {}
 
-export class AgentBackendChangeBlockedError extends Schema.TaggedErrorClass<AgentBackendChangeBlockedError>()(
+export class AgentBackendChangeBlockedError extends Schema.TaggedError<AgentBackendChangeBlockedError>()(
   "AgentBackendChangeBlockedError",
   {
     message: Schema.String,
@@ -93,7 +93,7 @@ export class AgentBackendChangeBlockedError extends Schema.TaggedErrorClass<Agen
   },
 ) {}
 
-export class RepositoryIdentityChangeBlockedError extends Schema.TaggedErrorClass<RepositoryIdentityChangeBlockedError>()(
+export class RepositoryIdentityChangeBlockedError extends Schema.TaggedError<RepositoryIdentityChangeBlockedError>()(
   "RepositoryIdentityChangeBlockedError",
   {
     repositoryId: Schema.String,
@@ -102,7 +102,7 @@ export class RepositoryIdentityChangeBlockedError extends Schema.TaggedErrorClas
   },
 ) {}
 
-export class InvalidRepositorySettingsError extends Schema.TaggedErrorClass<InvalidRepositorySettingsError>()(
+export class InvalidRepositorySettingsError extends Schema.TaggedError<InvalidRepositorySettingsError>()(
   "InvalidRepositorySettingsError",
   {
     field: Schema.Literals([
@@ -131,7 +131,7 @@ export class InvalidRepositorySettingsError extends Schema.TaggedErrorClass<Inva
  * raises/adds a Repository guarantee or lowers the global cap below the
  * current total of guarantees.
  */
-export class GuaranteedMinAgentTurnsExceedsCapError extends Schema.TaggedErrorClass<GuaranteedMinAgentTurnsExceedsCapError>()(
+export class GuaranteedMinAgentTurnsExceedsCapError extends Schema.TaggedError<GuaranteedMinAgentTurnsExceedsCapError>()(
   "GuaranteedMinAgentTurnsExceedsCapError",
   {
     message: Schema.String,
@@ -140,7 +140,7 @@ export class GuaranteedMinAgentTurnsExceedsCapError extends Schema.TaggedErrorCl
   },
 ) {}
 
-export class DatabaseError extends Schema.TaggedErrorClass<DatabaseError>()(
+export class DatabaseError extends Schema.TaggedError<DatabaseError>()(
   "DatabaseError",
   {
     message: Schema.String,

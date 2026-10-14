@@ -10,7 +10,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Fiber, Layer } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 import {
   AgentBackend,
   AgentBackendExitError,

@@ -1,6 +1,6 @@
 import { Clock, Duration, Effect, Fiber, Queue, Ref, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, type ChildProcessSpawner } from "effect/process"
 import {
   AgentBackendConfigError,
   AgentBackendNotInstalledError,

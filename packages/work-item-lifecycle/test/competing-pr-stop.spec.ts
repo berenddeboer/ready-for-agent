@@ -1,5 +1,5 @@
 import { Deferred, Effect, Fiber, Layer, Option } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"

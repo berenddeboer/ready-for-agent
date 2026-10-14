@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class WorktreeContextMissingError extends Schema.TaggedErrorClass<WorktreeContextMissingError>()(
+export class WorktreeContextMissingError extends Schema.TaggedError<WorktreeContextMissingError>()(
   "WorktreeContextMissingError",
   {
     workItemId: Schema.String,
@@ -8,7 +8,7 @@ export class WorktreeContextMissingError extends Schema.TaggedErrorClass<Worktre
   },
 ) {}
 
-export class InvalidWorktreeContextError extends Schema.TaggedErrorClass<InvalidWorktreeContextError>()(
+export class InvalidWorktreeContextError extends Schema.TaggedError<InvalidWorktreeContextError>()(
   "InvalidWorktreeContextError",
   {
     workItemId: Schema.String,
@@ -17,7 +17,7 @@ export class InvalidWorktreeContextError extends Schema.TaggedErrorClass<Invalid
   },
 ) {}
 
-export class InstallCommandError extends Schema.TaggedErrorClass<InstallCommandError>()(
+export class InstallCommandError extends Schema.TaggedError<InstallCommandError>()(
   "InstallCommandError",
   {
     message: Schema.String,
@@ -29,7 +29,7 @@ export class InstallCommandError extends Schema.TaggedErrorClass<InstallCommandE
   },
 ) {}
 
-export class InstallDependenciesFallbackError extends Schema.TaggedErrorClass<InstallDependenciesFallbackError>()(
+export class InstallDependenciesFallbackError extends Schema.TaggedError<InstallDependenciesFallbackError>()(
   "InstallDependenciesFallbackError",
   {
     message: Schema.String,

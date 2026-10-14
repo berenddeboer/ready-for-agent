@@ -6,11 +6,8 @@ import { Runtime, Schema } from "effect"
  * Marked as already reported so `BunRuntime.runMain` does not pretty-print
  * a stack after the one-line message.
  */
-export class JumpFailed extends Schema.TaggedErrorClass<JumpFailed>()(
-  "JumpFailed",
-  {
-    message: Schema.String,
-  },
-) {
+export class JumpFailed extends Schema.TaggedError<JumpFailed>()("JumpFailed", {
+  message: Schema.String,
+}) {
   override readonly [Runtime.errorReported] = false
 }

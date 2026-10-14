@@ -51,7 +51,7 @@ const createGraphqlEndpointFetch =
  * CLI writes the versioned JSON error once (harness-down and similar).
  * `code` is the Harness `extensions.code` or a CLI-owned transport code.
  */
-export class GraphqlRequestFailed extends Schema.TaggedErrorClass<GraphqlRequestFailed>()(
+export class GraphqlRequestFailed extends Schema.TaggedError<GraphqlRequestFailed>()(
   "GraphqlRequestFailed",
   {
     code: Schema.String,

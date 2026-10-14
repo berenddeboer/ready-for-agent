@@ -1,5 +1,5 @@
 import { Duration, Effect, Stream } from "effect"
-import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, type ChildProcessSpawner } from "effect/process"
 
 /**
  * Prefer this over `glab config get token --host`, which can exit successfully

@@ -15,14 +15,14 @@ import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { unwrapSentinelArgument } from "./unwrap-sentinel-argument.js"
 
-export class ResolvePrMergeConflictContextError extends Schema.TaggedErrorClass<ResolvePrMergeConflictContextError>()(
+export class ResolvePrMergeConflictContextError extends Schema.TaggedError<ResolvePrMergeConflictContextError>()(
   "ResolvePrMergeConflictContextError",
   {
     message: Schema.String,
   },
 ) {}
 
-export class ResolvePrMergeConflictOpenCodeError extends Schema.TaggedErrorClass<ResolvePrMergeConflictOpenCodeError>()(
+export class ResolvePrMergeConflictOpenCodeError extends Schema.TaggedError<ResolvePrMergeConflictOpenCodeError>()(
   "ResolvePrMergeConflictOpenCodeError",
   {
     message: Schema.String,

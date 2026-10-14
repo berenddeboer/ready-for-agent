@@ -29,7 +29,7 @@
     "@ready-for-agent/local-git": "workspace:*",
     "@ready-for-agent/queue-service": "workspace:*",
     "@ready-for-agent/work-item-lifecycle": "workspace:*",
-    "effect": "^4.0.0-beta.97",
+    "effect": "4.0.4",
     "graphql": "^16.11.0",
     "graphql-yoga": "^5.13.0",
     "tslib": "^2.3.0",

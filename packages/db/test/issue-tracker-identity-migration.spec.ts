@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { Effect } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 import { SqliteTest } from "../src/lib/database-test.js"
 import {
   defaultMigrationsFolder,

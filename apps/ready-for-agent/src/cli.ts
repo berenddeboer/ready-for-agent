@@ -1,5 +1,5 @@
 import { Console, Effect, FileSystem, Option } from "effect"
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, Command, Flag } from "effect/cli"
 import {
   FiniteCommandFailed,
   type FiniteCommandName,
@@ -30,78 +30,80 @@ import { StartHarness } from "./services/start-harness.ts"
 import { Tmux } from "./services/tmux.ts"
 import { skillsCommand } from "./skills/command.ts"
 
-const pathArg = Argument.string("path").pipe(
+const pathArg = Argument.String("path").pipe(
   Argument.withDescription("Path to a local git repository"),
 )
 
 const repositorySelectorGuidance =
   "Use <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment"
 
-const repositoryIdentityArg = Argument.string("repository").pipe(
+const repositoryIdentityArg = Argument.String("repository").pipe(
   Argument.withDescription(
     "Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)",
   ),
 )
 
-const sessionIdArg = Argument.string("session-id").pipe(
+const sessionIdArg = Argument.String("session-id").pipe(
   Argument.withDescription("Opaque backend Session ID to continue"),
 )
 
-const optionalRepositoryIdentityArg = Argument.string("repository").pipe(
+const optionalRepositoryIdentityArg = Argument.String("repository").pipe(
   Argument.withDescription(
     "Optional repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)",
   ),
   Argument.optional,
 )
 
-const noOpenFlag = Flag.boolean("no-open").pipe(
+const noOpenFlag = Flag.Boolean("no-open").pipe(
+  Flag.withDefault(false),
   Flag.withDescription(
     "Do not open the default browser after a successful start (also: NO_BROWSER)",
   ),
 )
 
-const hostFlag = Flag.string("host").pipe(
+const hostFlag = Flag.String("host").pipe(
   Flag.withDescription(
     "Listen host (default 127.0.0.1). Bare --host binds all interfaces (0.0.0.0); --host <addr> binds that address. Env: HOST (flag wins)",
   ),
   Flag.optional,
 )
 
-const forgeHostFlag = Flag.string("forge-host").pipe(
+const forgeHostFlag = Flag.String("forge-host").pipe(
   Flag.withDescription(
     "Correct the forge host inferred from the repository remote",
   ),
   Flag.optional,
 )
 
-const projectPathFlag = Flag.string("project-path").pipe(
+const projectPathFlag = Flag.String("project-path").pipe(
   Flag.withDescription(
     "Correct the forge project path inferred from the repository remote",
   ),
   Flag.optional,
 )
 
-const retryIssueFlag = Flag.string("issue").pipe(
+const retryIssueFlag = Flag.String("issue").pipe(
   Flag.withDescription(
     "Retry the current unfinished Work Item for this Issue Native Identity",
   ),
   Flag.optional,
 )
 
-const retryWorkItemFlag = Flag.string("work-item").pipe(
+const retryWorkItemFlag = Flag.String("work-item").pipe(
   Flag.withDescription(
     "Retry this Work Item after verifying it belongs to the selected Repository",
   ),
   Flag.optional,
 )
 
-const retryAllRetryableFlag = Flag.boolean("all-retryable").pipe(
+const retryAllRetryableFlag = Flag.Boolean("all-retryable").pipe(
+  Flag.withDefault(false),
   Flag.withDescription(
     "Retry every Work Item eligible for Autonomous Retry in the Repository (excludes paused Work Items)",
   ),
 )
 
-const maxAutonomousRetriesFlag = Flag.integer("max-autonomous-retries").pipe(
+const maxAutonomousRetriesFlag = Flag.Int("max-autonomous-retries").pipe(
   Flag.withDescription(
     "Maximum accepted Autonomous Retry execution attempts per Work Item at its current Lifecycle Step (default 3; --all-retryable only)",
   ),

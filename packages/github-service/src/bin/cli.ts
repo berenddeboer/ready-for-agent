@@ -21,7 +21,7 @@ import {
 import type { GitHubService } from "../lib/github-service.js"
 import { makeGitHubServiceLive } from "../lib/github-service-live.js"
 
-export class CliArgumentError extends Schema.TaggedErrorClass<CliArgumentError>()(
+export class CliArgumentError extends Schema.TaggedError<CliArgumentError>()(
   "CliArgumentError",
   { message: Schema.String },
 ) {}

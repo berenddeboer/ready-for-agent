@@ -1,5 +1,5 @@
 import { Effect, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { spawnOwned } from "@ready-for-agent/agent-backend"
 import { GitCommandError } from "./create-worktree-errors.js"
 import { repositoryProcessOptions } from "./repository-process-environment.js"

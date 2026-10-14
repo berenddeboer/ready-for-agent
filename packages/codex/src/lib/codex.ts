@@ -1,5 +1,5 @@
 import { Duration, Effect, Layer, Stream } from "effect"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/process"
 import {
   AGENT_BACKEND_IDS,
   AgentBackend,

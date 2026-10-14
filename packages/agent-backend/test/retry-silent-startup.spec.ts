@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Ref } from "effect"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/process"
 import { runCliTurn } from "../src/lib/cli-runner.js"
 import { sanitizeInheritedEnvironment } from "../src/lib/environment.js"
 import {

@@ -1,5 +1,5 @@
 import { Context, Duration, Effect, Layer, Schema } from "effect"
-import type { ChildProcessSpawner } from "effect/unstable/process"
+import type { ChildProcessSpawner } from "effect/process"
 import {
   GITLAB_VAULT_METADATA_BUDGET_SECONDS,
   type GitLabHelperOperation,

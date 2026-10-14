@@ -16,7 +16,7 @@ import {
  * Unlike GitHub/GitLab, there is no CLI (`gh`/`glab`) to shell out to for
  * token discovery, and `AzureDevOpsServiceLive` (the package's own Live
  * layer) is not used directly here because it fails closed via
- * `Config.redacted` when the PAT env var is absent — which would break
+ * `Config.Redacted` when the PAT env var is absent — which would break
  * Harness startup entirely for installs with no Azure DevOps Repository.
  * This layer instead reads the PAT from the same `environment` record the
  * ambient GitHub/GitLab layers already thread through (so tests can inject

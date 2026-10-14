@@ -1,5 +1,5 @@
 import { Clock, Effect, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 import { ulid } from "ulidx"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
@@ -39,14 +39,14 @@ import {
 import { unwrapSentinelArgument } from "./unwrap-sentinel-argument.js"
 import { workItemBranchName } from "./worktree-names.js"
 
-export class PrStatusChecksContextError extends Schema.TaggedErrorClass<PrStatusChecksContextError>()(
+export class PrStatusChecksContextError extends Schema.TaggedError<PrStatusChecksContextError>()(
   "PrStatusChecksContextError",
   {
     message: Schema.String,
   },
 ) {}
 
-export class PrStatusChecksOpenCodeError extends Schema.TaggedErrorClass<PrStatusChecksOpenCodeError>()(
+export class PrStatusChecksOpenCodeError extends Schema.TaggedError<PrStatusChecksOpenCodeError>()(
   "PrStatusChecksOpenCodeError",
   {
     message: Schema.String,
@@ -54,7 +54,7 @@ export class PrStatusChecksOpenCodeError extends Schema.TaggedErrorClass<PrStatu
   },
 ) {}
 
-export class PrStatusChecksUnresolvedError extends Schema.TaggedErrorClass<PrStatusChecksUnresolvedError>()(
+export class PrStatusChecksUnresolvedError extends Schema.TaggedError<PrStatusChecksUnresolvedError>()(
   "PrStatusChecksUnresolvedError",
   {
     message: Schema.String,

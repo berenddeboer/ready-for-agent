@@ -3,14 +3,14 @@ import { Schema } from "effect"
 export * from "./create-worktree-errors.js"
 export * from "./install-dependencies-errors.js"
 
-export class NonTransactionalQueueError extends Schema.TaggedErrorClass<NonTransactionalQueueError>()(
+export class NonTransactionalQueueError extends Schema.TaggedError<NonTransactionalQueueError>()(
   "NonTransactionalQueueError",
   {
     message: Schema.String,
   },
 ) {}
 
-export class IssueNotFoundError extends Schema.TaggedErrorClass<IssueNotFoundError>()(
+export class IssueNotFoundError extends Schema.TaggedError<IssueNotFoundError>()(
   "IssueNotFoundError",
   {
     repositoryId: Schema.String,
@@ -20,7 +20,7 @@ export class IssueNotFoundError extends Schema.TaggedErrorClass<IssueNotFoundErr
 ) {}
 
 /** More than one live Issue shares this number under the current tracker. */
-export class IssueIdentityAmbiguousError extends Schema.TaggedErrorClass<IssueIdentityAmbiguousError>()(
+export class IssueIdentityAmbiguousError extends Schema.TaggedError<IssueIdentityAmbiguousError>()(
   "IssueIdentityAmbiguousError",
   {
     repositoryId: Schema.String,
@@ -29,7 +29,7 @@ export class IssueIdentityAmbiguousError extends Schema.TaggedErrorClass<IssueId
   },
 ) {}
 
-export class IssueNotOpenError extends Schema.TaggedErrorClass<IssueNotOpenError>()(
+export class IssueNotOpenError extends Schema.TaggedError<IssueNotOpenError>()(
   "IssueNotOpenError",
   {
     repositoryId: Schema.String,
@@ -38,7 +38,7 @@ export class IssueNotOpenError extends Schema.TaggedErrorClass<IssueNotOpenError
   },
 ) {}
 
-export class ParentIssueError extends Schema.TaggedErrorClass<ParentIssueError>()(
+export class ParentIssueError extends Schema.TaggedError<ParentIssueError>()(
   "ParentIssueError",
   {
     repositoryId: Schema.String,
@@ -47,7 +47,7 @@ export class ParentIssueError extends Schema.TaggedErrorClass<ParentIssueError>(
 ) {}
 
 /** The Issue is not a Parent Issue (no children). */
-export class NotAParentIssueError extends Schema.TaggedErrorClass<NotAParentIssueError>()(
+export class NotAParentIssueError extends Schema.TaggedError<NotAParentIssueError>()(
   "NotAParentIssueError",
   {
     repositoryId: Schema.String,
@@ -58,7 +58,7 @@ export class NotAParentIssueError extends Schema.TaggedErrorClass<NotAParentIssu
 /**
  * The Issue hierarchy is not a Supported Issue Hierarchy (e.g. grandchildren).
  */
-export class UnsupportedIssueHierarchyError extends Schema.TaggedErrorClass<UnsupportedIssueHierarchyError>()(
+export class UnsupportedIssueHierarchyError extends Schema.TaggedError<UnsupportedIssueHierarchyError>()(
   "UnsupportedIssueHierarchyError",
   {
     repositoryId: Schema.String,
@@ -71,7 +71,7 @@ export class UnsupportedIssueHierarchyError extends Schema.TaggedErrorClass<Unsu
  * Parent Issue is not eligible for Implement all with auto-merge (no open
  * Child Issues, or concurrent enrollment conflict).
  */
-export class ImplementAllWithAutoMergeNotEligibleError extends Schema.TaggedErrorClass<ImplementAllWithAutoMergeNotEligibleError>()(
+export class ImplementAllWithAutoMergeNotEligibleError extends Schema.TaggedError<ImplementAllWithAutoMergeNotEligibleError>()(
   "ImplementAllWithAutoMergeNotEligibleError",
   {
     repositoryId: Schema.String,
@@ -84,7 +84,7 @@ export class ImplementAllWithAutoMergeNotEligibleError extends Schema.TaggedErro
  * Implement With cannot request an Implement Locally pause on a Parent Issue.
  * Bulk enrollment is always remote; the pause option fails closed.
  */
-export class ParentImplementWithPauseNotAllowedError extends Schema.TaggedErrorClass<ParentImplementWithPauseNotAllowedError>()(
+export class ParentImplementWithPauseNotAllowedError extends Schema.TaggedError<ParentImplementWithPauseNotAllowedError>()(
   "ParentImplementWithPauseNotAllowedError",
   {
     repositoryId: Schema.String,
@@ -92,7 +92,7 @@ export class ParentImplementWithPauseNotAllowedError extends Schema.TaggedErrorC
   },
 ) {}
 
-export class IssueBlockedError extends Schema.TaggedErrorClass<IssueBlockedError>()(
+export class IssueBlockedError extends Schema.TaggedError<IssueBlockedError>()(
   "IssueBlockedError",
   {
     repositoryId: Schema.String,
@@ -102,7 +102,7 @@ export class IssueBlockedError extends Schema.TaggedErrorClass<IssueBlockedError
 ) {}
 
 /** Queue requires listed blockers; Implement Now requires none. */
-export class IssueNotBlockedError extends Schema.TaggedErrorClass<IssueNotBlockedError>()(
+export class IssueNotBlockedError extends Schema.TaggedError<IssueNotBlockedError>()(
   "IssueNotBlockedError",
   {
     repositoryId: Schema.String,
@@ -110,7 +110,7 @@ export class IssueNotBlockedError extends Schema.TaggedErrorClass<IssueNotBlocke
   },
 ) {}
 
-export class UnfinishedWorkItemExistsError extends Schema.TaggedErrorClass<UnfinishedWorkItemExistsError>()(
+export class UnfinishedWorkItemExistsError extends Schema.TaggedError<UnfinishedWorkItemExistsError>()(
   "UnfinishedWorkItemExistsError",
   {
     repositoryId: Schema.String,
@@ -120,7 +120,7 @@ export class UnfinishedWorkItemExistsError extends Schema.TaggedErrorClass<Unfin
 ) {}
 
 /** Pause/Start/force-start are not allowed while Waiting for blockers. */
-export class WorkItemWaitingForBlockersError extends Schema.TaggedErrorClass<WorkItemWaitingForBlockersError>()(
+export class WorkItemWaitingForBlockersError extends Schema.TaggedError<WorkItemWaitingForBlockersError>()(
   "WorkItemWaitingForBlockersError",
   {
     workItemId: Schema.String,
@@ -128,7 +128,7 @@ export class WorkItemWaitingForBlockersError extends Schema.TaggedErrorClass<Wor
   },
 ) {}
 
-export class BuildModelNotConfiguredError extends Schema.TaggedErrorClass<BuildModelNotConfiguredError>()(
+export class BuildModelNotConfiguredError extends Schema.TaggedError<BuildModelNotConfiguredError>()(
   "BuildModelNotConfiguredError",
   {
     message: Schema.String,
@@ -139,7 +139,7 @@ export class BuildModelNotConfiguredError extends Schema.TaggedErrorClass<BuildM
  * Implement With rejected a complete-profile input (partial fields, catalog
  * membership, or Thinking Level) before creating a Work Item.
  */
-export class InvalidExecutionProfileError extends Schema.TaggedErrorClass<InvalidExecutionProfileError>()(
+export class InvalidExecutionProfileError extends Schema.TaggedError<InvalidExecutionProfileError>()(
   "InvalidExecutionProfileError",
   {
     message: Schema.String,
@@ -147,7 +147,7 @@ export class InvalidExecutionProfileError extends Schema.TaggedErrorClass<Invali
   },
 ) {}
 
-export class AgentBackendUnavailableError extends Schema.TaggedErrorClass<AgentBackendUnavailableError>()(
+export class AgentBackendUnavailableError extends Schema.TaggedError<AgentBackendUnavailableError>()(
   "AgentBackendUnavailableError",
   {
     message: Schema.String,
@@ -155,7 +155,7 @@ export class AgentBackendUnavailableError extends Schema.TaggedErrorClass<AgentB
   },
 ) {}
 
-export class WorkItemNotFoundError extends Schema.TaggedErrorClass<WorkItemNotFoundError>()(
+export class WorkItemNotFoundError extends Schema.TaggedError<WorkItemNotFoundError>()(
   "WorkItemNotFoundError",
   {
     workItemId: Schema.String,
@@ -163,7 +163,7 @@ export class WorkItemNotFoundError extends Schema.TaggedErrorClass<WorkItemNotFo
 ) {}
 
 /** No Work Item owns this opaque backend Session ID. */
-export class SessionIdNotFoundError extends Schema.TaggedErrorClass<SessionIdNotFoundError>()(
+export class SessionIdNotFoundError extends Schema.TaggedError<SessionIdNotFoundError>()(
   "SessionIdNotFoundError",
   {
     sessionId: Schema.String,
@@ -171,21 +171,21 @@ export class SessionIdNotFoundError extends Schema.TaggedErrorClass<SessionIdNot
 ) {}
 
 /** More than one Work Item owns this opaque backend Session ID. */
-export class SessionIdAmbiguousError extends Schema.TaggedErrorClass<SessionIdAmbiguousError>()(
+export class SessionIdAmbiguousError extends Schema.TaggedError<SessionIdAmbiguousError>()(
   "SessionIdAmbiguousError",
   {
     sessionId: Schema.String,
   },
 ) {}
 
-export class StepRunNotFoundError extends Schema.TaggedErrorClass<StepRunNotFoundError>()(
+export class StepRunNotFoundError extends Schema.TaggedError<StepRunNotFoundError>()(
   "StepRunNotFoundError",
   {
     stepRunId: Schema.String,
   },
 ) {}
 
-export class WorkItemLifecycleDatabaseError extends Schema.TaggedErrorClass<WorkItemLifecycleDatabaseError>()(
+export class WorkItemLifecycleDatabaseError extends Schema.TaggedError<WorkItemLifecycleDatabaseError>()(
   "WorkItemLifecycleDatabaseError",
   {
     message: Schema.String,
@@ -193,7 +193,7 @@ export class WorkItemLifecycleDatabaseError extends Schema.TaggedErrorClass<Work
   },
 ) {}
 
-export class WorkItemTerminalError extends Schema.TaggedErrorClass<WorkItemTerminalError>()(
+export class WorkItemTerminalError extends Schema.TaggedError<WorkItemTerminalError>()(
   "WorkItemTerminalError",
   {
     workItemId: Schema.String,
@@ -205,7 +205,7 @@ export class WorkItemTerminalError extends Schema.TaggedErrorClass<WorkItemTermi
  * Implement CI Repair / Authorize as CI Repair is offered only while a
  * CI Failure Incident is active and Closed.
  */
-export class CiRepairNotAvailableError extends Schema.TaggedErrorClass<CiRepairNotAvailableError>()(
+export class CiRepairNotAvailableError extends Schema.TaggedError<CiRepairNotAvailableError>()(
   "CiRepairNotAvailableError",
   {
     repositoryId: Schema.String,
@@ -214,7 +214,7 @@ export class CiRepairNotAvailableError extends Schema.TaggedErrorClass<CiRepairN
   },
 ) {}
 
-export class ActiveStepRunExistsError extends Schema.TaggedErrorClass<ActiveStepRunExistsError>()(
+export class ActiveStepRunExistsError extends Schema.TaggedError<ActiveStepRunExistsError>()(
   "ActiveStepRunExistsError",
   {
     workItemId: Schema.String,
@@ -223,7 +223,7 @@ export class ActiveStepRunExistsError extends Schema.TaggedErrorClass<ActiveStep
   },
 ) {}
 
-export class RetryNotEligibleError extends Schema.TaggedErrorClass<RetryNotEligibleError>()(
+export class RetryNotEligibleError extends Schema.TaggedError<RetryNotEligibleError>()(
   "RetryNotEligibleError",
   {
     workItemId: Schema.String,
@@ -232,7 +232,7 @@ export class RetryNotEligibleError extends Schema.TaggedErrorClass<RetryNotEligi
 ) {}
 
 /** Interrupt is legal only while paused with a running Step Run. */
-export class InterruptNotEligibleError extends Schema.TaggedErrorClass<InterruptNotEligibleError>()(
+export class InterruptNotEligibleError extends Schema.TaggedError<InterruptNotEligibleError>()(
   "InterruptNotEligibleError",
   {
     workItemId: Schema.String,
@@ -241,7 +241,7 @@ export class InterruptNotEligibleError extends Schema.TaggedErrorClass<Interrupt
 ) {}
 
 /** Autonomous Retry Budget exhausted for this Work Item at its current step. */
-export class AutonomousRetryLimitReachedError extends Schema.TaggedErrorClass<AutonomousRetryLimitReachedError>()(
+export class AutonomousRetryLimitReachedError extends Schema.TaggedError<AutonomousRetryLimitReachedError>()(
   "AutonomousRetryLimitReachedError",
   {
     workItemId: Schema.String,
@@ -251,7 +251,7 @@ export class AutonomousRetryLimitReachedError extends Schema.TaggedErrorClass<Au
 ) {}
 
 /** Structured provider retry time has not elapsed; consume no budget. */
-export class AutonomousRetryDeferredError extends Schema.TaggedErrorClass<AutonomousRetryDeferredError>()(
+export class AutonomousRetryDeferredError extends Schema.TaggedError<AutonomousRetryDeferredError>()(
   "AutonomousRetryDeferredError",
   {
     workItemId: Schema.String,
@@ -259,7 +259,7 @@ export class AutonomousRetryDeferredError extends Schema.TaggedErrorClass<Autono
   },
 ) {}
 
-export class InvalidAutonomousRetryLimitError extends Schema.TaggedErrorClass<InvalidAutonomousRetryLimitError>()(
+export class InvalidAutonomousRetryLimitError extends Schema.TaggedError<InvalidAutonomousRetryLimitError>()(
   "InvalidAutonomousRetryLimitError",
   {
     maxRetries: Schema.Finite,
@@ -267,7 +267,7 @@ export class InvalidAutonomousRetryLimitError extends Schema.TaggedErrorClass<In
   },
 ) {}
 
-export class WorkItemHasRunningStepError extends Schema.TaggedErrorClass<WorkItemHasRunningStepError>()(
+export class WorkItemHasRunningStepError extends Schema.TaggedError<WorkItemHasRunningStepError>()(
   "WorkItemHasRunningStepError",
   {
     workItemId: Schema.String,
@@ -275,7 +275,7 @@ export class WorkItemHasRunningStepError extends Schema.TaggedErrorClass<WorkIte
   },
 ) {}
 
-export class ResetCleanupError extends Schema.TaggedErrorClass<ResetCleanupError>()(
+export class ResetCleanupError extends Schema.TaggedError<ResetCleanupError>()(
   "ResetCleanupError",
   {
     workItemId: Schema.String,
@@ -284,7 +284,7 @@ export class ResetCleanupError extends Schema.TaggedErrorClass<ResetCleanupError
   },
 ) {}
 
-export class AbandonCleanupError extends Schema.TaggedErrorClass<AbandonCleanupError>()(
+export class AbandonCleanupError extends Schema.TaggedError<AbandonCleanupError>()(
   "AbandonCleanupError",
   {
     workItemId: Schema.String,
@@ -293,7 +293,7 @@ export class AbandonCleanupError extends Schema.TaggedErrorClass<AbandonCleanupE
   },
 ) {}
 
-export class NeedsHumanHandoffNotEligibleError extends Schema.TaggedErrorClass<NeedsHumanHandoffNotEligibleError>()(
+export class NeedsHumanHandoffNotEligibleError extends Schema.TaggedError<NeedsHumanHandoffNotEligibleError>()(
   "NeedsHumanHandoffNotEligibleError",
   {
     workItemId: Schema.String,
@@ -302,7 +302,7 @@ export class NeedsHumanHandoffNotEligibleError extends Schema.TaggedErrorClass<N
 ) {}
 
 /** Ad-hoc step failure for tests and non-domain handler failures. */
-export class LifecycleStepFailedError extends Schema.TaggedErrorClass<LifecycleStepFailedError>()(
+export class LifecycleStepFailedError extends Schema.TaggedError<LifecycleStepFailedError>()(
   "LifecycleStepFailedError",
   {
     message: Schema.String,

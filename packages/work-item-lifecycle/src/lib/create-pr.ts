@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { SqlClient } from "effect/unstable/sql"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { SqlClient } from "effect/sql"
 import {
   type ActiveAgentBackend,
   AgentBackend,

@@ -1,6 +1,6 @@
 import { Effect, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
+import type { ChildProcessHandle } from "effect/process/ChildProcessSpawner"
 
 /**
  * Memory bound for an Agent Turn stderr fold. Only this many characters

@@ -90,7 +90,7 @@ export const isExecutableKeymaxxerEntrypoint = (
 }
 
 /** Effect Config for KEYMAXXER_ENTRYPOINT (optional). */
-export const KeymaxxerEntrypointConfig = Config.string(
+export const KeymaxxerEntrypointConfig = Config.String(
   "KEYMAXXER_ENTRYPOINT",
 ).pipe(Config.option)
 

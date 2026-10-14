@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class GitLabProjectUnavailableError extends Schema.TaggedErrorClass<GitLabProjectUnavailableError>()(
+export class GitLabProjectUnavailableError extends Schema.TaggedError<GitLabProjectUnavailableError>()(
   "GitLabProjectUnavailableError",
   {
     forge: Schema.String,
@@ -9,7 +9,7 @@ export class GitLabProjectUnavailableError extends Schema.TaggedErrorClass<GitLa
   },
 ) {}
 
-export class GitLabRequestError extends Schema.TaggedErrorClass<GitLabRequestError>()(
+export class GitLabRequestError extends Schema.TaggedError<GitLabRequestError>()(
   "GitLabRequestError",
   {
     message: Schema.String,

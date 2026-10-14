@@ -1,5 +1,5 @@
 import { Cache, Duration, Effect, Exit, Fiber, Layer, Option } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { extractErrorCode } from "@ready-for-agent/forge-contract"
 import {
   type GitHubOperationOptions,
@@ -120,9 +120,12 @@ export const ambientGitHubLayer = (options: {
       // failures expire immediately (TTL zero, not reused); success lives until
       // a 401 or repository-unavailable invalidate. Cache.get is forked into the
       // layer scope so canceling one requester cannot abort a shared in-flight
-      // lookup for joiners. Nested consumers must build this layer with
-      // Layer.buildWithScope (not a short-lived Effect.provide) so that scope
-      // stays open.
+      // lookup for joiners. The join stays interruptible: Effect 4 closes a
+      // ManagedRuntime's fiber scope before this layer scope, and the GitHub
+      // permit is uninterruptible, so an uninterruptible join would deadlock
+      // shutdown on the scope-owned lookup. Nested consumers must build this
+      // layer with Layer.buildWithScope (not a short-lived Effect.provide) so
+      // that scope stays open.
       const tokenCache = yield* Cache.makeWith(
         (_key: typeof TOKEN_CACHE_KEY) => resolveToken(),
         {
@@ -137,7 +140,7 @@ export const ambientGitHubLayer = (options: {
           const fiber = yield* Cache.get(tokenCache, TOKEN_CACHE_KEY).pipe(
             Effect.forkIn(layerScope),
           )
-          return yield* Fiber.join(fiber)
+          return yield* Fiber.join(fiber).pipe(Effect.interruptible)
         },
       )
 
@@ -258,10 +261,12 @@ export const ambientGitHubLayer = (options: {
 
         // Cache owns the lookup for the application scope, so a canceled
         // caller cannot tear down a concurrent reconciliation's identity work.
+        // The join is interruptible for the same shutdown reason as token
+        // acquisition above.
         const lookup = yield* Cache.get(authenticatedUserCache, key).pipe(
           Effect.forkIn(layerScope),
         )
-        return yield* Fiber.join(lookup)
+        return yield* Fiber.join(lookup).pipe(Effect.interruptible)
       })
 
       return {

@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class LinearRequestError extends Schema.TaggedErrorClass<LinearRequestError>()(
+export class LinearRequestError extends Schema.TaggedError<LinearRequestError>()(
   "LinearRequestError",
   {
     message: Schema.String,
@@ -10,7 +10,7 @@ export class LinearRequestError extends Schema.TaggedErrorClass<LinearRequestErr
   },
 ) {}
 
-export class LinearNotConfiguredError extends Schema.TaggedErrorClass<LinearNotConfiguredError>()(
+export class LinearNotConfiguredError extends Schema.TaggedError<LinearNotConfiguredError>()(
   "LinearNotConfiguredError",
   {
     repositoryId: Schema.String,
@@ -18,7 +18,7 @@ export class LinearNotConfiguredError extends Schema.TaggedErrorClass<LinearNotC
   },
 ) {}
 
-export class LinearExecutionNotSupportedError extends Schema.TaggedErrorClass<LinearExecutionNotSupportedError>()(
+export class LinearExecutionNotSupportedError extends Schema.TaggedError<LinearExecutionNotSupportedError>()(
   "LinearExecutionNotSupportedError",
   {
     repositoryId: Schema.String,

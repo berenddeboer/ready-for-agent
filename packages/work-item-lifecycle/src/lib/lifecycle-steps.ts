@@ -1,6 +1,6 @@
 import { Context, type Duration, type Effect } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { SqlError } from "effect/sql/SqlError"
 import type { AgentBackendNotInstalledError } from "@ready-for-agent/agent-backend"
 import type {
   AzureDevOpsNotImplementedError,

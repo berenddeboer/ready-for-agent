@@ -4,7 +4,7 @@ import type {
   LinearRequestError,
 } from "@ready-for-agent/linear-service"
 
-export class ImplementWorktreeContextMissingError extends Schema.TaggedErrorClass<ImplementWorktreeContextMissingError>()(
+export class ImplementWorktreeContextMissingError extends Schema.TaggedError<ImplementWorktreeContextMissingError>()(
   "ImplementWorktreeContextMissingError",
   {
     workItemId: Schema.String,
@@ -12,7 +12,7 @@ export class ImplementWorktreeContextMissingError extends Schema.TaggedErrorClas
   },
 ) {}
 
-export class ImplementInvalidWorktreeContextError extends Schema.TaggedErrorClass<ImplementInvalidWorktreeContextError>()(
+export class ImplementInvalidWorktreeContextError extends Schema.TaggedError<ImplementInvalidWorktreeContextError>()(
   "ImplementInvalidWorktreeContextError",
   {
     workItemId: Schema.String,
@@ -21,7 +21,7 @@ export class ImplementInvalidWorktreeContextError extends Schema.TaggedErrorClas
   },
 ) {}
 
-export class ImplementRepositoryNotFoundError extends Schema.TaggedErrorClass<ImplementRepositoryNotFoundError>()(
+export class ImplementRepositoryNotFoundError extends Schema.TaggedError<ImplementRepositoryNotFoundError>()(
   "ImplementRepositoryNotFoundError",
   {
     repositoryId: Schema.String,
@@ -29,7 +29,7 @@ export class ImplementRepositoryNotFoundError extends Schema.TaggedErrorClass<Im
   },
 ) {}
 
-export class ImplementIssueContextMissingError extends Schema.TaggedErrorClass<ImplementIssueContextMissingError>()(
+export class ImplementIssueContextMissingError extends Schema.TaggedError<ImplementIssueContextMissingError>()(
   "ImplementIssueContextMissingError",
   {
     workItemId: Schema.String,
@@ -37,7 +37,7 @@ export class ImplementIssueContextMissingError extends Schema.TaggedErrorClass<I
   },
 ) {}
 
-export class ImplementForgeCredentialError extends Schema.TaggedErrorClass<ImplementForgeCredentialError>()(
+export class ImplementForgeCredentialError extends Schema.TaggedError<ImplementForgeCredentialError>()(
   "ImplementForgeCredentialError",
   {
     repositoryId: Schema.String,
@@ -46,7 +46,7 @@ export class ImplementForgeCredentialError extends Schema.TaggedErrorClass<Imple
   },
 ) {}
 
-export class ImplementOpenCodeError extends Schema.TaggedErrorClass<ImplementOpenCodeError>()(
+export class ImplementOpenCodeError extends Schema.TaggedError<ImplementOpenCodeError>()(
   "ImplementOpenCodeError",
   {
     message: Schema.String,

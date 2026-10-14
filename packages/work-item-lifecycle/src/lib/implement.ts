@@ -1,5 +1,5 @@
 import { Effect, FileSystem } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { resolveForgeIssuePresentation } from "@ready-for-agent/forge-contract"

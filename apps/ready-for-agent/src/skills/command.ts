@@ -1,5 +1,5 @@
 import { Console, Effect } from "effect"
-import { Argument, Command, Flag } from "effect/unstable/cli"
+import { Argument, Command, Flag } from "effect/cli"
 import { FiniteCommandFailed, encodeCompactJson } from "../cli-json.ts"
 import { READY_FOR_AGENT_VERSION } from "../generated/version.ts"
 import { SKILL_CATALOG, findSkill, normalizeSkillDocument } from "./catalog.ts"
@@ -10,11 +10,12 @@ import {
   unknownSkillMessage,
 } from "./documents.ts"
 
-const jsonFlag = Flag.boolean("json").pipe(
+const jsonFlag = Flag.Boolean("json").pipe(
+  Flag.withDefault(false),
   Flag.withDescription("Print a versioned JSON document"),
 )
 
-const skillIdArg = Argument.string("skill-id").pipe(
+const skillIdArg = Argument.String("skill-id").pipe(
   Argument.withDescription(
     `Stable skill identifier from \`skills list\` (${SKILL_CATALOG.map((skill) => skill.id).join(", ")})`,
   ),

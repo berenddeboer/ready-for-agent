@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class AzureDevOpsProjectUnavailableError extends Schema.TaggedErrorClass<AzureDevOpsProjectUnavailableError>()(
+export class AzureDevOpsProjectUnavailableError extends Schema.TaggedError<AzureDevOpsProjectUnavailableError>()(
   "AzureDevOpsProjectUnavailableError",
   {
     forge: Schema.String,
@@ -9,7 +9,7 @@ export class AzureDevOpsProjectUnavailableError extends Schema.TaggedErrorClass<
   },
 ) {}
 
-export class AzureDevOpsRequestError extends Schema.TaggedErrorClass<AzureDevOpsRequestError>()(
+export class AzureDevOpsRequestError extends Schema.TaggedError<AzureDevOpsRequestError>()(
   "AzureDevOpsRequestError",
   {
     message: Schema.String,
@@ -29,7 +29,7 @@ export class AzureDevOpsRequestError extends Schema.TaggedErrorClass<AzureDevOps
  * `countOpenNonDraftPullRequests`, which fails with this error until a later
  * ticket builds it out.
  */
-export class AzureDevOpsNotImplementedError extends Schema.TaggedErrorClass<AzureDevOpsNotImplementedError>()(
+export class AzureDevOpsNotImplementedError extends Schema.TaggedError<AzureDevOpsNotImplementedError>()(
   "AzureDevOpsNotImplementedError",
   {
     method: Schema.String,

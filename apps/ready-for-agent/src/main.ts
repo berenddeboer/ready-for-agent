@@ -42,11 +42,12 @@ if (isExactUsageMetadataInvocation(process.argv.slice(2))) {
     } else {
       const { BunRuntime, BunServices } = await import("@effect/platform-bun")
       const { Effect, Layer } = await import("effect")
-      const { Command } = await import("effect/unstable/cli")
+      const { Command } = await import("effect/cli")
       const { expandBareHostFlag } = await import(
         "../../harness/src/server/listen-host.ts"
       )
       const { cli } = await import("./cli.ts")
+      const { operatorCliConfigLayer } = await import("./cli-config.ts")
       const { ApplicationConfig } = await import(
         "./services/application-config.ts"
       )
@@ -78,6 +79,7 @@ if (isExactUsageMetadataInvocation(process.argv.slice(2))) {
         version: READY_FOR_AGENT_VERSION,
       })(args).pipe(
         Effect.provide(MainLive),
+        Effect.provide(operatorCliConfigLayer),
         // FiniteCommandFailed is marked [Runtime.errorReported]=false so runMain
         // skips Cause pretty-print; emit one versioned JSON error on stderr.
         Effect.tapErrorTag("FiniteCommandFailed", (error) =>

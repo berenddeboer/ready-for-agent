@@ -98,7 +98,7 @@ export const SecretMetadataList = Schema.Array(SecretMetadata)
 
 export const protocolVersion = 3 as const
 
-export class KeymaxxerError extends Schema.TaggedErrorClass<KeymaxxerError>()(
+export class KeymaxxerError extends Schema.TaggedError<KeymaxxerError>()(
   "KeymaxxerError",
   {
     operation: Schema.String,

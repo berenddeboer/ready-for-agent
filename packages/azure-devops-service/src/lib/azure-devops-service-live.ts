@@ -3080,7 +3080,7 @@ export const makeAzureDevOpsServiceFromToken = (
 export const AzureDevOpsServiceLive = Layer.effect(
   AzureDevOpsService,
   Effect.gen(function* () {
-    const token = yield* Config.redacted(AZURE_DEVOPS_PAT_ENV_VAR)
+    const token = yield* Config.Redacted(AZURE_DEVOPS_PAT_ENV_VAR)
     return makeAzureDevOpsServiceFromToken(Redacted.value(token))
   }),
 )

@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class ReviewWorktreeContextMissingError extends Schema.TaggedErrorClass<ReviewWorktreeContextMissingError>()(
+export class ReviewWorktreeContextMissingError extends Schema.TaggedError<ReviewWorktreeContextMissingError>()(
   "ReviewWorktreeContextMissingError",
   {
     workItemId: Schema.String,
@@ -8,7 +8,7 @@ export class ReviewWorktreeContextMissingError extends Schema.TaggedErrorClass<R
   },
 ) {}
 
-export class ReviewInvalidWorktreeContextError extends Schema.TaggedErrorClass<ReviewInvalidWorktreeContextError>()(
+export class ReviewInvalidWorktreeContextError extends Schema.TaggedError<ReviewInvalidWorktreeContextError>()(
   "ReviewInvalidWorktreeContextError",
   {
     workItemId: Schema.String,
@@ -17,7 +17,7 @@ export class ReviewInvalidWorktreeContextError extends Schema.TaggedErrorClass<R
   },
 ) {}
 
-export class ReviewSessionContextMissingError extends Schema.TaggedErrorClass<ReviewSessionContextMissingError>()(
+export class ReviewSessionContextMissingError extends Schema.TaggedError<ReviewSessionContextMissingError>()(
   "ReviewSessionContextMissingError",
   {
     workItemId: Schema.String,
@@ -25,7 +25,7 @@ export class ReviewSessionContextMissingError extends Schema.TaggedErrorClass<Re
   },
 ) {}
 
-export class ReviewOpenCodeError extends Schema.TaggedErrorClass<ReviewOpenCodeError>()(
+export class ReviewOpenCodeError extends Schema.TaggedError<ReviewOpenCodeError>()(
   "ReviewOpenCodeError",
   {
     message: Schema.String,
@@ -35,7 +35,7 @@ export class ReviewOpenCodeError extends Schema.TaggedErrorClass<ReviewOpenCodeE
   },
 ) {}
 
-export class ReviewResultError extends Schema.TaggedErrorClass<ReviewResultError>()(
+export class ReviewResultError extends Schema.TaggedError<ReviewResultError>()(
   "ReviewResultError",
   {
     workItemId: Schema.String,

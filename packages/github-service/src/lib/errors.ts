@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class GitHubRepositoryUnavailableError extends Schema.TaggedErrorClass<GitHubRepositoryUnavailableError>()(
+export class GitHubRepositoryUnavailableError extends Schema.TaggedError<GitHubRepositoryUnavailableError>()(
   "GitHubRepositoryUnavailableError",
   {
     forge: Schema.String,
@@ -23,7 +23,7 @@ export const formatGitHubRepositoryUnavailableMessage = (
 ): string =>
   `${projectPath} is not visible to GitHub user ${authenticatedLogin} — it may not exist, or that account may not have access`
 
-export class GitHubRequestError extends Schema.TaggedErrorClass<GitHubRequestError>()(
+export class GitHubRequestError extends Schema.TaggedError<GitHubRequestError>()(
   "GitHubRequestError",
   {
     message: Schema.String,
@@ -43,7 +43,7 @@ export class GitHubRequestError extends Schema.TaggedErrorClass<GitHubRequestErr
  * Permanent TLS certificate trust failure talking to the GitHub API host.
  * Not retryable for the process lifetime (missing private CA / MITM root).
  */
-export class GitHubTlsTrustError extends Schema.TaggedErrorClass<GitHubTlsTrustError>()(
+export class GitHubTlsTrustError extends Schema.TaggedError<GitHubTlsTrustError>()(
   "GitHubTlsTrustError",
   {
     message: Schema.String,
@@ -62,7 +62,7 @@ export class GitHubTlsTrustError extends Schema.TaggedErrorClass<GitHubTlsTrustE
  * milliseconds so a process-local coordinator and GraphQL can share it without
  * locale or clock-format ambiguity.
  */
-export class GitHubThrottledError extends Schema.TaggedErrorClass<GitHubThrottledError>()(
+export class GitHubThrottledError extends Schema.TaggedError<GitHubThrottledError>()(
   "GitHubThrottledError",
   {
     retryAt: Schema.Finite,
