@@ -238,15 +238,15 @@ the fixture vault with repository secret `E2E_KEYMAXXER_MASTER_KEY`.
 | --- | --- | --- |
 | `push` to `main` | required | Fail closed if missing |
 | Same-repo PR | required on live-Forge | Fail closed if missing on `harness-e2e-live-forge`; UI-history and `@no-backend` still run |
-| Fork PR | no (secrets not exposed) | Skip live-Forge e2e only (log + continue); UI-history still runs smoke, vault-free `e2e-no-backend`, and `e2e-ui-history`; quality-gates and pinact still run |
+| Fork PR | no (secrets not exposed) | Skip live-Forge e2e only (log + continue); UI-history still runs smoke, vault-free `e2e-no-backend`, and `e2e-ui-history`; quality-gates, pinact, and jactionlint still run |
 
 Required status checks (after the former monolithic `main` job was split, then
 the PR `harness` e2e job):
 
 | Workflow | Require |
 | --- | --- |
-| **PR** | `quality-gates`, `harness-e2e-live-forge`, `harness-e2e-ui-history`, `harness`, `pinact` |
-| **CI/CD** | `quality-gates`, `harness`, `packed-install`, `pinact` |
+| **PR** | `quality-gates`, `harness-e2e-live-forge`, `harness-e2e-ui-history`, `harness`, `pinact`, `jactionlint` |
+| **CI/CD** | `quality-gates`, `harness`, `packed-install`, `pinact`, `jactionlint` |
 
 ### Overnight published-install smoke (complementary)
 

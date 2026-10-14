@@ -64,6 +64,8 @@ runs:
     - name: Reject unknown Nx cache mode
       if: inputs.mode != 'main' && inputs.mode != 'restore-main' && inputs.mode != 'pr'
       shell: bash
+      env:
+        NX_CACHE_MODE: ${{ inputs.mode }}
       run: |
-        echo "Unknown nx-cache mode: '${{ inputs.mode }}' (expected main, restore-main, or pr)" >&2
+        echo "Unknown nx-cache mode: '${NX_CACHE_MODE}' (expected main, restore-main, or pr)" >&2
         exit 1

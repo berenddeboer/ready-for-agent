@@ -27,8 +27,8 @@ Also needed to run or test the harness:
 ## Install with mise
 
 [mise](https://mise.jdx.dev/) 2026.7.0 or later installs the pinned Bun, hk,
-and Usage (5.1.0) versions, then workspace dependencies (which apply the
-existing Git hooks).
+Usage (5.1.0), and jactionlint (2.2.0) versions, then workspace dependencies
+(which apply the existing Git hooks).
 
 ```bash
 git clone git@github.com:berenddeboer/ready-for-agent.git
@@ -48,7 +48,8 @@ mise run setup-e2e
 
 Install the Bun version pinned in [`mise.toml`](mise.toml) from
 [bun.sh](https://bun.sh/). Operator CLI contract checks also need Usage
-`5.1.0` on `PATH`. Then:
+`5.1.0` on `PATH`. Workflow checks need jactionlint `2.2.0` on `PATH`
+(the version pinned in `mise.toml`). Then:
 
 ```bash
 git clone git@github.com:berenddeboer/ready-for-agent.git
@@ -65,6 +66,27 @@ Optional browser/e2e setup:
 ```bash
 (cd apps/harness && bunx playwright install --with-deps chromium)
 ```
+
+## GitHub Actions workflow check
+
+[jactionlint](https://github.com/jdx/jactionlint) `2.2.0`, the version pinned
+in [`mise.toml`](mise.toml), checks `.github/workflows/`, local composite
+actions under `.github/actions/`, and `.github/dependabot.yml` with the
+default profile. Pull-request and main-branch CI download that same release,
+verify its checksum and GitHub artifact attestation, and run:
+
+```bash
+jactionlint --format github
+```
+
+After `mise install`, run that same command locally. `jactionlint` without
+`--format github` reports the same findings as text. Ubuntu runners include
+`shellcheck`, which jactionlint uses for `run:` scripts; install shellcheck
+locally to see those script findings too.
+
+Intentional exceptions are listed with their reasons in
+[`.github/jactionlint.yaml`](.github/jactionlint.yaml). Pinact remains a
+separate check.
 
 ## Operator CLI Usage contract
 
