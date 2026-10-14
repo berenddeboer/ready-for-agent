@@ -5,7 +5,7 @@ import type { AzureDevOpsService } from "../lib/azure-devops-service.js"
 import { AzureDevOpsServiceLive } from "../lib/azure-devops-service-live.js"
 import { AzureDevOpsProjectUnavailableError } from "../lib/errors.js"
 
-export class CliArgumentError extends Schema.TaggedErrorClass<CliArgumentError>()(
+export class CliArgumentError extends Schema.TaggedError<CliArgumentError>()(
   "CliArgumentError",
   { message: Schema.String },
 ) {}

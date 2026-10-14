@@ -1,13 +1,13 @@
 import { Schema } from "effect"
 
-export class CreateWorktreeRepositoryNotFoundError extends Schema.TaggedErrorClass<CreateWorktreeRepositoryNotFoundError>()(
+export class CreateWorktreeRepositoryNotFoundError extends Schema.TaggedError<CreateWorktreeRepositoryNotFoundError>()(
   "CreateWorktreeRepositoryNotFoundError",
   {
     repositoryId: Schema.String,
   },
 ) {}
 
-export class WorktreeConflictError extends Schema.TaggedErrorClass<WorktreeConflictError>()(
+export class WorktreeConflictError extends Schema.TaggedError<WorktreeConflictError>()(
   "WorktreeConflictError",
   {
     message: Schema.String,
@@ -16,7 +16,7 @@ export class WorktreeConflictError extends Schema.TaggedErrorClass<WorktreeConfl
   },
 ) {}
 
-export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
+export class GitCommandError extends Schema.TaggedError<GitCommandError>()(
   "GitCommandError",
   {
     message: Schema.String,

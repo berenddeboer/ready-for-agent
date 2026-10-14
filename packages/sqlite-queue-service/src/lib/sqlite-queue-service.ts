@@ -8,8 +8,8 @@ import {
   Result,
   Schema,
 } from "effect"
-import { SqlClient } from "effect/unstable/sql"
-import type { SqlError } from "effect/unstable/sql/SqlError"
+import { SqlClient } from "effect/sql"
+import type { SqlError } from "effect/sql/SqlError"
 import type {
   EnsureKeyedResult,
   KeyedQueueEntry,
@@ -156,7 +156,7 @@ const decodeKeyedLockRows = (rows: ReadonlyArray<unknown>) =>
 const decodeStatsRows = (rows: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.Array(StatsSqlRow))(rows)
 
-class JsonParseError extends Schema.TaggedErrorClass<JsonParseError>()(
+class JsonParseError extends Schema.TaggedError<JsonParseError>()(
   "JsonParseError",
   {
     message: Schema.String,

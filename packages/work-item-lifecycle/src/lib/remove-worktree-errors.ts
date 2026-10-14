@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class RemoveWorktreeCredentialError extends Schema.TaggedErrorClass<RemoveWorktreeCredentialError>()(
+export class RemoveWorktreeCredentialError extends Schema.TaggedError<RemoveWorktreeCredentialError>()(
   "RemoveWorktreeCredentialError",
   {
     repositoryId: Schema.String,
@@ -9,7 +9,7 @@ export class RemoveWorktreeCredentialError extends Schema.TaggedErrorClass<Remov
   },
 ) {}
 
-export class RemoveWorktreeRemoteError extends Schema.TaggedErrorClass<RemoveWorktreeRemoteError>()(
+export class RemoveWorktreeRemoteError extends Schema.TaggedError<RemoveWorktreeRemoteError>()(
   "RemoveWorktreeRemoteError",
   {
     message: Schema.String,

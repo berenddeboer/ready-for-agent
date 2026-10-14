@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { JumpFailed } from "../jump-error.ts"
 import { jumpPaneEnvironmentFlags } from "../jump-pane-environment.ts"
 

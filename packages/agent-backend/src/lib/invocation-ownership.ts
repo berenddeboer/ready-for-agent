@@ -14,7 +14,7 @@ import {
 import { delimiter, isAbsolute, join, resolve } from "node:path"
 import { Duration, Effect, Exit } from "effect"
 import { PlatformError, systemError } from "effect/PlatformError"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 const CONTROL_TIMEOUT_MS = 3_000
 const active = new Set<string>()

@@ -6,10 +6,11 @@ import { fileURLToPath } from "node:url"
 import { BunServices } from "@effect/platform-bun"
 import { beforeEach, describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Stream } from "effect"
-import { Command } from "effect/unstable/cli"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Command } from "effect/cli"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { expandBareHostFlag } from "../../harness/src/server/listen-host.ts"
 import { cli } from "./cli.ts"
+import { operatorCliConfigLayer } from "./cli-config.ts"
 import {
   CLI_SCHEMA_VERSION,
   FiniteCommandFailed,
@@ -88,6 +89,7 @@ const runOperator = (
   Command.runWith(cli, { version: "0.0.0" })(expandBareHostFlag(args)).pipe(
     Effect.provide(layer),
     Effect.provide(unusedJumpServices),
+    Effect.provide(operatorCliConfigLayer),
     Effect.provide(BunServices.layer),
   )
 

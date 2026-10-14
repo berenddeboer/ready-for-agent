@@ -1,6 +1,6 @@
 import { Clock, Context, Effect, Layer, PubSub, Schema, Stream } from "effect"
-import { SqlClient } from "effect/unstable/sql"
-import type { SqlError } from "effect/unstable/sql/SqlError"
+import { SqlClient } from "effect/sql"
+import type { SqlError } from "effect/sql/SqlError"
 import { ulid } from "ulidx"
 import { isSelectableAgentBackendId } from "@ready-for-agent/agent-backend"
 import {

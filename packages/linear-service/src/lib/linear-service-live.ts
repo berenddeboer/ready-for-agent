@@ -868,7 +868,7 @@ export const makeAnonymousLinearService = (
 export const LinearServiceLive = Layer.effect(
   LinearService,
   Effect.gen(function* () {
-    const token = yield* Config.redacted(LINEAR_API_KEY_ENV_VAR)
+    const token = yield* Config.Redacted(LINEAR_API_KEY_ENV_VAR)
     return makeLinearServiceFromToken(Redacted.value(token))
   }),
 )

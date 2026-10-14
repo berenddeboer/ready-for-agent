@@ -3,7 +3,7 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
 import { expect, it } from "@effect/vitest"
 import { Effect, Layer, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import {
   GitLabRequestError,
   GitLabService,

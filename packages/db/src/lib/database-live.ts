@@ -2,14 +2,14 @@ import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { Effect, Layer, Schema } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 import {
   DatabasePathConfig,
   normalizeDatabasePath,
   toTursoDatabasePath,
 } from "@ready-for-agent/layer-turso-local/database-path"
 
-export class DatabaseDirectoryError extends Schema.TaggedErrorClass<DatabaseDirectoryError>()(
+export class DatabaseDirectoryError extends Schema.TaggedError<DatabaseDirectoryError>()(
   "DatabaseDirectoryError",
   {
     path: Schema.String,

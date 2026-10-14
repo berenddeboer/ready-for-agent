@@ -3,7 +3,7 @@ import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
 import { expect, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Stream } from "effect"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/process"
 import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,

@@ -39,7 +39,7 @@ const isValidTcpPort = (port: number): boolean =>
  * Process entrypoints may still read env synchronously via
  * `keymaxxerSidecarPortFromEnvironment`.
  */
-export const KeymaxxerSidecarPortConfig = Config.int(
+export const KeymaxxerSidecarPortConfig = Config.Int(
   "KEYMAXXER_SIDECAR_PORT",
 ).pipe(
   Config.orElse(() => Config.succeed(defaultKeymaxxerSidecarPort)),

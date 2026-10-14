@@ -16,14 +16,14 @@ import {
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { unwrapSentinelArgument } from "./unwrap-sentinel-argument.js"
 
-export class DecidePrMergeContextError extends Schema.TaggedErrorClass<DecidePrMergeContextError>()(
+export class DecidePrMergeContextError extends Schema.TaggedError<DecidePrMergeContextError>()(
   "DecidePrMergeContextError",
   {
     message: Schema.String,
   },
 ) {}
 
-export class DecidePrMergeOpenCodeError extends Schema.TaggedErrorClass<DecidePrMergeOpenCodeError>()(
+export class DecidePrMergeOpenCodeError extends Schema.TaggedError<DecidePrMergeOpenCodeError>()(
   "DecidePrMergeOpenCodeError",
   {
     message: Schema.String,

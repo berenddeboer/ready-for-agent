@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class AcpSpawnError extends Schema.TaggedErrorClass<AcpSpawnError>()(
+export class AcpSpawnError extends Schema.TaggedError<AcpSpawnError>()(
   "AcpSpawnError",
   {
     command: Schema.String,
@@ -9,7 +9,7 @@ export class AcpSpawnError extends Schema.TaggedErrorClass<AcpSpawnError>()(
   },
 ) {}
 
-export class AcpProcessExitError extends Schema.TaggedErrorClass<AcpProcessExitError>()(
+export class AcpProcessExitError extends Schema.TaggedError<AcpProcessExitError>()(
   "AcpProcessExitError",
   {
     command: Schema.String,
@@ -18,7 +18,7 @@ export class AcpProcessExitError extends Schema.TaggedErrorClass<AcpProcessExitE
   },
 ) {}
 
-export class AcpProtocolError extends Schema.TaggedErrorClass<AcpProtocolError>()(
+export class AcpProtocolError extends Schema.TaggedError<AcpProtocolError>()(
   "AcpProtocolError",
   {
     method: Schema.String,

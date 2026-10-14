@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Deferred, Duration, Effect, Exit, Fiber } from "effect"
 import { PlatformError, systemError } from "effect/PlatformError"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import {
   AgentBackendExitError,
   AgentBackendNotInstalledError,

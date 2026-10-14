@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class PreCommitWorktreeContextMissingError extends Schema.TaggedErrorClass<PreCommitWorktreeContextMissingError>()(
+export class PreCommitWorktreeContextMissingError extends Schema.TaggedError<PreCommitWorktreeContextMissingError>()(
   "PreCommitWorktreeContextMissingError",
   {
     workItemId: Schema.String,
@@ -8,7 +8,7 @@ export class PreCommitWorktreeContextMissingError extends Schema.TaggedErrorClas
   },
 ) {}
 
-export class PreCommitInvalidWorktreeContextError extends Schema.TaggedErrorClass<PreCommitInvalidWorktreeContextError>()(
+export class PreCommitInvalidWorktreeContextError extends Schema.TaggedError<PreCommitInvalidWorktreeContextError>()(
   "PreCommitInvalidWorktreeContextError",
   {
     workItemId: Schema.String,
@@ -17,7 +17,7 @@ export class PreCommitInvalidWorktreeContextError extends Schema.TaggedErrorClas
   },
 ) {}
 
-export class PreCommitStageError extends Schema.TaggedErrorClass<PreCommitStageError>()(
+export class PreCommitStageError extends Schema.TaggedError<PreCommitStageError>()(
   "PreCommitStageError",
   {
     message: Schema.String,
@@ -27,7 +27,7 @@ export class PreCommitStageError extends Schema.TaggedErrorClass<PreCommitStageE
   },
 ) {}
 
-export class PreCommitHookFailedError extends Schema.TaggedErrorClass<PreCommitHookFailedError>()(
+export class PreCommitHookFailedError extends Schema.TaggedError<PreCommitHookFailedError>()(
   "PreCommitHookFailedError",
   {
     message: Schema.String,
@@ -37,7 +37,7 @@ export class PreCommitHookFailedError extends Schema.TaggedErrorClass<PreCommitH
   },
 ) {}
 
-export class PreCommitSessionContextMissingError extends Schema.TaggedErrorClass<PreCommitSessionContextMissingError>()(
+export class PreCommitSessionContextMissingError extends Schema.TaggedError<PreCommitSessionContextMissingError>()(
   "PreCommitSessionContextMissingError",
   {
     workItemId: Schema.String,
@@ -45,7 +45,7 @@ export class PreCommitSessionContextMissingError extends Schema.TaggedErrorClass
   },
 ) {}
 
-export class PreCommitOpenCodeError extends Schema.TaggedErrorClass<PreCommitOpenCodeError>()(
+export class PreCommitOpenCodeError extends Schema.TaggedError<PreCommitOpenCodeError>()(
   "PreCommitOpenCodeError",
   {
     message: Schema.String,

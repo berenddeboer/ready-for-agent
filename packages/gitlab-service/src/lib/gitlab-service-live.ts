@@ -2408,7 +2408,7 @@ export const makeGitLabServiceFromToken = (
 export const GitLabServiceLive = Layer.effect(
   GitLabService,
   Effect.gen(function* () {
-    const token = yield* Config.redacted("GITLAB_TOKEN")
+    const token = yield* Config.Redacted("GITLAB_TOKEN")
     return makeGitLabServiceFromToken(Redacted.value(token))
   }),
 )

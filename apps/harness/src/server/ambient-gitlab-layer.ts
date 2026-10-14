@@ -1,5 +1,5 @@
 import { Cache, Duration, Effect, Exit, Fiber, Layer } from "effect"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/process"
 import { extractErrorCode } from "@ready-for-agent/forge-contract"
 import {
   type GitLabProjectUnavailableError,

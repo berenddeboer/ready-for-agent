@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import type { LinearRequestError } from "@ready-for-agent/linear-service"
 
-export class CreatePrWorktreeContextMissingError extends Schema.TaggedErrorClass<CreatePrWorktreeContextMissingError>()(
+export class CreatePrWorktreeContextMissingError extends Schema.TaggedError<CreatePrWorktreeContextMissingError>()(
   "CreatePrWorktreeContextMissingError",
   {
     workItemId: Schema.String,
@@ -9,7 +9,7 @@ export class CreatePrWorktreeContextMissingError extends Schema.TaggedErrorClass
   },
 ) {}
 
-export class CreatePrInvalidWorktreeContextError extends Schema.TaggedErrorClass<CreatePrInvalidWorktreeContextError>()(
+export class CreatePrInvalidWorktreeContextError extends Schema.TaggedError<CreatePrInvalidWorktreeContextError>()(
   "CreatePrInvalidWorktreeContextError",
   {
     workItemId: Schema.String,
@@ -18,7 +18,7 @@ export class CreatePrInvalidWorktreeContextError extends Schema.TaggedErrorClass
   },
 ) {}
 
-export class CreatePrSessionContextMissingError extends Schema.TaggedErrorClass<CreatePrSessionContextMissingError>()(
+export class CreatePrSessionContextMissingError extends Schema.TaggedError<CreatePrSessionContextMissingError>()(
   "CreatePrSessionContextMissingError",
   {
     workItemId: Schema.String,
@@ -26,7 +26,7 @@ export class CreatePrSessionContextMissingError extends Schema.TaggedErrorClass<
   },
 ) {}
 
-export class CreatePrCredentialError extends Schema.TaggedErrorClass<CreatePrCredentialError>()(
+export class CreatePrCredentialError extends Schema.TaggedError<CreatePrCredentialError>()(
   "CreatePrCredentialError",
   {
     repositoryId: Schema.String,
@@ -35,7 +35,7 @@ export class CreatePrCredentialError extends Schema.TaggedErrorClass<CreatePrCre
   },
 ) {}
 
-export class CreatePrOpenCodeError extends Schema.TaggedErrorClass<CreatePrOpenCodeError>()(
+export class CreatePrOpenCodeError extends Schema.TaggedError<CreatePrOpenCodeError>()(
   "CreatePrOpenCodeError",
   {
     message: Schema.String,
@@ -45,7 +45,7 @@ export class CreatePrOpenCodeError extends Schema.TaggedErrorClass<CreatePrOpenC
   },
 ) {}
 
-export class CreatePrLookupError extends Schema.TaggedErrorClass<CreatePrLookupError>()(
+export class CreatePrLookupError extends Schema.TaggedError<CreatePrLookupError>()(
   "CreatePrLookupError",
   {
     repositoryId: Schema.String,
@@ -54,7 +54,7 @@ export class CreatePrLookupError extends Schema.TaggedErrorClass<CreatePrLookupE
   },
 ) {}
 
-export class CreatePrPostconditionError extends Schema.TaggedErrorClass<CreatePrPostconditionError>()(
+export class CreatePrPostconditionError extends Schema.TaggedError<CreatePrPostconditionError>()(
   "CreatePrPostconditionError",
   {
     repositoryId: Schema.String,

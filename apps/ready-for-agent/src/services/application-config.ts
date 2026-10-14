@@ -5,7 +5,7 @@ import { resolveDefaultDatabasePath } from "../product-data-dir.ts"
 
 const DEFAULT_GRAPHQL_URL = "http://127.0.0.1:6056/graphql"
 
-const optionalString = (name: string) => Config.option(Config.string(name))
+const optionalString = (name: string) => Config.option(Config.String(name))
 
 export class ApplicationConfig extends Context.Service<
   ApplicationConfig,
@@ -19,7 +19,7 @@ export class ApplicationConfig extends Context.Service<
   static readonly layer = Layer.effect(
     ApplicationConfig,
     Effect.gen(function* () {
-      const graphqlUrl = yield* Config.string(
+      const graphqlUrl = yield* Config.String(
         "READY_FOR_AGENT_GRAPHQL_URL",
       ).pipe(Config.orElse(() => Config.succeed(DEFAULT_GRAPHQL_URL)))
       const homeOption = yield* optionalString("HOME")

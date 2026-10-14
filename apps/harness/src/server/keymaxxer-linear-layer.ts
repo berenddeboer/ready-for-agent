@@ -1,5 +1,5 @@
 import { Context, Duration, Effect, Layer, Schema } from "effect"
-import type { ChildProcessSpawner } from "effect/unstable/process"
+import type { ChildProcessSpawner } from "effect/process"
 import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {

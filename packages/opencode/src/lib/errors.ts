@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 
 /** @deprecated Prefer AgentBackendConfigError from @ready-for-agent/agent-backend */
-export class OpencodeConfigError extends Schema.TaggedErrorClass<OpencodeConfigError>()(
+export class OpencodeConfigError extends Schema.TaggedError<OpencodeConfigError>()(
   "OpencodeConfigError",
   {
     message: Schema.String,

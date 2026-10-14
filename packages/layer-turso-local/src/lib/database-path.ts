@@ -73,7 +73,7 @@ export const resolveProductDatabasePath = (
 const nonEmptyConfigString = (
   name: string,
 ): Config.Config<Option.Option<string>> =>
-  Config.option(Config.string(name)).pipe(
+  Config.option(Config.String(name)).pipe(
     Config.map((value) =>
       Option.flatMap(value, (raw) => {
         const trimmed = raw.trim()
@@ -103,7 +103,7 @@ const productDatabasePathConfig: Config.Config<string> = Config.all({
  * Effect Config for the database path (SQLITE_DATABASE_PATH).
  * Defaults to the product XDG / platform data directory when unset.
  */
-export const DatabasePathConfig: Config.Config<string> = Config.string(
+export const DatabasePathConfig: Config.Config<string> = Config.String(
   "SQLITE_DATABASE_PATH",
 ).pipe(Config.orElse(() => productDatabasePathConfig))
 

@@ -78,7 +78,7 @@ export const ReconciliationMutation = Schema.Literals([
 ])
 export type ReconciliationMutation = typeof ReconciliationMutation.Type
 
-export class ReconciliationMutationError extends Schema.TaggedErrorClass<ReconciliationMutationError>()(
+export class ReconciliationMutationError extends Schema.TaggedError<ReconciliationMutationError>()(
   "ReconciliationMutationError",
   {
     repositoryId: Schema.String,

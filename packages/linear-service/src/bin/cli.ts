@@ -4,7 +4,7 @@ import { formatUserFacingError } from "@ready-for-agent/forge-contract"
 import type { LinearService } from "../lib/linear-service.js"
 import { LinearServiceLive } from "../lib/linear-service-live.js"
 
-export class CliArgumentError extends Schema.TaggedErrorClass<CliArgumentError>()(
+export class CliArgumentError extends Schema.TaggedError<CliArgumentError>()(
   "CliArgumentError",
   { message: Schema.String },
 ) {}

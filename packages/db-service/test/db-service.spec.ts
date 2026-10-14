@@ -1,5 +1,5 @@
 import { Effect, Fiber, Layer, Stream } from "effect"
-import { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   DatabaseError,

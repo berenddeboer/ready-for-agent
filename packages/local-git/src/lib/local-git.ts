@@ -9,12 +9,12 @@ import {
   Stream,
 } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { spawnOwned } from "@ready-for-agent/agent-backend"
 import { parseForgeRemote } from "./parse-forge-remote.js"
 import type { LocalRepository } from "./types.js"
 
-export class PathNotFound extends Schema.TaggedErrorClass<PathNotFound>()(
+export class PathNotFound extends Schema.TaggedError<PathNotFound>()(
   "PathNotFound",
   { path: Schema.String },
 ) {
@@ -23,7 +23,7 @@ export class PathNotFound extends Schema.TaggedErrorClass<PathNotFound>()(
   }
 }
 
-export class NotADirectory extends Schema.TaggedErrorClass<NotADirectory>()(
+export class NotADirectory extends Schema.TaggedError<NotADirectory>()(
   "NotADirectory",
   { path: Schema.String },
 ) {
@@ -32,7 +32,7 @@ export class NotADirectory extends Schema.TaggedErrorClass<NotADirectory>()(
   }
 }
 
-export class NotAGitRepository extends Schema.TaggedErrorClass<NotAGitRepository>()(
+export class NotAGitRepository extends Schema.TaggedError<NotAGitRepository>()(
   "NotAGitRepository",
   { path: Schema.String },
 ) {
@@ -41,7 +41,7 @@ export class NotAGitRepository extends Schema.TaggedErrorClass<NotAGitRepository
   }
 }
 
-export class NoForgeRemote extends Schema.TaggedErrorClass<NoForgeRemote>()(
+export class NoForgeRemote extends Schema.TaggedError<NoForgeRemote>()(
   "NoForgeRemote",
   { path: Schema.String },
 ) {

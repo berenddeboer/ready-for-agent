@@ -387,7 +387,7 @@ const FiniteCommandNameSchema = Schema.Literals([
  * `BunRuntime.runMain` does not pretty-print a multi-frame stack after the
  * CLI writes the versioned JSON error document once on stderr.
  */
-export class FiniteCommandFailed extends Schema.TaggedErrorClass<FiniteCommandFailed>()(
+export class FiniteCommandFailed extends Schema.TaggedError<FiniteCommandFailed>()(
   "FiniteCommandFailed",
   {
     command: FiniteCommandNameSchema,

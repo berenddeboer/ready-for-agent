@@ -2,7 +2,7 @@ import { accessSync, constants } from "node:fs"
 import { homedir } from "node:os"
 import { delimiter, join } from "node:path"
 import { Context, Effect, Layer, Result } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 export type DirectoryPickerCommand = {
   readonly command: string

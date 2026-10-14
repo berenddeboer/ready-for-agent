@@ -4,7 +4,7 @@ import type {
   LinearRequestError,
 } from "@ready-for-agent/linear-service"
 
-export class CloseIssueSummaryMissingError extends Schema.TaggedErrorClass<CloseIssueSummaryMissingError>()(
+export class CloseIssueSummaryMissingError extends Schema.TaggedError<CloseIssueSummaryMissingError>()(
   "CloseIssueSummaryMissingError",
   {
     workItemId: Schema.String,
@@ -12,7 +12,7 @@ export class CloseIssueSummaryMissingError extends Schema.TaggedErrorClass<Close
   },
 ) {}
 
-export class CloseIssueContextError extends Schema.TaggedErrorClass<CloseIssueContextError>()(
+export class CloseIssueContextError extends Schema.TaggedError<CloseIssueContextError>()(
   "CloseIssueContextError",
   {
     workItemId: Schema.String,
@@ -20,7 +20,7 @@ export class CloseIssueContextError extends Schema.TaggedErrorClass<CloseIssueCo
   },
 ) {}
 
-export class CloseIssueEligibilityError extends Schema.TaggedErrorClass<CloseIssueEligibilityError>()(
+export class CloseIssueEligibilityError extends Schema.TaggedError<CloseIssueEligibilityError>()(
   "CloseIssueEligibilityError",
   {
     workItemId: Schema.String,

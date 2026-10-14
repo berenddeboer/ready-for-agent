@@ -13,8 +13,8 @@ import {
   Schema,
   Stream,
 } from "effect"
+import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
-import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest, makeFileDatabaseTest } from "@ready-for-agent/db/test"
 import {
   DbService,

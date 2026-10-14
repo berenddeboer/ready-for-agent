@@ -1,7 +1,7 @@
 import { Deferred, Duration, Effect, Ref, Result, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
-import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process"
-import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
+import { ChildProcess, type ChildProcessSpawner } from "effect/process"
+import type { ChildProcessHandle } from "effect/process/ChildProcessSpawner"
 import {
   findSpawnNotFoundCode,
   formatAgentCliNotFoundRemediation,

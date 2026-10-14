@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export class AssessChangesWorktreeContextMissingError extends Schema.TaggedErrorClass<AssessChangesWorktreeContextMissingError>()(
+export class AssessChangesWorktreeContextMissingError extends Schema.TaggedError<AssessChangesWorktreeContextMissingError>()(
   "AssessChangesWorktreeContextMissingError",
   {
     workItemId: Schema.String,
@@ -8,7 +8,7 @@ export class AssessChangesWorktreeContextMissingError extends Schema.TaggedError
   },
 ) {}
 
-export class AssessChangesInvalidWorktreeContextError extends Schema.TaggedErrorClass<AssessChangesInvalidWorktreeContextError>()(
+export class AssessChangesInvalidWorktreeContextError extends Schema.TaggedError<AssessChangesInvalidWorktreeContextError>()(
   "AssessChangesInvalidWorktreeContextError",
   {
     workItemId: Schema.String,
@@ -17,7 +17,7 @@ export class AssessChangesInvalidWorktreeContextError extends Schema.TaggedError
   },
 ) {}
 
-export class AssessChangesStartingCommitMissingError extends Schema.TaggedErrorClass<AssessChangesStartingCommitMissingError>()(
+export class AssessChangesStartingCommitMissingError extends Schema.TaggedError<AssessChangesStartingCommitMissingError>()(
   "AssessChangesStartingCommitMissingError",
   {
     workItemId: Schema.String,
@@ -25,7 +25,7 @@ export class AssessChangesStartingCommitMissingError extends Schema.TaggedErrorC
   },
 ) {}
 
-export class AssessChangesSessionMissingError extends Schema.TaggedErrorClass<AssessChangesSessionMissingError>()(
+export class AssessChangesSessionMissingError extends Schema.TaggedError<AssessChangesSessionMissingError>()(
   "AssessChangesSessionMissingError",
   {
     workItemId: Schema.String,
@@ -33,7 +33,7 @@ export class AssessChangesSessionMissingError extends Schema.TaggedErrorClass<As
   },
 ) {}
 
-export class AssessChangesOpenCodeError extends Schema.TaggedErrorClass<AssessChangesOpenCodeError>()(
+export class AssessChangesOpenCodeError extends Schema.TaggedError<AssessChangesOpenCodeError>()(
   "AssessChangesOpenCodeError",
   {
     workItemId: Schema.String,
@@ -42,7 +42,7 @@ export class AssessChangesOpenCodeError extends Schema.TaggedErrorClass<AssessCh
   },
 ) {}
 
-export class AssessChangesResultError extends Schema.TaggedErrorClass<AssessChangesResultError>()(
+export class AssessChangesResultError extends Schema.TaggedError<AssessChangesResultError>()(
   "AssessChangesResultError",
   {
     workItemId: Schema.String,

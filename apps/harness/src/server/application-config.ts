@@ -49,14 +49,14 @@ class ApplicationConfig extends Context.Service<
     ApplicationConfig,
     Effect.gen(function* () {
       const enabledValue = yield* Config.option(
-        Config.string("KEYMAXXER_ENABLED"),
+        Config.String("KEYMAXXER_ENABLED"),
       )
       const enabled =
         Option.getOrUndefined(enabledValue)?.trim().toLowerCase() !== "false"
       const sidecarUrl = enabled
         ? yield* Config.schema(RequiredString, "KEYMAXXER_SIDECAR_URL")
         : undefined
-      const home = yield* Config.option(Config.string("HOME"))
+      const home = yield* Config.option(Config.String("HOME"))
 
       return {
         keymaxxerSidecarUrl: sidecarUrl?.trim(),

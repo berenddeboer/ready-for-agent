@@ -19,6 +19,7 @@ effect_ignore=(
   "**/keymaxxer-gitlab-layer.test.ts"
   "**/keymaxxer-azure-devops-layer.test.ts"
   "**/ambient-github-layer.test.ts"
+  "**/github-operation-coordinator.test.ts"
   "**/ambient-gitlab-layer.test.ts"
   "**/application-config.test.ts"
   "**/application-runtime-disposal.test.ts"

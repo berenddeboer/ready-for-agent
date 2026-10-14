@@ -28,7 +28,7 @@ export const AgentBackendErrorClassification = Schema.Literals([
 export type AgentBackendErrorClassification =
   typeof AgentBackendErrorClassification.Type
 
-export class AgentBackendConfigError extends Schema.TaggedErrorClass<AgentBackendConfigError>()(
+export class AgentBackendConfigError extends Schema.TaggedError<AgentBackendConfigError>()(
   "AgentBackendConfigError",
   {
     message: Schema.String,
@@ -64,7 +64,7 @@ type AgentBackendExitErrorProps = {
   readonly message: string
 }
 
-export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendExitError>()(
+export class AgentBackendExitError extends Schema.TaggedError<AgentBackendExitError>()(
   "AgentBackendExitError",
   {
     exitCode: Schema.Finite,
@@ -117,7 +117,7 @@ export class AgentBackendExitError extends Schema.TaggedErrorClass<AgentBackendE
   }
 }
 
-export class AgentBackendTimeoutError extends Schema.TaggedErrorClass<AgentBackendTimeoutError>()(
+export class AgentBackendTimeoutError extends Schema.TaggedError<AgentBackendTimeoutError>()(
   "AgentBackendTimeoutError",
   {
     cwd: Schema.String,
@@ -131,7 +131,7 @@ export class AgentBackendTimeoutError extends Schema.TaggedErrorClass<AgentBacke
  * it never began the turn (bad auth, broken config, crash during startup).
  * Distinct from AgentBackendTimeoutError, which means the turn ran out of time.
  */
-export class AgentBackendStartupTimeoutError extends Schema.TaggedErrorClass<AgentBackendStartupTimeoutError>()(
+export class AgentBackendStartupTimeoutError extends Schema.TaggedError<AgentBackendStartupTimeoutError>()(
   "AgentBackendStartupTimeoutError",
   {
     cwd: Schema.String,
@@ -173,14 +173,14 @@ export const formatAgentBackendStartupTimeoutMessage = (input: {
   return `${input.backendLabel} failed ${input.action}: ${details.join("; ")}`
 }
 
-export class AgentBackendSessionIdMissingError extends Schema.TaggedErrorClass<AgentBackendSessionIdMissingError>()(
+export class AgentBackendSessionIdMissingError extends Schema.TaggedError<AgentBackendSessionIdMissingError>()(
   "AgentBackendSessionIdMissingError",
   {
     cwd: Schema.String,
   },
 ) {}
 
-export class AgentBackendMalformedOutputError extends Schema.TaggedErrorClass<AgentBackendMalformedOutputError>()(
+export class AgentBackendMalformedOutputError extends Schema.TaggedError<AgentBackendMalformedOutputError>()(
   "AgentBackendMalformedOutputError",
   {
     cwd: Schema.String,
@@ -202,7 +202,7 @@ const AgentBackendDescriptorSchema = Schema.Struct({
 })
 
 /** Agent Backend CLI binary was not found on the Harness PATH (spawn ENOENT). */
-export class AgentBackendNotInstalledError extends Schema.TaggedErrorClass<AgentBackendNotInstalledError>()(
+export class AgentBackendNotInstalledError extends Schema.TaggedError<AgentBackendNotInstalledError>()(
   "AgentBackendNotInstalledError",
   {
     message: Schema.String,

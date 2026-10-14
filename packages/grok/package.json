@@ -18,11 +18,11 @@
   "dependencies": {
     "@ready-for-agent/acp-client": "workspace:*",
     "@ready-for-agent/agent-backend": "workspace:*",
-    "effect": "^4.0.0-beta.97",
+    "effect": "4.0.4",
     "tslib": "^2.3.0"
   },
   "devDependencies": {
-    "@effect/platform-bun": "^4.0.0-beta.97",
+    "@effect/platform-bun": "4.0.4",
     "@types/bun": "^1.3.0"
   }
 }

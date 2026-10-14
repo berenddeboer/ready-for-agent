@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import { connect } from "@tursodatabase/database"
 import { ConfigProvider, Effect, Exit, Layer, Stream } from "effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 import { makeTursoLive } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 

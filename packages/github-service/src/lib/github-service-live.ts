@@ -84,7 +84,7 @@ const GITHUB_API_URL = "https://api.github.com"
 const GITHUB_USER_ATTACHMENTS_URL =
   "https://uploads.github.com/user-attachments/assets"
 
-class GitHubApiRepositoryUnavailableError extends Schema.TaggedErrorClass<GitHubApiRepositoryUnavailableError>()(
+class GitHubApiRepositoryUnavailableError extends Schema.TaggedError<GitHubApiRepositoryUnavailableError>()(
   "GitHubApiRepositoryUnavailableError",
   {
     owner: Schema.String,
@@ -4358,7 +4358,7 @@ export const makeGitHubServiceLive = (
   Layer.effect(
     GitHubService,
     Effect.gen(function* () {
-      const token = yield* Config.redacted("GITHUB_TOKEN")
+      const token = yield* Config.Redacted("GITHUB_TOKEN")
       const fs = yield* FileSystem.FileSystem
       return makeGitHubServiceFromToken(
         Redacted.value(token),

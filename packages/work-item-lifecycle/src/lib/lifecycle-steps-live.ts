@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Layer, Path } from "effect"
-import { ChildProcessSpawner } from "effect/unstable/process"
-import { SqlClient } from "effect/unstable/sql"
+import { ChildProcessSpawner } from "effect/process"
+import { SqlClient } from "effect/sql"
 import {
   ActiveAgentBackend,
   AgentBackend,

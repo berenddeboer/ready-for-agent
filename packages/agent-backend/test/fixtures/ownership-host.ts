@@ -1,6 +1,6 @@
 import { BunServices } from "@effect/platform-bun"
 import { Effect } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { spawnOwned } from "../../src/lib/invocation-ownership.js"
 
 const cwd = process.argv[2]
