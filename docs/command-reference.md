@@ -339,7 +339,7 @@ ready-for-agent status github.com/owner/repo
 - **Usage**: `ready-for-agent jump <session-id>`
 - **Effect**: destructive — may delete or irreversibly overwrite
 
-Continue a Work Item Session (Interactive Session Continuation)
+Continue a Work Item Session (Interactive Session Continuation). In tmux, Jump starts your interactive shell in the worktree, lets that shell's normal startup run, then replaces the shell with the agent from the shell's PATH. Outside tmux, Jump keeps the invoking terminal's environment and PATH. Enable direnv, mise, or similar tools in your own shell startup if you use them; Jump does not configure them. Tmux can still supply variables from the server, and Jump does not remove that baseline. Shell startup that reads terminal input, replaces the shell, or activates the environment asynchronously is unsupported.
 
 ### Arguments
 
@@ -351,7 +351,7 @@ Opaque backend Session ID to continue
 
 **Jump**
 
-Continue the Work Item Session in the current terminal or tmux
+Continue the Work Item Session in the current terminal or tmux. In tmux the worktree shell starts first.
 
 ```
 ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -2371,12 +2371,13 @@ describe("operator binary jump command", () => {
     }),
   )
 
-  it.live("jump fails when the backend executable is not on PATH", () =>
+  it.live("direct jump fails when the backend executable is not on PATH", () =>
     Effect.gen(function* () {
       let created = false
       const result = yield* runOperator(
         ["jump", sessionId],
         successfulJumpLayer({
+          tmuxModeSelected: Effect.succeed(false),
           resolve: (command) =>
             Effect.fail(
               new JumpFailed({
@@ -2398,6 +2399,30 @@ describe("operator binary jump command", () => {
         )
       }
     }),
+  )
+
+  it.live(
+    "tmux jump passes the executable name and does not resolve the caller PATH",
+    () =>
+      Effect.gen(function* () {
+        let resolved = false
+        let captured: JumpWindowInput | undefined
+        yield* runOperator(
+          ["jump", sessionId],
+          successfulJumpLayer({
+            resolve: () => {
+              resolved = true
+              return Effect.die("tmux jump must not resolve the caller PATH")
+            },
+            createJumpWindow: (input) =>
+              Effect.sync(() => {
+                captured = input
+              }),
+          }),
+        )
+        expect(resolved).toBe(false)
+        expect(captured?.agentExecutable).toBe("opencode")
+      }),
   )
 
   it.live("jump fails when tmux cannot create the window", () =>
@@ -2430,11 +2455,11 @@ describe("operator binary jump command", () => {
       try {
         const expected = {
           opencode: {
-            executable: "/usr/bin/opencode",
+            executable: "opencode",
             arguments: [worktree, "--session", sessionId, "--auto"],
           },
           grok: {
-            executable: "/usr/bin/grok",
+            executable: "grok",
             arguments: [
               "--cwd",
               worktree,
@@ -2445,7 +2470,7 @@ describe("operator binary jump command", () => {
             ],
           },
           codex: {
-            executable: "/usr/bin/codex",
+            executable: "codex",
             arguments: [
               "resume",
               "--dangerously-bypass-approvals-and-sandbox",
@@ -2455,7 +2480,7 @@ describe("operator binary jump command", () => {
             ],
           },
           claude: {
-            executable: "/usr/bin/claude",
+            executable: "claude",
             arguments: [
               "--resume",
               sessionId,
@@ -2484,7 +2509,6 @@ describe("operator binary jump command", () => {
             workingDirectory: worktree,
             agentExecutable: want.executable,
             agentArguments: want.arguments,
-            backendId,
           })
         }
       } finally {
@@ -2578,88 +2602,53 @@ describe("operator binary jump command", () => {
 
   const windowListFormat =
     "#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{@rfa-session-id}"
-  const paneListFormat = "#{pane_id} #{@rfa-agent}"
+  const paneListFormat = "#{pane_id} #{pane_dead} #{@rfa-agent}"
   const jumpInput = {
     sessionId,
     workingDirectory: "/tmp/rfa-jump-worktree",
-    agentExecutable: "/usr/bin/opencode",
+    agentExecutable: "opencode",
     agentArguments: [
       "/tmp/rfa-jump-worktree",
       "--session",
       sessionId,
       "--auto",
     ],
-    backendId: "opencode",
   } as const
 
-  const omittedPaneEnvironmentPrefixes = [
-    "TMUX=",
-    "TMUX_PANE=",
-    "TERM=",
-    "PWD=",
-    "SQLITE_DATABASE_PATH=",
-    "KEYMAXXER_SIDECAR_URL=",
-    "READY_FOR_AGENT_GRAPHQL_URL=",
-  ] as const
+  const maskQueuedExec = (invocations: readonly (readonly string[])[]) =>
+    invocations.map((args) => {
+      if (args[0] === "send-keys" && args.includes("-l")) {
+        return [...args.slice(0, -1), "<exec>"]
+      }
+      return [...args]
+    })
 
-  const tmuxFlagEnvAssignments = (
+  const queuedExecArgument = (
+    invocations: readonly (readonly string[])[],
+  ): string => {
+    const line = invocations
+      .find((args) => args[0] === "send-keys" && args.includes("-l"))
+      ?.at(-1)
+    expect(line).toBeDefined()
+    return line ?? ""
+  }
+
+  const expectLauncher = (
+    invocations: readonly (readonly string[])[],
+    executableName: string,
     args: readonly string[],
-  ): readonly string[] => {
-    const separator = args.indexOf("--")
-    const limit = separator === -1 ? args.length : separator
-    const assignments: string[] = []
-    for (let i = 0; i < limit; i++) {
-      if (args[i] !== "-e") {
-        continue
-      }
-      const assignment = args[i + 1]
-      if (assignment !== undefined) {
-        assignments.push(assignment)
-      }
-      i += 1
-    }
-    return assignments
+  ) => {
+    const line = queuedExecArgument(invocations)
+    const match = /^exec '([^']+)'$/.exec(line)
+    expect(match?.[1]).toBeDefined()
+    const script = readFileSync(match?.[1] ?? "", "utf8")
+    expect(script).toContain(`exe='${executableName}'`)
+    expect(script).toContain(
+      `exec "$exe"${args.length === 0 ? "" : ` ${args.map((argument) => `'${argument}'`).join(" ")}`}`,
+    )
+    expect(script).not.toContain(`/usr/bin/${executableName}`)
+    expect(invocations.flat()).not.toContain("-e")
   }
-
-  const withoutTmuxEnvFlags = (args: readonly string[]): string[] => {
-    const out: string[] = []
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === "-e") {
-        i += 1
-        continue
-      }
-      const arg = args[i]
-      if (arg !== undefined) {
-        out.push(arg)
-      }
-    }
-    return out
-  }
-
-  const expectForwardedPaneEnvironment = (args: readonly string[]) => {
-    const assignments = tmuxFlagEnvAssignments(args)
-    expect(assignments).toContain("CLAUDE_CODE_USE_BEDROCK=1")
-    for (const prefix of omittedPaneEnvironmentPrefixes) {
-      expect(
-        assignments.some((assignment) => assignment.startsWith(prefix)),
-      ).toBe(false)
-    }
-    const separator = args.indexOf("--")
-    const firstEnv = args.indexOf("-e")
-    expect(firstEnv).toBeGreaterThan(-1)
-    expect(separator).toBeGreaterThan(firstEnv)
-  }
-
-  const jumpProcessEnvFixture = {
-    CLAUDE_CODE_USE_BEDROCK: "1",
-    TMUX: "/tmp/tmux-1000/default,1,0",
-    TMUX_PANE: "%9",
-    TERM: "xterm-256color",
-    PWD: "/tmp/wrong-pwd",
-    SQLITE_DATABASE_PATH: "/tmp/ready-for-agent.db",
-    KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:6057/cap/mcp",
-    READY_FOR_AGENT_GRAPHQL_URL: "http://127.0.0.1:7000/graphql",
-  } as const
 
   const withProcessEnv = (
     overrides: Record<string, string>,
@@ -2692,6 +2681,7 @@ describe("operator binary jump command", () => {
     readonly windows?: string
     readonly panes?: string
     readonly failOn?: string
+    readonly defaultShell?: string
   }) => {
     const invocations: string[][] = []
     const encoder = new TextEncoder()
@@ -2716,7 +2706,9 @@ describe("operator binary jump command", () => {
               ? ""
               : `${script.windows}\n`
         } else if (command.args[0] === "list-panes") {
-          stdout = `${script.panes ?? "%1 1\n%2"}\n`
+          stdout = `${script.panes ?? "%1 0 1\n%2 0"}\n`
+        } else if (command.args[0] === "show-options") {
+          stdout = `${script.defaultShell ?? "/bin/bash"}\n`
         } else if (command.args.includes("new-window")) {
           stdout = "@1 %1\n"
         } else if (
@@ -2776,7 +2768,7 @@ describe("operator binary jump command", () => {
       Effect.gen(function* () {
         const tmux = recordingTmux({
           windows: `$0\tdefault\t@5\t3\t${sessionId}`,
-          panes: "%1 1\n%2",
+          panes: "%1 0 1\n%2 0",
         })
         yield* runCreateJumpWindow(tmux.layer)
         expect(tmux.invocations).toEqual([
@@ -2798,10 +2790,11 @@ describe("operator binary jump command", () => {
           panes: "%2",
         })
         yield* runCreateJumpWindow(tmux.layer)
-        expect(tmux.invocations.map(withoutTmuxEnvFlags)).toEqual([
+        expect(maskQueuedExec(tmux.invocations)).toEqual([
           ["display-message", "-p", "#{session_id}"],
           ["list-windows", "-a", "-F", windowListFormat],
           ["list-panes", "-t", "@5", "-F", paneListFormat],
+          ["show-options", "-Av", "default-shell"],
           [
             "split-window",
             "-h",
@@ -2814,14 +2807,21 @@ describe("operator binary jump command", () => {
             "-c",
             jumpInput.workingDirectory,
             "--",
-            jumpInput.agentExecutable,
-            ...jumpInput.agentArguments,
+            "/bin/bash",
+            "-l",
           ],
           ["set-option", "-p", "-t", "%3", "@rfa-agent", "1"],
+          ["send-keys", "-t", "%3", "-l", "--", "<exec>"],
+          ["send-keys", "-t", "%3", "Enter"],
           ["select-layout", "-t", "@5", "even-horizontal"],
           ["select-pane", "-t", "%3"],
           ["select-window", "-t", "@5"],
         ])
+        expectLauncher(
+          tmux.invocations,
+          jumpInput.agentExecutable,
+          jumpInput.agentArguments,
+        )
       }),
   )
 
@@ -2854,9 +2854,10 @@ describe("operator binary jump command", () => {
       Effect.gen(function* () {
         const tmux = recordingTmux({})
         yield* runCreateJumpWindow(tmux.layer)
-        expect(tmux.invocations.map(withoutTmuxEnvFlags)).toEqual([
+        expect(maskQueuedExec(tmux.invocations)).toEqual([
           ["display-message", "-p", "#{session_id}"],
           ["list-windows", "-a", "-F", windowListFormat],
+          ["show-options", "-Av", "default-shell"],
           [
             "new-window",
             "-d",
@@ -2868,89 +2869,168 @@ describe("operator binary jump command", () => {
             "-c",
             jumpInput.workingDirectory,
             "--",
-            jumpInput.agentExecutable,
-            ...jumpInput.agentArguments,
+            "/bin/bash",
+            "-l",
           ],
           ["set-option", "-w", "-t", "@1", "@rfa-session-id", sessionId],
           ["set-option", "-p", "-t", "%1", "@rfa-agent", "1"],
+          ["send-keys", "-t", "%1", "-l", "--", "<exec>"],
+          ["send-keys", "-t", "%1", "Enter"],
           ["split-window", "-h", "-t", "@1", "-c", jumpInput.workingDirectory],
           ["select-layout", "-t", "@1", "even-horizontal"],
           ["select-pane", "-t", "%1"],
           ["select-window", "-t", "@1"],
         ])
+        expectLauncher(
+          tmux.invocations,
+          jumpInput.agentExecutable,
+          jumpInput.agentArguments,
+        )
       }),
   )
 
   it.live(
-    "jump forwards the operator environment on new-window and omits tmux-owned vars",
+    "jump does not serialize the caller environment into tmux arguments",
     () =>
       withProcessEnv(
-        jumpProcessEnvFixture,
+        {
+          RFA_JUMP_HUGE: `RFAJUMPHUGE${"x".repeat(80_000)}`,
+          CLAUDE_CODE_USE_BEDROCK: "1",
+          DISABLE_AUTOUPDATER: "1",
+        },
         Effect.gen(function* () {
-          const tmux = recordingTmux({})
-          yield* runCreateJumpWindow(tmux.layer)
-          const created = tmux.invocations.find((args) =>
-            args.includes("new-window"),
-          )
-          expect(created).toBeDefined()
-          if (created === undefined) {
-            return
-          }
-          expectForwardedPaneEnvironment(created)
-        }),
-      ),
-  )
-
-  it.live(
-    "jump forwards the operator environment when recreating the agent pane",
-    () =>
-      withProcessEnv(
-        jumpProcessEnvFixture,
-        Effect.gen(function* () {
-          const tmux = recordingTmux({
+          const fresh = recordingTmux({})
+          yield* runCreateJumpWindow(fresh.layer)
+          const recreated = recordingTmux({
             windows: `$0\tdefault\t@5\t3\t${sessionId}`,
             panes: "%2",
           })
-          yield* runCreateJumpWindow(tmux.layer)
-          const recreated = tmux.invocations.find(
-            (args) => args[0] === "split-window" && args.includes("-P"),
-          )
-          expect(recreated).toBeDefined()
-          if (recreated === undefined) {
-            return
+          yield* runCreateJumpWindow(recreated.layer)
+          for (const tmux of [fresh, recreated]) {
+            const flat = tmux.invocations.flat()
+            expect(flat).not.toContain("-e")
+            expect(flat.some((arg) => arg.includes("RFAJUMPHUGE"))).toBe(false)
+            expect(
+              flat.some((arg) => arg.includes("CLAUDE_CODE_USE_BEDROCK")),
+            ).toBe(false)
+            expect(
+              flat.some((arg) => arg.includes("DISABLE_AUTOUPDATER")),
+            ).toBe(false)
           }
-          expectForwardedPaneEnvironment(recreated)
         }),
       ),
   )
 
-  it.live("jump sets DISABLE_AUTOUPDATER for the claude backend pane", () =>
-    withProcessEnv(
-      jumpProcessEnvFixture,
-      Effect.gen(function* () {
+  it.live("jump replaces a dead tagged agent pane", () =>
+    Effect.gen(function* () {
+      const tmux = recordingTmux({
+        windows: `$0\tdefault\t@5\t3\t${sessionId}`,
+        panes: "%1 1 1\n%2 0",
+      })
+      yield* runCreateJumpWindow(tmux.layer)
+      expect(maskQueuedExec(tmux.invocations)).toContainEqual([
+        "send-keys",
+        "-t",
+        "%3",
+        "-l",
+        "--",
+        "<exec>",
+      ])
+      expect(tmux.invocations).toContainEqual(["kill-pane", "-t", "%1"])
+      expect(
+        tmux.invocations.some((args) => args.includes("kill-window")),
+      ).toBe(false)
+    }),
+  )
+
+  it.live("jump refuses a tmux default-shell it cannot quote", () =>
+    Effect.gen(function* () {
+      const tmux = recordingTmux({ defaultShell: "/bin/nu" })
+      const result = yield* runCreateJumpWindow(tmux.layer).pipe(Effect.flip)
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toContain("/bin/nu")
+        expect(result.message).toContain("Supported shells")
+      }
+      expect(tmux.invocations.some((args) => args.includes("new-window"))).toBe(
+        false,
+      )
+    }),
+  )
+
+  it.live("jump refuses an empty tmux default-shell", () =>
+    Effect.gen(function* () {
+      const tmux = recordingTmux({ defaultShell: "" })
+      const result = yield* runCreateJumpWindow(tmux.layer).pipe(Effect.flip)
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toContain("default-shell is empty")
+      }
+    }),
+  )
+
+  it.live("jump quotes a launcher path that contains spaces and quotes", () =>
+    Effect.gen(function* () {
+      const root = mkdtempSync(join(tmpdir(), "rfa-quote-"))
+      const quotedTmp = join(root, "tmp's")
+      mkdirSync(quotedTmp)
+      const previous = process.env.TMPDIR
+      process.env.TMPDIR = quotedTmp
+      try {
         const tmux = recordingTmux({})
         yield* runCreateJumpWindow(tmux.layer, {
           ...jumpInput,
-          backendId: "claude",
-          agentExecutable: "/usr/bin/claude",
-          agentArguments: [
-            "--resume",
-            sessionId,
-            "--dangerously-skip-permissions",
-          ],
+          agentArguments: ["hello world", "quote's"],
         })
-        const created = tmux.invocations.find((args) =>
-          args.includes("new-window"),
-        )
-        expect(created).toBeDefined()
-        if (created === undefined) {
-          return
+        const line = queuedExecArgument(tmux.invocations)
+        expect(line.startsWith("exec '")).toBe(true)
+        const quoted = line.slice("exec ".length)
+        let scriptPath = ""
+        let index = 0
+        while (index < quoted.length) {
+          if (quoted.startsWith(`'\\''`, index)) {
+            scriptPath += "'"
+            index += 4
+            continue
+          }
+          const character = quoted[index]
+          if (character === "'") {
+            index += 1
+            continue
+          }
+          if (character !== undefined) {
+            scriptPath += character
+          }
+          index += 1
         }
-        expect(tmuxFlagEnvAssignments(created)).toContain(
-          "DISABLE_AUTOUPDATER=1",
-        )
-      }),
-    ),
+        expect(scriptPath).toContain("tmp's")
+        const script = readFileSync(scriptPath, "utf8")
+        expect(script).toContain(`exec "$exe" 'hello world' 'quote'\\''s'`)
+      } finally {
+        if (previous === undefined) {
+          delete process.env.TMPDIR
+        } else {
+          process.env.TMPDIR = previous
+        }
+        rmSync(root, { recursive: true, force: true })
+      }
+    }),
+  )
+
+  it.live("jump refuses a default-shell that is not executable", () =>
+    Effect.gen(function* () {
+      const tmux = recordingTmux({
+        defaultShell: "/tmp/rfa-missing-shell/bash",
+      })
+      const result = yield* runCreateJumpWindow(tmux.layer).pipe(Effect.flip)
+      expect(result).toBeInstanceOf(JumpFailed)
+      if (result instanceof JumpFailed) {
+        expect(result.message).toContain("is not executable")
+      }
+      expect(tmux.invocations.some((args) => args.includes("new-window"))).toBe(
+        false,
+      )
+    }),
   )
 
   it.live(
@@ -2978,7 +3058,7 @@ describe("operator binary jump command", () => {
       Effect.gen(function* () {
         const tmux = recordingTmux({
           windows: `$0\tdefault\t@5\t3\t${sessionId}`,
-          panes: "%1 1",
+          panes: "%1 0 1",
         })
         yield* runCreateJumpWindow(tmux.layer)
         expect(tmux.invocations).toEqual([

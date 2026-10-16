@@ -87,9 +87,9 @@ cmd "status" help="Print the current six-lane Kanban status as versioned JSON (o
   example "ready-for-agent status github.com/owner/repo" header="Scoped status" help="Print Kanban status for one Repository"
 }
 
-cmd "jump" help="Continue a Work Item Session (Interactive Session Continuation)" effect="destructive" {
+cmd "jump" help="Continue a Work Item Session (Interactive Session Continuation). In tmux, Jump starts your interactive shell in the worktree, lets that shell's normal startup run, then replaces the shell with the agent from the shell's PATH. Outside tmux, Jump keeps the invoking terminal's environment and PATH. Enable direnv, mise, or similar tools in your own shell startup if you use them; Jump does not configure them. Tmux can still supply variables from the server, and Jump does not remove that baseline. Shell startup that reads terminal input, replaces the shell, or activates the environment asynchronously is unsupported." effect="destructive" {
   arg "<session-id>" help="Opaque backend Session ID to continue"
-  example "ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd" header="Jump" help="Continue the Work Item Session in the current terminal or tmux"
+  example "ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd" header="Jump" help="Continue the Work Item Session in the current terminal or tmux. In tmux the worktree shell starts first."
 }
 
 cmd "skills" help="Discover version-matched agent skills bundled with this CLI (offline; aliases skills list)" effect="read" {
