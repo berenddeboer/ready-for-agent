@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import {
+  type RelevantIssuesGuidancePart,
+  emptyRelevantIssuesGuidance,
+  refreshIssuesUnauthenticatedTitle,
+} from "../src/relevant-issues-guidance.ts"
 import { describe, expect, test } from "bun:test"
 
 const homeSource = () =>
@@ -303,16 +308,110 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "function RepositoryIssues(",
       "function ParentIssueGroup(",
     )
-    expect(issues).toContain(
-      "Label {forgeDisplayName(repository.forge)} issues with",
-    )
+    expect(issues).toContain("emptyRelevantIssuesGuidance({")
+    expect(issues).toContain("issueTracker: repository.issueTracker")
+    expect(issues).toContain("linearProjectName: repository.linearProjectName")
+    expect(issues).not.toContain("forgeDisplayName(repository.forge)")
     expect(issues).not.toContain("Label GitHub/GitLab issues with")
-    expect(issues).toContain("ready-for-agent")
-    expect(issues).toContain("for them to\n        show up here.")
-    expect(issues).toContain(
-      "If an issue is a child issue, the parent itself cannot be\n        a child issue too.",
-    )
     expect(issues).toContain("ui.repoIssuesEmpty")
+    expect(issues).toContain("ui.guidanceCode")
+    expect(card).toContain("refreshIssuesUnauthenticatedTitle({")
+    expect(card).toContain("issueTracker: repository.issueTracker")
+
+    const parentChild =
+      "If an issue is a child issue, the parent itself cannot be a child issue too."
+    const plain = (parts: readonly RelevantIssuesGuidancePart[]) =>
+      parts.map((part) => part.text).join("")
+    expect(
+      plain(
+        emptyRelevantIssuesGuidance({
+          forge: "github",
+          issueTracker: "github",
+          linearProjectName: null,
+        }),
+      ),
+    ).toBe(
+      `Label GitHub issues with ready-for-agent for them to show up here. ${parentChild}`,
+    )
+    expect(
+      plain(
+        emptyRelevantIssuesGuidance({
+          forge: "gitlab",
+          issueTracker: "gitlab",
+          linearProjectName: null,
+        }),
+      ),
+    ).toBe(
+      `Label GitLab issues with ready-for-agent for them to show up here. ${parentChild}`,
+    )
+    expect(
+      plain(
+        emptyRelevantIssuesGuidance({
+          forge: "azure-devops",
+          issueTracker: "azure-devops",
+          linearProjectName: "Ignored for this tracker",
+        }),
+      ),
+    ).toBe(
+      `Label Azure DevOps issues with ready-for-agent for them to show up here. ${parentChild}`,
+    )
+    expect(
+      plain(
+        emptyRelevantIssuesGuidance({
+          forge: "github",
+          issueTracker: "linear",
+          linearProjectName: "Ready for Agent",
+        }),
+      ),
+    ).toBe(
+      `Label Linear issues in the linked project Ready for Agent with ready-for-agent for them to show up here. ${parentChild}`,
+    )
+    expect(
+      plain(
+        emptyRelevantIssuesGuidance({
+          forge: "github",
+          issueTracker: "linear",
+          linearProjectName: null,
+        }),
+      ),
+    ).toBe(
+      `Label Linear issues in the linked Linear project with ready-for-agent for them to show up here. ${parentChild}`,
+    )
+    expect(
+      plain(
+        emptyRelevantIssuesGuidance({
+          forge: "github",
+          issueTracker: "linear",
+          linearProjectName: "  ",
+        }),
+      ),
+    ).toBe(
+      `Label Linear issues in the linked Linear project with ready-for-agent for them to show up here. ${parentChild}`,
+    )
+    expect(
+      refreshIssuesUnauthenticatedTitle({
+        forge: "github",
+        issueTracker: "linear",
+      }),
+    ).toBe("Authenticate Linear before refreshing issues")
+    expect(
+      refreshIssuesUnauthenticatedTitle({
+        forge: "github",
+        issueTracker: "github",
+      }),
+    ).toBe("Add a GitHub token before refreshing issues")
+    expect(
+      refreshIssuesUnauthenticatedTitle({
+        forge: "gitlab",
+        issueTracker: "gitlab",
+      }),
+    ).toBe("Authenticate GitLab before refreshing issues")
+    expect(
+      refreshIssuesUnauthenticatedTitle({
+        forge: "azure-devops",
+        issueTracker: "azure-devops",
+      }),
+    ).toBe("Authenticate Azure DevOps before refreshing issues")
 
     const ui = uiSource()
     const emptyStyle = sliceBetweenMarkers(
