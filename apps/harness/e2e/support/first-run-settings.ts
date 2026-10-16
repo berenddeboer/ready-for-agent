@@ -284,24 +284,32 @@ export const dismissFirstRunSettingsIfPresent = async (page: Page) => {
   await expect(dialog).toBeHidden()
 }
 
+/**
+ * One DOM snapshot. Awaiting each option locator hangs for the scenario
+ * timeout when a catalog re-render shrinks the list mid-loop. The short
+ * timeout lets the settings poll retry that read instead.
+ */
+const LISTED_SELECT_VALUE_TIMEOUT_MS = 5_000
+
 const listedSelectValues = async (
   select: ReturnType<Page["locator"]>,
 ): Promise<readonly string[]> => {
-  const options = select.locator("option")
-  const count = await options.count()
-  const values: string[] = []
-  for (let i = 0; i < count; i += 1) {
-    const value = await options.nth(i).getAttribute("value")
-    if (value != null && value.length > 0) {
-      values.push(value)
-    }
-  }
-  return values
+  const values = await select.evaluate(
+    (element) => {
+      if (!(element instanceof HTMLSelectElement)) {
+        return []
+      }
+      return Array.from(element.options, (option) =>
+        option.getAttribute("value"),
+      )
+    },
+    undefined,
+    { timeout: LISTED_SELECT_VALUE_TIMEOUT_MS },
+  )
+  return values.filter(
+    (value): value is string => value != null && value.length > 0,
+  )
 }
-
-const countRealSelectValues = async (
-  select: ReturnType<Page["locator"]>,
-): Promise<number> => (await listedSelectValues(select)).length
 
 /**
  * Complete first-run settings: prefer OpenCode when listed (shared e2e
@@ -332,6 +340,9 @@ export const completeAndSaveFirstRunSettings = async (page: Page) => {
   let selectedModel: string | null = null
   for (const backendId of backendIds) {
     await backendSelect.selectOption(backendId)
+    // Keep the catalog from the poll iteration that observed it. A second
+    // read can land on a shorter list after the OpenCode preview re-renders.
+    let catalog: readonly string[] = []
     try {
       // Settings fetch can briefly overlay; do not wait on "Loading catalog…"
       // text — that string is the empty option label on both Build and Review
@@ -341,14 +352,26 @@ export const completeAndSaveFirstRunSettings = async (page: Page) => {
         timeout: 15_000,
       })
       await expect
-        .poll(() => countRealSelectValues(modelSelect), {
-          timeout: 15_000,
-        })
+        .poll(
+          async () => {
+            try {
+              catalog = await listedSelectValues(modelSelect)
+            } catch (error) {
+              // expect.poll does not retry a thrown timeout; treat a detached
+              // select as "no catalog yet" so this backend keeps polling.
+              if (error instanceof Error && error.name === "TimeoutError") {
+                return 0
+              }
+              throw error
+            }
+            return catalog.length
+          },
+          { timeout: 15_000 },
+        )
         .toBeGreaterThan(0)
     } catch {
       continue
     }
-    const catalog = await listedSelectValues(modelSelect)
     selectedModel = catalog[0] ?? null
     if (selectedModel !== null) {
       break
