@@ -291,6 +291,20 @@ export const dismissFirstRunSettingsIfPresent = async (page: Page) => {
  */
 const LISTED_SELECT_VALUE_TIMEOUT_MS = 5_000
 
+/**
+ * `selectOption` has no default timeout: a catalog re-render between the poll
+ * that observed a value and the select action landing makes it wait for a
+ * value that no longer exists — until the scenario timeout (CI run
+ * 38968344938). Give every select an explicit short timeout.
+ */
+const SELECT_OPTION_TIMEOUT_MS = 5_000
+
+/**
+ * How often the per-backend read-and-select cycle retries when a preview
+ * re-render invalidates the observed option between the read and the select.
+ */
+const MODEL_SELECT_RETRIES = 5
+
 const listedSelectValues = async (
   select: ReturnType<Page["locator"]>,
 ): Promise<readonly string[]> => {
@@ -339,7 +353,9 @@ export const completeAndSaveFirstRunSettings = async (page: Page) => {
   )
   let selectedModel: string | null = null
   for (const backendId of backendIds) {
-    await backendSelect.selectOption(backendId)
+    await backendSelect.selectOption(backendId, {
+      timeout: SELECT_OPTION_TIMEOUT_MS,
+    })
     // Keep the catalog from the poll iteration that observed it. A second
     // read can land on a shorter list after the OpenCode preview re-renders.
     let catalog: readonly string[] = []
@@ -372,7 +388,31 @@ export const completeAndSaveFirstRunSettings = async (page: Page) => {
     } catch {
       continue
     }
-    selectedModel = catalog[0] ?? null
+    // The observed catalog can still be stale: the preview re-render can
+    // replace the option list after the poll returns but before the select
+    // lands, so the observed first value no longer exists in the DOM. Retry
+    // against the live list within this backend; each attempt is bounded by
+    // SELECT_OPTION_TIMEOUT_MS so the scenario never waits on options that
+    // were replaced (CI run 38968344938).
+    for (let attempt = 0; attempt < MODEL_SELECT_RETRIES; attempt += 1) {
+      const liveCatalog = await listedSelectValues(modelSelect)
+      const candidate = liveCatalog[0] ?? null
+      if (candidate === null) {
+        break
+      }
+      try {
+        await modelSelect.selectOption(candidate, {
+          timeout: SELECT_OPTION_TIMEOUT_MS,
+        })
+      } catch (error) {
+        if (!(error instanceof Error && error.name === "TimeoutError")) {
+          throw error
+        }
+        continue
+      }
+      selectedModel = candidate
+      break
+    }
     if (selectedModel !== null) {
       break
     }
