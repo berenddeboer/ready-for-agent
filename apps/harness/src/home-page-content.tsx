@@ -102,11 +102,14 @@ import {
   kanbanStatusQueryKeyPrefix,
 } from "./refresh-work-items-live.js"
 import {
+  emptyRelevantIssuesGuidance,
+  refreshIssuesUnauthenticatedTitle,
+} from "./relevant-issues-guidance.js"
+import {
   type Forge,
   type Repository,
   ciGateStatusLabel,
   decodeForge,
-  forgeDisplayName,
   repositoriesQuery,
 } from "./repositories-query.js"
 import { RepositoryCiGateCardDetails } from "./repository-ci-gate-card.js"
@@ -3418,11 +3421,10 @@ function RepositoryCard({
                   title={
                     repository.credential.configured
                       ? "Refresh issues"
-                      : repository.forge === "gitlab"
-                        ? "Authenticate GitLab before refreshing issues"
-                        : repository.forge === "azure-devops"
-                          ? "Authenticate Azure DevOps before refreshing issues"
-                          : "Add a GitHub token before refreshing issues"
+                      : refreshIssuesUnauthenticatedTitle({
+                          forge: repository.forge,
+                          issueTracker: repository.issueTracker,
+                        })
                   }
                 >
                   <svg
@@ -3522,10 +3524,19 @@ function RepositoryIssues({
   if (issues.length === 0) {
     return (
       <p className={ui.repoIssuesEmpty}>
-        Label {forgeDisplayName(repository.forge)} issues with{" "}
-        <code className={ui.guidanceCode}>ready-for-agent</code> for them to
-        show up here. If an issue is a child issue, the parent itself cannot be
-        a child issue too.
+        {emptyRelevantIssuesGuidance({
+          forge: repository.forge,
+          issueTracker: repository.issueTracker,
+          linearProjectName: repository.linearProjectName,
+        }).map((part) =>
+          part.kind === "code" ? (
+            <code className={ui.guidanceCode} key={part.key}>
+              {part.text}
+            </code>
+          ) : (
+            <span key={part.key}>{part.text}</span>
+          ),
+        )}
       </p>
     )
   }
