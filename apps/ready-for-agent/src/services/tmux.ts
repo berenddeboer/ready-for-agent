@@ -1,14 +1,28 @@
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { Context, Effect, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { JumpFailed } from "../jump-error.ts"
-import { jumpPaneEnvironmentFlags } from "../jump-pane-environment.ts"
+import {
+  type InteractiveShellInvocation,
+  interactiveShellInvocation,
+  queuedExecLine,
+  renderJumpLauncherScript,
+} from "../jump-shell-launch.ts"
 
 export type JumpWindowInput = {
   readonly sessionId: string
   readonly workingDirectory: string
   readonly agentExecutable: string
   readonly agentArguments: readonly string[]
-  readonly backendId: string
 }
 
 const sessionOptionName = "@rfa-session-id"
@@ -16,7 +30,7 @@ const agentPaneOptionName = "@rfa-agent"
 const agentPaneMarker = "1"
 const windowListFormat =
   "#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{@rfa-session-id}"
-const paneListFormat = "#{pane_id} #{@rfa-agent}"
+const paneListFormat = "#{pane_id} #{pane_dead} #{@rfa-agent}"
 
 const tmuxArrangeMessage = (detail?: string): string =>
   detail === undefined || detail.length === 0
@@ -25,6 +39,9 @@ const tmuxArrangeMessage = (detail?: string): string =>
 
 const jumpWindowName = (sessionId: string): string =>
   `rfa:${sessionId.slice(0, 8)}`
+
+const unsupportedShellMessage = (shellPath: string): string =>
+  `Jump cannot type an exec command into tmux default-shell '${shellPath}'. Supported shells are bash, zsh, fish, and POSIX sh.`
 
 type TaggedWindow = {
   readonly tmuxSessionId: string
@@ -40,12 +57,22 @@ type JumpTarget =
       readonly windowId: string
       readonly paneId: string
     }
-  | { readonly kind: "recreate"; readonly windowId: string }
+  | {
+      readonly kind: "recreate"
+      readonly windowId: string
+      readonly deadPaneId?: string
+    }
   | {
       readonly kind: "foreign"
       readonly sessionName: string
       readonly windowIndex: string
     }
+
+type PreparedLaunch = {
+  readonly directory: string
+  readonly execLine: string
+  readonly shellArguments: readonly string[]
+}
 
 const parseTaggedWindows = (
   listing: string,
@@ -77,18 +104,63 @@ const parseTaggedWindows = (
   return matches
 }
 
-const taggedAgentPaneId = (listing: string): string | undefined => {
+const taggedAgentPane = (
+  listing: string,
+): { readonly paneId: string; readonly dead: boolean } | undefined => {
   for (const line of listing.split("\n")) {
     const trimmed = line.trim()
     if (trimmed.length === 0) {
       continue
     }
-    const [paneId, marker] = trimmed.split(/\s+/)
+    const [paneId, dead, marker] = trimmed.split(/\s+/)
     if (paneId !== undefined && marker === agentPaneMarker) {
-      return paneId
+      return { paneId, dead: dead === "1" }
     }
   }
   return undefined
+}
+
+const executableOnPath = (name: string): string | undefined => {
+  const pathEnv = process.env.PATH
+  if (pathEnv === undefined) {
+    return undefined
+  }
+  for (const directory of pathEnv.split(":")) {
+    if (directory.length === 0) {
+      continue
+    }
+    const candidate = join(directory, name)
+    try {
+      accessSync(candidate, constants.X_OK)
+      return candidate
+    } catch {
+      // This PATH entry does not contain the executable.
+    }
+  }
+  return undefined
+}
+
+const writeLaunch = (
+  input: JumpWindowInput,
+  invocation: InteractiveShellInvocation,
+): PreparedLaunch => {
+  const directory = mkdtempSync(join(tmpdir(), "rfa-jump-"))
+  const scriptPath = join(directory, "launch")
+  writeFileSync(
+    scriptPath,
+    renderJumpLauncherScript({
+      executableName: input.agentExecutable,
+      arguments: input.agentArguments,
+      tmuxExecutable: executableOnPath("tmux") ?? "tmux",
+    }),
+    { mode: 0o700 },
+  )
+  chmodSync(scriptPath, 0o700)
+  return {
+    directory,
+    execLine: queuedExecLine(invocation.family, scriptPath),
+    shellArguments: invocation.arguments,
+  }
 }
 
 export class Tmux extends Context.Service<
@@ -165,10 +237,70 @@ export class Tmux extends Context.Service<
           yield* runTmux(["select-window", "-t", windowId])
         })
 
+      const discardLaunch = (launch: PreparedLaunch) =>
+        Effect.sync(() => {
+          rmSync(launch.directory, { recursive: true, force: true })
+        })
+
+      const resolveDefaultShell = Effect.fn("Tmux.resolveDefaultShell")(
+        function* () {
+          const shell = (yield* runTmux([
+            "show-options",
+            "-Av",
+            "default-shell",
+          ])).trim()
+          if (shell.length === 0) {
+            return yield* new JumpFailed({
+              message:
+                "tmux default-shell is empty; Jump cannot start an interactive shell for the agent pane",
+            })
+          }
+          const invocation = interactiveShellInvocation(shell)
+          if (invocation === null) {
+            return yield* new JumpFailed({
+              message: unsupportedShellMessage(shell),
+            })
+          }
+          yield* Effect.try({
+            try: () => {
+              accessSync(shell, constants.X_OK)
+            },
+            catch: () =>
+              new JumpFailed({
+                message: `tmux default-shell '${shell}' is not executable`,
+              }),
+          })
+          return invocation
+        },
+      )
+
+      const prepareLaunch = (
+        input: JumpWindowInput,
+        invocation: InteractiveShellInvocation,
+      ) =>
+        Effect.try({
+          try: () => writeLaunch(input, invocation),
+          catch: (cause) =>
+            new JumpFailed({
+              message: `could not prepare the agent launch command: ${
+                cause instanceof Error ? cause.message : String(cause)
+              }`,
+            }),
+        })
+
+      const queueExec = (paneId: string, execLine: string) =>
+        Effect.gen(function* () {
+          yield* runTmux(["send-keys", "-t", paneId, "-l", "--", execLine])
+          yield* runTmux(["send-keys", "-t", paneId, "Enter"])
+        })
+
       const recreateAgentPane = Effect.fn("Tmux.recreateAgentPane")(function* (
         windowId: string,
         input: JumpWindowInput,
+        deadPaneId?: string,
       ) {
+        const invocation = yield* resolveDefaultShell()
+        const launch = yield* prepareLaunch(input, invocation)
         const paneId = yield* runTmux([
           "split-window",
           "-h",
@@ -180,24 +312,61 @@ export class Tmux extends Context.Service<
           windowId,
           "-c",
           input.workingDirectory,
-          ...jumpPaneEnvironmentFlags({ backendId: input.backendId }),
           "--",
-          input.agentExecutable,
-          ...input.agentArguments,
-        ])
+          ...launch.shellArguments,
+        ]).pipe(Effect.tapError(() => discardLaunch(launch)))
         if (paneId.length === 0) {
+          yield* discardLaunch(launch)
           return yield* new JumpFailed({
             message: tmuxArrangeMessage(),
           })
         }
-        yield* tagAgentPane(paneId)
-        yield* runTmux(["select-layout", "-t", windowId, "even-horizontal"])
-        yield* focusWindow(windowId, paneId)
+        yield* tagAgentPane(paneId).pipe(
+          Effect.tapError(() =>
+            Effect.all(
+              [
+                runTmux(["kill-pane", "-t", paneId]).pipe(Effect.ignore),
+                discardLaunch(launch),
+              ],
+              { discard: true },
+            ),
+          ),
+        )
+        // The agent pane closes as soon as the queued process exits. Finish
+        // every command that targets it before typing the exec, or a fast
+        // agent makes a later select-pane fail with "can't find pane".
+        yield* Effect.gen(function* () {
+          if (deadPaneId !== undefined) {
+            yield* runTmux(["kill-pane", "-t", deadPaneId])
+          }
+          yield* runTmux(["select-layout", "-t", windowId, "even-horizontal"])
+          yield* runTmux(["select-pane", "-t", paneId])
+        }).pipe(
+          Effect.tapError(() =>
+            Effect.all(
+              [
+                runTmux(["kill-pane", "-t", paneId]).pipe(Effect.ignore),
+                discardLaunch(launch),
+              ],
+              { discard: true },
+            ),
+          ),
+        )
+        // Delivered input is not proof the agent is running. The launcher
+        // reports a failed launch in the pane; do not delete it after queueing.
+        yield* queueExec(paneId, launch.execLine).pipe(
+          Effect.tapError(() =>
+            runTmux(["kill-pane", "-t", paneId]).pipe(Effect.ignore),
+          ),
+        )
+        yield* runTmux(["select-window", "-t", windowId])
       })
 
       const createFreshWindow = Effect.fn("Tmux.createFreshWindow")(function* (
         input: JumpWindowInput,
       ) {
+        const invocation = yield* resolveDefaultShell()
+        const launch = yield* prepareLaunch(input, invocation)
         const created = yield* runTmux([
           "new-window",
           "-d",
@@ -208,19 +377,19 @@ export class Tmux extends Context.Service<
           jumpWindowName(input.sessionId),
           "-c",
           input.workingDirectory,
-          ...jumpPaneEnvironmentFlags({ backendId: input.backendId }),
           "--",
-          input.agentExecutable,
-          ...input.agentArguments,
-        ])
+          ...launch.shellArguments,
+        ]).pipe(Effect.tapError(() => discardLaunch(launch)))
         const [windowId, paneId] = created.split(/\s+/)
         if (windowId === undefined) {
+          yield* discardLaunch(launch)
           return yield* new JumpFailed({
             message: tmuxArrangeMessage(),
           })
         }
         if (paneId === undefined) {
           yield* killCreatedWindow(windowId)
+          yield* discardLaunch(launch)
           return yield* new JumpFailed({
             message: tmuxArrangeMessage(),
           })
@@ -236,6 +405,16 @@ export class Tmux extends Context.Service<
             input.sessionId,
           ])
           yield* tagAgentPane(paneId)
+        }).pipe(
+          Effect.tapError(() =>
+            Effect.all([killCreatedWindow(windowId), discardLaunch(launch)], {
+              discard: true,
+            }),
+          ),
+        )
+        // Split and focus first. Typing the exec before select-pane races a
+        // fast-exiting agent, which removes the pane tmux still has to focus.
+        yield* Effect.gen(function* () {
           yield* runTmux([
             "split-window",
             "-h",
@@ -246,7 +425,16 @@ export class Tmux extends Context.Service<
           ])
           yield* runTmux(["select-layout", "-t", windowId, "even-horizontal"])
           yield* runTmux(["select-pane", "-t", paneId])
-        }).pipe(Effect.tapError(() => killCreatedWindow(windowId)))
+        }).pipe(
+          Effect.tapError(() =>
+            Effect.all([killCreatedWindow(windowId), discardLaunch(launch)], {
+              discard: true,
+            }),
+          ),
+        )
+        yield* queueExec(paneId, launch.execLine).pipe(
+          Effect.tapError(() => killCreatedWindow(windowId)),
+        )
         yield* runTmux(["select-window", "-t", windowId])
       })
 
@@ -286,14 +474,21 @@ export class Tmux extends Context.Service<
           "-F",
           paneListFormat,
         ])
-        const paneId = taggedAgentPaneId(panes)
-        if (paneId === undefined) {
+        const agent = taggedAgentPane(panes)
+        if (agent === undefined) {
           return { kind: "recreate", windowId: current.windowId } as const
+        }
+        if (agent.dead) {
+          return {
+            kind: "recreate",
+            windowId: current.windowId,
+            deadPaneId: agent.paneId,
+          } as const
         }
         return {
           kind: "reuse",
           windowId: current.windowId,
-          paneId,
+          paneId: agent.paneId,
         } as const
       })
 
@@ -309,7 +504,11 @@ export class Tmux extends Context.Service<
           case "reuse":
             return yield* focusWindow(target.windowId, target.paneId)
           case "recreate":
-            return yield* recreateAgentPane(target.windowId, input)
+            return yield* recreateAgentPane(
+              target.windowId,
+              input,
+              target.deadPaneId,
+            )
           case "create":
             return yield* createFreshWindow(input)
           default: {

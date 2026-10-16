@@ -2050,7 +2050,11 @@ if (args[0] === "list-windows") {
   process.exit(0)
 }
 if (args[0] === "list-panes") {
-  process.stdout.write((process.env.TMUX_LIST_PANES ?? "%1 1\\n%2") + "\\n")
+  process.stdout.write((process.env.TMUX_LIST_PANES ?? "%1 0 1\\n%2 0") + "\\n")
+  process.exit(0)
+}
+if (args[0] === "show-options") {
+  process.stdout.write((process.env.TMUX_DEFAULT_SHELL ?? "/bin/bash") + "\\n")
   process.exit(0)
 }
 if (args.includes("new-window")) {
@@ -2079,63 +2083,39 @@ if (args[0] === "split-window" && args.includes("-P")) {
     TERM: "xterm-256color",
     PWD: "/tmp/wrong-pwd",
     CLAUDE_CODE_USE_BEDROCK: "1",
+    RFA_JUMP_HUGE: `RFAJUMPHUGE${"x".repeat(80_000)}`,
     TMUX_ARGV_LOG: tmuxLog,
     ...overrides,
   })
 
-  const omittedTmuxEnvPrefixes = [
-    "TMUX=",
-    "TMUX_PANE=",
-    "TERM=",
-    "PWD=",
-  ] as const
+  const maskQueuedExec = (invocations: readonly (readonly string[])[]) =>
+    invocations.map((args) => {
+      if (args[0] === "send-keys" && args.includes("-l")) {
+        return [...args.slice(0, -1), "<exec>"]
+      }
+      return [...args]
+    })
 
-  const tmuxFlagEnvAssignments = (
-    args: readonly string[],
-  ): readonly string[] => {
-    const separator = args.indexOf("--")
-    const limit = separator === -1 ? args.length : separator
-    const assignments: string[] = []
-    for (let i = 0; i < limit; i++) {
-      if (args[i] !== "-e") {
-        continue
-      }
-      const assignment = args[i + 1]
-      if (assignment !== undefined) {
-        assignments.push(assignment)
-      }
-      i += 1
-    }
-    return assignments
+  const readQueuedLauncher = (
+    invocations: readonly (readonly string[])[],
+  ): string => {
+    const line = invocations
+      .find((args) => args[0] === "send-keys" && args.includes("-l"))
+      ?.at(-1)
+    const match = /^exec '([^']+)'$/.exec(line ?? "")
+    expect(match?.[1]).toBeDefined()
+    return readFileSync(match?.[1] ?? "", "utf8")
   }
 
-  const withoutTmuxEnvFlags = (args: readonly string[]): string[] => {
-    const out: string[] = []
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === "-e") {
-        i += 1
-        continue
-      }
-      const arg = args[i]
-      if (arg !== undefined) {
-        out.push(arg)
-      }
-    }
-    return out
-  }
-
-  const expectForwardedPaneEnvironment = (args: readonly string[]) => {
-    const assignments = tmuxFlagEnvAssignments(args)
-    expect(assignments).toContain("CLAUDE_CODE_USE_BEDROCK=1")
-    for (const prefix of omittedTmuxEnvPrefixes) {
-      expect(
-        assignments.some((assignment) => assignment.startsWith(prefix)),
-      ).toBe(false)
-    }
-    const separator = args.indexOf("--")
-    const firstEnv = args.indexOf("-e")
-    expect(firstEnv).toBeGreaterThan(-1)
-    expect(separator).toBeGreaterThan(firstEnv)
+  const expectNoCallerEnvironment = (
+    invocations: readonly (readonly string[])[],
+  ) => {
+    const flat = invocations.flat()
+    expect(flat).not.toContain("-e")
+    expect(flat.some((arg) => arg.includes("CLAUDE_CODE_USE_BEDROCK"))).toBe(
+      false,
+    )
+    expect(flat.some((arg) => arg.includes("RFAJUMPHUGE"))).toBe(false)
   }
 
   test("jump without a TTY rejects before contacting the Harness or tmux", async () => {
@@ -2253,26 +2233,25 @@ if (args[0] === "split-window" && args.includes("-P")) {
     }
   })
 
-  test("jump fails when the backend executable is not on PATH", async () => {
+  test("tmux jump does not resolve the agent on the caller PATH", async () => {
     const graphql = await startJumpGraphqlServer({
       backendId: "opencode",
       worktreePath: null,
     })
     try {
-      const emptyBin = join(tempRoot, "empty-bin")
-      mkdirSync(emptyBin)
-      const bunDir = dirname(Bun.which("bun") ?? "/usr/bin/bun")
-      const result = await runCli(["jump", jumpSessionId], graphql.url, {
-        PATH: `${emptyBin}:${bunDir}`,
-        TMUX: "/tmp/tmux-1000/default,123,0",
-        TMUX_ARGV_LOG: tmuxLog,
-      })
-
-      expect(result.status).toBe(1)
-      expect(result.stderr.trim()).toBe(
-        "Agent Backend executable 'opencode' is not on PATH",
+      rmSync(join(binDir, "opencode"))
+      const result = await runCli(
+        ["jump", jumpSessionId],
+        graphql.url,
+        jumpEnv(),
       )
-      expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+
+      expect(result.status).toBe(0)
+      const invocations = parseTmuxArgvLog(tmuxLog)
+      expectNoCallerEnvironment(invocations)
+      const script = readQueuedLauncher(invocations)
+      expect(script).toContain("exe='opencode'")
+      expect(script).not.toMatch(/exe='\/.*opencode'/)
     } finally {
       await graphql.close()
     }
@@ -2318,13 +2297,14 @@ if (args[0] === "split-window" && args.includes("-P")) {
       expect(result.stdout.trim()).toBe("")
       expect(result.stderr.trim()).toBe("")
       const invocations = parseTmuxArgvLog(tmuxLog)
-      const opencode = join(binDir, "opencode")
-      const created = invocations.find((args) => args.includes("new-window"))
-      expect(created).toBeDefined()
-      if (created !== undefined) {
-        expectForwardedPaneEnvironment(created)
-      }
-      expect(invocations.map(withoutTmuxEnvFlags)).toEqual([
+      expectNoCallerEnvironment(invocations)
+      const script = readQueuedLauncher(invocations)
+      expect(script).toContain("exe='opencode'")
+      expect(script).toContain(
+        `exec "$exe" '${worktree}' '--session' '${jumpSessionId}' '--auto'`,
+      )
+      expect(script).not.toContain(join(binDir, "opencode"))
+      expect(maskQueuedExec(invocations)).toEqual([
         ["display-message", "-p", "#{session_id}"],
         [
           "list-windows",
@@ -2332,6 +2312,7 @@ if (args[0] === "split-window" && args.includes("-P")) {
           "-F",
           "#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{@rfa-session-id}",
         ],
+        ["show-options", "-Av", "default-shell"],
         [
           "new-window",
           "-d",
@@ -2343,17 +2324,16 @@ if (args[0] === "split-window" && args.includes("-P")) {
           "-c",
           worktree,
           "--",
-          opencode,
-          worktree,
-          "--session",
-          jumpSessionId,
-          "--auto",
+          "/bin/bash",
+          "-l",
         ],
         ["set-option", "-w", "-t", "@1", "@rfa-session-id", jumpSessionId],
         ["set-option", "-p", "-t", "%1", "@rfa-agent", "1"],
         ["split-window", "-h", "-t", "@1", "-c", worktree],
         ["select-layout", "-t", "@1", "even-horizontal"],
         ["select-pane", "-t", "%1"],
+        ["send-keys", "-t", "%1", "-l", "--", "<exec>"],
+        ["send-keys", "-t", "%1", "Enter"],
         ["select-window", "-t", "@1"],
       ])
     } finally {
@@ -2379,8 +2359,13 @@ if (args[0] === "split-window" && args.includes("-P")) {
 
       expect(result.status).toBe(0)
       const invocations = parseTmuxArgvLog(tmuxLog)
-      const opencode = join(binDir, "opencode")
-      expect(invocations.map(withoutTmuxEnvFlags)).toContainEqual([
+      const script = readQueuedLauncher(invocations)
+      expect(script).toContain("exe='opencode'")
+      expect(script).toContain(
+        `exec "$exe" '${worktree}' '--session' '${jumpSessionId}' '--auto' '-m' 'amazon-bedrock/au.anthropic.claude-sonnet-5'`,
+      )
+      expect(script).not.toContain("high")
+      expect(maskQueuedExec(invocations)).toContainEqual([
         "new-window",
         "-d",
         "-P",
@@ -2391,13 +2376,8 @@ if (args[0] === "split-window" && args.includes("-P")) {
         "-c",
         worktree,
         "--",
-        opencode,
-        worktree,
-        "--session",
-        jumpSessionId,
-        "--auto",
-        "-m",
-        "amazon-bedrock/au.anthropic.claude-sonnet-5",
+        "/bin/bash",
+        "-l",
       ])
     } finally {
       await graphql.close()
@@ -2418,16 +2398,16 @@ if (args[0] === "split-window" && args.includes("-P")) {
 
       expect(result.status).toBe(0)
       const invocations = parseTmuxArgvLog(tmuxLog)
-      const claude = join(binDir, "claude")
       const cliCwd = resolve(packageRoot)
-      expect(invocations[2]).toBeDefined()
-      if (invocations[2] !== undefined) {
-        expectForwardedPaneEnvironment(invocations[2])
-        expect(tmuxFlagEnvAssignments(invocations[2])).toContain(
-          "DISABLE_AUTOUPDATER=1",
-        )
-      }
-      expect(withoutTmuxEnvFlags(invocations[2] ?? [])).toEqual([
+      expectNoCallerEnvironment(invocations)
+      const script = readQueuedLauncher(invocations)
+      expect(script).toContain("exe='claude'")
+      expect(script).toContain(
+        `exec "$exe" '--resume' '${jumpSessionId}' '--dangerously-skip-permissions'`,
+      )
+      expect(script).not.toContain("DISABLE_AUTOUPDATER")
+      expect(script).not.toContain(join(binDir, "claude"))
+      expect(maskQueuedExec(invocations)[3]).toEqual([
         "new-window",
         "-d",
         "-P",
@@ -2438,10 +2418,8 @@ if (args[0] === "split-window" && args.includes("-P")) {
         "-c",
         cliCwd,
         "--",
-        claude,
-        "--resume",
-        jumpSessionId,
-        "--dangerously-skip-permissions",
+        "/bin/bash",
+        "-l",
       ])
       expect(invocations).toContainEqual([
         "split-window",
@@ -2496,11 +2474,16 @@ if (args[0] === "split-window" && args.includes("-P")) {
         expect(result.status).toBe(0)
         const invocations = parseTmuxArgvLog(tmuxLog)
         const created = invocations.find((args) => args[0] === "new-window")
-        const separator = created?.indexOf("--") ?? -1
-        expect(created?.slice(separator + 1)).toEqual([
-          join(binDir, backendId),
-          ...expectedTail,
+        expect(created?.slice(created.indexOf("--") + 1)).toEqual([
+          "/bin/bash",
+          "-l",
         ])
+        const script = readQueuedLauncher(invocations)
+        expect(script).toContain(`exe='${backendId}'`)
+        expect(script).toContain(
+          `exec "$exe" ${expectedTail.map((argument) => `'${argument}'`).join(" ")}`,
+        )
+        expect(script).not.toContain(join(binDir, backendId))
       } finally {
         await graphql.close()
       }
@@ -2516,7 +2499,7 @@ if (args[0] === "split-window" && args.includes("-P")) {
       const result = await runCli(["jump", jumpSessionId], graphql.url, {
         ...jumpEnv(),
         TMUX_LIST_WINDOWS: `$0\tdefault\t@5\t3\t${jumpSessionId}`,
-        TMUX_LIST_PANES: "%1 1\n%2",
+        TMUX_LIST_PANES: "%1 0 1\n%2 0",
       })
 
       expect(result.status).toBe(0)
@@ -2558,11 +2541,7 @@ if (args[0] === "split-window" && args.includes("-P")) {
       const recreated = invocations.find(
         (args) => args[0] === "split-window" && args.includes("-P"),
       )
-      expect(recreated).toBeDefined()
-      if (recreated !== undefined) {
-        expectForwardedPaneEnvironment(recreated)
-      }
-      expect(invocations.map(withoutTmuxEnvFlags)).toContainEqual([
+      expect(recreated).toEqual([
         "split-window",
         "-h",
         "-b",
@@ -2574,12 +2553,15 @@ if (args[0] === "split-window" && args.includes("-P")) {
         "-c",
         worktree,
         "--",
-        join(binDir, "opencode"),
-        worktree,
-        "--session",
-        jumpSessionId,
-        "--auto",
+        "/bin/bash",
+        "-l",
       ])
+      expectNoCallerEnvironment(invocations)
+      const script = readQueuedLauncher(invocations)
+      expect(script).toContain("exe='opencode'")
+      expect(script).toContain(
+        `exec "$exe" '${worktree}' '--session' '${jumpSessionId}' '--auto'`,
+      )
       expect(invocations).toContainEqual([
         "set-option",
         "-p",
@@ -2611,7 +2593,7 @@ if (args[0] === "split-window" && args.includes("-P")) {
         graphql.url,
         jumpEnv({
           TMUX_LIST_WINDOWS: `$0\tdefault\t@5\t3\t${jumpSessionId}`,
-          TMUX_LIST_PANES: "%1 1",
+          TMUX_LIST_PANES: "%1 0 1",
         }),
       )
 
@@ -2789,6 +2771,30 @@ process.exit(1)
     expect(output).toContain("Interactive Session Continuation")
     expect(output.toLowerCase()).not.toContain("must be run from inside a tmux")
     expect(output).not.toContain("new tmux window")
+  })
+
+  test("direct jump fails when the backend executable is not on PATH", async () => {
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: null,
+    })
+    try {
+      const result = await runCliOnPty(["jump", jumpSessionId], graphql.url, {
+        ...directEnv(),
+        PATH: dirname(process.execPath),
+      })
+
+      expect(result.status).toBe(1)
+      // The direct-mode diagnostic is written to stderr, which this PTY
+      // runner surfaces on the terminal master (stdout).
+      const output = `${result.stdout}\n${result.stderr}`.replaceAll("\r", "")
+      expect(output).toContain(
+        "Agent Backend executable 'opencode' is not on PATH",
+      )
+      expect(parseTmuxArgvLog(tmuxLog)).toEqual([])
+    } finally {
+      await graphql.close()
+    }
   })
 
   test("jump continues each backend directly outside tmux", async () => {

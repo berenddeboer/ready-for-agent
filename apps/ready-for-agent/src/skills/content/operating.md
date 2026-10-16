@@ -77,7 +77,11 @@ Inspects a local clone and adds it to the running Harness. Correct inferred iden
 ready-for-agent jump <session-id>
 ```
 
-Takes over the current terminal (or opens a tmux window). Usage classifies `jump` as destructive: it replaces that terminal's foreground. Session IDs come from Work Item `sessionId`.
+Interactive Session Continuation. Takes over the current terminal, or opens a tmux window split between the agent and a shell. Usage classifies `jump` as destructive: it replaces that terminal's foreground. Session IDs come from Work Item `sessionId`.
+
+Outside tmux, the agent runs in this terminal with this terminal's environment. The executable is the one on this terminal's PATH.
+
+Inside tmux, Jump starts your interactive shell in the Work Item worktree, lets that shell's normal startup finish, then replaces the shell with the agent. The executable is the one that shell's PATH finds after startup. That is how the worktree's own environment is applied. Enable direnv, mise, or any other such tool in your shell startup if you use them. Jump does not set them up. The shell still inherits the tmux server's existing environment, including PATH the tmux client may have supplied; Jump does not wipe that baseline. Shell startup that reads the keys Jump types, replaces the shell, or applies the environment in the background is unsupported, and Jump does not wait for it. Login bash reads `.bash_profile`, not `.bashrc`, unless your profile sources it. If the agent cannot be started, the pane stays open with the error instead of pretending the agent is running.
 
 ## Cost and reversibility
 

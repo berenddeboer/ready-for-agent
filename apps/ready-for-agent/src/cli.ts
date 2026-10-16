@@ -473,18 +473,19 @@ const jumpWorkflow = Effect.fn("Cli.jump")(function* (sessionId: string) {
     })
   }
 
-  const agentExecutable = yield* executablePath.resolve(resume.executableName)
   if (tmuxModeSelected) {
+    // The worktree shell resolves the executable after its startup hooks.
+    // An absolute path from this process would pin the caller's PATH.
     yield* tmux.createJumpWindow({
       sessionId: found.sessionId,
       workingDirectory,
-      agentExecutable,
+      agentExecutable: resume.executableName,
       agentArguments: resume.arguments,
-      backendId: found.agentBackend.id,
     })
     return
   }
 
+  const agentExecutable = yield* executablePath.resolve(resume.executableName)
   const exitStatus = yield* directTerminal.run({
     agentExecutable,
     agentArguments: resume.arguments,
@@ -582,7 +583,19 @@ const jumpCommand = Command.make(
   ({ sessionId }) => jumpWorkflow(sessionId),
 ).pipe(
   Command.withDescription(
-    "Continue a Work Item Session (Interactive Session Continuation)",
+    [
+      "Continue a Work Item Session (Interactive Session Continuation).",
+      "In tmux, Jump starts your interactive shell in the worktree,",
+      "lets that shell's normal startup run, then replaces the shell",
+      "with the agent from the shell's PATH. Outside tmux, Jump keeps",
+      "the invoking terminal's environment and PATH. Enable project",
+      "environment tools in your own shell startup if you use them;",
+      "Jump does not configure them. Tmux can still supply",
+      "variables from the server, and Jump does not remove that",
+      "baseline. Shell startup that reads terminal input, replaces",
+      "the shell, or activates the environment asynchronously is",
+      "unsupported.",
+    ].join(" "),
   ),
 )
 

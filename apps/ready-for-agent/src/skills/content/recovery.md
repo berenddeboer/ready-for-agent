@@ -65,7 +65,7 @@ Read `statusMessage` and inspect the named PR **before** Reset.
 ready-for-agent jump <session-id>
 ```
 
-Fastest way to answer "why did it do that". Session IDs come from Work Item `sessionId`.
+Fastest way to answer "why did it do that". Session IDs come from Work Item `sessionId`. In tmux, Jump uses the worktree's interactive shell, not the PATH of the terminal where you typed the command. A pane that says the agent was not found means that shell cannot see the executable.
 
 ## Failure codes on a terminal Work Item
 

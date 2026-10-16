@@ -385,6 +385,14 @@ in your terminal or tmux. Pass the session's backend Session ID, for example:
 ready-for-agent jump 85312e9f-9c57-42ef-9757-b2512cee57cd
 ```
 
+Outside tmux, Jump uses the environment of the terminal you typed it in.
+Inside tmux, Jump starts your interactive shell in the worktree first, so
+the shell startup you already use (for example direnv or mise) can activate
+that project, and then replaces the shell with the agent from that shell's
+PATH. Jump does not configure those tools. A tmux server can still pass
+through variables from when it started. Shell startup that consumes typed
+input or activates the environment asynchronously is not supported.
+
 See the [full CLI reference](docs/command-reference.md) for all commands,
 flags, environment variables, and shell-completion instructions.
 
