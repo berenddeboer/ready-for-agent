@@ -82,3 +82,6 @@ to integrate an environment manager here.
 - The tmux 3.0 / 3.2 floor existed only to support `tmux -e` on
   `new-window` and `split-window`. That floor is withdrawn. Jump still
   requires a working tmux client.
+- Jump arranges and focuses the agent pane before typing the exec, and
+  does not address that pane again afterward. The pane closes as soon as
+  the agent exits, so a later `select-pane` would race a fast process.

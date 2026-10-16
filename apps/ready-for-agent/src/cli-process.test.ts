@@ -2329,11 +2329,11 @@ if (args[0] === "split-window" && args.includes("-P")) {
         ],
         ["set-option", "-w", "-t", "@1", "@rfa-session-id", jumpSessionId],
         ["set-option", "-p", "-t", "%1", "@rfa-agent", "1"],
-        ["send-keys", "-t", "%1", "-l", "--", "<exec>"],
-        ["send-keys", "-t", "%1", "Enter"],
         ["split-window", "-h", "-t", "@1", "-c", worktree],
         ["select-layout", "-t", "@1", "even-horizontal"],
         ["select-pane", "-t", "%1"],
+        ["send-keys", "-t", "%1", "-l", "--", "<exec>"],
+        ["send-keys", "-t", "%1", "Enter"],
         ["select-window", "-t", "@1"],
       ])
     } finally {

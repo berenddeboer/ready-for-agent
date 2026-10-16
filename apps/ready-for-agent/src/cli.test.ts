@@ -2811,10 +2811,10 @@ describe("operator binary jump command", () => {
             "-l",
           ],
           ["set-option", "-p", "-t", "%3", "@rfa-agent", "1"],
-          ["send-keys", "-t", "%3", "-l", "--", "<exec>"],
-          ["send-keys", "-t", "%3", "Enter"],
           ["select-layout", "-t", "@5", "even-horizontal"],
           ["select-pane", "-t", "%3"],
+          ["send-keys", "-t", "%3", "-l", "--", "<exec>"],
+          ["send-keys", "-t", "%3", "Enter"],
           ["select-window", "-t", "@5"],
         ])
         expectLauncher(
@@ -2874,11 +2874,11 @@ describe("operator binary jump command", () => {
           ],
           ["set-option", "-w", "-t", "@1", "@rfa-session-id", sessionId],
           ["set-option", "-p", "-t", "%1", "@rfa-agent", "1"],
-          ["send-keys", "-t", "%1", "-l", "--", "<exec>"],
-          ["send-keys", "-t", "%1", "Enter"],
           ["split-window", "-h", "-t", "@1", "-c", jumpInput.workingDirectory],
           ["select-layout", "-t", "@1", "even-horizontal"],
           ["select-pane", "-t", "%1"],
+          ["send-keys", "-t", "%1", "-l", "--", "<exec>"],
+          ["send-keys", "-t", "%1", "Enter"],
           ["select-window", "-t", "@1"],
         ])
         expectLauncher(
@@ -2928,15 +2928,34 @@ describe("operator binary jump command", () => {
         panes: "%1 1 1\n%2 0",
       })
       yield* runCreateJumpWindow(tmux.layer)
-      expect(maskQueuedExec(tmux.invocations)).toContainEqual([
-        "send-keys",
-        "-t",
-        "%3",
-        "-l",
-        "--",
-        "<exec>",
+      expect(maskQueuedExec(tmux.invocations)).toEqual([
+        ["display-message", "-p", "#{session_id}"],
+        ["list-windows", "-a", "-F", windowListFormat],
+        ["list-panes", "-t", "@5", "-F", paneListFormat],
+        ["show-options", "-Av", "default-shell"],
+        [
+          "split-window",
+          "-h",
+          "-b",
+          "-P",
+          "-F",
+          "#{pane_id}",
+          "-t",
+          "@5",
+          "-c",
+          jumpInput.workingDirectory,
+          "--",
+          "/bin/bash",
+          "-l",
+        ],
+        ["set-option", "-p", "-t", "%3", "@rfa-agent", "1"],
+        ["kill-pane", "-t", "%1"],
+        ["select-layout", "-t", "@5", "even-horizontal"],
+        ["select-pane", "-t", "%3"],
+        ["send-keys", "-t", "%3", "-l", "--", "<exec>"],
+        ["send-keys", "-t", "%3", "Enter"],
+        ["select-window", "-t", "@5"],
       ])
-      expect(tmux.invocations).toContainEqual(["kill-pane", "-t", "%1"])
       expect(
         tmux.invocations.some((args) => args.includes("kill-window")),
       ).toBe(false)

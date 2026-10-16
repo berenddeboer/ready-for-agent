@@ -332,6 +332,26 @@ export class Tmux extends Context.Service<
             ),
           ),
         )
+        // The agent pane closes as soon as the queued process exits. Finish
+        // every command that targets it before typing the exec, or a fast
+        // agent makes a later select-pane fail with "can't find pane".
+        yield* Effect.gen(function* () {
+          if (deadPaneId !== undefined) {
+            yield* runTmux(["kill-pane", "-t", deadPaneId])
+          }
+          yield* runTmux(["select-layout", "-t", windowId, "even-horizontal"])
+          yield* runTmux(["select-pane", "-t", paneId])
+        }).pipe(
+          Effect.tapError(() =>
+            Effect.all(
+              [
+                runTmux(["kill-pane", "-t", paneId]).pipe(Effect.ignore),
+                discardLaunch(launch),
+              ],
+              { discard: true },
+            ),
+          ),
+        )
         // Delivered input is not proof the agent is running. The launcher
         // reports a failed launch in the pane; do not delete it after queueing.
         yield* queueExec(paneId, launch.execLine).pipe(
@@ -339,11 +359,7 @@ export class Tmux extends Context.Service<
             runTmux(["kill-pane", "-t", paneId]).pipe(Effect.ignore),
           ),
         )
-        if (deadPaneId !== undefined) {
-          yield* runTmux(["kill-pane", "-t", deadPaneId])
-        }
-        yield* runTmux(["select-layout", "-t", windowId, "even-horizontal"])
-        yield* focusWindow(windowId, paneId)
+        yield* runTmux(["select-window", "-t", windowId])
       })
 
       const createFreshWindow = Effect.fn("Tmux.createFreshWindow")(function* (
@@ -396,9 +412,8 @@ export class Tmux extends Context.Service<
             }),
           ),
         )
-        yield* queueExec(paneId, launch.execLine).pipe(
-          Effect.tapError(() => killCreatedWindow(windowId)),
-        )
+        // Split and focus first. Typing the exec before select-pane races a
+        // fast-exiting agent, which removes the pane tmux still has to focus.
         yield* Effect.gen(function* () {
           yield* runTmux([
             "split-window",
@@ -410,7 +425,16 @@ export class Tmux extends Context.Service<
           ])
           yield* runTmux(["select-layout", "-t", windowId, "even-horizontal"])
           yield* runTmux(["select-pane", "-t", paneId])
-        }).pipe(Effect.tapError(() => killCreatedWindow(windowId)))
+        }).pipe(
+          Effect.tapError(() =>
+            Effect.all([killCreatedWindow(windowId), discardLaunch(launch)], {
+              discard: true,
+            }),
+          ),
+        )
+        yield* queueExec(paneId, launch.execLine).pipe(
+          Effect.tapError(() => killCreatedWindow(windowId)),
+        )
         yield* runTmux(["select-window", "-t", windowId])
       })
 

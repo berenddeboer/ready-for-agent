@@ -72,7 +72,8 @@ shift
     printf 'arg%d=%s\\n' "$i" "$arg"
     i=$((i + 1))
   done
-} > "$result"
+} > "$result.partial"
+mv "$result.partial" "$result"
 `
 
 type ShellName = "bash" | "fish"
