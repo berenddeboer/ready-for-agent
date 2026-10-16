@@ -235,8 +235,10 @@ describe.skipIf(!toolsReady)("jump activates the target worktree shell", () => {
             "-F",
             "#{pane_id} #{pane_dead} #{@rfa-agent} #{pane_current_path}",
           ]).stdout,
+        // -J joins lines wrapped for the pane width. A narrow CI pane
+        // otherwise splits words, and collapsing whitespace hides the error.
         capture: (paneId) =>
-          tmuxClient(["capture-pane", "-p", "-t", paneId]).stdout,
+          tmuxClient(["capture-pane", "-p", "-J", "-t", paneId]).stdout,
       })
     } finally {
       if (previousTmux === undefined) {
