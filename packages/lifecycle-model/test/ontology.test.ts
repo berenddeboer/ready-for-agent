@@ -198,7 +198,10 @@ const expectedIssueTrackerTerms = {
   GitLab: "gitlab",
   AzureDevOps: "azure-devops",
   Linear: "linear",
+  Fp: "fp",
 } as const
+
+const expectedIssueTrackerOnlyLocalNames = ["Linear", "Fp"] as const
 
 const expectedIssueTrackerIris = Object.keys(expectedIssueTrackerTerms).map(
   (localName) => `${namespace.rfa}${localName}`,
@@ -726,7 +729,7 @@ describe("full vocabulary semantic distinctions", () => {
     expect(hasExactAllDifferent).toBe(true)
   })
 
-  it("declares Issue Tracker kinds including Linear without making Linear a Forge", () => {
+  it("declares Issue Tracker kinds including the tracker-only kinds without making them Forges", () => {
     const actualTerms = ontology.getSubjects(rdfType, issueTrackerClass, null)
     expectExactIris(actualTerms, expectedIssueTrackerIris)
 
@@ -746,12 +749,25 @@ describe("full vocabulary semantic distinctions", () => {
       expect(definition.value.length).toBeGreaterThan(20)
     }
 
-    expect(ontology.countQuads(term("Linear"), rdfType, forgeClass, null)).toBe(
-      0,
+    for (const localName of expectedIssueTrackerOnlyLocalNames) {
+      expect(
+        ontology.countQuads(term(localName), rdfType, forgeClass, null),
+      ).toBe(0)
+      expect(
+        ontology.countQuads(
+          term(localName),
+          rdfType,
+          issueTrackerOnlyClass,
+          null,
+        ),
+      ).toBe(1)
+    }
+    expectExactIris(
+      ontology.getSubjects(rdfType, issueTrackerOnlyClass, null),
+      expectedIssueTrackerOnlyLocalNames.map(
+        (localName) => `${namespace.rfa}${localName}`,
+      ),
     )
-    expect(
-      ontology.countQuads(term("Linear"), rdfType, issueTrackerOnlyClass, null),
-    ).toBe(1)
     expect(
       ontology.countQuads(
         issueTrackerOnlyClass,

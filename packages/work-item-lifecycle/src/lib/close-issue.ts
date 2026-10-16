@@ -4,36 +4,27 @@ import { DbService, type IssueRecord } from "@ready-for-agent/db-service"
 import { resolveForgeIssueOperations } from "@ready-for-agent/forge-contract"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
-import { formatIssueDisplayId } from "@ready-for-agent/lifecycle-model"
 import {
   CloseIssueContextError,
   CloseIssueEligibilityError,
   CloseIssueSummaryMissingError,
 } from "./close-issue-errors.js"
-import { issueOperationsForge } from "./issue-source-execution.js"
-import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
-  completeLinearIssue,
-  isLinearIssueSource,
-} from "./linear-milestones.js"
+  findStoredIssueForSource,
+  issueLabelForSource,
+  issueOperationsForge,
+} from "./issue-source-execution.js"
+import { completeTrackerIssue } from "./issue-tracker-execution.js"
+import type { LifecycleStepContext } from "./lifecycle-steps.js"
 
 const issueLabel = (context: LifecycleStepContext): string =>
-  isLinearIssueSource(context.issueSource)
-    ? formatIssueDisplayId(context.issueSource.displayId)
-    : `#${context.issueNumber}`
+  issueLabelForSource(context.issueSource, context.issueNumber)
 
 const findStoredIssue = (
   issues: readonly IssueRecord[],
   context: LifecycleStepContext,
-): IssueRecord | undefined => {
-  if (isLinearIssueSource(context.issueSource)) {
-    const nativeId = context.issueSource.nativeId
-    return issues.find((candidate) => candidate.nativeId === nativeId)
-  }
-  return issues.find(
-    (candidate) => candidate.issueNumber === context.issueNumber,
-  )
-}
+): IssueRecord | undefined =>
+  findStoredIssueForSource(issues, context.issueSource, context.issueNumber)
 
 const rejectIfOpenAndIneligible = (
   context: LifecycleStepContext,
@@ -106,13 +97,14 @@ export const closeIssue = (context: LifecycleStepContext) =>
       return yield* ineligible
     }
 
-    if (isLinearIssueSource(context.issueSource)) {
-      return yield* completeLinearIssue({
-        repository,
-        issueSource: context.issueSource,
-        workItemId: context.workItemId,
-        summary,
-      })
+    const completedOnTracker = yield* completeTrackerIssue({
+      repository,
+      issueSource: context.issueSource,
+      workItemId: context.workItemId,
+      summary,
+    })
+    if (completedOnTracker) {
+      return
     }
 
     const issueForge = issueOperationsForge(

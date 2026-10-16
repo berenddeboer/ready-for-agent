@@ -1,6 +1,10 @@
 import { Effect } from "effect"
 import type { RepositoryRecord } from "@ready-for-agent/db-service"
-import type { IssueSource } from "@ready-for-agent/lifecycle-model"
+import {
+  ISSUE_TRACKER_DESCRIPTIONS,
+  type IssueSource,
+  describeIssueTracker,
+} from "@ready-for-agent/lifecycle-model"
 import {
   LinearNotConfiguredError,
   type LinearRequestError,
@@ -9,27 +13,10 @@ import {
 } from "@ready-for-agent/linear-service"
 
 export const LINEAR_MERGE_COMPLETION_SUMMARY =
-  "Ready for Agent completed this Issue after the GitHub pull request merged."
+  ISSUE_TRACKER_DESCRIPTIONS.linear.afterConfirmedMerge.completionSummary
 
-export const nextStateAfterConfirmedMerge = (
-  source: IssueSource | undefined,
-): "close_issue" | "local_cleanup" =>
-  isLinearIssueSource(source) ? "close_issue" : "local_cleanup"
-
-export const linearMergeCompletionSummary = (
-  existing: string | null | undefined,
-): string => {
-  const persisted = existing?.trim()
-  if (persisted !== undefined && persisted !== "") {
-    return persisted
-  }
-  return LINEAR_MERGE_COMPLETION_SUMMARY
-}
-
-export const isLinearIssueSource = (
-  source: IssueSource | undefined,
-): source is IssueSource & { readonly tracker: "linear" } =>
-  source?.tracker === "linear"
+/** An Original Issue Source already dispatched to Linear. */
+export type LinearIssueSource = IssueSource & { readonly tracker: "linear" }
 
 const commentBody = (prose: readonly string[], marker: string): string =>
   `${prose.filter((line) => line.length > 0).join("\n")}\n\n${marker}`
@@ -82,14 +69,17 @@ export const githubPullRequestUrl = (input: {
 }): string =>
   `https://${input.forgeHost}/${input.projectPath}/pull/${input.pullRequestNumber}`
 
-const requireLinearSource = (
-  source: IssueSource | undefined,
-): source is IssueSource & { readonly tracker: "linear" } =>
-  isLinearIssueSource(source)
+/**
+ * Whether the Repository still carries Linear workflow statuses. A Work Item
+ * whose Repository has since switched trackers skips the status change.
+ */
+const usesLinearSettings = (repository: RepositoryRecord): boolean =>
+  describeIssueTracker(repository.issueTracker).settings.kind ===
+  "linear_project_mapping"
 
 export const notifyLinearWorkStarted = (input: {
   readonly repository: RepositoryRecord
-  readonly issueSource: IssueSource | undefined
+  readonly issueSource: LinearIssueSource
   readonly workItemId: string
 }): Effect.Effect<
   void,
@@ -97,16 +87,13 @@ export const notifyLinearWorkStarted = (input: {
   LinearService
 > =>
   Effect.gen(function* () {
-    if (!requireLinearSource(input.issueSource)) {
-      return
-    }
     const linear = yield* LinearService
     const issue = yield* linear.getIssue(input.issueSource.nativeId)
     const team = input.repository.linearWorkflowStatuses.find(
       (status) => status.teamId === issue.teamId,
     )
     if (team === undefined) {
-      if (input.repository.issueTracker === "linear") {
+      if (usesLinearSettings(input.repository)) {
         return yield* new LinearNotConfiguredError({
           repositoryId: input.repository.id,
           message: `No In Progress workflow status is configured for Linear team ${issue.teamKey}. Choose In Progress in Repository settings, then Retry.`,
@@ -126,14 +113,11 @@ export const notifyLinearWorkStarted = (input: {
   })
 
 export const notifyLinearPullRequest = (input: {
-  readonly issueSource: IssueSource | undefined
+  readonly issueSource: LinearIssueSource
   readonly workItemId: string
   readonly pullRequestUrl: string
 }): Effect.Effect<void, LinearRequestError, LinearService> =>
   Effect.gen(function* () {
-    if (!requireLinearSource(input.issueSource)) {
-      return
-    }
     const linear = yield* LinearService
     yield* linear.ensureMilestoneComment(
       input.issueSource.nativeId,
@@ -143,14 +127,11 @@ export const notifyLinearPullRequest = (input: {
   })
 
 export const notifyLinearHumanAttention = (input: {
-  readonly issueSource: IssueSource | undefined
+  readonly issueSource: LinearIssueSource
   readonly workItemId: string
   readonly reason: string
 }): Effect.Effect<void, LinearRequestError, LinearService> =>
   Effect.gen(function* () {
-    if (!requireLinearSource(input.issueSource)) {
-      return
-    }
     const linear = yield* LinearService
     yield* linear.ensureMilestoneComment(
       input.issueSource.nativeId,
@@ -166,7 +147,7 @@ export const notifyLinearHumanAttention = (input: {
  */
 export const completeLinearIssue = (input: {
   readonly repository: RepositoryRecord
-  readonly issueSource: IssueSource | undefined
+  readonly issueSource: LinearIssueSource
   readonly workItemId: string
   readonly summary: string
 }): Effect.Effect<
@@ -175,9 +156,6 @@ export const completeLinearIssue = (input: {
   LinearService
 > =>
   Effect.gen(function* () {
-    if (!requireLinearSource(input.issueSource)) {
-      return
-    }
     const linear = yield* LinearService
     const issue = yield* linear.getIssue(input.issueSource.nativeId)
     yield* linear.ensureMilestoneComment(
@@ -189,7 +167,7 @@ export const completeLinearIssue = (input: {
       (status) => status.teamId === issue.teamId,
     )
     if (team === undefined) {
-      if (input.repository.issueTracker === "linear") {
+      if (usesLinearSettings(input.repository)) {
         return yield* new LinearNotConfiguredError({
           repositoryId: input.repository.id,
           message: `No Done workflow status is configured for Linear team ${issue.teamKey}. Choose Done in Repository settings, then Retry.`,

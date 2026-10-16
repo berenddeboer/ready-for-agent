@@ -63,6 +63,7 @@ import {
   isAgentDependentLifecycleStep,
   isForge,
   isIssueTracker,
+  parentImplementAllRefusal,
   persistedIssueIdentity,
 } from "@ready-for-agent/lifecycle-model"
 import {
@@ -78,6 +79,11 @@ import {
   type JobNotFoundError,
   QueueService,
 } from "@ready-for-agent/queue-service"
+import {
+  afterConfirmedMerge,
+  mergeCompletionSummary,
+  nextStateAfterConfirmedMerge,
+} from "./after-confirmed-merge.js"
 import {
   CurrentCapturedAgentBackendId,
   CurrentStepRun,
@@ -128,17 +134,13 @@ import {
   validateExecutionProfileCatalog,
 } from "./execution-profile.js"
 import { resolveForgeObservation } from "./forge-observation.js"
+import { notifyHumanAttention } from "./issue-tracker-execution.js"
 import { selectJumpAgentModel } from "./jump-agent-model.js"
 import {
   type LifecycleStepContext,
   LifecycleSteps,
   type RunHandlerError,
 } from "./lifecycle-steps.js"
-import {
-  linearMergeCompletionSummary,
-  nextStateAfterConfirmedMerge,
-  notifyLinearHumanAttention,
-} from "./linear-milestones.js"
 import {
   type MergePolicy,
   decodeMergeMode,
@@ -4171,12 +4173,11 @@ export const makeWorkItemLifecycleLive = (
               }
               const result = yield* steps.mergePr(context)
               if (result._tag === "merged") {
-                if (
-                  nextStateAfterConfirmedMerge(context.issueSource) ===
-                  "close_issue"
-                ) {
+                const mergeNext = afterConfirmedMerge(context.issueSource)
+                if (mergeNext.kind === "close_issue") {
                   return {
-                    completionSummary: linearMergeCompletionSummary(
+                    completionSummary: mergeCompletionSummary(
+                      mergeNext,
                       context.completionSummary,
                     ),
                     transition: {
@@ -4483,7 +4484,7 @@ export const makeWorkItemLifecycleLive = (
               `${agentBackendLabel(workItem.agent_backend)} requested human intervention`)
             : null
           if (attentionReason !== null) {
-            yield* notifyLinearHumanAttention({
+            yield* notifyHumanAttention({
               issueSource: toIssueSource(workItem),
               workItemId: workItem.id,
               reason: attentionReason,
@@ -4560,12 +4561,11 @@ export const makeWorkItemLifecycleLive = (
                   // Confirmed merge at revalidation seam: same destination as
                   // Refresh / continueAfterHumanPrOutcome (Close Issue for
                   // Linear, otherwise local cleanup).
-                  const mergeNextState = nextStateAfterConfirmedMerge(
-                    toIssueSource(workItem),
-                  )
+                  const mergeNext = afterConfirmedMerge(toIssueSource(workItem))
+                  const mergeNextState = mergeNext.kind
                   const mergeSummary =
-                    mergeNextState === "close_issue"
-                      ? linearMergeCompletionSummary(completionSummary)
+                    mergeNext.kind === "close_issue"
+                      ? mergeCompletionSummary(mergeNext, completionSummary)
                       : completionSummary
                   yield* sql.unsafe(
                     `UPDATE work_item
@@ -7385,9 +7385,8 @@ export const makeWorkItemLifecycleLive = (
                     reason: "Work Item has no Work Item PR",
                   })
                 }
-                const mergeNextState = nextStateAfterConfirmedMerge(
-                  toIssueSource(current),
-                )
+                const mergeNext = afterConfirmedMerge(toIssueSource(current))
+                const mergeNextState = mergeNext.kind
                 if (
                   current.state === "local_cleanup" ||
                   current.state === mergeNextState
@@ -7490,8 +7489,11 @@ export const makeWorkItemLifecycleLive = (
                   }
 
                   const mergeSummary =
-                    mergeNextState === "close_issue"
-                      ? linearMergeCompletionSummary(current.completion_summary)
+                    mergeNext.kind === "close_issue"
+                      ? mergeCompletionSummary(
+                          mergeNext,
+                          current.completion_summary,
+                        )
                       : current.completion_summary
                   const updated = (yield* sql.unsafe(
                     `UPDATE work_item
@@ -9562,11 +9564,13 @@ export const makeWorkItemLifecycleLive = (
           }
           const issue = matches[0]
           if (issue?.hasChildren) {
-            if (liveIssueTracker(repository) === "linear") {
+            const tracker = liveIssueTracker(repository)
+            const implementAllRefusal =
+              tracker === null ? null : parentImplementAllRefusal(tracker)
+            if (implementAllRefusal !== null) {
               return yield* new LinearExecutionNotSupportedError({
                 repositoryId,
-                message:
-                  "Implement All is not available for Linear Issues in this release. Start eligible leaf Issues instead.",
+                message: implementAllRefusal,
               })
             }
             if (options.implementLocally) {
