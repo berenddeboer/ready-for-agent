@@ -1,5 +1,10 @@
 # Repository CI gate is a best-effort failure circuit breaker
 
+The accepted follow-up [ADR 0074](0074-agent-owned-ci-repair.md) introduces an
+opt-in, agent-owned repair invocation and replaces the repository-level
+Implement CI Repair entry point when implemented. The gate observation and
+ordinary Work Item holding behaviour described here remain in force.
+
 Each Repository may watch operator-selected, Forge-native CI Gate Definitions on its default branch. Observation is periodic and optimistic until an actual terminal failure is seen; that failure latches the Repository CI Gate Closed until a newer success is observed or the definition is removed, while unavailable definitions make the gate Degraded without blocking work.
 
 Newer is the Forge's authoritative run/source order, not wall-clock completion. A successful rerun of the failed run also clears that failure. Pending or running runs do not prevent recovery and must not hide a qualifying success that is already newer than the latched failure. A still-newer observed failure keeps the gate Closed, including when an older run later finishes green.
