@@ -32,6 +32,7 @@ import {
   retrySilentKnownSessionStartup,
   runCliCapture,
   runCliTurn,
+  sanitizeAgentBackendStderrTail,
 } from "@ready-for-agent/agent-backend"
 import {
   buildAcpContinueArgs,
@@ -102,11 +103,16 @@ export const Grok = {
               })
             }
             if (error instanceof AcpProcessExitError) {
+              // Keep the end of a long stderr tail. Exit-message sanitizing
+              // otherwise keeps the first 500 characters and drops the
+              // diagnostic written last.
+              const message =
+                sanitizeAgentBackendStderrTail(error.message) ?? error.message
               return AgentBackendExitError.new({
                 exitCode: error.exitCode ?? 1,
                 cwd: input.cwd,
                 sessionId: input.sessionId,
-                message: error.message,
+                message,
               })
             }
             if (error instanceof AcpProtocolError) {

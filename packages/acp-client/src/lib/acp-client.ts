@@ -8,6 +8,11 @@ import {
   AcpProtocolError,
   AcpSpawnError,
 } from "./errors.js"
+import {
+  type ChildStderrCapture,
+  captureChildStderr,
+  formatAcpProcessExitMessage,
+} from "./stderr-tail.js"
 import type {
   AcpAuthenticateInput,
   AcpCancelInput,
@@ -86,6 +91,7 @@ const attachConnection = (
   pid: number,
   command: string,
   exit: { code?: number | null },
+  stderrCapture: ChildStderrCapture,
   buffers: SessionBuffers,
 ): AcpConnection => {
   const takeText = (sessionId: string): string => {
@@ -98,10 +104,20 @@ const attachConnection = (
     exit.code ?? child.exitCode
 
   const toProcessExitError = (method: string, exitCode: number | null) =>
-    new AcpProcessExitError({
-      command,
-      exitCode,
-      message: `ACP agent exited before ${method} completed`,
+    Effect.gen(function* () {
+      // Read the tail only after stderr closes so the bytes written
+      // immediately before exit are still included. `drained` is bounded.
+      yield* stderrCapture.drained
+      return yield* new AcpProcessExitError({
+        command,
+        exitCode,
+        message: formatAcpProcessExitMessage({
+          method,
+          command,
+          exitCode,
+          stderr: stderrCapture.text(),
+        }),
+      })
     })
 
   const toProtocolError = (method: string, cause: unknown) =>
@@ -288,24 +304,29 @@ const connect = Effect.fn("AcpClient.connect")(function* (
   input: AcpConnectInput,
 ) {
   const args = input.args === undefined ? [] : [...input.args]
-  const child = yield* Effect.acquireRelease(
+  const held = yield* Effect.acquireRelease(
     Effect.try({
-      try: () =>
-        spawn(input.command, args, {
+      try: () => {
+        const child = spawn(input.command, args, {
           cwd: input.cwd,
           env: input.env === undefined ? process.env : { ...input.env },
           stdio: ["pipe", "pipe", "pipe"],
           detached: process.platform !== "win32",
-        }),
+        })
+        // Attach before yielding so stderr is drained while the child runs.
+        return { child, stderr: captureChildStderr(child) }
+      },
       catch: (cause) => toSpawnError(input.command, cause),
     }),
-    (process) =>
+    ({ child }) =>
       Effect.sync(() => {
-        if (!process.killed) {
-          process.kill("SIGTERM")
+        if (!child.killed) {
+          child.kill("SIGTERM")
         }
       }),
   )
+  const child = held.child
+  const stderrCapture = held.stderr
 
   yield* waitForSpawn(child, input.command)
 
@@ -326,7 +347,6 @@ const connect = Effect.fn("AcpClient.connect")(function* (
     })
   }
 
-  child.stderr?.resume()
   const exit: { code?: number | null } = {}
   child.once("exit", (code) => {
     exit.code = code
@@ -383,7 +403,15 @@ const connect = Effect.fn("AcpClient.connect")(function* (
     (connection) => Effect.sync(() => connection.close()),
   )
 
-  return attachConnection(sdk, child, pid, input.command, exit, buffers)
+  return attachConnection(
+    sdk,
+    child,
+    pid,
+    input.command,
+    exit,
+    stderrCapture,
+    buffers,
+  )
 })
 
 export class AcpClient extends Context.Service<AcpClient, AcpClientShape>()(

@@ -17,5 +17,9 @@ export * from "./lib/operator-guidance.js"
 export * from "./lib/prompt-delivery.js"
 export * from "./lib/registry.js"
 export * from "./lib/retry-silent-startup.js"
+export {
+  AGENT_BACKEND_EXIT_MESSAGE_MAX,
+  sanitizeAgentBackendStderrTail,
+} from "./lib/sanitize-exit-message.js"
 export * from "./lib/session-telemetry.js"
 export * from "./lib/types.js"

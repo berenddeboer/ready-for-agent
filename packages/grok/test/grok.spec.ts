@@ -16,6 +16,11 @@ import {
   type OnSessionId,
   PROMPT_ARGV_BYTE_LIMIT,
 } from "@ready-for-agent/agent-backend"
+import {
+  buildReasonDetail,
+  parseReasonDetail,
+  serializeReasonDetail,
+} from "../../forge-contract/src/lib/error-cause-chain.js"
 import { Grok } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -277,6 +282,76 @@ describe("Grok AgentBackend adapter", () => {
         `export ${FAKE_ACP_ENV.resumeFail}=1`,
         `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeAcpAgentPath)}`,
       ].join("\n"),
+    )
+  })
+
+  it("keeps a mise trust error through Grok mapping and Step Run detail", async () => {
+    const trust = [
+      "mise ERROR error parsing config file: ~/src/ready-for-agent/12-wi-01M54A0TQ8D6P1EVWM82H8XK91/mise.toml",
+      "mise ERROR Config files in ~/src/ready-for-agent/12-wi-01M54A0TQ8D6P1EVWM82H8XK91/mise.toml are not trusted.",
+      "Trust them with `mise trust`.",
+    ].join("\n")
+    await withExecutable(
+      ["cat >&2 <<'EOF'", trust, "EOF", "exit 1"].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          continueTurn(binary).pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (!(error instanceof AgentBackendExitError)) {
+          throw new Error("Expected Agent Backend exit")
+        }
+        expect(error.exitCode).toBe(1)
+        expect(error.sessionId).toBe(SESSION_ID)
+        expect(error.message).toContain("before initialize completed")
+        expect(error.message).toContain("exit 1")
+        // ACP spawns the cgroup launcher; the trust text is the actionable part.
+        expect(error.message).toContain("/bin/sh")
+        expect(error.message).toContain("are not trusted")
+        expect(error.message).toContain("mise trust")
+
+        const detail = buildReasonDetail({
+          _tag: "PrStatusChecksOpenCodeError",
+          message:
+            "Grok Build failed while investigating PR status checks (work)",
+          cause: error,
+        })
+        const parsed = parseReasonDetail(serializeReasonDetail(detail))
+        const messages = (parsed?.causeChain ?? [])
+          .map((link) => link.message ?? "")
+          .join("\n")
+        expect(parsed?.code).toBe("1")
+        expect(messages).toContain("are not trusted")
+        expect(messages).toContain("mise trust")
+        expect(messages).toContain(
+          "Grok Build failed while investigating PR status checks (work)",
+        )
+      },
+    )
+  })
+
+  it("keeps the final stderr diagnostic when Grok maps a chunked exit", async () => {
+    await withExecutable(
+      [
+        "printf 'PREFIX-MARKER\\n' >&2",
+        "dd if=/dev/zero bs=1024 count=80 status=none | tr '\\0' 'x' >&2",
+        "printf '\\nTAIL-MARKER Trust them with `mise trust`.\\n' >&2",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          continueTurn(binary).pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (!(error instanceof AgentBackendExitError)) {
+          throw new Error("Expected Agent Backend exit")
+        }
+        expect(error.exitCode).toBe(1)
+        expect(error.message).toContain("TAIL-MARKER")
+        expect(error.message).toContain("mise trust")
+        expect(error.message).not.toContain("PREFIX-MARKER")
+        expect(error.message.length).toBeLessThanOrEqual(500)
+      },
     )
   })
 

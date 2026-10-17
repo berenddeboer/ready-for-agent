@@ -12,7 +12,8 @@
         "command": "bun test"
       },
       "inputs": ["default", "^production"],
-      "cache": true
+      "cache": true,
+      "dependsOn": ["^build"]
     }
   }
 }
