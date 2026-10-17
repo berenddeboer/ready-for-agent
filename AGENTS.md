@@ -16,7 +16,9 @@ When adding a new skill under `.agents/skills/`, add the matching symlink:
 
 ### Issue tracker
 
-Issues live in GitHub Issues for berenddeboer/ready-for-agent (via `gh`). See `docs/agents/issue-tracker.md`.
+Specs and tickets live in Linear; pull requests live on GitHub. Before creating,
+reading, or updating tickets (including `/to-spec` and `/to-tickets`), follow
+`docs/agents/issue-tracker.md` for Linear routing and relationships.
 
 ### Forge token scopes
 
