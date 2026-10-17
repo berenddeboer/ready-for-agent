@@ -11,7 +11,7 @@ const TOKEN_SHAPED_RE =
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b|\bglpat-[A-Za-z0-9_-]{20,}\b|\bsk-ant-[A-Za-z0-9_-]{16,}\b|\bsk-[A-Za-z0-9]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi
 
 /** Operator-visible exit reasons are persisted and rendered in a browser. */
-const AGENT_BACKEND_EXIT_MESSAGE_MAX = 500
+export const AGENT_BACKEND_EXIT_MESSAGE_MAX = 500
 
 const cleanOperatorFacingText = (text: string): string =>
   scrubProviderCredentialSecrets(
@@ -27,12 +27,11 @@ export const sanitizeAgentBackendExitMessage = (text: string): string =>
  */
 export const sanitizeAgentBackendStderrTail = (
   text: string,
+  maxLength = AGENT_BACKEND_EXIT_MESSAGE_MAX,
 ): string | undefined => {
   const cleaned = cleanOperatorFacingText(text)
-  if (cleaned.length === 0) {
+  if (cleaned.length === 0 || maxLength <= 0) {
     return undefined
   }
-  return cleaned.length <= AGENT_BACKEND_EXIT_MESSAGE_MAX
-    ? cleaned
-    : cleaned.slice(-AGENT_BACKEND_EXIT_MESSAGE_MAX)
+  return cleaned.length <= maxLength ? cleaned : cleaned.slice(-maxLength)
 }

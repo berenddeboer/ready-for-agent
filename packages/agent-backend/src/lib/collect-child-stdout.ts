@@ -3,16 +3,16 @@ import type { PlatformError } from "effect/PlatformError"
 import type { ChildProcessHandle } from "effect/process/ChildProcessSpawner"
 
 /**
- * Memory bound for an Agent Turn stderr fold. Only this many characters
- * are retained; older output is dropped. Matches the Install Dependencies
- * diagnostic tail so a chatty CLI cannot grow unbounded.
+ * Memory bound for a subprocess stderr fold. Only this many characters are
+ * retained; older output is dropped. Shared by Agent Turn CLI folds and ACP
+ * process-exit diagnostics so a chatty process cannot grow unbounded.
  */
-const CLI_TURN_STDERR_TAIL_LIMIT = 4_000
+export const STDERR_TAIL_LIMIT = 4_000
 
 const appendStderrTail = (
   tail: string,
   chunk: string,
-  limit = CLI_TURN_STDERR_TAIL_LIMIT,
+  limit = STDERR_TAIL_LIMIT,
 ): string => {
   const combined = `${tail}${chunk}`
   return combined.length <= limit
@@ -28,7 +28,7 @@ const appendStderrTail = (
  */
 export const collectChildStderrTail = (
   handle: ChildProcessHandle,
-  limit = CLI_TURN_STDERR_TAIL_LIMIT,
+  limit = STDERR_TAIL_LIMIT,
 ): Effect.Effect<string, PlatformError> =>
   Stream.decodeText(handle.stderr).pipe(
     Stream.runFold(

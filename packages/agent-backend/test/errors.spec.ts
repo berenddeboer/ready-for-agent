@@ -127,6 +127,17 @@ describe("sanitizeAgentBackendStderrTail", () => {
     expect(tail?.includes("this_must_never")).toBe(false)
     expect(tail?.length).toBeLessThanOrEqual(500)
   })
+
+  it("keeps the end when the caller passes a smaller bound", () => {
+    const tail = sanitizeAgentBackendStderrTail(
+      `prefix-marker${"x".repeat(100)}tail-marker`,
+      20,
+    )
+    expect(tail).toBeDefined()
+    expect(tail).toContain("tail-marker")
+    expect(tail).not.toContain("prefix-marker")
+    expect(tail?.length).toBeLessThanOrEqual(20)
+  })
 })
 
 describe("formatAgentBackendStartupTimeoutMessage", () => {

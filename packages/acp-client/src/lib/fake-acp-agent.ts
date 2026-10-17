@@ -16,6 +16,7 @@ export const FAKE_ACP_ENV = {
   loadFail: "FAKE_ACP_LOAD_FAIL",
   promptDelayMs: "FAKE_ACP_PROMPT_DELAY_MS",
   exitBeforePrompt: "FAKE_ACP_EXIT_BEFORE_PROMPT",
+  stderrLine: "FAKE_ACP_STDERR_LINE",
 } as const
 
 const defaultAssistantText = "hello from fake agent"
@@ -263,6 +264,10 @@ const delay = (ms: number, signal: AbortSignal): Promise<void> => {
 }
 
 export const runFakeAcpAgent = (): void => {
+  const stderrLine = process.env[FAKE_ACP_ENV.stderrLine]
+  if (stderrLine !== undefined && stderrLine.length > 0) {
+    process.stderr.write(`${stderrLine}\n`)
+  }
   const input = Writable.toWeb(process.stdout)
   const output = readableToWebBytes(process.stdin)
   const stream = acp.ndJsonStream(input, output)

@@ -1,7 +1,11 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { Effect, Fiber } from "effect"
 import {
   AcpClient,
   type AcpConnection,
+  AcpProcessExitError,
   AcpProtocolError,
   AcpSessionId,
   AcpSpawnError,
@@ -247,5 +251,144 @@ describe("Effect ACP client", () => {
     )
 
     expect(result).toBeInstanceOf(AcpSpawnError)
+  })
+
+  const withScript = async (
+    source: string,
+    use: (path: string) => Promise<void>,
+  ) => {
+    const directory = await mkdtemp(join(tmpdir(), "acp-stderr-"))
+    const path = join(directory, "agent.mjs")
+    try {
+      await writeFile(path, source)
+      await use(path)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  }
+
+  const initializeError = (command: string, args: readonly string[] = []) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const client = yield* AcpClient
+          const connection = yield* client.connect({
+            command,
+            args: [...args],
+            cwd: process.cwd(),
+            env: inheritedEnv,
+          })
+          return yield* connection.initialize()
+        }),
+      ).pipe(Effect.provide(AcpClient.layer), Effect.flip),
+    )
+
+  const MISE_TRUST_STDERR = [
+    "mise ERROR error parsing config file: ~/src/ready-for-agent/12-wi-01M54A0TQ8D6P1EVWM82H8XK91/mise.toml",
+    "mise ERROR Config files in ~/src/ready-for-agent/12-wi-01M54A0TQ8D6P1EVWM82H8XK91/mise.toml are not trusted.",
+    "Trust them with `mise trust`.",
+  ].join("\n")
+
+  it("keeps a mise trust error written immediately before exit", async () => {
+    const source = [
+      'import { writeSync } from "node:fs"',
+      `writeSync(2, ${JSON.stringify(`${MISE_TRUST_STDERR}\n`)})`,
+      "process.exit(1)",
+      "",
+    ].join("\n")
+    await withScript(source, async (path) => {
+      const error = await initializeError(process.execPath, [path])
+      expect(error).toBeInstanceOf(AcpProcessExitError)
+      if (!(error instanceof AcpProcessExitError)) {
+        throw new Error("Expected ACP process exit")
+      }
+      expect(error.exitCode).toBe(1)
+      expect(error.command).toBe(process.execPath)
+      expect(error.message).toContain("before initialize completed")
+      expect(error.message).toContain(process.execPath)
+      expect(error.message).toContain("exit 1")
+      expect(error.message).toContain("are not trusted")
+      expect(error.message).toContain("mise trust")
+      expect(error.message.length).toBeLessThanOrEqual(500)
+    })
+  })
+
+  it("bounds chunked stderr and keeps the diagnostic written just before exit", async () => {
+    const source = [
+      'import { writeSync } from "node:fs"',
+      'writeSync(2, "PREFIX-MARKER\\n")',
+      "const chunk = Buffer.alloc(64 * 1024, 0x78)",
+      "writeSync(2, chunk)",
+      "writeSync(2, chunk)",
+      'writeSync(2, "\\nTAIL-MARKER Trust them with `mise trust`.\\n")',
+      "process.exit(1)",
+      "",
+    ].join("\n")
+    await withScript(source, async (path) => {
+      const error = await initializeError(process.execPath, [path])
+      expect(error).toBeInstanceOf(AcpProcessExitError)
+      if (!(error instanceof AcpProcessExitError)) {
+        throw new Error("Expected ACP process exit")
+      }
+      expect(error.exitCode).toBe(1)
+      expect(error.message).toContain("TAIL-MARKER")
+      expect(error.message).toContain("mise trust")
+      expect(error.message).toContain("exit 1")
+      expect(error.message).not.toContain("PREFIX-MARKER")
+      expect(error.message.length).toBeLessThanOrEqual(500)
+    })
+  })
+
+  it("redacts a credential in stderr before the exit message is returned", async () => {
+    const secret = "ghp_this_must_never_appear_in_exit_message"
+    const source = [
+      'import { writeSync } from "node:fs"',
+      `writeSync(2, ${JSON.stringify(`not trusted ${secret}\nTrust them with \`mise trust\`.\n`)})`,
+      "process.exit(1)",
+      "",
+    ].join("\n")
+    await withScript(source, async (path) => {
+      const error = await initializeError(process.execPath, [path])
+      expect(error).toBeInstanceOf(AcpProcessExitError)
+      if (!(error instanceof AcpProcessExitError)) {
+        throw new Error("Expected ACP process exit")
+      }
+      expect(error.message).toContain("[redacted]")
+      expect(error.message).toContain("mise trust")
+      expect(error.message).not.toContain(secret)
+      expect(error.message).not.toMatch(/ghp_[A-Za-z0-9_]+/)
+    })
+  })
+
+  it("keeps the method-specific error when stderr is empty", async () => {
+    const source = ["process.exit(1)", ""].join("\n")
+    await withScript(source, async (path) => {
+      const error = await initializeError(process.execPath, [path])
+      expect(error).toBeInstanceOf(AcpProcessExitError)
+      if (!(error instanceof AcpProcessExitError)) {
+        throw new Error("Expected ACP process exit")
+      }
+      expect(error.exitCode).toBe(1)
+      expect(error.command).toBe(process.execPath)
+      expect(error.message).toBe("ACP agent exited before initialize completed")
+    })
+  })
+
+  it("completes a prompt when the agent writes stderr", async () => {
+    const result = await run(
+      (connection) =>
+        Effect.gen(function* () {
+          yield* connection.initialize()
+          const session = yield* connection.newSession({ cwd: process.cwd() })
+          return yield* connection.prompt({
+            sessionId: session.sessionId,
+            prompt: "hello",
+          })
+        }),
+      { [FAKE_ACP_ENV.stderrLine]: "harmless startup warning" },
+    )
+
+    expect(result.assistantText).toBe("hello from fake agent")
+    expect(result.stopReason).toBe("end_turn")
   })
 })
