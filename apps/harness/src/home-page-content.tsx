@@ -3148,8 +3148,8 @@ function RepositoryCard({
                 </dd>
               </div>
               <div className={ui.repoMetaRow}>
-                <dt>CI Gate</dt>
-                <dd>
+                <dt className="shrink-0">CI Gate</dt>
+                <dd className="min-w-0">
                   <RepositoryCiGateCardDetails ciGate={repository.ciGate} />
                 </dd>
               </div>
