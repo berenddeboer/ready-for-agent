@@ -1,5 +1,9 @@
 # Merge PR after clanker decision
 
+[ADR 0074](0074-agent-owned-ci-repair.md) records a planned exception for
+standalone repository CI repair, where the repair agent owns merging. This ADR
+continues to govern ordinary Work Item merges.
+
 After Decide PR Merge returns clanker merge, the Work Item advances to Merge PR. The step uses the Repository GitHub token through `GitHubService` GraphQL (not `gh` or OpenCode) to find the open pull request on the Work Item's deterministic branch, revalidate the current head's aggregate checks, and call `mergePullRequest` with squash and `expectedHeadOid`. An already merged PR is a success (idempotent).
 
 When GitHub does not merge because the head changed, checks are no longer green, or mergeability is conflicting or unknown, Merge PR records a handled Merge Revalidation Outcome rather than a failed Step Run. An Expected check rollup is not treated as green. An absent/`no_checks` aggregate is green only for effective Always after the Check-Start Deadline (ADR 0059); otherwise Merge PR produces the missing-successful-check Needs Human handoff instead of merging or counting a Merge Revalidation Outcome (ADR 0055). The first three such outcomes for a Work Item return it to Watch PR Status Checks with prior individual-check handoff history intact. The Work Item then traverses the normal Watch → Mark PR Ready for Review → Decide PR Merge or Merge PR path again, including a fresh risk decision when Classify applies. Watch uses the existing Resolve PR Merge Conflict and Investigate PR Status Checks handoffs when current evidence requires OpenCode work; Merge PR does not invent a generic repair prompt and OpenCode does not merge.
