@@ -198,6 +198,33 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         `Work Item ${error.workItemId} is already ${error.state}`,
         "WORK_ITEM_TERMINAL",
       )
+    case "CiRepairNotSupportedError":
+      return gql(
+        error.message ??
+          "CI repair execution is supported for GitHub repositories only.",
+        "CI_REPAIR_NOT_SUPPORTED",
+        { repositoryId: error.repositoryId },
+      )
+    case "CiRepairNotEligibleError":
+      return gql(
+        error.message ??
+          "CI repair starts only while a current Closed incident is active.",
+        "CI_REPAIR_NOT_ELIGIBLE",
+        { repositoryId: error.repositoryId },
+      )
+    case "CiRepairNotReadyError":
+      return gql(
+        error.message ??
+          "CI repair cannot start until the agent backend is ready.",
+        "CI_REPAIR_NOT_READY",
+        { repositoryId: error.repositoryId },
+      )
+    case "CiRepairProcessStillRunningError":
+      return gql(
+        error.message ?? "The previous CI repair process is still running.",
+        "CI_REPAIR_PROCESS_STILL_RUNNING",
+        { repositoryId: error.repositoryId },
+      )
     case "CiRepairNotAvailableError":
       return gql(
         error.message ??

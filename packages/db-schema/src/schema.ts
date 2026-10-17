@@ -797,6 +797,96 @@ export const ciRepairAuthorization = snakeCase.table(
 )
 
 /**
+ * One manual repository CI repair invocation. At most one queued or running
+ * row per repository. This is process supervision, not a Work Item.
+ * See xplain: type ci repair invocation "criv"
+ */
+export const ciRepairInvocation = snakeCase.table(
+  "ci_repair_invocation",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `criv-${ulid()}`),
+    repositoryId: text()
+      .notNull()
+      .references(() => repository.id, { onDelete: "cascade" }),
+    incidentId: text()
+      .notNull()
+      .references(() => ciFailureIncident.id, { onDelete: "cascade" }),
+    /**
+     * `queued` is admitted and waiting for an agent slot. `running` has
+     * launched. `recovered` and `unresolved` are terminal.
+     */
+    status: text({
+      enum: ["queued", "running", "recovered", "unresolved"],
+    }).notNull(),
+    /** Set once the invocation reaches a terminal status. */
+    outcome: text({
+      enum: ["recovered", "failed", "timed_out", "interrupted"],
+    }),
+    /** Process generation that admitted this row. Restart reconciles others. */
+    supervisorEpoch: text().notNull(),
+    admittedAt: integer({ mode: "number" }).notNull(),
+    launchedAt: integer({ mode: "number" }),
+    deadlineAt: integer({ mode: "number" }),
+    sessionId: text(),
+    processRef: text(),
+    report: text(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("ci_repair_invocation_one_active_uidx")
+      .on(t.repositoryId)
+      .where(sql`${t.status} IN ('queued', 'running')`),
+    index("ci_repair_invocation_repository_id_admitted_at_idx").on(
+      t.repositoryId,
+      t.admittedAt,
+    ),
+    index("ci_repair_invocation_incident_id_idx").on(t.incidentId),
+  ],
+)
+
+/**
+ * Pull request and remote job links discovered for one CI repair invocation.
+ * See xplain: type ci repair invocation link "cril"
+ */
+export const ciRepairInvocationLink = snakeCase.table(
+  "ci_repair_invocation_link",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `cril-${ulid()}`),
+    invocationId: text()
+      .notNull()
+      .references(() => ciRepairInvocation.id, { onDelete: "cascade" }),
+    url: text().notNull(),
+    kind: text({ enum: ["pull_request", "remote_job"] }).notNull(),
+    /**
+     * `unfinished` and `active` outlive stopped local execution.
+     * `merged` and `completed` are settled.
+     */
+    disposition: text({
+      enum: ["unfinished", "merged", "active", "completed", "unknown"],
+    }).notNull(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("ci_repair_invocation_link_invocation_id_url_uidx").on(
+      t.invocationId,
+      t.url,
+    ),
+    index("ci_repair_invocation_link_invocation_id_idx").on(t.invocationId),
+  ],
+)
+
+/**
  * Durable autonomous whole-review workflow rerun permits for a Work Item.
  * Scoped by PR head SHA and workflow run identity; initial execution is free.
  * See xplain: type automated review rerun "arr"

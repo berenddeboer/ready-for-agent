@@ -1,4 +1,5 @@
-import { Context, Duration, Effect, Option, Ref, Schema } from "effect"
+import { Context, Duration, Effect, Layer, Option, Ref, Schema } from "effect"
+import { SqlClient as SqlClientModule } from "effect/sql"
 import type { SqlClient } from "effect/sql/SqlClient"
 import type {
   AgentBackendError,
@@ -9,7 +10,7 @@ import type {
   StartTurnInput,
 } from "@ready-for-agent/agent-backend"
 import { AgentBackend } from "@ready-for-agent/agent-backend"
-import type { DbServiceShape } from "@ready-for-agent/db-service"
+import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
 import { STEP_RUN_REASON, WAITING_FOR_AGENT_TURN_MESSAGE } from "./types.js"
 
 const DEFAULT_MAX_CONCURRENT_AGENT_TURNS = 2
@@ -256,6 +257,23 @@ const releasePermit =
   }
 
 /**
+ * Shared fair-share permit gate. Lifecycle Agent Turns and repository CI
+ * repair must use one instance so repair occupies ordinary capacity without
+ * a reserved pool or a second limiter.
+ */
+export type AgentTurnAdmission = {
+  readonly withPermit: <A, E, R>(
+    repositoryId: string,
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>
+}
+
+export class SharedAgentTurnAdmission extends Context.Service<
+  SharedAgentTurnAdmission,
+  AgentTurnAdmission
+>()("@ready-for-agent/work-item-lifecycle/SharedAgentTurnAdmission") {}
+
+/**
  * Cap concurrent lifecycle Agent Turn processes using the current harness
  * Config value, admitting repositories fairly under contention. `inspect` is
  * not wrapped.
@@ -289,11 +307,10 @@ const releasePermit =
  * restores any prior mid-run phase (for example Review: pre-commit) instead
  * of clearing the reason.
  */
-export const limitAgentTurns = (
-  backend: AgentBackendService,
+export const makeAgentTurnAdmission = (
   db: Pick<DbServiceShape, "getConfig" | "notifyWorkItemsChanged">,
   sql: Pick<SqlClient, "unsafe">,
-): Effect.Effect<AgentBackendService> =>
+): Effect.Effect<AgentTurnAdmission> =>
   Effect.gen(function* () {
     const gate = yield* Ref.make(
       initialFairGateState(DEFAULT_MAX_CONCURRENT_AGENT_TURNS),
@@ -441,13 +458,11 @@ export const limitAgentTurns = (
         Effect.asVoid,
       )
 
-    const withTurnSlot = <A, E, R>(
+    const withPermit = <A, E, R>(
+      repositoryId: string,
       effect: Effect.Effect<A, E, R>,
     ): Effect.Effect<A, E, R> =>
       Effect.gen(function* () {
-        const current = yield* CurrentStepRun
-        const repositoryId = current?.repositoryId ?? NO_REPOSITORY
-
         let markedWaiting = false
         let savedReason: SavedStepRunReason | null = null
         let registeredWaiting = false
@@ -552,9 +567,45 @@ export const limitAgentTurns = (
         )
       })
 
+    return { withPermit }
+  })
+
+/**
+ * Wrap an Agent Backend with {@link makeAgentTurnAdmission}. Pass a shared
+ * admission so other callers, including repository CI repair, compete for the
+ * same permits. Without one, this builds a private gate (existing tests).
+ */
+export const limitAgentTurns = (
+  backend: AgentBackendService,
+  db: Pick<DbServiceShape, "getConfig" | "notifyWorkItemsChanged">,
+  sql: Pick<SqlClient, "unsafe">,
+  admission?: AgentTurnAdmission,
+): Effect.Effect<AgentBackendService> =>
+  Effect.gen(function* () {
+    const gate = admission ?? (yield* makeAgentTurnAdmission(db, sql))
+    const withTurnSlot = <A, E, R>(
+      effect: Effect.Effect<A, E, R>,
+    ): Effect.Effect<A, E, R> =>
+      Effect.gen(function* () {
+        const current = yield* CurrentStepRun
+        return yield* gate.withPermit(
+          current?.repositoryId ?? NO_REPOSITORY,
+          effect,
+        )
+      })
     return AgentBackend.of({
       startTurn: (input) => withTurnSlot(backend.startTurn(input)),
       continueTurn: (input) => withTurnSlot(backend.continueTurn(input)),
       inspect: (input) => backend.inspect(input),
     })
   })
+
+/** One fair-share gate for the process. Provide this to lifecycle steps and CI repair. */
+export const SharedAgentTurnAdmissionLive = Layer.effect(
+  SharedAgentTurnAdmission,
+  Effect.gen(function* () {
+    const db = yield* DbService
+    const sql = yield* SqlClientModule.SqlClient
+    return yield* makeAgentTurnAdmission(db, sql)
+  }),
+)

@@ -25,7 +25,11 @@ import { Claude, ClaudeSessionTelemetryLive } from "@ready-for-agent/claude"
 import { Codex, CodexSessionTelemetryLive } from "@ready-for-agent/codex"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
-import { createGraphqlApi } from "@ready-for-agent/graphql-api"
+import {
+  CiRepairExecutorLive,
+  RepositoryCiRepairLive,
+  createGraphqlApi,
+} from "@ready-for-agent/graphql-api"
 import { Grok, GrokSessionTelemetryLive } from "@ready-for-agent/grok"
 import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import {
@@ -42,6 +46,7 @@ import {
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   LifecycleStepsLive,
+  SharedAgentTurnAdmissionLive,
   makeWorkItemLifecycleLive,
 } from "@ready-for-agent/work-item-lifecycle"
 import type { ApplicationRequestContext } from "../application-request-context.js"
@@ -230,10 +235,22 @@ export const createApplication = async (
     }),
   ).pipe(Layer.provide(databaseLayer))
 
+  // One gate for lifecycle turns and CI repair. A second Live call would
+  // be a private pool and would hide repair from ordinary fairness.
+  const admissionLayer = SharedAgentTurnAdmissionLive.pipe(
+    Layer.provideMerge(databaseLayer),
+  )
+  const repairLayer = RepositoryCiRepairLive().pipe(
+    Layer.provideMerge(CiRepairExecutorLive),
+    Layer.provideMerge(admissionLayer),
+    Layer.provideMerge(activeLayer),
+    Layer.provideMerge(databaseLayer),
+  )
   const lifecycleLayer = makeWorkItemLifecycleLive({
     inspectCwd: toolCwd,
   }).pipe(
     Layer.provideMerge(LifecycleStepsLive),
+    Layer.provideMerge(admissionLayer),
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(queueLayer),
     Layer.provideMerge(activeLayer),
@@ -268,6 +285,7 @@ export const createApplication = async (
           linearLayer,
           activeLayer,
           lifecycleLayer,
+          repairLayer,
           localGitLayer,
           directoryPickerLayer,
           loggingLayer,
@@ -281,6 +299,7 @@ export const createApplication = async (
           linearLayer,
           activeLayer,
           lifecycleLayer,
+          repairLayer,
           localGitLayer,
           directoryPickerLayer,
           loggingLayer,

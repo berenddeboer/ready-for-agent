@@ -35,6 +35,11 @@ const PlatformLayer = BunServices.layer
 // Leave room for real systemd/cgroup setup while preserving the timing ratios.
 const fixtureMillis = (ms: number) => Duration.millis(ms * 10)
 const REVIEW_INTERVAL = fixtureMillis(120)
+// Six Fix Rounds each fingerprint the worktree and run nested Pre-Commit.
+// That is several owned git processes between checkpoints. The shared 1.2s
+// interval fits one round and expires under CI cgroup load across six,
+// which leaves the Step Run in review instead of Needs Human.
+const SIX_ROUND_REVIEW_INTERVAL = Duration.seconds(15)
 
 const successfulSteps: LifecycleStepsShape = {
   createWorktree: () =>
@@ -144,8 +149,13 @@ const maxDurations = {
   local_cleanup: Duration.minutes(5),
 }
 
-const makeLayer = (steps: LifecycleStepsShape) =>
-  makeWorkItemLifecycleLive({ maxDurations }).pipe(
+const makeLayer = (
+  steps: LifecycleStepsShape,
+  reviewInterval: Duration.Duration = REVIEW_INTERVAL,
+) =>
+  makeWorkItemLifecycleLive({
+    maxDurations: { ...maxDurations, review: reviewInterval },
+  }).pipe(
     Layer.provideMerge(stubActiveAgentBackendLayer()),
     Layer.provideMerge(stubGitHubServiceLayer()),
     Layer.provideMerge(stubGitLabServiceLayer()),
@@ -168,7 +178,9 @@ const runWithSteps = <A, E>(
     | SqlClient.SqlClient
     | LifecycleSteps
   >,
-): Promise<A> => Effect.runPromise(Effect.provide(test, makeLayer(steps)))
+  reviewInterval?: Duration.Duration,
+): Promise<A> =>
+  Effect.runPromise(Effect.provide(test, makeLayer(steps, reviewInterval)))
 
 const seedActionableIssue = Effect.gen(function* () {
   const db = yield* DbService
@@ -648,6 +660,7 @@ describe("Review no-progress timeout", () => {
           expect(result.workItem.failureMessage).toBe(REVIEW_FIX_LIMIT_REASON)
           expect(reviewingTurns).toBe(MAX_REVIEW_FIX_ROUNDS + 1)
         }),
+        SIX_ROUND_REVIEW_INTERVAL,
       )
     }))
 

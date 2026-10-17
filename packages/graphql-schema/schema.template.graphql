@@ -671,6 +671,63 @@ type RepositoryCiGate {
   definitions: [CiGateDefinitionObservation!]!
   activeIncident: CiFailureIncident
   latestResolvedIncident: CiFailureIncident
+  """
+  True only for GitHub, where manual CI repair execution is supported.
+  GitLab and Azure DevOps stay observation-only.
+  """
+  repairSupported: Boolean!
+  """
+  Latest manual CI repair invocation for this repository, if one has been
+  admitted. Null when repair has never been requested.
+  """
+  repair: RepositoryCiRepair
+}
+
+enum RepositoryCiRepairStatus {
+  QUEUED
+  RUNNING
+  RECOVERED
+  UNRESOLVED
+}
+
+enum RepositoryCiRepairOutcome {
+  RECOVERED
+  FAILED
+  TIMED_OUT
+  INTERRUPTED
+}
+
+"""
+A pull request or remote job discovered while repairing CI. Unfinished pull
+requests and active jobs stay visible after local execution stops.
+"""
+type RepositoryCiRepairLink {
+  url: String!
+  kind: String!
+  disposition: String!
+}
+
+"""
+One manual repository CI repair. Not a Work Item. Recovery is the gate
+reopening; this record only reports the invocation.
+"""
+type RepositoryCiRepair {
+  id: ID!
+  repositoryId: ID!
+  incidentId: ID!
+  status: RepositoryCiRepairStatus!
+  outcome: RepositoryCiRepairOutcome
+  admittedAt: String!
+  launchedAt: String
+  deadlineAt: String
+  sessionId: String
+  report: String
+  links: [RepositoryCiRepairLink!]!
+  """
+  True when this process is no longer running the agent. Remote jobs and
+  unfinished pull requests may still be active.
+  """
+  localExecutionStopped: Boolean!
 }
 
 type Repository {
@@ -1404,9 +1461,19 @@ type Mutation {
   """
   Create a Work Item authorized as CI Repair for the active Closed CI Failure
   Incident. Fails when no Closed incident is active. Competes for ordinary
-  Worker Slots and does not bypass Work Item-local PR safety.
+  Worker Slots and does not bypass Work Item-local PR safety. The repository
+  CI repair button uses startRepositoryCiRepair instead of this mutation.
+  Existing authorized Work Items keep the policy recorded here.
   """
   implementCiRepair(repositoryId: ID!, nativeId: String!): WorkItem!
+  """
+  Manually start or retry repository CI repair for the current Closed incident.
+  GitHub only. Does not create a Work Item. At most one queued or running
+  repair per repository. An explicit retry after an unresolved outcome gets a
+  new four-hour budget counted from launch, not from queue time. Allowed while
+  the repository is paused.
+  """
+  startRepositoryCiRepair(repositoryId: ID!): RepositoryCiRepair!
   """
   Authorize an unfinished Work Item as CI Repair for the active Closed incident
   without resetting worktree, Session, profile, Merge Policy, PR, or history.
