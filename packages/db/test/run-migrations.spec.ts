@@ -387,6 +387,7 @@ describe("runMigrations", () => {
           { name: "20260921140000_issue_store_tracker_identity" },
           { name: "20260921180000_linear_discovery_settings" },
           { name: "20260921190000_unfinished_work_item_native_identity" },
+          { name: "20261017120000_repository_ci_repair_invocation" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
