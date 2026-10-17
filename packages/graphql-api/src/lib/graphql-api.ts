@@ -94,6 +94,10 @@ import {
   observeRepositoryCiGate,
 } from "./observe-repository-ci-gate.js"
 import {
+  RepositoryCiRepair,
+  type RepositoryCiRepairView,
+} from "./repository-ci-repair.js"
+import {
   RepositoryCredentialError,
   activatePollingIfCredentialed,
   azureDevOpsTokenSecretName,
@@ -460,6 +464,63 @@ type RetryWorkItemsArgs = {
 }
 
 type ResetWorkItemArgs = WorkItemArgs
+
+type StartRepositoryCiRepairArgs = {
+  repositoryId: string
+}
+
+const graphqlRepairStatus = (status: RepositoryCiRepairView["status"]) => {
+  switch (status) {
+    case "queued":
+      return "QUEUED"
+    case "running":
+      return "RUNNING"
+    case "recovered":
+      return "RECOVERED"
+    case "unresolved":
+      return "UNRESOLVED"
+  }
+}
+
+const graphqlRepairOutcome = (outcome: RepositoryCiRepairView["outcome"]) => {
+  switch (outcome) {
+    case null:
+      return null
+    case "recovered":
+      return "RECOVERED"
+    case "failed":
+      return "FAILED"
+    case "timed_out":
+      return "TIMED_OUT"
+    case "interrupted":
+      return "INTERRUPTED"
+  }
+}
+
+const graphqlCiRepair = (repair: RepositoryCiRepairView) => ({
+  id: repair.id,
+  repositoryId: repair.repositoryId,
+  incidentId: repair.incidentId,
+  status: graphqlRepairStatus(repair.status),
+  outcome: graphqlRepairOutcome(repair.outcome),
+  admittedAt: new Date(repair.admittedAt).toISOString(),
+  launchedAt:
+    repair.launchedAt === null
+      ? null
+      : new Date(repair.launchedAt).toISOString(),
+  deadlineAt:
+    repair.deadlineAt === null
+      ? null
+      : new Date(repair.deadlineAt).toISOString(),
+  sessionId: repair.sessionId,
+  report: repair.report,
+  links: repair.links.map((link) => ({
+    url: link.url,
+    kind: link.kind,
+    disposition: link.disposition,
+  })),
+  localExecutionStopped: repair.localExecutionStopped,
+})
 
 export type GraphqlServices =
   | DbService
@@ -1590,7 +1651,7 @@ export const createGraphqlApi = <R>(
               context,
             ),
           ciGate: async (
-            repository: { id: string },
+            repository: { id: string; forge: string },
             _args: unknown,
             context: GraphqlRequestContext,
           ) =>
@@ -1601,7 +1662,13 @@ export const createGraphqlApi = <R>(
                   repository.id,
                 )
                 const snapshot = yield* db.loadCiGateSnapshot(repository.id)
-                return projectRepositoryCiGate({ definitions, snapshot })
+                const repair = yield* RepositoryCiRepair
+                const latest = yield* repair.latestForRepository(repository.id)
+                return {
+                  ...projectRepositoryCiGate({ definitions, snapshot }),
+                  repairSupported: repository.forge === "github",
+                  repair: latest === null ? null : graphqlCiRepair(latest),
+                }
               }).pipe(Effect.withSpan("graphql-api.Repository.ciGate")),
               context,
             ),
@@ -2755,6 +2822,20 @@ export const createGraphqlApi = <R>(
                   args.nativeId,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementNow")),
+              context,
+            ),
+          startRepositoryCiRepair: async (
+            _parent: unknown,
+            args: StartRepositoryCiRepairArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const repair = yield* RepositoryCiRepair
+                return graphqlCiRepair(
+                  yield* repair.startManual(args.repositoryId),
+                )
+              }).pipe(Effect.withSpan("graphql-api.startRepositoryCiRepair")),
               context,
             ),
           implementCiRepair: async (

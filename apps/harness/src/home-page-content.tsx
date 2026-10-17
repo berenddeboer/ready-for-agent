@@ -2104,6 +2104,24 @@ function RepositoryCard({
     onSuccess: updateRepositoryPaused,
   })
 
+  const startCiRepair = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        startRepositoryCiRepair: {
+          __args: { repositoryId: repository.id },
+          id: true,
+          status: true,
+        },
+      })
+      return result.startRepositoryCiRepair
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: repositoriesQuery.queryKey,
+      })
+    },
+  })
+
   const pausePending = pauseRepository.isPending || unpauseRepository.isPending
   const pauseFailed = pauseRepository.isError || unpauseRepository.isError
   const pauseLabel = repository.paused
@@ -3150,7 +3168,27 @@ function RepositoryCard({
               <div className={ui.repoMetaRow}>
                 <dt className="shrink-0">CI Gate</dt>
                 <dd className="min-w-0">
-                  <RepositoryCiGateCardDetails ciGate={repository.ciGate} />
+                  <RepositoryCiGateCardDetails
+                    ciGate={repository.ciGate}
+                    repairSupported={repository.ciGate.repairSupported}
+                    repair={repository.ciGate.repair}
+                    repairPending={startCiRepair.isPending}
+                    onStartRepair={() => startCiRepair.mutate()}
+                  />
+                  {startCiRepair.isError ? (
+                    <Banner
+                      className={cx(ui.bannerCompact, "mt-2")}
+                      tone="alarm"
+                      tag="Error"
+                      role="alert"
+                    >
+                      {startWorkBannerMessage({
+                        error: startCiRepair.error,
+                        fallback:
+                          "Could not start CI repair. Refresh the repository and try again.",
+                      })}
+                    </Banner>
+                  ) : null}
                 </dd>
               </div>
             </dl>
@@ -3869,17 +3907,21 @@ function RepositoryIssueRow({
   const implementCiRepair = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
-        implementCiRepair: {
+        startRepositoryCiRepair: {
           __args: {
-            repositoryId: issue.repositoryId,
-            nativeId: issue.nativeId,
+            repositoryId: repository.id,
           },
-          ...workItemFields,
+          id: true,
+          status: true,
         },
       })
-      return result.implementCiRepair
+      return result.startRepositoryCiRepair
     },
-    onSuccess: onImplementSuccess,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: repositoriesQuery.queryKey,
+      })
+    },
   })
   const implementWith = useMutation({
     mutationFn: async (input: ImplementWithSubmitInput) => {
@@ -3944,6 +3986,7 @@ function RepositoryIssueRow({
     queueIssue.isPending
   const canImplementCiRepair =
     canImplementNow &&
+    repository.ciGate.repairSupported &&
     repository.ciGate.status === "CLOSED" &&
     repository.ciGate.activeIncident !== null
   const startImplementNow = () => {

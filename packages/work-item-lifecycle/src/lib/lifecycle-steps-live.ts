@@ -16,6 +16,7 @@ import { LinearService } from "@ready-for-agent/linear-service"
 import {
   CurrentCapturedAgentBackendId,
   CurrentStepRun,
+  SharedAgentTurnAdmission,
   limitAgentTurns,
 } from "./agent-turn-limiter.js"
 import { assessChanges } from "./assess-changes.js"
@@ -123,7 +124,13 @@ export const LifecycleStepsLive = Layer.effect(
           return yield* activeAgentBackend.inspectBackend(captured, input)
         }),
     })
-    const agentBackend = yield* limitAgentTurns(routedAgentBackend, db, sql)
+    const admission = yield* SharedAgentTurnAdmission
+    const agentBackend = yield* limitAgentTurns(
+      routedAgentBackend,
+      db,
+      sql,
+      admission,
+    )
 
     const services = Layer.mergeAll(
       Layer.succeed(DbService, db),
