@@ -32,8 +32,8 @@ export function RepositoryCiGateCardDetails({
     return statusLabel
   }
   return (
-    <>
-      {statusLabel}
+    <span className="flex min-w-0 flex-col gap-1 break-words">
+      <span>{statusLabel}</span>
       {ciGate.diagnostic !== null ? (
         <span className={ui.dialogFieldHint}>{ciGate.diagnostic}</span>
       ) : null}
@@ -77,6 +77,6 @@ export function RepositoryCiGateCardDetails({
           Last resolved: {ciGate.latestResolvedIncident.summary}
         </span>
       ) : null}
-    </>
+    </span>
   )
 }

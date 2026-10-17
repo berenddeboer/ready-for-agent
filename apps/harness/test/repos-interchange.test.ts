@@ -107,7 +107,10 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(meta).toContain("ui.repoMetaRow")
     expect(meta).toContain("Harness default (")
     expect(
-      Array.from(meta.matchAll(/<dt>([^<]+)<\/dt>/g), (match) => match[1]),
+      Array.from(
+        meta.matchAll(/<dt(?:\s[^>]*)?>([^<]+)<\/dt>/g),
+        (match) => match[1],
+      ),
     ).toEqual([
       "Path",
       "Checkout",

@@ -128,7 +128,7 @@ describe("Repository settings CI Gate Definitions", () => {
 
   test("shows persisted selections and empty default on the Repository card", () => {
     const source = indexSource()
-    expect(source).toContain("<dt>CI Gate</dt>")
+    expect(source).toMatch(/<dt(?:\s[^>]*)?>CI Gate<\/dt>/)
     expect(source).toContain("<RepositoryCiGateCardDetails")
     expect(source).toContain("ciGate={repository.ciGate}")
     expect(source).toContain(
