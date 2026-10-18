@@ -12,7 +12,7 @@ export const CI_GATE_AUTOMATIC_REPAIR_HINT =
 export const CI_GATE_AUTOMATIC_REPAIR_DISABLED_HINT =
   "Unavailable until a CI Gate Definition is selected. The saved choice is kept."
 
-export type AutomaticCiRepairControl = {
+type AutomaticCiRepairControl = {
   readonly checked: boolean
   readonly onCheckedChange: (checked: boolean) => void
 }
