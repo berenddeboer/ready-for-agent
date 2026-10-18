@@ -20,6 +20,7 @@ export const ISSUE_TRACKERS = [
   "gitlab",
   "azure-devops",
   "linear",
+  "fp",
 ] as const
 
 export const IssueTracker = Schema.Literals(ISSUE_TRACKERS)

@@ -5,8 +5,11 @@
 
 import { basename, extname, isAbsolute, relative, resolve } from "node:path"
 import { currentNativeForgeClosingReferenceRules } from "@ready-for-agent/forge-contract"
-import type { IssueSource } from "@ready-for-agent/lifecycle-model"
-import { isLinearIssueSource } from "./linear-milestones.js"
+import {
+  type IssueSource,
+  behaviourNotImplemented,
+  describeIssueTracker,
+} from "@ready-for-agent/lifecycle-model"
 import {
   classifyUnparsedResult,
   normalizeResultCandidateLine,
@@ -15,12 +18,48 @@ import { promptUserContentSection } from "./sanitize-prompt-user-content.js"
 
 const closingReference = currentNativeForgeClosingReferenceRules
 
-const linearReferenceLines = (source: IssueSource): readonly string[] => [
-  `Linear: ${source.displayId}`,
-  source.url,
-]
+/**
+ * Choose publication copy by what the pull request says about the Original
+ * Issue Source, as its Issue Tracker description decides. A context without
+ * a source keeps the Forge closing reference. One case per reference kind,
+ * so a new kind is a compile error here.
+ */
+const byPullRequestReference = <A>(
+  source: IssueSource | undefined,
+  cases: {
+    readonly forge_closing_reference: () => A
+    readonly tracker_identity: (source: IssueSource, trackerName: string) => A
+  },
+): A => {
+  if (source === undefined) {
+    return cases.forge_closing_reference()
+  }
+  const description = describeIssueTracker(source.tracker)
+  const reference = description.pullRequestReference
+  switch (reference.kind) {
+    case "forge_closing_reference":
+      return cases.forge_closing_reference()
+    case "tracker_identity":
+      return cases.tracker_identity(source, description.displayName)
+    case "not_implemented":
+      return behaviourNotImplemented(source.tracker, "pull request reference")
+    default: {
+      const _exhaustive: never = reference
+      return _exhaustive
+    }
+  }
+}
 
-const stripLinearReference = (body: string, source: IssueSource): string => {
+const trackerReferenceLines = (
+  source: IssueSource,
+  trackerName: string,
+): readonly string[] => [`${trackerName}: ${source.displayId}`, source.url]
+
+const stripTrackerReference = (
+  body: string,
+  source: IssueSource,
+  trackerName: string,
+): string => {
   const kept: string[] = []
   for (const line of body.split("\n")) {
     const trimmed = line.trim()
@@ -30,7 +69,7 @@ const stripLinearReference = (body: string, source: IssueSource): string => {
     if (trimmed === source.url) {
       continue
     }
-    if (trimmed === `Linear: ${source.displayId}`) {
+    if (trimmed === `${trackerName}: ${source.displayId}`) {
       continue
     }
     if (trimmed === source.displayId) {
@@ -48,9 +87,11 @@ export const formatPublicationIssueReference = (
   issueNumber: number,
   issueSource?: IssueSource,
 ): string =>
-  isLinearIssueSource(issueSource)
-    ? linearReferenceLines(issueSource).join("\n")
-    : closingReference.formatLine(issueNumber)
+  byPullRequestReference(issueSource, {
+    forge_closing_reference: () => closingReference.formatLine(issueNumber),
+    tracker_identity: (source, trackerName) =>
+      trackerReferenceLines(source, trackerName).join("\n"),
+  })
 
 const stripPublicationIssueReference = (
   body: string,
@@ -58,9 +99,11 @@ const stripPublicationIssueReference = (
   issueSource?: IssueSource,
 ): string => {
   const withoutCloses = closingReference.strip(body, issueNumber)
-  return isLinearIssueSource(issueSource)
-    ? stripLinearReference(withoutCloses, issueSource)
-    : withoutCloses
+  return byPullRequestReference(issueSource, {
+    forge_closing_reference: () => withoutCloses,
+    tracker_identity: (source, trackerName) =>
+      stripTrackerReference(withoutCloses, source, trackerName),
+  })
 }
 
 /** GitHub pull request title limit. */
@@ -261,12 +304,13 @@ export const buildHarnessPublicationFallbackCopy = (input: {
   readonly issueSource?: IssueSource
 }): PublicationCopy => {
   const trimmedTitle = (input.issueTitle ?? "").replace(/\s+/g, " ").trim()
-  const linear = isLinearIssueSource(input.issueSource)
   const title =
     trimmedTitle === ""
-      ? linear
-        ? `Implement ${input.issueSource.displayId}`
-        : `Implement issue #${input.issueNumber}`
+      ? byPullRequestReference(input.issueSource, {
+          forge_closing_reference: () =>
+            `Implement issue #${input.issueNumber}`,
+          tracker_identity: (source) => `Implement ${source.displayId}`,
+        })
       : trimmedTitle.slice(0, PUBLICATION_TITLE_MAX_LENGTH)
   const body = [
     `${HARNESS_FALLBACK_BODY_PREFIX} for Work Item ${input.workItemId}.`,
@@ -485,9 +529,12 @@ export const buildPublicationCopyPrompt = (input: {
     "- body: useful reviewer-facing Markdown explaining why the change was needed, what changed, and meaningful verification or limitations.",
     "Do not use the Issue title alone as the publication title.",
     `Do not write a generic body such as "${closingReference.genericPlaceholderExample}".`,
-    isLinearIssueSource(input.issueSource)
-      ? `Reference Linear issue ${input.issueSource.displayId} (${input.issueSource.url}); the harness will ensure the body ends with that Linear identity. Do not write a GitHub Closes #<number> line.`
-      : closingReference.mentionGuidance(input.issueNumber),
+    byPullRequestReference(input.issueSource, {
+      forge_closing_reference: () =>
+        closingReference.mentionGuidance(input.issueNumber),
+      tracker_identity: (source, trackerName) =>
+        `Reference ${trackerName} issue ${source.displayId} (${source.url}); the harness will ensure the body ends with that ${trackerName} identity. Do not write a GitHub Closes #<number> line.`,
+    }),
     "End your final response with exactly one machine-readable result line. Prefer putting the JSON on that line:",
     `READY_FOR_AGENT_RESULT: PUBLICATION_COPY {"title":"...","body":"..."}`,
     "The body value must be a JSON string (use \\n for newlines). The result line must be the final non-empty line.",
@@ -504,9 +551,12 @@ export const buildPublicationCopyFormatCorrectionPrompt = (input: {
     `Work Item attachment directory: ${input.attachmentDirectory}`,
     "You may embed markdown images that point at files in that directory.",
     `End with exactly one final line of the form: READY_FOR_AGENT_RESULT: PUBLICATION_COPY {"title":"...","body":"..."}`,
-    isLinearIssueSource(input.issueSource)
-      ? `Include a substantive title and body for the completed work on Linear issue ${input.issueSource.displayId}. Do not write a GitHub Closes #<number> line.`
-      : `Include a substantive title and body for the completed work on issue #${input.issueNumber}.`,
+    byPullRequestReference(input.issueSource, {
+      forge_closing_reference: () =>
+        `Include a substantive title and body for the completed work on issue #${input.issueNumber}.`,
+      tracker_identity: (source, trackerName) =>
+        `Include a substantive title and body for the completed work on ${trackerName} issue ${source.displayId}. Do not write a GitHub Closes #<number> line.`,
+    }),
   ].join("\n")
 
 export const buildCreatePrFallbackPromptWithCopy = (input: {
@@ -548,9 +598,12 @@ export const buildCommitFallbackPromptWithCopy = (input: {
     "Prefer this exact commit message (subject + body). Only change the message if repository policy (for example commitlint) requires a different form:",
     promptUserContentSection("publication_title", input.title),
     promptUserContentSection("publication_body", input.body),
-    isLinearIssueSource(input.issueSource)
-      ? `Keep the Linear issue ${input.issueSource.displayId} reference in the commit body. Do not add a GitHub Closes #<number> line.`
-      : closingReference.commitMustCloseGuidance(input.issueNumber),
+    byPullRequestReference(input.issueSource, {
+      forge_closing_reference: () =>
+        closingReference.commitMustCloseGuidance(input.issueNumber),
+      tracker_identity: (source, trackerName) =>
+        `Keep the ${trackerName} issue ${source.displayId} reference in the commit body. Do not add a GitHub Closes #<number> line.`,
+    }),
     "Stage only the relevant implementation changes, then commit.",
     "Exclude harness-owned diagnostic artifacts such as `.ready-for-agent/`.",
     "If there is nothing left to commit because a valid commit already exists for this work, succeed without creating an empty commit.",

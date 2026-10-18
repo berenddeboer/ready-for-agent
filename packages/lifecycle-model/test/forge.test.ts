@@ -32,19 +32,22 @@ describe("generated Forge vocabulary", () => {
     expect(isForge(undefined)).toBe(false)
   })
 
-  it("exports Issue Tracker kinds including Linear without making Linear a Forge", () => {
+  it("exports Issue Tracker kinds including the tracker-only kinds without making them Forges", () => {
     expect([...ISSUE_TRACKERS]).toEqual([
       "github",
       "gitlab",
       "azure-devops",
       "linear",
+      "fp",
     ])
-    expect(isIssueTracker("linear")).toBe(true)
-    expect(isForge("linear")).toBe(false)
-    expect(relevancePolicyForIssueTracker("linear")).toEqual({
-      hierarchyObservation: { kind: "required" },
-      openDraftClosingPullRequest: { kind: "inactive" },
-    })
+    for (const trackerOnly of ["linear", "fp"] as const) {
+      expect(isIssueTracker(trackerOnly)).toBe(true)
+      expect(isForge(trackerOnly)).toBe(false)
+      expect(relevancePolicyForIssueTracker(trackerOnly)).toEqual({
+        hierarchyObservation: { kind: "required" },
+        openDraftClosingPullRequest: { kind: "inactive" },
+      })
+    }
     expect(isIssueTracker("github")).toBe(true)
     expect(isIssueTracker("bitbucket")).toBe(false)
   })

@@ -5,7 +5,7 @@ Opinionated agentic software engineering harness that works Forge issues into pu
 ## Language
 
 **Forge**:
-A code-hosting platform kind the harness supports as a Repository's source of git hosting and Pull Requests: GitHub, GitLab, or Azure DevOps. A Repository belongs to exactly one Forge, chosen when the Repository is added. Each Forge is also that Repository's default Issue Tracker; Linear is not a Forge. Azure DevOps now has the same end-to-end lifecycle as GitHub and GitLab: remote detection, PAT-based authentication, Ready Issue listing/reconciliation (including native Predecessor/Successor blocking links, surfaced as blockedBy), draft Pull Request creation, PR Status Checks (build validation / branch policy evaluations), merge, and work item close-out with a completion summary are all implemented.
+A code-hosting platform kind the harness supports as a Repository's source of git hosting and Pull Requests: GitHub, GitLab, or Azure DevOps. A Repository belongs to exactly one Forge, chosen when the Repository is added. Each Forge is also that Repository's default Issue Tracker; Linear and fp are not Forges. Azure DevOps now has the same end-to-end lifecycle as GitHub and GitLab: remote detection, PAT-based authentication, Ready Issue listing/reconciliation (including native Predecessor/Successor blocking links, surfaced as blockedBy), draft Pull Request creation, PR Status Checks (build validation / branch policy evaluations), merge, and work item close-out with a completion summary are all implemented.
 _Avoid_: Provider (overloaded with model provider and credential metadata), issue source (Issue tracking is independently configurable; the Issue Tracker is the issue source), platform
 
 **Forge Host**:
@@ -97,7 +97,7 @@ A process-local flow-control condition established only by explicit GitHub throt
 _Avoid_: Rate limited, quota budget
 
 **Issue Tracker**:
-A platform kind the harness uses as a Repository's source of Issues, independently of the Repository's Forge: GitHub, GitLab, Azure DevOps, or Linear. Linear is an Issue Tracker only and is not a code-hosting Forge. A Repository has exactly one configured Issue Tracker; adding a Repository selects the hosting Forge's default without an extra onboarding choice.
+A platform kind the harness uses as a Repository's source of Issues, independently of the Repository's Forge: GitHub, GitLab, Azure DevOps, Linear, or fp. Linear and fp are Issue Trackers only and are not code-hosting Forges. fp is Fiberplane's local-first issue tracker, reached through the fp CLI in a registered project directory; it is in the vocabulary ahead of its adapter and cannot yet be selected in Repository settings. A Repository has exactly one configured Issue Tracker; adding a Repository selects the hosting Forge's default without an extra onboarding choice.
 _Avoid_: Forge (when referring to issue tracking), Linear as a Forge, provider
 
 **Issue Native Identity**:

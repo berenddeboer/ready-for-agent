@@ -62,6 +62,8 @@ describe("Repository settings Linear discovery", () => {
     expect(source).toContain("const canImplementNow = canImplement")
     expect(source).toContain("const canQueueNow = canQueue")
     expect(source).not.toContain("canStartLinearExecution")
-    expect(source).toContain('repository.issueTracker !== "linear" &&')
+    expect(source).toContain(
+      "offersParentImplementAll(repository.issueTracker) &&",
+    )
   })
 })

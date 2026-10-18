@@ -927,12 +927,12 @@ rfa:Forge
 
 rfa:IssueTracker
   owl:equivalentClass [
-    owl:oneOf ( rfa:GitHub rfa:GitLab rfa:AzureDevOps rfa:Linear )
+    owl:oneOf ( rfa:GitHub rfa:GitLab rfa:AzureDevOps rfa:Linear rfa:Fp )
   ] .
 
-# Linear is an Issue Tracker only. GitHub, GitLab, and Azure DevOps are both
-# Forges and Issue Trackers. This class is disjoint from Forge so a data graph
-# cannot treat a tracker-only kind as code hosting.
+# Linear and fp are Issue Trackers only. GitHub, GitLab, and Azure DevOps are
+# both Forges and Issue Trackers. This class is disjoint from Forge so a data
+# graph cannot treat a tracker-only kind as code hosting.
 rfa:IssueTrackerOnly
   a owl:Class ;
   rdfs:label "Issue Tracker only"@en ;
@@ -972,6 +972,12 @@ rfa:Linear
   skos:definition
     "The Linear Issue Tracker kind. Linear is not a code-hosting Forge. Runtime spelling linear."@en .
 
+rfa:Fp
+  a rfa:IssueTracker, rfa:IssueTrackerOnly ;
+  skos:notation "fp" ;
+  skos:definition
+    "The fp Issue Tracker kind: Fiberplane's local-first issue tracker, reached through the fp CLI in a registered project directory. fp is not a code-hosting Forge. Runtime spelling fp."@en .
+
 rfa:OriginalIssueSource
   a owl:Class .
 
@@ -1000,7 +1006,7 @@ rfa:originalIssueSource
   owl:distinctMembers ( rfa:GitHub rfa:GitLab rfa:AzureDevOps ) .
 
 [] a owl:AllDifferent ;
-  owl:distinctMembers ( rfa:GitHub rfa:GitLab rfa:AzureDevOps rfa:Linear ) .
+  owl:distinctMembers ( rfa:GitHub rfa:GitLab rfa:AzureDevOps rfa:Linear rfa:Fp ) .
 
 rfa:StepRun
   rdfs:subClassOf
