@@ -2650,27 +2650,6 @@ function RepositoryCard({
                     Skip autonomous work selection
                   </span>
                 </label>
-                {forge === "github" ? (
-                  <label className={ui.dialogCheck}>
-                    <input
-                      type="checkbox"
-                      className={ui.dialogCheckInput}
-                      data-testid="automatic-ci-repair"
-                      checked={automaticCiRepair}
-                      onChange={(event) =>
-                        setAutomaticCiRepair(event.target.checked)
-                      }
-                    />
-                    Automatic CI repair
-                    <span
-                      className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}
-                    >
-                      A confirmed failure that closes the CI gate queues one
-                      repair. Pending CI, Degraded observation, and Paused do
-                      not. Manual start and retry stay available.
-                    </span>
-                  </label>
-                ) : null}
                 <label className={ui.dialogField}>
                   Merge Policy
                   <select
@@ -3058,6 +3037,14 @@ function RepositoryCard({
                 catalog={ciGateCatalogView}
                 selectedIdentities={selectedCiGateIdentities}
                 onSelectedIdentitiesChange={setSelectedCiGateIdentities}
+                automaticCiRepair={
+                  forge === "github"
+                    ? {
+                        checked: automaticCiRepair,
+                        onCheckedChange: setAutomaticCiRepair,
+                      }
+                    : null
+                }
                 status={{
                   disabled: repository.ciGate.status === "DISABLED",
                   statusLabel: ciGateStatusLabel(repository.ciGate.status),

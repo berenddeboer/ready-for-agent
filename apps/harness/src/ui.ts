@@ -473,6 +473,18 @@ export const ui = {
     "font-mono text-[0.58rem] tracking-[0.1em] uppercase text-ink-faint",
 
   /**
+   * Nested plate inside a section card so a setting below a checkbox list
+   * does not read as one more row of that list.
+   */
+  dialogSubsection: cx(
+    "m-0 grid min-w-0 gap-3 border-[1.5px] border-ink bg-panel",
+    "px-[0.85rem] pt-3 pb-[0.95rem]",
+  ),
+
+  dialogSubsectionTitle:
+    "m-0 font-display text-[0.72rem] font-extrabold tracking-[0.06em] uppercase text-ink",
+
+  /**
    * Field label on paper — medium weight, ink-dim — distinct from the plate
    * control value (bold plate-ink).
    */
@@ -505,7 +517,8 @@ export const ui = {
   dialogCheck:
     "flex flex-wrap items-center gap-3 font-display text-[0.88rem] font-semibold text-ink-2",
 
-  dialogCheckInput: "h-4 w-4 accent-signal",
+  dialogCheckInput:
+    "h-4 w-4 accent-signal disabled:cursor-not-allowed disabled:opacity-60",
 
   dialogCheckHint: "ml-7 flex-[1_1_100%]",
 

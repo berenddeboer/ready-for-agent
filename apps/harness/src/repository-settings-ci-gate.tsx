@@ -4,6 +4,18 @@ import { cx, ui } from "./ui.js"
 export const CI_GATE_DEFINITIONS_LOADING_LABEL = "Loading CI Gate Definitions…"
 export const CI_GATE_EMPTY_SELECTION_HINT =
   "Selected definitions watch default-branch CI. Empty selection disables the Repository CI Gate."
+export const CI_GATE_ON_CLOSE_HEADING = "When the gate closes"
+export const CI_GATE_AUTOMATIC_REPAIR_LABEL =
+  "Automatically start a CI Repair Work Item"
+export const CI_GATE_AUTOMATIC_REPAIR_HINT =
+  "A confirmed failure that closes the CI gate queues one repair. Pending CI, Degraded observation, and Paused do not. Manual start and retry stay available."
+export const CI_GATE_AUTOMATIC_REPAIR_DISABLED_HINT =
+  "Unavailable until a CI Gate Definition is selected. The saved choice is kept."
+
+type AutomaticCiRepairControl = {
+  readonly checked: boolean
+  readonly onCheckedChange: (checked: boolean) => void
+}
 
 export type CiGateDefinitionChoice = {
   readonly identity: string
@@ -38,6 +50,8 @@ export type RepositorySettingsCiGateSectionProps = {
   readonly selectedIdentities: readonly string[]
   readonly onSelectedIdentitiesChange: (identities: string[]) => void
   readonly status: RepositoryCiGateStatusView
+  /** Null hides the control. Non-GitHub Repositories do not offer it. */
+  readonly automaticCiRepair: AutomaticCiRepairControl | null
 }
 
 export const ciGateCatalogViewFromQuery = (input: {
@@ -92,6 +106,45 @@ const toggleIdentity = (input: {
   }
   return input.selectedIdentities.filter(
     (identity) => identity !== input.identity,
+  )
+}
+
+const AutomaticCiRepairSubsection = ({
+  repositoryId,
+  selectedCount,
+  control,
+}: {
+  repositoryId: string
+  selectedCount: number
+  control: AutomaticCiRepairControl
+}) => {
+  const disabled = selectedCount === 0
+  const headingId = `repo-ci-gate-on-close-${repositoryId}`
+  return (
+    <div className={ui.dialogSubsection}>
+      <h4 id={headingId} className={ui.dialogSubsectionTitle}>
+        {CI_GATE_ON_CLOSE_HEADING}
+      </h4>
+      <label className={ui.dialogCheck}>
+        <input
+          type="checkbox"
+          className={ui.dialogCheckInput}
+          name="automaticCiRepair"
+          data-testid="automatic-ci-repair"
+          checked={control.checked}
+          disabled={disabled}
+          onChange={(event) => {
+            control.onCheckedChange(event.target.checked)
+          }}
+        />
+        {CI_GATE_AUTOMATIC_REPAIR_LABEL}
+        <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+          {disabled
+            ? CI_GATE_AUTOMATIC_REPAIR_DISABLED_HINT
+            : CI_GATE_AUTOMATIC_REPAIR_HINT}
+        </span>
+      </label>
+    </div>
   )
 }
 
@@ -208,6 +261,7 @@ export function RepositorySettingsCiGateSection({
   selectedIdentities,
   onSelectedIdentitiesChange,
   status,
+  automaticCiRepair,
 }: RepositorySettingsCiGateSectionProps) {
   const onToggle = (input: { identity: string; selected: boolean }) => {
     onSelectedIdentitiesChange(
@@ -256,6 +310,13 @@ export function RepositorySettingsCiGateSection({
           Last resolved: {status.latestResolvedIncidentSummary}
         </span>
       ) : null}
+      {automaticCiRepair === null ? null : (
+        <AutomaticCiRepairSubsection
+          repositoryId={repositoryId}
+          selectedCount={selectedIdentities.length}
+          control={automaticCiRepair}
+        />
+      )}
     </section>
   )
 }

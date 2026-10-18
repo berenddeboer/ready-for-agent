@@ -12,7 +12,7 @@ const repositoryDialog = (page: Page) =>
 
 /**
  * The Paused control's accessible name starts with its label. A substring
- * `/Paused/i` also matches that word in the Automatic CI repair hint.
+ * `/Paused/i` also matches that word in the CI Gate automatic-repair hint.
  */
 const pausedCheckbox = (dialog: ReturnType<typeof repositoryDialog>) =>
   dialog.getByRole("checkbox", { name: /^Paused\b/i })
