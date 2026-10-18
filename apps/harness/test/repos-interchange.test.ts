@@ -119,6 +119,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "Build model",
       "Review model",
       "Wait for ready checks",
+      "Automatic CI repair",
       "Merge Policy",
       "CI Gate",
     ])

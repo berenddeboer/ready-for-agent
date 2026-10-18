@@ -78,6 +78,7 @@ export default defineConfig({
       "test/ambient-gitlab-layer.test.ts",
       "test/application-config.test.ts",
       "test/application-runtime-disposal.test.ts",
+      "test/automatic-repair-worker-context.test.ts",
       "test/production-sse-idle-timeout.test.ts",
     ],
     // production-sse-idle-timeout is intentionally long; run via vitest when included.

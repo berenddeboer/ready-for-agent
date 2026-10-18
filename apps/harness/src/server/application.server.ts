@@ -240,12 +240,6 @@ export const createApplication = async (
   const admissionLayer = SharedAgentTurnAdmissionLive.pipe(
     Layer.provideMerge(databaseLayer),
   )
-  const repairLayer = RepositoryCiRepairLive().pipe(
-    Layer.provideMerge(CiRepairExecutorLive),
-    Layer.provideMerge(admissionLayer),
-    Layer.provideMerge(activeLayer),
-    Layer.provideMerge(databaseLayer),
-  )
   const lifecycleLayer = makeWorkItemLifecycleLive({
     inspectCwd: toolCwd,
   }).pipe(
@@ -261,6 +255,16 @@ export const createApplication = async (
     Layer.provideMerge(linearLayer),
     Layer.provide(platformLayer),
   )
+  const repairLayer = RepositoryCiRepairLive().pipe(
+    Layer.provideMerge(CiRepairExecutorLive),
+    Layer.provideMerge(admissionLayer),
+    Layer.provideMerge(activeLayer),
+    Layer.provideMerge(keymaxxerLayer),
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(lifecycleLayer),
+  )
+  // The worker fiber is forked while this layer builds. A mergeAll sibling
+  // is not in that fiber, so polling would keep the no-op repair default.
   const workerLayer = JobWorkerLive.pipe(
     Layer.provideMerge(queueLayer),
     Layer.provideMerge(reconcilerLayer),
@@ -269,6 +273,7 @@ export const createApplication = async (
     Layer.provideMerge(gitlabLayer),
     Layer.provideMerge(azureDevOpsLayer),
     Layer.provideMerge(linearLayer),
+    Layer.provideMerge(repairLayer),
   )
   const loggingLayer = Logger.layer([Logger.consolePretty({ colors: false })])
   const localGitLayer = LocalGit.layer.pipe(Layer.provide(platformLayer))

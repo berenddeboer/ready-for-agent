@@ -56,6 +56,8 @@ describe("native repository invocation ownership", () => {
             ]),
           )
           await run(runGit(repository, ["config", "user.name", "fixture"]))
+          // Local-only: global commit.gpgsign would hang this commit on pinentry.
+          await run(runGit(repository, ["config", "commit.gpgsign", "false"]))
           await writeFile(join(cwd, "tracked.txt"), "keep this change\n")
           await run(runGit(repository, ["add", "tracked.txt"]))
           await writeFile(join(cwd, "worker.py"), worker)

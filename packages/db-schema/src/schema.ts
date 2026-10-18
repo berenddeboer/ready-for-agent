@@ -74,6 +74,11 @@ export const repository = snakeCase.table(
       .notNull()
       .default(true),
     /**
+     * Opt-in automatic CI repair for a confirmed Closed incident. Off for
+     * existing and new Repositories. Only a GitHub Repository can enable it.
+     */
+    automaticCiRepair: integer({ mode: "boolean" }).notNull().default(false),
+    /**
      * Mapped Linear project id when Issue Tracker is Linear. Null otherwise.
      * Unique among Repositories when set: one Linear project maps to one
      * Repository.
@@ -712,6 +717,14 @@ export const ciFailureIncident = snakeCase.table(
       ],
     }),
     summary: text().notNull(),
+    /**
+     * False once any repair invocation has been admitted for this incident.
+     * Polling, restart, and checkbox toggles cannot start another automatic
+     * attempt. A new incident starts eligible.
+     */
+    automaticRepairEligible: integer({ mode: "boolean" })
+      .notNull()
+      .default(true),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),
@@ -797,8 +810,9 @@ export const ciRepairAuthorization = snakeCase.table(
 )
 
 /**
- * One manual repository CI repair invocation. At most one queued or running
- * row per repository. This is process supervision, not a Work Item.
+ * One repository CI repair invocation, manual or automatic. At most one
+ * queued or running row per repository. This is process supervision, not a
+ * Work Item.
  * See xplain: type ci repair invocation "criv"
  */
 export const ciRepairInvocation = snakeCase.table(
@@ -820,6 +834,10 @@ export const ciRepairInvocation = snakeCase.table(
     status: text({
       enum: ["queued", "running", "recovered", "unresolved"],
     }).notNull(),
+    /** `manual` is an explicit start or retry. `automatic` is opt-in selection. */
+    requestSource: text({ enum: ["manual", "automatic"] })
+      .notNull()
+      .default("manual"),
     /** Set once the invocation reaches a terminal status. */
     outcome: text({
       enum: ["recovered", "failed", "timed_out", "interrupted"],

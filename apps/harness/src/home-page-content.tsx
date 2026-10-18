@@ -1084,6 +1084,9 @@ function RepositoryCard({
   )
   const [waitForReadyForReviewChecks, setWaitForReadyForReviewChecks] =
     useState(repository.waitForReadyForReviewChecks)
+  const [automaticCiRepair, setAutomaticCiRepair] = useState(
+    repository.automaticCiRepair,
+  )
   const [selectedCiGateIdentities, setSelectedCiGateIdentities] = useState(() =>
     repository.selectedCiGateDefinitions.map(
       (definition) => definition.identity,
@@ -1137,6 +1140,7 @@ function RepositoryCard({
       mergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
       includeAllIssueAuthors: boolean
       waitForReadyForReviewChecks: boolean
+      automaticCiRepair: boolean
       issueTracker?: string
       linearProjectId?: string | null
       linearProjectName?: string | null
@@ -1170,6 +1174,7 @@ function RepositoryCard({
           mergePolicy: true,
           includeAllIssueAuthors: true,
           waitForReadyForReviewChecks: true,
+          automaticCiRepair: true,
           issueTracker: true,
           linearProjectId: true,
           linearProjectName: true,
@@ -1325,6 +1330,7 @@ function RepositoryCard({
     setLinearWorkflowStatuses([...repository.linearWorkflowStatuses])
     setLinearTokenCreated(false)
     setWaitForReadyForReviewChecks(repository.waitForReadyForReviewChecks)
+    setAutomaticCiRepair(repository.automaticCiRepair)
     setSelectedCiGateIdentities(
       repository.selectedCiGateDefinitions.map(
         (definition) => definition.identity,
@@ -1871,6 +1877,7 @@ function RepositoryCard({
       mergePolicy,
       includeAllIssueAuthors,
       waitForReadyForReviewChecks,
+      automaticCiRepair: forge === "github" ? automaticCiRepair : false,
       issueTracker: forge === "github" ? issueTracker : forge,
       linearProjectId:
         forge === "github" && issueTracker === "linear"
@@ -2643,6 +2650,27 @@ function RepositoryCard({
                     Skip autonomous work selection
                   </span>
                 </label>
+                {forge === "github" ? (
+                  <label className={ui.dialogCheck}>
+                    <input
+                      type="checkbox"
+                      className={ui.dialogCheckInput}
+                      data-testid="automatic-ci-repair"
+                      checked={automaticCiRepair}
+                      onChange={(event) =>
+                        setAutomaticCiRepair(event.target.checked)
+                      }
+                    />
+                    Automatic CI repair
+                    <span
+                      className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}
+                    >
+                      A confirmed failure that closes the CI gate queues one
+                      repair. Pending CI, Degraded observation, and Paused do
+                      not. Manual start and retry stay available.
+                    </span>
+                  </label>
+                ) : null}
                 <label className={ui.dialogField}>
                   Merge Policy
                   <select
@@ -3155,6 +3183,14 @@ function RepositoryCard({
                     : "Disabled"}
                 </dd>
               </div>
+              {repository.forge === "github" ? (
+                <div className={ui.repoMetaRow}>
+                  <dt>Automatic CI repair</dt>
+                  <dd>
+                    {repository.automaticCiRepair ? "Enabled" : "Disabled"}
+                  </dd>
+                </div>
+              ) : null}
               <div className={ui.repoMetaRow}>
                 <dt>Merge Policy</dt>
                 <dd>

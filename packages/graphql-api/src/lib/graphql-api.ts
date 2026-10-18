@@ -188,6 +188,8 @@ type UpdateRepositorySettingsArgs = {
     mergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
     includeAllIssueAuthors: boolean
     waitForReadyForReviewChecks: boolean
+    /** Omitted leaves the stored opt-in unchanged. */
+    automaticCiRepair?: boolean
     selectedCiGateDefinitionIdentities?: readonly string[] | null
     issueTracker?: string | null
     linearProjectId?: string | null
@@ -513,6 +515,7 @@ const graphqlCiRepair = (repair: RepositoryCiRepairView) => ({
       ? null
       : new Date(repair.deadlineAt).toISOString(),
   sessionId: repair.sessionId,
+  requestSource: repair.requestSource === "automatic" ? "AUTOMATIC" : "MANUAL",
   report: repair.report,
   links: repair.links.map((link) => ({
     url: link.url,
@@ -2138,6 +2141,9 @@ export const createGraphqlApi = <R>(
                       includeAllIssueAuthors: args.input.includeAllIssueAuthors,
                       waitForReadyForReviewChecks:
                         args.input.waitForReadyForReviewChecks,
+                      ...(args.input.automaticCiRepair !== undefined
+                        ? { automaticCiRepair: args.input.automaticCiRepair }
+                        : {}),
                       ...(args.input.issueTracker !== undefined &&
                       args.input.issueTracker !== null
                         ? { issueTracker: args.input.issueTracker }
@@ -2198,6 +2204,16 @@ export const createGraphqlApi = <R>(
                         ),
                       )
                     }
+                    const repair = yield* RepositoryCiRepair
+                    yield* repair.considerAutomatic(updated.id).pipe(
+                      Effect.catch((error) =>
+                        Effect.logWarning(
+                          "Automatic CI repair was not considered after settings save",
+                          { repositoryId: updated.id, error: String(error) },
+                        ),
+                      ),
+                      Effect.asVoid,
+                    )
                     return updated
                   }),
                 )

@@ -675,15 +675,20 @@ type RepositoryCiGate {
   activeIncident: CiFailureIncident
   latestResolvedIncident: CiFailureIncident
   """
-  True only for GitHub, where manual CI repair execution is supported.
+  True only for GitHub, where CI repair execution is supported.
   GitLab and Azure DevOps stay observation-only.
   """
   repairSupported: Boolean!
   """
-  Latest manual CI repair invocation for this repository, if one has been
-  admitted. Null when repair has never been requested.
+  Latest CI repair invocation for this repository, manual or automatic, if one
+  has been admitted. Null when repair has never been requested.
   """
   repair: RepositoryCiRepair
+}
+
+enum RepositoryCiRepairRequestSource {
+  MANUAL
+  AUTOMATIC
 }
 
 enum RepositoryCiRepairStatus {
@@ -711,14 +716,18 @@ type RepositoryCiRepairLink {
 }
 
 """
-One manual repository CI repair. Not a Work Item. Recovery is the gate
-reopening; this record only reports the invocation.
+One repository CI repair, manual or automatic. Not a Work Item. Recovery is
+the gate reopening; this record only reports the invocation.
 """
 type RepositoryCiRepair {
   id: ID!
   repositoryId: ID!
   incidentId: ID!
   status: RepositoryCiRepairStatus!
+  """
+  MANUAL is an explicit start or retry. AUTOMATIC is opt-in selection.
+  """
+  requestSource: RepositoryCiRepairRequestSource!
   outcome: RepositoryCiRepairOutcome
   admittedAt: String!
   launchedAt: String
@@ -788,6 +797,12 @@ type Repository {
   advance to Decide PR Merge without that 90-second startup wait.
   """
   waitForReadyForReviewChecks: Boolean!
+  """
+  Opt-in automatic CI repair. Off for existing and new Repositories. Only a
+  GitHub Repository can enable it. When on, one confirmed Closed incident can
+  enqueue one shared repair attempt.
+  """
+  automaticCiRepair: Boolean!
   issuesReconciledAt: String
   """
   Unfinished ordinary Work Items on this Repository. Explicit-profile Work
@@ -1431,6 +1446,12 @@ input UpdateRepositorySettingsInput {
   """
   waitForReadyForReviewChecks: Boolean!
   """
+  Opt-in automatic CI repair. Omitted leaves the stored value unchanged.
+  True is rejected unless the Repository's Forge is GitHub. A Forge other
+  than GitHub clears a stored opt-in.
+  """
+  automaticCiRepair: Boolean
+  """
   Selected CI Gate Definition identities. Empty list disables the Repository
   CI Gate. Omitted leaves stored selections unchanged. Newly added identities
   must exist in the current live catalog.
@@ -1493,7 +1514,7 @@ type Mutation {
   GitHub only. Does not create a Work Item. At most one queued or running
   repair per repository. An explicit retry after an unresolved outcome gets a
   new four-hour budget counted from launch, not from queue time. Allowed while
-  the repository is paused.
+  the repository is paused and while automatic repair is off.
   """
   startRepositoryCiRepair(repositoryId: ID!): RepositoryCiRepair!
   """

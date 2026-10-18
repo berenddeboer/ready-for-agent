@@ -96,8 +96,13 @@ describe("CI Gate Definition migration", () => {
     if (observation === undefined) {
       throw new Error(`Missing migration ${OBSERVATION_MIGRATION}`)
     }
+    // Later migrations alter ci_failure_incident. They must not run until
+    // this observation migration has created that table.
     const prior = sources.filter(
-      (source) => source.name !== OBSERVATION_MIGRATION,
+      (source) => source.name < OBSERVATION_MIGRATION,
+    )
+    const following = sources.filter(
+      (source) => source.name > OBSERVATION_MIGRATION,
     )
 
     await Effect.runPromise(
@@ -129,7 +134,7 @@ describe("CI Gate Definition migration", () => {
            )`,
         )
 
-        yield* runMigrationsFromSources([...prior, observation])
+        yield* runMigrationsFromSources([...prior, observation, ...following])
 
         const states = (yield* sql.unsafe(
           "SELECT repository_id FROM ci_gate_state",

@@ -359,6 +359,7 @@ const repositorySelectColumns = `id, forge, issue_tracker, forge_host, project_p
              review_model, review_thinking_level, backend_model_prefs, merge_policy,
              guaranteed_min_concurrent_agent_turns,
              include_all_issue_authors, wait_for_ready_for_review_checks,
+             automatic_ci_repair,
              linear_project_id, linear_project_name, linear_workflow_statuses,
              issues_reconciled_at`
 
@@ -416,6 +417,7 @@ const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
     guaranteedMinConcurrentAgentTurns: row.guaranteedMinConcurrentAgentTurns,
     includeAllIssueAuthors: row.includeAllIssueAuthors,
     waitForReadyForReviewChecks: row.waitForReadyForReviewChecks,
+    automaticCiRepair: row.automaticCiRepair,
     linearProjectId: row.linearProjectId,
     linearProjectName: row.linearProjectName,
     linearWorkflowStatuses: parseLinearWorkflowStatuses(
@@ -1418,6 +1420,7 @@ export const DbServiceLive = Layer.effect(
                         selected_agent_backend AS selectedAgentBackend,
                         backend_model_prefs AS backendModelPrefs,
                         guaranteed_min_concurrent_agent_turns AS guaranteedMinConcurrentAgentTurns,
+                        automatic_ci_repair AS automaticCiRepair,
                         linear_project_id AS linearProjectId,
                         linear_project_name AS linearProjectName,
                         linear_workflow_statuses AS linearWorkflowStatuses
@@ -1647,6 +1650,17 @@ export const DbServiceLive = Layer.effect(
             // the (possibly empty) prefs for the new effective backend — which
             // we just wrote from this request's model fields.
             const backendModelPrefs = serializeBackendModelPrefsMap(prefsMap)
+            if (input.automaticCiRepair === true && nextForge !== "github") {
+              return yield* new InvalidRepositorySettingsError({
+                field: "automaticCiRepair",
+                message:
+                  "Automatic CI repair can be enabled only for a GitHub Repository",
+              })
+            }
+            // Omitted leaves the stored opt-in. Leaving GitHub clears it.
+            const nextAutomatic =
+              nextForge === "github" &&
+              (input.automaticCiRepair ?? existing.automaticCiRepair)
             const updatedRows = yield* sql
               .unsafe(
                 `UPDATE repository
@@ -1665,6 +1679,7 @@ export const DbServiceLive = Layer.effect(
                  guaranteed_min_concurrent_agent_turns = ?,
                  include_all_issue_authors = ?,
                  wait_for_ready_for_review_checks = ?,
+                 automatic_ci_repair = ?,
                  linear_project_id = ?,
                  linear_project_name = ?,
                  linear_workflow_statuses = ?,
@@ -1687,6 +1702,7 @@ export const DbServiceLive = Layer.effect(
                   nextGuaranteedMin,
                   input.includeAllIssueAuthors,
                   input.waitForReadyForReviewChecks,
+                  nextAutomatic,
                   nextLinearProjectId,
                   nextLinearProjectName,
                   JSON.stringify(nextLinearWorkflowStatuses),

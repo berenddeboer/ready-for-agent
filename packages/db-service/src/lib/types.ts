@@ -80,6 +80,8 @@ export const RepositoryRecord = Schema.Struct({
   ),
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
+  /** Opt-in automatic CI repair. Off unless a GitHub Repository enables it. */
+  automaticCiRepair: Schema.Boolean,
   linearProjectId: Schema.NullOr(Schema.String),
   linearProjectName: Schema.NullOr(Schema.String),
   linearWorkflowStatuses: Schema.Array(LinearTeamWorkflowSelection),
@@ -223,6 +225,11 @@ export const UpdateRepositorySettingsInput = Schema.Struct({
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
   /**
+   * Omitted leaves the stored opt-in unchanged. True is rejected unless the
+   * Repository's Forge is GitHub.
+   */
+  automaticCiRepair: Schema.optionalKey(Schema.Boolean),
+  /**
    * Configured Issue Tracker. Omitted leaves the stored tracker unchanged.
    */
   issueTracker: Schema.optionalKey(IssueTracker),
@@ -361,6 +368,7 @@ export const RepositorySqlRow = Schema.Struct({
   guaranteedMinConcurrentAgentTurns: Schema.NullOr(Schema.Int),
   includeAllIssueAuthors: SqlBoolean,
   waitForReadyForReviewChecks: SqlBoolean,
+  automaticCiRepair: SqlBoolean,
   linearProjectId: Schema.NullOr(Schema.String),
   linearProjectName: Schema.NullOr(Schema.String),
   linearWorkflowStatuses: Schema.String,
@@ -383,6 +391,7 @@ export const RepositorySqlRow = Schema.Struct({
     guaranteedMinConcurrentAgentTurns: "guaranteed_min_concurrent_agent_turns",
     includeAllIssueAuthors: "include_all_issue_authors",
     waitForReadyForReviewChecks: "wait_for_ready_for_review_checks",
+    automaticCiRepair: "automatic_ci_repair",
     linearProjectId: "linear_project_id",
     linearProjectName: "linear_project_name",
     linearWorkflowStatuses: "linear_workflow_statuses",
@@ -555,6 +564,7 @@ export const RepositorySettingsSqlRow = Schema.Struct({
   selectedAgentBackend: Schema.NullOr(Schema.String),
   backendModelPrefs: Schema.String,
   guaranteedMinConcurrentAgentTurns: Schema.NullOr(Schema.Int),
+  automaticCiRepair: SqlBoolean,
   linearProjectId: Schema.NullOr(Schema.String),
   linearProjectName: Schema.NullOr(Schema.String),
   linearWorkflowStatuses: Schema.String,

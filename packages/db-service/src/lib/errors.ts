@@ -119,6 +119,7 @@ export class InvalidRepositorySettingsError extends Schema.TaggedError<InvalidRe
       "issueTracker",
       "linearProjectId",
       "linearWorkflowStatuses",
+      "automaticCiRepair",
     ]),
     message: Schema.String,
   },
