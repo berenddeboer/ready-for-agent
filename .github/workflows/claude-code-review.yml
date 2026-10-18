@@ -1,12 +1,16 @@
 name: Claude Code Review
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+
+# Match the sibling workflows: default to no permissions; the job below
+# grants itself only what the review needs.
+permissions: {}
 
 jobs:
   claude-review:
@@ -39,6 +43,8 @@ jobs:
           fetch-depth: 0
 
       - name: Authenticate Git fetches for review
+        # The checkout persists no credentials; Claude's git and gh reads of
+        # the same repository still need them.
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh auth setup-git --hostname github.com
@@ -57,8 +63,9 @@ jobs:
           track_progress: true
           additional_permissions: |
             actions: read
-          # The action restores .claude/ from the trusted base before Claude
-          # starts, so this resolves to the repository's reviewed local skill.
+          # The skill is read from the PR's own checkout. Only authors with
+          # push access can open same-repo PRs, so it is as trusted as any
+          # branch they can push.
           prompt: '/code-review origin/${{ github.event.pull_request.base.ref }}'
           # Permit only the local review skill, its required sub-agent, and
           # read-only repository inspection commands.
