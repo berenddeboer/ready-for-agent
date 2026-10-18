@@ -171,6 +171,20 @@ describe("generated lifecycle state", () => {
     expect(fromStates).not.toContain("local_cleanup")
   })
 
+  it("declares a CI Repair No-Change Outcome straight to local cleanup", () => {
+    expect(
+      isDeclaredLifecycleTransition("assess_changes", "local_cleanup"),
+    ).toBe(true)
+    expect(isDeclaredLifecycleTransition("commit", "local_cleanup")).toBe(true)
+    expect(
+      LIFECYCLE_TRANSITIONS.filter(
+        (transition) =>
+          transition.guard === "no_change_outcome" &&
+          transition.to === "local_cleanup",
+      ).map((transition) => transition.from),
+    ).toEqual(["assess_changes", "commit"])
+  })
+
   it("declares Commit's confirmed No-Change Outcome to Close Issue", () => {
     const commitNoChange = LIFECYCLE_TRANSITIONS.filter(
       (transition) =>

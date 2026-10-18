@@ -41,6 +41,8 @@ import {
   STEP_RUN_REASON,
   buildHarnessPublicationFallbackCopy,
   buildNoChangeConfirmationPrompt,
+  buildPublicationCopyFormatCorrectionPrompt,
+  buildPublicationCopyPrompt,
   commit,
   formatPublicationCommitMessage,
   makeWorkItemId,
@@ -539,6 +541,58 @@ describe("publication copy parsing", () => {
     expect(formatPublicationCommitMessage(seeded!)).toBe(
       "prior commit\n\nCloses #91",
     )
+  })
+
+  it("keeps a CI Repair publication free of an Issue closing reference", () => {
+    const normalized = normalizePublicationCopy(
+      {
+        title: "fix: restore default-branch CI",
+        body: "The workflow used a removed action.\n\nCloses #0",
+      },
+      0,
+      undefined,
+      { ciRepair: true },
+    )
+    expect(normalized).toEqual({
+      title: "fix: restore default-branch CI",
+      body: "The workflow used a removed action.",
+    })
+
+    const seeded = publicationCopyFromCommitMessage(
+      "fix: restore default-branch CI\n\nThe workflow used a removed action.\n\nCloses #0",
+      0,
+      undefined,
+      { ciRepair: true },
+    )
+    expect(seeded?.body).toBe("The workflow used a removed action.")
+    expect(seeded?.body).not.toContain("Closes")
+
+    const fallback = buildHarnessPublicationFallbackCopy({
+      issueNumber: 0,
+      issueTitle: "Repair CI on main",
+      workItemId: "wi-ci",
+      ciRepair: true,
+    })
+    expect(fallback.title).toBe("Repair CI on main")
+    expect(fallback.body).not.toContain("Closes")
+    expect(fallback.body).not.toContain("Linear:")
+
+    const prompt = buildPublicationCopyPrompt({
+      issueNumber: 0,
+      attachmentDirectory: "/tmp/attachments",
+      ciRepair: true,
+    })
+    expect(prompt).toContain("CI Repair Work Item")
+    expect(prompt).toContain("no Closes #")
+    expect(prompt).not.toContain("Closes #0")
+
+    const correction = buildPublicationCopyFormatCorrectionPrompt({
+      issueNumber: 0,
+      attachmentDirectory: "/tmp/attachments",
+      ciRepair: true,
+    })
+    expect(correction).toContain("no Closes #")
+    expect(correction).not.toContain("issue #0")
   })
 
   it("strips trailing-period and list-form closing references when normalizing", () => {

@@ -136,6 +136,14 @@ function PipelineTicket({
 }) {
   const repositoryLabel = repository?.projectPath ?? workItem.repositoryId
   const issueTitle = issue?.title ?? workItem.issueTitle ?? undefined
+  const isCiRepair = workItem.origin === "CI_REPAIR"
+  const ciRepairTitle =
+    workItem.issueTitle !== null && workItem.issueTitle.trim() !== ""
+      ? workItem.issueTitle
+      : workItem.ciRepairDefaultBranch !== null &&
+          workItem.ciRepairDefaultBranch.trim() !== ""
+        ? `Repair CI on ${workItem.ciRepairDefaultBranch}`
+        : "Repair CI"
   const issueUrl =
     issue?.url !== undefined && issue.url !== ""
       ? issue.url
@@ -203,7 +211,49 @@ function PipelineTicket({
       <p className={ui.jobTicketRepo} title={repositoryLabel}>
         {repositoryLabel}
       </p>
-      {issueUrl !== null && issueUrl !== "" ? (
+      {isCiRepair ? (
+        <>
+          <span className={ui.jobTicketTitle}>{ciRepairTitle}</span>
+          <span
+            className={cx(ui.statusTag, ui.statusTagPlain)}
+            data-testid="ci-repair-badge"
+          >
+            CI Repair
+          </span>
+          {workItem.ciRepairHeadSha !== null &&
+          workItem.ciRepairHeadSha !== "" ? (
+            <p
+              className={ui.jobTicketRuntimeLine}
+              data-testid="ci-repair-head-sha"
+              title={workItem.ciRepairHeadSha}
+            >
+              {workItem.ciRepairHeadSha}
+            </p>
+          ) : null}
+          {workItem.ciRepairFailingRuns.map((run) =>
+            run.htmlUrl !== null && run.htmlUrl !== "" ? (
+              <a
+                key={run.runIdentity}
+                className={ui.jobTicketRuntimeLine}
+                href={run.htmlUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="ci-repair-failing-run"
+              >
+                {run.displayLabel}
+              </a>
+            ) : (
+              <span
+                key={run.runIdentity}
+                className={ui.jobTicketRuntimeLine}
+                data-testid="ci-repair-failing-run"
+              >
+                {run.displayLabel}
+              </span>
+            ),
+          )}
+        </>
+      ) : issueUrl !== null && issueUrl !== "" ? (
         <a
           className={cx(ui.jobTicketTitle, ui.jobTicketTitleLink)}
           href={issueUrl}
@@ -290,7 +340,7 @@ function PipelineTicket({
           workItem={workItem}
           compact
           collapseEarlierLanes
-          issueUrl={issueUrl}
+          issueUrl={isCiRepair ? null : issueUrl}
           pullRequestUrl={pullRequestUrl}
           showPullRequestBadge={!promotePrToHeader}
         />

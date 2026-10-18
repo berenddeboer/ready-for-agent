@@ -625,16 +625,16 @@ type CiFailureIncident {
 }
 
 """
-How a Work Item became a CI Repair for one CI Failure Incident.
+How a Work Item received CI Gate Bypass for one CI Failure Incident.
 """
 enum CiRepairSourceAction {
-  IMPLEMENT_CI_REPAIR
-  AUTHORIZE_AS_CI_REPAIR
+  IMPLEMENT_CI_GATE_BYPASS
+  AUTHORIZE_CI_GATE_BYPASS
 }
 
 """
-One append-only CI Repair authorization. Incident remains visible after it
-resolves. Never labeled Skip CI or Force merge.
+One append-only CI Gate Bypass authorization. Incident remains visible after it
+resolves. Never labeled Skip CI, Force merge, or CI Repair.
 """
 type CiRepairAuthorization {
   incident: CiFailureIncident!
@@ -643,7 +643,7 @@ type CiRepairAuthorization {
 }
 
 """
-Active and historical CI Repair authorization for one Work Item.
+Active and historical CI Gate Bypass authorization for one Work Item.
 """
 type WorkItemCiRepair {
   """
@@ -656,10 +656,27 @@ type WorkItemCiRepair {
   """
   history: [CiRepairAuthorization!]!
   """
-  True when this unfinished Work Item can be authorized for the active Closed
-  CI Failure Incident.
+  True when this unfinished Work Item can receive CI Gate Bypass for the
+  active Closed CI Failure Incident.
   """
   canAuthorize: Boolean!
+}
+
+"""
+One failing CI run captured when a CI Repair Work Item starts.
+"""
+type CiRepairFailingRun {
+  runIdentity: String!
+  htmlUrl: String
+  displayLabel: String!
+}
+
+"""
+Whether a Work Item was created from an Issue or as a CI Repair Work Item.
+"""
+enum WorkItemOrigin {
+  ISSUE
+  CI_REPAIR
 }
 
 """
@@ -675,71 +692,10 @@ type RepositoryCiGate {
   activeIncident: CiFailureIncident
   latestResolvedIncident: CiFailureIncident
   """
-  True only for GitHub, where CI repair execution is supported.
-  GitLab and Azure DevOps stay observation-only.
+  True while the gate is Closed and no CI Repair Work Item is unfinished.
+  Independent of automatic CI repair and of Paused. Allowed on every Forge.
   """
-  repairSupported: Boolean!
-  """
-  Latest CI repair invocation for this repository, manual or automatic, if one
-  has been admitted. Null when repair has never been requested.
-  """
-  repair: RepositoryCiRepair
-}
-
-enum RepositoryCiRepairRequestSource {
-  MANUAL
-  AUTOMATIC
-}
-
-enum RepositoryCiRepairStatus {
-  QUEUED
-  RUNNING
-  RECOVERED
-  UNRESOLVED
-}
-
-enum RepositoryCiRepairOutcome {
-  RECOVERED
-  FAILED
-  TIMED_OUT
-  INTERRUPTED
-}
-
-"""
-A pull request or remote job discovered while repairing CI. Unfinished pull
-requests and active jobs stay visible after local execution stops.
-"""
-type RepositoryCiRepairLink {
-  url: String!
-  kind: String!
-  disposition: String!
-}
-
-"""
-One repository CI repair, manual or automatic. Not a Work Item. Recovery is
-the gate reopening; this record only reports the invocation.
-"""
-type RepositoryCiRepair {
-  id: ID!
-  repositoryId: ID!
-  incidentId: ID!
-  status: RepositoryCiRepairStatus!
-  """
-  MANUAL is an explicit start or retry. AUTOMATIC is opt-in selection.
-  """
-  requestSource: RepositoryCiRepairRequestSource!
-  outcome: RepositoryCiRepairOutcome
-  admittedAt: String!
-  launchedAt: String
-  deadlineAt: String
-  sessionId: String
-  report: String
-  links: [RepositoryCiRepairLink!]!
-  """
-  True when this process is no longer running the agent. Remote jobs and
-  unfinished pull requests may still be active.
-  """
-  localExecutionStopped: Boolean!
+  canStartCiRepair: Boolean!
 }
 
 type Repository {
@@ -798,9 +754,10 @@ type Repository {
   """
   waitForReadyForReviewChecks: Boolean!
   """
-  Opt-in automatic CI repair. Off for existing and new Repositories. Only a
-  GitHub Repository can enable it. When on, one confirmed Closed incident can
-  enqueue one shared repair attempt.
+  Opt-in automatic CI repair. Off for existing and new Repositories. When on,
+  every gate observation that sees a terminal failure of a selected CI Gate
+  Definition starts a CI Repair Work Item when none is unfinished and the
+  Repository is not Paused. Allowed on every Forge.
   """
   automaticCiRepair: Boolean!
   issuesReconciledAt: String
@@ -1291,7 +1248,23 @@ type IssueSource {
 type WorkItem {
   id: ID!
   repositoryId: ID!
+  """
+  ISSUE is an ordinary Issue Work Item. CI_REPAIR has no Issue.
+  """
+  origin: WorkItemOrigin!
   issueNumber: Int!
+  """
+  Default branch for a CI Repair Work Item. Null for Issue origin.
+  """
+  ciRepairDefaultBranch: String
+  """
+  Triggering commit for a CI Repair Work Item when known. Null otherwise.
+  """
+  ciRepairHeadSha: String
+  """
+  Failing runs captured when a CI Repair Work Item starts. Empty for Issue origin.
+  """
+  ciRepairFailingRuns: [CiRepairFailingRun!]!
   """
   Original Issue Source captured at creation. Survives later Repository
   Issue Tracker changes. Other Issue contents remain live.
@@ -1330,8 +1303,9 @@ type WorkItem {
   statusLabel: String!
   statusMessage: String
   """
-  Incident-scoped CI Repair authorization. Active is set only while the
-  authorized CI Failure Incident is still open. History is append-only.
+  Incident-scoped CI Gate Bypass. Active is set only while the authorized CI
+  Failure Incident is still open. History is append-only. A CI Repair Work
+  Item crosses a Closed gate without this authorization.
   """
   ciRepair: WorkItemCiRepair!
   """
@@ -1447,8 +1421,7 @@ input UpdateRepositorySettingsInput {
   waitForReadyForReviewChecks: Boolean!
   """
   Opt-in automatic CI repair. Omitted leaves the stored value unchanged.
-  True is rejected unless the Repository's Forge is GitHub. A Forge other
-  than GitHub clears a stored opt-in.
+  Allowed on every Forge.
   """
   automaticCiRepair: Boolean
   """
@@ -1502,23 +1475,21 @@ type Mutation {
   refreshRepository(repositoryId: ID!): RefreshJob!
   implementNow(repositoryId: ID!, nativeId: String!): WorkItem!
   """
-  Create a Work Item authorized as CI Repair for the active Closed CI Failure
+  Create a Work Item with CI Gate Bypass for the active Closed CI Failure
   Incident. Fails when no Closed incident is active. Competes for ordinary
   Worker Slots and does not bypass Work Item-local PR safety. The repository
-  CI repair button uses startRepositoryCiRepair instead of this mutation.
+  CI view uses startRepositoryCiRepair to create a CI Repair Work Item.
   Existing authorized Work Items keep the policy recorded here.
   """
   implementCiRepair(repositoryId: ID!, nativeId: String!): WorkItem!
   """
-  Manually start or retry repository CI repair for the current Closed incident.
-  GitHub only. Does not create a Work Item. At most one queued or running
-  repair per repository. An explicit retry after an unresolved outcome gets a
-  new four-hour budget counted from launch, not from queue time. Allowed while
-  the repository is paused and while automatic repair is off.
+  Start a CI Repair Work Item for this Repository. Same Work Item as automatic
+  start. Allowed while the gate is Closed and no CI Repair Work Item is
+  unfinished, on every Forge, regardless of automatic CI repair and Paused.
   """
-  startRepositoryCiRepair(repositoryId: ID!): RepositoryCiRepair!
+  startRepositoryCiRepair(repositoryId: ID!): WorkItem!
   """
-  Authorize an unfinished Work Item as CI Repair for the active Closed incident
+  Grant an unfinished Work Item CI Gate Bypass for the active Closed incident
   without resetting worktree, Session, profile, Merge Policy, PR, or history.
   """
   authorizeWorkItemAsCiRepair(workItemId: ID!): WorkItem!

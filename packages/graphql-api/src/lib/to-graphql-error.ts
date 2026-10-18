@@ -198,42 +198,29 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         `Work Item ${error.workItemId} is already ${error.state}`,
         "WORK_ITEM_TERMINAL",
       )
-    case "CiRepairNotSupportedError":
-      return gql(
-        error.message ??
-          "CI repair execution is supported for GitHub repositories only.",
-        "CI_REPAIR_NOT_SUPPORTED",
-        { repositoryId: error.repositoryId },
-      )
-    case "CiRepairNotEligibleError":
-      return gql(
-        error.message ??
-          "CI repair starts only while a current Closed incident is active.",
-        "CI_REPAIR_NOT_ELIGIBLE",
-        { repositoryId: error.repositoryId },
-      )
-    case "CiRepairNotReadyError":
-      return gql(
-        error.message ??
-          "CI repair cannot start until the agent backend is ready.",
-        "CI_REPAIR_NOT_READY",
-        { repositoryId: error.repositoryId },
-      )
-    case "CiRepairProcessStillRunningError":
-      return gql(
-        error.message ?? "The previous CI repair process is still running.",
-        "CI_REPAIR_PROCESS_STILL_RUNNING",
-        { repositoryId: error.repositoryId },
-      )
     case "CiRepairNotAvailableError":
       return gql(
         error.message ??
-          "CI Repair is available only while a CI Failure Incident is active and Closed",
+          "CI Gate Bypass is available only while a CI Failure Incident is active and Closed",
         "CI_REPAIR_NOT_AVAILABLE",
         {
           repositoryId: error.repositoryId,
           workItemId: error.workItemId,
         },
+      )
+    case "CiRepairGateNotClosedError":
+      return gql(
+        error.message ??
+          "Start CI Repair is available only while the CI Gate is Closed",
+        "CI_REPAIR_GATE_NOT_CLOSED",
+        { repositoryId: error.repositoryId },
+      )
+    case "CiRepairDefaultBranchMissingError":
+      return gql(
+        error.message ??
+          "Start CI Repair needs the Repository default branch from the CI Gate",
+        "CI_REPAIR_DEFAULT_BRANCH_MISSING",
+        { repositoryId: error.repositoryId },
       )
     case "ActiveStepRunExistsError":
       return gql(

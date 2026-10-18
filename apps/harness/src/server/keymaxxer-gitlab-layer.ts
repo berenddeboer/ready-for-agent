@@ -44,6 +44,33 @@ type VaultSecretProbe =
 
 const requestError = makeRequestError(GitLabRequestError)
 
+/**
+ * `retryPipeline` stays off GitLabServiceShape. Ambient attaches it; this
+ * layer forwards that method or runs the vault helper.
+ */
+const callGitLabRetryPipeline = (
+  service: object,
+  repository: GitLabRepository,
+  pipelineId: number,
+): Effect.Effect<void, GitLabServiceError> => {
+  const candidate = (service as { retryPipeline?: unknown }).retryPipeline
+  if (typeof candidate !== "function") {
+    return Effect.fail(
+      requestError(
+        repository,
+        "retry pipeline",
+        "This Forge cannot rerun CI jobs (gitlab)",
+      ),
+    )
+  }
+  return (
+    candidate as (
+      repository: GitLabRepository,
+      pipelineId: number,
+    ) => Effect.Effect<void, GitLabServiceError>
+  )(repository, pipelineId)
+}
+
 const repositoryUnavailable = (repository: GitLabRepository) =>
   new GitLabProjectUnavailableError(repository)
 
@@ -743,6 +770,24 @@ export const keymaxxerGitLabLayer = (options: {
             ),
         ),
       }
-      return service
+      return Object.assign(service, {
+        retryPipeline: Effect.fn("KeymaxxerGitLab.retryPipeline")(
+          (repository: GitLabRepository, pipelineId: number) =>
+            withVaultOrAmbient(
+              repository,
+              (tokenName) =>
+                callHelper({
+                  operation: "retry-pipeline",
+                  repository,
+                  tokenName,
+                  describe: "retry pipeline",
+                  args: [encodeArgument(String(pipelineId))],
+                  decode: decodeVoid,
+                }),
+              (ambientService) =>
+                callGitLabRetryPipeline(ambientService, repository, pipelineId),
+            ),
+        ),
+      })
     }),
   )

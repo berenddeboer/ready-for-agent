@@ -25,6 +25,29 @@ describe("worktree names", () => {
     ).toBe("rfa/acme-widgets/42/wi-01HABCDEFGHJKMNPQRSTVWXYZ")
   })
 
+  it("builds a dedicated branch and directory for a CI Repair Work Item", () => {
+    expect(
+      workItemBranchName({
+        projectPath: "acme/widgets",
+        issueNumber: 0,
+        workItemId: "wi-01HABCDEFGHJKMNPQRSTVWXYZ",
+        origin: "ci_repair",
+      }),
+    ).toBe("rfa/acme-widgets/ci-repair/wi-01HABCDEFGHJKMNPQRSTVWXYZ")
+    expect(
+      workItemWorktreePath({
+        localPath: "/repos/acme/widgets.git",
+        isBare: true,
+        projectPath: "acme/widgets",
+        issueNumber: 0,
+        workItemId: "wi-01HABCDEFGHJKMNPQRSTVWXYZ",
+        origin: "ci_repair",
+      }),
+    ).toBe(
+      "/repos/acme/widgets-worktrees/ci-repair-wi-01HABCDEFGHJKMNPQRSTVWXYZ",
+    )
+  })
+
   it("places dot-bare worktrees beside .bare in the project root", () => {
     expect(
       worktreeParentPath({

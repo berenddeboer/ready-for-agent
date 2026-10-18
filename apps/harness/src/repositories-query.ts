@@ -80,26 +80,7 @@ type RepositoryCiGate = {
     summary: string
     failedDefinitions: readonly CiGateDefinition[]
   } | null
-  repairSupported: boolean
-  repair: {
-    id: string
-    repositoryId: string
-    incidentId: string
-    status: "QUEUED" | "RUNNING" | "RECOVERED" | "UNRESOLVED"
-    requestSource: "MANUAL" | "AUTOMATIC"
-    outcome: "RECOVERED" | "FAILED" | "TIMED_OUT" | "INTERRUPTED" | null
-    admittedAt: string
-    launchedAt: string | null
-    deadlineAt: string | null
-    sessionId: string | null
-    report: string | null
-    localExecutionStopped: boolean
-    links: readonly {
-      url: string
-      kind: string
-      disposition: string
-    }[]
-  } | null
+  canStartCiRepair: boolean
   latestResolvedIncident: {
     id: string
     status: "OPEN" | "RESOLVED"
@@ -247,26 +228,7 @@ export const repositoriesQuery = {
               diagnosticMetadata: true,
             },
           },
-          repairSupported: true,
-          repair: {
-            id: true,
-            repositoryId: true,
-            incidentId: true,
-            status: true,
-            requestSource: true,
-            outcome: true,
-            admittedAt: true,
-            launchedAt: true,
-            deadlineAt: true,
-            sessionId: true,
-            report: true,
-            localExecutionStopped: true,
-            links: {
-              url: true,
-              kind: true,
-              disposition: true,
-            },
-          },
+          canStartCiRepair: true,
         },
         issuesReconciledAt: true,
         blockingUnfinishedWorkItemCount: true,

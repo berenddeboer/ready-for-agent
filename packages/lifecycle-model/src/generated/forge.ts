@@ -36,3 +36,14 @@ export const DEFAULT_ISSUE_TRACKER_BY_FORGE = {
 
 export const defaultIssueTrackerForForge = (forge: Forge): IssueTracker =>
   DEFAULT_ISSUE_TRACKER_BY_FORGE[forge]
+
+export const WORK_ITEM_ORIGINS = [
+  "issue",
+  "ci_repair",
+] as const
+
+export const WorkItemOrigin = Schema.Literals(WORK_ITEM_ORIGINS)
+export type WorkItemOrigin = typeof WorkItemOrigin.Type
+
+export const isWorkItemOrigin = (value: unknown): value is WorkItemOrigin =>
+  WORK_ITEM_ORIGINS.some((origin) => origin === value)

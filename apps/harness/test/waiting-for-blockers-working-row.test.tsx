@@ -20,7 +20,11 @@ const uiSource = () =>
 const runningWorkItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: "repo-1",
+  origin: "ISSUE",
   issueNumber: 26,
+  ciRepairDefaultBranch: null,
+  ciRepairHeadSha: null,
+  ciRepairFailingRuns: [],
   issueSource: {
     tracker: "github",
     nativeId: "26",

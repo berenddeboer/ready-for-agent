@@ -584,7 +584,9 @@ describe("Authorize incident-scoped CI Repair", () => {
     expect(payload.errors).toBeUndefined()
     const created = payload.data?.implementCiRepair
     expect(created?.status).not.toBe("WAITING_FOR_CI_REPAIR")
-    expect(created?.ciRepair.active?.sourceAction).toBe("IMPLEMENT_CI_REPAIR")
+    expect(created?.ciRepair.active?.sourceAction).toBe(
+      "IMPLEMENT_CI_GATE_BYPASS",
+    )
     expect(created?.ciRepair.active?.incident.status).toBe("OPEN")
     expect(created?.ciRepair.history).toHaveLength(1)
     expect(created?.ciRepair.canAuthorize).toBe(false)
@@ -634,7 +636,7 @@ describe("Authorize incident-scoped CI Repair", () => {
         const created = payload.data?.implementCiRepair
         expect(created?.status).not.toBe("WAITING_FOR_CI_REPAIR")
         expect(created?.ciRepair.active?.sourceAction).toBe(
-          "IMPLEMENT_CI_REPAIR",
+          "IMPLEMENT_CI_GATE_BYPASS",
         )
         expect(created?.ciRepair.history).toHaveLength(1)
         workItemId = created?.id ?? ""
@@ -663,7 +665,9 @@ describe("Authorize incident-scoped CI Repair", () => {
           (candidate) => candidate.id === workItemId,
         )
         expect(item?.status).not.toBe("WAITING_FOR_CI_REPAIR")
-        expect(item?.ciRepair.active?.sourceAction).toBe("IMPLEMENT_CI_REPAIR")
+        expect(item?.ciRepair.active?.sourceAction).toBe(
+          "IMPLEMENT_CI_GATE_BYPASS",
+        )
         expect(item?.ciRepair.history).toHaveLength(1)
         const record = await secondRuntime.runPromise(
           Effect.gen(function* () {
@@ -770,7 +774,7 @@ describe("Authorize incident-scoped CI Repair", () => {
       "opencode/deepseek-v4-flash-free",
     )
     expect(authorized?.ciRepair.active?.sourceAction).toBe(
-      "AUTHORIZE_AS_CI_REPAIR",
+      "AUTHORIZE_CI_GATE_BYPASS",
     )
 
     const record = await runtime.runPromise(
@@ -926,7 +930,7 @@ describe("Authorize incident-scoped CI Repair", () => {
     expect(
       authorizedPayload.data?.authorizeWorkItemAsCiRepair.ciRepair.active
         ?.sourceAction,
-    ).toBe("AUTHORIZE_AS_CI_REPAIR")
+    ).toBe("AUTHORIZE_CI_GATE_BYPASS")
 
     const refused = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
@@ -1106,7 +1110,7 @@ describe("Authorize incident-scoped CI Repair", () => {
     expect(
       reauthorizePayload.data?.authorizeWorkItemAsCiRepair.ciRepair.active
         ?.sourceAction,
-    ).toBe("AUTHORIZE_AS_CI_REPAIR")
+    ).toBe("AUTHORIZE_CI_GATE_BYPASS")
     expect(
       reauthorizePayload.data?.authorizeWorkItemAsCiRepair.ciRepair.history,
     ).toHaveLength(2)
@@ -1433,7 +1437,7 @@ describe("Authorize incident-scoped CI Repair", () => {
     expect(
       reauthorizePayload.data?.authorizeWorkItemAsCiRepair.ciRepair.active
         ?.sourceAction,
-    ).toBe("AUTHORIZE_AS_CI_REPAIR")
+    ).toBe("AUTHORIZE_CI_GATE_BYPASS")
     expect(
       reauthorizePayload.data?.authorizeWorkItemAsCiRepair.ciRepair.history,
     ).toHaveLength(2)

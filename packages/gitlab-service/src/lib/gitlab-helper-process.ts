@@ -16,6 +16,7 @@ import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
 import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
 import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
 import { observeCiGateProgram } from "../bin/observe-ci-gate.js"
+import { retryPipelineProgram } from "../bin/retry-pipeline.js"
 import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
 import { verifyProjectProgram } from "../bin/verify-project.js"
 import { gitlabServiceBinScriptPath } from "../bin-script-path.js"
@@ -44,6 +45,7 @@ export const GITLAB_HELPER_OPERATIONS = [
   "ensure-issue-completed-with-summary",
   "close-open-pull-requests-for-branch",
   "delete-branch",
+  "retry-pipeline",
 ] as const
 
 export type GitLabHelperOperation = (typeof GITLAB_HELPER_OPERATIONS)[number]
@@ -154,6 +156,7 @@ const programs: Record<
   "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
   "close-open-pull-requests-for-branch": closeOpenPullRequestsForBranchProgram,
   "delete-branch": deleteBranchProgram,
+  "retry-pipeline": retryPipelineProgram,
 }
 
 /**

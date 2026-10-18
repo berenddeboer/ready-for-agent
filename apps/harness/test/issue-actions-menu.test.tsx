@@ -178,7 +178,7 @@ describe("IssueActionsMenu interaction", () => {
     ])
   })
 
-  test("offers Implement CI Repair beside Implement now only while Closed", () => {
+  test("offers Implement CI Gate Bypass beside Implement now only while Closed", () => {
     const calls: string[] = []
     const node = render(
       <IssueActionsMenu
@@ -199,14 +199,14 @@ describe("IssueActionsMenu interaction", () => {
     )
     expect(items).toEqual([
       "Implement now",
-      "Implement CI Repair",
+      "Implement CI Gate Bypass",
       "Implement with...",
       "Implement locally",
     ])
     expect(items.join(" ")).not.toContain("Skip CI")
     expect(items.join(" ")).not.toContain("Force merge")
     const repairItem = [...node.querySelectorAll("[role='menuitem']")].find(
-      (item) => item.textContent === "Implement CI Repair",
+      (item) => item.textContent === "Implement CI Gate Bypass",
     )
     flushSync(() => {
       fire(repairItem ?? null, "click")

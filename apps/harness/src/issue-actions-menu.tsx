@@ -21,8 +21,8 @@ export type IssueActionsMenuProps = {
 }
 
 /**
- * Actionable Issue kebab: Implement now, Implement CI Repair (Closed only),
- * Implement with..., Implement locally.
+ * Actionable Issue kebab: Implement now, Implement CI Gate Bypass (Closed
+ * only), Implement with..., Implement locally.
  * Blocked Issues show Queue only. Presentational so menu order and eligibility
  * can be tested without the Repos list.
  */
@@ -112,7 +112,7 @@ export function IssueActionsMenu({
                 >
                   {implementCiRepairPending
                     ? "Starting..."
-                    : "Implement CI Repair"}
+                    : "Implement CI Gate Bypass"}
                 </button>
               )}
               <button

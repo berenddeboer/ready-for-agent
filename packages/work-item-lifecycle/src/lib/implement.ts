@@ -13,6 +13,7 @@ import {
   forgeDisplayName,
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
+import { buildCiRepairImplementPrompt } from "./ci-repair-work-item.js"
 import {
   ImplementForgeCredentialError,
   ImplementInvalidWorktreeContextError,
@@ -241,16 +242,142 @@ const priorSessionId = (context: LifecycleStepContext): string | null => {
   return sessionId
 }
 
+const runImplementTurn = (
+  context: LifecycleStepContext,
+  worktreePath: string,
+  promptBody: string,
+  failureMessage: string,
+) =>
+  Effect.gen(function* () {
+    const db = yield* DbService
+    const scopeHandoff = yield* loadScopeHandoff(context, worktreePath)
+    const prompt = `${promptBody}\n\n${scopeHandoff}`
+    const existingSessionId = priorSessionId(context)
+    const agentBackend = yield* AgentBackend
+    const sql = yield* SqlClient.SqlClient
+    const onSessionId = (sessionId: string) =>
+      persistSessionIdMidRun(
+        context.workItemId,
+        sessionId,
+        context.repositoryId,
+      ).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.provideService(DbService, db),
+      )
+
+    const run =
+      existingSessionId === null
+        ? agentBackend.startTurn({
+            prompt,
+            cwd: worktreePath,
+            model: context.model,
+            thinkingLevel: context.thinkingLevel,
+            timeout:
+              context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
+            onSessionId,
+          })
+        : agentBackend.continueTurn({
+            sessionId: existingSessionId,
+            prompt,
+            cwd: worktreePath,
+            model: context.model,
+            thinkingLevel: context.thinkingLevel,
+            timeout:
+              context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
+            onSessionId,
+          })
+
+    const result = yield* run.pipe(
+      Effect.mapError(
+        (cause) =>
+          new ImplementOpenCodeError({
+            message: failureMessage,
+            worktreePath,
+            cause,
+          }),
+      ),
+    )
+
+    if (result.sessionId.trim() === "") {
+      return yield* new ImplementOpenCodeError({
+        message: `${agentBackendLabel(context.agentBackend)} completed without returning a Session ID`,
+        worktreePath,
+      })
+    }
+
+    return result.sessionId
+  })
+
+const implementCiRepairOrigin = (
+  context: LifecycleStepContext,
+  worktreePath: string,
+  repository: {
+    readonly forge: AgentTurnForgeRepository["forge"]
+    readonly forgeHost: string
+    readonly projectPath: string
+  },
+) =>
+  Effect.gen(function* () {
+    const gitRepository = {
+      forge: repository.forge,
+      forgeHost: repository.forgeHost,
+      projectPath: repository.projectPath,
+    }
+    const forgeAuth = yield* resolveAgentTurnForgeAuth(gitRepository).pipe(
+      Effect.mapError((cause) => {
+        if (
+          cause instanceof AgentTurnForgeCredentialMissingError ||
+          cause instanceof InvalidCapturedAgentBackendError
+        ) {
+          return new ImplementForgeCredentialError({
+            repositoryId: context.repositoryId,
+            message: cause.message,
+          })
+        }
+        return new ImplementForgeCredentialError({
+          repositoryId: context.repositoryId,
+          message: `Failed to resolve the ${forgeDisplayName(repository.forge)} credential`,
+          cause,
+        })
+      }),
+    )
+    const promptBody = [
+      buildCiRepairImplementPrompt({
+        defaultBranch:
+          context.ciRepairDefaultBranch?.trim() || "the default branch",
+        headSha: context.ciRepairHeadSha ?? null,
+        failingRuns: context.ciRepairFailingRuns ?? [],
+        mode: priorSessionId(context) === null ? "start" : "continue",
+      }),
+      agentTurnForgeCredentialGuidance(
+        gitRepository,
+        forgeAuth,
+        "read of CI logs",
+      ),
+    ].join("\n")
+    return yield* runImplementTurn(
+      context,
+      worktreePath,
+      promptBody,
+      `${agentBackendLabel(context.agentBackend)} failed to implement the CI Repair Work Item`,
+    )
+  })
+
 /**
  * Production Implement Lifecycle Step.
  * Starts a fresh OpenCode Session in the Work Item worktree when none exists,
  * or continues the prior Session when `session_id` is already set (Retry after
  * interrupt or failed Build). Fresh start after delete/reset has no session id.
+ * A CI Repair Work Item has no Issue: it does not resolve an issue number,
+ * notify Linear, or ask the agent to close one.
  */
 export const implement = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
     const repository = yield* resolveRepository(context)
+    if (context.origin === "ci_repair") {
+      return yield* implementCiRepairOrigin(context, worktreePath, repository)
+    }
     const issueNumber = yield* resolveIssueNumber(context)
     const issueForge = issueOperationsForge(
       context.issueSource,
@@ -312,71 +439,20 @@ export const implement = (context: LifecycleStepContext) =>
           : { title: context.issueTitle, body: "" }
         : { title: storedIssue.title, body: storedIssue.body }
 
-    const existingSessionId = priorSessionId(context)
     const implementationPrompt = buildImplementPrompt(
       gitRepository,
       issueNumber,
       context.workItemId,
       forgeAuth,
-      existingSessionId === null ? "start" : "continue",
+      priorSessionId(context) === null ? "start" : "continue",
       context.issueSource?.url,
       context.issueSource,
       isLinearIssueSource(context.issueSource) ? liveIssue : null,
     )
-    const scopeHandoff = yield* loadScopeHandoff(context, worktreePath)
-    const prompt = `${implementationPrompt}\n\n${scopeHandoff}`
-
-    const agentBackend = yield* AgentBackend
-    const sql = yield* SqlClient.SqlClient
-    const onSessionId = (sessionId: string) =>
-      persistSessionIdMidRun(
-        context.workItemId,
-        sessionId,
-        context.repositoryId,
-      ).pipe(
-        Effect.provideService(SqlClient.SqlClient, sql),
-        Effect.provideService(DbService, db),
-      )
-
-    const run =
-      existingSessionId === null
-        ? agentBackend.startTurn({
-            prompt,
-            cwd: worktreePath,
-            model: context.model,
-            thinkingLevel: context.thinkingLevel,
-            timeout:
-              context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
-            onSessionId,
-          })
-        : agentBackend.continueTurn({
-            sessionId: existingSessionId,
-            prompt,
-            cwd: worktreePath,
-            model: context.model,
-            thinkingLevel: context.thinkingLevel,
-            timeout:
-              context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
-            onSessionId,
-          })
-
-    const result = yield* run.pipe(
-      Effect.mapError(
-        (cause) =>
-          new ImplementOpenCodeError({
-            message: `${agentBackendLabel(context.agentBackend)} failed to implement the Work Item issue`,
-            worktreePath,
-            cause,
-          }),
-      ),
+    return yield* runImplementTurn(
+      context,
+      worktreePath,
+      implementationPrompt,
+      `${agentBackendLabel(context.agentBackend)} failed to implement the Work Item issue`,
     )
-
-    if (result.sessionId.trim() === "") {
-      return yield* new ImplementOpenCodeError({
-        message: `${agentBackendLabel(context.agentBackend)} completed without returning a Session ID`,
-        worktreePath,
-      })
-    }
-
-    return result.sessionId
   })

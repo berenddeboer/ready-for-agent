@@ -59,4 +59,31 @@ describe("ambientAzureDevOpsLayer", () => {
       ),
     ).resolves.toBe(false)
   })
+
+  test("keeps build retry on the ambient service", async () => {
+    const calls: number[] = []
+    const retryBuild = (_repository: typeof repository, buildId: number) => {
+      calls.push(buildId)
+      return Effect.void
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* AzureDevOpsService
+        const method = (service as { retryBuild?: typeof retryBuild })
+          .retryBuild
+        expect(method).toBe(retryBuild)
+        if (method === undefined) return
+        yield* method(repository, 42)
+      }).pipe(
+        Effect.provide(
+          ambientAzureDevOpsLayer({
+            environment: { AZURE_DEVOPS_EXT_PAT: "pat" },
+            makeService: () =>
+              ({ retryBuild }) as unknown as AzureDevOpsServiceShape,
+          }),
+        ),
+      ),
+    )
+    expect(calls).toEqual([42])
+  })
 })

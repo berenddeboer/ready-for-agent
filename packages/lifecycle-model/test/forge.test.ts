@@ -5,6 +5,7 @@ import {
   FORGES,
   ISSUE_TRACKERS,
   type IssueSource,
+  WORK_ITEM_ORIGINS,
   defaultIssueTrackerForForge,
   existingProviderIssueIdentity,
   forgeForIssueSource,
@@ -12,6 +13,7 @@ import {
   formatIssueDisplayId,
   isForge,
   isIssueTracker,
+  isWorkItemOrigin,
   persistedIssueIdentity,
   relevancePolicyForIssueTracker,
 } from "../src/index.js"
@@ -20,6 +22,13 @@ import { describe, expect, it } from "bun:test"
 describe("generated Forge vocabulary", () => {
   it("exports exactly the existing three runtime spellings in declared order", () => {
     expect([...FORGES]).toEqual(["github", "gitlab", "azure-devops"])
+  })
+
+  it("exports Work Item origins in declared order", () => {
+    expect([...WORK_ITEM_ORIGINS]).toEqual(["issue", "ci_repair"])
+    expect(isWorkItemOrigin("issue")).toBe(true)
+    expect(isWorkItemOrigin("ci_repair")).toBe(true)
+    expect(isWorkItemOrigin("repair")).toBe(false)
   })
 
   it("accepts the supported kinds and rejects unknown spellings", () => {

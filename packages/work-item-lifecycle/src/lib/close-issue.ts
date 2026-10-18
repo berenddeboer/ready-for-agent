@@ -70,6 +70,12 @@ const rejectIfOpenAndIneligible = (
  */
 export const closeIssue = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
+    if (context.origin === "ci_repair") {
+      return yield* new CloseIssueContextError({
+        workItemId: context.workItemId,
+        message: "A CI Repair Work Item has no Issue to close",
+      })
+    }
     const summary = context.completionSummary
     if (summary === null || summary.trim() === "") {
       return yield* new CloseIssueSummaryMissingError({

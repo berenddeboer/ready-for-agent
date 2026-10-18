@@ -208,6 +208,7 @@ const resolveContext = (context: LifecycleStepContext) =>
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
+      origin: context.origin,
     })
     return {
       repository,

@@ -313,7 +313,7 @@ const observationFromAdapter = (input: {
   })
 }
 
-export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
+const observeRepositoryCiGateBody = Effect.fn("observeRepositoryCiGate.body")(
   function* (input: {
     readonly repository: RepositoryRecord
     readonly origin: ForgeOperationOrigin
@@ -498,6 +498,19 @@ export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
       recoveryIfCleared,
       previousStatus,
     })
+  },
+)
+
+export const observeRepositoryCiGate = Effect.fn("observeRepositoryCiGate")(
+  function* (input: {
+    readonly repository: RepositoryRecord
+    readonly origin: ForgeOperationOrigin
+  }) {
+    yield* observeRepositoryCiGateBody(input)
+    const lifecycle = yield* WorkItemLifecycle
+    // Every successful observation, including the first after startup.
+    // The method cannot fail the caller.
+    yield* lifecycle.considerAutomaticCiRepair(input.repository.id)
   },
 )
 

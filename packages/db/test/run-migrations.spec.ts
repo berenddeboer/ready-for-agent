@@ -389,6 +389,7 @@ describe("runMigrations", () => {
           { name: "20260921190000_unfinished_work_item_native_identity" },
           { name: "20261017120000_repository_ci_repair_invocation" },
           { name: "20261018120000_automatic_ci_repair" },
+          { name: "20261019120000_ci_repair_work_item" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

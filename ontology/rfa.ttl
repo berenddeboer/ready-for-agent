@@ -656,6 +656,7 @@ rfa:InstallDependenciesSucceededTransition a rfa:Transition ; rfa:fromStep rfa:I
 rfa:ImplementSucceededTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:AssessChanges ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
 rfa:AssessChangesDetectedTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:PreCommit ; rfa:guard "changes_detected" ; rfa:reasonCode rfa:NativeReason .
 rfa:AssessChangesNoChangeTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:CloseIssue ; rfa:guard "no_change_outcome" ; rfa:reasonCode rfa:NativeReason .
+rfa:AssessChangesCiRepairNoChangeTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:LocalCleanup ; rfa:guard "no_change_outcome" ; rfa:reasonCode rfa:NativeReason .
 rfa:PreCommitSucceededTransition a rfa:Transition ; rfa:fromStep rfa:PreCommit ; rfa:toStep rfa:Review ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
 rfa:ReviewSucceededTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:Commit ; rfa:guard "review_completed" ; rfa:reasonCode rfa:NativeReason .
 rfa:ReviewDeferredTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:Commit ; rfa:guard "review_deferred" ; rfa:reasonCode rfa:ReviewDeferredReason .
@@ -665,6 +666,7 @@ rfa:ReviewNeedsHumanTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:
 rfa:CommitNativeTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:CreatePr ; rfa:guard "native_completion" ; rfa:reasonCode rfa:NativeReason .
 rfa:CommitAgentFallbackTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:CreatePr ; rfa:guard "agent_fallback_completion" ; rfa:reasonCode rfa:AgentFallbackReason .
 rfa:CommitNoChangeTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:CloseIssue ; rfa:guard "no_change_outcome" ; rfa:reasonCode rfa:NativeReason .
+rfa:CommitCiRepairNoChangeTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:LocalCleanup ; rfa:guard "no_change_outcome" ; rfa:reasonCode rfa:NativeReason .
 rfa:CreatePrNativeTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "native_completion" ; rfa:reasonCode rfa:NativeReason .
 rfa:CreatePrAgentFallbackTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "agent_fallback_completion" ; rfa:reasonCode rfa:AgentFallbackReason .
 
@@ -971,6 +973,36 @@ rfa:Linear
   skos:notation "linear" ;
   skos:definition
     "The Linear Issue Tracker kind. Linear is not a code-hosting Forge. Runtime spelling linear."@en .
+
+# Work Item origin. Completeness is owl:oneOf in this order.
+# issue is an ordinary Issue Work Item. ci_repair is a CI Repair Work Item.
+rfa:WorkItemOrigin
+  owl:equivalentClass [
+    owl:oneOf ( rfa:IssueOrigin rfa:CiRepairOrigin )
+  ] .
+
+rfa:IssueOrigin
+  a rfa:WorkItemOrigin ;
+  skos:notation "issue" ;
+  skos:definition
+    "A Work Item whose input is an Issue. Runtime spelling issue."@en .
+
+rfa:CiRepairOrigin
+  a rfa:WorkItemOrigin ;
+  skos:notation "ci_repair" ;
+  skos:definition
+    "A CI Repair Work Item whose input is the Repository CI Gate observation instead of an Issue. It never creates an Issue, skips Close Issue, and keeps its completion summary on the Work Item. Runtime spelling ci_repair."@en .
+
+rfa:workItemOrigin
+  a owl:ObjectProperty ;
+  rdfs:domain rfa:WorkItem ;
+  rdfs:range rfa:WorkItemOrigin ;
+  rdfs:label "Work Item origin"@en ;
+  skos:definition
+    "Whether the Work Item was created from an Issue or as a CI Repair Work Item."@en .
+
+[] a owl:AllDifferent ;
+  owl:distinctMembers ( rfa:IssueOrigin rfa:CiRepairOrigin ) .
 
 rfa:OriginalIssueSource
   a owl:Class .

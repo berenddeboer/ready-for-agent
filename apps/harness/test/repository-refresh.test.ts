@@ -5,7 +5,6 @@ import {
   stubDbServiceLayer,
 } from "@ready-for-agent/db-service/test"
 import { GitHubRequestError } from "@ready-for-agent/github-service"
-import { RepositoryCiRepair } from "@ready-for-agent/graphql-api"
 import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
 import {
   WorkItemLifecycle,
@@ -81,6 +80,9 @@ describe("refreshLoadedRepository", () => {
               },
               implementNow: unused,
               implementCiRepair: unused,
+              unfinishedCiRepairWorkItem: unused,
+              startCiRepair: unused,
+              considerAutomaticCiRepair: () => Effect.succeed(null),
               authorizeAsCiRepair: unused,
               implementWith: unused,
               implementLocally: unused,
@@ -163,6 +165,9 @@ describe("refreshLoadedRepository", () => {
     },
     implementNow: unused,
     implementCiRepair: unused,
+    unfinishedCiRepairWorkItem: unused,
+    startCiRepair: unused,
+    considerAutomaticCiRepair: () => Effect.succeed(null),
     authorizeAsCiRepair: unused,
     implementWith: unused,
     implementLocally: unused,
@@ -304,6 +309,15 @@ describe("refreshLoadedRepository", () => {
       expect(result._tag).toBe("Success")
     }).pipe(Effect.runPromise))
 
+  const recordingLifecycle = (considered: string[]) => ({
+    ...idleLifecycle,
+    considerAutomaticCiRepair: (repositoryId: string) =>
+      Effect.sync(() => {
+        considered.push(repositoryId)
+        return null
+      }),
+  })
+
   it("considers automatic repair after CI observation succeeds", () =>
     Effect.gen(function* () {
       const repository = makeRepositoryRecord({ paused: true })
@@ -312,17 +326,6 @@ describe("refreshLoadedRepository", () => {
         repository,
         githubOperationOrigin: "polling",
       }).pipe(
-        Effect.provideService(RepositoryCiRepair, {
-          startManual: () => Effect.die("unused"),
-          drive: () => Effect.void,
-          latestForRepository: () => Effect.succeed(null),
-          reconcile: () => Effect.succeed({ blockedRepositoryIds: [] }),
-          considerAutomatic: (repositoryId) =>
-            Effect.sync(() => {
-              considered.push(repositoryId)
-              return null
-            }),
-        }),
         Effect.provide(
           Layer.mergeAll(
             stubDbServiceLayer({
@@ -338,7 +341,7 @@ describe("refreshLoadedRepository", () => {
                   new DatabaseError({ message: "reconciliation failed" }),
                 ),
             }),
-            Layer.succeed(WorkItemLifecycle, idleLifecycle),
+            Layer.succeed(WorkItemLifecycle, recordingLifecycle(considered)),
           ),
         ),
         Effect.result,
@@ -355,17 +358,6 @@ describe("refreshLoadedRepository", () => {
         repository,
         githubOperationOrigin: "operator",
       }).pipe(
-        Effect.provideService(RepositoryCiRepair, {
-          startManual: () => Effect.die("unused"),
-          drive: () => Effect.void,
-          latestForRepository: () => Effect.succeed(null),
-          reconcile: () => Effect.succeed({ blockedRepositoryIds: [] }),
-          considerAutomatic: (repositoryId) =>
-            Effect.sync(() => {
-              considered.push(repositoryId)
-              return null
-            }),
-        }),
         Effect.provide(
           Layer.mergeAll(
             stubDbServiceLayer({
@@ -388,7 +380,7 @@ describe("refreshLoadedRepository", () => {
                   competingObservations: [],
                 }),
             }),
-            Layer.succeed(WorkItemLifecycle, idleLifecycle),
+            Layer.succeed(WorkItemLifecycle, recordingLifecycle(considered)),
           ),
         ),
         Effect.result,

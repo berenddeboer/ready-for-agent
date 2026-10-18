@@ -11,6 +11,7 @@ import {
   FORGES,
   ISSUE_TRACKERS,
   OPERATIONAL_LIFECYCLE_STEPS,
+  WORK_ITEM_ORIGINS,
   WORK_ITEM_STATES,
 } from "@ready-for-agent/lifecycle-model"
 
@@ -74,8 +75,10 @@ export const repository = snakeCase.table(
       .notNull()
       .default(true),
     /**
-     * Opt-in automatic CI repair for a confirmed Closed incident. Off for
-     * existing and new Repositories. Only a GitHub Repository can enable it.
+     * Opt-in automatic CI repair. Off for existing and new Repositories.
+     * When on, a terminal failure of a selected CI Gate Definition starts a
+     * CI Repair Work Item when none is unfinished and the Repository is not
+     * Paused. Allowed on every Forge.
      */
     automaticCiRepair: integer({ mode: "boolean" }).notNull().default(false),
     /**
@@ -285,7 +288,8 @@ export const completedJob = snakeCase.table(
 )
 
 /**
- * Durable operator-requested implementation attempt for one Issue.
+ * Durable operator-requested implementation attempt for one Issue, or one
+ * CI Repair Work Item.
  * See xplain: type work item "wi"
  */
 export const workItem = snakeCase.table(
@@ -297,6 +301,11 @@ export const workItem = snakeCase.table(
     repositoryId: text()
       .notNull()
       .references(() => repository.id, { onDelete: "cascade" }),
+    /**
+     * `issue` is an ordinary Issue Work Item. `ci_repair` is a CI Repair
+     * Work Item with no Issue.
+     */
+    origin: text({ enum: WORK_ITEM_ORIGINS }).notNull().default("issue"),
     issueNumber: integer().notNull(),
     /**
      * Original Issue Source captured at creation. Survives later Repository
@@ -388,10 +397,23 @@ export const workItem = snakeCase.table(
     publicationTitle: text(),
     /**
      * Canonical publication body (Markdown) for git commit body and PR body.
-     * Includes a normalized `Closes #<issue>` reference. Null until Commit
-     * generates, seeds, or falls back to harness copy.
+     * Issue-origin Work Items include a normalized `Closes #<issue>` reference.
+     * A CI Repair Work Item does not. Null until Commit generates, seeds, or
+     * falls back to harness copy.
      */
     publicationBody: text(),
+    /** Default branch named on a CI Repair Work Item. Null for Issue origin. */
+    ciRepairDefaultBranch: text(),
+    /**
+     * Triggering commit SHA when the latest observed run is the latched
+     * failure. Null when unknown or for Issue origin.
+     */
+    ciRepairHeadSha: text(),
+    /**
+     * JSON array of failing runs `{runIdentity, htmlUrl, displayLabel}` for a
+     * CI Repair Work Item. Null for Issue origin.
+     */
+    ciRepairFailingRuns: text(),
     sessionId: text(),
     failureCode: text(),
     failureMessage: text(),
@@ -430,6 +452,11 @@ export const workItem = snakeCase.table(
     uniqueIndex("work_item_one_unfinished_v5_uidx")
       .on(t.repositoryId, t.issueTracker, t.issueNativeId)
       .where(sql`${t.state} NOT IN ('complete', 'failed', 'abandoned')`),
+    uniqueIndex("work_item_one_unfinished_ci_repair_uidx")
+      .on(t.repositoryId)
+      .where(
+        sql`${t.origin} = 'ci_repair' AND ${t.state} NOT IN ('complete', 'failed', 'abandoned')`,
+      ),
     index("work_item_repository_issue_created_idx").on(
       t.repositoryId,
       t.issueNumber,
@@ -717,14 +744,6 @@ export const ciFailureIncident = snakeCase.table(
       ],
     }),
     summary: text().notNull(),
-    /**
-     * False once any repair invocation has been admitted for this incident.
-     * Polling, restart, and checkbox toggles cannot start another automatic
-     * attempt. A new incident starts eligible.
-     */
-    automaticRepairEligible: integer({ mode: "boolean" })
-      .notNull()
-      .default(true),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),
@@ -806,101 +825,6 @@ export const ciRepairAuthorization = snakeCase.table(
     index("ci_repair_authorization_repository_id_idx").on(t.repositoryId),
     index("ci_repair_authorization_incident_id_idx").on(t.incidentId),
     index("ci_repair_authorization_work_item_id_idx").on(t.workItemId),
-  ],
-)
-
-/**
- * One repository CI repair invocation, manual or automatic. At most one
- * queued or running row per repository. This is process supervision, not a
- * Work Item.
- * See xplain: type ci repair invocation "criv"
- */
-export const ciRepairInvocation = snakeCase.table(
-  "ci_repair_invocation",
-  {
-    id: text()
-      .primaryKey()
-      .$defaultFn(() => `criv-${ulid()}`),
-    repositoryId: text()
-      .notNull()
-      .references(() => repository.id, { onDelete: "cascade" }),
-    incidentId: text()
-      .notNull()
-      .references(() => ciFailureIncident.id, { onDelete: "cascade" }),
-    /**
-     * `queued` is admitted and waiting for an agent slot. `running` has
-     * launched. `recovered` and `unresolved` are terminal.
-     */
-    status: text({
-      enum: ["queued", "running", "recovered", "unresolved"],
-    }).notNull(),
-    /** `manual` is an explicit start or retry. `automatic` is opt-in selection. */
-    requestSource: text({ enum: ["manual", "automatic"] })
-      .notNull()
-      .default("manual"),
-    /** Set once the invocation reaches a terminal status. */
-    outcome: text({
-      enum: ["recovered", "failed", "timed_out", "interrupted"],
-    }),
-    /** Process generation that admitted this row. Restart reconciles others. */
-    supervisorEpoch: text().notNull(),
-    admittedAt: integer({ mode: "number" }).notNull(),
-    launchedAt: integer({ mode: "number" }),
-    deadlineAt: integer({ mode: "number" }),
-    sessionId: text(),
-    processRef: text(),
-    report: text(),
-    createdAt: integer({ mode: "number" })
-      .notNull()
-      .$defaultFn(() => Date.now()),
-    updatedAt: integer({ mode: "number" })
-      .notNull()
-      .$defaultFn(() => Date.now()),
-  },
-  (t) => [
-    uniqueIndex("ci_repair_invocation_one_active_uidx")
-      .on(t.repositoryId)
-      .where(sql`${t.status} IN ('queued', 'running')`),
-    index("ci_repair_invocation_repository_id_admitted_at_idx").on(
-      t.repositoryId,
-      t.admittedAt,
-    ),
-    index("ci_repair_invocation_incident_id_idx").on(t.incidentId),
-  ],
-)
-
-/**
- * Pull request and remote job links discovered for one CI repair invocation.
- * See xplain: type ci repair invocation link "cril"
- */
-export const ciRepairInvocationLink = snakeCase.table(
-  "ci_repair_invocation_link",
-  {
-    id: text()
-      .primaryKey()
-      .$defaultFn(() => `cril-${ulid()}`),
-    invocationId: text()
-      .notNull()
-      .references(() => ciRepairInvocation.id, { onDelete: "cascade" }),
-    url: text().notNull(),
-    kind: text({ enum: ["pull_request", "remote_job"] }).notNull(),
-    /**
-     * `unfinished` and `active` outlive stopped local execution.
-     * `merged` and `completed` are settled.
-     */
-    disposition: text({
-      enum: ["unfinished", "merged", "active", "completed", "unknown"],
-    }).notNull(),
-    createdAt: integer({ mode: "number" })
-      .notNull()
-      .$defaultFn(() => Date.now()),
-  },
-  (t) => [
-    uniqueIndex("ci_repair_invocation_link_invocation_id_url_uidx").on(
-      t.invocationId,
-      t.url,
-    ),
-    index("ci_repair_invocation_link_invocation_id_idx").on(t.invocationId),
   ],
 )
 

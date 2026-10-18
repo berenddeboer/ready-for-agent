@@ -23,7 +23,9 @@ export const loadScopeHandoff = (
         path,
         [
           `# Scope for Work Item ${context.workItemId}`,
-          `Issue: ${context.issueSource?.url ?? `${context.repositoryId}#${context.issueNumber}`}`,
+          context.origin === "ci_repair"
+            ? "Issue: none. This is a CI Repair Work Item. Do not create or close an Issue."
+            : `Issue: ${context.issueSource?.url ?? `${context.repositoryId}#${context.issueNumber}`}`,
           "",
           "## Agreed requirements",
           "Not yet summarized. Read the Issue and explicit operator decisions in this Session.",
