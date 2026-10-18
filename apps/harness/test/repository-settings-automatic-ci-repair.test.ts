@@ -5,11 +5,35 @@ import { describe, expect, test } from "bun:test"
 const source = () =>
   readFileSync(join(import.meta.dir, "../src/home-page-content.tsx"), "utf8")
 
+const sliceBetween = (
+  sourceText: string,
+  start: string,
+  end: string,
+): string => {
+  const from = sourceText.indexOf(start)
+  if (from < 0) {
+    throw new Error(`Start marker not found: ${start}`)
+  }
+  const to = sourceText.indexOf(end, from)
+  if (to < 0) {
+    throw new Error(`End marker not found after ${start}: ${end}`)
+  }
+  return sourceText.slice(from, to)
+}
+
 describe("Repository settings automatic CI repair", () => {
-  test("defaults the GitHub checkbox off, persists it, and keeps manual repair", () => {
+  test("leaves Options and keeps the saved GitHub value through Save", () => {
     const settings = source()
-    expect(settings).toContain("Automatic CI repair")
-    expect(settings).toContain('data-testid="automatic-ci-repair"')
+    const options = sliceBetween(
+      settings,
+      "repo-sec-options-",
+      "repo-sec-agent-",
+    )
+    expect(options).not.toContain('data-testid="automatic-ci-repair"')
+    expect(options).not.toContain("When the gate closes")
+    expect(options).not.toContain("Automatically start a CI Repair Work Item")
+    expect(options).not.toContain("Automatic CI repair")
+
     expect(settings).toContain(
       "const [automaticCiRepair, setAutomaticCiRepair] = useState(",
     )
@@ -17,15 +41,16 @@ describe("Repository settings automatic CI repair", () => {
     expect(settings).toContain(
       "setAutomaticCiRepair(repository.automaticCiRepair)",
     )
-    expect(settings).toContain("checked={automaticCiRepair}")
-    expect(settings).toContain("setAutomaticCiRepair(event.target.checked)")
+    expect(settings).toContain("checked: automaticCiRepair")
+    expect(settings).toContain("onCheckedChange: setAutomaticCiRepair")
     expect(settings).toContain(
       'automaticCiRepair: forge === "github" ? automaticCiRepair : false',
     )
-    expect(settings).toContain('forge === "github" ? (')
+    expect(settings).toContain('forge === "github"')
     expect(settings).toContain("startRepositoryCiRepair:")
     expect(settings).toContain("onStartRepair={() => startCiRepair.mutate()}")
     expect(settings).not.toContain("useState(true)")
+
     const card = readFileSync(
       join(import.meta.dir, "../src/repository-ci-gate-card.tsx"),
       "utf8",
@@ -34,5 +59,6 @@ describe("Repository settings automatic CI repair", () => {
     expect(card).toContain('data-testid="ci-repair-request-source"')
     expect(card).toContain("Automatic")
     expect(card).toContain("Manual")
+    expect(settings).toContain("<dt>Automatic CI repair</dt>")
   })
 })

@@ -2,8 +2,12 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { renderToStaticMarkup } from "react-dom/server"
 import {
+  CI_GATE_AUTOMATIC_REPAIR_DISABLED_HINT,
+  CI_GATE_AUTOMATIC_REPAIR_HINT,
+  CI_GATE_AUTOMATIC_REPAIR_LABEL,
   CI_GATE_DEFINITIONS_LOADING_LABEL,
   CI_GATE_EMPTY_SELECTION_HINT,
+  CI_GATE_ON_CLOSE_HEADING,
   RepositorySettingsCiGateSection,
   ciGateCatalogViewFromQuery,
 } from "../src/repository-settings-ci-gate.js"
@@ -69,9 +73,24 @@ const renderSection = (
       selectedIdentities={[]}
       onSelectedIdentitiesChange={() => {}}
       status={baseStatus}
+      automaticCiRepair={null}
       {...overrides}
     />,
   )
+
+const inputTag = (html: string, testId: string): string => {
+  const match = html.match(
+    new RegExp(`<input\\b[^>]*data-testid="${testId}"[^>]*>`),
+  )
+  if (match === null || match[0] === undefined) {
+    throw new Error(`Missing input ${testId} in ${html}`)
+  }
+  return match[0]
+}
+
+/** Boolean attribute, ignoring Tailwind variants such as `disabled:opacity-60`. */
+const hasBooleanAttr = (tag: string, name: string): boolean =>
+  new RegExp(`\\s${name}(?:="[^"]*"|\\s|>)`).test(tag)
 
 describe("Repository settings CI Gate Definitions", () => {
   test("CI Gate is the last settings section, directly below Models", () => {
@@ -339,5 +358,82 @@ describe("Repository settings CI Gate catalog presentation", () => {
       definitions: [lintDefinition],
       unavailable: [ciDefinition],
     })
+  })
+})
+
+describe("Repository settings automatic CI repair in the CI Gate section", () => {
+  const repair = { checked: false, onCheckedChange: () => {} }
+
+  test("places the control below the definition list, not as another definition", () => {
+    const html = renderSection({
+      catalog: {
+        kind: "loaded",
+        definitions: [ciDefinition, lintDefinition],
+        unavailable: [],
+      },
+      selectedIdentities: [ciDefinition.identity],
+      automaticCiRepair: { ...repair, checked: true },
+    })
+    const definition = html.indexOf('name="selectedCiGateDefinitionIdentities"')
+    const subsection = html.indexOf(CI_GATE_ON_CLOSE_HEADING)
+    const repairInput = inputTag(html, "automatic-ci-repair")
+    expect(definition).toBeGreaterThan(-1)
+    expect(subsection).toBeGreaterThan(definition)
+    expect(html.indexOf(CI_GATE_AUTOMATIC_REPAIR_LABEL)).toBeGreaterThan(
+      subsection,
+    )
+    expect(repairInput).toContain('name="automaticCiRepair"')
+    expect(repairInput).not.toContain("selectedCiGateDefinitionIdentities")
+    expect(hasBooleanAttr(repairInput, "disabled")).toBe(false)
+    expect(hasBooleanAttr(repairInput, "checked")).toBe(true)
+    expect(html).toContain('<h4 id="repo-ci-gate-on-close-repo-1"')
+    expect(html).toContain(CI_GATE_AUTOMATIC_REPAIR_HINT)
+    expect(html).not.toContain(CI_GATE_AUTOMATIC_REPAIR_DISABLED_HINT)
+  })
+
+  test("disables the control and explains why when no definition is selected", () => {
+    const html = renderSection({
+      catalog: {
+        kind: "loaded",
+        definitions: [ciDefinition],
+        unavailable: [],
+      },
+      selectedIdentities: [],
+      automaticCiRepair: { ...repair, checked: true },
+    })
+    const repairInput = inputTag(html, "automatic-ci-repair")
+    expect(hasBooleanAttr(repairInput, "disabled")).toBe(true)
+    expect(hasBooleanAttr(repairInput, "checked")).toBe(true)
+    expect(html).toContain(CI_GATE_AUTOMATIC_REPAIR_DISABLED_HINT)
+    expect(html).not.toContain(CI_GATE_AUTOMATIC_REPAIR_HINT)
+    expect(html).toContain(CI_GATE_ON_CLOSE_HEADING)
+  })
+
+  test("keeps a saved selection enabled while the catalog is still loading", () => {
+    const html = renderSection({
+      catalog: { kind: "pending" },
+      selectedIdentities: [ciDefinition.identity],
+      automaticCiRepair: repair,
+    })
+    const repairInput = inputTag(html, "automatic-ci-repair")
+    expect(hasBooleanAttr(repairInput, "disabled")).toBe(false)
+    expect(hasBooleanAttr(repairInput, "checked")).toBe(false)
+    expect(html).toContain(CI_GATE_AUTOMATIC_REPAIR_HINT)
+    expect(html).toContain(CI_GATE_DEFINITIONS_LOADING_LABEL)
+  })
+
+  test("hides the control when the Repository cannot offer it", () => {
+    const html = renderSection({
+      catalog: {
+        kind: "loaded",
+        definitions: [ciDefinition],
+        unavailable: [],
+      },
+      selectedIdentities: [ciDefinition.identity],
+      automaticCiRepair: null,
+    })
+    expect(html).not.toContain(CI_GATE_ON_CLOSE_HEADING)
+    expect(html).not.toContain("automatic-ci-repair")
+    expect(html).not.toContain(CI_GATE_AUTOMATIC_REPAIR_LABEL)
   })
 })
