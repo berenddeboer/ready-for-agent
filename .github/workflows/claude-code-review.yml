@@ -5,7 +5,9 @@ on:
   # 2026-11-02, so this workflow has no pull_request event at all. The review
   # always runs from the default branch via dispatch; pr-approval-relay.yml
   # fires it once PR checks actually start (after the first-timer Enable
-  # click). See .github/jactionlint.yaml.
+  # click). Dispatched runs attach their checks to the default branch, so the
+  # review surfaces as a PR comment, not a PR check; dispatching from the PR
+  # head instead would run untrusted workflow definitions with secrets.
   workflow_dispatch:
     inputs:
       pr_number:

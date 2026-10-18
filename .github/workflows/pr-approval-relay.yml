@@ -1,10 +1,8 @@
-# Dispatch Claude Code Review once PR checks actually start. The review
-# workflow has no pull_request event (GitHub restricts pull_request_target on
-# public repositories from 2026-11-02), so this relay is the only automatic
-# path — for the repository owner and outside contributors alike.
-# workflow_run also shares the PR workflow's first-time-contributor Enable
-# gate: a first-timer's checks only start after that click.
-name: PR approval relay
+# Dispatch Claude Code Review once PR checks actually start — the only
+# automatic review path for every human-authored PR, owner included.
+# workflow_run shares the PR workflow's first-time-contributor Enable gate:
+# a first-timer's checks only start after that click.
+name: Claude review relay
 
 on:
   # workflow_run fires when the PR workflow actually starts — immediately for
@@ -22,7 +20,9 @@ concurrency:
 
 jobs:
   dispatch-review:
-    if: github.event.workflow_run.event == 'pull_request'
+    # Re-runs of unchanged PR checks must not start duplicate paid reviews;
+    # each dispatch cancels the review still running for that PR.
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
