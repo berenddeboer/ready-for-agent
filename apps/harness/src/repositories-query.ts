@@ -86,6 +86,7 @@ type RepositoryCiGate = {
     repositoryId: string
     incidentId: string
     status: "QUEUED" | "RUNNING" | "RECOVERED" | "UNRESOLVED"
+    requestSource: "MANUAL" | "AUTOMATIC"
     outcome: "RECOVERED" | "FAILED" | "TIMED_OUT" | "INTERRUPTED" | null
     admittedAt: string
     launchedAt: string | null
@@ -138,6 +139,7 @@ export type Repository = {
   mergePolicy: "OFF" | "CLASSIFY" | "ALWAYS"
   includeAllIssueAuthors: boolean
   waitForReadyForReviewChecks: boolean
+  automaticCiRepair: boolean
   selectedCiGateDefinitions: readonly CiGateDefinition[]
   ciGate: RepositoryCiGate
   linearProjectId: string | null
@@ -174,6 +176,7 @@ export const repositoriesQuery = {
         mergePolicy: true,
         includeAllIssueAuthors: true,
         waitForReadyForReviewChecks: true,
+        automaticCiRepair: true,
         linearProjectId: true,
         linearProjectName: true,
         linearWorkflowStatuses: {
@@ -250,6 +253,7 @@ export const repositoriesQuery = {
             repositoryId: true,
             incidentId: true,
             status: true,
+            requestSource: true,
             outcome: true,
             admittedAt: true,
             launchedAt: true,

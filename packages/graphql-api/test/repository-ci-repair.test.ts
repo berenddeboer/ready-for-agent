@@ -91,6 +91,23 @@ const failureObservation = (
   ],
 })
 
+const pendingObservation = (): CiGateObservation => ({
+  defaultBranch: "main",
+  observations: [
+    {
+      identity: "161335",
+      kind: "observed",
+      runs: [
+        {
+          ...observedRun("100:1", "failure"),
+          rawStatus: "in_progress",
+          rawConclusion: null,
+        },
+      ],
+    },
+  ],
+})
+
 const successObservation = (runIdentity = "101:1"): CiGateObservation => ({
   defaultBranch: "main",
   observations: [
@@ -290,6 +307,10 @@ const graphqlRequest = (body: unknown) =>
     body: JSON.stringify(body),
   })
 
+// Date.now() alone collides when two repositories are seeded in the same
+// millisecond (GitHub, GitLab, and Azure rows in one view).
+let localPathSeq = 0
+
 const seedRepository = (
   input: {
     readonly forge?: "github" | "gitlab" | "azure-devops"
@@ -321,7 +342,7 @@ const seedRepository = (
         forge,
         forgeHost: input.forgeHost ?? "github.com",
         projectPath: input.projectPath ?? "acme/widgets",
-        localPath: `/repos/${input.projectPath ?? "acme/widgets"}-${String(Date.now())}.git`,
+        localPath: `/repos/${input.projectPath ?? "acme/widgets"}-${String(Date.now())}-${String(++localPathSeq)}.git`,
         isBare: true,
       })
       yield* db.updateRepositorySettings({
@@ -374,8 +395,11 @@ const degradeGate = (
   )
 }
 
-const invocationCount = (repositoryId: string) =>
-  runtime.runPromise(
+const invocationCount = (
+  repositoryId: string,
+  target: typeof runtime = runtime,
+) =>
+  target.runPromise(
     Effect.gen(function* () {
       const client = yield* SqlClient.SqlClient
       const rows = (yield* client.unsafe(
@@ -387,6 +411,73 @@ const invocationCount = (repositoryId: string) =>
         [repositoryId],
       )) as readonly { readonly id: string }[]
       return { repairs: rows.length, workItems: workItems.length }
+    }),
+  )
+
+const setAutomatic = (
+  repository: RepositoryRecord,
+  enabled: boolean,
+  target: typeof runtime = runtime,
+  paused?: boolean,
+) =>
+  target.runPromise(
+    Effect.gen(function* () {
+      const db = yield* DbService
+      const current = (yield* db.listRepositories).find(
+        (item) => item.id === repository.id,
+      )
+      if (current === undefined) {
+        return yield* Effect.die(`Repository ${repository.id} is missing`)
+      }
+      return yield* db.updateRepositorySettings({
+        repositoryId: current.id,
+        paused: paused ?? current.paused,
+        defaultModel: current.defaultModel,
+        defaultThinkingLevel: current.defaultThinkingLevel,
+        reviewModel: current.reviewModel,
+        reviewThinkingLevel: current.reviewThinkingLevel,
+        mergePolicy: current.mergePolicy,
+        includeAllIssueAuthors: current.includeAllIssueAuthors,
+        waitForReadyForReviewChecks: current.waitForReadyForReviewChecks,
+        automaticCiRepair: enabled,
+      })
+    }),
+  )
+
+const consider = (repositoryId: string, target: typeof runtime = runtime) =>
+  target.runPromise(
+    Effect.gen(function* () {
+      const repair = yield* makeRepositoryCiRepair({ autoDrive: false })
+      return yield* repair.considerAutomatic(repositoryId)
+    }),
+  )
+
+const openIncidentId = (
+  repositoryId: string,
+  target: typeof runtime = runtime,
+) =>
+  target.runPromise(
+    Effect.gen(function* () {
+      const db = yield* DbService
+      const snapshot = yield* db.loadCiGateSnapshot(repositoryId)
+      return snapshot.activeIncident?.id ?? null
+    }),
+  )
+
+const automaticEligibility = (
+  incidentId: string,
+  target: typeof runtime = runtime,
+) =>
+  target.runPromise(
+    Effect.gen(function* () {
+      const client = yield* SqlClient.SqlClient
+      const rows = (yield* client.unsafe(
+        `SELECT automatic_repair_eligible AS eligible
+         FROM ci_failure_incident WHERE id = ?`,
+        [incidentId],
+      )) as readonly { readonly eligible: number | boolean }[]
+      const eligible = rows[0]?.eligible
+      return eligible === true || eligible === 1
     }),
   )
 
@@ -722,6 +813,7 @@ describe("manual repository CI repair", () => {
     expect((outcome?.deadlineAt ?? 0) - (outcome?.launchedAt ?? 0)).toBe(
       CI_REPAIR_BUDGET_MS,
     )
+    expect(control.prompts[0]).toContain("one manual repository CI repair")
     expect(control.prompts[0]).toContain("repair-ci-cd-pipeline")
     expect(control.prompts[0]).toContain("Do not switch to a review model")
     expect(control.prompts[0]).toContain("Absolute deadline:")
@@ -1008,6 +1100,7 @@ describe("manual repository CI repair", () => {
                 repairSupported
                 repair {
                   status
+                  requestSource
                   outcome
                   localExecutionStopped
                   report
@@ -1028,6 +1121,7 @@ describe("manual repository CI repair", () => {
               repairSupported: boolean
               repair: {
                 status: string
+                requestSource: string
                 outcome: string | null
                 localExecutionStopped: boolean
                 report: string | null
@@ -1043,6 +1137,7 @@ describe("manual repository CI repair", () => {
         (item) => item.id === repository.id,
       )?.ciGate
       expect(gate?.repairSupported).toBe(true)
+      expect(gate?.repair?.requestSource).toBe("MANUAL")
       expect(gate?.repair?.status).toBe("UNRESOLVED")
       expect(gate?.repair?.outcome).toBe("FAILED")
       expect(gate?.repair?.localExecutionStopped).toBe(true)
@@ -1056,6 +1151,457 @@ describe("manual repository CI repair", () => {
         expect(other?.ciGate.repairSupported).toBe(false)
         expect(other?.ciGate.repair).toBeNull()
       }
+    } finally {
+      await graphqlRuntime.dispose()
+    }
+  })
+})
+
+describe("automatic repository CI repair", () => {
+  test("stays off until a confirmed Closed GitHub incident is enabled", async () => {
+    const repository = await seedRepository({ projectPath: "acme/auto-off" })
+    await closeGate(repository)
+    expect(await consider(repository.id)).toBeNull()
+    expect((await invocationCount(repository.id)).repairs).toBe(0)
+
+    await setAutomatic(repository, true)
+    const queued = await consider(repository.id)
+    expect(queued?.status).toBe("queued")
+    expect(queued?.requestSource).toBe("automatic")
+    expect(queued?.launchedAt).toBeNull()
+    expect((await invocationCount(repository.id)).repairs).toBe(1)
+    expect((await invocationCount(repository.id)).workItems).toBe(0)
+    const incidentId = await openIncidentId(repository.id)
+    expect(incidentId).not.toBeNull()
+    expect(await automaticEligibility(incidentId ?? "")).toBe(false)
+  })
+
+  test("pending CI and Degraded observation do not enqueue", async () => {
+    const pending = await seedRepository({ projectPath: "acme/auto-pending" })
+    await setAutomatic(pending, true)
+    observe = () => Effect.succeed(pendingObservation())
+    await runtime.runPromise(
+      observeRepositoryCiGate({ repository: pending, origin: "polling" }),
+    )
+    expect(await consider(pending.id)).toBeNull()
+    expect((await invocationCount(pending.id)).repairs).toBe(0)
+
+    const degraded = await seedRepository({ projectPath: "acme/auto-degraded" })
+    await setAutomatic(degraded, true)
+    await degradeGate(degraded)
+    expect(await consider(degraded.id)).toBeNull()
+    expect((await invocationCount(degraded.id)).repairs).toBe(0)
+    const incidentId = await openIncidentId(degraded.id)
+    expect(incidentId).toBeNull()
+  })
+
+  test("Paused skips automatic selection and still allows manual start", async () => {
+    const repository = await seedRepository({
+      paused: true,
+      projectPath: "acme/auto-paused",
+    })
+    await setAutomatic(repository, true)
+    await closeGate(repository)
+    expect(await consider(repository.id)).toBeNull()
+    const incidentId = await openIncidentId(repository.id)
+    expect(await automaticEligibility(incidentId ?? "")).toBe(true)
+    const manual = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repair = yield* makeRepositoryCiRepair({ autoDrive: false })
+        return yield* repair.startManual(repository.id)
+      }),
+    )
+    expect(manual.requestSource).toBe("manual")
+    expect(manual.status).toBe("queued")
+
+    const held = await seedRepository({
+      paused: true,
+      projectPath: "acme/auto-unpause",
+    })
+    await setAutomatic(held, true)
+    await closeGate(held)
+    expect(await consider(held.id)).toBeNull()
+    await setAutomatic(held, true, runtime, false)
+    const queued = await consider(held.id)
+    expect(queued?.requestSource).toBe("automatic")
+    expect(queued?.status).toBe("queued")
+  })
+
+  test("a not-ready backend does not consume the automatic attempt", async () => {
+    const repository = await seedRepository({
+      projectPath: "acme/auto-unready",
+      repositoryBackend: "grok",
+    })
+    await setAutomatic(repository, true)
+    await closeGate(repository)
+    expect(await consider(repository.id)).toBeNull()
+    expect((await invocationCount(repository.id)).repairs).toBe(0)
+    const incidentId = await openIncidentId(repository.id)
+    expect(await automaticEligibility(incidentId ?? "")).toBe(true)
+
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const current = (yield* db.listRepositories).find(
+          (item) => item.id === repository.id,
+        )
+        if (current === undefined) {
+          return yield* Effect.die("missing")
+        }
+        yield* db.updateRepositorySettings({
+          repositoryId: current.id,
+          paused: current.paused,
+          selectedAgentBackend: null,
+          defaultModel: current.defaultModel,
+          defaultThinkingLevel: current.defaultThinkingLevel,
+          reviewModel: current.reviewModel,
+          reviewThinkingLevel: current.reviewThinkingLevel,
+          mergePolicy: current.mergePolicy,
+          includeAllIssueAuthors: current.includeAllIssueAuthors,
+          waitForReadyForReviewChecks: current.waitForReadyForReviewChecks,
+          automaticCiRepair: true,
+        })
+      }),
+    )
+    const queued = await consider(repository.id)
+    expect(queued?.status).toBe("queued")
+    expect(queued?.requestSource).toBe("automatic")
+  })
+
+  test("repeated polls, extra failures, and a manual request share one repair", async () => {
+    const repository = await seedRepository({ projectPath: "acme/auto-once" })
+    await setAutomatic(repository, true)
+    await closeGate(repository)
+    const [first, second] = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repair = yield* makeRepositoryCiRepair({ autoDrive: false })
+        return yield* Effect.all(
+          [
+            repair.considerAutomatic(repository.id),
+            repair.considerAutomatic(repository.id),
+          ],
+          { concurrency: "unbounded" },
+        )
+      }),
+    )
+    expect(first?.id).toBe(second?.id)
+    expect((await invocationCount(repository.id)).repairs).toBe(1)
+
+    const incidentId = await openIncidentId(repository.id)
+    observe = () => Effect.succeed(failureObservation("100:2"))
+    await runtime.runPromise(
+      observeRepositoryCiGate({ repository, origin: "polling" }),
+    )
+    expect(await openIncidentId(repository.id)).toBe(incidentId)
+    const again = await consider(repository.id)
+    expect(again?.id).toBe(first?.id)
+
+    const raced = await seedRepository({ projectPath: "acme/auto-manual-race" })
+    await setAutomatic(raced, true)
+    await closeGate(raced)
+    const [automatic, manual] = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repair = yield* makeRepositoryCiRepair({ autoDrive: false })
+        return yield* Effect.all(
+          [repair.considerAutomatic(raced.id), repair.startManual(raced.id)],
+          { concurrency: "unbounded" },
+        )
+      }),
+    )
+    expect(automatic?.id).toBe(manual.id)
+    expect((await invocationCount(raced.id)).repairs).toBe(1)
+  })
+
+  test("failure, timeout, restart, and an earlier manual attempt are not repeated automatically", async () => {
+    const failed = await seedRepository({ projectPath: "acme/auto-failed" })
+    await setAutomatic(failed, true)
+    await closeGate(failed)
+    const first = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repair = yield* makeRepositoryCiRepair({
+          autoDrive: false,
+          pollInterval: Duration.hours(5),
+        })
+        const queued = yield* repair.considerAutomatic(failed.id)
+        yield* repair.drive(queued?.id ?? "")
+        return yield* repair.latestForRepository(failed.id)
+      }),
+    )
+    expect(first?.outcome).toBe("failed")
+    expect(first?.requestSource).toBe("automatic")
+    expect(control.prompts[0]).toContain("one automatic repository CI repair")
+    await setAutomatic(failed, false)
+    await setAutomatic(failed, true)
+    expect(await consider(failed.id)).toBeNull()
+    expect((await invocationCount(failed.id)).repairs).toBe(1)
+    const retried = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repair = yield* makeRepositoryCiRepair({ autoDrive: false })
+        return yield* repair.startManual(failed.id)
+      }),
+    )
+    expect(retried.requestSource).toBe("manual")
+    expect(retried.id).not.toBe(first?.id)
+
+    const manualFirst = await seedRepository({
+      projectPath: "acme/auto-after-manual",
+    })
+    await closeGate(manualFirst)
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const repair = yield* makeRepositoryCiRepair({
+          autoDrive: false,
+          pollInterval: Duration.hours(5),
+        })
+        const queued = yield* repair.startManual(manualFirst.id)
+        yield* repair.drive(queued.id)
+      }),
+    )
+    await setAutomatic(manualFirst, true)
+    expect(await consider(manualFirst.id)).toBeNull()
+    expect((await invocationCount(manualFirst.id)).repairs).toBe(1)
+
+    const timedOut = await seedRepository({ projectPath: "acme/auto-timeout" })
+    await setAutomatic(timedOut, true)
+    await closeGate(timedOut)
+    control.mode = "block"
+    const timed = await runtime.runPromise(
+      Effect.gen(function* () {
+        control.release = yield* Deferred.make<void>()
+        control.entered = yield* Deferred.make<void>()
+        const repair = yield* makeRepositoryCiRepair({
+          autoDrive: false,
+          pollInterval: Duration.hours(5),
+        })
+        const queued = yield* repair.considerAutomatic(timedOut.id)
+        const drive = yield* repair
+          .drive(queued?.id ?? "")
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(control.entered as Deferred.Deferred<void>)
+        yield* TestClock.adjust(Duration.millis(CI_REPAIR_BUDGET_MS + 1000))
+        yield* Fiber.join(drive)
+        return yield* repair.latestForRepository(timedOut.id)
+      }).pipe(Effect.provide(TestClock.layer())),
+    )
+    expect(timed?.outcome).toBe("timed_out")
+    expect(await consider(timedOut.id)).toBeNull()
+    const timeoutRetry = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repair = yield* makeRepositoryCiRepair({ autoDrive: false })
+        return yield* repair.startManual(timedOut.id)
+      }),
+    )
+    expect(timeoutRetry.status).toBe("queued")
+    expect(timeoutRetry.requestSource).toBe("manual")
+  })
+
+  test("reopening while queued does not launch, and a later incident can", async () => {
+    const repository = await seedRepository({ projectPath: "acme/auto-reopen" })
+    await setAutomatic(repository, true)
+    await closeGate(repository)
+    const firstIncident = await openIncidentId(repository.id)
+    const outcome = await runtime.runPromise(
+      Effect.gen(function* () {
+        const repair = yield* makeRepositoryCiRepair({ autoDrive: false })
+        const queued = yield* repair.considerAutomatic(repository.id)
+        observe = () => Effect.succeed(successObservation())
+        yield* observeRepositoryCiGate({ repository, origin: "operator" })
+        yield* repair.drive(queued?.id ?? "")
+        return yield* repair.latestForRepository(repository.id)
+      }),
+    )
+    expect(control.prompts).toHaveLength(0)
+    expect(outcome?.status).toBe("recovered")
+    expect(outcome?.launchedAt).toBeNull()
+
+    observe = () => Effect.succeed(failureObservation("200:1"))
+    await runtime.runPromise(
+      observeRepositoryCiGate({ repository, origin: "polling" }),
+    )
+    const nextIncident = await openIncidentId(repository.id)
+    expect(nextIncident).not.toBeNull()
+    expect(nextIncident).not.toBe(firstIncident)
+    const next = await consider(repository.id)
+    expect(next?.requestSource).toBe("automatic")
+    expect(next?.incidentId).toBe(nextIncident)
+    expect(next?.id).not.toBe(outcome?.id)
+  })
+
+  test("recovery during execution follows the gate observer", async () => {
+    const repository = await seedRepository({
+      projectPath: "acme/auto-recover",
+    })
+    await setAutomatic(repository, true)
+    await closeGate(repository)
+    control.mode = "block"
+    const outcome = await runtime.runPromise(
+      Effect.gen(function* () {
+        control.release = yield* Deferred.make<void>()
+        control.entered = yield* Deferred.make<void>()
+        const repair = yield* makeRepositoryCiRepair({
+          autoDrive: false,
+          pollInterval: Duration.seconds(1),
+        })
+        const queued = yield* repair.considerAutomatic(repository.id)
+        const drive = yield* repair
+          .drive(queued?.id ?? "")
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(control.entered as Deferred.Deferred<void>)
+        observe = () => Effect.succeed(successObservation("101:1"))
+        yield* TestClock.adjust("2 seconds")
+        yield* Fiber.join(drive)
+        return yield* repair.latestForRepository(repository.id)
+      }).pipe(Effect.provide(TestClock.layer())),
+    )
+    expect(outcome?.outcome).toBe("recovered")
+    expect(outcome?.requestSource).toBe("automatic")
+    expect(control.kills.length).toBeGreaterThan(0)
+  })
+
+  test("restart reconciles an automatic attempt and does not launch another", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ci-repair-auto-"))
+    const filename = join(dir, "harness.sqlite")
+    const firstRuntime = ManagedRuntime.make(
+      makeRuntimeLayer(makeFileDatabaseTest(filename)),
+    )
+    let repositoryId = ""
+    try {
+      const repository = await seedRepository(
+        { projectPath: "acme/auto-restart" },
+        firstRuntime,
+      )
+      repositoryId = repository.id
+      await setAutomatic(repository, true, firstRuntime)
+      await closeGate(repository, firstRuntime)
+      const queued = await consider(repository.id, firstRuntime)
+      expect(queued?.requestSource).toBe("automatic")
+      expect(queued?.status).toBe("queued")
+    } finally {
+      await firstRuntime.dispose()
+    }
+    const secondRuntime = ManagedRuntime.make(
+      makeRuntimeLayer(makeFileDatabaseTest(filename)),
+    )
+    try {
+      const result = await secondRuntime.runPromise(
+        Effect.gen(function* () {
+          const repair = yield* makeRepositoryCiRepair({
+            autoDrive: false,
+            epoch: "epoch-b",
+          })
+          yield* repair.reconcile()
+          const again = yield* repair.considerAutomatic(repositoryId)
+          const manual = yield* repair.startManual(repositoryId)
+          return { again, manual }
+        }),
+      )
+      expect(result.again).toBeNull()
+      expect(result.manual.requestSource).toBe("manual")
+      expect(result.manual.status).toBe("queued")
+      expect((await invocationCount(repositoryId, secondRuntime)).repairs).toBe(
+        2,
+      )
+    } finally {
+      await secondRuntime.dispose()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  test("saving the GitHub opt-in enqueues the current Closed incident once", async () => {
+    const graphqlRuntime = ManagedRuntime.make(
+      RepositoryCiRepairLive({
+        autoDrive: false,
+        pollInterval: Duration.hours(5),
+      }).pipe(Layer.provideMerge(runtimeLayer)),
+    )
+    try {
+      const repository = await seedRepository(
+        { projectPath: "acme/auto-save" },
+        graphqlRuntime,
+      )
+      await closeGate(repository, graphqlRuntime)
+      const saved = await createGraphqlApi(graphqlRuntime).fetch(
+        graphqlRequest({
+          query: `mutation Save($input: UpdateRepositorySettingsInput!) {
+            updateRepositorySettings(input: $input) {
+              automaticCiRepair
+            }
+          }`,
+          variables: {
+            input: {
+              repositoryId: repository.id,
+              paused: false,
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              mergePolicy: "CLASSIFY",
+              includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
+              automaticCiRepair: true,
+            },
+          },
+        }),
+      )
+      const payload = (await saved.json()) as {
+        data?: { updateRepositorySettings: { automaticCiRepair: boolean } }
+        errors?: unknown
+      }
+      expect(payload.errors).toBeUndefined()
+      expect(payload.data?.updateRepositorySettings.automaticCiRepair).toBe(
+        true,
+      )
+      expect(
+        (await invocationCount(repository.id, graphqlRuntime)).repairs,
+      ).toBe(1)
+      const again = await createGraphqlApi(graphqlRuntime).fetch(
+        graphqlRequest({
+          query: `mutation Save($input: UpdateRepositorySettingsInput!) {
+            updateRepositorySettings(input: $input) { automaticCiRepair }
+          }`,
+          variables: {
+            input: {
+              repositoryId: repository.id,
+              paused: false,
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              mergePolicy: "CLASSIFY",
+              includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
+              automaticCiRepair: false,
+            },
+          },
+        }),
+      )
+      expect(
+        ((await again.json()) as { errors?: unknown }).errors,
+      ).toBeUndefined()
+      await createGraphqlApi(graphqlRuntime).fetch(
+        graphqlRequest({
+          query: `mutation Save($input: UpdateRepositorySettingsInput!) {
+            updateRepositorySettings(input: $input) { automaticCiRepair }
+          }`,
+          variables: {
+            input: {
+              repositoryId: repository.id,
+              paused: false,
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              mergePolicy: "CLASSIFY",
+              includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
+              automaticCiRepair: true,
+            },
+          },
+        }),
+      )
+      expect(
+        (await invocationCount(repository.id, graphqlRuntime)).repairs,
+      ).toBe(1)
     } finally {
       await graphqlRuntime.dispose()
     }

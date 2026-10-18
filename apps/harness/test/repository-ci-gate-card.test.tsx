@@ -150,6 +150,7 @@ describe("Repository card CI Gate", () => {
     ): RepositoryCiRepairCard => ({
       incidentId: "cfi-1",
       status: "QUEUED",
+      requestSource: "MANUAL",
       outcome: null,
       launchedAt: null,
       deadlineAt: null,
@@ -212,6 +213,7 @@ describe("Repository card CI Gate", () => {
         repair={{
           incidentId: "cfi-1",
           status: "UNRESOLVED",
+          requestSource: "MANUAL",
           outcome: "TIMED_OUT",
           launchedAt: "2026-10-17T12:00:00.000Z",
           deadlineAt: "2026-10-17T16:00:00.000Z",
@@ -244,6 +246,35 @@ describe("Repository card CI Gate", () => {
     )
     expect(html).toContain("Retry CI repair")
     expect(html).toContain('data-ci-repair-action="retry"')
+    expect(html).toContain("Manual")
+  })
+
+  test("shows an automatic repair on the same activity card", () => {
+    const html = renderToStaticMarkup(
+      <RepositoryCiGateCardDetails
+        ciGate={gate({
+          status: "CLOSED",
+          activeIncident: { id: "cfi-1", summary: "CI failed." },
+        })}
+        repairSupported
+        repair={{
+          incidentId: "cfi-1",
+          status: "RUNNING",
+          requestSource: "AUTOMATIC",
+          outcome: null,
+          launchedAt: "2026-10-18T12:00:00.000Z",
+          deadlineAt: "2026-10-18T16:00:00.000Z",
+          report: null,
+          localExecutionStopped: false,
+          links: [],
+        }}
+        onStartRepair={() => undefined}
+      />,
+    )
+    expect(html).toContain("CI repair running")
+    expect(html).toContain('data-testid="ci-repair-request-source"')
+    expect(html).toContain("Automatic")
+    expect(html).not.toContain("data-ci-repair-action")
   })
 })
 

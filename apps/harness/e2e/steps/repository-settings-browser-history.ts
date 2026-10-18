@@ -10,6 +10,13 @@ import { Then, When } from "./fixtures.ts"
 const repositoryDialog = (page: Page) =>
   page.locator("dialog[open]").filter({ hasText: "Repository settings" })
 
+/**
+ * The Paused control's accessible name starts with its label. A substring
+ * `/Paused/i` also matches that word in the Automatic CI repair hint.
+ */
+const pausedCheckbox = (dialog: ReturnType<typeof repositoryDialog>) =>
+  dialog.getByRole("checkbox", { name: /^Paused\b/i })
+
 const notFoundDialog = (page: Page) =>
   page.getByRole("dialog", { name: "Repository not found" })
 
@@ -238,7 +245,7 @@ When("I press Escape in the Repository settings dialog", async ({ page }) => {
 
 When("I change the Repository paused draft", async ({ page }) => {
   const dialog = repositoryDialog(page)
-  const checkbox = dialog.getByRole("checkbox", { name: /Paused/i })
+  const checkbox = pausedCheckbox(dialog)
   await expect(checkbox).toBeChecked()
   await checkbox.setChecked(false)
 })
@@ -386,7 +393,7 @@ Then(
   async ({ page }) => {
     const dialog = repositoryDialog(page)
     await awaitCatalogSettled(dialog)
-    const checkbox = dialog.getByRole("checkbox", { name: /Paused/i })
+    const checkbox = pausedCheckbox(dialog)
     // Seeded Paused Repository: discarded draft is unchecked; saved stays Paused.
     await expect(checkbox).toBeChecked()
   },

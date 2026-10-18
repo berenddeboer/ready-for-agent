@@ -5,6 +5,7 @@ import {
   stubDbServiceLayer,
 } from "@ready-for-agent/db-service/test"
 import { GitHubRequestError } from "@ready-for-agent/github-service"
+import { RepositoryCiRepair } from "@ready-for-agent/graphql-api"
 import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
 import {
   WorkItemLifecycle,
@@ -301,5 +302,98 @@ describe("refreshLoadedRepository", () => {
       )
       expect(calls).toEqual(["reconcile", "issues", "ci"])
       expect(result._tag).toBe("Success")
+    }).pipe(Effect.runPromise))
+
+  it("considers automatic repair after CI observation succeeds", () =>
+    Effect.gen(function* () {
+      const repository = makeRepositoryRecord({ paused: true })
+      const considered: string[] = []
+      const result = yield* refreshLoadedRepository({
+        repository,
+        githubOperationOrigin: "polling",
+      }).pipe(
+        Effect.provideService(RepositoryCiRepair, {
+          startManual: () => Effect.die("unused"),
+          drive: () => Effect.void,
+          latestForRepository: () => Effect.succeed(null),
+          reconcile: () => Effect.succeed({ blockedRepositoryIds: [] }),
+          considerAutomatic: (repositoryId) =>
+            Effect.sync(() => {
+              considered.push(repositoryId)
+              return null
+            }),
+        }),
+        Effect.provide(
+          Layer.mergeAll(
+            stubDbServiceLayer({
+              listCiGateDefinitions: () => Effect.succeed([]),
+              commitCiGateSnapshot: () => Effect.void,
+            }),
+            stubGitHubServiceLayer(),
+            stubGitLabServiceLayer(),
+            stubAzureDevOpsServiceLayer(),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () =>
+                Effect.fail(
+                  new DatabaseError({ message: "reconciliation failed" }),
+                ),
+            }),
+            Layer.succeed(WorkItemLifecycle, idleLifecycle),
+          ),
+        ),
+        Effect.result,
+      )
+      expect(considered).toEqual([repository.id])
+      expect(result._tag).toBe("Failure")
+    }).pipe(Effect.runPromise))
+
+  it("does not consider automatic repair when CI observation fails", () =>
+    Effect.gen(function* () {
+      const repository = makeRepositoryRecord({ paused: true })
+      const considered: string[] = []
+      const result = yield* refreshLoadedRepository({
+        repository,
+        githubOperationOrigin: "operator",
+      }).pipe(
+        Effect.provideService(RepositoryCiRepair, {
+          startManual: () => Effect.die("unused"),
+          drive: () => Effect.void,
+          latestForRepository: () => Effect.succeed(null),
+          reconcile: () => Effect.succeed({ blockedRepositoryIds: [] }),
+          considerAutomatic: (repositoryId) =>
+            Effect.sync(() => {
+              considered.push(repositoryId)
+              return null
+            }),
+        }),
+        Effect.provide(
+          Layer.mergeAll(
+            stubDbServiceLayer({
+              listRepositories: Effect.succeed([repository]),
+              listCiGateDefinitions: () =>
+                Effect.fail(new DatabaseError({ message: "ci unavailable" })),
+              notifyIssuesChanged: () => Effect.void,
+            }),
+            stubGitHubServiceLayer(),
+            stubGitLabServiceLayer(),
+            stubAzureDevOpsServiceLayer(),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () =>
+                Effect.succeed({
+                  fetched: 0,
+                  inserted: 0,
+                  updated: 0,
+                  deleted: 0,
+                  unchanged: 0,
+                  competingObservations: [],
+                }),
+            }),
+            Layer.succeed(WorkItemLifecycle, idleLifecycle),
+          ),
+        ),
+        Effect.result,
+      )
+      expect(considered).toEqual([])
+      expect(result._tag).toBe("Failure")
     }).pipe(Effect.runPromise))
 })

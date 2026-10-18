@@ -9,6 +9,7 @@ import {
   Effect,
   Layer,
   Ref,
+  Result,
   Schema,
 } from "effect"
 import { SqlClient } from "effect/sql"
@@ -18,14 +19,14 @@ import {
   type AgentBackendId,
   isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
-import type { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
+import { AzureDevOpsService } from "@ready-for-agent/azure-devops-service"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
-import type { GitHubService } from "@ready-for-agent/github-service"
-import type { GitLabService } from "@ready-for-agent/gitlab-service"
-import type { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import { GitHubService } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
+import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   SharedAgentTurnAdmission,
-  type WorkItemLifecycle,
+  WorkItemLifecycle,
   agentModelCatalogViolation,
   agentTurnForgeCredentialGuidance,
   resolveAgentModelsForBackend,
@@ -96,6 +97,7 @@ export type RepositoryCiRepairView = {
   readonly repositoryId: string
   readonly incidentId: string
   readonly status: "queued" | "running" | "recovered" | "unresolved"
+  readonly requestSource: "manual" | "automatic"
   readonly outcome: "recovered" | "failed" | "timed_out" | "interrupted" | null
   readonly admittedAt: number
   readonly launchedAt: number | null
@@ -163,6 +165,15 @@ export type RepositoryCiRepairShape = {
   readonly latestForRepository: (
     repositoryId: string,
   ) => Effect.Effect<RepositoryCiRepairView | null, unknown>
+  /**
+   * Enqueue the shared repair for a confirmed Closed incident when the
+   * Repository has opted in. Returns null when automatic selection does not
+   * apply. Does not consume the incident's single automatic attempt unless a
+   * repair is admitted.
+   */
+  readonly considerAutomatic: (
+    repositoryId: string,
+  ) => Effect.Effect<RepositoryCiRepairView | null, unknown>
   readonly reconcile: () => Effect.Effect<
     {
       readonly blockedRepositoryIds: readonly string[]
@@ -181,6 +192,7 @@ const unavailableRepair: RepositoryCiRepairShape = {
     ),
   drive: () => Effect.void,
   latestForRepository: () => Effect.succeed(null),
+  considerAutomatic: () => Effect.succeed(null),
   reconcile: () => Effect.succeed({ blockedRepositoryIds: [] }),
 }
 
@@ -198,6 +210,7 @@ type InvocationRow = {
   readonly repository_id: string
   readonly incident_id: string
   readonly status: RepositoryCiRepairView["status"]
+  readonly request_source: RepositoryCiRepairView["requestSource"]
   readonly outcome: RepositoryCiRepairView["outcome"]
   readonly supervisor_epoch: string
   readonly admitted_at: number
@@ -412,6 +425,7 @@ const buildPrompt = (input: {
   readonly model: string
   readonly previousLinks: readonly RepositoryCiRepairLinkView[]
   readonly evidenceDir: string
+  readonly requestSource: RepositoryCiRepairView["requestSource"]
 }): string => {
   const deadline = new Date(input.deadlineAt).toISOString()
   const definitions = input.gate.definitions
@@ -438,7 +452,7 @@ const buildPrompt = (input: {
     .map((link) => `- ${link.url}`)
     .join("\n")
   return [
-    "You are the single build agent for a manual repository CI repair.",
+    `You are the single build agent for one ${input.requestSource} repository CI repair.`,
     `Backend: ${input.backendLabel}. Build model: ${input.model}. Do not switch to a review model. There is no pull-request cap and no round cap.`,
     "Broad repair authority: change application code, CI, infrastructure, credentials, and repository settings as needed; rerun jobs; create and merge successive pull requests. Stay within the supplied credentials. Credential or platform refusals are real constraints — report them instead of inventing access.",
     `Absolute deadline: ${deadline}. This covers diagnosis, commands, pull requests, merges, and watching. Stop local work at that instant even if a remote job is still running.`,
@@ -523,6 +537,11 @@ export const makeRepositoryCiRepair = (options?: {
     const db = yield* DbService
     const admission = yield* SharedAgentTurnAdmission
     const active = yield* ActiveAgentBackend
+    const keymaxxer = yield* KeymaxxerService
+    const lifecycle = yield* WorkItemLifecycle
+    const github = yield* GitHubService
+    const gitlab = yield* GitLabService
+    const azure = yield* AzureDevOpsService
     const executor = yield* CiRepairExecutor
     const epoch = options?.epoch ?? `epoch-${ulid()}`
     const autoDrive = options?.autoDrive ?? true
@@ -532,7 +551,7 @@ export const makeRepositoryCiRepair = (options?: {
     const loadRow = (id: string) =>
       Effect.gen(function* () {
         const rows = (yield* sql.unsafe(
-          `SELECT id, repository_id, incident_id, status, outcome, supervisor_epoch,
+          `SELECT id, repository_id, incident_id, status, request_source, outcome, supervisor_epoch,
                   admitted_at, launched_at, deadline_at, session_id, process_ref, report
            FROM ci_repair_invocation WHERE id = ?`,
           [id],
@@ -560,6 +579,7 @@ export const makeRepositoryCiRepair = (options?: {
           repositoryId: row.repository_id,
           incidentId: row.incident_id,
           status: row.status,
+          requestSource: row.request_source,
           outcome: row.outcome,
           admittedAt: row.admitted_at,
           launchedAt: row.launched_at,
@@ -725,7 +745,7 @@ export const makeRepositoryCiRepair = (options?: {
     const activeRow = (repositoryId: string) =>
       Effect.gen(function* () {
         const rows = (yield* sql.unsafe(
-          `SELECT id, repository_id, incident_id, status, outcome, supervisor_epoch,
+          `SELECT id, repository_id, incident_id, status, request_source, outcome, supervisor_epoch,
                   admitted_at, launched_at, deadline_at, session_id, process_ref, report
            FROM ci_repair_invocation
            WHERE repository_id = ? AND status IN ('queued', 'running')
@@ -853,6 +873,7 @@ export const makeRepositoryCiRepair = (options?: {
           model: input.launch.model,
           previousLinks,
           evidenceDir: evidenceDirectory(input.row.id),
+          requestSource: input.row.request_source,
         })
         const now = yield* Clock.currentTimeMillis
         const timeoutMs = Math.max(1, input.deadlineAt - now)
@@ -1085,7 +1106,7 @@ export const makeRepositoryCiRepair = (options?: {
     const reconcile = () =>
       Effect.gen(function* () {
         const rows = (yield* sql.unsafe(
-          `SELECT id, repository_id, incident_id, status, outcome, supervisor_epoch,
+          `SELECT id, repository_id, incident_id, status, request_source, outcome, supervisor_epoch,
                 admitted_at, launched_at, deadline_at, session_id, process_ref, report
          FROM ci_repair_invocation
          WHERE status IN ('queued', 'running') AND supervisor_epoch <> ?`,
@@ -1132,7 +1153,7 @@ export const makeRepositoryCiRepair = (options?: {
     const latestForRepository = (repositoryId: string) =>
       Effect.gen(function* () {
         const rows = (yield* sql.unsafe(
-          `SELECT id, repository_id, incident_id, status, outcome, supervisor_epoch,
+          `SELECT id, repository_id, incident_id, status, request_source, outcome, supervisor_epoch,
                   admitted_at, launched_at, deadline_at, session_id, process_ref, report
            FROM ci_repair_invocation
            WHERE repository_id = ?
@@ -1144,6 +1165,114 @@ export const makeRepositoryCiRepair = (options?: {
         if (row === undefined) return null
         return yield* toView(row)
       })
+
+    const invocationColumns = `id, repository_id, incident_id, status, request_source, outcome, supervisor_epoch,
+            admitted_at, launched_at, deadline_at, session_id, process_ref, report`
+
+    /**
+     * One queued or running repair per Repository. Any admission consumes the
+     * incident's automatic-attempt eligibility in the same transaction as the
+     * insert, so a failed insert does not burn it. An active repair for a
+     * different incident does not consume this incident.
+     */
+    const admit = (input: {
+      readonly repositoryId: string
+      readonly incidentId: string
+      readonly requestSource: RepositoryCiRepairView["requestSource"]
+    }) =>
+      Effect.gen(function* () {
+        const committed = yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const activeRows = (yield* sql.unsafe(
+                `SELECT ${invocationColumns}
+                 FROM ci_repair_invocation
+                 WHERE repository_id = ? AND status IN ('queued', 'running')
+                 LIMIT 1`,
+                [input.repositoryId],
+              )) as readonly InvocationRow[]
+              const active = activeRows[0]
+              if (active !== undefined) {
+                if (active.incident_id === input.incidentId) {
+                  return { _tag: "existing" as const, row: active }
+                }
+                return { _tag: "blocked" as const }
+              }
+              if (input.requestSource === "automatic") {
+                const consumed = (yield* sql.unsafe(
+                  `UPDATE ci_failure_incident
+                   SET automatic_repair_eligible = 0
+                   WHERE id = ? AND automatic_repair_eligible = 1
+                   RETURNING id`,
+                  [input.incidentId],
+                )) as readonly { readonly id: string }[]
+                if (consumed.length === 0) {
+                  return { _tag: "ineligible" as const }
+                }
+              } else {
+                yield* sql.unsafe(
+                  `UPDATE ci_failure_incident
+                   SET automatic_repair_eligible = 0
+                   WHERE id = ?`,
+                  [input.incidentId],
+                )
+              }
+              const id = `criv-${ulid()}`
+              const admittedAt = yield* Clock.currentTimeMillis
+              const inserted = (yield* sql.unsafe(
+                `INSERT INTO ci_repair_invocation
+                   (id, repository_id, incident_id, status, request_source, outcome, supervisor_epoch,
+                    admitted_at, launched_at, deadline_at, session_id, process_ref, report,
+                    created_at, updated_at)
+                 VALUES (?, ?, ?, 'queued', ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?)
+                 RETURNING ${invocationColumns}`,
+                [
+                  id,
+                  input.repositoryId,
+                  input.incidentId,
+                  input.requestSource,
+                  epoch,
+                  admittedAt,
+                  admittedAt,
+                  admittedAt,
+                ],
+              )) as readonly InvocationRow[]
+              const row = inserted[0]
+              if (row === undefined) {
+                return yield* Effect.die(
+                  "CI repair insert did not return a row",
+                )
+              }
+              return { _tag: "created" as const, row }
+            }),
+          )
+          .pipe(
+            Effect.catch((error: unknown) =>
+              isUniqueActiveViolation(error)
+                ? Effect.succeed({ _tag: "conflict" as const })
+                : Effect.fail(error),
+            ),
+          )
+        if (committed._tag !== "conflict") {
+          return committed
+        }
+        const raced = yield* activeRow(input.repositoryId)
+        if (raced !== null && raced.incident_id === input.incidentId) {
+          return { _tag: "existing" as const, row: raced }
+        }
+        return { _tag: "blocked" as const }
+      })
+
+    const forkDrive = (invocationId: string) =>
+      drive(invocationId).pipe(
+        Effect.catch((error) =>
+          Effect.logError("Repository CI repair drive failed", {
+            invocationId,
+            error: String(error),
+          }),
+        ),
+        Effect.forkDetach,
+      )
 
     const startManual = (repositoryId: string) =>
       Effect.gen(function* () {
@@ -1172,39 +1301,21 @@ export const makeRepositoryCiRepair = (options?: {
                 : "CI repair starts only while a current Closed incident is active.",
           })
         }
+        // Readiness is checked before admission so a missing backend does not
+        // consume the incident's automatic attempt.
         yield* resolveLaunch(repository)
-        const existing = yield* activeRow(repositoryId)
-        if (existing !== null) {
-          return yield* toView(existing)
+        const admitted = yield* admit({
+          repositoryId,
+          incidentId: gate.incidentId,
+          requestSource: "manual",
+        })
+        if (admitted._tag === "ineligible") {
+          return yield* new CiRepairNotEligibleError({
+            repositoryId,
+            message: "CI repair could not be admitted for this incident.",
+          })
         }
-        const id = `criv-${ulid()}`
-        const admittedAt = yield* Clock.currentTimeMillis
-        const inserted = yield* sql
-          .unsafe(
-            `INSERT INTO ci_repair_invocation
-               (id, repository_id, incident_id, status, outcome, supervisor_epoch,
-                admitted_at, launched_at, deadline_at, session_id, process_ref, report,
-                created_at, updated_at)
-             VALUES (?, ?, ?, 'queued', NULL, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
-            [
-              id,
-              repositoryId,
-              gate.incidentId,
-              epoch,
-              admittedAt,
-              admittedAt,
-              admittedAt,
-            ],
-          )
-          .pipe(
-            Effect.as(true),
-            Effect.catch((error: unknown) =>
-              isUniqueActiveViolation(error)
-                ? Effect.succeed(false)
-                : Effect.fail(error),
-            ),
-          )
-        if (!inserted) {
+        if (admitted._tag === "blocked") {
           const raced = yield* activeRow(repositoryId)
           if (raced === null) {
             return yield* new CiRepairNotEligibleError({
@@ -1214,31 +1325,73 @@ export const makeRepositoryCiRepair = (options?: {
           }
           return yield* toView(raced)
         }
-        if (autoDrive) {
-          yield* drive(id).pipe(
-            Effect.catch((error) =>
-              Effect.logError("Repository CI repair drive failed", {
-                invocationId: id,
-                error: String(error),
-              }),
-            ),
-            Effect.forkDetach,
-          )
+        if (admitted._tag === "created" && autoDrive) {
+          yield* forkDrive(admitted.row.id)
         }
-        const created = yield* loadRow(id)
-        if (created === null) {
-          return yield* new CiRepairNotEligibleError({
-            repositoryId,
-            message: "CI repair was admitted but could not be reloaded.",
-          })
-        }
-        return yield* toView(created)
+        return yield* toView(admitted.row)
       })
+
+    // Callers such as Repository refresh do not carry the repair context.
+    // The services were captured when this supervisor was built.
+    const provideCallContext = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.provideService(DbService, db),
+        Effect.provideService(WorkItemLifecycle, lifecycle),
+        Effect.provideService(GitHubService, github),
+        Effect.provideService(GitLabService, gitlab),
+        Effect.provideService(AzureDevOpsService, azure),
+        Effect.provideService(KeymaxxerService, keymaxxer),
+        Effect.provideService(ActiveAgentBackend, active),
+      )
+
+    const considerAutomatic = (repositoryId: string) =>
+      provideCallContext(
+        Effect.gen(function* () {
+          const repository = (yield* db.listRepositories).find(
+            (candidate) => candidate.id === repositoryId,
+          )
+          if (
+            repository === undefined ||
+            repository.forge !== "github" ||
+            repository.paused ||
+            !repository.automaticCiRepair
+          ) {
+            return null
+          }
+          const definitions = yield* db.listCiGateDefinitions(repository.id)
+          const snapshot = yield* db.loadCiGateSnapshot(repository.id)
+          const status = deriveRepositoryCiGateStatus({
+            selectedCount: definitions.length,
+            observations: snapshot.observations,
+          })
+          const incidentId = snapshot.activeIncident?.id ?? null
+          if (status !== "closed" || incidentId === null) {
+            return null
+          }
+          const ready = yield* resolveLaunch(repository).pipe(Effect.result)
+          if (Result.isFailure(ready)) {
+            return null
+          }
+          const admitted = yield* admit({
+            repositoryId,
+            incidentId,
+            requestSource: "automatic",
+          })
+          if (admitted._tag === "blocked" || admitted._tag === "ineligible") {
+            return null
+          }
+          if (admitted._tag === "created" && autoDrive) {
+            yield* forkDrive(admitted.row.id)
+          }
+          return yield* toView(admitted.row)
+        }),
+      )
 
     return {
       startManual,
       drive,
       latestForRepository,
+      considerAutomatic,
       reconcile,
     } satisfies RepositoryCiRepairShape
   })

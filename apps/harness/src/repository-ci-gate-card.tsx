@@ -28,6 +28,7 @@ type RepositoryCiGateCard = {
 export type RepositoryCiRepairCard = {
   readonly incidentId: string
   readonly status: "QUEUED" | "RUNNING" | "RECOVERED" | "UNRESOLVED"
+  readonly requestSource: "MANUAL" | "AUTOMATIC"
   readonly outcome: "RECOVERED" | "FAILED" | "TIMED_OUT" | "INTERRUPTED" | null
   readonly launchedAt: string | null
   readonly deadlineAt: string | null
@@ -181,6 +182,9 @@ function CiRepairStatus({
       data-testid="ci-repair-status"
     >
       <span>{repairStatusLabel(repair)}</span>
+      <span data-testid="ci-repair-request-source">
+        {repair.requestSource === "AUTOMATIC" ? "Automatic" : "Manual"}
+      </span>
       {repair.deadlineAt !== null ? (
         <span className={ui.dialogFieldHint}>
           Deadline {repair.deadlineAt}

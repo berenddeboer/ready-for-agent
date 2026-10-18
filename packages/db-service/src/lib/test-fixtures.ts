@@ -36,6 +36,7 @@ export const makeRepositoryRecord = (
     guaranteedMinConcurrentAgentTurns: null,
     includeAllIssueAuthors: false,
     waitForReadyForReviewChecks: true,
+    automaticCiRepair: false,
     linearProjectId: null,
     linearProjectName: null,
     linearWorkflowStatuses: [],

@@ -6,7 +6,10 @@ import {
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
 import type { GitHubOperationOrigin } from "@ready-for-agent/github-service"
-import { observeRepositoryCiGate } from "@ready-for-agent/graphql-api"
+import {
+  RepositoryCiRepair,
+  observeRepositoryCiGate,
+} from "@ready-for-agent/graphql-api"
 import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
 import {
   WorkItemLifecycle,
@@ -79,6 +82,18 @@ export const refreshLoadedRepository = Effect.fn("refreshLoadedRepository")(
           repositoryId: repository.id,
           error: ciResult.failure,
         },
+      )
+    }
+    if (Result.isSuccess(ciResult)) {
+      const repair = yield* RepositoryCiRepair
+      yield* repair.considerAutomatic(repository.id).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning(
+            "Automatic CI repair was not considered after Repository refresh",
+            { repositoryId: repository.id, error: String(error) },
+          ),
+        ),
+        Effect.asVoid,
       )
     }
     if (Result.isFailure(issueResult)) {

@@ -23,6 +23,7 @@ effect_ignore=(
   "**/ambient-gitlab-layer.test.ts"
   "**/application-config.test.ts"
   "**/application-runtime-disposal.test.ts"
+  "**/automatic-repair-worker-context.test.ts"
   "**/production-sse-idle-timeout.test.ts"
 )
 # Also exclude the slow SSE suite from the default bun path (historical)
