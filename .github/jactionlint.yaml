@@ -3,18 +3,10 @@
 profile: default
 
 ignores:
-  # The review must post with a base-repository token. pull_request from a fork
-  # cannot. First-time contributors are skipped until PR checks start and the
-  # approval relay dispatches this workflow; the job restores trusted Claude
-  # config from the base branch before the review action runs.
-  - rule: dangerous-triggers
-    file: .github/workflows/claude-code-review.yml
-    reason: pull_request_target is required to post the review; first-time contributors are gated by the PR approval relay
-
-  # pull_request_target cannot wait for the first-time-contributor Enable
-  # click, and GITHUB_TOKEN cannot fire labeled. This job does not check out
-  # pull-request code; it reads PR metadata and dispatches the review workflow
-  # on the default branch.
+  # The relay does not check out pull-request code; it reads PR metadata and
+  # dispatches the review workflow on the default branch. workflow_run is the
+  # only event that observes PR checks starting — including after the
+  # first-timer Enable click.
   - rule: dangerous-triggers
     file: .github/workflows/pr-approval-relay.yml
     reason: workflow_run is how the relay observes that PR checks actually started

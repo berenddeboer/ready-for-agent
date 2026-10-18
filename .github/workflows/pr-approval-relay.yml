@@ -1,11 +1,15 @@
-# Share the PR workflow's first-time-contributor Enable gate with Claude Code
-# Review. pull_request_target cannot wait for that click, and GITHUB_TOKEN
-# cannot fire `labeled`. When PR checks actually start, dispatch the review.
+# Dispatch Claude Code Review once PR checks actually start. The review
+# workflow has no pull_request event (GitHub restricts pull_request_target on
+# public repositories from 2026-11-02), so this relay is the only automatic
+# path — for the repository owner and outside contributors alike.
+# workflow_run also shares the PR workflow's first-time-contributor Enable
+# gate: a first-timer's checks only start after that click.
 name: PR approval relay
 
 on:
-  # workflow_run is required: pull_request_target cannot wait for the
-  # first-time-contributor Enable click. See .github/jactionlint.yaml.
+  # workflow_run fires when the PR workflow actually starts — immediately for
+  # known contributors, after the Enable click for first-timers. See
+  # .github/jactionlint.yaml.
   workflow_run:
     workflows: ["PR"]
     types: [in_progress]
@@ -17,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  dispatch-first-timer-review:
+  dispatch-review:
     if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -25,7 +29,7 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Dispatch Claude review for first-timer PRs
+      - name: Dispatch Claude review
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -38,23 +42,17 @@ jobs:
             gh api --method GET "repos/${GH_REPO}/pulls" \
               -f state=open \
               -f "head=${HEAD_OWNER}:${HEAD_BRANCH}" \
-              --jq ".[0] | select(. != null) | {number, assoc: .author_association, login: .user.login, type: .user.type}"
+              --jq ".[0] | select(. != null) | {number, login: .user.login, type: .user.type}"
           )"
           if [ -z "${pr_meta}" ]; then
             echo "No open PR for ${HEAD_OWNER}:${HEAD_BRANCH}"
             exit 0
           fi
-          assoc="$(printf '%s' "${pr_meta}" | jq -r '.assoc')"
           login="$(printf '%s' "${pr_meta}" | jq -r '.login')"
           type="$(printf '%s' "${pr_meta}" | jq -r '.type')"
           number="$(printf '%s' "${pr_meta}" | jq -r '.number')"
-          case "${assoc}" in
-            FIRST_TIME_CONTRIBUTOR|FIRST_TIMER|NONE) ;;
-            *)
-              echo "Skipping ${login} (#${number}): ${assoc}"
-              exit 0
-              ;;
-          esac
+          # The review action rejects bots outside its allowed_bots list, and
+          # dependency bumps do not need a Claude review.
           if [ "${type}" = "Bot" ]; then
             echo "Skipping bot ${login} (#${number})"
             exit 0

@@ -1,12 +1,11 @@
 name: Claude Code Review
 
 on:
-  # pull_request_target is required so the review can be posted with a
-  # base-repository token. See .github/jactionlint.yaml.
-  pull_request_target:
-    types: [opened, synchronize, reopened]
-  # GITHUB_TOKEN cannot fire pull_request_target `labeled`. Dispatch is the
-  # allowed chain from pr-approval-relay.yml after PR checks actually start.
+  # GitHub restricts pull_request_target on public repositories from
+  # 2026-11-02, so this workflow has no pull_request event at all. The review
+  # always runs from the default branch via dispatch; pr-approval-relay.yml
+  # fires it once PR checks actually start (after the first-timer Enable
+  # click). See .github/jactionlint.yaml.
   workflow_dispatch:
     inputs:
       pr_number:
@@ -17,19 +16,11 @@ on:
 jobs:
   claude-review:
     timeout-minutes: 25
-    # pull_request_target always runs (with secrets) and bypasses GitHub's
-    # first-time-contributor approval gate. Skip first-timers on that event.
-    # After Enable, PR checks start and the relay dispatches this workflow.
-    # Later PRs from a CONTRIBUTOR skip the wait, matching PR.
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (
-        github.event.pull_request.user.login != 'berenddeboer' &&
-        !contains(fromJSON('["FIRST_TIME_CONTRIBUTOR","FIRST_TIMER","NONE"]'), github.event.pull_request.author_association)
-      )
+    # The relay decides who gets reviewed; this job always runs when
+    # dispatched, including PRs authored by the repository owner.
     runs-on: ubuntu-latest
     concurrency:
-      group: claude-review-${{ github.event.pull_request.number || inputs.pr_number }}
+      group: claude-review-${{ inputs.pr_number }}
       cancel-in-progress: true
     env:
       # Headless runs exit when the parent finishes, terminating background
@@ -48,7 +39,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
           test -n "${PR_NUMBER}"
@@ -77,8 +68,7 @@ jobs:
 
       # workflow_dispatch has no pull_request payload, so the action will not
       # fetch the PR. Check it out here and restore Claude config from base.
-      - name: Check out PR head for dispatched reviews
-        if: github.event_name == 'workflow_dispatch'
+      - name: Check out PR head
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           BASE_REF: ${{ steps.pr.outputs.base }}
@@ -104,19 +94,17 @@ jobs:
         uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1.0.247
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Anthropic's OIDC→app-token exchange rejects pull_request_target
-          # (anthropics/claude-code-action#713). The job token skips that
-          # exchange; reviews post as github-actions[bot], not claude[bot].
+          # The job token skips Anthropic's OIDC→app-token exchange; reviews
+          # post as github-actions[bot], not claude[bot].
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # Fork authors have no write access. The job if already shares the
-          # PR workflow's first-timer gate; this lets remaining authors through.
+          # Fork authors have no write access. The relay's workflow_run
+          # trigger shares the PR workflow's first-timer Enable gate; this
+          # lets remaining authors through.
           allowed_non_write_users: "*"
-          # Automatic PR reviews often run as github-actions[bot] (e.g. after
-          # workflow re-runs). Explicit allowlist — not '*' — so only this
+          # The relay dispatches with GITHUB_TOKEN, so runs appear as
+          # github-actions[bot]. Explicit allowlist — not '*' — so only this
           # trusted platform bot can trigger the review action.
           allowed_bots: github-actions
-          # track_progress is only valid for pull_request / issue events.
-          track_progress: ${{ github.event_name == 'pull_request_target' }}
           additional_permissions: |
             actions: read
           # The action restores .claude/ from the trusted base before Claude
