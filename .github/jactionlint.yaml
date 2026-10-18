@@ -3,13 +3,13 @@
 profile: default
 
 ignores:
-  # The relay does not check out pull-request code; it reads PR metadata and
-  # dispatches the review workflow on the default branch. workflow_run is the
-  # only event that observes PR checks starting — including after the
-  # first-timer Enable click.
-  - rule: dangerous-triggers
-    file: .github/workflows/pr-approval-relay.yml
-    reason: workflow_run is how the relay observes that PR checks actually started
+  # The version comes from the GitHub API so the unauthenticated latest-release
+  # endpoint is not used. The official installer is what places the CLI at
+  # ~/.opencode/bin; pinning a tarball instead would change that install.
+  - rule: unverified-download
+    file: .github/workflows/pr.yml
+    step: Install OpenCode
+    reason: official OpenCode installer, version resolved from the GitHub API
 
   # The version comes from the GitHub API so the unauthenticated latest-release
   # endpoint is not used. The official installer is what places the CLI at

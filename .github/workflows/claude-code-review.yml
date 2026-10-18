@@ -1,29 +1,24 @@
 name: Claude Code Review
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 on:
-  # GitHub restricts pull_request_target on public repositories from
-  # 2026-11-02, so this workflow has no pull_request event at all. The review
-  # always runs from the default branch via dispatch; pr-approval-relay.yml
-  # fires it once PR checks actually start (after the first-timer Enable
-  # click). Dispatched runs attach their checks to the default branch, so the
-  # review surfaces as a PR comment, not a PR check; dispatching from the PR
-  # head instead would run untrusted workflow definitions with secrets.
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: Pull request number to review
-        required: true
-        type: string
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
   claude-review:
     timeout-minutes: 25
-    # The relay decides who gets reviewed; this job always runs when
-    # dispatched, including PRs authored by the repository owner.
+    # Reviews post for the repository owner and approved contributors
+    # (anyone who can push a branch here) on every push. Fork PRs need
+    # pull_request_target to post with base-repo secrets; plain
+    # pull_request cannot, so they get no Claude review.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
-    concurrency:
-      group: claude-review-${{ inputs.pr_number }}
-      cancel-in-progress: true
     env:
       # Headless runs exit when the parent finishes, terminating background
       # review agents before their findings can be aggregated.
@@ -36,85 +31,35 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Resolve pull request
-        id: pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ inputs.pr_number }}
-        run: |
-          set -euo pipefail
-          test -n "${PR_NUMBER}"
-          gh pr view "${PR_NUMBER}" --repo "${GH_REPO}" \
-            --json number,baseRefName,headRefName,headRefOid \
-            --jq '"number=\(.number)\nbase=\(.baseRefName)\nhead=\(.headRefName)\nsha=\(.headRefOid)"' \
-            >> "${GITHUB_OUTPUT}"
-
-      - name: Checkout base repository
+      - name: Checkout pull request revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
 
-      # The action fetches `pull/$n/head:<head.ref>`. Fork PRs whose head
-      # branch is also `main` collide with the local base branch.
-      - name: Drop local branch colliding with the PR head
+      - name: Authenticate Git fetches for review
         env:
-          HEAD_REF: ${{ steps.pr.outputs.head }}
-        run: |
-          set -euo pipefail
-          git checkout --detach
-          if git show-ref --verify --quiet "refs/heads/${HEAD_REF}"; then
-            git branch -D "${HEAD_REF}"
-          fi
-
-      # workflow_dispatch has no pull_request payload, so the action will not
-      # fetch the PR. Check it out here and restore Claude config from base.
-      - name: Check out PR head
-        env:
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          BASE_REF: ${{ steps.pr.outputs.base }}
-          HEAD_SHA: ${{ steps.pr.outputs.sha }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags origin "pull/${PR_NUMBER}/head"
-          git checkout --detach "${HEAD_SHA}"
-          restore_from_base() {
-            local path="$1"
-            if git cat-file -e "origin/${BASE_REF}:${path}" 2>/dev/null; then
-              git checkout "origin/${BASE_REF}" -- "${path}"
-            elif [ -e "${path}" ]; then
-              rm -rf "${path}"
-            fi
-          }
-          for path in .claude .mcp.json .claude.json .gitmodules .ripgreprc CLAUDE.md CLAUDE.local.md .husky; do
-            restore_from_base "${path}"
-          done
+          GH_TOKEN: ${{ github.token }}
+        run: gh auth setup-git --hostname github.com
 
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@2dca132ff0e0c4094ce6048b422c6915a071210b # v1.0.247
+        env:
+          GH_TOKEN: ${{ github.token }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # The job token skips Anthropic's OIDC→app-token exchange; reviews
-          # post as github-actions[bot], not claude[bot].
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          # Fork authors have no write access. The relay's workflow_run
-          # trigger shares the PR workflow's first-timer Enable gate; this
-          # lets remaining authors through.
-          allowed_non_write_users: "*"
-          # The relay dispatches with GITHUB_TOKEN, so runs appear as
-          # github-actions[bot]. Explicit allowlist — not '*' — so only this
-          # trusted platform bot can trigger the review action.
+          # Workflow re-runs appear as github-actions[bot]. Explicit
+          # allowlist — not '*' — so only this trusted platform bot can
+          # trigger the review action.
           allowed_bots: github-actions
+          track_progress: true
           additional_permissions: |
             actions: read
           # The action restores .claude/ from the trusted base before Claude
           # starts, so this resolves to the repository's reviewed local skill.
-          prompt: |
-            REPO: ${{ github.repository }}
-            PR NUMBER: ${{ steps.pr.outputs.number }}
-            /code-review origin/${{ steps.pr.outputs.base }}
+          prompt: '/code-review origin/${{ github.event.pull_request.base.ref }}'
           # Permit only the local review skill, its required sub-agent, and
           # read-only repository inspection commands.
           claude_args: |
