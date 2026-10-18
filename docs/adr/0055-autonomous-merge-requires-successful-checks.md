@@ -8,9 +8,8 @@ amends:
 
 # Autonomous merge requires a successful status-check aggregate
 
-[ADR 0074](0074-agent-owned-ci-repair.md) records a planned exception for the
-broadly authorized, standalone repository CI repair agent. The Work Item merge
-invariant below is unchanged.
+[ADR 0075](0075-ci-repair-work-item.md) withdraws ADR 0074's exception for a
+standalone repair agent; CI Repair Work Items are bound by the invariant below.
 
 Harness-initiated pull request and merge request merge requires the Forge's
 current aggregate status to be successful and non-empty, except for the

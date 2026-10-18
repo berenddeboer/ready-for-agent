@@ -1,8 +1,8 @@
 # Merge PR after clanker decision
 
-[ADR 0074](0074-agent-owned-ci-repair.md) records a planned exception for
-standalone repository CI repair, where the repair agent owns merging. This ADR
-continues to govern ordinary Work Item merges.
+[ADR 0075](0075-ci-repair-work-item.md) withdraws ADR 0074's exception for a
+standalone repair agent; CI Repair Work Items merge under this ADR like any
+other Work Item.
 
 After Decide PR Merge returns clanker merge, the Work Item advances to Merge PR. The step uses the Repository GitHub token through `GitHubService` GraphQL (not `gh` or OpenCode) to find the open pull request on the Work Item's deterministic branch, revalidate the current head's aggregate checks, and call `mergePullRequest` with squash and `expectedHeadOid`. An already merged PR is a success (idempotent).
 

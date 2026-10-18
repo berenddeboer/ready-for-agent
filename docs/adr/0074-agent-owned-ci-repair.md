@@ -1,5 +1,6 @@
 ---
-status: accepted
+status: superseded
+superseded_by: 0075
 amends:
   - 0017
   - 0055
@@ -7,6 +8,9 @@ amends:
 ---
 
 # Delegate repository CI repair to one bounded build agent
+
+Superseded by [ADR 0075](0075-ci-repair-work-item.md): CI repair is now an
+ordinary CI Repair Work Item, and this standalone repair agent is removed.
 
 The Repository CI Gate detects default-branch failures but currently relies on
 an operator to arrange repairs. Introduce a lightweight, incident-scoped repair
