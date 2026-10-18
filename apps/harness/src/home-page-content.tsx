@@ -316,7 +316,15 @@ type WorkItemStatus =
 export type WorkItem = {
   id: string
   repositoryId: string
+  origin: "ISSUE" | "CI_REPAIR"
   issueNumber: number
+  ciRepairDefaultBranch: string | null
+  ciRepairHeadSha: string | null
+  ciRepairFailingRuns: readonly {
+    runIdentity: string
+    htmlUrl: string | null
+    displayLabel: string
+  }[]
   issueSource: {
     tracker: string
     nativeId: string
@@ -371,7 +379,7 @@ export type WorkItem = {
     canAuthorize: boolean
     active: {
       authorizedAt: string
-      sourceAction: "IMPLEMENT_CI_REPAIR" | "AUTHORIZE_AS_CI_REPAIR"
+      sourceAction: "IMPLEMENT_CI_GATE_BYPASS" | "AUTHORIZE_CI_GATE_BYPASS"
       incident: {
         id: string
         status: "OPEN" | "RESOLVED"
@@ -380,7 +388,7 @@ export type WorkItem = {
     } | null
     history: readonly {
       authorizedAt: string
-      sourceAction: "IMPLEMENT_CI_REPAIR" | "AUTHORIZE_AS_CI_REPAIR"
+      sourceAction: "IMPLEMENT_CI_GATE_BYPASS" | "AUTHORIZE_CI_GATE_BYPASS"
       incident: {
         id: string
         status: "OPEN" | "RESOLVED"
@@ -393,7 +401,15 @@ export type WorkItem = {
 const workItemFields = {
   id: true,
   repositoryId: true,
+  origin: true,
   issueNumber: true,
+  ciRepairDefaultBranch: true,
+  ciRepairHeadSha: true,
+  ciRepairFailingRuns: {
+    runIdentity: true,
+    htmlUrl: true,
+    displayLabel: true,
+  },
   issueSource: {
     tracker: true,
     nativeId: true,
@@ -1877,7 +1893,7 @@ function RepositoryCard({
       mergePolicy,
       includeAllIssueAuthors,
       waitForReadyForReviewChecks,
-      automaticCiRepair: forge === "github" ? automaticCiRepair : false,
+      automaticCiRepair,
       issueTracker: forge === "github" ? issueTracker : forge,
       linearProjectId:
         forge === "github" && issueTracker === "linear"
@@ -2116,8 +2132,7 @@ function RepositoryCard({
       const result = await graphql.mutation({
         startRepositoryCiRepair: {
           __args: { repositoryId: repository.id },
-          id: true,
-          status: true,
+          ...workItemFields,
         },
       })
       return result.startRepositoryCiRepair
@@ -2125,6 +2140,12 @@ function RepositoryCard({
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: repositoriesQuery.queryKey,
+      })
+      void queryClient.invalidateQueries({
+        queryKey: ["work-items", repository.id],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: kanbanStatusQueryKeyPrefix,
       })
     },
   })
@@ -3037,14 +3058,10 @@ function RepositoryCard({
                 catalog={ciGateCatalogView}
                 selectedIdentities={selectedCiGateIdentities}
                 onSelectedIdentitiesChange={setSelectedCiGateIdentities}
-                automaticCiRepair={
-                  forge === "github"
-                    ? {
-                        checked: automaticCiRepair,
-                        onCheckedChange: setAutomaticCiRepair,
-                      }
-                    : null
-                }
+                automaticCiRepair={{
+                  checked: automaticCiRepair,
+                  onCheckedChange: setAutomaticCiRepair,
+                }}
                 status={{
                   disabled: repository.ciGate.status === "DISABLED",
                   statusLabel: ciGateStatusLabel(repository.ciGate.status),
@@ -3170,14 +3187,10 @@ function RepositoryCard({
                     : "Disabled"}
                 </dd>
               </div>
-              {repository.forge === "github" ? (
-                <div className={ui.repoMetaRow}>
-                  <dt>Automatic CI repair</dt>
-                  <dd>
-                    {repository.automaticCiRepair ? "Enabled" : "Disabled"}
-                  </dd>
-                </div>
-              ) : null}
+              <div className={ui.repoMetaRow}>
+                <dt>Automatic CI repair</dt>
+                <dd>{repository.automaticCiRepair ? "Enabled" : "Disabled"}</dd>
+              </div>
               <div className={ui.repoMetaRow}>
                 <dt>Merge Policy</dt>
                 <dd>
@@ -3193,8 +3206,7 @@ function RepositoryCard({
                 <dd className="min-w-0">
                   <RepositoryCiGateCardDetails
                     ciGate={repository.ciGate}
-                    repairSupported={repository.ciGate.repairSupported}
-                    repair={repository.ciGate.repair}
+                    canStartCiRepair={repository.ciGate.canStartCiRepair}
                     repairPending={startCiRepair.isPending}
                     onStartRepair={() => startCiRepair.mutate()}
                   />
@@ -3208,7 +3220,7 @@ function RepositoryCard({
                       {startWorkBannerMessage({
                         error: startCiRepair.error,
                         fallback:
-                          "Could not start CI repair. Refresh the repository and try again.",
+                          "Could not start CI Repair. Refresh the repository and try again.",
                       })}
                     </Banner>
                   ) : null}
@@ -3930,21 +3942,17 @@ function RepositoryIssueRow({
   const implementCiRepair = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
-        startRepositoryCiRepair: {
+        implementCiRepair: {
           __args: {
-            repositoryId: repository.id,
+            repositoryId: issue.repositoryId,
+            nativeId: issue.nativeId,
           },
-          id: true,
-          status: true,
+          ...workItemFields,
         },
       })
-      return result.startRepositoryCiRepair
+      return result.implementCiRepair
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: repositoriesQuery.queryKey,
-      })
-    },
+    onSuccess: onImplementSuccess,
   })
   const implementWith = useMutation({
     mutationFn: async (input: ImplementWithSubmitInput) => {
@@ -4009,7 +4017,6 @@ function RepositoryIssueRow({
     queueIssue.isPending
   const canImplementCiRepair =
     canImplementNow &&
-    repository.ciGate.repairSupported &&
     repository.ciGate.status === "CLOSED" &&
     repository.ciGate.activeIncident !== null
   const startImplementNow = () => {
@@ -4528,10 +4535,10 @@ export function WorkItemLifecycleStatus({
     sourceAction: WorkItem["ciRepair"]["history"][number]["sourceAction"],
   ): string => {
     switch (sourceAction) {
-      case "IMPLEMENT_CI_REPAIR":
-        return "Implement CI Repair"
-      case "AUTHORIZE_AS_CI_REPAIR":
-        return "Authorize as CI Repair"
+      case "IMPLEMENT_CI_GATE_BYPASS":
+        return "Implement CI Gate Bypass"
+      case "AUTHORIZE_CI_GATE_BYPASS":
+        return "Authorize CI Gate Bypass"
       default: {
         const _exhaustive: never = sourceAction
         return _exhaustive
@@ -4836,13 +4843,13 @@ export function WorkItemLifecycleStatus({
       )}
       {workItem.ciRepair.active !== null && (
         <p className={ui.jobTicketRuntimeLine}>
-          CI Repair for {workItem.ciRepair.active.incident.summary}
+          CI Gate Bypass for {workItem.ciRepair.active.incident.summary}
         </p>
       )}
       {workItem.ciRepair.history.length > 0 && (
         <ol
           className="mt-1 mb-0 list-none p-0 font-mono text-xs text-ink-2"
-          aria-label="CI Repair authorization history"
+          aria-label="CI Gate Bypass authorization history"
         >
           {workItem.ciRepair.history.map((authorization) => (
             <li
@@ -4894,7 +4901,7 @@ export function WorkItemLifecycleStatus({
             >
               {authorizeAsCiRepair.isPending
                 ? "Authorizing..."
-                : "Authorize as CI Repair"}
+                : "Authorize CI Gate Bypass"}
             </button>
           )}
         </div>
@@ -4916,7 +4923,7 @@ export function WorkItemLifecycleStatus({
           tag="Error"
           role="alert"
         >
-          Could not authorize this Work Item as CI Repair.
+          Could not authorize this Work Item as CI Gate Bypass.
         </Banner>
       )}
       {retry.isError && (

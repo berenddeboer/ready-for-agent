@@ -87,6 +87,7 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
         projectPath: repository.projectPath,
         issueNumber: workItem.issueNumber,
         workItemId: workItem.id,
+        origin: workItem.origin,
       })
 
       const lifecycleLookup: Effect.Effect<

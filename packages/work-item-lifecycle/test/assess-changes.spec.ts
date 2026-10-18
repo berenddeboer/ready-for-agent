@@ -13,6 +13,7 @@ import {
   AssessChangesWorktreeContextMissingError,
   GitCommandError,
   assessChanges,
+  buildNoChangeConfirmationPrompt,
   makeWorkItemId,
   parseAssessChangesResult,
 } from "../src/index.js"
@@ -145,6 +146,15 @@ describe("parseAssessChangesResult", () => {
     expect(
       parseAssessChangesResult("READY_FOR_AGENT_RESULT: NO_CHANGES"),
     ).toBeNull()
+  })
+
+  it("rejects RERUN_JOBS for an ordinary Issue", () => {
+    expect(
+      parseAssessChangesResult(
+        "Rerun the red job.\nREADY_FOR_AGENT_RESULT: RERUN_JOBS: 10:1",
+      ),
+    ).toBeNull()
+    expect(buildNoChangeConfirmationPrompt()).not.toContain("RERUN_JOBS")
   })
 
   it("rejects missing, duplicate, or non-final markers", () => {

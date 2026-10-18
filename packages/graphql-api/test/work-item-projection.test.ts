@@ -43,6 +43,10 @@ const baseStepRun = {
 const baseWorkItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: "repo-1",
+  origin: "issue" as const,
+  ciRepairDefaultBranch: null,
+  ciRepairHeadSha: null,
+  ciRepairFailingRuns: [],
   issueNumber: 42,
   issueSource: {
     tracker: "github",

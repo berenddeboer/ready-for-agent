@@ -3,6 +3,7 @@ import { ChildProcessSpawner } from "effect/process"
 import { extractErrorCode } from "@ready-for-agent/forge-contract"
 import {
   type GitLabProjectUnavailableError,
+  type GitLabRepository,
   GitLabRequestError,
   GitLabService,
   type GitLabServiceShape,
@@ -12,6 +13,31 @@ import {
 } from "@ready-for-agent/gitlab-service"
 
 type GitLabServiceError = GitLabProjectUnavailableError | GitLabRequestError
+
+/**
+ * `retryPipeline` stays off GitLabServiceShape. The live service and this
+ * layer attach it so CI Repair can rerun a pipeline.
+ */
+const callGitLabRetryPipeline = (
+  service: object,
+  repository: GitLabRepository,
+  pipelineId: number,
+): Effect.Effect<void, GitLabServiceError> => {
+  const candidate = (service as { retryPipeline?: unknown }).retryPipeline
+  if (typeof candidate !== "function") {
+    return Effect.fail(
+      new GitLabRequestError({
+        message: "This Forge cannot rerun CI jobs (gitlab)",
+      }),
+    )
+  }
+  return (
+    candidate as (
+      repository: GitLabRepository,
+      pipelineId: number,
+    ) => Effect.Effect<void, GitLabServiceError>
+  )(repository, pipelineId)
+}
 
 const authenticationError = (forgeHost: string, cause: unknown) => {
   const code = extractErrorCode(cause)
@@ -150,7 +176,7 @@ export const ambientGitLabLayer = (options: {
         ) => Effect.Effect<A, GitLabServiceError>,
       ): Effect.Effect<A, GitLabServiceError> => run(forgeHost, operation)
 
-      return {
+      const service = {
         verifyProject: Effect.fn("AmbientGitLab.verifyProject")((repository) =>
           authenticated(repository.forgeHost, (service) =>
             service.verifyProject(repository),
@@ -304,5 +330,13 @@ export const ambientGitLabLayer = (options: {
             ),
         ),
       }
+      return Object.assign(service, {
+        retryPipeline: Effect.fn("AmbientGitLab.retryPipeline")(
+          (repository: GitLabRepository, pipelineId: number) =>
+            authenticated(repository.forgeHost, (live) =>
+              callGitLabRetryPipeline(live, repository, pipelineId),
+            ),
+        ),
+      })
     }),
   )

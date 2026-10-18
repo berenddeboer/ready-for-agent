@@ -71,7 +71,11 @@ export const worktreeParentPath = (input: {
 export const workItemDirectoryName = (input: {
   readonly issueNumber: number
   readonly workItemId: string
-}): string => `${input.issueNumber}-${input.workItemId}`
+  readonly origin?: "issue" | "ci_repair"
+}): string =>
+  input.origin === "ci_repair"
+    ? `ci-repair-${input.workItemId}`
+    : `${input.issueNumber}-${input.workItemId}`
 
 /**
  * Absolute worktree path for one Work Item.
@@ -82,12 +86,14 @@ export const workItemWorktreePath = (input: {
   readonly projectPath: string
   readonly issueNumber: number
   readonly workItemId: string
+  readonly origin?: "issue" | "ci_repair"
   readonly tmpDir?: string
 }): string => {
   const parent = worktreeParentPath(input)
   const name = workItemDirectoryName({
     issueNumber: input.issueNumber,
     workItemId: input.workItemId,
+    origin: input.origin,
   })
   return `${parent}/${name}`
 }

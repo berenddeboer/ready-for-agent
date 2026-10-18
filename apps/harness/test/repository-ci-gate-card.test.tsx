@@ -2,10 +2,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { renderToStaticMarkup } from "react-dom/server"
 import { ciGateStatusLabel } from "../src/ci-gate-status-label.js"
-import {
-  RepositoryCiGateCardDetails,
-  type RepositoryCiRepairCard,
-} from "../src/repository-ci-gate-card.js"
+import { RepositoryCiGateCardDetails } from "../src/repository-ci-gate-card.js"
 import { describe, expect, test } from "bun:test"
 
 const DISABLED_GATE_SENTENCE =
@@ -118,178 +115,79 @@ describe("Repository card CI Gate", () => {
     expect(html).not.toContain(DISABLED_GATE_SENTENCE)
   })
 
-  test("GitHub Closed incidents offer start, and other forges do not", () => {
-    const closed = gate({
+  test("Start CI Repair follows canStartCiRepair and ignores incident, pause, and the setting", () => {
+    const closedWithoutIncident = gate({
       status: "CLOSED",
-      activeIncident: { id: "cfi-1", summary: "CI Gate closed: CI failed." },
+      activeIncident: null,
     })
-    const github = renderToStaticMarkup(
+    const enabled = renderToStaticMarkup(
       <RepositoryCiGateCardDetails
-        ciGate={closed}
-        repairSupported
+        ciGate={closedWithoutIncident}
+        canStartCiRepair
         onStartRepair={() => undefined}
       />,
     )
-    expect(github).toContain("Start CI repair")
-    expect(github).toContain('data-ci-repair-action="start"')
-    const gitlab = renderToStaticMarkup(
-      <RepositoryCiGateCardDetails
-        ciGate={closed}
-        repairSupported={false}
-        onStartRepair={() => undefined}
-      />,
-    )
-    expect(gitlab).not.toContain("Start CI repair")
-    expect(gitlab).not.toContain("data-ci-repair-action")
-    expect(gitlab).not.toContain("CI repair")
-  })
+    expect(enabled).toContain("Start CI Repair")
+    expect(enabled).toContain('data-testid="ci-repair-action"')
+    expect(enabled).not.toContain("Retry CI repair")
+    expect(enabled).not.toContain("Deadline")
+    expect(enabled).not.toContain("data-ci-repair-action")
 
-  test("shows queued status without a deadline, then running deadline and links", () => {
-    const repair = (
-      overrides: Partial<RepositoryCiRepairCard>,
-    ): RepositoryCiRepairCard => ({
-      incidentId: "cfi-1",
-      status: "QUEUED",
-      requestSource: "MANUAL",
-      outcome: null,
-      launchedAt: null,
-      deadlineAt: null,
-      report: null,
-      localExecutionStopped: false,
-      links: [],
-      ...overrides,
-    })
-    const queued = renderToStaticMarkup(
+    const blocked = renderToStaticMarkup(
       <RepositoryCiGateCardDetails
         ciGate={gate({
           status: "CLOSED",
-          activeIncident: { id: "cfi-1", summary: "CI failed." },
+          activeIncident: {
+            id: "cfi-1",
+            summary: "CI Gate closed: CI failed.",
+          },
         })}
-        repairSupported
-        repair={repair({})}
+        canStartCiRepair={false}
         onStartRepair={() => undefined}
       />,
     )
-    expect(queued).toContain("CI repair queued")
-    expect(queued).toContain("Deadline starts when the repair launches")
-    expect(queued).not.toContain("data-ci-repair-action")
-
-    const running = renderToStaticMarkup(
-      <RepositoryCiGateCardDetails
-        ciGate={gate({
-          status: "CLOSED",
-          activeIncident: { id: "cfi-1", summary: "CI failed." },
-        })}
-        repairSupported
-        repair={repair({
-          status: "RUNNING",
-          launchedAt: "2026-10-17T12:00:00.000Z",
-          deadlineAt: "2026-10-17T16:00:00.000Z",
-          links: [
-            {
-              url: "https://github.com/acme/widgets/pull/7",
-              kind: "pull_request",
-              disposition: "unfinished",
-            },
-          ],
-        })}
-        onStartRepair={() => undefined}
-      />,
-    )
-    expect(running).toContain("CI repair running")
-    expect(running).toContain("Deadline 2026-10-17T16:00:00.000Z")
-    expect(running).toContain("https://github.com/acme/widgets/pull/7")
-    expect(running).not.toContain("Local execution stopped.")
+    expect(blocked).not.toContain("Start CI Repair")
+    expect(blocked).not.toContain('data-testid="ci-repair-action"')
+    expect(blocked).toContain("Active incident: CI Gate closed: CI failed.")
   })
 
-  test("an unresolved outcome keeps unfinished work distinct from stopped local execution and offers retry", () => {
+  test("a pending start disables the button without offering retry", () => {
     const html = renderToStaticMarkup(
       <RepositoryCiGateCardDetails
-        ciGate={gate({
-          status: "CLOSED",
-          activeIncident: { id: "cfi-1", summary: "CI failed." },
-        })}
-        repairSupported
-        repair={{
-          incidentId: "cfi-1",
-          status: "UNRESOLVED",
-          requestSource: "MANUAL",
-          outcome: "TIMED_OUT",
-          launchedAt: "2026-10-17T12:00:00.000Z",
-          deadlineAt: "2026-10-17T16:00:00.000Z",
-          report:
-            "Local execution: stopped.\n\nUnfinished pull requests:\nhttps://github.com/acme/widgets/pull/7",
-          localExecutionStopped: true,
-          links: [
-            {
-              url: "https://github.com/acme/widgets/pull/7",
-              kind: "pull_request",
-              disposition: "unfinished",
-            },
-            {
-              url: "https://github.com/acme/widgets/actions/runs/9",
-              kind: "remote_job",
-              disposition: "active",
-            },
-          ],
-        }}
+        ciGate={gate({ status: "OPEN" })}
+        canStartCiRepair
+        repairPending
         onStartRepair={() => undefined}
       />,
     )
-    expect(html).toContain("CI repair timed out")
-    expect(html).toContain("Local execution stopped.")
-    expect(html).toContain(
-      "Unfinished pull requests: https://github.com/acme/widgets/pull/7",
-    )
-    expect(html).toContain(
-      "Active remote jobs: https://github.com/acme/widgets/actions/runs/9",
-    )
-    expect(html).toContain("Retry CI repair")
-    expect(html).toContain('data-ci-repair-action="retry"')
-    expect(html).toContain("Manual")
-  })
-
-  test("shows an automatic repair on the same activity card", () => {
-    const html = renderToStaticMarkup(
-      <RepositoryCiGateCardDetails
-        ciGate={gate({
-          status: "CLOSED",
-          activeIncident: { id: "cfi-1", summary: "CI failed." },
-        })}
-        repairSupported
-        repair={{
-          incidentId: "cfi-1",
-          status: "RUNNING",
-          requestSource: "AUTOMATIC",
-          outcome: null,
-          launchedAt: "2026-10-18T12:00:00.000Z",
-          deadlineAt: "2026-10-18T16:00:00.000Z",
-          report: null,
-          localExecutionStopped: false,
-          links: [],
-        }}
-        onStartRepair={() => undefined}
-      />,
-    )
-    expect(html).toContain("CI repair running")
-    expect(html).toContain('data-testid="ci-repair-request-source"')
-    expect(html).toContain("Automatic")
-    expect(html).not.toContain("data-ci-repair-action")
+    expect(html).toContain("Starting...")
+    expect(html).toContain("disabled")
+    expect(html).not.toContain("Start CI Repair")
+    expect(html).not.toContain("Retry CI repair")
   })
 })
 
 describe("repository CI repair entry points", () => {
-  test("the issue action and the CI card start repair instead of creating a Work Item", () => {
+  test("the CI card starts a CI Repair Work Item and the issue action authorizes CI Gate Bypass", () => {
     const source = readFileSync(
       join(import.meta.dir, "../src/home-page-content.tsx"),
       "utf8",
     )
     expect(source).toContain("startRepositoryCiRepair:")
     expect(source).toContain(
-      "repairSupported={repository.ciGate.repairSupported}",
+      "canStartCiRepair={repository.ciGate.canStartCiRepair}",
     )
     expect(source).toContain("onStartRepair={() => startCiRepair.mutate()}")
-    expect(source).toContain("repository.ciGate.repairSupported")
-    expect(source).not.toContain("implementCiRepair:")
+    expect(source).not.toContain("repairSupported")
+    expect(source).not.toContain("repository.ciGate.repair")
+    const issueActionStart = source.indexOf(
+      "const implementCiRepair = useMutation",
+    )
+    const issueAction = source.slice(
+      issueActionStart,
+      source.indexOf("const implementWith = useMutation", issueActionStart),
+    )
+    expect(issueAction).toContain("implementCiRepair:")
+    expect(issueAction).not.toContain("startRepositoryCiRepair")
   })
 })

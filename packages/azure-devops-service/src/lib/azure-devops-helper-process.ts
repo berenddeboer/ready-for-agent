@@ -17,6 +17,7 @@ import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
 import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
 import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
 import { observeCiGateProgram } from "../bin/observe-ci-gate.js"
+import { retryBuildProgram } from "../bin/retry-build.js"
 import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
 import { verifyProjectProgram } from "../bin/verify-project.js"
 import { azureDevOpsServiceBinScriptPath } from "../bin-script-path.js"
@@ -55,6 +56,7 @@ export const AZURE_DEVOPS_HELPER_OPERATIONS = [
   "ensure-issue-completed-with-summary",
   "close-open-pull-requests-for-branch",
   "delete-branch",
+  "retry-build",
 ] as const
 
 export type AzureDevOpsHelperOperation =
@@ -169,6 +171,7 @@ const programs: Record<
   "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
   "close-open-pull-requests-for-branch": closeOpenPullRequestsForBranchProgram,
   "delete-branch": deleteBranchProgram,
+  "retry-build": retryBuildProgram,
 }
 
 /**

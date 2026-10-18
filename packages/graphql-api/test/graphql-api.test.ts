@@ -175,6 +175,10 @@ const openIssue = (issueNumber: number) => ({
 const workItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: repository.id,
+  origin: "issue" as const,
+  ciRepairDefaultBranch: null,
+  ciRepairHeadSha: null,
+  ciRepairFailingRuns: [],
   issueNumber: issue.issueNumber,
   issueSource: {
     tracker: "github",
@@ -433,6 +437,9 @@ const makeRuntime = (
     },
     implementNow: unused,
     implementCiRepair: unused,
+    unfinishedCiRepairWorkItem: () => Effect.succeed(null),
+    startCiRepair: unused,
+    considerAutomaticCiRepair: () => Effect.succeed(null),
     authorizeAsCiRepair: unused,
     implementWith: unused,
     implementLocally: unused,

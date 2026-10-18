@@ -202,14 +202,33 @@ export class WorkItemTerminalError extends Schema.TaggedError<WorkItemTerminalEr
 ) {}
 
 /**
- * Implement CI Repair / Authorize as CI Repair is offered only while a
- * CI Failure Incident is active and Closed.
+ * CI Gate Bypass is offered only while a CI Failure Incident is active and
+ * Closed. The class tag stays CiRepairNotAvailableError so existing failures
+ * remain recognizable.
  */
 export class CiRepairNotAvailableError extends Schema.TaggedError<CiRepairNotAvailableError>()(
   "CiRepairNotAvailableError",
   {
     repositoryId: Schema.String,
     workItemId: Schema.optionalKey(Schema.String),
+    message: Schema.String,
+  },
+) {}
+
+/** Start CI Repair was requested while the Repository CI Gate is not Closed. */
+export class CiRepairGateNotClosedError extends Schema.TaggedError<CiRepairGateNotClosedError>()(
+  "CiRepairGateNotClosedError",
+  {
+    repositoryId: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
+/** Start CI Repair has no observed default branch to name the Work Item. */
+export class CiRepairDefaultBranchMissingError extends Schema.TaggedError<CiRepairDefaultBranchMissingError>()(
+  "CiRepairDefaultBranchMissingError",
+  {
+    repositoryId: Schema.String,
     message: Schema.String,
   },
 ) {}

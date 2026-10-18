@@ -7,13 +7,13 @@ describe("toGraphQLError", () => {
       _tag: "CiRepairNotAvailableError" as const,
       repositoryId: "repo-1",
       workItemId: "wi-1",
-      message:
-        "CI Repair is available only while a CI Failure Incident is active and Closed",
     }
 
     const gqlError = toGraphQLError(error)
 
-    expect(gqlError.message).toContain("CI Failure Incident")
+    expect(gqlError.message).toBe(
+      "CI Gate Bypass is available only while a CI Failure Incident is active and Closed",
+    )
     expect(gqlError.extensions).toMatchObject({
       code: "CI_REPAIR_NOT_AVAILABLE",
       repositoryId: "repo-1",

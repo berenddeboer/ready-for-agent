@@ -198,6 +198,7 @@ export const createWorktree = (
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
+      origin: context.origin,
     })
 
     const plannedPath = workItemWorktreePath({
@@ -206,6 +207,7 @@ export const createWorktree = (
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
+      origin: context.origin,
       tmpDir: options.tmpDir,
     })
 

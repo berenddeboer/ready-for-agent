@@ -80,7 +80,7 @@ export const RepositoryRecord = Schema.Struct({
   ),
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
-  /** Opt-in automatic CI repair. Off unless a GitHub Repository enables it. */
+  /** Opt-in automatic CI repair. Off until a Repository enables it. */
   automaticCiRepair: Schema.Boolean,
   linearProjectId: Schema.NullOr(Schema.String),
   linearProjectName: Schema.NullOr(Schema.String),
@@ -225,8 +225,7 @@ export const UpdateRepositorySettingsInput = Schema.Struct({
   includeAllIssueAuthors: Schema.Boolean,
   waitForReadyForReviewChecks: Schema.Boolean,
   /**
-   * Omitted leaves the stored opt-in unchanged. True is rejected unless the
-   * Repository's Forge is GitHub.
+   * Omitted leaves the stored opt-in unchanged. Allowed on every Forge.
    */
   automaticCiRepair: Schema.optionalKey(Schema.Boolean),
   /**

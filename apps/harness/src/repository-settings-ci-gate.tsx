@@ -8,7 +8,7 @@ export const CI_GATE_ON_CLOSE_HEADING = "When the gate closes"
 export const CI_GATE_AUTOMATIC_REPAIR_LABEL =
   "Automatically start a CI Repair Work Item"
 export const CI_GATE_AUTOMATIC_REPAIR_HINT =
-  "A confirmed failure that closes the CI gate queues one repair. Pending CI, Degraded observation, and Paused do not. Manual start and retry stay available."
+  "A terminal failure that closes the CI gate starts one CI Repair Work Item when none is unfinished. Paused repositories do not start automatically."
 export const CI_GATE_AUTOMATIC_REPAIR_DISABLED_HINT =
   "Unavailable until a CI Gate Definition is selected. The saved choice is kept."
 
@@ -50,7 +50,7 @@ export type RepositorySettingsCiGateSectionProps = {
   readonly selectedIdentities: readonly string[]
   readonly onSelectedIdentitiesChange: (identities: string[]) => void
   readonly status: RepositoryCiGateStatusView
-  /** Null hides the control. Non-GitHub Repositories do not offer it. */
+  /** Null hides the control. The settings dialog offers it on every Forge. */
   readonly automaticCiRepair: AutomaticCiRepairControl | null
 }
 

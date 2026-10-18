@@ -5,6 +5,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import {
   AzureDevOpsProjectUnavailableError,
+  type AzureDevOpsRepository,
   AzureDevOpsRequestError,
   AzureDevOpsService,
 } from "@ready-for-agent/azure-devops-service"
@@ -830,5 +831,103 @@ describe("Keymaxxer-backed Azure DevOps layer", () => {
           "decode pull request check status",
         )
       }),
+  )
+
+  it.effect("retries a build through the vault helper", () =>
+    Effect.gen(function* () {
+      const runs: RunWithSecretsInput[] = []
+      const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+        initialize: Effect.void,
+        findSecret: ({ account }) =>
+          Effect.succeed(
+            account === vaultAccount ? "AZURE_DEVOPS_TOKEN_ACME_WIDGETS" : null,
+          ),
+        findSecrets: () => Effect.die("not used"),
+        hasSecret: () => Effect.die("not used"),
+        addSecret: () => Effect.die("not used"),
+        runWithSecrets: (input) => {
+          runs.push(input)
+          return Effect.succeed({ exitCode: 0, stdout: "ok", stderr: "" })
+        },
+      })
+      const layer = keymaxxerAzureDevOpsLayer({
+        workspaceRoot: "/workspace",
+      }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
+
+      yield* Effect.gen(function* () {
+        const azureDevOps = yield* AzureDevOpsService
+        const retryBuild = (
+          azureDevOps as {
+            retryBuild?: (
+              repo: typeof repository,
+              buildId: number,
+            ) => Effect.Effect<void, unknown>
+          }
+        ).retryBuild
+        if (retryBuild === undefined) {
+          return yield* Effect.die("retryBuild was dropped")
+        }
+        yield* retryBuild(repository, 42)
+      }).pipe(Effect.provide(layer))
+
+      expect(runs).toHaveLength(1)
+      expect(runs[0]?.command).toContain("retry-build")
+      expect(runs[0]?.command).toContain(encodeArgument("42"))
+      expect(runs[0]?.secrets).toEqual(["AZURE_DEVOPS_TOKEN_ACME_WIDGETS"])
+    }),
+  )
+
+  it.effect("retries a build through ambient when the vault misses", () =>
+    Effect.gen(function* () {
+      const calls: number[] = []
+      const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+        initialize: Effect.void,
+        findSecret: () => Effect.succeed(null),
+        findSecrets: () => Effect.die("not used"),
+        hasSecret: () => Effect.die("not used"),
+        addSecret: () => Effect.die("not used"),
+        runWithSecrets: () => Effect.die("not used"),
+      })
+      const layer = keymaxxerAzureDevOpsLayer({
+        workspaceRoot: "/workspace",
+        environment: { AZURE_DEVOPS_EXT_PAT: "ambient-token" },
+        makeService: () =>
+          Object.assign(
+            {
+              verifyProject: (candidate: AzureDevOpsRepository) =>
+                Effect.succeed(candidate),
+              getAuthenticatedUserLogin: () => Effect.succeed("operator"),
+              listReadyIssues: () => Effect.succeed([]),
+              hasCredentials: () => Effect.succeed(true),
+              hasAmbientCredentials: () => Effect.succeed(true),
+              ...azureLifecycleStub,
+            },
+            {
+              retryBuild: (_repository: typeof repository, buildId: number) => {
+                calls.push(buildId)
+                return Effect.void
+              },
+            },
+          ),
+      }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
+
+      yield* Effect.gen(function* () {
+        const azureDevOps = yield* AzureDevOpsService
+        const retryBuild = (
+          azureDevOps as {
+            retryBuild?: (
+              repo: typeof repository,
+              buildId: number,
+            ) => Effect.Effect<void, unknown>
+          }
+        ).retryBuild
+        if (retryBuild === undefined) {
+          return yield* Effect.die("retryBuild was dropped")
+        }
+        yield* retryBuild(repository, 42)
+      }).pipe(Effect.provide(layer))
+
+      expect(calls).toEqual([42])
+    }),
   )
 })

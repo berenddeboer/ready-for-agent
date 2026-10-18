@@ -13,6 +13,11 @@ import {
   buildNoChangeConfirmationPrompt,
   parseAssessChangesResult,
 } from "./assess-changes.js"
+import { CiRepairRerunError, rerunCiRepairJobs } from "./ci-repair-rerun.js"
+import {
+  buildCiRepairNoChangeConfirmationPrompt,
+  parseCiRepairNoChangeResult,
+} from "./ci-repair-work-item.js"
 import {
   type CommitError,
   CommitInvalidWorktreeContextError,
@@ -379,6 +384,7 @@ const parseAndNormalize = (
     parsed,
     context.issueNumber,
     context.issueSource,
+    context.origin === "ci_repair" ? { ciRepair: true } : undefined,
   )
 }
 
@@ -410,6 +416,7 @@ const generatePublicationCopy = (
           issueNumber: context.issueNumber,
           attachmentDirectory,
           issueSource: context.issueSource,
+          ciRepair: context.origin === "ci_repair",
         }),
         cwd: worktreePath,
         model: context.model,
@@ -440,6 +447,7 @@ const generatePublicationCopy = (
             issueNumber: context.issueNumber,
             attachmentDirectory,
             issueSource: context.issueSource,
+            ciRepair: context.origin === "ci_repair",
           }),
           cwd: worktreePath,
           model: context.model,
@@ -473,6 +481,7 @@ const generatePublicationCopy = (
         issueTitle: context.issueTitle,
         workItemId: context.workItemId,
         issueSource: context.issueSource,
+        ciRepair: context.origin === "ci_repair",
       })
       yield* Effect.logInfo("Commit using harness publication-copy fallback", {
         workItemId: context.workItemId,
@@ -518,6 +527,7 @@ const resolvePublicationCopy = (
         message,
         context.issueNumber,
         context.issueSource,
+        context.origin === "ci_repair" ? { ciRepair: true } : undefined,
       )
       if (seeded !== null) {
         const existingTitle = context.publicationTitle?.trim() ?? ""
@@ -538,6 +548,7 @@ const resolvePublicationCopy = (
         stored,
         context.issueNumber,
         context.issueSource,
+        context.origin === "ci_repair" ? { ciRepair: true } : undefined,
       )
       // Already-persisted copy is trusted even if slightly over bounds after deploy;
       // re-normalize when possible, otherwise reuse as stored. Harness fallback
@@ -581,6 +592,7 @@ const alignCopyWithHeadCommit = (
       actualMessage,
       context.issueNumber,
       context.issueSource,
+      context.origin === "ci_repair" ? { ciRepair: true } : undefined,
     )
     if (fromCommit === null) {
       return preferred
@@ -717,6 +729,7 @@ const askAgentToRepairCommit = (
           body: copy.body,
           diagnostics,
           issueSource: context.issueSource,
+          ciRepair: context.origin === "ci_repair",
         }),
         cwd: worktreePath,
         model: context.model,
@@ -758,7 +771,10 @@ const confirmLateNoChange = (
     const result = yield* agentBackend
       .continueTurn({
         sessionId,
-        prompt: buildNoChangeConfirmationPrompt(),
+        prompt:
+          context.origin === "ci_repair"
+            ? buildCiRepairNoChangeConfirmationPrompt()
+            : buildNoChangeConfirmationPrompt(),
         cwd: worktreePath,
         model: context.model,
         thinkingLevel: context.thinkingLevel,
@@ -775,6 +791,37 @@ const confirmLateNoChange = (
             }),
         ),
       )
+
+    if (context.origin === "ci_repair") {
+      const parsed = parseCiRepairNoChangeResult(result.assistantText)
+      if (parsed === null || parsed._tag === "changes") {
+        return yield* new CommitNoChangeConfirmationError({
+          workItemId: context.workItemId,
+          message:
+            parsed === null
+              ? `${agentBackendLabel(context.agentBackend)} did not return a valid READY_FOR_AGENT_RESULT: CHANGES, NO_CHANGES, or RERUN_JOBS with a non-blank summary when required`
+              : `${agentBackendLabel(context.agentBackend)} did not confirm a No-Change Outcome`,
+        })
+      }
+      if (parsed._tag === "rerun_jobs") {
+        yield* rerunCiRepairJobs(context, parsed.runIdentities).pipe(
+          Effect.mapError(
+            (cause) =>
+              new CommitNoChangeConfirmationError({
+                workItemId: context.workItemId,
+                message:
+                  cause instanceof CiRepairRerunError
+                    ? cause.message
+                    : `Failed to rerun CI jobs: ${String(cause)}`,
+              }),
+          ),
+        )
+      }
+      return {
+        _tag: "no_changes" as const,
+        completionSummary: parsed.completionSummary,
+      }
+    }
 
     const parsed = parseAssessChangesResult(result.assistantText)
     if (parsed === null) {

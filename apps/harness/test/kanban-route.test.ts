@@ -339,6 +339,30 @@ describe("kanban home board", () => {
     expect(completeBranch).toContain("<WorkItemLifecycleStatus")
   })
 
+  test("CI Repair tickets use the Work Item title, commit, badge, and failing runs instead of an Issue link", () => {
+    const ticket = boardSource().slice(
+      boardSource().indexOf("function PipelineTicket("),
+      boardSource().indexOf("function KanbanJobsBoard()"),
+    )
+    expect(ticket).toContain('workItem.origin === "CI_REPAIR"')
+    expect(ticket).toContain("workItem.issueTitle")
+    expect(ticket).toContain(`Repair CI on \${workItem.ciRepairDefaultBranch}`)
+    expect(ticket).toContain("workItem.ciRepairHeadSha")
+    expect(ticket).toContain("workItem.ciRepairFailingRuns")
+    expect(ticket).toContain("run.htmlUrl")
+    expect(ticket).toContain("run.displayLabel")
+    expect(ticket).toContain('data-testid="ci-repair-badge"')
+    expect(ticket).toContain("CI Repair")
+    expect(ticket).toContain("issueUrl={isCiRepair ? null : issueUrl}")
+    const repairBranch = ticket.slice(
+      ticket.indexOf("{isCiRepair ? ("),
+      ticket.indexOf(") : issueUrl"),
+    )
+    expect(repairBranch).not.toContain("href={issueUrl}")
+    expect(repairBranch).not.toContain("formatIssueDisplayId")
+    expect(repairBranch).not.toContain("CI Gate Bypass")
+  })
+
   test("Needs Human + PR promotes PR control to top status row (issue #764)", () => {
     // Drop duplicate top NEEDS HUMAN stateLabel; one PR control up top, one
     // Needs Human badge in outcome chrome (showPullRequestBadge false).

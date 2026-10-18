@@ -11,9 +11,9 @@ const toGraphqlSourceAction = (
 ) => {
   switch (sourceAction) {
     case "implement_ci_repair":
-      return "IMPLEMENT_CI_REPAIR"
+      return "IMPLEMENT_CI_GATE_BYPASS"
     case "authorize_as_ci_repair":
-      return "AUTHORIZE_AS_CI_REPAIR"
+      return "AUTHORIZE_CI_GATE_BYPASS"
     default: {
       const _exhaustive: never = sourceAction
       return _exhaustive

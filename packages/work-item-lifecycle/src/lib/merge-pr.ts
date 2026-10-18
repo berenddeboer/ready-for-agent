@@ -61,6 +61,7 @@ export const mergePr = (context: LifecycleStepContext) =>
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
+      origin: context.origin,
     })
     const effectivePolicy = resolveEffectiveMergePolicy({
       repositoryMergePolicy: repository.mergePolicy,

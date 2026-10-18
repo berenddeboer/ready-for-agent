@@ -25,11 +25,7 @@ import { Claude, ClaudeSessionTelemetryLive } from "@ready-for-agent/claude"
 import { Codex, CodexSessionTelemetryLive } from "@ready-for-agent/codex"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
-import {
-  CiRepairExecutorLive,
-  RepositoryCiRepairLive,
-  createGraphqlApi,
-} from "@ready-for-agent/graphql-api"
+import { createGraphqlApi } from "@ready-for-agent/graphql-api"
 import { Grok, GrokSessionTelemetryLive } from "@ready-for-agent/grok"
 import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import {
@@ -235,8 +231,7 @@ export const createApplication = async (
     }),
   ).pipe(Layer.provide(databaseLayer))
 
-  // One gate for lifecycle turns and CI repair. A second Live call would
-  // be a private pool and would hide repair from ordinary fairness.
+  // One admission gate for lifecycle turns, including CI Repair Work Items.
   const admissionLayer = SharedAgentTurnAdmissionLive.pipe(
     Layer.provideMerge(databaseLayer),
   )
@@ -255,16 +250,6 @@ export const createApplication = async (
     Layer.provideMerge(linearLayer),
     Layer.provide(platformLayer),
   )
-  const repairLayer = RepositoryCiRepairLive().pipe(
-    Layer.provideMerge(CiRepairExecutorLive),
-    Layer.provideMerge(admissionLayer),
-    Layer.provideMerge(activeLayer),
-    Layer.provideMerge(keymaxxerLayer),
-    Layer.provideMerge(databaseLayer),
-    Layer.provideMerge(lifecycleLayer),
-  )
-  // The worker fiber is forked while this layer builds. A mergeAll sibling
-  // is not in that fiber, so polling would keep the no-op repair default.
   const workerLayer = JobWorkerLive.pipe(
     Layer.provideMerge(queueLayer),
     Layer.provideMerge(reconcilerLayer),
@@ -273,7 +258,6 @@ export const createApplication = async (
     Layer.provideMerge(gitlabLayer),
     Layer.provideMerge(azureDevOpsLayer),
     Layer.provideMerge(linearLayer),
-    Layer.provideMerge(repairLayer),
   )
   const loggingLayer = Logger.layer([Logger.consolePretty({ colors: false })])
   const localGitLayer = LocalGit.layer.pipe(Layer.provide(platformLayer))
@@ -290,7 +274,6 @@ export const createApplication = async (
           linearLayer,
           activeLayer,
           lifecycleLayer,
-          repairLayer,
           localGitLayer,
           directoryPickerLayer,
           loggingLayer,
@@ -304,7 +287,6 @@ export const createApplication = async (
           linearLayer,
           activeLayer,
           lifecycleLayer,
-          repairLayer,
           localGitLayer,
           directoryPickerLayer,
           loggingLayer,

@@ -8,10 +8,12 @@ import {
   STEP_RUN_REASON,
   TERMINAL_WORK_ITEM_STATES,
   TerminalWorkItemState,
+  type WorkItemOrigin,
   WorkItemState,
   evaluateUnfinishedWorkItem,
   formatIssueDisplayId,
 } from "@ready-for-agent/lifecycle-model"
+import type { CiRepairFailingRun } from "./ci-repair-work-item.js"
 import type { ExplicitWorkItemExecutionProfile } from "./execution-profile.js"
 import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
@@ -20,7 +22,10 @@ import {
   JOBS_COMPLETED_WINDOW_MS,
 } from "./jobs-completed-window.js"
 
-export type { IssueSource } from "@ready-for-agent/lifecycle-model"
+export type {
+  IssueSource,
+  WorkItemOrigin,
+} from "@ready-for-agent/lifecycle-model"
 export {
   STEP_RUN_REASON,
   type StepRunReasonCode,
@@ -127,6 +132,11 @@ export type StepRunRecord = PostponedStepRunRecord | NonPostponedStepRunRecord
 export interface WorkItemRecord {
   readonly id: WorkItemId
   readonly repositoryId: string
+  /** `issue` is an Issue Work Item. `ci_repair` has no Issue. */
+  readonly origin: WorkItemOrigin
+  readonly ciRepairDefaultBranch: string | null
+  readonly ciRepairHeadSha: string | null
+  readonly ciRepairFailingRuns: readonly CiRepairFailingRun[]
   readonly issueNumber: number
   readonly issueSource: IssueSource
   readonly issueTitle: string | null

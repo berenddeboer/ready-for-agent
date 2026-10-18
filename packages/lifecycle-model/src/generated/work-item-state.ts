@@ -308,6 +308,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "assess_changes",
     to: "local_cleanup",
+    guard: "no_change_outcome",
+    reasonCode: "native",
+  },
+  {
+    from: "assess_changes",
+    to: "local_cleanup",
     guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
     reasonCode: "native",
   },
@@ -400,6 +406,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "failed",
     guard: "issue_revalidation_failed",
     reasonCode: "handler_failed",
+  },
+  {
+    from: "commit",
+    to: "local_cleanup",
+    guard: "no_change_outcome",
+    reasonCode: "native",
   },
   {
     from: "commit",

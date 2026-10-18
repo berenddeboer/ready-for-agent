@@ -19,7 +19,6 @@ import {
   GitLabService,
   type GitLabServiceShape,
 } from "@ready-for-agent/gitlab-service"
-import { RepositoryCiRepair } from "@ready-for-agent/graphql-api"
 import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
 import { disabledKeymaxxerLayer } from "@ready-for-agent/keymaxxer-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
@@ -28,7 +27,7 @@ import { JobWorkerLive } from "../src/server/job-worker.js"
 
 describe("automatic repair worker context", () => {
   it.live(
-    "a refresh inside the built worker calls the provided repair service",
+    "a refresh inside the built worker considers automatic CI repair",
     () =>
       Effect.gen(function* () {
         const applicationServer = readFileSync(
@@ -39,19 +38,12 @@ describe("automatic repair worker context", () => {
           applicationServer.indexOf("const workerLayer = JobWorkerLive.pipe("),
           applicationServer.indexOf("const loggingLayer"),
         )
-        expect(workerLayer).toContain("Layer.provideMerge(repairLayer)")
+        expect(workerLayer).not.toContain("repairLayer")
+        expect(workerLayer).not.toContain("RepositoryCiRepair")
 
         const seen = yield* Deferred.make<string>()
         const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
         const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
-        const repair = Layer.succeed(RepositoryCiRepair, {
-          startManual: () => Effect.die("unused"),
-          drive: () => Effect.void,
-          latestForRepository: () => Effect.succeed(null),
-          reconcile: () => Effect.succeed({ blockedRepositoryIds: [] }),
-          considerAutomatic: (repositoryId) =>
-            Deferred.succeed(seen, repositoryId).pipe(Effect.as(null)),
-        })
         // The lifecycle claim loop reads maxDurations before the first claim.
         // A thinner stub kills that fiber and leaves the refresh job pending.
         const lifecycle = Layer.succeed(WorkItemLifecycle, {
@@ -76,6 +68,10 @@ describe("automatic repair worker context", () => {
           recoverOrphanedStepRuns: Effect.succeed(0),
           interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
           releaseWaitingForCiRepair: () => Effect.succeed(0),
+          unfinishedCiRepairWorkItem: () => Effect.die("unused"),
+          startCiRepair: () => Effect.die("unused"),
+          considerAutomaticCiRepair: (repositoryId: string) =>
+            Deferred.succeed(seen, repositoryId).pipe(Effect.as(null)),
         } as never)
         const reconciler = Layer.succeed(IssueReconciler, {
           reconcile: (repository) =>
@@ -101,7 +97,6 @@ describe("automatic repair worker context", () => {
           Layer.provideMerge(reconciler),
           Layer.provideMerge(lifecycle),
           Layer.provideMerge(disabledKeymaxxerLayer),
-          Layer.provideMerge(repair),
         )
         // Credential checks and CI observation name these services. This
         // GitHub repository, with Keymaxxer disabled and no CI selection,

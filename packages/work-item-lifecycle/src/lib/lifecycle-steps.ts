@@ -29,6 +29,7 @@ import type {
 } from "@ready-for-agent/linear-service"
 import type { AssessChangesResult } from "./assess-changes.js"
 import type { AssessChangesError } from "./assess-changes-errors.js"
+import type { CiRepairFailingRun } from "./ci-repair-work-item.js"
 import type { CloseIssueError } from "./close-issue-errors.js"
 import type { CommitResult } from "./commit.js"
 import type { CommitError } from "./commit-errors.js"
@@ -65,7 +66,12 @@ import type {
 } from "./resolve-pr-merge-conflict.js"
 import type { ReviewResult } from "./review.js"
 import type { ReviewError } from "./review-errors.js"
-import type { IssueSource, MergeMode, WorkItemId } from "./types.js"
+import type {
+  IssueSource,
+  MergeMode,
+  WorkItemId,
+  WorkItemOrigin,
+} from "./types.js"
 
 /**
  * Context supplied to every Lifecycle Step handler.
@@ -75,6 +81,11 @@ export interface LifecycleStepContext {
   readonly workItemId: WorkItemId
   readonly repositoryId: string
   readonly issueNumber: number
+  /** Absent on legacy step-handler tests; production always sets it. */
+  readonly origin?: WorkItemOrigin
+  readonly ciRepairDefaultBranch?: string | null
+  readonly ciRepairHeadSha?: string | null
+  readonly ciRepairFailingRuns?: readonly CiRepairFailingRun[]
   /**
    * Original Issue Source captured on the Work Item. Issue reads, prompt
    * identity, links, mutations, and source credentials resolve against this

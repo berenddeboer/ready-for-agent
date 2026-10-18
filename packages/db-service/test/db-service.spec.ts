@@ -1258,7 +1258,7 @@ describe("DbService", () => {
         }),
       ))
 
-    it("keeps automatic CI repair off unless a GitHub Repository enables it", () =>
+    it("keeps automatic CI repair when omitted and allows every Forge to enable it", () =>
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
@@ -1282,24 +1282,39 @@ describe("DbService", () => {
             localPath: "/repos/gitlab/widgets.git",
             isBare: true,
           })
-          const rejected = yield* db
-            .updateRepositorySettings(
-              settingsInput(gitlab.id, { automaticCiRepair: true }),
-            )
-            .pipe(Effect.flip)
-          expect(rejected).toBeInstanceOf(InvalidRepositorySettingsError)
-          if (rejected._tag === "InvalidRepositorySettingsError") {
-            expect(rejected.field).toBe("automaticCiRepair")
-          }
+          const gitlabEnabled = yield* db.updateRepositorySettings(
+            settingsInput(gitlab.id, { automaticCiRepair: true }),
+          )
+          expect(gitlabEnabled.automaticCiRepair).toBe(true)
           expect(
             (yield* db.listRepositories).find((item) => item.id === gitlab.id)
               ?.automaticCiRepair,
-          ).toBe(false)
+          ).toBe(true)
 
-          const cleared = yield* db.updateRepositorySettings(
+          const azure = yield* db.addRepository({
+            forge: "azure-devops",
+            forgeHost: "dev.azure.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/azure/widgets.git",
+            isBare: true,
+          })
+          const azureEnabled = yield* db.updateRepositorySettings(
+            settingsInput(azure.id, { automaticCiRepair: true }),
+          )
+          expect(azureEnabled.automaticCiRepair).toBe(true)
+
+          const moved = yield* db.updateRepositorySettings(
             settingsInput(repo.id, { forge: "gitlab", paused: false }),
           )
-          expect(cleared.forge).toBe("gitlab")
+          expect(moved.forge).toBe("gitlab")
+          expect(moved.automaticCiRepair).toBe(true)
+
+          const cleared = yield* db.updateRepositorySettings(
+            settingsInput(repo.id, {
+              automaticCiRepair: false,
+              paused: false,
+            }),
+          )
           expect(cleared.automaticCiRepair).toBe(false)
         }),
       ))

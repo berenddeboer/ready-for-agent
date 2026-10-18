@@ -5,6 +5,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Duration, Effect, Layer } from "effect"
 import {
   GitLabProjectUnavailableError,
+  type GitLabRepository,
   GitLabRequestError,
   GitLabService,
 } from "@ready-for-agent/gitlab-service"
@@ -1155,5 +1156,109 @@ describe("Keymaxxer-backed GitLab layer", () => {
           "decode pull request check status",
         )
       }),
+  )
+
+  it.effect("retries a pipeline through the vault helper", () =>
+    Effect.gen(function* () {
+      const runs: RunWithSecretsInput[] = []
+      const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+        initialize: Effect.void,
+        findSecret: ({ account }) =>
+          Effect.succeed(
+            account === vaultAccount
+              ? "GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"
+              : null,
+          ),
+        findSecrets: () => Effect.die("not used"),
+        hasSecret: () => Effect.die("not used"),
+        addSecret: () => Effect.die("not used"),
+        runWithSecrets: (input) => {
+          runs.push(input)
+          return Effect.succeed({ exitCode: 0, stdout: "ok", stderr: "" })
+        },
+      })
+      const layer = keymaxxerGitLabLayer({ workspaceRoot: "/workspace" }).pipe(
+        Layer.provide(keymaxxerLayer),
+        Layer.provide(platformLayer),
+      )
+
+      yield* Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        const retryPipeline = (
+          gitlab as {
+            retryPipeline?: (
+              repo: typeof repository,
+              pipelineId: number,
+            ) => Effect.Effect<void, unknown>
+          }
+        ).retryPipeline
+        if (retryPipeline === undefined) {
+          return yield* Effect.die("retryPipeline was dropped")
+        }
+        yield* retryPipeline(repository, 99)
+      }).pipe(Effect.provide(layer))
+
+      expect(runs).toHaveLength(1)
+      expect(runs[0]?.command).toContain("retry-pipeline")
+      expect(runs[0]?.command).toContain(encodeArgument("99"))
+      expect(runs[0]?.secrets).toEqual(["GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"])
+    }),
+  )
+
+  it.effect("retries a pipeline through ambient when the vault misses", () =>
+    Effect.gen(function* () {
+      const calls: number[] = []
+      const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+        initialize: Effect.void,
+        findSecret: () => Effect.succeed(null),
+        findSecrets: () => Effect.die("not used"),
+        hasSecret: () => Effect.die("not used"),
+        addSecret: () => Effect.die("not used"),
+        runWithSecrets: () => Effect.die("not used"),
+      })
+      const layer = keymaxxerGitLabLayer({
+        workspaceRoot: "/workspace",
+        environment: { GITLAB_TOKEN: "ambient-token" },
+        makeService: () =>
+          Object.assign(
+            {
+              verifyProject: (candidate: GitLabRepository) =>
+                Effect.succeed(candidate),
+              getAuthenticatedUserLogin: () => Effect.succeed("operator"),
+              listReadyIssues: () => Effect.succeed([]),
+              hasCredentials: () => Effect.succeed(true),
+              hasAmbientCredentials: () => Effect.succeed(true),
+              ...gitlabLifecycleStub,
+            },
+            {
+              retryPipeline: (
+                _repository: typeof repository,
+                pipelineId: number,
+              ) => {
+                calls.push(pipelineId)
+                return Effect.void
+              },
+            },
+          ),
+      }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
+
+      yield* Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        const retryPipeline = (
+          gitlab as {
+            retryPipeline?: (
+              repo: typeof repository,
+              pipelineId: number,
+            ) => Effect.Effect<void, unknown>
+          }
+        ).retryPipeline
+        if (retryPipeline === undefined) {
+          return yield* Effect.die("retryPipeline was dropped")
+        }
+        yield* retryPipeline(repository, 99)
+      }).pipe(Effect.provide(layer))
+
+      expect(calls).toEqual([99])
+    }),
   )
 })

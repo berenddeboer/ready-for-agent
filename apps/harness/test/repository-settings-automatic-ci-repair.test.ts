@@ -22,7 +22,7 @@ const sliceBetween = (
 }
 
 describe("Repository settings automatic CI repair", () => {
-  test("leaves Options and keeps the saved GitHub value through Save", () => {
+  test("leaves Options and persists the checkbox for every forge", () => {
     const settings = source()
     const options = sliceBetween(
       settings,
@@ -41,24 +41,34 @@ describe("Repository settings automatic CI repair", () => {
     expect(settings).toContain(
       "setAutomaticCiRepair(repository.automaticCiRepair)",
     )
-    expect(settings).toContain("checked: automaticCiRepair")
-    expect(settings).toContain("onCheckedChange: setAutomaticCiRepair")
-    expect(settings).toContain(
+    expect(settings).toContain("automaticCiRepair,")
+    expect(settings).not.toContain(
       'automaticCiRepair: forge === "github" ? automaticCiRepair : false',
     )
-    expect(settings).toContain('forge === "github"')
+
+    const ciGate = sliceBetween(
+      settings,
+      "<RepositorySettingsCiGateSection",
+      "/>",
+    )
+    expect(ciGate).toContain("checked: automaticCiRepair")
+    expect(ciGate).toContain("onCheckedChange: setAutomaticCiRepair")
+    expect(ciGate).not.toContain('forge === "github"')
+    expect(ciGate).not.toContain(": null")
+
     expect(settings).toContain("startRepositoryCiRepair:")
     expect(settings).toContain("onStartRepair={() => startCiRepair.mutate()}")
     expect(settings).not.toContain("useState(true)")
+    expect(settings).toContain("<dt>Automatic CI repair</dt>")
 
     const card = readFileSync(
       join(import.meta.dir, "../src/repository-ci-gate-card.tsx"),
       "utf8",
     )
     expect(card).not.toContain("automaticCiRepair")
-    expect(card).toContain('data-testid="ci-repair-request-source"')
-    expect(card).toContain("Automatic")
-    expect(card).toContain("Manual")
-    expect(settings).toContain("<dt>Automatic CI repair</dt>")
+    expect(card).toContain("Start CI Repair")
+    expect(card).toContain("canStartCiRepair")
+    expect(card).not.toContain("Retry CI repair")
+    expect(card).not.toContain('data-testid="ci-repair-request-source"')
   })
 })

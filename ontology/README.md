@@ -81,6 +81,8 @@ emits `packages/lifecycle-model/src/generated/work-item-state.ts` and
   kinds (`github`, `gitlab`, `azure-devops`, `linear`) from
   `rfa:IssueTracker` `owl:oneOf`. Linear is an Issue Tracker only, not a
   Forge. `DEFAULT_ISSUE_TRACKER_BY_FORGE` maps each Forge to itself.
+- `WORK_ITEM_ORIGINS` / `WorkItemOrigin` / `isWorkItemOrigin` — `issue` and
+  `ci_repair` from `rfa:WorkItemOrigin` `owl:oneOf`, in declared order.
 - `LIFECYCLE_TRANSITIONS` — every declared `rfa:Transition` as queryable data
   (`from`, `to`, `guard`, `reasonCode`).
 - `isDeclaredLifecycleTransition(from, to)` — membership in the declared

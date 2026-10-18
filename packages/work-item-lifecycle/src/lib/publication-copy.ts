@@ -63,6 +63,24 @@ const stripPublicationIssueReference = (
     : withoutCloses
 }
 
+/** Any whole-line closing keyword, not only this Work Item's issue number. */
+const ANY_CLOSING_REFERENCE_LINE =
+  /^(?:[-*]\s+)?(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#\d+\s*[.:]?\s*$/i
+
+const stripAnyClosingReferenceLine = (body: string): string => {
+  const kept: string[] = []
+  for (const line of body.split("\n")) {
+    if (ANY_CLOSING_REFERENCE_LINE.test(line.trim())) {
+      continue
+    }
+    kept.push(line)
+  }
+  while (kept.length > 0 && kept[kept.length - 1]?.trim() === "") {
+    kept.pop()
+  }
+  return kept.join("\n").trim()
+}
+
 /** GitHub pull request title limit. */
 export const PUBLICATION_TITLE_MAX_LENGTH = 256
 
@@ -199,23 +217,28 @@ export const inspectPublicationCopyResult = (output: string) => {
  * Normalize agent copy: trim, enforce length bounds, require substantive body,
  * and ensure exactly one Issue reference. Forge-hosted Issues keep
  * `Closes #<issue>`; Linear Issues get the display key and URL instead of a
- * fabricated GitHub closing reference. Returns null when invalid.
+ * fabricated GitHub closing reference. CI Repair omits every closing
+ * reference. Returns null when invalid.
  */
 export const normalizePublicationCopy = (
   raw: PublicationCopy,
   issueNumber: number,
   issueSource?: IssueSource,
+  options?: { readonly ciRepair?: boolean },
 ): PublicationCopy | null => {
   const title = raw.title.replace(/\s+/g, " ").trim()
   if (title === "" || title.length > PUBLICATION_TITLE_MAX_LENGTH) {
     return null
   }
 
-  const withoutCloses = stripPublicationIssueReference(
+  const strippedReference = stripPublicationIssueReference(
     raw.body,
     issueNumber,
     issueSource,
   )
+  const withoutCloses = options?.ciRepair
+    ? stripAnyClosingReferenceLine(strippedReference)
+    : strippedReference
   if (withoutCloses === "") {
     return null
   }
@@ -227,7 +250,9 @@ export const normalizePublicationCopy = (
     return null
   }
 
-  const body = `${withoutCloses}\n\n${formatPublicationIssueReference(issueNumber, issueSource)}`
+  const body = options?.ciRepair
+    ? withoutCloses
+    : `${withoutCloses}\n\n${formatPublicationIssueReference(issueNumber, issueSource)}`
   if (body.length > PUBLICATION_BODY_MAX_LENGTH) {
     return null
   }
@@ -259,21 +284,29 @@ export const buildHarnessPublicationFallbackCopy = (input: {
   readonly issueTitle: string | null
   readonly workItemId: string
   readonly issueSource?: IssueSource
+  readonly ciRepair?: boolean
 }): PublicationCopy => {
   const trimmedTitle = (input.issueTitle ?? "").replace(/\s+/g, " ").trim()
   const linear = isLinearIssueSource(input.issueSource)
   const title =
     trimmedTitle === ""
-      ? linear
-        ? `Implement ${input.issueSource.displayId}`
-        : `Implement issue #${input.issueNumber}`
+      ? input.ciRepair
+        ? "Repair CI"
+        : linear
+          ? `Implement ${input.issueSource.displayId}`
+          : `Implement issue #${input.issueNumber}`
       : trimmedTitle.slice(0, PUBLICATION_TITLE_MAX_LENGTH)
-  const body = [
-    `${HARNESS_FALLBACK_BODY_PREFIX} for Work Item ${input.workItemId}.`,
-    "The agent did not emit valid publication copy. Review the linked Issue and this commit diff.",
-    "",
-    formatPublicationIssueReference(input.issueNumber, input.issueSource),
-  ].join("\n")
+  const body = input.ciRepair
+    ? [
+        `${HARNESS_FALLBACK_BODY_PREFIX} for Work Item ${input.workItemId}.`,
+        "The agent did not emit valid publication copy. Review this commit diff.",
+      ].join("\n")
+    : [
+        `${HARNESS_FALLBACK_BODY_PREFIX} for Work Item ${input.workItemId}.`,
+        "The agent did not emit valid publication copy. Review the linked Issue and this commit diff.",
+        "",
+        formatPublicationIssueReference(input.issueNumber, input.issueSource),
+      ].join("\n")
   return { title, body }
 }
 
@@ -431,6 +464,7 @@ export const publicationCopyFromCommitMessage = (
   message: string,
   issueNumber: number,
   issueSource?: IssueSource,
+  options?: { readonly ciRepair?: boolean },
 ): PublicationCopy | null => {
   const trimmed = message.replace(/\r\n/g, "\n").trim()
   if (trimmed === "") {
@@ -447,13 +481,21 @@ export const publicationCopyFromCommitMessage = (
   // Prefer equality with the actual commit: strip duplicate closing refs and
   // re-append exactly one. Do not invent prose when the body was empty or only
   // closes (legacy `title\n\nCloses #N` → body is just `Closes #N`).
+  // A CI Repair Work Item has no Issue, so the reference is stripped and not
+  // put back.
   const stripped =
     body === ""
       ? ""
       : stripPublicationIssueReference(body, issueNumber, issueSource)
-  const prose = stripped.trim()
+  const prose = (
+    options?.ciRepair ? stripAnyClosingReferenceLine(stripped) : stripped
+  ).trim()
   const reference = formatPublicationIssueReference(issueNumber, issueSource)
-  const normalizedBody = prose === "" ? reference : `${prose}\n\n${reference}`
+  const normalizedBody = options?.ciRepair
+    ? prose
+    : prose === ""
+      ? reference
+      : `${prose}\n\n${reference}`
   if (title.length > PUBLICATION_TITLE_MAX_LENGTH) {
     return {
       title: title.slice(0, PUBLICATION_TITLE_MAX_LENGTH).trimEnd(),
@@ -473,6 +515,7 @@ export const buildPublicationCopyPrompt = (input: {
   readonly issueNumber: number
   readonly attachmentDirectory: string
   readonly issueSource?: IssueSource
+  readonly ciRepair?: boolean
 }): string =>
   [
     "Author shared publication copy for this Work Item's git commit and draft pull request.",
@@ -485,9 +528,11 @@ export const buildPublicationCopyPrompt = (input: {
     "- body: useful reviewer-facing Markdown explaining why the change was needed, what changed, and meaningful verification or limitations.",
     "Do not use the Issue title alone as the publication title.",
     `Do not write a generic body such as "${closingReference.genericPlaceholderExample}".`,
-    isLinearIssueSource(input.issueSource)
-      ? `Reference Linear issue ${input.issueSource.displayId} (${input.issueSource.url}); the harness will ensure the body ends with that Linear identity. Do not write a GitHub Closes #<number> line.`
-      : closingReference.mentionGuidance(input.issueNumber),
+    input.ciRepair
+      ? "This is a CI Repair Work Item. It has no Issue. Do not include an Issue closing reference (no Closes #, no Fixes #) and do not write a Linear issue key. The harness keeps the completion summary on the Work Item."
+      : isLinearIssueSource(input.issueSource)
+        ? `Reference Linear issue ${input.issueSource.displayId} (${input.issueSource.url}); the harness will ensure the body ends with that Linear identity. Do not write a GitHub Closes #<number> line.`
+        : closingReference.mentionGuidance(input.issueNumber),
     "End your final response with exactly one machine-readable result line. Prefer putting the JSON on that line:",
     `READY_FOR_AGENT_RESULT: PUBLICATION_COPY {"title":"...","body":"..."}`,
     "The body value must be a JSON string (use \\n for newlines). The result line must be the final non-empty line.",
@@ -497,6 +542,7 @@ export const buildPublicationCopyFormatCorrectionPrompt = (input: {
   readonly issueNumber: number
   readonly attachmentDirectory: string
   readonly issueSource?: IssueSource
+  readonly ciRepair?: boolean
 }): string =>
   [
     "Your previous response did not report a unique final READY_FOR_AGENT_RESULT: PUBLICATION_COPY with valid JSON title and body.",
@@ -504,9 +550,11 @@ export const buildPublicationCopyFormatCorrectionPrompt = (input: {
     `Work Item attachment directory: ${input.attachmentDirectory}`,
     "You may embed markdown images that point at files in that directory.",
     `End with exactly one final line of the form: READY_FOR_AGENT_RESULT: PUBLICATION_COPY {"title":"...","body":"..."}`,
-    isLinearIssueSource(input.issueSource)
-      ? `Include a substantive title and body for the completed work on Linear issue ${input.issueSource.displayId}. Do not write a GitHub Closes #<number> line.`
-      : `Include a substantive title and body for the completed work on issue #${input.issueNumber}.`,
+    input.ciRepair
+      ? "Include a substantive title and body for the CI repair. Do not include an Issue closing reference (no Closes #, no Fixes #) and do not write a Linear issue key."
+      : isLinearIssueSource(input.issueSource)
+        ? `Include a substantive title and body for the completed work on Linear issue ${input.issueSource.displayId}. Do not write a GitHub Closes #<number> line.`
+        : `Include a substantive title and body for the completed work on issue #${input.issueNumber}.`,
   ].join("\n")
 
 export const buildCreatePrFallbackPromptWithCopy = (input: {
@@ -541,6 +589,7 @@ export const buildCommitFallbackPromptWithCopy = (input: {
   readonly body: string
   readonly diagnostics: string
   readonly issueSource?: IssueSource
+  readonly ciRepair?: boolean
 }): string =>
   [
     "The harness attempted to create a git commit for the implementation changes in this worktree and failed.",
@@ -548,9 +597,11 @@ export const buildCommitFallbackPromptWithCopy = (input: {
     "Prefer this exact commit message (subject + body). Only change the message if repository policy (for example commitlint) requires a different form:",
     promptUserContentSection("publication_title", input.title),
     promptUserContentSection("publication_body", input.body),
-    isLinearIssueSource(input.issueSource)
-      ? `Keep the Linear issue ${input.issueSource.displayId} reference in the commit body. Do not add a GitHub Closes #<number> line.`
-      : closingReference.commitMustCloseGuidance(input.issueNumber),
+    input.ciRepair
+      ? "This is a CI Repair Work Item. Do not include an Issue closing reference (no Closes #, no Fixes #) and do not add a Linear issue reference."
+      : isLinearIssueSource(input.issueSource)
+        ? `Keep the Linear issue ${input.issueSource.displayId} reference in the commit body. Do not add a GitHub Closes #<number> line.`
+        : closingReference.commitMustCloseGuidance(input.issueNumber),
     "Stage only the relevant implementation changes, then commit.",
     "Exclude harness-owned diagnostic artifacts such as `.ready-for-agent/`.",
     "If there is nothing left to commit because a valid commit already exists for this work, succeed without creating an empty commit.",

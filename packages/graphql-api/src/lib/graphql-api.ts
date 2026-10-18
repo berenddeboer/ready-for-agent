@@ -94,10 +94,6 @@ import {
   observeRepositoryCiGate,
 } from "./observe-repository-ci-gate.js"
 import {
-  RepositoryCiRepair,
-  type RepositoryCiRepairView,
-} from "./repository-ci-repair.js"
-import {
   RepositoryCredentialError,
   activatePollingIfCredentialed,
   azureDevOpsTokenSecretName,
@@ -471,59 +467,8 @@ type StartRepositoryCiRepairArgs = {
   repositoryId: string
 }
 
-const graphqlRepairStatus = (status: RepositoryCiRepairView["status"]) => {
-  switch (status) {
-    case "queued":
-      return "QUEUED"
-    case "running":
-      return "RUNNING"
-    case "recovered":
-      return "RECOVERED"
-    case "unresolved":
-      return "UNRESOLVED"
-  }
-}
-
-const graphqlRepairOutcome = (outcome: RepositoryCiRepairView["outcome"]) => {
-  switch (outcome) {
-    case null:
-      return null
-    case "recovered":
-      return "RECOVERED"
-    case "failed":
-      return "FAILED"
-    case "timed_out":
-      return "TIMED_OUT"
-    case "interrupted":
-      return "INTERRUPTED"
-  }
-}
-
-const graphqlCiRepair = (repair: RepositoryCiRepairView) => ({
-  id: repair.id,
-  repositoryId: repair.repositoryId,
-  incidentId: repair.incidentId,
-  status: graphqlRepairStatus(repair.status),
-  outcome: graphqlRepairOutcome(repair.outcome),
-  admittedAt: new Date(repair.admittedAt).toISOString(),
-  launchedAt:
-    repair.launchedAt === null
-      ? null
-      : new Date(repair.launchedAt).toISOString(),
-  deadlineAt:
-    repair.deadlineAt === null
-      ? null
-      : new Date(repair.deadlineAt).toISOString(),
-  sessionId: repair.sessionId,
-  requestSource: repair.requestSource === "automatic" ? "AUTOMATIC" : "MANUAL",
-  report: repair.report,
-  links: repair.links.map((link) => ({
-    url: link.url,
-    kind: link.kind,
-    disposition: link.disposition,
-  })),
-  localExecutionStopped: repair.localExecutionStopped,
-})
+const toGraphqlWorkItemOrigin = (origin: WorkItemRecord["origin"]) =>
+  origin === "ci_repair" ? "CI_REPAIR" : "ISSUE"
 
 export type GraphqlServices =
   | DbService
@@ -1654,29 +1599,43 @@ export const createGraphqlApi = <R>(
               context,
             ),
           ciGate: async (
-            repository: { id: string; forge: string },
+            repository: { id: string },
             _args: unknown,
             context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
+                const lifecycle = yield* WorkItemLifecycle
                 const definitions = yield* db.listCiGateDefinitions(
                   repository.id,
                 )
                 const snapshot = yield* db.loadCiGateSnapshot(repository.id)
-                const repair = yield* RepositoryCiRepair
-                const latest = yield* repair.latestForRepository(repository.id)
+                const status = deriveRepositoryCiGateStatus({
+                  selectedCount: definitions.length,
+                  observations: snapshot.observations,
+                })
+                const unfinished = yield* lifecycle.unfinishedCiRepairWorkItem(
+                  repository.id,
+                )
                 return {
                   ...projectRepositoryCiGate({ definitions, snapshot }),
-                  repairSupported: repository.forge === "github",
-                  repair: latest === null ? null : graphqlCiRepair(latest),
+                  canStartCiRepair: status === "closed" && unfinished === null,
                 }
               }).pipe(Effect.withSpan("graphql-api.Repository.ciGate")),
               context,
             ),
         },
         WorkItem: {
+          origin: (workItem: WorkItemRecord) =>
+            toGraphqlWorkItemOrigin(workItem.origin),
+          ciRepairDefaultBranch: (workItem: WorkItemRecord) =>
+            workItem.ciRepairDefaultBranch ?? null,
+          ciRepairHeadSha: (workItem: WorkItemRecord) =>
+            workItem.ciRepairHeadSha ?? null,
+          ciRepairFailingRuns: (workItem: WorkItemRecord) => [
+            ...(workItem.ciRepairFailingRuns ?? []),
+          ],
           agentBackend: (workItem: WorkItemRecord) =>
             toGraphqlBackend(resolveWorkItemBackend(workItem.agentBackend)),
           mergeMode: (workItem: { mergeMode: string }) =>
@@ -2204,16 +2163,6 @@ export const createGraphqlApi = <R>(
                         ),
                       )
                     }
-                    const repair = yield* RepositoryCiRepair
-                    yield* repair.considerAutomatic(updated.id).pipe(
-                      Effect.catch((error) =>
-                        Effect.logWarning(
-                          "Automatic CI repair was not considered after settings save",
-                          { repositoryId: updated.id, error: String(error) },
-                        ),
-                      ),
-                      Effect.asVoid,
-                    )
                     return updated
                   }),
                 )
@@ -2847,10 +2796,8 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
-                const repair = yield* RepositoryCiRepair
-                return graphqlCiRepair(
-                  yield* repair.startManual(args.repositoryId),
-                )
+                const lifecycle = yield* WorkItemLifecycle
+                return yield* lifecycle.startCiRepair(args.repositoryId)
               }).pipe(Effect.withSpan("graphql-api.startRepositoryCiRepair")),
               context,
             ),

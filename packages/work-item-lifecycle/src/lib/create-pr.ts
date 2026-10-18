@@ -804,11 +804,14 @@ const resolvePublicationCopyForCreatePr = (
   Effect.gen(function* () {
     const title = context.publicationTitle?.trim() ?? ""
     const body = context.publicationBody?.trim() ?? ""
+    const ciRepair =
+      context.origin === "ci_repair" ? { ciRepair: true as const } : undefined
     if (title !== "" && body !== "") {
       const normalized = normalizePublicationCopy(
         { title, body },
         context.issueNumber,
         context.issueSource,
+        ciRepair,
       )
       if (normalized !== null) {
         return normalized
@@ -827,6 +830,7 @@ const resolvePublicationCopyForCreatePr = (
         head.stdout,
         context.issueNumber,
         context.issueSource,
+        ciRepair,
       )
       if (seeded !== null) {
         yield* softPersistPublicationCopy(context.workItemId, seeded)
@@ -911,6 +915,7 @@ export const createPr = (context: LifecycleStepContext) =>
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
+      origin: context.origin,
     })
     const copy = yield* resolvePublicationCopyForCreatePr(context, worktreePath)
 
@@ -1094,7 +1099,7 @@ export const createPr = (context: LifecycleStepContext) =>
       context.issueSource,
       repository.forge,
     )
-    if (issueForge === "azure-devops") {
+    if (issueForge === "azure-devops" && context.origin !== "ci_repair") {
       yield* associateNativePullRequestWithIssue({
         mutations,
         repository: toForgeRepository(repository),

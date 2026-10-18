@@ -776,7 +776,7 @@ type RequestInitOptions = {
 export const makeGitLabService = (options: {
   readonly token?: string
   readonly fetch?: GitLabFetch
-}): GitLabServiceShape => {
+}) => {
   const fetchImpl = options.fetch ?? fetch
   const headers: Record<string, string> =
     options.token === undefined || options.token.trim() === ""
@@ -1085,7 +1085,7 @@ export const makeGitLabService = (options: {
       ),
     )
 
-  return {
+  const service = {
     verifyProject: Effect.fn("GitLabService.verifyProject")((repository) =>
       unavailableOn404(
         repository,
@@ -2392,13 +2392,37 @@ export const makeGitLabService = (options: {
         return yield* error
       },
     ),
-  }
+  } satisfies GitLabServiceShape
+
+  /**
+   * Retry one project pipeline. Attached after the shape check so test stubs
+   * of GitLabServiceShape do not implement it. CI Repair calls it through an
+   * optional cast.
+   */
+  return Object.assign(service, {
+    retryPipeline: Effect.fn("GitLabService.retryPipeline")(function* (
+      repository: GitLabRepository,
+      pipelineId: number,
+    ) {
+      if (!Number.isSafeInteger(pipelineId) || pipelineId <= 0) {
+        return yield* new GitLabRequestError({
+          message: `Invalid pipeline id ${String(pipelineId)} for ${repository.projectPath}`,
+        })
+      }
+      yield* requestUnknown(
+        repository,
+        `${projectApiPath(repository)}/pipelines/${String(pipelineId)}/retry`,
+        `Failed to retry pipeline ${String(pipelineId)} on ${repository.projectPath}`,
+        { method: "POST", acceptEmpty: true },
+      ).pipe(Effect.asVoid)
+    }),
+  })
 }
 
 export const makeGitLabServiceFromToken = (
   token: string,
   fetchImpl: GitLabFetch = fetch,
-): GitLabServiceShape => makeGitLabService({ token, fetch: fetchImpl })
+) => makeGitLabService({ token, fetch: fetchImpl })
 
 /**
  * Helper-process Live layer: reads `GITLAB_TOKEN` from the environment.

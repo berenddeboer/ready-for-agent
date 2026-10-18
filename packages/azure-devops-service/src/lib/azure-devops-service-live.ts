@@ -961,7 +961,7 @@ const notImplemented = (
 export const makeAzureDevOpsService = (options: {
   readonly token?: string
   readonly fetch?: AzureDevOpsFetch
-}): AzureDevOpsServiceShape => {
+}) => {
   const fetchImpl = options.fetch ?? fetch
   const headers: Record<string, string> =
     options.token === undefined || options.token.trim() === ""
@@ -1685,7 +1685,7 @@ export const makeAzureDevOpsService = (options: {
       }
     })
 
-  return {
+  const service = {
     verifyProject: Effect.fn("AzureDevOpsService.verifyProject")(
       function* (repository) {
         const identity = splitAzureDevOpsProjectPath(repository.projectPath)
@@ -3064,13 +3064,41 @@ export const makeAzureDevOpsService = (options: {
       },
     ),
   } satisfies AzureDevOpsServiceShape
+
+  /**
+   * Retry one build. Attached after the shape check so test stubs of
+   * AzureDevOpsServiceShape do not implement it. CI Repair calls it through
+   * an optional cast.
+   */
+  return Object.assign(service, {
+    retryBuild: Effect.fn("AzureDevOpsService.retryBuild")(function* (
+      repository: AzureDevOpsRepository,
+      buildId: number,
+    ) {
+      if (!Number.isSafeInteger(buildId) || buildId <= 0) {
+        return yield* new AzureDevOpsRequestError({
+          message: `Invalid build id ${String(buildId)} for ${repository.projectPath}`,
+        })
+      }
+      const identity = splitAzureDevOpsProjectPath(repository.projectPath)
+      if (identity === null) {
+        return yield* invalidProjectPath(repository)
+      }
+      // Build - Update Build retries failed jobs when `retry=true` (PATCH).
+      yield* requestUnknown(
+        identity.organization,
+        `/${encodeURIComponent(identity.project)}/_apis/build/builds/${String(buildId)}?retry=true`,
+        `Failed to retry build ${String(buildId)} on ${repository.projectPath}`,
+        { method: "PATCH", body: { id: buildId } },
+      ).pipe(Effect.asVoid)
+    }),
+  })
 }
 
 export const makeAzureDevOpsServiceFromToken = (
   token: string,
   fetchImpl: AzureDevOpsFetch = fetch,
-): AzureDevOpsServiceShape =>
-  makeAzureDevOpsService({ token, fetch: fetchImpl })
+) => makeAzureDevOpsService({ token, fetch: fetchImpl })
 
 /**
  * Helper-process Live layer: reads `AZURE_DEVOPS_EXT_PAT` from the

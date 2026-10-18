@@ -43,6 +43,33 @@ type VaultSecretProbe =
 
 const requestError = makeRequestError(AzureDevOpsRequestError)
 
+/**
+ * `retryBuild` stays off AzureDevOpsServiceShape. Ambient keeps the live
+ * method; this layer forwards it or runs the vault helper.
+ */
+const callAzureRetryBuild = (
+  service: object,
+  repository: AzureDevOpsRepository,
+  buildId: number,
+): Effect.Effect<void, AzureDevOpsServiceError> => {
+  const candidate = (service as { retryBuild?: unknown }).retryBuild
+  if (typeof candidate !== "function") {
+    return Effect.fail(
+      requestError(
+        repository,
+        "retry build",
+        "This Forge cannot rerun CI jobs (azure-devops)",
+      ),
+    )
+  }
+  return (
+    candidate as (
+      repository: AzureDevOpsRepository,
+      buildId: number,
+    ) => Effect.Effect<void, AzureDevOpsServiceError>
+  )(repository, buildId)
+}
+
 const repositoryUnavailable = (repository: AzureDevOpsRepository) =>
   new AzureDevOpsProjectUnavailableError(repository)
 
@@ -748,6 +775,24 @@ export const keymaxxerAzureDevOpsLayer = (options: {
             ),
         ),
       }
-      return service
+      return Object.assign(service, {
+        retryBuild: Effect.fn("KeymaxxerAzureDevOps.retryBuild")(
+          (repository: AzureDevOpsRepository, buildId: number) =>
+            withVaultOrAmbient(
+              repository,
+              (tokenName) =>
+                callHelper({
+                  operation: "retry-build",
+                  repository,
+                  tokenName,
+                  describe: "retry build",
+                  args: [encodeArgument(String(buildId))],
+                  decode: decodeVoid,
+                }),
+              (ambientService) =>
+                callAzureRetryBuild(ambientService, repository, buildId),
+            ),
+        ),
+      })
     }),
   )

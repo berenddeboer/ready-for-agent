@@ -177,6 +177,7 @@ const removeLocalArtifacts = (
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
+      origin: context.origin,
     })
 
     const plannedPath = workItemWorktreePath({
@@ -185,6 +186,7 @@ const removeLocalArtifacts = (
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
+      origin: context.origin,
       tmpDir: options.tmpDir,
     })
 

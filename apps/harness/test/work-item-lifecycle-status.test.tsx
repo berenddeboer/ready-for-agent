@@ -13,7 +13,11 @@ import { describe, expect, test } from "bun:test"
 const waitingForGitHubWorkItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: "repo-1",
+  origin: "ISSUE",
   issueNumber: 874,
+  ciRepairDefaultBranch: null,
+  ciRepairHeadSha: null,
+  ciRepairFailingRuns: [],
   issueSource: {
     tracker: "github",
     nativeId: "874",
@@ -222,7 +226,7 @@ describe("WorkItemLifecycleStatus", () => {
     )
   })
 
-  test("shows active and historical CI Repair authorization without Skip CI or Force merge", () => {
+  test("shows active and historical CI Gate Bypass without Skip CI, Force merge, or a CI Repair badge", () => {
     const repairing = {
       ...waitingForGitHubWorkItem,
       status: "RUNNING",
@@ -234,7 +238,7 @@ describe("WorkItemLifecycleStatus", () => {
         canAuthorize: false,
         active: {
           authorizedAt: "2026-09-07T12:00:00.000Z",
-          sourceAction: "AUTHORIZE_AS_CI_REPAIR" as const,
+          sourceAction: "AUTHORIZE_CI_GATE_BYPASS" as const,
           incident: {
             id: "cfi-1",
             status: "OPEN" as const,
@@ -244,7 +248,7 @@ describe("WorkItemLifecycleStatus", () => {
         history: [
           {
             authorizedAt: "2026-09-07T11:00:00.000Z",
-            sourceAction: "IMPLEMENT_CI_REPAIR" as const,
+            sourceAction: "IMPLEMENT_CI_GATE_BYPASS" as const,
             incident: {
               id: "cfi-0",
               status: "RESOLVED" as const,
@@ -253,7 +257,7 @@ describe("WorkItemLifecycleStatus", () => {
           },
           {
             authorizedAt: "2026-09-07T12:00:00.000Z",
-            sourceAction: "AUTHORIZE_AS_CI_REPAIR" as const,
+            sourceAction: "AUTHORIZE_CI_GATE_BYPASS" as const,
             incident: {
               id: "cfi-1",
               status: "OPEN" as const,
@@ -268,16 +272,17 @@ describe("WorkItemLifecycleStatus", () => {
         <WorkItemLifecycleStatus workItem={repairing} compact />
       </QueryClientProvider>,
     )
-    expect(html).toContain("CI Repair for CI Gate closed: CI failed.")
-    expect(html).toContain("CI Repair authorization history")
-    expect(html).toContain("Implement CI Repair")
-    expect(html).toContain("Authorize as CI Repair")
+    expect(html).toContain("CI Gate Bypass for CI Gate closed: CI failed.")
+    expect(html).toContain("CI Gate Bypass authorization history")
+    expect(html).toContain("Implement CI Gate Bypass")
+    expect(html).toContain("Authorize CI Gate Bypass")
     expect(html).toContain("(resolved)")
     expect(html).not.toContain("Skip CI")
     expect(html).not.toContain("Force merge")
+    expect(html).not.toContain(">CI Repair<")
   })
 
-  test("offers Authorize as CI Repair while the incident is Closed and the Work Item is unfinished", () => {
+  test("offers Authorize CI Gate Bypass while the incident is Closed and the Work Item is unfinished", () => {
     const held = {
       ...waitingForGitHubWorkItem,
       status: "WAITING_FOR_CI_REPAIR",
@@ -295,7 +300,7 @@ describe("WorkItemLifecycleStatus", () => {
         <WorkItemLifecycleStatus workItem={held} compact />
       </QueryClientProvider>,
     )
-    expect(html).toContain("Authorize as CI Repair")
+    expect(html).toContain("Authorize CI Gate Bypass")
     expect(html).not.toContain("Skip CI")
     expect(html).not.toContain("Force merge")
   })

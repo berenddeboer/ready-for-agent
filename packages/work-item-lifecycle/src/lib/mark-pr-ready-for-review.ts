@@ -223,6 +223,7 @@ export const markPrReadyForReview = (context: LifecycleStepContext) =>
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
+      origin: context.origin,
     })
 
     const outcome = yield* repairFallback<

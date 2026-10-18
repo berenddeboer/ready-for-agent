@@ -1650,17 +1650,9 @@ export const DbServiceLive = Layer.effect(
             // the (possibly empty) prefs for the new effective backend — which
             // we just wrote from this request's model fields.
             const backendModelPrefs = serializeBackendModelPrefsMap(prefsMap)
-            if (input.automaticCiRepair === true && nextForge !== "github") {
-              return yield* new InvalidRepositorySettingsError({
-                field: "automaticCiRepair",
-                message:
-                  "Automatic CI repair can be enabled only for a GitHub Repository",
-              })
-            }
-            // Omitted leaves the stored opt-in. Leaving GitHub clears it.
+            // Omitted leaves the stored opt-in. Allowed on every Forge.
             const nextAutomatic =
-              nextForge === "github" &&
-              (input.automaticCiRepair ?? existing.automaticCiRepair)
+              input.automaticCiRepair ?? existing.automaticCiRepair
             const updatedRows = yield* sql
               .unsafe(
                 `UPDATE repository
@@ -2584,6 +2576,7 @@ export const DbServiceLive = Layer.effect(
           `SELECT issue_number, pull_request_number
              FROM work_item
              WHERE repository_id = ? AND pull_request_number IS NOT NULL
+               AND origin = 'issue'
              ORDER BY issue_number ASC, pull_request_number ASC`,
           [repositoryId],
         )
@@ -2608,6 +2601,7 @@ export const DbServiceLive = Layer.effect(
              FROM work_item
              WHERE repository_id = ?
                AND state = 'create_pr'
+               AND origin = 'issue'
              ORDER BY issue_number ASC, id ASC`,
           [repositoryId],
         )

@@ -387,3 +387,41 @@ it.effect(
       expect(glab.commands).toEqual([])
     }),
 )
+
+it.effect("forwards pipeline retry to the live GitLab service", () =>
+  Effect.gen(function* () {
+    const calls: number[] = []
+    const layer = ambientGitLabLayer({
+      workspaceRoot: "/workspace",
+      environment: { GITLAB_TOKEN: "environment-token" },
+      makeService: () =>
+        Object.assign(service(), {
+          retryPipeline: (
+            _repository: typeof repository,
+            pipelineId: number,
+          ) => {
+            calls.push(pipelineId)
+            return Effect.void
+          },
+        }),
+    })
+
+    yield* Effect.gen(function* () {
+      const gitlab = yield* GitLabService
+      const retryPipeline = (
+        gitlab as {
+          retryPipeline?: (
+            repo: typeof repository,
+            pipelineId: number,
+          ) => Effect.Effect<void, unknown>
+        }
+      ).retryPipeline
+      if (retryPipeline === undefined) {
+        return yield* Effect.die("retryPipeline was dropped")
+      }
+      yield* retryPipeline(repository, 99)
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
+
+    expect(calls).toEqual([99])
+  }),
+)

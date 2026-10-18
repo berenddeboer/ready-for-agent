@@ -31,6 +31,7 @@ const operationalLifecycleStep = term("OperationalLifecycleStep")
 const terminalWorkItemState = term("TerminalWorkItemState")
 const forgeClass = term("Forge")
 const issueTrackerClass = term("IssueTracker")
+const workItemOriginClass = term("WorkItemOrigin")
 const defaultIssueTracker = term("defaultIssueTracker")
 const stepRunReasonClass = term("StepRunReason")
 const transitionClass = term("Transition")
@@ -693,6 +694,7 @@ const renderForgeSource = (
   forges: readonly string[],
   issueTrackers: readonly string[],
   defaults: Readonly<Record<string, string>>,
+  workItemOrigins: readonly string[],
 ) => `\
 // This file is generated from ontology/rfa.ttl.
 // Run \`bunx nx run lifecycle-model:generate\` to update it.
@@ -719,6 +721,13 @@ ${renderDefaultIssueTrackers(defaults, forges)}
 
 export const defaultIssueTrackerForForge = (forge: Forge): IssueTracker =>
   DEFAULT_ISSUE_TRACKER_BY_FORGE[forge]
+
+${renderTuple("WORK_ITEM_ORIGINS", workItemOrigins)}
+export const WorkItemOrigin = Schema.Literals(WORK_ITEM_ORIGINS)
+export type WorkItemOrigin = typeof WorkItemOrigin.Type
+
+export const isWorkItemOrigin = (value: unknown): value is WorkItemOrigin =>
+  WORK_ITEM_ORIGINS.some((origin) => origin === value)
 `
 
 const renderTransitions = (values: readonly GeneratedTransition[]) => `\
@@ -866,10 +875,16 @@ const generate = async () => {
         issueTrackerClass,
         "IssueTracker",
       )
+      const workItemOrigins = oneOfKinds(
+        ontology,
+        workItemOriginClass,
+        "WorkItemOrigin",
+      )
       return renderForgeSource(
         forges.values,
         issueTrackers.values,
         defaultIssueTrackerByForge(ontology, forges.members),
+        workItemOrigins.values,
       )
     })(),
     predicateSource: renderPredicateExpressions(predicateExpressions(ontology)),

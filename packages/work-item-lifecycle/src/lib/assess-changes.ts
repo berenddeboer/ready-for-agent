@@ -13,6 +13,11 @@ import {
   AssessChangesStartingCommitMissingError,
   AssessChangesWorktreeContextMissingError,
 } from "./assess-changes-errors.js"
+import { CiRepairRerunError, rerunCiRepairJobs } from "./ci-repair-rerun.js"
+import {
+  buildCiRepairNoChangeConfirmationPrompt,
+  parseCiRepairNoChangeResult,
+} from "./ci-repair-work-item.js"
 import { GitCommandError } from "./create-worktree-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { repositoryProcessOptions } from "./repository-process-environment.js"
@@ -196,7 +201,10 @@ const confirmNoObservableChange = (
   sessionId: string,
 ) =>
   Effect.gen(function* () {
-    const prompt = buildNoChangeConfirmationPrompt()
+    const ciRepair = context.origin === "ci_repair"
+    const prompt = ciRepair
+      ? buildCiRepairNoChangeConfirmationPrompt()
+      : buildNoChangeConfirmationPrompt()
 
     const agentBackend = yield* AgentBackend
     const result = yield* agentBackend
@@ -222,6 +230,35 @@ const confirmNoObservableChange = (
             }),
         ),
       )
+
+    if (ciRepair) {
+      const parsed = parseCiRepairNoChangeResult(result.assistantText)
+      if (parsed === null) {
+        return yield* new AssessChangesResultError({
+          workItemId: context.workItemId,
+          message: `${agentBackendLabel(context.agentBackend)} did not report a unique final READY_FOR_AGENT_RESULT: CHANGES, NO_CHANGES, or RERUN_JOBS with a non-blank summary when required`,
+        })
+      }
+      if (parsed._tag !== "rerun_jobs") {
+        return parsed
+      }
+      yield* rerunCiRepairJobs(context, parsed.runIdentities).pipe(
+        Effect.mapError(
+          (cause) =>
+            new AssessChangesResultError({
+              workItemId: context.workItemId,
+              message:
+                cause instanceof CiRepairRerunError
+                  ? cause.message
+                  : `Failed to rerun CI jobs: ${String(cause)}`,
+            }),
+        ),
+      )
+      return {
+        _tag: "no_changes" as const,
+        completionSummary: parsed.completionSummary,
+      }
+    }
 
     const parsed = parseAssessChangesResult(result.assistantText)
     if (parsed === null) {
