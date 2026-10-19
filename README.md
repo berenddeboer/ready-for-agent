@@ -41,7 +41,7 @@ action.
 1. Install the [prerequisites](#requirements) and have them on your PATH:
    [git](https://git-scm.com/), the [GitHub CLI
    (`gh`)](https://cli.github.com/), and at least one coding agent —
-   [OpenCode](https://opencode.ai/),
+   [OpenCode 2](https://opencode.ai/v2/),
    [Codex](https://github.com/openai/codex), [Grok
    Build](https://docs.x.ai/), or [Claude
    Code](https://docs.anthropic.com/en/docs/claude-code) —
@@ -136,7 +136,7 @@ missing or broken selected backend (default is OpenCode) is shown as
 **Agent Backend Unavailable**; open Settings to choose another
 backend, reinstall the CLI, or use Recheck after fixing it:
 
-- [OpenCode](https://opencode.ai/) (`opencode` on PATH)
+- [OpenCode 2](https://opencode.ai/v2/) (`opencode` on PATH). OpenCode 1 is not supported.
 - [Codex](https://github.com/openai/codex) (`codex` on PATH). Codex Build
   0.153.4 or later is the supported baseline so Settings can list GPT-6
   Astra and current reasoning options. After upgrading Codex, use Recheck
@@ -488,7 +488,7 @@ opencode -s ses_015198f50ffe6aMS7EDvD1U6ob
 
 1. What coding CLI agents are supported?
 
-[OpenCode](https://opencode.ai/),
+[OpenCode 2](https://opencode.ai/v2/) (OpenCode 1 is not supported),
 [Codex](https://github.com/openai/codex), [Grok
 Build](https://docs.x.ai/), and [Claude
 Code](https://docs.anthropic.com/en/docs/claude-code). Settings

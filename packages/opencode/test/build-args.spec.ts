@@ -1,7 +1,10 @@
 import { PROMPT_ARGV_BYTE_LIMIT } from "@ready-for-agent/agent-backend"
 import {
+  buildCommandApiArgs,
   buildRunArgs,
+  commandBodyExceedsArgvLimit,
   joinOpenCodeMessageArgs,
+  openCodeModelReference,
   shouldUsePromptStdin,
 } from "../src/lib/build-args.js"
 import { describe, expect, it } from "bun:test"
@@ -16,12 +19,16 @@ const messageTokensFromArgs = (
 const messageFromArgs = (args: ReadonlyArray<string>): string =>
   joinOpenCodeMessageArgs(messageTokensFromArgs(args))
 
+const obsoleteFlags = ["--dir", "--variant", "--command"]
+
 describe("buildRunArgs", () => {
-  it("omits --variant when thinkingLevel is null", () => {
+  it("omits an explicit variant when thinkingLevel is null", () => {
+    expect(openCodeModelReference("anthropic/claude-sonnet-4-5", null)).toBe(
+      "anthropic/claude-sonnet-4-5",
+    )
     expect(
       buildRunArgs({
         prompt: "fix the bug",
-        cwd: "/worktrees/repository",
         model: "anthropic/claude-sonnet-4-5",
         thinkingLevel: null,
       }),
@@ -30,8 +37,6 @@ describe("buildRunArgs", () => {
       "--auto",
       "--format",
       "json",
-      "--dir",
-      "/worktrees/repository",
       "-m",
       "anthropic/claude-sonnet-4-5",
       "--",
@@ -41,10 +46,9 @@ describe("buildRunArgs", () => {
     ])
   })
 
-  it("builds start args with auto, json, model, and tokenized prompt positionals", () => {
+  it("builds start args with auto, json, model#variant, and tokenized prompt positionals", () => {
     const args = buildRunArgs({
       prompt: "fix the bug",
-      cwd: "/worktrees/repository",
       model: "anthropic/claude-sonnet-4-5",
       thinkingLevel: "high",
     })
@@ -54,17 +58,14 @@ describe("buildRunArgs", () => {
       "--auto",
       "--format",
       "json",
-      "--dir",
-      "/worktrees/repository",
       "-m",
-      "anthropic/claude-sonnet-4-5",
-      "--variant",
-      "high",
+      "anthropic/claude-sonnet-4-5#high",
       "--",
       "fix",
       "the",
       "bug",
     ])
+    expect(obsoleteFlags.some((flag) => args.includes(flag))).toBe(false)
     expect(messageTokensFromArgs(args)).toEqual(["fix", "the", "bug"])
     const persisted = messageFromArgs(args)
     expect(persisted).toBe("fix the bug")
@@ -83,22 +84,17 @@ describe("buildRunArgs", () => {
 
     const args = buildRunArgs({
       prompt,
-      cwd: "/worktrees/repository",
       model: "anthropic/claude-sonnet-4-5",
       thinkingLevel: "high",
     })
 
-    expect(args.slice(0, 10)).toEqual([
+    expect(args).toEqual([
       "run",
       "--auto",
       "--format",
       "json",
-      "--dir",
-      "/worktrees/repository",
       "-m",
-      "anthropic/claude-sonnet-4-5",
-      "--variant",
-      "high",
+      "anthropic/claude-sonnet-4-5#high",
     ])
     expect(shouldUsePromptStdin({ prompt })).toBe(true)
     expect(messageTokensFromArgs(args)).toEqual([])
@@ -112,7 +108,6 @@ describe("buildRunArgs", () => {
     ] as const) {
       const args = buildRunArgs({
         prompt,
-        cwd: "/worktrees/repository",
         model: "anthropic/claude-sonnet-4-5",
         thinkingLevel: "high",
       })
@@ -124,14 +119,11 @@ describe("buildRunArgs", () => {
   })
 
   it("keeps a large single-line prompt off argv (ARG_MAX)", () => {
-    // A pasted stack trace or inlined diff with no line breaks: newline
-    // detection alone would leave it on argv and fail the spawn.
     const prompt = `Fix ${"x".repeat(PROMPT_ARGV_BYTE_LIMIT)}`
     expect(prompt).not.toContain("\n")
 
     const args = buildRunArgs({
       prompt,
-      cwd: "/worktrees/repository",
       model: "anthropic/claude-sonnet-4-5",
       thinkingLevel: "high",
     })
@@ -143,12 +135,8 @@ describe("buildRunArgs", () => {
       "--auto",
       "--format",
       "json",
-      "--dir",
-      "/worktrees/repository",
       "-m",
-      "anthropic/claude-sonnet-4-5",
-      "--variant",
-      "high",
+      "anthropic/claude-sonnet-4-5#high",
     ])
   })
 
@@ -157,7 +145,6 @@ describe("buildRunArgs", () => {
 
     const args = buildRunArgs({
       prompt,
-      cwd: "/worktrees/repository",
       model: "anthropic/claude-sonnet-4-5",
       thinkingLevel: "high",
     })
@@ -166,58 +153,10 @@ describe("buildRunArgs", () => {
     expect(messageTokensFromArgs(args)).toEqual([prompt])
   })
 
-  it("keeps a large command prompt off argv but retains --command", () => {
-    const prompt = "x".repeat(PROMPT_ARGV_BYTE_LIMIT + 1)
-
-    const args = buildRunArgs({
-      prompt,
-      cwd: "/worktrees/repository",
-      model: "anthropic/claude-sonnet-4-5",
-      thinkingLevel: "high",
-      sessionId: "ses_review",
-      command: "/review",
-    })
-
-    expect(shouldUsePromptStdin({ prompt, command: "/review" })).toBe(true)
-    expect(args).toEqual([
-      "run",
-      "--auto",
-      "--format",
-      "json",
-      "--dir",
-      "/worktrees/repository",
-      "-m",
-      "anthropic/claude-sonnet-4-5",
-      "--variant",
-      "high",
-      "--session",
-      "ses_review",
-      "--command",
-      "review",
-    ])
-    expect(messageTokensFromArgs(args)).toEqual([])
-  })
-
-  it("keeps multi-line command prompts tokenized on argv", () => {
-    // Commands read `$ARGUMENTS`; only the argv byte limit moves them to stdin.
-    const prompt = "first\nsecond"
-    expect(shouldUsePromptStdin({ prompt, command: "/review" })).toBe(false)
-
-    const args = buildRunArgs({
-      prompt,
-      cwd: "/worktrees/repository",
-      model: "anthropic/claude-sonnet-4-5",
-      thinkingLevel: "high",
-      command: "/review",
-    })
-    expect(messageTokensFromArgs(args)).toEqual(["first", "second"])
-  })
-
   it("includes session for continue and protects the prompt with --", () => {
     expect(
       buildRunArgs({
         prompt: "continue the work",
-        cwd: "/worktrees/repository",
         model: "anthropic/claude-sonnet-4-5",
         thinkingLevel: "max",
         sessionId: "ses_abc",
@@ -227,12 +166,8 @@ describe("buildRunArgs", () => {
       "--auto",
       "--format",
       "json",
-      "--dir",
-      "/worktrees/repository",
       "-m",
-      "anthropic/claude-sonnet-4-5",
-      "--variant",
-      "max",
+      "anthropic/claude-sonnet-4-5#max",
       "--session",
       "ses_abc",
       "--",
@@ -242,103 +177,10 @@ describe("buildRunArgs", () => {
     ])
   })
 
-  it("invokes /review via --command with unquoted tokenized args after --", () => {
-    const prompt = [
-      "Review uncommitted worktree changes.",
-      "Do not edit files, commit, push, open pull requests, or apply findings in this turn.",
-      "End your final response with exactly one machine-readable result line:",
-      "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
-      "or",
-      "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
-    ].join("\n")
-
-    const args = buildRunArgs({
-      prompt,
-      cwd: "/worktrees/repository",
-      model: "anthropic/claude-sonnet-4-5",
-      thinkingLevel: "high",
-      sessionId: "ses_review",
-      command: "/review",
-    })
-
-    expect(args.slice(0, 15)).toEqual([
-      "run",
-      "--auto",
-      "--format",
-      "json",
-      "--dir",
-      "/worktrees/repository",
-      "-m",
-      "anthropic/claude-sonnet-4-5",
-      "--variant",
-      "high",
-      "--session",
-      "ses_review",
-      "--command",
-      "review",
-      "--",
-    ])
-    expect(args).not.toContain("/review")
-    expect(args.slice(15).every((token) => !token.includes(" "))).toBe(true)
-    expect(args).toContain("uncommitted")
-    expect(
-      args.indexOf("--") < args.indexOf("--ignore-missing") ||
-        !args.includes("--ignore-missing"),
-    ).toBe(true)
-
-    const withFlags = buildRunArgs({
-      prompt: "use --ignore-missing safely",
-      cwd: "/tmp",
-      model: "m",
-      thinkingLevel: "v",
-      command: "/review",
-    })
-    expect(
-      withFlags.indexOf("--") < withFlags.indexOf("--ignore-missing"),
-    ).toBe(true)
-
-    const persisted = messageFromArgs(args)
-    expect(persisted.startsWith('"')).toBe(false)
-    expect(persisted.endsWith('"')).toBe(false)
-    expect(persisted.startsWith("/review")).toBe(false)
-    expect(persisted).toContain("Review uncommitted worktree changes.")
-    expect(persisted).toContain(
-      "Do not edit files, commit, push, open pull requests, or apply findings in this turn.",
-    )
-    expect(persisted).toContain("READY_FOR_AGENT_RESULT: REVIEW_CLEAN")
-    expect(persisted).toContain("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS")
-  })
-
-  it("omits empty prompt when only a command is set", () => {
-    expect(
-      buildRunArgs({
-        prompt: "",
-        cwd: "/worktrees/repository",
-        model: "anthropic/claude-sonnet-4-5",
-        thinkingLevel: "high",
-        command: "/review",
-      }),
-    ).toEqual([
-      "run",
-      "--auto",
-      "--format",
-      "json",
-      "--dir",
-      "/worktrees/repository",
-      "-m",
-      "anthropic/claude-sonnet-4-5",
-      "--variant",
-      "high",
-      "--command",
-      "review",
-    ])
-  })
-
   it("omits empty non-command prompt positionals", () => {
     expect(
       buildRunArgs({
         prompt: "   \n\t  ",
-        cwd: "/worktrees/repository",
         model: "anthropic/claude-sonnet-4-5",
         thinkingLevel: "high",
       }),
@@ -347,12 +189,8 @@ describe("buildRunArgs", () => {
       "--auto",
       "--format",
       "json",
-      "--dir",
-      "/worktrees/repository",
       "-m",
-      "anthropic/claude-sonnet-4-5",
-      "--variant",
-      "high",
+      "anthropic/claude-sonnet-4-5#high",
     ])
   })
 
@@ -366,13 +204,66 @@ describe("buildRunArgs", () => {
 
     const args = buildRunArgs({
       prompt,
-      cwd: "/worktrees/issue-434",
       model: "xai/grok-code-fast-1",
       thinkingLevel: "high",
     })
 
-    const messageTokens = messageTokensFromArgs(args)
     expect(shouldUsePromptStdin({ prompt })).toBe(true)
-    expect(messageTokens).toEqual([])
+    expect(messageTokensFromArgs(args)).toEqual([])
+    expect(args).not.toContain("--dir")
+  })
+})
+
+describe("buildCommandApiArgs", () => {
+  it("invokes /review through the V2 session command API with arguments preserved", () => {
+    const prompt = [
+      "Review uncommitted worktree changes.",
+      "Do not edit files, commit, push, open pull requests, or apply findings in this turn.",
+      "End your final response with exactly one machine-readable result line:",
+      "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+      "or",
+      "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+    ].join("\n")
+
+    const invocation = buildCommandApiArgs({
+      sessionId: "ses_review",
+      command: "/review",
+      prompt,
+      directory: "/worktrees/repository",
+    })
+
+    expect(invocation.slice(0, 5)).toEqual([
+      "api",
+      "--header",
+      `x-opencode-directory:${encodeURIComponent("/worktrees/repository")}`,
+      "post",
+      "/api/session/ses_review/command",
+    ])
+    expect(obsoleteFlags.some((flag) => invocation.includes(flag))).toBe(false)
+    const body = JSON.parse(invocation.at(-1) ?? "") as {
+      name: string
+      text: string
+      delivery: string
+    }
+    expect(body).toEqual({
+      name: "review",
+      text: prompt,
+      delivery: "steer",
+    })
+    expect(body.text).toContain("READY_FOR_AGENT_RESULT: REVIEW_CLEAN")
+    expect(body.text).toContain("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS")
+  })
+
+  it("leaves the argv-size decision to the caller", () => {
+    const prompt = "x".repeat(PROMPT_ARGV_BYTE_LIMIT + 1)
+    const input = {
+      sessionId: "ses_review",
+      command: "/review",
+      prompt,
+      directory: "/worktrees/repository",
+    }
+
+    expect(commandBodyExceedsArgvLimit(input)).toBe(true)
+    expect(buildCommandApiArgs(input)).toContain("--data")
   })
 })

@@ -5,14 +5,26 @@ import {
   AgentBackend,
   AgentBackendConfigError,
   type AgentBackendError,
+  AgentBackendMalformedOutputError,
   type ContinueTurnInput,
   type InspectInput,
+  PROMPT_ARGV_BYTE_LIMIT,
   type StartTurnInput,
   retrySilentKnownSessionStartup,
   runCliCapture,
   runCliTurn,
 } from "@ready-for-agent/agent-backend"
-import { buildRunArgs, shouldUsePromptStdin } from "./build-args.js"
+import {
+  buildCommandApiArgs,
+  buildCreateSessionApiArgs,
+  buildRunArgs,
+  buildSessionExportArgs,
+  buildSessionInterruptApiArgs,
+  buildSessionWaitApiArgs,
+  buildSwitchModelApiArgs,
+  commandBodyExceedsArgvLimit,
+  shouldUsePromptStdin,
+} from "./build-args.js"
 import { makeOpencodeEnvironment } from "./environment.js"
 import type { OpencodeConfigError } from "./errors.js"
 import {
@@ -22,6 +34,10 @@ import {
 } from "./opencode-db-path.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseCommandTaskResultFromLine } from "./parse-command-task-result.js"
+import {
+  parseCommandTranscript,
+  parseCreatedSessionId,
+} from "./parse-command-transcript.js"
 import {
   parseErrorClassificationFromLine,
   parseProviderRetryAtFromLine,
@@ -38,6 +54,12 @@ import type { OpencodeLayerOptions } from "./types.js"
 
 const DEFAULT_TIMEOUT = Duration.minutes(30)
 const DEFAULT_BINARY = "opencode"
+
+const OPENCODE_V2_REQUIRED_MESSAGE =
+  "OpenCode 2 is required. This CLI is not OpenCode 2. Install OpenCode 2, then Recheck Agent Backend."
+
+const isOpenCodeV1Version = (text: string): boolean =>
+  /(?:^|\s)v?1\.\d+\.\d+/.test(text) && !/(?:^|\s)v?2\.\d+\.\d+/.test(text)
 
 const OPENCODE_BACKEND = {
   id: AGENT_BACKEND_IDS.opencode,
@@ -76,9 +98,41 @@ export const Opencode = {
           OPENCODE_DISABLE_CHANNEL_DB:
             environment["OPENCODE_DISABLE_CHANNEL_DB"],
         } satisfies OpencodePathEnv
+        const assertOpenCodeV2 = (input: {
+          readonly cwd: string
+          readonly timeout: Duration.Input
+        }) =>
+          runCliCapture({
+            spawner,
+            backend: OPENCODE_BACKEND,
+            binary,
+            args: ["--version"],
+            cwd: input.cwd,
+            env: turnEnvironment(input.cwd),
+            timeout: "1 second",
+            allowNonZeroExit: true,
+          }).pipe(
+            Effect.orElseSucceed(() => undefined),
+            Effect.flatMap((version) => {
+              if (version === undefined || version.exitCode !== 0) {
+                return Effect.void
+              }
+              const text = `${version.stdout}\n${version.stderr}`
+              return isOpenCodeV1Version(text)
+                ? Effect.fail(
+                    new AgentBackendConfigError({
+                      message: OPENCODE_V2_REQUIRED_MESSAGE,
+                    }),
+                  )
+                : Effect.void
+            }),
+          )
+
         const inspect = Effect.fn("Opencode.inspect")(function* (
           input: InspectInput,
         ) {
+          const timeout = input.timeout ?? defaultTimeout
+          yield* assertOpenCodeV2({ cwd: input.cwd, timeout })
           // `--standalone` pins the catalog to this process cwd. Without it,
           // V2 `api get` reads the background server's location and ignores cwd.
           const result = yield* runCliCapture({
@@ -87,8 +141,8 @@ export const Opencode = {
             binary,
             args: ["api", "--standalone", "get", "/api/model"],
             cwd: input.cwd,
-            env: environment,
-            timeout: input.timeout ?? defaultTimeout,
+            env: turnEnvironment(input.cwd),
+            timeout,
           })
 
           const parsed = parseOpencodeModelCatalog(result.stdout)
@@ -144,6 +198,13 @@ export const Opencode = {
           return resolved
         }
 
+        const turnEnvironment = (cwd: string): Record<string, string> => ({
+          ...environment,
+          // V2 `opencode run` resolves the project from PWD before process cwd.
+          // Inherited PWD is the Harness directory, so each turn must pin it.
+          PWD: cwd,
+        })
+
         const runTurn = (input: {
           readonly prompt: string
           readonly cwd: string
@@ -157,23 +218,173 @@ export const Opencode = {
           { readonly sessionId: string; readonly assistantText: string },
           AgentBackendError
         > => {
-          const promptInput = {
-            prompt: input.prompt,
-            ...(input.command !== undefined ? { command: input.command } : {}),
+          const promptOnStdin =
+            input.command === undefined &&
+            shouldUsePromptStdin({ prompt: input.prompt })
+          const args =
+            input.command === undefined
+              ? buildRunArgs({
+                  prompt: input.prompt,
+                  model: input.model,
+                  thinkingLevel: input.thinkingLevel,
+                  sessionId: input.sessionId,
+                })
+              : []
+          const command = input.command
+          const env = turnEnvironment(input.cwd)
+          const timeout = input.timeout ?? defaultTimeout
+          if (
+            command !== undefined &&
+            commandBodyExceedsArgvLimit({
+              command,
+              prompt: input.prompt,
+            })
+          ) {
+            return Effect.fail(
+              new AgentBackendConfigError({
+                message: `OpenCode cannot start this Agent Command. OpenCode v2 only accepts the command body as --data, and this prompt exceeds the ${PROMPT_ARGV_BYTE_LIMIT} byte limit. The turn was not started.`,
+              }),
+            )
           }
-          const args = buildRunArgs({
-            ...promptInput,
-            cwd: input.cwd,
-            model: input.model,
-            thinkingLevel: input.thinkingLevel,
-            sessionId: input.sessionId,
-          })
-          const promptOnStdin = shouldUsePromptStdin(promptInput)
-          const commandName = input.command
           // Snapshot just before spawn so only post-spawn task/child activity
           // disarms the startup window (not historical review attempts).
           const startedAfterMs = Date.now()
           const knownSessionId = input.sessionId
+
+          const invalidModel = () =>
+            new AgentBackendConfigError({
+              message: `OpenCode model reference is invalid: ${input.model}`,
+            })
+
+          const interruptSession = (sessionId: string) =>
+            runCliCapture({
+              spawner,
+              backend: OPENCODE_BACKEND,
+              binary,
+              args: buildSessionInterruptApiArgs(sessionId),
+              cwd: input.cwd,
+              env,
+              timeout,
+              allowNonZeroExit: true,
+            }).pipe(Effect.ignore)
+
+          const stopSessionOnAbort = <A, E, R>(
+            sessionId: string,
+            effect: Effect.Effect<A, E, R>,
+          ) =>
+            effect.pipe(
+              Effect.onInterrupt(() => interruptSession(sessionId)),
+              Effect.tapError((error) =>
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                (error._tag === "AgentBackendTimeoutError" ||
+                  error._tag === "AgentBackendStartupTimeoutError")
+                  ? interruptSession(sessionId)
+                  : Effect.void,
+              ),
+            )
+
+          const ensureCommandSession = (): Effect.Effect<
+            string,
+            AgentBackendError
+          > => {
+            if (knownSessionId !== undefined) {
+              const switchArgs = buildSwitchModelApiArgs({
+                sessionId: knownSessionId,
+                model: input.model,
+                thinkingLevel: input.thinkingLevel,
+                directory: input.cwd,
+              })
+              if (switchArgs === undefined) {
+                return Effect.fail(invalidModel())
+              }
+              return runCliCapture({
+                spawner,
+                backend: OPENCODE_BACKEND,
+                binary,
+                args: switchArgs,
+                cwd: input.cwd,
+                env,
+                timeout,
+              }).pipe(Effect.as(knownSessionId))
+            }
+            const createArgs = buildCreateSessionApiArgs({
+              model: input.model,
+              thinkingLevel: input.thinkingLevel,
+              directory: input.cwd,
+            })
+            if (createArgs === undefined) {
+              return Effect.fail(invalidModel())
+            }
+            return runCliCapture({
+              spawner,
+              backend: OPENCODE_BACKEND,
+              binary,
+              args: createArgs,
+              cwd: input.cwd,
+              env,
+              timeout,
+            }).pipe(
+              Effect.flatMap((created) => {
+                const sessionId = parseCreatedSessionId(created.stdout)
+                if (sessionId === undefined) {
+                  return Effect.fail(
+                    new AgentBackendMalformedOutputError({
+                      cwd: input.cwd,
+                      byteLength: Buffer.byteLength(created.stdout, "utf8"),
+                    }),
+                  )
+                }
+                return Effect.succeed(sessionId)
+              }),
+            )
+          }
+
+          const collectCommandResult = (
+            sessionId: string,
+            commandName: string,
+          ): Effect.Effect<string, AgentBackendError> =>
+            stopSessionOnAbort(
+              sessionId,
+              runCliCapture({
+                spawner,
+                backend: OPENCODE_BACKEND,
+                binary,
+                args: buildSessionWaitApiArgs(sessionId),
+                cwd: input.cwd,
+                env,
+                timeout,
+              }),
+            ).pipe(
+              Effect.andThen(
+                runCliCapture({
+                  spawner,
+                  backend: OPENCODE_BACKEND,
+                  binary,
+                  args: buildSessionExportArgs(sessionId),
+                  cwd: input.cwd,
+                  env,
+                  timeout,
+                }),
+              ),
+              Effect.flatMap((exported) => {
+                const assistantText = parseCommandTranscript({
+                  transcript: exported.stdout,
+                  command: commandName,
+                  startedAfterMs,
+                })
+                if (assistantText === undefined) {
+                  return Effect.fail(
+                    new AgentBackendMalformedOutputError({
+                      cwd: input.cwd,
+                      byteLength: Buffer.byteLength(exported.stdout, "utf8"),
+                    }),
+                  )
+                }
+                return Effect.succeed(assistantText)
+              }),
+            )
 
           return Effect.scoped(
             Effect.gen(function* () {
@@ -191,6 +402,31 @@ export const Opencode = {
                 )
               if (knownSessionId !== undefined) {
                 yield* offerSessionId(knownSessionId)
+              }
+
+              let turnSessionId = knownSessionId
+              let turnArgs: ReadonlyArray<string> = args
+              const turnStdin: "ignore" | Stream.Stream<Uint8Array, never> =
+                promptOnStdin
+                  ? Stream.fromIterable([
+                      new TextEncoder().encode(input.prompt),
+                    ])
+                  : "ignore"
+              if (command !== undefined) {
+                turnSessionId = yield* ensureCommandSession()
+                if (knownSessionId === undefined) {
+                  yield* offerSessionId(turnSessionId)
+                  if (input.onSessionId !== undefined) {
+                    // Observer failures must not fail the turn.
+                    yield* input.onSessionId(turnSessionId).pipe(Effect.ignore)
+                  }
+                }
+                turnArgs = buildCommandApiArgs({
+                  sessionId: turnSessionId,
+                  command,
+                  prompt: input.prompt,
+                  directory: input.cwd,
+                })
               }
 
               yield* Deferred.await(sessionReady).pipe(
@@ -221,15 +457,15 @@ export const Opencode = {
                 Effect.forkScoped,
               )
 
-              return yield* runCliTurn({
+              const turn = runCliTurn({
                 spawner,
                 backend: OPENCODE_BACKEND,
                 binary,
-                args,
+                args: turnArgs,
                 cwd: input.cwd,
-                env: environment,
-                timeout: input.timeout ?? defaultTimeout,
-                knownSessionId: input.sessionId,
+                env,
+                timeout,
+                knownSessionId: turnSessionId,
                 onSessionId: (sessionId) =>
                   offerSessionId(sessionId).pipe(
                     Effect.andThen(
@@ -259,10 +495,10 @@ export const Opencode = {
                   const errorClassification =
                     parseErrorClassificationFromLine(line)
                   const retryAt = parseProviderRetryAtFromLine(line)
-                  if (commandName !== undefined) {
+                  if (command !== undefined) {
                     const commandText = parseCommandTaskResultFromLine(
                       line,
-                      commandName,
+                      command,
                     )
                     if (commandText !== undefined) {
                       return {
@@ -284,12 +520,26 @@ export const Opencode = {
                     text: parseAssistantTextFromLine(line),
                   }
                 },
-                stdin: promptOnStdin
-                  ? Stream.fromIterable([
-                      new TextEncoder().encode(input.prompt),
-                    ])
-                  : "ignore",
+                stdin: turnStdin,
               })
+              const streamed = yield* turnSessionId === undefined ||
+              command === undefined
+                ? turn
+                : stopSessionOnAbort(turnSessionId, turn)
+              if (
+                command !== undefined &&
+                streamed.assistantText.length === 0
+              ) {
+                const assistantText = yield* collectCommandResult(
+                  streamed.sessionId,
+                  command,
+                )
+                return {
+                  sessionId: streamed.sessionId,
+                  assistantText,
+                }
+              }
+              return streamed
             }),
           )
         }

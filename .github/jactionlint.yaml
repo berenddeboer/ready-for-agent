@@ -3,15 +3,15 @@
 profile: default
 
 ignores:
-  # The version comes from the GitHub API so the unauthenticated latest-release
-  # endpoint is not used. The official installer is what places the CLI at
-  # ~/.opencode/bin; pinning a tarball instead would change that install.
+  # The version comes from the npm package so the installer's unauthenticated
+  # latest endpoint is not used. The official v2 installer is what places the
+  # CLI at ~/.opencode/bin; pinning a tarball instead would change that install.
   - rule: unverified-download
     file: .github/workflows/pr.yml
     step: Install OpenCode
-    reason: official OpenCode installer, version resolved from the GitHub API
+    reason: official OpenCode 2 installer, version resolved from npm
 
   - rule: unverified-download
     file: .github/workflows/ci-cd.yml
     step: Install OpenCode
-    reason: official OpenCode installer, version resolved from the GitHub API
+    reason: official OpenCode 2 installer, version resolved from npm

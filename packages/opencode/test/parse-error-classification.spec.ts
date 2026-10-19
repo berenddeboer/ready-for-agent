@@ -7,6 +7,29 @@ import { describe, expect, it } from "bun:test"
 const NOW = Date.parse("2026-08-15T12:00:00.000Z")
 
 describe("parseErrorClassificationFromLine", () => {
+  it("classifies a V2 provider rate-limit error as retryable_provider_error", () => {
+    const line = JSON.stringify({
+      type: "error",
+      sessionID: "ses_1",
+      error: {
+        type: "provider.rate-limit",
+        message: "Slow down",
+        status: 429,
+      },
+    })
+    expect(parseErrorClassificationFromLine(line)).toBe(
+      "retryable_provider_error",
+    )
+  })
+
+  it("classifies a V2 provider auth error as terminal_auth_error", () => {
+    const line = JSON.stringify({
+      type: "error",
+      error: { type: "provider.auth", message: "Authentication failed" },
+    })
+    expect(parseErrorClassificationFromLine(line)).toBe("terminal_auth_error")
+  })
+
   it("classifies a retryable APIError as retryable_provider_error", () => {
     const line = JSON.stringify({
       type: "error",
