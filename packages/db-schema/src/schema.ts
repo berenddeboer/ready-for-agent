@@ -627,6 +627,44 @@ export const autonomousRetry = snakeCase.table(
 )
 
 /**
+ * Shared Provider Recovery Cooldown for one constrained provider scope.
+ * Waiting Work Items hold no Worker Slot. Probe ownership is the single
+ * in-flight recovery attempt for that scope.
+ * See xplain: type provider recovery cooldown "prcd"
+ */
+export const providerRecoveryCooldown = snakeCase.table(
+  "provider_recovery_cooldown",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `prcd-${ulid()}`),
+    scopeKey: text().notNull(),
+    scopeKind: text({ enum: ["model", "provider"] }).notNull(),
+    backend: text().notNull(),
+    providerId: text(),
+    /** Non-credential account identity. Null when none is safely available. */
+    accountId: text(),
+    /** Null for an explicit provider-wide rate limit. */
+    model: text(),
+    nextAttemptAt: integer({ mode: "number" }),
+    probeWorkItemId: text().references(() => workItem.id, {
+      onDelete: "set null",
+    }),
+    probeClaimedAt: integer({ mode: "number" }),
+    generation: integer({ mode: "number" }).notNull(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("provider_recovery_cooldown_scope_key_uidx").on(t.scopeKey),
+  ],
+)
+
+/**
  * One Provider Recovery Episode per Work Item. Open statuses are `scheduled`
  * and `in_attempt`; terminal statuses retain the last outage for the UI.
  * See xplain: type provider recovery episode "prev"
@@ -662,6 +700,9 @@ export const providerRecoveryEpisode = snakeCase.table(
     generation: integer({ mode: "number" }).notNull(),
     escalated: integer({ mode: "boolean" }).notNull().default(false),
     exhaustedAt: integer({ mode: "number" }),
+    cooldownId: text().references(() => providerRecoveryCooldown.id, {
+      onDelete: "set null",
+    }),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),
@@ -671,6 +712,7 @@ export const providerRecoveryEpisode = snakeCase.table(
   },
   (t) => [
     uniqueIndex("provider_recovery_episode_work_item_uidx").on(t.workItemId),
+    index("provider_recovery_episode_cooldown_id_idx").on(t.cooldownId),
   ],
 )
 

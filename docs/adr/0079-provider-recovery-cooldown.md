@@ -1,0 +1,7 @@
+# Coordinate provider outage cooldowns across work items
+
+Provider Recovery stays per Work Item, but Work Items that fail against the same constrained provider scope share one Provider Recovery Cooldown instead of retrying in a burst. The scope key is Agent Backend, provider identity, a non-credential account identity when one is already available, and Agent Model. Explicit provider-wide rate limits omit the model. Credentials are never stored as identifiers. Model-specific overload does not cover unrelated models or providers.
+
+The cooldown has one shared retry deadline and one Provider Recovery Probe. Other Work Items in that scope keep waiting and hold no Worker Slot and no Agent Turn permit. A failed probe extends the shared backoff. A successful probe releases waiting Work Items through ordinary admission, including repository fairness and CI holds, at staggered times. Provider retry deadlines are a floor. Individual elapsed-time limits still exhaust that Work Item rather than showing a next attempt past its own limit.
+
+Probe ownership is a durable lease. Claiming it is atomic. Pause, cancel, Reset, and removal drop the owner and let another eligible Work Item probe. A lease with no queued or running Step Run and no slot wait is abandoned and recovered on restart, without treating process death as another provider failure. This is overload coordination after a classified transient failure, not a proactive rate limiter, and it does not change the selected model.

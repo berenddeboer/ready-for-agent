@@ -3224,7 +3224,7 @@ rfa:ProviderHold
 rfa:ProviderRecovery
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Provider Recovery"@en ;
-  skos:definition "Automatic resumption of the same Lifecycle Step after a classified transient provider failure, without an operator Retry and without consuming Autonomous Retry Budget. It keeps the selected Agent Model, resumes the existing Session and worktree, and re-enters that step's ordinary recovery path rather than replaying the workflow. Permanent credential, configuration, billing, and unknown failures are not Provider Recovery. Waiting holds neither an Agent Turn permit nor a Worker Slot; a due attempt re-enters ordinary admission, including repository fairness and CI holds."@en ;
+  skos:definition "Automatic resumption of the same Lifecycle Step after a classified transient provider failure, without an operator Retry and without consuming Autonomous Retry Budget. It keeps the selected Agent Model, resumes the existing Session and worktree, and re-enters that step's ordinary recovery path rather than replaying the workflow. Permanent credential, configuration, billing, and unknown failures are not Provider Recovery. Waiting holds neither an Agent Turn permit nor a Worker Slot; a due attempt re-enters ordinary admission, including repository fairness and CI holds. Work Items that fail against the same constrained provider scope share one Provider Recovery Cooldown and admit one Provider Recovery Probe before the others resume."@en ;
   skos:hiddenLabel "Automatic Retry"@en, "model substitution"@en, "in-process sleep"@en .
 
 [
@@ -3284,7 +3284,7 @@ rfa:ProviderRecoveryEpisode
 rfa:WaitingForProvider
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Waiting for Provider"@en ;
-  skos:definition "A derived hold while a Provider Recovery Episode has a future next attempt. It is not a Lifecycle Step or Work Item state: the Work Item stays in its current pipeline lane, holds no Worker Slot and no Agent Turn permit, and owns no queued or running Step Run. A due attempt re-enters ordinary admission, including repository fairness and CI holds. It is distinct from a failure that requires manual Retry."@en ;
+  skos:definition "A derived hold while a Provider Recovery Episode has a future next attempt. It is not a Lifecycle Step or Work Item state: the Work Item stays in its current pipeline lane, holds no Worker Slot and no Agent Turn permit, and owns no queued or running Step Run. A due attempt re-enters ordinary admission, including repository fairness and CI holds. When a Provider Recovery Cooldown applies, the visible next attempt is not earlier than that shared deadline. It is distinct from a failure that requires manual Retry."@en ;
   skos:hiddenLabel "Waiting for GitHub"@en, "Waiting for Worker Slot"@en, "Failed"@en .
 
 [
@@ -3309,6 +3309,50 @@ rfa:WaitingForProvider
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Failed"@en ;
   rfa:avoidanceRationale "exhaustion and permanent failures are actionable, not this hold"@en ;
+] .
+
+rfa:ProviderRecoveryCooldown
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Provider Recovery Cooldown"@en ;
+  skos:definition "The durable shared retry deadline for one constrained provider scope. It is keyed by Agent Backend, a provider or account identity when a non-credential identifier is available, and Agent Model. Model-specific overload does not cover unrelated models or providers. An explicit provider-wide rate limit uses that broader scope and omits the model. Credentials are never stored as identifiers. It exists only to coordinate Provider Recovery after classified transient failures, not as a proactive rate limiter. Waiting Work Items hold no Worker Slot and no Agent Turn permit."@en ;
+  skos:hiddenLabel "proactive rate limiter"@en, "credential identifier"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderRecoveryCooldown ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "proactive rate limiter"@en ;
+  rfa:avoidanceRationale "coordination starts only after a classified transient failure"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderRecoveryCooldown ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "credential identifier"@en ;
+  rfa:avoidanceRationale "credentials are never persisted"@en ;
+] .
+
+rfa:ProviderRecoveryProbe
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Provider Recovery Probe"@en ;
+  skos:definition "The single recovery attempt admitted for a cooling Provider Recovery Cooldown. Other Work Items in that scope keep waiting until the probe fails, which extends the shared backoff, or succeeds, which releases them through ordinary fair admission at staggered times. Ownership is persisted so restart cannot admit a second probe, and abandoned ownership is recovered. A paused, cancelled, or removed owner is not resumed and does not keep the probe; another eligible Work Item may claim it."@en ;
+  skos:hiddenLabel "burst retry"@en, "in-process lock"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderRecoveryProbe ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "burst retry"@en ;
+  rfa:avoidanceRationale "one probe before waiting work is released"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderRecoveryProbe ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "in-process lock"@en ;
+  rfa:avoidanceRationale "ownership is durable and survives restart"@en ;
 ] .
 
 rfa:PauseWorkItem
