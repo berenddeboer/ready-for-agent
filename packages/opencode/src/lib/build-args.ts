@@ -14,14 +14,21 @@ const messageTokens = (prompt: string): ReadonlyArray<string> =>
  *
  * Non-command prompts lose their structure once tokenized, so any newline sends
  * them to stdin. A single-line prompt past the argv byte limit also goes to
- * stdin: otherwise the spawn fails with an opaque platform error.
+ * stdin: otherwise the spawn fails with an opaque platform error. A token that
+ * starts with `-` would be parsed as a flag, so that prompt uses stdin too.
+ *
+ * OpenCode 2.0.32 duplicates every message placed after `--`. Production
+ * therefore passes message tokens as positionals and does not emit that
+ * separator. Reintroducing it stores the prompt twice.
  */
 export const shouldUsePromptStdin = (input: {
   readonly prompt: string
   readonly command?: string
 }): boolean =>
   exceedsPromptArgvLimit(input.prompt) ||
-  (input.command === undefined && /\r|\n/.test(input.prompt))
+  (input.command === undefined &&
+    (/\r|\n/.test(input.prompt) ||
+      messageTokens(input.prompt).some((token) => token.startsWith("-"))))
 
 /**
  * V2 model reference. A null Thinking Level omits `#variant` so the model
@@ -126,7 +133,7 @@ export const buildRunArgs = (input: {
   if (!shouldUsePromptStdin({ prompt: input.prompt })) {
     const tokens = messageTokens(input.prompt)
     if (tokens.length > 0) {
-      args.push("--", ...tokens)
+      args.push(...tokens)
     }
   }
   return args

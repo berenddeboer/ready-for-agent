@@ -55,10 +55,16 @@ export const resolveOpenCodeServerBase = async (
 const DEFAULT_STATUS_TIMEOUT_MS = 3_000
 const DEFAULT_STATUS_TTL_MS = 5_000
 
-/** `opencode service status` stdout. Does not start the service. */
+/**
+ * `opencode service status` stdout. Does not start the service.
+ *
+ * `env` isolates discovery from the operator's service. Omitted, the child
+ * inherits the harness process environment, which is the production lookup.
+ */
 export const readOpenCodeServiceStatus = async (input?: {
   readonly binary?: string
   readonly timeoutMs?: number
+  readonly env?: Record<string, string>
 }): Promise<string> => {
   const binary = input?.binary ?? "opencode"
   const timeoutMs = input?.timeoutMs ?? DEFAULT_STATUS_TIMEOUT_MS
@@ -66,6 +72,7 @@ export const readOpenCodeServiceStatus = async (input?: {
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",
+    ...(input?.env === undefined ? {} : { env: input.env }),
   })
   const timer = setTimeout(() => {
     proc.kill()

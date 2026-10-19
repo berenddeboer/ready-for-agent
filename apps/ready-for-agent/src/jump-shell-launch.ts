@@ -1,4 +1,5 @@
-import { basename } from "node:path"
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs"
+import { basename, join } from "node:path"
 
 /**
  * Shell that will read the queued exec line.
@@ -48,6 +49,38 @@ export const queuedExecLine = (
   launcherPath: string,
 ): string =>
   `exec ${family === "fish" ? quoteFishShell(launcherPath) : quotePosixShell(launcherPath)}`
+
+/**
+ * Write the script tmux execs after the worktree shell starts.
+ * Jump and the CLI contract both use this writer so the executed file is the
+ * production script, not a test copy.
+ */
+export const writeJumpLauncherScript = (input: {
+  readonly directory: string
+  readonly executableName: string
+  readonly arguments: readonly string[]
+  readonly tmuxExecutable?: string
+  readonly modelPinArguments?: readonly string[]
+}): string => {
+  mkdirSync(input.directory, { recursive: true })
+  const scriptPath = join(input.directory, "launch")
+  writeFileSync(
+    scriptPath,
+    renderJumpLauncherScript({
+      executableName: input.executableName,
+      arguments: input.arguments,
+      ...(input.tmuxExecutable === undefined
+        ? {}
+        : { tmuxExecutable: input.tmuxExecutable }),
+      ...(input.modelPinArguments === undefined
+        ? {}
+        : { modelPinArguments: input.modelPinArguments }),
+    }),
+    { mode: 0o700 },
+  )
+  chmodSync(scriptPath, 0o700)
+  return scriptPath
+}
 
 /**
  * Short script the interactive shell execs after its own startup.

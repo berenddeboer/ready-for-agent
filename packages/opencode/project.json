@@ -9,11 +9,19 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun test"
+        "command": "bun test --path-ignore-patterns '**/v2-cli-contract.spec.ts'"
       },
       "inputs": ["default", "^production"],
       "cache": true,
       "dependsOn": ["^build"]
+    },
+    "cli-contract": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions=@ready-for-agent/source test test/v2-cli-contract.spec.ts --timeout 60000 && bun --conditions=@ready-for-agent/source test --cwd ../../apps/ready-for-agent src/interactive-resume-v2-contract.test.ts --timeout 60000"
+      },
+      "cache": false
     }
   }
 }

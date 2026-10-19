@@ -1,11 +1,4 @@
-import {
-  accessSync,
-  chmodSync,
-  constants,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs"
+import { accessSync, constants, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Context, Effect, Layer, Stream } from "effect"
@@ -15,7 +8,7 @@ import {
   type InteractiveShellInvocation,
   interactiveShellInvocation,
   queuedExecLine,
-  renderJumpLauncherScript,
+  writeJumpLauncherScript,
 } from "../jump-shell-launch.ts"
 
 export type JumpWindowInput = {
@@ -147,20 +140,15 @@ const writeLaunch = (
   invocation: InteractiveShellInvocation,
 ): PreparedLaunch => {
   const directory = mkdtempSync(join(tmpdir(), "rfa-jump-"))
-  const scriptPath = join(directory, "launch")
-  writeFileSync(
-    scriptPath,
-    renderJumpLauncherScript({
-      executableName: input.agentExecutable,
-      arguments: input.agentArguments,
-      tmuxExecutable: executableOnPath("tmux") ?? "tmux",
-      ...(input.modelPinArguments === undefined
-        ? {}
-        : { modelPinArguments: input.modelPinArguments }),
-    }),
-    { mode: 0o700 },
-  )
-  chmodSync(scriptPath, 0o700)
+  const scriptPath = writeJumpLauncherScript({
+    directory,
+    executableName: input.agentExecutable,
+    arguments: input.agentArguments,
+    tmuxExecutable: executableOnPath("tmux") ?? "tmux",
+    ...(input.modelPinArguments === undefined
+      ? {}
+      : { modelPinArguments: input.modelPinArguments }),
+  })
   return {
     directory,
     execLine: queuedExecLine(invocation.family, scriptPath),

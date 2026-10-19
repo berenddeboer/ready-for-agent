@@ -45,6 +45,9 @@
     },
     {
       "path": "../../packages/release-versioning/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/opencode/tsconfig.lib.json"
     }
   ]
 }
