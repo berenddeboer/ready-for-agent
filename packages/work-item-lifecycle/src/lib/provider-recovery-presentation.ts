@@ -166,6 +166,22 @@ export const formatProviderRecoveryApiMessage = (
   return `${providerRecoveryCauseLabel(episode)} — next attempt at ${next}.${modelSuffix} ${attempts}.`
 }
 
+/** Whole minutes for the settings field. Sub-minute stored values round up so Save stays valid. */
+export const formatProviderRecoveryMaxWaitMinutes = (
+  maxWaitMs: number | null | undefined,
+):
+  | { readonly mode: "unlimited"; readonly minutes: "" }
+  | { readonly mode: "limited"; readonly minutes: string } => {
+  if (maxWaitMs === null || maxWaitMs === undefined) {
+    return { mode: "unlimited", minutes: "" }
+  }
+  const minutes = maxWaitMs / 60_000
+  return {
+    mode: "limited",
+    minutes: String(Number.isInteger(minutes) ? minutes : Math.ceil(minutes)),
+  }
+}
+
 export const parseProviderRecoveryMaxWaitMinutes = (
   mode: "unlimited" | "limited",
   minutes: string,

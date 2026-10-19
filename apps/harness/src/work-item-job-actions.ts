@@ -44,6 +44,11 @@ export function workItemPauseControl(args: {
     return { kind: "hidden" }
   }
   if (args.status === "WAITING_FOR_PROVIDER") {
+    if (args.paused) {
+      return args.hasActiveStepRun
+        ? { kind: "interrupt", label: "Interrupt job" }
+        : { kind: "start", label: "Start job" }
+    }
     return { kind: "pause", label: "Pause job" }
   }
   if (args.hasActiveStepRun) {

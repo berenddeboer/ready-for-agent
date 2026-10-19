@@ -26,7 +26,10 @@ import {
   useRef,
   useState,
 } from "react"
-import { parseProviderRecoveryMaxWaitMinutes } from "@ready-for-agent/work-item-lifecycle/provider-recovery-presentation"
+import {
+  formatProviderRecoveryMaxWaitMinutes,
+  parseProviderRecoveryMaxWaitMinutes,
+} from "@ready-for-agent/work-item-lifecycle/provider-recovery-presentation"
 import { formatAgentBackendStatusTrail } from "../agent-backend-status-label.js"
 import { AgentBackendWarnings } from "../agent-backend-warnings.js"
 import { AgentModelSelect } from "../agent-model-select.js"
@@ -491,19 +494,11 @@ function SettingsChrome() {
       String(config.data.maxConcurrentAgentTurns),
     )
     setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
-    if (
-      config.data.providerRecoveryMaxWaitMs === null ||
-      config.data.providerRecoveryMaxWaitMs === undefined
-    ) {
-      setProviderRecoveryMode("unlimited")
-      setProviderRecoveryMinutes("")
-    } else {
-      setProviderRecoveryMode("limited")
-      const minutes = config.data.providerRecoveryMaxWaitMs / 60_000
-      setProviderRecoveryMinutes(
-        String(Number.isInteger(minutes) ? minutes : Math.ceil(minutes)),
-      )
-    }
+    const providerRecoveryWaitField = formatProviderRecoveryMaxWaitMinutes(
+      config.data.providerRecoveryMaxWaitMs,
+    )
+    setProviderRecoveryMode(providerRecoveryWaitField.mode)
+    setProviderRecoveryMinutes(providerRecoveryWaitField.minutes)
     previewGenerationRef.current += 1
     setPreviewModels(null)
     setPreviewProvider(null)
@@ -813,18 +808,11 @@ function SettingsChrome() {
         String(config.data.maxConcurrentAgentTurns),
       )
       setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
-      if (
-        config.data.providerRecoveryMaxWaitMs === null ||
-        config.data.providerRecoveryMaxWaitMs === undefined
-      ) {
-        setProviderRecoveryMode("unlimited")
-        setProviderRecoveryMinutes("")
-      } else {
-        setProviderRecoveryMode("limited")
-        setProviderRecoveryMinutes(
-          String(config.data.providerRecoveryMaxWaitMs / 60_000),
-        )
-      }
+      const providerRecoveryWaitField = formatProviderRecoveryMaxWaitMinutes(
+        config.data.providerRecoveryMaxWaitMs,
+      )
+      setProviderRecoveryMode(providerRecoveryWaitField.mode)
+      setProviderRecoveryMinutes(providerRecoveryWaitField.minutes)
     }
     setPreviewModels(null)
     setPreviewProvider(null)

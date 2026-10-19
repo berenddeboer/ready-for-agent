@@ -211,6 +211,14 @@ describe("workItemPauseControl", () => {
         hasActiveStepRun: false,
       }),
     ).toEqual({ kind: "pause", label: "Pause job" })
+    expect(
+      workItemPauseControl({
+        isTerminal: false,
+        status: "WAITING_FOR_PROVIDER",
+        paused: true,
+        hasActiveStepRun: false,
+      }),
+    ).toEqual({ kind: "start", label: "Start job" })
   })
 
   test("shows play only when paused and idle", () => {

@@ -4,6 +4,7 @@ import {
   type ProviderRecoverySnapshot,
   formatProviderRecoveryApiMessage,
   formatProviderRecoveryElapsed,
+  formatProviderRecoveryMaxWaitMinutes,
   formatProviderRecoveryWaitingHeadline,
   parseProviderRecoveryMaxWaitMinutes,
 } from "../src/lib/provider-recovery-presentation.js"
@@ -73,5 +74,13 @@ describe("Provider Recovery presentation", () => {
     expect(parseProviderRecoveryMaxWaitMinutes("limited", "0").ok).toBe(false)
     expect(parseProviderRecoveryMaxWaitMinutes("limited", "-5").ok).toBe(false)
     expect(parseProviderRecoveryMaxWaitMinutes("limited", "1.5").ok).toBe(false)
+    expect(formatProviderRecoveryMaxWaitMinutes(null)).toEqual({
+      mode: "unlimited",
+      minutes: "",
+    })
+    expect(formatProviderRecoveryMaxWaitMinutes(90_000)).toEqual({
+      mode: "limited",
+      minutes: "2",
+    })
   })
 })
