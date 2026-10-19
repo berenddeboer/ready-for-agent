@@ -77,8 +77,10 @@ export const splitOpenCodeModelReference = (
 /**
  * Attach `--server` where OpenCode 2.0.32 accepts it.
  *
- * `run` accepts the flag before the subcommand. `api` and `session export`
- * reject that position and accept the flag only on their own command.
+ * `run`, `api`, and `session export` reject the flag before the subcommand.
+ * `opencode --server URL run` exits with `Unrecognized flag: --server`.
+ * `run` and `api` accept the flag immediately after the command name.
+ * `session export` accepts it only after `export`.
  */
 export const withOpenCodeServer = (
   args: ReadonlyArray<string>,
@@ -87,7 +89,7 @@ export const withOpenCodeServer = (
   if (serverUrl === undefined || serverUrl.trim().length === 0) return args
   const flag = ["--server", serverUrl] as const
   const [command, subcommand, ...rest] = args
-  if (command === "api") {
+  if (command === "api" || command === "run") {
     return [
       command,
       ...flag,
@@ -145,8 +147,8 @@ const directoryHeader = (directory: string): string =>
 
 /**
  * Model catalog read for a harness-owned server. The directory header keeps
- * the catalog on the worktree. Callers prepend `--server`; this is not the
- * disabled-Keymaxxer `--standalone` catalog read.
+ * the catalog on the worktree. Callers attach `--server` after `api`. This
+ * is not the disabled-Keymaxxer `--standalone` catalog read.
  */
 export const buildModelCatalogApiArgs = (input: {
   readonly directory: string

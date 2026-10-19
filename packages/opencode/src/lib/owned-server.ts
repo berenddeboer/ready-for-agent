@@ -128,6 +128,8 @@ export type StartOwnedOpenCodeServerOptions = {
   readonly keymaxxerMcpUrl: string
   readonly binary?: string
   readonly environment?: Readonly<Record<string, string | undefined>>
+  /** Isolated project directory. Omitted, the server inherits the process cwd. */
+  readonly cwd?: string
   readonly readyTimeoutMs?: number
   readonly spawn?: (
     args: ReadonlyArray<string>,
@@ -246,6 +248,7 @@ export const startOwnedOpenCodeServer = async (
       Bun.spawn({
         cmd: [binary, ...args],
         env: serverEnv,
+        ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
         stdin: "ignore",
         stdout: "ignore",
         stderr: "pipe",
