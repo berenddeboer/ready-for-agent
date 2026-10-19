@@ -13030,6 +13030,106 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("session exposes an Open in OpenCode URL only for OpenCode", async () => {
+    const exampleUrl =
+      "http://127.0.0.1:49374/server/aHR0cDovLzEyNy4wLjAuMTo0OTM3NA/session/ses_owned"
+    let requested: string | null = null
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.succeed({
+            ...workItem,
+            sessionId: "ses_owned",
+          }),
+      },
+    )
+
+    const opened = await createGraphqlApi(runtime, {
+      resolveOpenCodeSessionUrl: async ({ sessionId }) => {
+        requested = sessionId
+        return exampleUrl
+      },
+    }).fetch(
+      graphqlRequest({
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) { openInOpenCodeUrl }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+
+    expect(opened.status).toBe(200)
+    expect(await opened.json()).toEqual({
+      data: { session: { openInOpenCodeUrl: exampleUrl } },
+    })
+    expect(requested).toBe("ses_owned")
+
+    let grokRequested = false
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.succeed({
+            ...workItem,
+            agentBackend: "grok",
+            sessionId: "ses_owned",
+          }),
+      },
+    )
+    const otherBackend = await createGraphqlApi(runtime, {
+      resolveOpenCodeSessionUrl: async () => {
+        grokRequested = true
+        return exampleUrl
+      },
+    }).fetch(
+      graphqlRequest({
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) { openInOpenCodeUrl }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+    expect(otherBackend.status).toBe(200)
+    expect(await otherBackend.json()).toEqual({
+      data: { session: { openInOpenCodeUrl: null } },
+    })
+    expect(grokRequested).toBe(false)
+  })
+
+  test("session omits the Open in OpenCode URL when the server cannot be resolved", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.succeed({
+            ...workItem,
+            sessionId: "ses_owned",
+          }),
+      },
+    )
+    const response = await createGraphqlApi(runtime, {
+      resolveOpenCodeSessionUrl: async () => null,
+    }).fetch(
+      graphqlRequest({
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) { openInOpenCodeUrl }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: { session: { openInOpenCodeUrl: null } },
+    })
+  })
+
   test("session reports Agent Turn Tail supported for Grok Build", async () => {
     runtime = makeRuntime(
       {},

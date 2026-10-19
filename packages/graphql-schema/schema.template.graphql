@@ -378,6 +378,13 @@ type Session {
   Cheap capability flag; does not read Session content.
   """
   agentTurnTailSupported: Boolean!
+  """
+  Browser URL that opens this OpenCode Session in the OpenCode web UI.
+  Null when the captured backend is not OpenCode, the Session ID is missing,
+  or the OpenCode server address cannot be resolved. Contains no credentials
+  or pairing token; the browser uses its existing OpenCode cookie.
+  """
+  openInOpenCodeUrl: String
 }
 
 """
@@ -1364,6 +1371,12 @@ type WorkItem {
   """
   completionSummary: String
   sessionId: String
+  """
+  Browser URL that opens this Work Item's OpenCode Session in a new tab.
+  Null for other Agent Backends, when no Session ID is captured, or when the
+  OpenCode server address cannot be resolved. Contains no credentials.
+  """
+  openInOpenCodeUrl: String
   failureCode: String
   createdAt: String!
   updatedAt: String!

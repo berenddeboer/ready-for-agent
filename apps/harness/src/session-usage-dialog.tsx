@@ -9,6 +9,8 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { Banner } from "./banner.js"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
+import { OpenInOpenCodeLink } from "./open-in-opencode-link.js"
+import { sessionOpenAction } from "./session-open-action.js"
 import { cx, ui } from "./ui.js"
 
 const graphql = createHarnessGraphqlClient()
@@ -39,6 +41,7 @@ const sessionQuery = (workItemId: string) => ({
         updatedAt: true,
         diagnostic: true,
         agentTurnTailSupported: true,
+        openInOpenCodeUrl: true,
       },
     })
     return result.session
@@ -120,9 +123,24 @@ export function SessionUsageDialog({
     ...sessionQuery(workItemId ?? ""),
     enabled,
   })
+  // Prefer the open-time hint (Pipeline click / history state); fall back to
+  // the session query id so direct `/session/<work-item-id>/telemetry` loads
+  // still show the backend-local Session ID when available (issue #841).
+  const displaySessionId =
+    sessionId !== null && sessionId.length > 0
+      ? sessionId
+      : (session.data?.id ?? null)
+  const openAction = sessionOpenAction({
+    openInOpenCodeUrl: session.data?.openInOpenCodeUrl,
+    sessionId: displaySessionId,
+    agentTurnTailSupported: session.data?.agentTurnTailSupported,
+  })
+  const openInOpenCodeUrl =
+    openAction.kind === "open-in-opencode" ? openAction.url : null
+  const showTailAction = openAction.kind === "tail"
   const tail = useQuery({
     ...agentTurnTailQuery(workItemId ?? ""),
-    enabled: enabled && tailOpen,
+    enabled: enabled && showTailAction && tailOpen,
   })
 
   useEffect(() => {
@@ -142,16 +160,7 @@ export function SessionUsageDialog({
   }, [open])
 
   const backendLabel = session.data?.backend.label
-  // Prefer the open-time hint (Pipeline click / history state); fall back to
-  // the session query id so direct `/session/<work-item-id>/telemetry` loads
-  // still show the backend-local Session ID when available (issue #841).
-  const displaySessionId =
-    sessionId !== null && sessionId.length > 0
-      ? sessionId
-      : (session.data?.id ?? null)
   const showSessionId = displaySessionId !== null && displaySessionId.length > 0
-  const showTailAction =
-    showSessionId && session.data?.agentTurnTailSupported === true
 
   return (
     <dialog
@@ -297,7 +306,7 @@ export function SessionUsageDialog({
             </tbody>
           </table>
         )}
-        {tailOpen ? (
+        {showTailAction && tailOpen ? (
           <AgentTurnTailPanel
             isPending={tail.isPending}
             isError={tail.isError}
@@ -309,10 +318,15 @@ export function SessionUsageDialog({
         className={cx(
           ui.dialogFooter,
           ui.dialogFooterCompact,
-          showTailAction && "justify-between",
+          (showTailAction || openInOpenCodeUrl !== null) && "justify-between",
         )}
       >
-        {showTailAction ? (
+        {openInOpenCodeUrl !== null ? (
+          <OpenInOpenCodeLink
+            href={openInOpenCodeUrl}
+            className={ui.plateMini}
+          />
+        ) : showTailAction ? (
           <button
             type="button"
             className={ui.plateMini}
