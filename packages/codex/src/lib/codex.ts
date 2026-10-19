@@ -245,6 +245,7 @@ export const Codex = {
                 ? { onSessionId: input.onSessionId }
                 : {}),
               observerLabel: "Codex Build",
+              model: input.model,
               parseLine: (line) => {
                 stream = foldCodexStreamLine(stream, line)
 
@@ -258,6 +259,17 @@ export const Codex = {
                       : {}),
                     errorMessage:
                       stream.turnFailedMessage ?? "Codex turn.failed",
+                    ...(stream.turnFailedClassification !== undefined
+                      ? {
+                          errorClassification: stream.turnFailedClassification,
+                        }
+                      : {}),
+                    ...(stream.turnFailedRetryAt !== undefined
+                      ? { retryAt: stream.turnFailedRetryAt }
+                      : {}),
+                    ...(stream.turnFailedProviderCode !== undefined
+                      ? { providerCode: stream.turnFailedProviderCode }
+                      : {}),
                   }
                 }
                 if (stream.turnCompleted && isSuccessfulCodexTurn(stream)) {
@@ -297,6 +309,16 @@ export const Codex = {
                 exitCode: 1,
                 cwd: input.cwd,
                 message: stream.turnFailedMessage ?? "Codex turn.failed",
+                model: input.model,
+                ...(stream.turnFailedClassification !== undefined
+                  ? { classification: stream.turnFailedClassification }
+                  : {}),
+                ...(stream.turnFailedRetryAt !== undefined
+                  ? { retryAt: stream.turnFailedRetryAt }
+                  : {}),
+                ...(stream.turnFailedProviderCode !== undefined
+                  ? { providerCode: stream.turnFailedProviderCode }
+                  : {}),
                 ...(stream.threadId !== undefined
                   ? { sessionId: stream.threadId }
                   : input.sessionId !== undefined

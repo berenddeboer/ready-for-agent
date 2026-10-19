@@ -155,6 +155,13 @@ type GraphqlStepRunReason = {
   readonly retryAt?: string | null
   readonly detail?: {
     readonly code?: string | null
+    readonly classification?: string | null
+    readonly providerCode?: string | null
+    readonly model?: string | null
+    readonly provider?: {
+      readonly id: string
+      readonly label: string
+    } | null
     readonly causeChain?: readonly GraphqlCauseChainLink[] | null
   } | null
 }
@@ -199,6 +206,14 @@ const toStatusStepRunReason = (
         : {
             causeChain: (detail.causeChain ?? []).map(toStatusCauseChainLink),
             ...(detail.code != null ? { code: detail.code } : {}),
+            ...(detail.classification != null
+              ? { classification: detail.classification }
+              : {}),
+            ...(detail.providerCode != null
+              ? { providerCode: detail.providerCode }
+              : {}),
+            ...(detail.model != null ? { model: detail.model } : {}),
+            ...(detail.provider != null ? { provider: detail.provider } : {}),
           },
     retryAt: reason.retryAt ?? null,
   }
@@ -984,6 +999,13 @@ export class GraphqlApi extends Context.Service<
                           retryAt: true,
                           detail: {
                             code: true,
+                            classification: true,
+                            providerCode: true,
+                            model: true,
+                            provider: {
+                              id: true,
+                              label: true,
+                            },
                             causeChain: {
                               name: true,
                               code: true,

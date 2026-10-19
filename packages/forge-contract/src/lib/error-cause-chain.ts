@@ -10,6 +10,20 @@ export type CauseChainLink = {
   readonly message?: string
 }
 
+/** Hosting provider identity persisted with a classified provider failure. */
+export type StepRunProviderIdentity = {
+  readonly id: string
+  readonly label: string
+}
+
+const PROVIDER_CLASSIFICATIONS = new Set([
+  "retryable_provider_error",
+  "length_limit_truncation",
+  "terminal_auth_error",
+])
+
+const SAFE_PROVIDER_CODE = /^[a-z][a-z0-9_]{0,63}$/
+
 /** Durable diagnostic payload stored on `step_run.reason_detail`. */
 export type StepRunReasonDetail = {
   readonly causeChain: readonly CauseChainLink[]
@@ -19,6 +33,20 @@ export type StepRunReasonDetail = {
    * adapter extracted one from a quota or rate-limit failure.
    */
   readonly retryAt?: string
+  /**
+   * Agent Backend classification from a nested exit error, when the adapter
+   * recognized one.
+   */
+  readonly classification?: string
+  /** Hosting provider, when known. Id and label only. */
+  readonly provider?: StepRunProviderIdentity
+  /** Agent Model used for the failed turn, when known. */
+  readonly model?: string
+  /**
+   * Structured provider discriminator from the CLI event, when present.
+   * Not inferred from prose.
+   */
+  readonly providerCode?: string
 }
 
 const DEFAULT_MAX_DEPTH = 8
@@ -109,22 +137,81 @@ const nextCause = (value: unknown): unknown => {
   return undefined
 }
 
-const extractRetryAtIso = (error: unknown): string | undefined => {
+const readIdentityText = (value: unknown): string | undefined => {
+  const text = readString(value)
+  if (text === undefined) {
+    return undefined
+  }
+  const sanitized = sanitizeUserFacingText(text, LINK_MESSAGE_MAX)
+  if (sanitized.length === 0 || sanitized.includes("[redacted]")) {
+    return undefined
+  }
+  return sanitized
+}
+
+const readClassification = (value: unknown): string | undefined => {
+  if (typeof value !== "string" || !PROVIDER_CLASSIFICATIONS.has(value)) {
+    return undefined
+  }
+  return value
+}
+
+const readProviderCode = (value: unknown): string | undefined => {
+  if (typeof value !== "string" || !SAFE_PROVIDER_CODE.test(value)) {
+    return undefined
+  }
+  return value
+}
+
+const readProvider = (value: unknown): StepRunProviderIdentity | undefined => {
+  const record = asRecord(value)
+  if (record === null) {
+    return undefined
+  }
+  const id = readIdentityText(record.id)
+  const label = readIdentityText(record.label)
+  if (id === undefined || label === undefined) {
+    return undefined
+  }
+  return { id, label }
+}
+
+const walkCause = <A>(
+  error: unknown,
+  read: (record: Record<string, unknown>) => A | undefined,
+): A | undefined => {
   const seen = new Set<unknown>()
   let current: unknown = error
   while (current !== undefined && current !== null && !seen.has(current)) {
     seen.add(current)
     const record = asRecord(current)
-    if (record !== null && "retryAt" in record) {
-      const retryAt = readRetryAtIso(record.retryAt)
-      if (retryAt !== undefined) {
-        return retryAt
+    if (record !== null) {
+      const found = read(record)
+      if (found !== undefined) {
+        return found
       }
     }
     current = nextCause(current)
   }
   return undefined
 }
+
+const extractRetryAtIso = (error: unknown): string | undefined =>
+  walkCause(error, (record) =>
+    "retryAt" in record ? readRetryAtIso(record.retryAt) : undefined,
+  )
+
+const extractClassification = (error: unknown): string | undefined =>
+  walkCause(error, (record) => readClassification(record.classification))
+
+const extractProvider = (error: unknown): StepRunProviderIdentity | undefined =>
+  walkCause(error, (record) => readProvider(record.provider))
+
+const extractModel = (error: unknown): string | undefined =>
+  walkCause(error, (record) => readIdentityText(record.model))
+
+const extractProviderCode = (error: unknown): string | undefined =>
+  walkCause(error, (record) => readProviderCode(record.providerCode))
 
 /**
  * Flatten nested `cause` / AggregateError chains into structured links.
@@ -173,13 +260,29 @@ export const buildReasonDetail = (
   const causeChain = extractCauseChain(error)
   const code = extractErrorCode(error)
   const retryAt = extractRetryAtIso(error)
-  if (causeChain.length === 0 && code === undefined && retryAt === undefined) {
+  const classification = extractClassification(error)
+  const provider = extractProvider(error)
+  const model = extractModel(error)
+  const providerCode = extractProviderCode(error)
+  if (
+    causeChain.length === 0 &&
+    code === undefined &&
+    retryAt === undefined &&
+    classification === undefined &&
+    provider === undefined &&
+    model === undefined &&
+    providerCode === undefined
+  ) {
     return null
   }
   return {
     causeChain,
     ...(code !== undefined ? { code } : {}),
     ...(retryAt !== undefined ? { retryAt } : {}),
+    ...(classification !== undefined ? { classification } : {}),
+    ...(provider !== undefined ? { provider } : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(providerCode !== undefined ? { providerCode } : {}),
   }
 }
 
@@ -220,13 +323,29 @@ export const parseReasonDetail = (
 
   const code = readCode(record.code)
   const retryAt = readRetryAtIso(record.retryAt)
-  if (causeChain.length === 0 && code === undefined && retryAt === undefined) {
+  const classification = readClassification(record.classification)
+  const provider = readProvider(record.provider)
+  const model = readIdentityText(record.model)
+  const providerCode = readProviderCode(record.providerCode)
+  if (
+    causeChain.length === 0 &&
+    code === undefined &&
+    retryAt === undefined &&
+    classification === undefined &&
+    provider === undefined &&
+    model === undefined &&
+    providerCode === undefined
+  ) {
     return null
   }
   return {
     causeChain,
     ...(code !== undefined ? { code } : {}),
     ...(retryAt !== undefined ? { retryAt } : {}),
+    ...(classification !== undefined ? { classification } : {}),
+    ...(provider !== undefined ? { provider } : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(providerCode !== undefined ? { providerCode } : {}),
   }
 }
 

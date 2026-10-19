@@ -1204,9 +1204,36 @@ type CauseChainLink {
   message: String
 }
 
+"""
+Hosting provider known for a classified Agent Backend failure. Id and label
+only; never a credential.
+"""
+type StepRunProviderIdentity {
+  id: String!
+  label: String!
+}
+
 type StepRunReasonDetail {
   causeChain: [CauseChainLink!]!
   code: String
+  """
+  Agent Backend classification from a nested provider failure, when the
+  adapter recognized one (for example retryable_provider_error).
+  """
+  classification: String
+  """
+  Structured provider discriminator from the CLI event, when present
+  (for example server_overloaded). Not inferred from prose.
+  """
+  providerCode: String
+  """
+  Hosting provider known for the failed turn.
+  """
+  provider: StepRunProviderIdentity
+  """
+  Agent Model used for the failed turn, when known.
+  """
+  model: String
 }
 
 """

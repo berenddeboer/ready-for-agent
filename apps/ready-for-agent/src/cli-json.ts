@@ -175,6 +175,13 @@ type StatusCauseChainLink = {
 type StatusStepRunReasonDetail = {
   readonly causeChain: readonly StatusCauseChainLink[]
   readonly code?: string
+  readonly classification?: string
+  readonly providerCode?: string
+  readonly provider?: {
+    readonly id: string
+    readonly label: string
+  }
+  readonly model?: string
 }
 
 /**

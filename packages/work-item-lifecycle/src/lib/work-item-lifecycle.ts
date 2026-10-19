@@ -33,6 +33,7 @@ import {
 } from "@ready-for-agent/db-service"
 import {
   type PullRequestLifecycleStatus,
+  type StepRunReasonDetail,
   buildReasonDetail,
   formatUserFacingError,
   isDeterministicForgeAuthFailure,
@@ -353,6 +354,72 @@ const terminalAuthFromCause = (
     return { provider: fromText?.provider ?? null }
   }
   return undefined
+}
+
+const nonEmptyIdentity = (
+  value: string | null | undefined,
+): string | undefined => {
+  if (value === null || value === undefined) {
+    return undefined
+  }
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+/**
+ * Model the failed step actually selected. Review uses its explicit model;
+ * every other step, and review-same-as-build, uses the build model.
+ */
+const capturedModelForStep = (
+  workItem: ExecutionProfileColumns,
+  step: string,
+): string | undefined => {
+  const profile = decodeExecutionProfile(workItem)
+  if (profile === null) {
+    return undefined
+  }
+  if (step === "review" && profile.review.kind === "explicit") {
+    return profile.review.model
+  }
+  return profile.build.model
+}
+
+/**
+ * Fill provider and model the adapter did not already carry, but only when
+ * the nested failure was classified. Unknown failures stay unlabeled.
+ */
+const withKnownProviderIdentity = (
+  detail: StepRunReasonDetail | null,
+  identity: {
+    readonly provider?: AgentBackendProvider | null
+    readonly model?: string
+  },
+): StepRunReasonDetail | null => {
+  if (detail?.classification === undefined) {
+    return detail
+  }
+  const provider =
+    detail.provider ??
+    (identity.provider != null &&
+    nonEmptyIdentity(identity.provider.id) !== undefined &&
+    nonEmptyIdentity(identity.provider.label) !== undefined
+      ? {
+          id: identity.provider.id.trim(),
+          label: identity.provider.label.trim(),
+        }
+      : undefined)
+  const model = detail.model ?? nonEmptyIdentity(identity.model)
+  if (provider === undefined && model === undefined) {
+    return detail
+  }
+  if (provider === detail.provider && model === detail.model) {
+    return detail
+  }
+  return {
+    ...detail,
+    ...(provider !== undefined ? { provider } : {}),
+    ...(model !== undefined ? { model } : {}),
+  }
 }
 
 const classifyHandlerFailure = (
@@ -5086,6 +5153,15 @@ export const makeWorkItemLifecycleLive = (
           readonly failureCode: string
           readonly failureMessage: string
         }
+        /**
+         * Provider and model known to the lifecycle but not already on the
+         * nested Agent Backend error. Applied only when that error was
+         * classified.
+         */
+        readonly identity?: {
+          readonly provider?: AgentBackendProvider | null
+          readonly model?: string
+        }
       }): Effect.Effect<WorkItemRecord, RunStepError> =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
@@ -5103,7 +5179,12 @@ export const makeWorkItemLifecycleLive = (
             reasonMessage,
           )
           const reasonDetail = serializeReasonDetail(
-            buildReasonDetail(failureSource),
+            withKnownProviderIdentity(buildReasonDetail(failureSource), {
+              provider: input.identity?.provider,
+              model:
+                input.identity?.model ??
+                capturedModelForStep(workItem, stepRun.step),
+            }),
           )
 
           yield* Effect.logError("Lifecycle Step handler failed", {
@@ -6246,6 +6327,9 @@ export const makeWorkItemLifecycleLive = (
                       reasonCode: classification.reasonCode,
                       reasonMessage: timeoutMessage,
                       cause: handlerExit.cause,
+                      identity: {
+                        provider: capturedStatus?.provider ?? null,
+                      },
                       terminalFailure:
                         eligibility === null
                           ? undefined

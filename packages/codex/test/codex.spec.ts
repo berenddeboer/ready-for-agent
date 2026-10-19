@@ -903,6 +903,144 @@ describe("Codex AgentBackend adapter (Agent Turns)", () => {
     )
   })
 
+  it("classifies the observed capacity message as a retryable overload", async () => {
+    const secret = "ghp_this_must_never_appear_in_exit_message"
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"type":"thread.started","thread_id":"capacity-thread"}'`,
+        `printf '%s\\n' '{"type":"turn.failed","error":{"message":"Selected model is at capacity. Please try a different model. (${secret})"}}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.classification).toBe("retryable_provider_error")
+          expect(error.model).toBe("gpt-5.5")
+          expect(error.sessionId).toBe("capacity-thread")
+          expect(error.message).not.toContain(secret)
+          expect(error.providerCode).toBeUndefined()
+        }
+      },
+    )
+  })
+
+  it("classifies structured server overload on the exec stream", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"type":"thread.started","thread_id":"overload-thread"}'`,
+        `printf '%s\\n' '{"type":"turn.failed","error":{"message":"Selected model is at capacity. Please try a different model.","codex_error_info":"server_overloaded"}}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.classification).toBe("retryable_provider_error")
+          expect(error.providerCode).toBe("server_overloaded")
+          expect(error.model).toBe("gpt-5.5")
+        }
+      },
+    )
+  })
+
+  it("keeps a trustworthy retry deadline for a structured rate limit", async () => {
+    const before = Date.now()
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"type":"thread.started","thread_id":"rate-thread"}'`,
+        `printf '%s\\n' '{"type":"turn.failed","error":{"message":"rate limit exceeded","codex_error_info":"rate_limit_exceeded","retry_after":30}}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.classification).toBe("retryable_provider_error")
+          expect(error.providerCode).toBe("rate_limit_exceeded")
+          expect(error.retryAt).toBeGreaterThanOrEqual(before + 29_000)
+          expect(error.retryAt).toBeLessThanOrEqual(Date.now() + 31_000)
+        }
+      },
+    )
+  })
+
+  it("does not retry billing exhaustion, invalid model, cancellation, or an unknown failure", async () => {
+    const cases = [
+      {
+        thread: "billing-thread",
+        event:
+          '{"type":"turn.failed","error":{"message":"You have hit your usage limit. Try again at 5:56 PM.","codex_error_info":"usage_limit_exceeded","retry_after":3600}}',
+        providerCode: "usage_limit_exceeded",
+      },
+      {
+        thread: "model-thread",
+        event:
+          '{"type":"turn.failed","error":{"message":"The model is not supported when using Codex with a ChatGPT account.","codex_error_info":"other"}}',
+        providerCode: "other",
+      },
+      {
+        thread: "cancel-thread",
+        event:
+          '{"type":"turn.failed","error":{"message":"interrupted (Ctrl-C)"}}',
+        providerCode: undefined,
+      },
+      {
+        thread: "unknown-thread",
+        event: '{"type":"turn.failed","error":{"message":"boom"}}',
+        providerCode: undefined,
+      },
+    ] as const
+
+    for (const entry of cases) {
+      await withExecutable(
+        [
+          `printf '%s\\n' '{"type":"thread.started","thread_id":"${entry.thread}"}'`,
+          `printf '%s\\n' '${entry.event}'`,
+          "exit 1",
+        ].join("\n"),
+        async (binary) => {
+          const error = await Effect.runPromise(
+            startTurn(binary, "2 seconds").pipe(Effect.flip),
+          )
+          expect(error).toBeInstanceOf(AgentBackendExitError)
+          if (error instanceof AgentBackendExitError) {
+            expect(error.classification).toBeUndefined()
+            expect(error.retryAt).toBeUndefined()
+            expect(error.providerCode).toBe(entry.providerCode)
+          }
+        },
+      )
+    }
+  })
+
+  it("classifies structured unauthorized as terminal auth rather than a retry", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"type":"thread.started","thread_id":"unauth-thread"}'`,
+        `printf '%s\\n' '{"type":"turn.failed","error":{"message":"refresh token failed","codex_error_info":"unauthorized"}}'`,
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
+        )
+        expect(error).toBeInstanceOf(AgentBackendExitError)
+        if (error instanceof AgentBackendExitError) {
+          expect(error.classification).toBe("terminal_auth_error")
+          expect(error.providerCode).toBe("unauthorized")
+          expect(error.retryAt).toBeUndefined()
+        }
+      },
+    )
+  })
+
   it("maps turn.failed to exit failure with observed session", async () => {
     await withExecutable(
       [
