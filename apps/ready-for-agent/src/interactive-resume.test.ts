@@ -1,4 +1,7 @@
-import { interactiveResumeCommand } from "./interactive-resume.ts"
+import {
+  interactiveResumeCommand,
+  openCodeModelPinArguments,
+} from "./interactive-resume.ts"
 import { describe, expect, test } from "bun:test"
 
 const sessionId = "85312e9f-9c57-42ef-9757-b2512cee57cd"
@@ -18,25 +21,73 @@ describe("interactive resume command contract", () => {
     })
   })
 
-  test("pins the Work Item Agent Model on OpenCode resume so Jump cannot fall back to the ambient default", () => {
+  test("pins the Work Item Agent Model through the OpenCode V2 session API, not a TUI flag", () => {
+    const agentModel = "amazon-bedrock/au.anthropic.claude-sonnet-5"
     expect(
       interactiveResumeCommand({
         backendId: "opencode",
         sessionId,
         workingDirectory,
-        agentModel: "amazon-bedrock/au.anthropic.claude-sonnet-5",
+        agentModel,
         thinkingLevel: "high",
       }),
     ).toEqual({
       executableName: "opencode",
-      arguments: [
-        workingDirectory,
-        "--session",
+      arguments: [workingDirectory, "--session", sessionId, "--auto"],
+      modelPin: {
+        kind: "ready",
+        arguments: [
+          "api",
+          "--header",
+          `x-opencode-directory:${encodeURIComponent(workingDirectory)}`,
+          "post",
+          `/api/session/${sessionId}/model`,
+          "--data",
+          JSON.stringify({
+            model: {
+              providerID: "amazon-bedrock",
+              id: "au.anthropic.claude-sonnet-5",
+              variant: "high",
+            },
+          }),
+        ],
+      },
+    })
+    expect(
+      openCodeModelPinArguments({
         sessionId,
-        "--auto",
-        "-m",
-        "amazon-bedrock/au.anthropic.claude-sonnet-5",
-      ],
+        workingDirectory,
+        agentModel,
+        thinkingLevel: null,
+      }),
+    ).toEqual([
+      "api",
+      "--header",
+      `x-opencode-directory:${encodeURIComponent(workingDirectory)}`,
+      "post",
+      `/api/session/${sessionId}/model`,
+      "--data",
+      JSON.stringify({
+        model: {
+          providerID: "amazon-bedrock",
+          id: "au.anthropic.claude-sonnet-5",
+        },
+      }),
+    ])
+  })
+
+  test("does not pass an unsupported OpenCode TUI model flag when the pin is invalid", () => {
+    expect(
+      interactiveResumeCommand({
+        backendId: "opencode",
+        sessionId,
+        workingDirectory,
+        agentModel: "not-a-reference",
+      }),
+    ).toEqual({
+      executableName: "opencode",
+      arguments: [workingDirectory, "--session", sessionId, "--auto"],
+      modelPin: { kind: "invalid" },
     })
   })
 

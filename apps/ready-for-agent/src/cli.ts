@@ -472,6 +472,14 @@ const jumpWorkflow = Effect.fn("Cli.jump")(function* (sessionId: string) {
       message: `Unsupported Agent Backend: ${found.agentBackend.id}`,
     })
   }
+  if (resume.modelPin?.kind === "invalid") {
+    return yield* new JumpFailed({
+      message:
+        "could not select the Work Item Agent Model on OpenCode: the model reference is invalid",
+    })
+  }
+  const modelPinArguments =
+    resume.modelPin?.kind === "ready" ? resume.modelPin.arguments : undefined
 
   if (tmuxModeSelected) {
     // The worktree shell resolves the executable after its startup hooks.
@@ -481,6 +489,7 @@ const jumpWorkflow = Effect.fn("Cli.jump")(function* (sessionId: string) {
       workingDirectory,
       agentExecutable: resume.executableName,
       agentArguments: resume.arguments,
+      ...(modelPinArguments === undefined ? {} : { modelPinArguments }),
     })
     return
   }
@@ -490,6 +499,7 @@ const jumpWorkflow = Effect.fn("Cli.jump")(function* (sessionId: string) {
     agentExecutable,
     agentArguments: resume.arguments,
     workingDirectory,
+    ...(modelPinArguments === undefined ? {} : { modelPinArguments }),
   })
   yield* Effect.sync(() => {
     process.exitCode = exitStatus

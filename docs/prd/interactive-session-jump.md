@@ -31,7 +31,7 @@ This is an Interactive Session Continuation, not an Agent Turn or Lifecycle Step
 - The CLI is a thin GraphQL client. A simple query resolves the Session ID to exactly one Work Item and returns the captured Agent Backend, canonical Session ID, worktree path, and the Agent Model/Thinking Level Jump must pin.
 - No match and multiple matches both fail. The current database does not enforce Session ID uniqueness, so ambiguity must not select an arbitrary Work Item.
 - The Work Item's captured Agent Backend and exact Session identity are sufficient provenance. V1 does not add persisted executable version, provider/auth mode, or backend persona.
-- Jump resolves the Agent Model and Thinking Level the next (or currently running) Agent Turn would use — Explicit Work Item Execution Profile when present, otherwise current settings — and pins them on the interactive resume command. This is a launch-scoped argv pin, not a new persisted Jump field. It prevents an OpenCode attach from writing the operator's ambient default into the shared Session model that an in-flight Step Run re-reads.
+- Jump resolves the Agent Model and Thinking Level the next (or currently running) Agent Turn would use — Explicit Work Item Execution Profile when present, otherwise current settings — and pins them for the interactive continuation. This is not a new persisted Jump field. For OpenCode V2 the pin is a session model switch (`POST /api/session/{id}/model`) before the TUI starts; the root TUI has no model flag. Other backends keep a launch-scoped argv pin. It prevents an OpenCode attach from writing the operator's ambient default into the shared Session model that an in-flight Step Run re-reads.
 - Jump does not refuse a running Step Run, inspect backend Session files, or check Active Agent Backend readiness. The operator decides when it is safe to jump. A concurrent attach is still the operator's responsibility; pinning the Agent Model is what stops that attach from silently hijacking the in-flight turn's model. Model resolution may look at a running Step Run only to choose build vs review.
 
 ## Interactive Backend Commands
@@ -39,13 +39,14 @@ This is an Interactive Session Continuation, not an Agent Turn or Lifecycle Step
 The agent process uses the exact, non-forking interactive continuation supported by the captured Agent Backend, anchored to the working directory, with that backend's native full permission-bypass mode so tool use does not wait for approval prompts:
 
 ```text
-opencode <dir> --session <session-id> --auto -m <model>
+opencode api post /api/session/<session-id>/model   # only when a model is pinned; then:
+opencode <dir> --session <session-id> --auto
 grok --cwd <dir> --resume <session-id> --permission-mode bypassPermissions -m <model> [--reasoning-effort <level>]
 codex resume --dangerously-bypass-approvals-and-sandbox -C <dir> -m <model> [-c model_reasoning_effort=<level>] <session-id>
 claude --resume <session-id> --dangerously-skip-permissions --model <model> [--effort <level>]            # child cwd is <dir>
 ```
 
-`<model>` and Thinking Level flags are omitted when the Harness cannot resolve a pin. OpenCode's interactive TUI has no `--variant` flag; Thinking Level for OpenCode is re-asserted on the Session record by the in-flight Agent Turn, not by Jump argv.
+`<model>` and Thinking Level flags are omitted when the Harness cannot resolve a pin. OpenCode's interactive TUI has no model or `--variant` flag. Jump selects the model, and the Thinking Level when one is resolved, through the V2 session model API before starting that TUI. An in-flight Agent Turn still re-asserts the Session record so a concurrent attach cannot redirect the turn.
 
 Where `<dir>` is the persisted worktree when it exists, otherwise the CLI process's current directory.
 

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { constants } from "node:os"
 import { Context, Effect, Layer } from "effect"
 import { sanitizeInheritedEnvironment } from "@ready-for-agent/agent-backend"
@@ -8,6 +8,8 @@ export type DirectLaunchInput = {
   readonly agentExecutable: string
   readonly agentArguments: readonly string[]
   readonly workingDirectory: string
+  /** OpenCode V2 model switch. Run before the TUI; failure does not start it. */
+  readonly modelPinArguments?: readonly string[]
 }
 
 const interactiveTerminalMessage = "jump requires an interactive terminal"
@@ -32,6 +34,26 @@ const exitStatusFrom = (
     return code
   }
   return 1
+}
+
+const ANSI_COLOR = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;]*m`, "g")
+
+const modelPinFailedMessage = (
+  status: number | null,
+  stderr: string,
+): string => {
+  const detail = stderr
+    .replaceAll(ANSI_COLOR, "")
+    .trim()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .at(-1)
+  const statusText = status === null ? "interrupted" : `status ${status}`
+  if (detail === undefined) {
+    return `could not select the Work Item Agent Model on OpenCode (${statusText})`
+  }
+  return `could not select the Work Item Agent Model on OpenCode (${statusText}): ${detail}`
 }
 
 const spawnFailed = (executable: string, error: unknown): JumpFailed =>
@@ -76,6 +98,29 @@ export class DirectTerminal extends Context.Service<
     const run = Effect.fn("DirectTerminal.run")(function* (
       input: DirectLaunchInput,
     ) {
+      const modelPinArguments = input.modelPinArguments
+      if (modelPinArguments !== undefined) {
+        const pin = yield* Effect.sync(() =>
+          spawnSync(input.agentExecutable, [...modelPinArguments], {
+            cwd: input.workingDirectory,
+            env: sanitizeInheritedEnvironment(process.env, {
+              stripForgeTokens: false,
+            }),
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+            shell: false,
+          }),
+        )
+        if (pin.error !== undefined) {
+          return yield* spawnFailed(input.agentExecutable, pin.error)
+        }
+        if (pin.status !== 0) {
+          return yield* new JumpFailed({
+            message: modelPinFailedMessage(pin.status, pin.stderr ?? ""),
+          })
+        }
+      }
+
       return yield* Effect.callback<number, JumpFailed>((resume) => {
         let started = false
         let failedToStart = false

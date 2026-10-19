@@ -8,6 +8,82 @@
 export type InteractiveResumeCommand = {
   readonly executableName: string
   readonly arguments: readonly string[]
+  /**
+   * OpenCode V2 session model switch. Run with the same executable, in the
+   * resume working directory, before the TUI. Absent when there is no pin.
+   * `invalid` means a pin was requested but is not a V2 model reference.
+   */
+  readonly modelPin?:
+    | { readonly kind: "ready"; readonly arguments: readonly string[] }
+    | { readonly kind: "invalid" }
+}
+
+type OpenCodeModelRef = {
+  readonly providerID: string
+  readonly id: string
+  readonly variant?: string
+}
+
+/**
+ * V2 `POST /api/session/{sessionID}/model` argv. Matches the headless
+ * session-model switch: the root TUI accepts neither `-m` nor `--model`.
+ */
+export const openCodeModelPinArguments = (input: {
+  readonly sessionId: string
+  readonly workingDirectory: string
+  readonly agentModel: string
+  readonly thinkingLevel: string | null
+}): readonly string[] | undefined => {
+  const reference = splitOpenCodeModelReference(
+    input.agentModel,
+    input.thinkingLevel,
+  )
+  if (reference === undefined || input.sessionId.trim() === "") {
+    return undefined
+  }
+  return [
+    "api",
+    "--header",
+    `x-opencode-directory:${encodeURIComponent(input.workingDirectory)}`,
+    "post",
+    `/api/session/${input.sessionId}/model`,
+    "--data",
+    JSON.stringify({ model: reference }),
+  ]
+}
+
+const splitOpenCodeModelReference = (
+  model: string,
+  thinkingLevel: string | null,
+): OpenCodeModelRef | undefined => {
+  const hash = model.indexOf("#")
+  const base = hash === -1 ? model : model.slice(0, hash)
+  const reference =
+    thinkingLevel === null || thinkingLevel.length === 0
+      ? base
+      : `${base}#${thinkingLevel}`
+  const providerEnd = reference.indexOf("/")
+  if (providerEnd <= 0) {
+    return undefined
+  }
+  const providerID = reference.slice(0, providerEnd)
+  const variantStart = reference.indexOf("#", providerEnd + 1)
+  const id = reference.slice(
+    providerEnd + 1,
+    variantStart === -1 ? undefined : variantStart,
+  )
+  const variant =
+    variantStart === -1 ? undefined : reference.slice(variantStart + 1)
+  if (
+    id.length === 0 ||
+    providerID.includes("#") ||
+    (variant !== undefined && (variant.length === 0 || variant.includes("#")))
+  ) {
+    return undefined
+  }
+  return variant === undefined
+    ? { providerID, id }
+    : { providerID, id, variant }
 }
 
 const pinnedModel = (agentModel: string | null | undefined): string | null => {
@@ -38,7 +114,16 @@ export const interactiveResumeCommand = (input: {
   const agentModel = pinnedModel(input.agentModel)
   const thinkingLevel = pinnedThinkingLevel(input.thinkingLevel)
   switch (input.backendId) {
-    case "opencode":
+    case "opencode": {
+      const modelPin =
+        agentModel === null
+          ? undefined
+          : openCodeModelPinArguments({
+              sessionId: input.sessionId,
+              workingDirectory: input.workingDirectory,
+              agentModel,
+              thinkingLevel,
+            })
       return {
         executableName: "opencode",
         arguments: [
@@ -46,9 +131,17 @@ export const interactiveResumeCommand = (input: {
           "--session",
           input.sessionId,
           "--auto",
-          ...(agentModel === null ? [] : (["-m", agentModel] as const)),
         ],
+        ...(agentModel === null
+          ? {}
+          : {
+              modelPin:
+                modelPin === undefined
+                  ? ({ kind: "invalid" } as const)
+                  : ({ kind: "ready", arguments: modelPin } as const),
+            }),
       }
+    }
     case "grok":
       return {
         executableName: "grok",

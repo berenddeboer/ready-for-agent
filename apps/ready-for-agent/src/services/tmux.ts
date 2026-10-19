@@ -23,6 +23,8 @@ export type JumpWindowInput = {
   readonly workingDirectory: string
   readonly agentExecutable: string
   readonly agentArguments: readonly string[]
+  /** OpenCode V2 model switch, run by the worktree shell before the TUI. */
+  readonly modelPinArguments?: readonly string[]
 }
 
 const sessionOptionName = "@rfa-session-id"
@@ -152,6 +154,9 @@ const writeLaunch = (
       executableName: input.agentExecutable,
       arguments: input.agentArguments,
       tmuxExecutable: executableOnPath("tmux") ?? "tmux",
+      ...(input.modelPinArguments === undefined
+        ? {}
+        : { modelPinArguments: input.modelPinArguments }),
     }),
     { mode: 0o700 },
   )
