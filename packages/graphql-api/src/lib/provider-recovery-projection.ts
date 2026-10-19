@@ -4,7 +4,7 @@ import type {
   WorkItemRecord,
 } from "@ready-for-agent/work-item-lifecycle"
 
-export type WorkItemWithProviderRecovery = WorkItemRecord & {
+type WorkItemWithProviderRecovery = WorkItemRecord & {
   readonly providerRecoveryEpisode: ProviderRecoveryEpisodeRecord | null
 }
 

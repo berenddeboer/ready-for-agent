@@ -9,7 +9,6 @@ import {
   formatProviderRecoveryElapsed,
   formatProviderRecoveryModel,
   formatProviderRecoveryWaitingHeadline,
-  providerRecoveryIsOpen,
 } from "@ready-for-agent/work-item-lifecycle/provider-recovery-presentation"
 import { Banner } from "./banner.js"
 import { ui } from "./ui.js"
@@ -192,13 +191,4 @@ export const providerRecoveryReplacesStatusMessage = (
     recovery.status === "IN_ATTEMPT" ||
     recovery.status === "EXHAUSTED"
   )
-}
-
-export const providerRecoveryWarningOpen = (
-  recovery: ProviderRecoveryView | null,
-): boolean => {
-  if (recovery === null || !recovery.escalated) {
-    return false
-  }
-  return providerRecoveryIsOpen(snapshotFromView(recovery))
 }
