@@ -20,7 +20,9 @@ import { dismissFirstRunSettingsIfPresent } from "../support/first-run-settings.
 import {
   CONTROL_FILES,
   type FakeClaudeMode,
+  fakeOpencodeModelCatalog,
   readLiveHarnessState,
+  splitExecutableOpencodeModelId,
   writeControlFile,
 } from "../support/live-harness-control.ts"
 import { seedLiveHarnessAndRestart } from "../support/live-harness-seed.ts"
@@ -152,23 +154,25 @@ When(
   "I add {string} to the OpenCode catalog without restarting the Harness",
   // biome-ignore lint/correctness/noEmptyPattern: playwright-bdd requires the first argument to use the object destructuring pattern, even when no fixtures are needed.
   async ({}, modelId: string) => {
+    const added = splitExecutableOpencodeModelId(modelId)
     const state = readLiveHarnessState()
     writeControlFile(
       state,
       CONTROL_FILES.opencodeModels,
-      [
-        "opencode/test-model-a",
-        "{",
-        '  "name": "Test Model A",',
-        '  "variants": { "low": {}, "high": {} }',
-        "}",
-        modelId,
-        "{",
-        '  "name": "Astra",',
-        '  "variants": { "low": {}, "high": {}, "max": {} }',
-        "}",
-        "",
-      ].join("\n"),
+      fakeOpencodeModelCatalog([
+        {
+          id: "test-model-a",
+          providerID: "opencode",
+          name: "Test Model A",
+          thinkingLevels: ["low", "high"],
+        },
+        {
+          id: added.id,
+          providerID: added.providerID,
+          name: "Astra",
+          thinkingLevels: ["low", "high", "max"],
+        },
+      ]),
     )
   },
 )

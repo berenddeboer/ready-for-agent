@@ -28,11 +28,17 @@ describe.skipIf(!runIntegration)("Opencode AgentBackend integration", () => {
 
     expect(result.backend.id).toBe("opencode")
     expect(result.models.length).toBeGreaterThan(0)
-    expect(
-      result.models.some(
-        (model) => model.id === "opencode/deepseek-v4-flash-free",
-      ),
-    ).toBe(true)
+    const deepseek = result.models.find(
+      (model) => model.id === "opencode/deepseek-v4.1-flash-free",
+    )
+    expect(deepseek).toEqual({
+      id: "opencode/deepseek-v4.1-flash-free",
+      name: "DeepSeek V4.1 Flash Free",
+      thinkingLevels: ["low", "high", "max"],
+    })
+    expect(result.models.some((model) => model.id.split("/").length > 2)).toBe(
+      true,
+    )
     expect(result.models.every((model) => model.id.includes("/"))).toBe(true)
     expect(
       result.models.every((model) => Array.isArray(model.thinkingLevels)),
@@ -50,7 +56,7 @@ describe.skipIf(!runIntegration)("Opencode AgentBackend integration", () => {
           const started = yield* backend.startTurn({
             cwd,
             prompt: "Reply exactly START_OK. Do not use tools.",
-            model: "opencode/deepseek-v4-flash-free",
+            model: "opencode/deepseek-v4.1-flash-free",
             thinkingLevel: "low",
             timeout: "2 minutes",
           })
@@ -61,7 +67,7 @@ describe.skipIf(!runIntegration)("Opencode AgentBackend integration", () => {
             cwd,
             sessionId: started.sessionId,
             prompt: "Reply exactly CONTINUE_OK. Do not use tools.",
-            model: "opencode/deepseek-v4-flash-free",
+            model: "opencode/deepseek-v4.1-flash-free",
             thinkingLevel: "low",
             timeout: "2 minutes",
           })
