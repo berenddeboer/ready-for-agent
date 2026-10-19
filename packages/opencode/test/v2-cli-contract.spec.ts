@@ -586,7 +586,9 @@ describe("installed OpenCode V2 production CLI contract", () => {
           await readOpenCodeServiceStatus({ env: current.explicitEnv })
         ).trim()
         expect(stopped).toBe("stopped")
-        if (operatorServiceUrl !== undefined) {
+        // A runner with no OpenCode service reports the same "stopped"
+        // sentinel. That is not an operator URL to exclude.
+        if (operatorServiceUrl?.includes("://") === true) {
           expect(stopped).not.toContain(operatorServiceUrl)
         }
         const discovered = (
