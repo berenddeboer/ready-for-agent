@@ -51,7 +51,7 @@ export const isSupportedOpenCodeServerVersion = (version: string): boolean => {
   return Number(match[1]) === OPENCODE_V2_SUPPORTED_MAJOR
 }
 
-export type OpencodeUnavailablePersistence = "transient" | "persistent"
+type OpencodeUnavailablePersistence = "transient" | "persistent"
 
 export type OpencodeUnavailable = {
   readonly kind: "unavailable"

@@ -46,7 +46,7 @@ const SERVICE_USERNAME = "opencode"
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-export const opencodeServiceRegistrationPath = (
+const opencodeServiceRegistrationPath = (
   env: NodeJS.ProcessEnv = process.env,
 ): string => {
   const stateHome = env.XDG_STATE_HOME?.trim()
@@ -261,5 +261,3 @@ export const connectOpencodeV2 = async (input: {
     return failure
   }
 }
-
-export { persistentFailure, transientFailure }

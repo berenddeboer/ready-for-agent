@@ -86,7 +86,7 @@ const sessionFromFailure = (
  * running 2.0.32 server's session rollup is higher than the sum of currently
  * listed assistant messages.
  */
-export const sessionFromInfo = (
+const sessionFromInfo = (
   id: string,
   raw: unknown,
 ): OpencodeSession | OpencodeReadFailure => {
@@ -243,7 +243,7 @@ const isUserMessage = (message: unknown): boolean =>
  * Newest-first pages until the latest user message, or until the tail item
  * bound is filled. Tool input and output are never copied.
  */
-export const tailEventsFromPages = (
+const tailEventsFromPages = (
   pages: ReadonlyArray<unknown>,
 ): ReadonlyArray<AgentTurnTailSourceEvent> => {
   const groups: AgentTurnTailSourceEvent[][] = []
@@ -376,7 +376,7 @@ const createdAtOrAfter = (
   return created !== undefined && created >= startedAfterMs
 }
 
-export const hasStartupActivity = (
+const hasStartupActivity = (
   children: unknown,
   messages: unknown,
   startedAfterMs: number,
