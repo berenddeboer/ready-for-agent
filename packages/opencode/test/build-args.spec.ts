@@ -6,6 +6,7 @@ import {
   joinOpenCodeMessageArgs,
   openCodeModelReference,
   shouldUsePromptStdin,
+  withOpenCodeServer,
 } from "../src/lib/build-args.js"
 import { describe, expect, it } from "bun:test"
 
@@ -20,6 +21,19 @@ const messageFromArgs = (args: ReadonlyArray<string>): string =>
   joinOpenCodeMessageArgs(messageTokensFromArgs(args))
 
 const obsoleteFlags = ["--dir", "--variant", "--command"]
+
+describe("withOpenCodeServer", () => {
+  it("prepends the explicit server used by telemetry reads", () => {
+    expect(
+      withOpenCodeServer(["run", "--auto"], "http://127.0.0.1:4096"),
+    ).toEqual(["--server", "http://127.0.0.1:4096", "run", "--auto"])
+    expect(withOpenCodeServer(["api", "get", "/api/info"], undefined)).toEqual([
+      "api",
+      "get",
+      "/api/info",
+    ])
+  })
+})
 
 describe("buildRunArgs", () => {
   it("omits an explicit variant when thinkingLevel is null", () => {

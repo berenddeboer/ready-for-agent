@@ -1,116 +1,106 @@
-import { existsSync } from "node:fs"
 import { Duration, Effect } from "effect"
-import { Database } from "bun:sqlite"
+import {
+  type ConnectOpencodeV2Result,
+  type OpencodeExplicitServer,
+  connectOpencodeV2,
+} from "./opencode-v2-client.js"
+import {
+  type OpencodeV2Reader,
+  probeStartupActivity,
+} from "./opencode-v2-read.js"
 
-const DEFAULT_BUSY_TIMEOUT_MS = 250
 /** Fast enough to disarm within a short startup window (default 90s; tests use ~200ms). */
 const DEFAULT_POLL_INTERVAL = Duration.millis(100)
+const STARTUP_PROBE_TIMEOUT_MS = 800
+
+export type OpencodeStartupProbe = (input: {
+  readonly sessionId: string
+  readonly startedAfterMs: number
+}) => boolean | Promise<boolean>
 
 /**
- * True when OpenCode's session store shows the given parent Session has an
- * active task subagent (or a newly created child session) after `startedAfterMs`.
- *
- * Used to disarm the CLI startup window while the outer `opencode run` JSONL
- * stream stays silent — the parent task part and child session rows are written
- * immediately even though parent stdout waits for the nested task to finish.
+ * True when the V2 API shows a child session or a parent task/subtask created
+ * at or after `startedAfterMs`. Probe errors are not activity.
  */
-export const hasOpencodeTaskSubagentActivity = (
-  dbPath: string,
-  sessionId: string,
-  startedAfterMs: number,
-  busyTimeoutMs: number = DEFAULT_BUSY_TIMEOUT_MS,
-): boolean => {
-  if (sessionId.trim() === "") {
-    return false
-  }
-  if (dbPath !== ":memory:" && !existsSync(dbPath)) {
-    return false
-  }
-
-  let db: Database | undefined
+export const hasOpencodeTaskSubagentActivity = async (input: {
+  readonly reader: OpencodeV2Reader
+  readonly sessionId: string
+  readonly startedAfterMs: number
+}): Promise<boolean> => {
   try {
-    db = new Database(dbPath, { readonly: true, create: false })
-    db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.trunc(busyTimeoutMs))}`)
-
-    const since = Math.trunc(startedAfterMs)
-
-    // Child sessions created after the turn began (task subagents). Use
-    // time_created only: time_updated on a historical child (refresh, cost
-    // bookkeeping) must not false-disarm the startup window.
-    const child = db
-      .query(
-        `SELECT 1 AS ok
-         FROM session
-         WHERE parent_id = ?
-           AND time_created >= ?
-         LIMIT 1`,
-      )
-      .get(sessionId, since) as { readonly ok: number } | null
-    if (child !== null && child !== undefined) {
-      return true
-    }
-
-    // Parent stream parts for a task / subtask created after the turn began.
-    // OpenCode persists these before the nested child emits parent JSONL.
-    const part = db
-      .query(
-        `SELECT 1 AS ok
-         FROM part
-         WHERE session_id = ?
-           AND time_created >= ?
-           AND (
-             json_extract(data, '$.tool') = 'task'
-             OR json_extract(data, '$.type') = 'subtask'
-           )
-         LIMIT 1`,
-      )
-      .get(sessionId, since) as { readonly ok: number } | null
-    return part !== null && part !== undefined
+    return await probeStartupActivity(
+      input.reader,
+      input.sessionId,
+      input.startedAfterMs,
+    )
   } catch {
     return false
-  } finally {
-    db?.close()
   }
 }
 
 export type ObserveOpencodeStartupActivityInput = {
   readonly sessionId: string
-  /** Resolve the live OpenCode DB path (may be unavailable until first use). */
-  readonly resolveDbPath: () => string | null
   /** Only count activity at or after this epoch ms (just before CLI spawn). */
   readonly startedAfterMs: number
   readonly pollInterval?: Duration.Input
-  readonly busyTimeoutMs?: number
+  readonly probe: OpencodeStartupProbe
 }
 
 /**
- * Succeeds when OpenCode session-store activity shows the turn has begun for
- * `sessionId`. Polls until then; never fails (callers ignore probe errors).
- * Interrupted when the runCliTurn scope ends.
+ * Succeeds when OpenCode shows the turn has begun for `sessionId`. Polls until
+ * then; never fails (callers ignore probe errors). Interrupted when the
+ * runCliTurn scope ends.
  */
 export const observeOpencodeStartupActivity = (
   input: ObserveOpencodeStartupActivityInput,
 ): Effect.Effect<void> => {
   const pollInterval = input.pollInterval ?? DEFAULT_POLL_INTERVAL
-  const busyTimeoutMs = input.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS
-  const sessionId = input.sessionId
-  const startedAfterMs = input.startedAfterMs
-
   return Effect.gen(function* () {
     for (;;) {
-      const dbPath = input.resolveDbPath()
-      if (
-        dbPath !== null &&
-        hasOpencodeTaskSubagentActivity(
-          dbPath,
-          sessionId,
-          startedAfterMs,
-          busyTimeoutMs,
-        )
-      ) {
+      const active = yield* Effect.promise(() =>
+        Promise.resolve(
+          input.probe({
+            sessionId: input.sessionId,
+            startedAfterMs: input.startedAfterMs,
+          }),
+        ),
+      ).pipe(Effect.orElseSucceed(() => false))
+      if (active) {
         return
       }
       yield* Effect.sleep(pollInterval)
     }
   })
+}
+
+export const makeOpencodeStartupProbe = (input: {
+  readonly server?: OpencodeExplicitServer
+  readonly resolveReader: () => Promise<OpencodeV2Reader | null>
+}): OpencodeStartupProbe => {
+  return async ({ sessionId, startedAfterMs }) => {
+    const reader = await input.resolveReader()
+    if (reader === null) {
+      return false
+    }
+    return hasOpencodeTaskSubagentActivity({
+      reader,
+      sessionId,
+      startedAfterMs,
+    })
+  }
+}
+
+export const connectStartupReader = async (input: {
+  readonly server?: OpencodeExplicitServer
+}): Promise<OpencodeV2Reader | null> => {
+  let connected: ConnectOpencodeV2Result
+  try {
+    connected = await connectOpencodeV2({
+      ...(input.server === undefined ? {} : { server: input.server }),
+      requestTimeoutMs: STARTUP_PROBE_TIMEOUT_MS,
+    })
+  } catch {
+    return null
+  }
+  return connected.kind === "ready" ? connected.reader : null
 }

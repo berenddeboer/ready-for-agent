@@ -36,6 +36,11 @@ export type SessionTelemetry = {
   readonly cost: number | null
   readonly createdAt: string | null
   readonly updatedAt: string | null
+  /**
+   * Actionable detail when availability is unavailable. Omitted when the
+   * backend has no extra detail.
+   */
+  readonly diagnostic?: string | null
 }
 
 /**

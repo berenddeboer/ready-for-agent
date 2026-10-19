@@ -367,6 +367,13 @@ type Session {
   createdAt: String
   updatedAt: String
   """
+  Actionable detail when availability is UNAVAILABLE. Null when telemetry
+  loaded, the Session is missing, or the backend has no extra detail.
+  Persistent compatibility and authentication failures are not described as
+  a transient retry.
+  """
+  diagnostic: String
+  """
   Whether this Work Item's captured Agent Backend can serve an Agent Turn Tail.
   Cheap capability flag; does not read Session content.
   """
@@ -381,6 +388,10 @@ type AgentTurnTail {
   backend: AgentBackendInfo!
   items: [AgentTurnTailItem!]!
   jumpHint: Boolean!
+  """
+  Actionable detail when availability is UNAVAILABLE. Null otherwise.
+  """
+  diagnostic: String
 }
 
 union AgentTurnTailItem = AgentTurnTailAssistantText | AgentTurnTailTool

@@ -24,14 +24,15 @@ import {
   buildSwitchModelApiArgs,
   commandBodyExceedsArgvLimit,
   shouldUsePromptStdin,
+  withOpenCodeServer,
 } from "./build-args.js"
 import { makeOpencodeEnvironment } from "./environment.js"
 import type { OpencodeConfigError } from "./errors.js"
 import {
   type OpencodePathEnv,
-  resolveOpencodeDbPath,
   resolveOpencodeDbPathFromRules,
 } from "./opencode-db-path.js"
+import type { OpencodeV2Reader } from "./opencode-v2-read.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseCommandTaskResultFromLine } from "./parse-command-task-result.js"
 import {
@@ -49,7 +50,12 @@ import {
 } from "./parse-model-catalog.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
 import { observeOpencodeSessionModel } from "./session-model.js"
-import { observeOpencodeStartupActivity } from "./startup-activity.js"
+import {
+  type OpencodeStartupProbe,
+  connectStartupReader,
+  makeOpencodeStartupProbe,
+  observeOpencodeStartupActivity,
+} from "./startup-activity.js"
 import type { OpencodeLayerOptions } from "./types.js"
 
 const DEFAULT_TIMEOUT = Duration.minutes(30)
@@ -163,40 +169,47 @@ export const Opencode = {
           }
         })
 
-        // Cache a successful DB path for the adapter lifetime so session-bearing
-        // turns do not re-spawn `opencode db path` after the first hit. Misses
-        // are retried with backoff so a transient CLI failure does not drop the
-        // #852 probe, without spawnSync-thrashing every 100ms poll on a permanent
-        // miss (CLI lookup can block up to ~2s).
-        let cachedStartupActivityDbPath: string | undefined =
-          options.startupActivityDbPath
-        let lastStartupDbPathResolveAttemptMs = 0
-        const STARTUP_DB_PATH_RETRY_MS = 2_000
+        // Cache a discovered reader so startup polls do not rediscover on every
+        // tick. Misses retry with backoff so a service that is still starting
+        // can disarm the window later, without hammering discovery.
+        let cachedStartupReader: OpencodeV2Reader | undefined
+        let lastStartupReaderAttemptMs = 0
+        const STARTUP_READER_RETRY_MS = 2_000
+        const explicitServerUrl = options.server?.baseUrl
+        const serviceArgs = (
+          args: ReadonlyArray<string>,
+        ): ReadonlyArray<string> => withOpenCodeServer(args, explicitServerUrl)
 
-        const resolveStartupActivityDbPath = (): string | null => {
-          if (options.startupActivityDbPath !== undefined) {
-            return options.startupActivityDbPath
+        const resolveStartupReader =
+          async (): Promise<OpencodeV2Reader | null> => {
+            if (cachedStartupReader !== undefined) {
+              return cachedStartupReader
+            }
+            const now = Date.now()
+            if (
+              lastStartupReaderAttemptMs > 0 &&
+              now - lastStartupReaderAttemptMs < STARTUP_READER_RETRY_MS
+            ) {
+              return null
+            }
+            lastStartupReaderAttemptMs = now
+            const reader = await connectStartupReader({
+              ...(options.server === undefined
+                ? {}
+                : { server: options.server }),
+            })
+            if (reader !== null) {
+              cachedStartupReader = reader
+            }
+            return reader
           }
-          if (cachedStartupActivityDbPath !== undefined) {
-            return cachedStartupActivityDbPath
-          }
-          const now = Date.now()
-          if (
-            lastStartupDbPathResolveAttemptMs > 0 &&
-            now - lastStartupDbPathResolveAttemptMs < STARTUP_DB_PATH_RETRY_MS
-          ) {
-            return null
-          }
-          lastStartupDbPathResolveAttemptMs = now
-          const resolved = resolveOpencodeDbPath({
-            binary,
-            env: pathEnv,
+
+        const startupProbe: OpencodeStartupProbe =
+          options.startupActivityProbe ??
+          makeOpencodeStartupProbe({
+            ...(options.server === undefined ? {} : { server: options.server }),
+            resolveReader: resolveStartupReader,
           })
-          if (resolved !== null) {
-            cachedStartupActivityDbPath = resolved
-          }
-          return resolved
-        }
 
         const turnEnvironment = (cwd: string): Record<string, string> => ({
           ...environment,
@@ -261,7 +274,7 @@ export const Opencode = {
               spawner,
               backend: OPENCODE_BACKEND,
               binary,
-              args: buildSessionInterruptApiArgs(sessionId),
+              args: serviceArgs(buildSessionInterruptApiArgs(sessionId)),
               cwd: input.cwd,
               env,
               timeout,
@@ -303,7 +316,7 @@ export const Opencode = {
                 spawner,
                 backend: OPENCODE_BACKEND,
                 binary,
-                args: switchArgs,
+                args: serviceArgs(switchArgs),
                 cwd: input.cwd,
                 env,
                 timeout,
@@ -321,7 +334,7 @@ export const Opencode = {
               spawner,
               backend: OPENCODE_BACKEND,
               binary,
-              args: createArgs,
+              args: serviceArgs(createArgs),
               cwd: input.cwd,
               env,
               timeout,
@@ -351,7 +364,7 @@ export const Opencode = {
                 spawner,
                 backend: OPENCODE_BACKEND,
                 binary,
-                args: buildSessionWaitApiArgs(sessionId),
+                args: serviceArgs(buildSessionWaitApiArgs(sessionId)),
                 cwd: input.cwd,
                 env,
                 timeout,
@@ -362,7 +375,7 @@ export const Opencode = {
                   spawner,
                   backend: OPENCODE_BACKEND,
                   binary,
-                  args: buildSessionExportArgs(sessionId),
+                  args: serviceArgs(buildSessionExportArgs(sessionId)),
                   cwd: input.cwd,
                   env,
                   timeout,
@@ -405,7 +418,7 @@ export const Opencode = {
               }
 
               let turnSessionId = knownSessionId
-              let turnArgs: ReadonlyArray<string> = args
+              let turnArgs: ReadonlyArray<string> = serviceArgs(args)
               const turnStdin: "ignore" | Stream.Stream<Uint8Array, never> =
                 promptOnStdin
                   ? Stream.fromIterable([
@@ -421,12 +434,14 @@ export const Opencode = {
                     yield* input.onSessionId(turnSessionId).pipe(Effect.ignore)
                   }
                 }
-                turnArgs = buildCommandApiArgs({
-                  sessionId: turnSessionId,
-                  command,
-                  prompt: input.prompt,
-                  directory: input.cwd,
-                })
+                turnArgs = serviceArgs(
+                  buildCommandApiArgs({
+                    sessionId: turnSessionId,
+                    command,
+                    prompt: input.prompt,
+                    directory: input.cwd,
+                  }),
+                )
               }
 
               yield* Deferred.await(sessionReady).pipe(
@@ -435,22 +450,16 @@ export const Opencode = {
                     sessionId,
                     model: input.model,
                     thinkingLevel: input.thinkingLevel,
-                    // Never spawn the turn binary as `opencode db path`: a
-                    // fake/test binary (or a hung CLI) would block spawnSync.
-                    // Prefer the startup-probe cache; on first Build that
-                    // probe never runs, so fall back to OpenCode's path rules.
+                    // Session-model reassertion still writes the on-disk record.
+                    // It does not call `opencode db path`. Startup activity uses
+                    // the V2 API instead of this path.
                     resolveDbPath: () => {
                       if (options.startupActivityDbPath !== undefined) {
                         return options.startupActivityDbPath
                       }
-                      if (cachedStartupActivityDbPath !== undefined) {
-                        return cachedStartupActivityDbPath
-                      }
-                      const fromRules = resolveOpencodeDbPathFromRules({
+                      return resolveOpencodeDbPathFromRules({
                         env: pathEnv,
                       })
-                      cachedStartupActivityDbPath = fromRules
-                      return fromRules
                     },
                   }),
                 ),
@@ -477,15 +486,14 @@ export const Opencode = {
                 ...(options.startupTimeout !== undefined
                   ? { startupTimeout: options.startupTimeout }
                   : {}),
-                // Always attach when the Session is known: resolveDbPath may miss
-                // on the first poll and succeed later (unlike a one-shot null that
-                // dropped the probe for the whole turn).
+                // Always attach when the Session is known: discovery may miss
+                // on the first poll and succeed later.
                 ...(knownSessionId !== undefined
                   ? {
                       observeStartup: observeOpencodeStartupActivity({
                         sessionId: knownSessionId,
                         startedAfterMs,
-                        resolveDbPath: resolveStartupActivityDbPath,
+                        probe: startupProbe,
                       }),
                     }
                   : {}),

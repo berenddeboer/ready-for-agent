@@ -74,6 +74,15 @@ export const splitOpenCodeModelReference = (
     : { providerID, id, variant }
 }
 
+/** Prepend `--server` so a turn uses the same explicit server as telemetry. */
+export const withOpenCodeServer = (
+  args: ReadonlyArray<string>,
+  serverUrl: string | undefined,
+): ReadonlyArray<string> =>
+  serverUrl === undefined || serverUrl.trim().length === 0
+    ? args
+    : ["--server", serverUrl, ...args]
+
 export const buildRunArgs = (input: {
   readonly prompt: string
   readonly model: string
