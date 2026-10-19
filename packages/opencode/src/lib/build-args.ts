@@ -103,7 +103,7 @@ export const buildRunArgs = (input: {
   return args
 }
 
-export const commandApiBody = (input: {
+const commandApiBody = (input: {
   readonly command: string
   readonly prompt: string
 }): string =>
@@ -113,35 +113,62 @@ export const commandApiBody = (input: {
     delivery: "steer",
   })
 
+const directoryHeader = (directory: string): string =>
+  `x-opencode-directory:${encodeURIComponent(directory)}`
+
+const resolvedModel = (
+  model: string,
+  thinkingLevel: string | null,
+): OpenCodeModelRef | undefined =>
+  splitOpenCodeModelReference(openCodeModelReference(model, thinkingLevel))
+
+const apiPost = (input: {
+  readonly directory: string
+  readonly path: string
+  readonly body: string
+}): ReadonlyArray<string> => [
+  "api",
+  "--header",
+  directoryHeader(input.directory),
+  "post",
+  input.path,
+  "--data",
+  input.body,
+]
+
+/**
+ * True when the session-command JSON body cannot be passed as `--data`.
+ *
+ * `opencode api` does not read a request body from stdin. An oversized `--data`
+ * argument fails the spawn with a platform error, so the caller must refuse
+ * the turn before starting OpenCode.
+ */
+export const commandBodyExceedsArgvLimit = (input: {
+  readonly command: string
+  readonly prompt: string
+}): boolean => exceedsPromptArgvLimit(commandApiBody(input))
+
 /**
  * V2 invokes a configured Agent Command through
  * `POST /api/session/{sessionID}/command`, not a `run` flag. The body carries
  * the command name and the raw argument string so `$ARGUMENTS` and shell
- * blocks stay server-owned. Oversized bodies go to stdin; the installed CLI
- * only accepts `--data`, so callers must keep command text within the argv
- * limit for a real V2 CLI.
+ * blocks stay server-owned. Returns undefined when that body cannot fit in
+ * `--data`.
  */
 export const buildCommandApiArgs = (input: {
   readonly sessionId: string
   readonly command: string
   readonly prompt: string
   readonly directory: string
-}): {
-  readonly args: ReadonlyArray<string>
-  readonly stdin?: string
-} => {
-  const body = commandApiBody(input)
-  const args = [
-    "api",
-    "--header",
-    `x-opencode-directory:${encodeURIComponent(input.directory)}`,
-    "post",
-    `/api/session/${input.sessionId}/command`,
-  ]
-  if (exceedsPromptArgvLimit(body)) {
-    return { args, stdin: body }
+}): ReadonlyArray<string> | undefined => {
+  if (commandBodyExceedsArgvLimit(input)) {
+    return undefined
   }
-  return { args: [...args, "--data", body] }
+  return apiPost({
+    directory: input.directory,
+    path: `/api/session/${input.sessionId}/command`,
+    body: commandApiBody(input),
+  })
 }
 
 export const buildSwitchModelApiArgs = (input: {
@@ -150,21 +177,15 @@ export const buildSwitchModelApiArgs = (input: {
   readonly thinkingLevel: string | null
   readonly directory: string
 }): ReadonlyArray<string> | undefined => {
-  const reference = splitOpenCodeModelReference(
-    openCodeModelReference(input.model, input.thinkingLevel),
-  )
+  const reference = resolvedModel(input.model, input.thinkingLevel)
   if (reference === undefined) {
     return undefined
   }
-  return [
-    "api",
-    "--header",
-    `x-opencode-directory:${encodeURIComponent(input.directory)}`,
-    "post",
-    `/api/session/${input.sessionId}/model`,
-    "--data",
-    JSON.stringify({ model: reference }),
-  ]
+  return apiPost({
+    directory: input.directory,
+    path: `/api/session/${input.sessionId}/model`,
+    body: JSON.stringify({ model: reference }),
+  })
 }
 
 export const buildCreateSessionApiArgs = (input: {
@@ -172,24 +193,18 @@ export const buildCreateSessionApiArgs = (input: {
   readonly thinkingLevel: string | null
   readonly directory: string
 }): ReadonlyArray<string> | undefined => {
-  const reference = splitOpenCodeModelReference(
-    openCodeModelReference(input.model, input.thinkingLevel),
-  )
+  const reference = resolvedModel(input.model, input.thinkingLevel)
   if (reference === undefined) {
     return undefined
   }
-  return [
-    "api",
-    "--header",
-    `x-opencode-directory:${encodeURIComponent(input.directory)}`,
-    "post",
-    "/api/session",
-    "--data",
-    JSON.stringify({
+  return apiPost({
+    directory: input.directory,
+    path: "/api/session",
+    body: JSON.stringify({
       location: { directory: input.directory },
       model: reference,
     }),
-  ]
+  })
 }
 
 export const buildSessionWaitApiArgs = (

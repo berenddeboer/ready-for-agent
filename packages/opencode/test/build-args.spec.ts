@@ -2,6 +2,7 @@ import { PROMPT_ARGV_BYTE_LIMIT } from "@ready-for-agent/agent-backend"
 import {
   buildCommandApiArgs,
   buildRunArgs,
+  commandBodyExceedsArgvLimit,
   joinOpenCodeMessageArgs,
   openCodeModelReference,
   shouldUsePromptStdin,
@@ -231,18 +232,17 @@ describe("buildCommandApiArgs", () => {
       directory: "/worktrees/repository",
     })
 
-    expect(invocation.stdin).toBeUndefined()
-    expect(invocation.args.slice(0, 5)).toEqual([
+    expect(invocation?.slice(0, 5)).toEqual([
       "api",
       "--header",
       `x-opencode-directory:${encodeURIComponent("/worktrees/repository")}`,
       "post",
       "/api/session/ses_review/command",
     ])
-    expect(obsoleteFlags.some((flag) => invocation.args.includes(flag))).toBe(
-      false,
-    )
-    const body = JSON.parse(invocation.args.at(-1) ?? "") as {
+    expect(
+      obsoleteFlags.some((flag) => invocation?.includes(flag) === true),
+    ).toBe(false)
+    const body = JSON.parse(invocation?.at(-1) ?? "") as {
       name: string
       text: string
       delivery: string
@@ -256,18 +256,16 @@ describe("buildCommandApiArgs", () => {
     expect(body.text).toContain("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS")
   })
 
-  it("keeps a large command body off argv", () => {
+  it("refuses a command body that cannot fit in --data", () => {
     const prompt = "x".repeat(PROMPT_ARGV_BYTE_LIMIT + 1)
-    const invocation = buildCommandApiArgs({
+    const input = {
       sessionId: "ses_review",
       command: "/review",
       prompt,
       directory: "/worktrees/repository",
-    })
+    }
 
-    expect(invocation.args).not.toContain("--data")
-    expect(invocation.args).not.toContain("--command")
-    expect(invocation.stdin).toContain(prompt)
-    expect(JSON.parse(invocation.stdin ?? "").text).toBe(prompt)
+    expect(commandBodyExceedsArgvLimit(input)).toBe(true)
+    expect(buildCommandApiArgs(input)).toBeUndefined()
   })
 })

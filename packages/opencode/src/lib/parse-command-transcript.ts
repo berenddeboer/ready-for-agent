@@ -83,21 +83,25 @@ const commandTaskResult = (
   return undefined
 }
 
+const presentText = (text: string): string | undefined => {
+  const nested = subagentText(text)
+  if (nested !== undefined) {
+    return nested
+  }
+  const trimmed = text.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
 const messageText = (message: Record<string, unknown>): string | undefined => {
   if (message.type === "assistant") {
     const text = textFromContent(message.content)
-    return text.length > 0 ? text : undefined
+    return text.length > 0 ? presentText(text) : undefined
   }
   if (
     (message.type === "synthetic" || message.type === "system") &&
     typeof message.text === "string"
   ) {
-    const nested = subagentText(message.text)
-    if (nested !== undefined) {
-      return nested
-    }
-    const text = message.text.trim()
-    return text.length > 0 ? text : undefined
+    return presentText(message.text)
   }
   return undefined
 }
@@ -119,13 +123,6 @@ const messagesFromTranscript = (parsed: unknown): ReadonlyArray<unknown> => {
   return []
 }
 
-/**
- * Result of a V2 Agent Command from a session export.
- *
- * Only messages created after the command was submitted count, so a continued
- * Session does not replay an earlier Implement turn. A nested task or subagent
- * result wins over a later parent summary.
- */
 export const parseCreatedSessionId = (stdout: string): string | undefined => {
   let parsed: unknown
   try {
@@ -144,6 +141,13 @@ export const parseCreatedSessionId = (stdout: string): string | undefined => {
   return data.id
 }
 
+/**
+ * Result of a V2 Agent Command from a session export.
+ *
+ * Only messages created after the command was submitted count, so a continued
+ * Session does not replay an earlier Implement turn. A nested task or subagent
+ * result wins over a later parent summary.
+ */
 export const parseCommandTranscript = (input: {
   readonly transcript: string
   readonly command: string
@@ -177,8 +181,7 @@ export const parseCommandTranscript = (input: {
     }
     const text = messageText(message)
     if (text !== undefined) {
-      const nested = subagentText(text)
-      fallback = nested ?? text
+      fallback = text
     }
   }
   return fallback

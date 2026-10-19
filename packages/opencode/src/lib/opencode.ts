@@ -8,6 +8,7 @@ import {
   AgentBackendMalformedOutputError,
   type ContinueTurnInput,
   type InspectInput,
+  PROMPT_ARGV_BYTE_LIMIT,
   type StartTurnInput,
   retrySilentKnownSessionStartup,
   runCliCapture,
@@ -21,6 +22,7 @@ import {
   buildSessionInterruptApiArgs,
   buildSessionWaitApiArgs,
   buildSwitchModelApiArgs,
+  commandBodyExceedsArgvLimit,
   shouldUsePromptStdin,
 } from "./build-args.js"
 import { makeOpencodeEnvironment } from "./environment.js"
@@ -190,23 +192,65 @@ export const Opencode = {
                   sessionId: input.sessionId,
                 })
               : []
-          const commandName = input.command
+          const command = input.command
           const env = turnEnvironment(input.cwd)
           const timeout = input.timeout ?? defaultTimeout
+          if (
+            command !== undefined &&
+            commandBodyExceedsArgvLimit({
+              command,
+              prompt: input.prompt,
+            })
+          ) {
+            return Effect.fail(
+              new AgentBackendConfigError({
+                message: `OpenCode cannot start this Agent Command. OpenCode v2 only accepts the command body as --data, and this prompt exceeds the ${PROMPT_ARGV_BYTE_LIMIT} byte limit. The turn was not started.`,
+              }),
+            )
+          }
           // Snapshot just before spawn so only post-spawn task/child activity
           // disarms the startup window (not historical review attempts).
           const startedAfterMs = Date.now()
           const knownSessionId = input.sessionId
 
+          const invalidModel = () =>
+            new AgentBackendConfigError({
+              message: `OpenCode model reference is invalid: ${input.model}`,
+            })
+
+          const interruptSession = (sessionId: string) =>
+            runCliCapture({
+              spawner,
+              backend: OPENCODE_BACKEND,
+              binary,
+              args: buildSessionInterruptApiArgs(sessionId),
+              cwd: input.cwd,
+              env,
+              timeout,
+              allowNonZeroExit: true,
+            }).pipe(Effect.ignore)
+
+          const stopSessionOnAbort = <A, E, R>(
+            sessionId: string,
+            effect: Effect.Effect<A, E, R>,
+          ) =>
+            effect.pipe(
+              Effect.onInterrupt(() => interruptSession(sessionId)),
+              Effect.tapError((error) =>
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                (error._tag === "AgentBackendTimeoutError" ||
+                  error._tag === "AgentBackendStartupTimeoutError")
+                  ? interruptSession(sessionId)
+                  : Effect.void,
+              ),
+            )
+
           const ensureCommandSession = (): Effect.Effect<
             string,
             AgentBackendError
           > => {
-            if (input.command === undefined) {
-              return Effect.die(
-                new Error("command session requested without a command"),
-              )
-            }
             if (knownSessionId !== undefined) {
               const switchArgs = buildSwitchModelApiArgs({
                 sessionId: knownSessionId,
@@ -215,11 +259,7 @@ export const Opencode = {
                 directory: input.cwd,
               })
               if (switchArgs === undefined) {
-                return Effect.fail(
-                  new AgentBackendConfigError({
-                    message: `OpenCode model reference is invalid: ${input.model}`,
-                  }),
-                )
+                return Effect.fail(invalidModel())
               }
               return runCliCapture({
                 spawner,
@@ -237,11 +277,7 @@ export const Opencode = {
               directory: input.cwd,
             })
             if (createArgs === undefined) {
-              return Effect.fail(
-                new AgentBackendConfigError({
-                  message: `OpenCode model reference is invalid: ${input.model}`,
-                }),
-              )
+              return Effect.fail(invalidModel())
             }
             return runCliCapture({
               spawner,
@@ -269,32 +305,20 @@ export const Opencode = {
 
           const collectCommandResult = (
             sessionId: string,
-          ): Effect.Effect<string, AgentBackendError> => {
-            const interrupt = runCliCapture({
-              spawner,
-              backend: OPENCODE_BACKEND,
-              binary,
-              args: buildSessionInterruptApiArgs(sessionId),
-              cwd: input.cwd,
-              env,
-              timeout,
-              allowNonZeroExit: true,
-            }).pipe(Effect.ignore)
-            return runCliCapture({
-              spawner,
-              backend: OPENCODE_BACKEND,
-              binary,
-              args: buildSessionWaitApiArgs(sessionId),
-              cwd: input.cwd,
-              env,
-              timeout,
-            }).pipe(
-              Effect.onInterrupt(() => interrupt),
-              Effect.tapError((error) =>
-                error._tag === "AgentBackendTimeoutError"
-                  ? interrupt
-                  : Effect.void,
-              ),
+            commandName: string,
+          ): Effect.Effect<string, AgentBackendError> =>
+            stopSessionOnAbort(
+              sessionId,
+              runCliCapture({
+                spawner,
+                backend: OPENCODE_BACKEND,
+                binary,
+                args: buildSessionWaitApiArgs(sessionId),
+                cwd: input.cwd,
+                env,
+                timeout,
+              }),
+            ).pipe(
               Effect.andThen(
                 runCliCapture({
                   spawner,
@@ -309,7 +333,7 @@ export const Opencode = {
               Effect.flatMap((exported) => {
                 const assistantText = parseCommandTranscript({
                   transcript: exported.stdout,
-                  command: input.command ?? "",
+                  command: commandName,
                   startedAfterMs,
                 })
                 if (assistantText === undefined) {
@@ -323,7 +347,6 @@ export const Opencode = {
                 return Effect.succeed(assistantText)
               }),
             )
-          }
 
           return Effect.scoped(
             Effect.gen(function* () {
@@ -345,13 +368,13 @@ export const Opencode = {
 
               let turnSessionId = knownSessionId
               let turnArgs: ReadonlyArray<string> = args
-              let turnStdin: "ignore" | Stream.Stream<Uint8Array, never> =
+              const turnStdin: "ignore" | Stream.Stream<Uint8Array, never> =
                 promptOnStdin
                   ? Stream.fromIterable([
                       new TextEncoder().encode(input.prompt),
                     ])
                   : "ignore"
-              if (input.command !== undefined) {
+              if (command !== undefined) {
                 turnSessionId = yield* ensureCommandSession()
                 if (knownSessionId === undefined) {
                   yield* offerSessionId(turnSessionId)
@@ -362,17 +385,16 @@ export const Opencode = {
                 }
                 const commandInvocation = buildCommandApiArgs({
                   sessionId: turnSessionId,
-                  command: input.command,
+                  command,
                   prompt: input.prompt,
                   directory: input.cwd,
                 })
-                turnArgs = commandInvocation.args
-                turnStdin =
-                  commandInvocation.stdin === undefined
-                    ? "ignore"
-                    : Stream.fromIterable([
-                        new TextEncoder().encode(commandInvocation.stdin),
-                      ])
+                if (commandInvocation === undefined) {
+                  return yield* new AgentBackendConfigError({
+                    message: `OpenCode cannot start this Agent Command. OpenCode v2 only accepts the command body as --data, and this prompt exceeds the ${PROMPT_ARGV_BYTE_LIMIT} byte limit. The turn was not started.`,
+                  })
+                }
+                turnArgs = commandInvocation
               }
 
               yield* Deferred.await(sessionReady).pipe(
@@ -403,7 +425,7 @@ export const Opencode = {
                 Effect.forkScoped,
               )
 
-              const streamed = yield* runCliTurn({
+              const turn = runCliTurn({
                 spawner,
                 backend: OPENCODE_BACKEND,
                 binary,
@@ -441,10 +463,10 @@ export const Opencode = {
                   const errorClassification =
                     parseErrorClassificationFromLine(line)
                   const retryAt = parseProviderRetryAtFromLine(line)
-                  if (commandName !== undefined) {
+                  if (command !== undefined) {
                     const commandText = parseCommandTaskResultFromLine(
                       line,
-                      commandName,
+                      command,
                     )
                     if (commandText !== undefined) {
                       return {
@@ -468,12 +490,17 @@ export const Opencode = {
                 },
                 stdin: turnStdin,
               })
+              const streamed = yield* turnSessionId === undefined ||
+              command === undefined
+                ? turn
+                : stopSessionOnAbort(turnSessionId, turn)
               if (
-                input.command !== undefined &&
+                command !== undefined &&
                 streamed.assistantText.length === 0
               ) {
                 const assistantText = yield* collectCommandResult(
                   streamed.sessionId,
+                  command,
                 )
                 return {
                   sessionId: streamed.sessionId,

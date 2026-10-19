@@ -286,6 +286,37 @@ describe("Opencode AgentBackend adapter", () => {
     }
   })
 
+  it("refuses an oversized Agent Command before starting OpenCode", async () => {
+    await withExecutable("echo spawned >&2; exit 9", async (binary) => {
+      const error = await Effect.runPromise(
+        Effect.gen(function* () {
+          const backend = yield* AgentBackend
+          return yield* backend.continueTurn({
+            cwd: process.cwd(),
+            sessionId: "ses_review",
+            prompt: "x".repeat(PROMPT_ARGV_BYTE_LIMIT + 1),
+            model: "test/model",
+            thinkingLevel: "high",
+            command: "/review",
+            timeout: "2 seconds",
+          })
+        }).pipe(
+          Effect.provide(
+            Opencode.layer({
+              binary,
+              keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+            }).pipe(Layer.provide(BunServices.layer)),
+          ),
+          Effect.flip,
+        ),
+      )
+
+      expect(error).toBeInstanceOf(AgentBackendConfigError)
+      expect(error.message).toContain("was not started")
+      expect(error.message).toContain("--data")
+    })
+  })
+
   it("omits --variant when thinkingLevel is null", async () => {
     await withExecutable(
       [
@@ -855,7 +886,7 @@ describe("Opencode AgentBackend adapter", () => {
     db.close()
 
     await withExecutable(
-      'case " $* " in *"/model "*) exit 0 ;; esac\nsleep 100',
+      'case " $* " in *"/model "*|*"/interrupt"*) exit 0 ;; esac\nsleep 100',
       async (binary) => {
         try {
           const error = await Effect.runPromise(
