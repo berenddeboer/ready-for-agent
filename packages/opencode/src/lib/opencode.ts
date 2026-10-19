@@ -8,7 +8,6 @@ import {
   type ContinueTurnInput,
   type InspectInput,
   type StartTurnInput,
-  malformedOutput,
   retrySilentKnownSessionStartup,
   runCliCapture,
   runCliTurn,
@@ -27,8 +26,12 @@ import {
   parseErrorClassificationFromLine,
   parseProviderRetryAtFromLine,
 } from "./parse-error-classification.js"
+import {
+  OPENCODE_CATALOG_EMPTY_MESSAGE,
+  OPENCODE_CATALOG_MALFORMED_MESSAGE,
+  parseOpencodeModelCatalog,
+} from "./parse-model-catalog.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
-import { parseVerboseModelsOutputDetailed } from "./parse-verbose-models.js"
 import { observeOpencodeSessionModel } from "./session-model.js"
 import { observeOpencodeStartupActivity } from "./startup-activity.js"
 import type { OpencodeLayerOptions } from "./types.js"
@@ -76,28 +79,33 @@ export const Opencode = {
         const inspect = Effect.fn("Opencode.inspect")(function* (
           input: InspectInput,
         ) {
+          // `--standalone` pins the catalog to this process cwd. Without it,
+          // V2 `api get` reads the background server's location and ignores cwd.
           const result = yield* runCliCapture({
             spawner,
             backend: OPENCODE_BACKEND,
             binary,
-            args: ["models", "--verbose"],
+            args: ["api", "--standalone", "get", "/api/model"],
             cwd: input.cwd,
             env: environment,
             timeout: input.timeout ?? defaultTimeout,
           })
 
-          const parsed = parseVerboseModelsOutputDetailed(result.stdout)
-          if (!parsed.complete) {
-            return yield* malformedOutput(input.cwd, result.stdout)
+          const parsed = parseOpencodeModelCatalog(result.stdout)
+          if (parsed.kind === "malformed") {
+            return yield* new AgentBackendConfigError({
+              message: OPENCODE_CATALOG_MALFORMED_MESSAGE(parsed.reason),
+            })
+          }
+          if (parsed.kind === "empty") {
+            return yield* new AgentBackendConfigError({
+              message: OPENCODE_CATALOG_EMPTY_MESSAGE,
+            })
           }
 
           return {
             backend: OPENCODE_BACKEND,
-            models: parsed.models.map((model) => ({
-              id: model.id,
-              ...(model.name !== undefined ? { name: model.name } : {}),
-              thinkingLevels: model.variants,
-            })),
+            models: parsed.models,
           }
         })
 

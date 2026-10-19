@@ -55,6 +55,7 @@ import {
 import {
   CONTROL_FILES,
   type LiveHarnessState,
+  fakeOpencodeModelCatalog,
   liveHarnessStateFilePath,
 } from "./live-harness-control.ts"
 import { liveHarnessSupervisorBindings } from "./live-harness-worker.ts"
@@ -93,12 +94,14 @@ const controlFile = (
 writeFileSync(controlFile(CONTROL_FILES.claudeMode), "firstParty")
 writeFileSync(
   controlFile(CONTROL_FILES.opencodeModels),
-  `opencode/test-model-a
-{
-  "name": "Test Model A",
-  "variants": { "low": {}, "high": {} }
-}
-`,
+  fakeOpencodeModelCatalog([
+    {
+      id: "test-model-a",
+      providerID: "opencode",
+      name: "Test Model A",
+      thinkingLevels: ["low", "high"],
+    },
+  ]),
 )
 
 /**
@@ -147,8 +150,16 @@ if [ "\${1-}" = "--version" ]; then
   exit 0
 fi
 if [ "\${1-}" = "models" ]; then
-  cat ${JSON.stringify(controlFile(CONTROL_FILES.opencodeModels))}
-  exit 0
+  echo "ERROR Unrecognized flag: --verbose in command opencode models" >&2
+  exit 1
+fi
+if [ "\${1-}" = "api" ]; then
+  for arg in "$@"; do
+    if [ "$arg" = "/api/model" ]; then
+      cat ${JSON.stringify(controlFile(CONTROL_FILES.opencodeModels))}
+      exit 0
+    fi
+  done
 fi
 echo "e2e fake opencode: unsupported invocation: $*" >&2
 exit 1

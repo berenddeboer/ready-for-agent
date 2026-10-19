@@ -6,14 +6,15 @@ import { BunServices } from "@effect/platform-bun"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import {
   AgentBackend,
+  AgentBackendConfigError,
   AgentBackendExitError,
-  AgentBackendMalformedOutputError,
   AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
   type OnSessionId,
   PROMPT_ARGV_BYTE_LIMIT,
 } from "@ready-for-agent/agent-backend"
-import { Opencode, parseVerboseModelsOutput } from "../src/index.js"
+import { Opencode } from "../src/index.js"
+import { OPENCODE_CATALOG_EMPTY_MESSAGE } from "../src/lib/parse-model-catalog.js"
 import { Database } from "bun:sqlite"
 import { describe, expect, it } from "bun:test"
 
@@ -31,6 +32,28 @@ const withExecutable = async <A>(
     await rm(directory, { recursive: true, force: true })
   }
 }
+
+const catalogJson = (data: ReadonlyArray<unknown>): string =>
+  JSON.stringify({
+    location: { directory: "/work/repo" },
+    data,
+  })
+
+/** V2 fake CLI: `models --verbose` fails; `api --standalone get /api/model` prints JSON. */
+const serveModelCatalog = (json: string): string =>
+  [
+    'if [ "$1" = "models" ]; then',
+    "  echo 'ERROR Unrecognized flag: --verbose in command opencode models' >&2",
+    "  exit 1",
+    "fi",
+    'if [ "$1" = "api" ] && [ "$2" = "--standalone" ] && [ "$3" = "get" ] && [ "$4" = "/api/model" ]; then',
+    "  cat <<'EOF'",
+    json,
+    "EOF",
+    "  exit 0",
+    "fi",
+    "exit 1",
+  ].join("\n")
 
 const startTurn = (
   binary: string,
@@ -882,107 +905,142 @@ describe("Opencode AgentBackend adapter", () => {
     )
   })
 
-  it("inspects models with thinking levels from verbose OpenCode output", async () => {
-    await withExecutable(
-      [
-        'if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then',
-        `  printf '%s\\n' 'xai/grok-4.5'`,
-        `  printf '%s\\n' '{'`,
-        `  printf '%s\\n' '  "name": "Grok 4.5",'`,
-        `  printf '%s\\n' '  "variants": {'`,
-        `  printf '%s\\n' '    "low": {},'`,
-        `  printf '%s\\n' '    "medium": {},'`,
-        `  printf '%s\\n' '    "high": {}'`,
-        `  printf '%s\\n' '  }'`,
-        `  printf '%s\\n' '}'`,
-        `  printf '%s\\n' 'xai/empty-variants'`,
-        `  printf '%s\\n' '{'`,
-        `  printf '%s\\n' '  "variants": {}'`,
-        `  printf '%s\\n' '}'`,
-        "  exit 0",
-        "fi",
-        "exit 1",
-      ].join("\n"),
-      async (binary) => {
-        const result = await Effect.runPromise(
-          Effect.gen(function* () {
-            const backend = yield* AgentBackend
-            return yield* backend.inspect({
-              cwd: process.cwd(),
-              timeout: "2 seconds",
-            })
-          }).pipe(
-            Effect.provide(
-              Opencode.layer({
-                binary,
-                keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
-              }).pipe(Layer.provide(BunServices.layer)),
-            ),
+  it("inspects V2 models when models --verbose is rejected", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "opencode-inspect-cwd-"))
+    const invocationPath = join(cwd, "invocation")
+    try {
+      await withExecutable(
+        [
+          `printf '%s\\n' "$*" > ${JSON.stringify(invocationPath)}`,
+          'pwd > "$PWD_FILE"',
+          'if [ -z "$OPENCODE_CONFIG_CONTENT" ]; then exit 3; fi',
+          serveModelCatalog(
+            catalogJson([
+              {
+                id: "grok-4.5",
+                modelID: "grok-4.5",
+                providerID: "xai",
+                name: "Grok 4.5",
+                enabled: true,
+                variants: [{ id: "low" }, { id: "medium" }, { id: "high" }],
+              },
+              {
+                id: "accounts/fireworks/models/deepseek-v4p1-flash",
+                modelID: "accounts/fireworks/models/deepseek-v4p1-flash",
+                providerID: "fireworks-ai",
+                name: "DeepSeek V4.1 Flash",
+                enabled: true,
+                variants: [{ id: "low" }, { id: "high" }],
+              },
+              {
+                id: "gpt-6.1-sol-ultrafast",
+                modelID: "gpt-6.1-sol",
+                providerID: "openai",
+                name: "GPT-6.1 Sol Ultrafast",
+                enabled: true,
+                variants: [{ id: "max" }],
+              },
+              {
+                id: "hidden",
+                modelID: "hidden",
+                providerID: "xai",
+                name: "Hidden",
+                enabled: false,
+                variants: [{ id: "low" }],
+              },
+              {
+                id: "empty-variants",
+                modelID: "empty-variants",
+                providerID: "xai",
+                name: "",
+                enabled: true,
+                variants: [],
+              },
+            ]),
           ),
-        )
+        ].join("\n"),
+        async (binary) => {
+          const result = await Effect.runPromise(
+            Effect.gen(function* () {
+              const backend = yield* AgentBackend
+              return yield* backend.inspect({
+                cwd,
+                timeout: "2 seconds",
+              })
+            }).pipe(
+              Effect.provide(
+                Opencode.layer({
+                  binary,
+                  keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+                  environment: {
+                    PWD_FILE: join(cwd, "pwd"),
+                  },
+                }).pipe(Layer.provide(BunServices.layer)),
+              ),
+            ),
+          )
 
-        expect(result.backend).toEqual({
-          id: "opencode",
-          label: "OpenCode",
-        })
-        expect(result.models).toEqual([
-          {
-            id: "xai/grok-4.5",
-            name: "Grok 4.5",
-            thinkingLevels: ["low", "medium", "high"],
-          },
-          {
-            id: "xai/empty-variants",
-            thinkingLevels: [],
-          },
-        ])
-      },
-    )
+          expect(await Bun.file(invocationPath).text()).toBe(
+            "api --standalone get /api/model\n",
+          )
+          expect((await Bun.file(join(cwd, "pwd")).text()).trim()).toBe(cwd)
+          expect(result.backend).toEqual({
+            id: "opencode",
+            label: "OpenCode",
+          })
+          expect(result.models).toEqual([
+            {
+              id: "xai/grok-4.5",
+              name: "Grok 4.5",
+              thinkingLevels: ["low", "medium", "high"],
+            },
+            {
+              id: "fireworks-ai/accounts/fireworks/models/deepseek-v4p1-flash",
+              name: "DeepSeek V4.1 Flash",
+              thinkingLevels: ["low", "high"],
+            },
+            {
+              id: "openai/gpt-6.1-sol-ultrafast",
+              name: "GPT-6.1 Sol Ultrafast",
+              thinkingLevels: ["max"],
+            },
+            {
+              id: "xai/empty-variants",
+              thinkingLevels: [],
+            },
+          ])
+        },
+      )
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
   })
 
-  it("captures a full multi-provider verbose catalog beyond 64KB", async () => {
+  it("captures a V2 catalog larger than 64KB", async () => {
     const padding = "x".repeat(1200)
-    const entries: string[] = []
-    for (let index = 0; index < 55; index += 1) {
-      entries.push(
-        [
-          `opencode/model-${index}`,
-          "{",
-          `  "id": "model-${index}",`,
-          `  "padding": "${padding}",`,
-          '  "variants": {',
-          '    "low": {},',
-          '    "medium": {},',
-          '    "high": {}',
-          "  }",
-          "}",
-        ].join("\n"),
-      )
-    }
-    entries.push(
-      [
-        "xai/grok-4.5",
-        "{",
-        '  "id": "grok-4.5",',
-        '  "variants": {',
-        '    "low": {},',
-        '    "medium": {},',
-        '    "high": {}',
-        "  }",
-        "}",
-      ].join("\n"),
-    )
-    const fullStdout = `${entries.join("\n")}\n`
-    expect(Buffer.byteLength(fullStdout, "utf8")).toBeGreaterThan(64 * 1024)
-    const expectedParsed = parseVerboseModelsOutput(fullStdout)
-    expect(expectedParsed.length).toBe(56)
-    expect(expectedParsed.at(-1)).toEqual({
-      id: "xai/grok-4.5",
-      variants: ["low", "medium", "high"],
+    const data = Array.from({ length: 55 }, (_, index) => ({
+      id: `model-${index}`,
+      modelID: `model-${index}`,
+      providerID: "opencode",
+      name: `Model ${index}`,
+      enabled: true,
+      variants: [{ id: "low" }, { id: "medium" }, { id: "high" }],
+      padding,
+    }))
+    data.push({
+      id: "grok-4.5",
+      modelID: "grok-4.5",
+      providerID: "xai",
+      name: "Grok 4.5",
+      enabled: true,
+      variants: [{ id: "low" }, { id: "medium" }, { id: "high" }],
+      padding,
     })
+    const fullStdout = catalogJson(data)
+    expect(Buffer.byteLength(fullStdout, "utf8")).toBeGreaterThan(64 * 1024)
 
     const directory = await mkdtemp(join(tmpdir(), "opencode-effect-test-"))
-    const fixturePath = join(directory, "models-verbose.txt")
+    const fixturePath = join(directory, "models.json")
     const binaryPath = join(directory, "opencode")
     try {
       await writeFile(fixturePath, fullStdout)
@@ -990,8 +1048,12 @@ describe("Opencode AgentBackend adapter", () => {
         binaryPath,
         [
           "#!/bin/sh",
-          'if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then',
-          `  cat "${fixturePath}"`,
+          'if [ "$1" = "models" ]; then',
+          "  echo 'ERROR Unrecognized flag: --verbose in command opencode models' >&2",
+          "  exit 1",
+          "fi",
+          'if [ "$1" = "api" ] && [ "$2" = "--standalone" ] && [ "$3" = "get" ] && [ "$4" = "/api/model" ]; then',
+          `  cat ${JSON.stringify(fixturePath)}`,
           "  exit 0",
           "fi",
           "exit 1",
@@ -1017,16 +1079,17 @@ describe("Opencode AgentBackend adapter", () => {
         ),
       )
 
-      expect(result.models).toEqual(
-        expectedParsed.map((model) => ({
-          id: model.id,
-          thinkingLevels: model.variants,
-        })),
-      )
+      expect(result.models).toHaveLength(56)
       expect(
-        result.models.find((model) => model.id === "xai/grok-4.5"),
+        result.models.find((entry) => entry.id === "xai/grok-4.5"),
       ).toEqual({
         id: "xai/grok-4.5",
+        name: "Grok 4.5",
+        thinkingLevels: ["low", "medium", "high"],
+      })
+      expect(result.models[0]).toEqual({
+        id: "opencode/model-0",
+        name: "Model 0",
         thinkingLevels: ["low", "medium", "high"],
       })
     } finally {
@@ -1037,7 +1100,7 @@ describe("Opencode AgentBackend adapter", () => {
   it("surfaces a stderr-only readiness failure as the inspect exit reason", async () => {
     await withExecutable(
       [
-        'if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then',
+        'if [ "$1" = "api" ]; then',
         "  printf 'Error: Configuration is invalid at /home/vscode/.config/opencode/opencode.jsonc\\n' >&2",
         "  printf '↳ Expected object | undefined, got [ … ] skills\\n' >&2",
         "  exit 1",
@@ -1075,43 +1138,77 @@ describe("Opencode AgentBackend adapter", () => {
     )
   })
 
-  it("fails when verbose models stdout is truncated mid-object", async () => {
-    await withExecutable(
-      [
-        'if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then',
-        `  printf '%s\\n' 'opencode/kimi-k2.5'`,
-        `  printf '%s\\n' '{'`,
-        `  printf '%s\\n' '  "variants": {'`,
-        `  printf '%s\\n' '    "low": {}'`,
-        "  exit 0",
-        "fi",
-        "exit 1",
-      ].join("\n"),
-      async (binary) => {
-        const error = await Effect.runPromise(
-          Effect.gen(function* () {
-            const backend = yield* AgentBackend
-            return yield* backend.inspect({
-              cwd: process.cwd(),
-              timeout: "2 seconds",
-            })
-          }).pipe(
-            Effect.provide(
-              Opencode.layer({
-                binary,
-                keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
-              }).pipe(Layer.provide(BunServices.layer)),
-            ),
-            Effect.flip,
+  it("fails when the V2 catalog is malformed or empty", async () => {
+    const inspectError = (binary: string) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const backend = yield* AgentBackend
+          return yield* backend.inspect({
+            cwd: process.cwd(),
+            timeout: "2 seconds",
+          })
+        }).pipe(
+          Effect.provide(
+            Opencode.layer({
+              binary,
+              keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+            }).pipe(Layer.provide(BunServices.layer)),
           ),
-        )
+          Effect.flip,
+        ),
+      )
 
-        expect(error).toBeInstanceOf(AgentBackendMalformedOutputError)
-        if (error instanceof AgentBackendMalformedOutputError) {
-          expect(error.cwd).toBe(process.cwd())
-          expect(error.byteLength).toBeGreaterThan(0)
+    await withExecutable(
+      serveModelCatalog(
+        '{"location":{"directory":"/tmp"},"data":[{"id":"grok","variants":{"low":{}}}]}',
+      ),
+      async (binary) => {
+        const malformed = await inspectError(binary)
+        expect(malformed).toBeInstanceOf(AgentBackendConfigError)
+        if (malformed instanceof AgentBackendConfigError) {
+          expect(malformed.message).toContain("V2 /api/model envelope")
+          expect(malformed.message).toContain("Recheck Agent Backend")
         }
       },
     )
+
+    await withExecutable(
+      serveModelCatalog('{"location":{"directory":"/tmp"},"data":[]}'),
+      async (binary) => {
+        const empty = await inspectError(binary)
+        expect(empty).toBeInstanceOf(AgentBackendConfigError)
+        if (empty instanceof AgentBackendConfigError) {
+          expect(empty.message).toBe(OPENCODE_CATALOG_EMPTY_MESSAGE)
+        }
+      },
+    )
+  })
+
+  it("fails catalog inspection when the V2 CLI times out", async () => {
+    await withExecutable(["sleep 5", "exit 0"].join("\n"), async (binary) => {
+      const error = await Effect.runPromise(
+        Effect.gen(function* () {
+          const backend = yield* AgentBackend
+          return yield* backend.inspect({
+            cwd: process.cwd(),
+            timeout: "200 millis",
+          })
+        }).pipe(
+          Effect.provide(
+            Opencode.layer({
+              binary,
+              keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+            }).pipe(Layer.provide(BunServices.layer)),
+          ),
+          Effect.flip,
+        ),
+      )
+
+      expect(error).toBeInstanceOf(AgentBackendTimeoutError)
+      if (error instanceof AgentBackendTimeoutError) {
+        expect(error.cwd).toBe(process.cwd())
+        expect(error.timeoutMs).toBe(200)
+      }
+    })
   })
 })

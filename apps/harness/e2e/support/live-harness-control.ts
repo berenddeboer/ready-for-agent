@@ -53,9 +53,9 @@ export const CONTROL_FILES = {
   /** Current {@link FakeClaudeMode}, read by the fake CLI on every probe. */
   claudeMode: "claude-mode",
   /**
-   * `opencode models --verbose` stdout served by the fake OpenCode CLI. The
-   * supervisor seeds a baseline catalog; steps may append models while the
-   * Harness stays running.
+   * V2 `GET /api/model` JSON served by the fake OpenCode CLI. The supervisor
+   * seeds a baseline catalog; steps may replace it while the Harness stays
+   * running. `opencode models --verbose` is unsupported and must fail.
    */
   opencodeModels: "opencode-models",
   /** SQL applied against the stopped Harness database before the next start. */
@@ -65,6 +65,41 @@ export const CONTROL_FILES = {
   /** Monotonic child-process generation, bumped after each spawn. */
   generation: "generation",
 } as const
+
+export type FakeOpencodeCatalogModel = {
+  /** Catalog model identity. May contain slashes. Not the provider wire id. */
+  readonly id: string
+  readonly providerID: string
+  readonly name: string
+  readonly thinkingLevels: readonly string[]
+}
+
+/** Stdout for the fake CLI's `api get /api/model` response. */
+export const fakeOpencodeModelCatalog = (
+  models: readonly FakeOpencodeCatalogModel[],
+): string =>
+  `${JSON.stringify({
+    location: { directory: "e2e" },
+    data: models.map((model) => ({
+      id: model.id,
+      modelID: model.id,
+      providerID: model.providerID,
+      name: model.name,
+      enabled: true,
+      variants: model.thinkingLevels.map((id) => ({ id })),
+    })),
+  })}\n`
+
+/** Split an executable `provider/model` id on the first slash. */
+export const splitExecutableOpencodeModelId = (
+  executableId: string,
+): { readonly providerID: string; readonly id: string } => {
+  const slash = executableId.indexOf("/")
+  return {
+    providerID: executableId.slice(0, slash),
+    id: executableId.slice(slash + 1),
+  }
+}
 
 export const readLiveHarnessState = (): LiveHarnessState =>
   JSON.parse(
