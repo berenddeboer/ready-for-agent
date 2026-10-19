@@ -1,6 +1,7 @@
 import {
   type AgentModelOption,
   formatAgentModelLabel,
+  orderAgentModelOptions,
 } from "./agent-model-settings.js"
 import { cx, ui } from "./ui.js"
 
@@ -14,6 +15,11 @@ import { cx, ui } from "./ui.js"
  * operators can see what is stored, why it cannot be used, and what they may
  * pick instead. The value is never rewritten or coerced by this component —
  * only an explicit operator choice changes it.
+ *
+ * Catalog options are shown in one shared alphabetical order by executable
+ * provider/model id (BER-23). Inherit / Same as build and an unavailable
+ * saved selection stay above that list. Sorting copies the catalog; it does
+ * not mutate the array Settings and Implement With share.
  */
 
 /** Suffix marking a preserved stored value that the catalog no longer lists. */
@@ -52,7 +58,7 @@ export type AgentModelSelectProps = {
 
 export function AgentModelSelect(props: AgentModelSelectProps) {
   const catalogLoaded = props.models !== undefined
-  const models = props.models ?? []
+  const models = orderAgentModelOptions(props.models ?? [])
   const storedValueMissing =
     props.value.length > 0 && !models.some((model) => model.id === props.value)
   return (

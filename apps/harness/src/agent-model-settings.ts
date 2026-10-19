@@ -98,6 +98,49 @@ export const formatAgentModelLabel = (model: AgentModelOption): string => {
 }
 
 /**
+ * Case-fold an executable Agent Model id for alphabetical comparison.
+ * Unicode default case mapping, not the runtime locale, so two machines
+ * present the same catalog in the same order.
+ */
+const agentModelIdSortKey = (id: string): string => id.toLowerCase()
+
+/**
+ * Ascending comparison of executable provider/model ids (BER-23).
+ *
+ * Case-insensitive first. A case-only tie breaks by the exact id in
+ * code-point order (`OpenCode/gpt` before `opencode/gpt`). Display names
+ * and kind labels are not keys, and release date is not a key.
+ */
+const compareAgentModelIds = (left: string, right: string): number => {
+  const leftKey = agentModelIdSortKey(left)
+  const rightKey = agentModelIdSortKey(right)
+  if (leftKey < rightKey) {
+    return -1
+  }
+  if (leftKey > rightKey) {
+    return 1
+  }
+  if (left < right) {
+    return -1
+  }
+  if (left > right) {
+    return 1
+  }
+  return 0
+}
+
+/**
+ * Presentation order for catalog Agent Model options. Returns a new array:
+ * the caller's catalog is not sorted in place and no entry is dropped.
+ * Synthetic inherit / Same as build choices are not catalog entries and
+ * stay outside this order.
+ */
+export const orderAgentModelOptions = (
+  models: readonly AgentModelOption[],
+): readonly AgentModelOption[] =>
+  [...models].sort((left, right) => compareAgentModelIds(left.id, right.id))
+
+/**
  * True when Claude Code is in Bedrock configuration mode. Mode comes from
  * GraphQL agentBackends metadata (never from browser process env) and only
  * selects operator guidance wording — catalog-only enforcement is identical
