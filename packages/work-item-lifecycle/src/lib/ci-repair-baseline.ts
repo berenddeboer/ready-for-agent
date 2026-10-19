@@ -193,7 +193,7 @@ const loadBaselineRows = (sql: SqlRunner, repositoryId: string) =>
     )
   })
 
-export interface CiRepairDefinitionCursor {
+interface CiRepairDefinitionCursor {
   readonly definitionIdentity: string
   readonly lastRunIdentity: string | null
   readonly lastRunOrderKey: string | null
@@ -329,6 +329,9 @@ export const recordCiRepairMergeFloor = (
         seen.has(definitionIdentity) ||
         floorOrderKey === null
       ) {
+        // A repair started before order keys existed has no floor to record.
+        // Leave any prior baseline unchanged; with no baseline, the next
+        // qualifying failure can start a repair.
         continue
       }
       seen.add(definitionIdentity)
