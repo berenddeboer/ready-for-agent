@@ -771,4 +771,78 @@ describe("Provider Recovery Cooldown", () => {
       }),
     )
   })
+
+  it("does not release the scope when a non-probe item recovers", async () => {
+    let implementCalls = 0
+    await run(
+      successfulSteps(() => {
+        implementCalls += 1
+        return implementCalls <= 2 ? capacityError() : null
+      }),
+      Effect.gen(function* () {
+        const seeded = yield* seedPair
+        yield* seeded.lifecycle.runStep(seeded.first.implementRunId)
+        yield* seeded.lifecycle.runStep(seeded.second.implementRunId)
+        const probe = (yield* loadEpisodes(seeded.sql)).find(
+          (row) => row.work_item_id === seeded.first.workItemId,
+        )
+        yield* TestClock.adjust((probe?.next_attempt_at ?? 0) - 1_000_000)
+        expect(
+          yield* seeded.lifecycle.wakeProviderRecovery({
+            workItemId: seeded.first.workItemId,
+            generation: probe?.generation ?? 0,
+            nextAttemptAt: probe?.next_attempt_at ?? 0,
+          }),
+        ).toEqual({ _tag: "woke" })
+        const retried = yield* seeded.lifecycle.retry(seeded.second.workItemId)
+        const retryRun = retried.stepRuns.at(-1)
+        if (retryRun === undefined) {
+          return yield* Effect.die("expected follower retry Step Run")
+        }
+        yield* seeded.lifecycle.runStep(retryRun.id)
+        expect(
+          (yield* loadEpisodes(seeded.sql)).find(
+            (row) => row.work_item_id === seeded.second.workItemId,
+          )?.status,
+        ).toBe("recovered")
+        expect((yield* loadCooldowns(seeded.sql))[0]?.probe_work_item_id).toBe(
+          seeded.first.workItemId,
+        )
+        expect(
+          (yield* loadEpisodes(seeded.sql)).find(
+            (row) => row.work_item_id === seeded.first.workItemId,
+          )?.status,
+        ).toBe("in_attempt")
+      }),
+    )
+  })
+
+  it("does not keep a paused in-attempt owner as the probe after restart", async () => {
+    await run(
+      successfulSteps(() => capacityError()),
+      Effect.gen(function* () {
+        const seeded = yield* seedPair
+        yield* seeded.lifecycle.runStep(seeded.first.implementRunId)
+        yield* seeded.lifecycle.runStep(seeded.second.implementRunId)
+        yield* seeded.sql.unsafe(
+          `UPDATE work_item SET paused = 1 WHERE id = ?`,
+          [seeded.first.workItemId],
+        )
+        yield* seeded.sql.unsafe(
+          `UPDATE provider_recovery_episode
+           SET status = 'in_attempt', next_attempt_at = NULL
+           WHERE work_item_id = ?`,
+          [seeded.first.workItemId],
+        )
+        yield* seeded.lifecycle.interruptRunningStepRunsFromPriorWorker
+        expect((yield* loadCooldowns(seeded.sql))[0]?.probe_work_item_id).toBe(
+          seeded.second.workItemId,
+        )
+        expect(
+          (yield* seeded.lifecycle.getWorkItem(seeded.first.workItemId)).paused,
+        ).toBe(true)
+        expect(yield* queuedSteps(seeded.sql, seeded.first.workItemId)).toBe(0)
+      }),
+    )
+  })
 })

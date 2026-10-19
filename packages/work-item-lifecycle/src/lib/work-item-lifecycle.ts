@@ -6039,6 +6039,9 @@ export const makeWorkItemLifecycleLive = (
               if (gate._tag === "not_due") {
                 return { _tag: "not_due" as const }
               }
+              // Deferred wakes are acknowledged and not re-enqueued. The item
+              // stays scheduled until the current probe fails (realign),
+              // succeeds (release), or is dropped (promote).
               if (gate._tag === "deferred") {
                 return { _tag: "deferred" as const }
               }

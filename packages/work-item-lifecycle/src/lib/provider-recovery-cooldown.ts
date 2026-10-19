@@ -1,5 +1,6 @@
 import { Duration, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/sql/SqlClient"
+import { TERMINAL_WORK_ITEM_STATES } from "@ready-for-agent/lifecycle-model"
 import type { QueueServiceShape } from "@ready-for-agent/queue-service"
 import {
   alignRecoveryAttempt,
@@ -121,12 +122,7 @@ const isValidProbeOwner = (sql: SqlClient, workItemId: string) =>
     if (row.paused || row.waiting_for_blockers || row.waiting_for_ci_repair) {
       return false
     }
-    if (
-      row.state === "complete" ||
-      row.state === "failed" ||
-      row.state === "abandoned" ||
-      row.state === "needs_human"
-    ) {
+    if ((TERMINAL_WORK_ITEM_STATES as readonly string[]).includes(row.state)) {
       return false
     }
     if (row.episode_status === "scheduled") {
@@ -966,13 +962,21 @@ export const settleProviderRecoveryCooldown = (input: {
       return
     }
     if (input.outcome === "recovered") {
-      yield* releaseFollowers({
-        sql: input.sql,
-        queue: input.queue,
-        cooldownId,
-        now: input.now,
-        maxWaitMs: input.maxWaitMs,
-      })
+      const cooldown = yield* loadCooldown(input.sql, cooldownId)
+      // Only the probe's success means the scope has recovered. A follower
+      // that recovers, for example after an operator Retry, must not release
+      // the other waiting items while the probe is still in flight.
+      if (cooldown?.probe_work_item_id === input.workItemId) {
+        yield* releaseFollowers({
+          sql: input.sql,
+          queue: input.queue,
+          cooldownId,
+          now: input.now,
+          maxWaitMs: input.maxWaitMs,
+        })
+        return
+      }
+      yield* deleteCooldownIfIdle(input.sql, cooldownId)
       return
     }
     const cooldown = yield* loadCooldown(input.sql, cooldownId)
@@ -994,12 +998,6 @@ export const settleProviderRecoveryCooldown = (input: {
     })
     yield* deleteCooldownIfIdle(input.sql, cooldownId)
   })
-
-export type ProviderRecoveryProbeGate =
-  | { readonly _tag: "legacy" }
-  | { readonly _tag: "proceed" }
-  | { readonly _tag: "not_due" }
-  | { readonly _tag: "deferred" }
 
 /**
  * Admit at most one probe for a cooling scope. A lost race or a still-valid
@@ -1111,6 +1109,13 @@ export const noteManualRecoveryProbe = (input: {
     )
   })
 
+/**
+ * Restart reconcile must not enqueue a second wake when one is already
+ * waiting. The queue service claims jobs; it does not answer "is a wake
+ * already pending?" inside this transaction, so this reads the queue table.
+ * `job_attempts < job_retry_limit` and an unlocked or expired lease mean the
+ * job can still be delivered.
+ */
 const hasPendingRecoveryJob = (
   sql: SqlClient,
   workItemId: string,
@@ -1154,6 +1159,8 @@ export const reconcileAbandonedProviderRecoveryProbes = (input: {
            JOIN work_item w ON w.id = e.work_item_id
            WHERE e.work_item_id = ?
              AND e.status = 'in_attempt'
+             AND w.paused = 0
+             AND w.waiting_for_blockers = 0
              AND w.waiting_since IS NULL
              AND w.waiting_for_ci_repair = 0
              AND NOT EXISTS (
