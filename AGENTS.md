@@ -1,3 +1,13 @@
+## Harness preview server
+
+When a task needs the harness UI running, start the preview server as a
+background shell command (`background: true`). Leave the timeout unset.
+Continue from the returned shell id, then confirm readiness with a short port
+or HTTP check.
+
+A foreground command with the timeout disabled waits until the process exits.
+A server started that way blocks the session until the host evicts the tool.
+
 ## Communication style
 
 Talk to the user like a product owner: decisions, outcomes, and trade-offs, not
