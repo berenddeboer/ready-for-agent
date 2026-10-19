@@ -127,14 +127,23 @@ const failingRunLines = (
   )
 
 /**
- * Implement prompt for a CI Repair Work Item. Read-only CI. No Issue.
+ * Default branch, head commit, and failing runs a CI Repair Work Item is
+ * about. The gate snapshot, creation evidence, and implement prompt share it.
  */
-export const buildCiRepairImplementPrompt = (input: {
+export interface CiRepairTarget {
   readonly defaultBranch: string
   readonly headSha: string | null
   readonly failingRuns: readonly CiRepairFailingRun[]
-  readonly mode: "start" | "continue"
-}): string => {
+}
+
+/**
+ * Implement prompt for a CI Repair Work Item. Read-only CI. No Issue.
+ */
+export const buildCiRepairImplementPrompt = (
+  input: CiRepairTarget & {
+    readonly mode: "start" | "continue"
+  },
+): string => {
   const since =
     input.headSha === null ? "the last green run" : `commit ${input.headSha}`
   return [
