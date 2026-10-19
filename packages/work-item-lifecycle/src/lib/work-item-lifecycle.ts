@@ -185,7 +185,16 @@ import {
   readProviderRecoveryMaxWaitMs,
   supersedeProviderRecoveryWake,
 } from "./provider-recovery.js"
+import {
+  gateProviderRecoveryProbe,
+  noteManualRecoveryProbe,
+  parkClaimedProbeForCiHold,
+  reconcileAbandonedProviderRecoveryProbes,
+  resumeProviderRecoveryAfterCiHold,
+  settleProviderRecoveryCooldown,
+} from "./provider-recovery-cooldown.js"
 import { PROVIDER_RECOVERY_CLASSIFICATION } from "./provider-recovery-policy.js"
+import { readAccountIdFromCause } from "./provider-recovery-scope.js"
 import {
   type AgentModelSelection,
   resolveAgentModelSelection,
@@ -3313,6 +3322,17 @@ export const makeWorkItemLifecycleLive = (
                     return true
                   }
 
+                  if (
+                    yield* resumeProviderRecoveryAfterCiHold({
+                      sql,
+                      queue,
+                      workItemId: held.id,
+                      now,
+                    })
+                  ) {
+                    return true
+                  }
+
                   const acquired = yield* tryAcquireWorkerSlot(held.id, now)
                   if (!acquired) {
                     return true
@@ -4814,6 +4834,7 @@ export const makeWorkItemLifecycleLive = (
                     appliedNextState === "failed"
                     ? "cancelled"
                     : "recovered",
+                  queue,
                 )
 
                 for (const checkId of output.handledCheckIds ?? []) {
@@ -5438,6 +5459,7 @@ export const makeWorkItemLifecycleLive = (
                       workItem.id,
                       now,
                       "cancelled",
+                      queue,
                     )
                   } else if (!classifiedTransient) {
                     yield* closeOpenProviderRecovery(
@@ -5445,6 +5467,7 @@ export const makeWorkItemLifecycleLive = (
                       workItem.id,
                       now,
                       "exited",
+                      queue,
                     )
                   } else if (plan._tag === "skip") {
                     yield* closeOpenProviderRecovery(
@@ -5452,6 +5475,7 @@ export const makeWorkItemLifecycleLive = (
                       workItem.id,
                       now,
                       "cancelled",
+                      queue,
                     )
                   } else {
                     yield* applyTransientProviderFailurePlan({
@@ -5460,6 +5484,10 @@ export const makeWorkItemLifecycleLive = (
                       workItemId: workItem.id,
                       step: stepRun.step,
                       now,
+                      backend: workItem.agent_backend,
+                      accountId: readAccountIdFromCause(failureSource),
+                      maxWaitMs,
+                      providerRetryAt: providerHoldRetryAtMs(reasonDetail),
                       plan,
                     })
                   }
@@ -5828,8 +5856,8 @@ export const makeWorkItemLifecycleLive = (
         })
       })
 
-      const interruptRunningStepRunsFromPriorWorker =
-        interruptSelectedRunningStepRuns({
+      const interruptRunningStepRunsFromPriorWorker = Effect.gen(function* () {
+        const interrupted = yield* interruptSelectedRunningStepRuns({
           reasonCode: STEP_RUN_REASON.workerRestarted,
           reasonMessage:
             "Harness job worker stopped or restarted while the Step Run was still Running",
@@ -5842,6 +5870,26 @@ export const makeWorkItemLifecycleLive = (
                       WHERE step_run.status = 'running'`,
           selectParams: [],
         })
+        const now = yield* Clock.currentTimeMillis
+        const maxWaitMs = yield* readProviderRecoveryMaxWaitMs(sql).pipe(
+          Effect.mapError(toDatabaseError),
+        )
+        yield* reconcileAbandonedProviderRecoveryProbes({
+          sql,
+          queue,
+          now,
+          maxWaitMs,
+        }).pipe(
+          Effect.mapError(
+            (error): WorkItemLifecycleDatabaseError =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Failed to recover abandoned Provider Recovery probes: ${String(error)}`,
+                cause: error,
+              }),
+          ),
+        )
+        return interrupted
+      })
 
       const wakePostponedStep = Effect.fn(
         "WorkItemLifecycle.wakePostponedStep",
@@ -5981,6 +6029,22 @@ export const makeWorkItemLifecycleLive = (
         const result = yield* sql
           .withTransaction(
             Effect.gen(function* () {
+              const gate = yield* gateProviderRecoveryProbe({
+                sql,
+                workItemId,
+                generation,
+                nextAttemptAt,
+                now,
+              })
+              if (gate._tag === "not_due") {
+                return { _tag: "not_due" as const }
+              }
+              // Deferred wakes are acknowledged and not re-enqueued. The item
+              // stays scheduled until the current probe fails (realign),
+              // succeeds (release), or is dropped (promote).
+              if (gate._tag === "deferred") {
+                return { _tag: "deferred" as const }
+              }
               const claim = yield* claimProviderRecoveryWake({
                 sql,
                 workItemId,
@@ -5989,6 +6053,16 @@ export const makeWorkItemLifecycleLive = (
                 now,
                 maxWaitMs,
               })
+              if (claim._tag === "exhausted") {
+                yield* settleProviderRecoveryCooldown({
+                  sql,
+                  queue,
+                  workItemId,
+                  now,
+                  outcome: "exhausted",
+                  maxWaitMs,
+                })
+              }
               if (claim._tag !== "claimed") {
                 return claim
               }
@@ -6014,6 +6088,7 @@ export const makeWorkItemLifecycleLive = (
                   workItemId,
                   now,
                   workItem?.paused ? "cancelled" : "exited",
+                  queue,
                 )
                 return { _tag: "stale" as const }
               }
@@ -6027,6 +6102,13 @@ export const makeWorkItemLifecycleLive = (
                 })
               ) {
                 yield* applyCiRepairMergeHold(workItemId, now)
+                yield* parkClaimedProbeForCiHold({
+                  sql,
+                  queue,
+                  workItemId,
+                  now,
+                  maxWaitMs,
+                })
                 return { _tag: "woke" as const }
               }
 
@@ -6052,7 +6134,8 @@ export const makeWorkItemLifecycleLive = (
                 (value._tag === "woke" ||
                   value._tag === "stale" ||
                   value._tag === "not_due" ||
-                  value._tag === "exhausted")
+                  value._tag === "exhausted" ||
+                  value._tag === "deferred")
               ) {
                 return { _tag: value._tag }
               }
@@ -6855,6 +6938,7 @@ export const makeWorkItemLifecycleLive = (
                 workItemId,
                 now,
                 "cancelled",
+                queue,
               )
             }),
           )
@@ -7047,6 +7131,7 @@ export const makeWorkItemLifecycleLive = (
                 workItemId,
                 now,
                 "cancelled",
+                queue,
               )
             }),
           )
@@ -7609,6 +7694,7 @@ export const makeWorkItemLifecycleLive = (
                 workItemId,
                 now,
                 "cancelled",
+                queue,
               )
 
               if (
@@ -7947,6 +8033,7 @@ export const makeWorkItemLifecycleLive = (
                   workItemId,
                   now,
                   "cancelled",
+                  queue,
                 )
                 if (
                   current.state === "complete" ||
@@ -8587,6 +8674,14 @@ export const makeWorkItemLifecycleLive = (
                   ).pipe(Effect.mapError(toDatabaseError))
                 }
 
+                yield* settleProviderRecoveryCooldown({
+                  sql,
+                  queue,
+                  workItemId,
+                  now,
+                  outcome: "cancelled",
+                  maxWaitMs: yield* readProviderRecoveryMaxWaitMs(sql),
+                })
                 yield* sql.unsafe(
                   `DELETE FROM step_run WHERE work_item_id = ?`,
                   [workItemId],
@@ -9022,6 +9117,7 @@ export const makeWorkItemLifecycleLive = (
               }
 
               yield* supersedeProviderRecoveryWake(sql, workItemId, now)
+              yield* noteManualRecoveryProbe({ sql, workItemId, now })
 
               const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
               if (!acquired) {

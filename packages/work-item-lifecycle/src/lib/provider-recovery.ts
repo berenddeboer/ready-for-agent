@@ -1,18 +1,17 @@
-import { Duration, Effect, Schema } from "effect"
+import { Effect } from "effect"
 import type { SqlClient } from "effect/sql/SqlClient"
 import type { AgentBackendProvider } from "@ready-for-agent/agent-backend"
 import type { QueueServiceShape } from "@ready-for-agent/queue-service"
+import {
+  coordinateProviderRecoverySchedule,
+  settleProviderRecoveryCooldown,
+} from "./provider-recovery-cooldown.js"
 import {
   PROVIDER_RECOVERY_ESCALATION_AFTER_MS,
   providerRecoveryElapsedExceedsMax,
   providerRecoveryJitterSeed,
   scheduleProviderRecovery,
 } from "./provider-recovery-policy.js"
-import {
-  WORK_ITEM_LIFECYCLE_QUEUE,
-  WorkItemProviderRecoveryJob,
-  makeProviderRecoveryId,
-} from "./types.js"
 
 export const TRANSIENT_PROVIDER_ERROR_REASON = "transient_provider_error"
 const PROVIDER_RECOVERY_EXHAUSTED_REASON = "provider_recovery_exhausted"
@@ -100,17 +99,32 @@ export const closeOpenProviderRecovery = (
   workItemId: string,
   now: number,
   status: "cancelled" | "exited" | "recovered",
+  queue?: QueueServiceShape,
 ) =>
-  sql.unsafe(
-    `UPDATE provider_recovery_episode
-     SET status = ?,
-         next_attempt_at = NULL,
-         generation = generation + 1,
-         updated_at = ?
-     WHERE work_item_id = ?
-       AND status IN ('scheduled', 'in_attempt')`,
-    [status, now, workItemId],
-  )
+  Effect.gen(function* () {
+    yield* sql.unsafe(
+      `UPDATE provider_recovery_episode
+       SET status = ?,
+           next_attempt_at = NULL,
+           generation = generation + 1,
+           updated_at = ?
+       WHERE work_item_id = ?
+         AND status IN ('scheduled', 'in_attempt')`,
+      [status, now, workItemId],
+    )
+    if (queue === undefined) {
+      return
+    }
+    const maxWaitMs = yield* readProviderRecoveryMaxWaitMs(sql)
+    yield* settleProviderRecoveryCooldown({
+      sql,
+      queue,
+      workItemId,
+      now,
+      outcome: status,
+      maxWaitMs,
+    })
+  })
 
 /**
  * Manual Retry keeps the episode so a later transient failure continues the
@@ -199,74 +213,16 @@ export const planTransientProviderFailure = (input: {
   }
 }
 
-const upsertEpisode = (
-  sql: SqlClient,
-  input: {
-    readonly workItemId: string
-    readonly step: string
-    readonly status: string
-    readonly now: number
-    readonly episodeStartedAt: number
-    readonly attemptCount: number
-    readonly nextAttemptAt: number | null
-    readonly generation: number
-    readonly escalated: boolean
-    readonly exhaustedAt: number | null
-    readonly providerId: string | null
-    readonly providerLabel: string | null
-    readonly model: string | null
-    readonly providerCode: string | null
-    readonly reasonMessage: string
-  },
-) =>
-  sql.unsafe(
-    `INSERT INTO provider_recovery_episode (
-       id, work_item_id, lifecycle_step, status, provider_id, provider_label,
-       model, provider_code, reason_message, episode_started_at, attempt_count,
-       next_attempt_at, generation, escalated, exhausted_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(work_item_id) DO UPDATE SET
-       lifecycle_step = excluded.lifecycle_step,
-       status = excluded.status,
-       provider_id = excluded.provider_id,
-       provider_label = excluded.provider_label,
-       model = excluded.model,
-       provider_code = excluded.provider_code,
-       reason_message = excluded.reason_message,
-       episode_started_at = excluded.episode_started_at,
-       attempt_count = excluded.attempt_count,
-       next_attempt_at = excluded.next_attempt_at,
-       generation = excluded.generation,
-       escalated = excluded.escalated,
-       exhausted_at = excluded.exhausted_at,
-       updated_at = excluded.updated_at`,
-    [
-      makeProviderRecoveryId(),
-      input.workItemId,
-      input.step,
-      input.status,
-      input.providerId,
-      input.providerLabel,
-      input.model,
-      input.providerCode,
-      input.reasonMessage,
-      input.episodeStartedAt,
-      input.attemptCount,
-      input.nextAttemptAt,
-      input.generation,
-      input.escalated ? 1 : 0,
-      input.exhaustedAt,
-      input.now,
-      input.now,
-    ],
-  )
-
 export const applyTransientProviderFailurePlan = (input: {
   readonly sql: SqlClient
   readonly queue: QueueServiceShape
   readonly workItemId: string
   readonly step: string
   readonly now: number
+  readonly backend: string
+  readonly accountId: string | null
+  readonly maxWaitMs: number | null
+  readonly providerRetryAt: number | null
   readonly plan: TransientProviderFailurePlan
 }) =>
   Effect.gen(function* () {
@@ -274,57 +230,18 @@ export const applyTransientProviderFailurePlan = (input: {
     if (plan._tag === "skip") {
       return
     }
-    if (plan._tag === "exhaust") {
-      yield* upsertEpisode(input.sql, {
-        workItemId: input.workItemId,
-        step: input.step,
-        status: "exhausted",
-        now: input.now,
-        episodeStartedAt: plan.episodeStartedAt,
-        attemptCount: plan.attemptCount,
-        nextAttemptAt: null,
-        generation: 0,
-        escalated: plan.escalated,
-        exhaustedAt: input.now,
-        providerId: plan.providerId,
-        providerLabel: plan.providerLabel,
-        model: plan.model,
-        providerCode: plan.providerCode,
-        reasonMessage: plan.reasonMessage,
-      })
-      return
-    }
-    yield* upsertEpisode(input.sql, {
+    yield* coordinateProviderRecoverySchedule({
+      sql: input.sql,
+      queue: input.queue,
+      now: input.now,
       workItemId: input.workItemId,
       step: input.step,
-      status: "scheduled",
-      now: input.now,
-      episodeStartedAt: plan.episodeStartedAt,
-      attemptCount: plan.attemptCount,
-      nextAttemptAt: plan.nextAttemptAt,
-      generation: plan.generation,
-      escalated: plan.escalated,
-      exhaustedAt: null,
-      providerId: plan.providerId,
-      providerLabel: plan.providerLabel,
-      model: plan.model,
-      providerCode: plan.providerCode,
-      reasonMessage: plan.reasonMessage,
+      backend: input.backend,
+      accountId: input.accountId,
+      maxWaitMs: input.maxWaitMs,
+      providerRetryAt: input.providerRetryAt,
+      plan,
     })
-    const payload = yield* Schema.decodeUnknownEffect(
-      WorkItemProviderRecoveryJob,
-    )({
-      _tag: "work-item-provider-recovery",
-      workItemId: input.workItemId,
-      generation: plan.generation,
-      nextAttemptAt: plan.nextAttemptAt,
-    })
-    yield* input.queue.enqueueWithDelay(
-      WORK_ITEM_LIFECYCLE_QUEUE,
-      payload,
-      Duration.millis(Math.max(0, plan.nextAttemptAt - input.now)),
-      { retryLimit: 1 },
-    )
   })
 
 export type ProviderRecoveryWakeResult =
@@ -332,6 +249,7 @@ export type ProviderRecoveryWakeResult =
   | { readonly _tag: "stale" }
   | { readonly _tag: "not_due" }
   | { readonly _tag: "exhausted" }
+  | { readonly _tag: "deferred" }
 
 /**
  * Claim a due wake and re-enter ordinary admission. The claim bumps generation

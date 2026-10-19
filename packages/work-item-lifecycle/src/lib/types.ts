@@ -69,6 +69,8 @@ export const makeAutonomousRetryId = (): string => `artry-${ulid()}`
 
 export const makeProviderRecoveryId = (): string => `prev-${ulid()}`
 
+export const makeProviderRecoveryCooldownId = (): string => `prcd-${ulid()}`
+
 export const makeCiRepairAuthorizationId = (): string => `cra-${ulid()}`
 
 export const StepRunStatus = Schema.Literals([

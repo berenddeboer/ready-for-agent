@@ -75,6 +75,11 @@ type AgentBackendExitErrorProps = {
   readonly retryAt?: number
   /** Agent Model used for the turn, when known. Never a credential. */
   readonly model?: string
+  /**
+   * Non-credential account identity, when the adapter already has one.
+   * API keys, tokens, and other secrets must not be passed here.
+   */
+  readonly accountId?: string
   /** Hosting provider known at failure time. Id and label only. */
   readonly provider?: {
     readonly id: string
@@ -109,6 +114,7 @@ export class AgentBackendExitError extends Schema.TaggedError<AgentBackendExitEr
      */
     retryAt: Schema.optionalKey(Schema.Finite),
     model: Schema.optionalKey(Schema.String),
+    accountId: Schema.optionalKey(Schema.String),
     provider: Schema.optionalKey(AgentBackendProviderSchema),
     providerCode: Schema.optionalKey(Schema.String),
     /** Best available human-readable reason. Never empty after construction. */
@@ -129,6 +135,7 @@ export class AgentBackendExitError extends Schema.TaggedError<AgentBackendExitEr
         ? props.retryAt
         : undefined
     const model = identityText(props.model)
+    const accountId = identityText(props.accountId)
     const providerId = identityText(props.provider?.id)
     const providerLabel = identityText(props.provider?.label)
     const providerCode =
@@ -143,6 +150,7 @@ export class AgentBackendExitError extends Schema.TaggedError<AgentBackendExitEr
       ...(classification !== undefined ? { classification } : {}),
       ...(retryAt !== undefined ? { retryAt } : {}),
       ...(model !== undefined ? { model } : {}),
+      ...(accountId !== undefined ? { accountId } : {}),
       ...(providerId !== undefined && providerLabel !== undefined
         ? { provider: { id: providerId, label: providerLabel } }
         : {}),
