@@ -1,11 +1,7 @@
 import { Duration, Effect, Schema } from "effect"
 import type { SqlClient } from "effect/sql/SqlClient"
 import type { AgentBackendProvider } from "@ready-for-agent/agent-backend"
-import type {
-  EnqueueError,
-  InvalidQueueNameError,
-  QueueServiceShape,
-} from "@ready-for-agent/queue-service"
+import type { QueueServiceShape } from "@ready-for-agent/queue-service"
 import {
   PROVIDER_RECOVERY_ESCALATION_AFTER_MS,
   providerRecoveryElapsedExceedsMax,
@@ -19,7 +15,7 @@ import {
 } from "./types.js"
 
 export const TRANSIENT_PROVIDER_ERROR_REASON = "transient_provider_error"
-export const PROVIDER_RECOVERY_EXHAUSTED_REASON = "provider_recovery_exhausted"
+const PROVIDER_RECOVERY_EXHAUSTED_REASON = "provider_recovery_exhausted"
 
 const OPEN_STATUSES = ["scheduled", "in_attempt"] as const
 
@@ -414,5 +410,3 @@ export const claimProviderRecoveryWake = (input: {
     }
     return { _tag: "claimed" as const, step }
   })
-
-export type ProviderRecoveryEnqueueError = EnqueueError | InvalidQueueNameError

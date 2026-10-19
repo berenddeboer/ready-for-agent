@@ -8876,6 +8876,9 @@ export const makeWorkItemLifecycleLive = (
                 return
               }
 
+              // Re-check inside the transaction. A Provider Recovery wake can
+              // enqueue between the earlier read and this write; the unique
+              // active Step Run index must not be the only guard.
               const activeBeforeRetry = (yield* sql.unsafe(
                 `SELECT id, status FROM step_run
                  WHERE work_item_id = ?

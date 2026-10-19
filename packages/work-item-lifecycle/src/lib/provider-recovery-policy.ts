@@ -16,9 +16,9 @@ export const PROVIDER_RECOVERY_ESCALATION_AFTER_MS = 3_600_000
 export const PROVIDER_RECOVERY_ESCALATED_DELAY_MS = 1_800_000
 
 /** Jitter never exceeds 15 seconds or 10% of the chosen delay. */
-export const PROVIDER_RECOVERY_JITTER_CAP_MS = 15_000
+const PROVIDER_RECOVERY_JITTER_CAP_MS = 15_000
 
-export const providerRecoveryBaseDelayMs = (attempt: number): number => {
+const providerRecoveryBaseDelayMs = (attempt: number): number => {
   const index =
     Math.min(Math.max(attempt, 1), PROVIDER_RECOVERY_BASE_DELAYS_MS.length) - 1
   const delay = PROVIDER_RECOVERY_BASE_DELAYS_MS[index]
