@@ -26,6 +26,7 @@ import {
   useRef,
   useState,
 } from "react"
+import { parseProviderRecoveryMaxWaitMinutes } from "@ready-for-agent/work-item-lifecycle/provider-recovery-presentation"
 import { formatAgentBackendStatusTrail } from "../agent-backend-status-label.js"
 import { AgentBackendWarnings } from "../agent-backend-warnings.js"
 import { AgentModelSelect } from "../agent-model-select.js"
@@ -55,6 +56,7 @@ import { openHarnessSettings } from "../harness-settings-nav.js"
 import { JobsRepositoryFilterProvider } from "../jobs-repository-filter.js"
 import { JobsViewSwitcher } from "../jobs-view-switcher.js"
 import { MastheadScrollwork } from "../masthead-scrollwork.js"
+import { ProviderRecoverySettingsFields } from "../provider-recovery-settings.js"
 import { repositoriesQuery } from "../repositories-query.js"
 import {
   isHarnessSettingsPath,
@@ -426,6 +428,10 @@ function SettingsChrome() {
   const [maxConcurrentAgentTurns, setMaxConcurrentOpencodeSessions] =
     useState("2")
   const [maxConcurrentWorkItems, setMaxConcurrentWorkItems] = useState("5")
+  const [providerRecoveryMode, setProviderRecoveryMode] = useState<
+    "unlimited" | "limited"
+  >("unlimited")
+  const [providerRecoveryMinutes, setProviderRecoveryMinutes] = useState("")
   const [previewModels, setPreviewModels] = useState<
     readonly AgentModelOption[] | null
   >(null)
@@ -485,6 +491,19 @@ function SettingsChrome() {
       String(config.data.maxConcurrentAgentTurns),
     )
     setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
+    if (
+      config.data.providerRecoveryMaxWaitMs === null ||
+      config.data.providerRecoveryMaxWaitMs === undefined
+    ) {
+      setProviderRecoveryMode("unlimited")
+      setProviderRecoveryMinutes("")
+    } else {
+      setProviderRecoveryMode("limited")
+      const minutes = config.data.providerRecoveryMaxWaitMs / 60_000
+      setProviderRecoveryMinutes(
+        String(Number.isInteger(minutes) ? minutes : Math.ceil(minutes)),
+      )
+    }
     previewGenerationRef.current += 1
     setPreviewModels(null)
     setPreviewProvider(null)
@@ -597,6 +616,7 @@ function SettingsChrome() {
       reviewThinkingLevel: string | null
       maxConcurrentAgentTurns: number
       maxConcurrentWorkItems: number
+      providerRecoveryMaxWaitMs: number | null
     }) =>
       graphql.mutation({
         updateConfig: {
@@ -793,6 +813,18 @@ function SettingsChrome() {
         String(config.data.maxConcurrentAgentTurns),
       )
       setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
+      if (
+        config.data.providerRecoveryMaxWaitMs === null ||
+        config.data.providerRecoveryMaxWaitMs === undefined
+      ) {
+        setProviderRecoveryMode("unlimited")
+        setProviderRecoveryMinutes("")
+      } else {
+        setProviderRecoveryMode("limited")
+        setProviderRecoveryMinutes(
+          String(config.data.providerRecoveryMaxWaitMs / 60_000),
+        )
+      }
     }
     setPreviewModels(null)
     setPreviewProvider(null)
@@ -1149,11 +1181,16 @@ function SettingsChrome() {
     catalogModels.length === 0
   // Single Save gate used by both the submit button and form onSubmit so Enter
   // cannot bypass a disabled Save control (issue #828 review).
+  const providerRecoveryWait = parseProviderRecoveryMaxWaitMinutes(
+    providerRecoveryMode,
+    providerRecoveryMinutes,
+  )
   const harnessSettingsSaveBlocked =
     config.isPending ||
     config.isError ||
     modelsLoading ||
     updateConfig.isPending ||
+    !providerRecoveryWait.ok ||
     // Claude mode unknown (pending/error/missing agentBackends entry) — fail closed.
     claudeConfigurationModeUnresolved ||
     (backendChangeBlocked && backendChanging) ||
@@ -1172,6 +1209,9 @@ function SettingsChrome() {
     }
     const parsedMaxSessions = Number(maxConcurrentAgentTurns)
     const parsedMaxWorkItems = Number(maxConcurrentWorkItems)
+    const providerRecoveryMaxWaitMs = providerRecoveryWait.ok
+      ? providerRecoveryWait.maxWaitMs
+      : null
     updateConfig.mutate({
       selectedAgentBackend,
       defaultModel: defaultModel.trim() === "" ? null : defaultModel.trim(),
@@ -1182,6 +1222,7 @@ function SettingsChrome() {
         reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel.trim(),
       maxConcurrentAgentTurns: parsedMaxSessions,
       maxConcurrentWorkItems: parsedMaxWorkItems,
+      providerRecoveryMaxWaitMs,
     })
   }
 
@@ -1809,6 +1850,23 @@ function SettingsChrome() {
                     </span>
                   </label>
                 </section>
+
+                <ProviderRecoverySettingsFields
+                  mode={providerRecoveryMode}
+                  minutes={providerRecoveryMinutes}
+                  onModeChange={setProviderRecoveryMode}
+                  onMinutesChange={setProviderRecoveryMinutes}
+                />
+                {!providerRecoveryWait.ok && (
+                  <Banner
+                    className={ui.bannerCompact}
+                    tone="alarm"
+                    tag="Provider"
+                    role="alert"
+                  >
+                    {providerRecoveryWait.message}
+                  </Banner>
+                )}
               </>
             )}
 

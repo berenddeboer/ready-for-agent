@@ -19,6 +19,12 @@
       "types": "./dist/lib/jobs-completed-window.d.ts",
       "import": "./dist/lib/jobs-completed-window.js",
       "default": "./dist/lib/jobs-completed-window.js"
+    },
+    "./provider-recovery-presentation": {
+      "@ready-for-agent/source": "./src/lib/provider-recovery-presentation.ts",
+      "types": "./dist/lib/provider-recovery-presentation.d.ts",
+      "import": "./dist/lib/provider-recovery-presentation.js",
+      "default": "./dist/lib/provider-recovery-presentation.js"
     }
   },
   "dependencies": {

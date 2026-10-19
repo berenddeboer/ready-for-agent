@@ -1267,4 +1267,100 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
       },
     })
   })
+
+  test("scheduled provider recovery is a waiting hold, not a manual failure", () => {
+    const waiting = workItemWith({
+      state: "investigate_pr_status_checks",
+      holdsWorkerSlot: false,
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "investigate_pr_status_checks",
+          status: "failed",
+          reasonCode: "transient_provider_error",
+          reasonMessage:
+            "Selected model is at capacity. Please try a different model.",
+        },
+      ],
+    })
+    const episode = {
+      status: "scheduled" as const,
+      lifecycleStep: "investigate_pr_status_checks",
+      providerId: "openai",
+      providerLabel: "OpenAI",
+      model: "gpt-5.5",
+      providerCode: "server_overloaded",
+      reasonMessage:
+        "Selected model is at capacity. Please try a different model.",
+      episodeStartedAt: Date.parse("2026-10-19T11:48:00.000Z"),
+      attemptCount: 3,
+      nextAttemptAt: Date.parse("2026-10-19T12:04:00.000Z"),
+      escalated: false,
+      exhaustedAt: null,
+    }
+    expect(workItemStatus(waiting, episode)).toBe("waiting_for_provider")
+    expect(workItemStatusLabel(waiting, episode)).toBe("Waiting for provider")
+    expect(workItemCanRetry(waiting)).toBe(true)
+    expect(workItemStatus(waiting, null)).toBe("failed")
+  })
+
+  test("permanent billing failures stay failed without a provider countdown", () => {
+    const billing = workItemWith({
+      state: "implement",
+      holdsWorkerSlot: false,
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "implement",
+          status: "failed",
+          reasonCode: "handler_failed",
+          reasonMessage: "Billing is not active for this account.",
+        },
+      ],
+    })
+    expect(workItemStatus(billing, null)).toBe("failed")
+    expect(workItemStatusLabel(billing, null)).toBe("Failed")
+    expect(workItemStatusMessage(billing, { providerRecovery: null })).toBe(
+      "Billing is not active for this account.",
+    )
+  })
+
+  test("exhausted recovery is an actionable stop, and pause hides the countdown", () => {
+    const stopped = workItemWith({
+      state: "implement",
+      holdsWorkerSlot: false,
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "implement",
+          status: "failed",
+          reasonCode: "provider_recovery_exhausted",
+          reasonMessage: "capacity",
+        },
+      ],
+    })
+    const exhausted = {
+      status: "exhausted" as const,
+      lifecycleStep: "implement",
+      providerId: null,
+      providerLabel: null,
+      model: "gpt-5.5",
+      providerCode: "server_overloaded",
+      reasonMessage: "capacity",
+      episodeStartedAt: 0,
+      attemptCount: 4,
+      nextAttemptAt: null,
+      escalated: true,
+      exhaustedAt: 1,
+    }
+    expect(workItemStatus(stopped, exhausted)).toBe("failed")
+    expect(workItemStatusLabel(stopped, exhausted)).toBe("Recovery stopped")
+    expect(workItemCanRetry(stopped)).toBe(true)
+    expect(
+      workItemStatus(
+        { ...stopped, paused: true },
+        { ...exhausted, status: "cancelled" },
+      ),
+    ).toBe("needs_human_review")
+  })
 })

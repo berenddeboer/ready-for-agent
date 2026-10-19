@@ -17,6 +17,7 @@ const requiredConfigFields = [
   "reviewThinkingLevel",
   "maxConcurrentAgentTurns",
   "maxConcurrentWorkItems",
+  "providerRecoveryMaxWaitMs",
   "unfinishedWorkItemCount",
   "blockingUnfinishedWorkItemCount",
 ] as const
@@ -29,6 +30,7 @@ const completeConfig = {
   reviewThinkingLevel: "low",
   maxConcurrentAgentTurns: 2,
   maxConcurrentWorkItems: 5,
+  providerRecoveryMaxWaitMs: null,
   unfinishedWorkItemCount: 3,
   blockingUnfinishedWorkItemCount: 1,
 }

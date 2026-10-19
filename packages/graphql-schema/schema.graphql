@@ -510,6 +510,12 @@ type Config {
   maxConcurrentAgentTurns: Int!
   maxConcurrentWorkItems: Int!
   """
+  Maximum elapsed Provider Recovery wait in milliseconds, measured from the
+  original episode start. Null means keep retrying. A later change is applied
+  against that start, not against the moment the setting changed.
+  """
+  providerRecoveryMaxWaitMs: Int
+  """
   Fleet-wide unfinished Work Item total (visibility only; includes Needs Human).
   Backend-change gates use blockingUnfinishedWorkItemCount instead.
   """
@@ -1165,6 +1171,12 @@ enum WorkItemStatus {
   This is not a Work Item lifecycle state.
   """
   WAITING_FOR_GITHUB
+  """
+  Derived while a Provider Recovery Episode is scheduled. The Work Item stays
+  in its current pipeline lane. This is not a Work Item lifecycle state and
+  is distinct from a failure that requires manual Retry.
+  """
+  WAITING_FOR_PROVIDER
 }
 
 enum LifecyclePhase {
@@ -1257,10 +1269,65 @@ type StepRunReasonDetail {
 }
 
 """
-Structured latest Step Run reason for operators. Null when the Work Item has
-no Step Run yet. Individual fields may be null when that part was not
-persisted. Messages and cause-chain text are already sanitized.
+Open statuses are SCHEDULED (waiting) and IN_ATTEMPT (automatic retry in
+progress). Terminal statuses are retained for reload.
 """
+enum ProviderRecoveryStatus {
+  SCHEDULED
+  IN_ATTEMPT
+  RECOVERED
+  EXITED
+  EXHAUSTED
+  CANCELLED
+}
+
+"""
+One Provider Recovery Episode. Timestamps are ISO-8601. The countdown is
+derived from nextAttemptAt; this object is the persisted authority.
+"""
+type ProviderRecovery {
+  status: ProviderRecoveryStatus!
+  """
+  Lifecycle Step the episode resumes. Not a Work Item state change.
+  """
+  lifecycleStep: String!
+  providerId: String
+  providerLabel: String
+  """
+  Selected Agent Model. Recovery does not substitute a model.
+  """
+  model: String
+  """
+  Structured provider discriminator, for example server_overloaded.
+  """
+  providerCode: String
+  """
+  Last classified cause.
+  """
+  reasonMessage: String
+  """
+  ISO-8601 episode start. Elapsed waiting and the maximum-wait check use this instant.
+  """
+  episodeStartedAt: String!
+  """
+  Failed automatic attempts in this episode, including the current failure.
+  """
+  attemptCount: Int!
+  """
+  ISO-8601 next scheduled attempt. Null unless status is SCHEDULED.
+  """
+  nextAttemptAt: String
+  """
+  True once this episode has been unresolved for at least one hour.
+  Cleared from the warning when the episode is no longer open.
+  """
+  escalated: Boolean!
+  """
+  ISO-8601 instant automatic recovery stopped for the configured maximum wait.
+  """
+  exhaustedAt: String
+}
+
 type StepRunReason {
   """
   Stable machine-readable Step Run reason code (for example handler_failed).
@@ -1371,6 +1438,13 @@ type WorkItem {
   is Waiting for GitHub.
   """
   postponedUntil: String
+  """
+  Durable Provider Recovery Episode. Null when this Work Item has never
+  entered Provider Recovery. SCHEDULED is the waiting hold. IN_ATTEMPT is the
+  automatic retry in progress. Terminal statuses are retained so reload shows
+  recovered, exited, exhausted, or cancelled instead of inventing a countdown.
+  """
+  providerRecovery: ProviderRecovery
   paused: Boolean!
   """
   True when this Work Item has a queued or running Step Run. Used by the
@@ -1436,6 +1510,12 @@ input UpdateConfigInput {
   reviewThinkingLevel: String
   maxConcurrentAgentTurns: Int!
   maxConcurrentWorkItems: Int!
+  """
+  Maximum elapsed Provider Recovery wait in milliseconds, measured from the
+  original episode start. Null means keep retrying. Omit to leave the stored
+  value unchanged. Zero and negative values are rejected.
+  """
+  providerRecoveryMaxWaitMs: Int
 }
 
 input UpdateRepositorySettingsInput {

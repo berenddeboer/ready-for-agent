@@ -558,6 +558,64 @@ export const ConfigSqlRow = Schema.Struct({
 )
 export type ConfigSqlRow = typeof ConfigSqlRow.Type
 
+export const ProviderRecoveryEpisodeStatus = Schema.Literals([
+  "scheduled",
+  "in_attempt",
+  "recovered",
+  "exited",
+  "exhausted",
+  "cancelled",
+])
+export type ProviderRecoveryEpisodeStatus =
+  typeof ProviderRecoveryEpisodeStatus.Type
+
+export type ProviderRecoveryEpisodeRecord = {
+  readonly workItemId: string
+  readonly lifecycleStep: string
+  readonly status: ProviderRecoveryEpisodeStatus
+  readonly providerId: string | null
+  readonly providerLabel: string | null
+  readonly model: string | null
+  readonly providerCode: string | null
+  readonly reasonMessage: string | null
+  readonly episodeStartedAt: number
+  readonly attemptCount: number
+  readonly nextAttemptAt: number | null
+  readonly escalated: boolean
+  readonly exhaustedAt: number | null
+}
+
+export const ProviderRecoveryEpisodeSqlRow = Schema.Struct({
+  workItemId: Schema.String,
+  lifecycleStep: Schema.String,
+  status: ProviderRecoveryEpisodeStatus,
+  providerId: Schema.NullOr(Schema.String),
+  providerLabel: Schema.NullOr(Schema.String),
+  model: Schema.NullOr(Schema.String),
+  providerCode: Schema.NullOr(Schema.String),
+  reasonMessage: Schema.NullOr(Schema.String),
+  episodeStartedAt: Schema.Int,
+  attemptCount: Schema.Int,
+  nextAttemptAt: Schema.NullOr(Schema.Int),
+  escalated: SqlBoolean,
+  exhaustedAt: Schema.NullOr(Schema.Int),
+}).pipe(
+  Schema.encodeKeys({
+    workItemId: "work_item_id",
+    lifecycleStep: "lifecycle_step",
+    providerId: "provider_id",
+    providerLabel: "provider_label",
+    providerCode: "provider_code",
+    reasonMessage: "reason_message",
+    episodeStartedAt: "episode_started_at",
+    attemptCount: "attempt_count",
+    nextAttemptAt: "next_attempt_at",
+    exhaustedAt: "exhausted_at",
+  }),
+)
+export type ProviderRecoveryEpisodeSqlRow =
+  typeof ProviderRecoveryEpisodeSqlRow.Type
+
 export const GuaranteedMinSumSqlRow = Schema.Struct({
   sum: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
 })

@@ -46,6 +46,8 @@ import {
   IssueSqlRow,
   IssueTracker,
   LinearTeamWorkflowSelection,
+  type ProviderRecoveryEpisodeRecord,
+  ProviderRecoveryEpisodeSqlRow,
   RepositoryId,
   RepositoryRecord,
   RepositorySettingsConfigSqlRow,
@@ -316,6 +318,10 @@ const decodeCiRepairAuthorizationRows = (rows: ReadonlyArray<unknown>) =>
   ).pipe(Effect.mapError(toSchemaDatabaseError))
 const millisOrNull = (value: Date | null): number | null =>
   value === null ? null : value.getTime()
+const decodeProviderRecoveryEpisodeRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(ProviderRecoveryEpisodeSqlRow))(
+    rows,
+  ).pipe(Effect.mapError(toSchemaDatabaseError))
 const decodeConfigRows = (rows: ReadonlyArray<unknown>) =>
   Schema.decodeUnknownEffect(Schema.Array(ConfigSqlRow))(rows).pipe(
     Effect.mapError(toSchemaDatabaseError),
@@ -487,6 +493,13 @@ export interface DbServiceShape {
   readonly setProviderRecoveryMaxWaitMs: (
     value: number | null,
   ) => Effect.Effect<number | null, InvalidConfigInputError | DatabaseError>
+  readonly listProviderRecoveryEpisodes: Effect.Effect<
+    readonly ProviderRecoveryEpisodeRecord[],
+    DatabaseError
+  >
+  readonly getProviderRecoveryEpisode: (
+    workItemId: string,
+  ) => Effect.Effect<ProviderRecoveryEpisodeRecord | null, DatabaseError>
   readonly getBackendModelPrefs: (
     backendId: string,
   ) => Effect.Effect<BackendModelPrefs, DatabaseError>
@@ -884,6 +897,58 @@ export const DbServiceLive = Layer.effect(
         )
         .pipe(Effect.mapError(toDatabaseError))
       return value
+    })
+
+    const providerRecoveryEpisodeSelect = `work_item_id, lifecycle_step, status,
+      provider_id, provider_label, model, provider_code, reason_message,
+      episode_started_at, attempt_count, next_attempt_at, escalated, exhausted_at`
+
+    const toProviderRecoveryEpisodeRecord = (
+      row: typeof ProviderRecoveryEpisodeSqlRow.Type,
+    ): ProviderRecoveryEpisodeRecord => ({
+      workItemId: row.workItemId,
+      lifecycleStep: row.lifecycleStep,
+      status: row.status,
+      providerId: row.providerId,
+      providerLabel: row.providerLabel,
+      model: row.model,
+      providerCode: row.providerCode,
+      reasonMessage: row.reasonMessage,
+      episodeStartedAt: row.episodeStartedAt,
+      attemptCount: row.attemptCount,
+      nextAttemptAt: row.nextAttemptAt,
+      escalated: row.escalated,
+      exhaustedAt: row.exhaustedAt,
+    })
+
+    const listProviderRecoveryEpisodes: Effect.Effect<
+      readonly ProviderRecoveryEpisodeRecord[],
+      DatabaseError
+    > = Effect.gen(function* () {
+      const rows = yield* sql
+        .unsafe(
+          `SELECT ${providerRecoveryEpisodeSelect}
+           FROM provider_recovery_episode`,
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+      const decoded = yield* decodeProviderRecoveryEpisodeRows(rows)
+      return decoded.map(toProviderRecoveryEpisodeRecord)
+    }).pipe(Effect.withSpan("DbService.listProviderRecoveryEpisodes"))
+
+    const getProviderRecoveryEpisode = Effect.fn(
+      "DbService.getProviderRecoveryEpisode",
+    )(function* (workItemId: string) {
+      const rows = yield* sql
+        .unsafe(
+          `SELECT ${providerRecoveryEpisodeSelect}
+           FROM provider_recovery_episode
+           WHERE work_item_id = ?`,
+          [workItemId],
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+      const decoded = yield* decodeProviderRecoveryEpisodeRows(rows)
+      const row = decoded[0]
+      return row === undefined ? null : toProviderRecoveryEpisodeRecord(row)
     })
 
     /**
@@ -2766,6 +2831,8 @@ export const DbServiceLive = Layer.effect(
       getConfig,
       getProviderRecoveryMaxWaitMs,
       setProviderRecoveryMaxWaitMs,
+      listProviderRecoveryEpisodes,
+      getProviderRecoveryEpisode,
       getBackendModelPrefs,
       getRepositoryBackendModelPrefs,
       updateConfig,

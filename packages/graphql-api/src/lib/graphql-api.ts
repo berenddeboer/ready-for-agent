@@ -95,6 +95,12 @@ import {
   observeRepositoryCiGate,
 } from "./observe-repository-ci-gate.js"
 import {
+  attachProviderRecovery,
+  attachedProviderRecovery,
+  toGraphqlProviderRecovery,
+  toProviderRecoverySnapshot,
+} from "./provider-recovery-projection.js"
+import {
   RepositoryCredentialError,
   activatePollingIfCredentialed,
   azureDevOpsTokenSecretName,
@@ -163,6 +169,10 @@ type UpdateConfigArgs = {
     reviewThinkingLevel?: string | null
     maxConcurrentAgentTurns: number
     maxConcurrentWorkItems: number
+    /**
+     * Undefined leaves the stored maximum unchanged. Null means keep retrying.
+     */
+    providerRecoveryMaxWaitMs?: number | null
   }
 }
 
@@ -206,6 +216,16 @@ type UpdateRepositorySettingsArgs = {
 }
 
 type GraphqlMergePolicy = "OFF" | "CLASSIFY" | "ALWAYS"
+
+const providerRecoveryFor = (workItem: WorkItemRecord) =>
+  Effect.gen(function* () {
+    const attached = attachedProviderRecovery(workItem)
+    if (attached !== undefined) {
+      return attached
+    }
+    const db = yield* DbService
+    return yield* db.getProviderRecoveryEpisode(workItem.id)
+  })
 
 const toGraphqlMergePolicy = (policy: MergePolicy): GraphqlMergePolicy => {
   switch (policy) {
@@ -1226,22 +1246,26 @@ export const createGraphqlApi = <R>(
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
+                const db = yield* DbService
                 const listKind = toWorkItemsListKind(args.listKind)
                 const limit = args.limit
                 const nowMs = Date.now()
+                const episodes = yield* db.listProviderRecoveryEpisodes
                 if (args.nativeId !== undefined) {
                   const workItems = yield* lifecycle.listWorkItemsForIssue(
                     args.repositoryId,
                     args.nativeId,
                   )
-                  return filterWorkItemsByListKind(
-                    workItems,
-                    listKind,
-                    limit,
-                    nowMs,
+                  return attachProviderRecovery(
+                    filterWorkItemsByListKind(
+                      workItems,
+                      listKind,
+                      limit,
+                      nowMs,
+                    ),
+                    episodes,
                   )
                 }
-                const db = yield* DbService
                 const [workItems, issues] = yield* Effect.all([
                   lifecycle.listWorkItemsForRepository(args.repositoryId),
                   db.listIssues(args.repositoryId),
@@ -1255,11 +1279,9 @@ export const createGraphqlApi = <R>(
                     isJobsWorkingWorkItem(workItem) ||
                     relevantNativeIds.has(workItem.issueSource.nativeId),
                 )
-                return filterWorkItemsByListKind(
-                  visible,
-                  listKind,
-                  limit,
-                  nowMs,
+                return attachProviderRecovery(
+                  filterWorkItemsByListKind(visible, listKind, limit, nowMs),
+                  episodes,
                 )
               }).pipe(Effect.withSpan("graphql-api.workItems")),
               context,
@@ -1276,15 +1298,17 @@ export const createGraphqlApi = <R>(
                   args.pageSize,
                 )
                 const lifecycle = yield* WorkItemLifecycle
+                const db = yield* DbService
                 const result = yield* lifecycle.listCompletedWorkItems({
                   page,
                   pageSize,
                 })
+                const episodes = yield* db.listProviderRecoveryEpisodes
                 const hasPreviousPage = result.page > 1
                 const hasNextPage =
                   result.page * result.pageSize < result.totalCount
                 return {
-                  items: result.items,
+                  items: attachProviderRecovery(result.items, episodes),
                   page: result.page,
                   pageSize: result.pageSize,
                   totalCount: result.totalCount,
@@ -1458,6 +1482,7 @@ export const createGraphqlApi = <R>(
                   { concurrency: "unbounded" },
                 )
                 const nowMs = Date.now()
+                const episodes = yield* db.listProviderRecoveryEpisodes
                 const source = buildKanbanSourceSet(perRepository.flat(), nowMs)
                 const visible =
                   filterRepositoryId === null
@@ -1470,22 +1495,33 @@ export const createGraphqlApi = <R>(
                   string,
                   (typeof repositories)[number]
                 >(repositories.map((repository) => [repository.id, repository]))
+                const recoveryByWorkItemId = new Map(
+                  episodes.map((episode) => [episode.workItemId, episode]),
+                )
                 const classifiable = visible.flatMap((workItem) => {
                   const repository = repositoryById.get(workItem.repositoryId)
                   if (repository === undefined) {
                     return []
+                  }
+                  const episode = recoveryByWorkItemId.get(workItem.id) ?? null
+                  const withRecovery = {
+                    ...workItem,
+                    providerRecoveryEpisode: episode,
                   }
                   return [
                     {
                       id: workItem.id,
                       repositoryId: workItem.repositoryId,
                       state: workItem.state,
-                      status: workItemStatus(workItem),
+                      status: workItemStatus(
+                        workItem,
+                        toProviderRecoverySnapshot(episode),
+                      ),
                       failureCode: workItem.failureCode,
                       createdAt: workItem.createdAt,
                       stateReadyAt: workItem.stateReadyAt,
                       repository,
-                      workItem,
+                      workItem: withRecovery,
                     },
                   ]
                 })
@@ -1665,6 +1701,22 @@ export const createGraphqlApi = <R>(
               context,
             ),
         },
+        Config: {
+          providerRecoveryMaxWaitMs: async (
+            _parent: unknown,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.flatMap(
+                DbService,
+                (db) => db.getProviderRecoveryMaxWaitMs,
+              ).pipe(
+                Effect.withSpan("graphql-api.Config.providerRecoveryMaxWaitMs"),
+              ),
+              context,
+            ),
+        },
         WorkItem: {
           origin: (workItem: WorkItemRecord) =>
             toGraphqlWorkItemOrigin(workItem.origin),
@@ -1708,23 +1760,52 @@ export const createGraphqlApi = <R>(
           state: (workItem: { state: string }) => workItem.state.toUpperCase(),
           stateLabel: (workItem: WorkItemRecord) =>
             workItemStateLabel(workItem),
-          status: (workItem: WorkItemRecord) =>
-            workItemStatus(workItem).toUpperCase(),
-          statusLabel: (workItem: WorkItemRecord) =>
-            workItemStatusLabel(workItem),
+          status: async (
+            workItem: WorkItemRecord,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const episode = toProviderRecoverySnapshot(
+                  yield* providerRecoveryFor(workItem),
+                )
+                return workItemStatus(workItem, episode).toUpperCase()
+              }).pipe(Effect.withSpan("graphql-api.WorkItem.status")),
+              context,
+            ),
+          statusLabel: async (
+            workItem: WorkItemRecord,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const episode = toProviderRecoverySnapshot(
+                  yield* providerRecoveryFor(workItem),
+                )
+                return workItemStatusLabel(workItem, episode)
+              }).pipe(Effect.withSpan("graphql-api.WorkItem.statusLabel")),
+              context,
+            ),
           statusMessage: async (
             workItem: WorkItemRecord,
             _args: unknown,
             context: GraphqlRequestContext,
           ) => {
-            if (
-              workItemIsTerminal(workItem) ||
-              (!workItem.waitingForBlockers && !workItem.waitingForCiRepair)
-            ) {
-              return workItemStatusMessage(workItem)
-            }
             return runGraphql(
               Effect.gen(function* () {
+                const episode = toProviderRecoverySnapshot(
+                  yield* providerRecoveryFor(workItem),
+                )
+                if (
+                  workItemIsTerminal(workItem) ||
+                  (!workItem.waitingForBlockers && !workItem.waitingForCiRepair)
+                ) {
+                  return workItemStatusMessage(workItem, {
+                    providerRecovery: episode,
+                  })
+                }
                 const db = yield* DbService
                 const issues = workItem.waitingForBlockers
                   ? yield* db.listIssues(workItem.repositoryId)
@@ -1751,11 +1832,25 @@ export const createGraphqlApi = <R>(
                   failedCiGateDefinitionLabels,
                   ciFailureIncidentSummary:
                     snapshot?.activeIncident?.summary ?? null,
+                  providerRecovery: episode,
                 })
               }).pipe(Effect.withSpan("graphql-api.WorkItem.statusMessage")),
               context,
             )
           },
+          providerRecovery: async (
+            workItem: WorkItemRecord,
+            _args: unknown,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                return toGraphqlProviderRecovery(
+                  yield* providerRecoveryFor(workItem),
+                )
+              }).pipe(Effect.withSpan("graphql-api.WorkItem.providerRecovery")),
+              context,
+            ),
           latestStepRunDetail: (workItem: WorkItemRecord) =>
             workItemLatestStepRunDetail(workItem),
           latestStepRunReason: (workItem: WorkItemRecord) =>
@@ -1904,6 +1999,19 @@ export const createGraphqlApi = <R>(
                       reviewThinkingLevel:
                         args.input.reviewThinkingLevel ?? null,
                     }
+                    if (args.input.providerRecoveryMaxWaitMs !== undefined) {
+                      const maxWait = args.input.providerRecoveryMaxWaitMs
+                      if (
+                        maxWait !== null &&
+                        (!Number.isSafeInteger(maxWait) || maxWait < 1)
+                      ) {
+                        return yield* new InvalidConfigInputError({
+                          field: "providerRecoveryMaxWaitMs",
+                          message:
+                            "providerRecoveryMaxWaitMs must be a positive integer or null",
+                        })
+                      }
+                    }
                     yield* validateAgentModelsAgainstCatalog({
                       backendId: args.input.selectedAgentBackend,
                       inspectInput: inspectInput(agentBackendCwd),
@@ -1931,6 +2039,11 @@ export const createGraphqlApi = <R>(
                         args.input.maxConcurrentAgentTurns,
                       maxConcurrentWorkItems: args.input.maxConcurrentWorkItems,
                     })
+                    if (args.input.providerRecoveryMaxWaitMs !== undefined) {
+                      yield* db.setProviderRecoveryMaxWaitMs(
+                        args.input.providerRecoveryMaxWaitMs,
+                      )
+                    }
                     // Sync Active set to selected-or-in-use after Save (activate
                     // missing, drop unused). Same-backend members skip re-inspect.
                     const selectedOrInUse =

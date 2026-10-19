@@ -88,6 +88,11 @@ import {
   EmptyRepositoriesBlankSlate,
   addRepositoryCommandQuery,
 } from "./pipeline-page.js"
+import {
+  ProviderRecoveryStatus,
+  type ProviderRecoveryView,
+  providerRecoveryReplacesStatusMessage,
+} from "./provider-recovery-status.js"
 import { followRepositoryIssuesLive } from "./refresh-issues-live.js"
 import {
   followOpenPullRequestCountLive,
@@ -314,6 +319,7 @@ type WorkItemStatus =
   | "WAITING_FOR_BLOCKERS"
   | "WAITING_FOR_CI_REPAIR"
   | "WAITING_FOR_GITHUB"
+  | "WAITING_FOR_PROVIDER"
 
 export type WorkItem = {
   id: string
@@ -361,6 +367,7 @@ export type WorkItem = {
     code: string | null
   } | null
   postponedUntil: string | null
+  providerRecovery?: ProviderRecoveryView | null
   paused: boolean
   hasActiveStepRun: boolean
   canRetry: boolean
@@ -448,6 +455,20 @@ const workItemFields = {
     code: true,
   },
   postponedUntil: true,
+  providerRecovery: {
+    status: true,
+    lifecycleStep: true,
+    providerId: true,
+    providerLabel: true,
+    model: true,
+    providerCode: true,
+    reasonMessage: true,
+    episodeStartedAt: true,
+    attemptCount: true,
+    nextAttemptAt: true,
+    escalated: true,
+    exhaustedAt: true,
+  },
   paused: true,
   hasActiveStepRun: true,
   canRetry: true,
@@ -4837,16 +4858,30 @@ export function WorkItemLifecycleStatus({
             })}
           </div>
         ))}
-      {workItem.statusMessage !== null && (
-        <p className={statusMessageClassName}>
-          {isStatusMessageAlarm(status) ? (
-            <span className={ui.statusMessageMark} aria-hidden="true">
-              ▲{" "}
-            </span>
-          ) : null}
-          {workItem.statusMessage}
-        </p>
-      )}
+      <ProviderRecoveryStatus
+        recovery={
+          workItem.isTerminal &&
+          workItem.providerRecovery?.status === "RECOVERED"
+            ? null
+            : (workItem.providerRecovery ?? null)
+        }
+        nowMs={nowMs}
+        paused={workItem.paused}
+      />
+      {workItem.statusMessage !== null &&
+        !providerRecoveryReplacesStatusMessage(
+          workItem.providerRecovery,
+          workItem.paused,
+        ) && (
+          <p className={statusMessageClassName}>
+            {isStatusMessageAlarm(status) ? (
+              <span className={ui.statusMessageMark} aria-hidden="true">
+                ▲{" "}
+              </span>
+            ) : null}
+            {workItem.statusMessage}
+          </p>
+        )}
       {workItem.ciRepair.active !== null && (
         <p className={ui.jobTicketRuntimeLine}>
           CI Gate Bypass for {workItem.ciRepair.active.incident.summary}

@@ -479,6 +479,108 @@ describe("Provider Recovery", () => {
     )
   })
 
+  it("applies a later maximum wait against the original episode start", async () => {
+    const steps: LifecycleStepsShape = {
+      ...successfulSteps,
+      implement: () => Effect.fail(capacityError()),
+    }
+    await run(
+      steps,
+      Effect.gen(function* () {
+        const seeded = yield* seedImplementRun
+        yield* seeded.lifecycle.runStep(seeded.implementRunId)
+        const scheduled = yield* loadEpisode(seeded.sql, seeded.workItemId)
+        const startedAt = scheduled?.episode_started_at
+        expect(startedAt).toBe(1_000_000)
+        const listed = yield* seeded.db.listProviderRecoveryEpisodes
+        expect(
+          listed.find((row) => row.workItemId === seeded.workItemId),
+        ).toMatchObject({
+          status: "scheduled",
+          providerLabel: "OpenAI",
+          model: "gpt-5.5",
+          attemptCount: 1,
+          escalated: false,
+        })
+        // Setting change is later than the outage. A 30s cap is already past
+        // if measured from the original start, and still in the future if
+        // someone wrongly restarts the clock here.
+        yield* TestClock.adjust(40_000)
+        yield* seeded.db.setProviderRecoveryMaxWaitMs(30_000)
+        expect(
+          (yield* loadEpisode(seeded.sql, seeded.workItemId))
+            ?.episode_started_at,
+        ).toBe(startedAt)
+        yield* isolateRecoveryJob(seeded.sql)
+        yield* TestClock.adjust((scheduled?.next_attempt_at ?? 0) - 1_040_000)
+        const queue = yield* QueueService
+        const wake = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+        if (Option.isNone(wake)) {
+          return yield* Effect.die("expected provider recovery wake")
+        }
+        const payload = wake.value.payload as {
+          readonly generation: number
+          readonly nextAttemptAt: number
+        }
+        expect(
+          yield* seeded.lifecycle.wakeProviderRecovery({
+            workItemId: seeded.workItemId,
+            generation: payload.generation,
+            nextAttemptAt: payload.nextAttemptAt,
+          }),
+        ).toEqual({ _tag: "exhausted" })
+        const after = yield* seeded.lifecycle.getWorkItem(seeded.workItemId)
+        expect(after.sessionId).toBe("ses_kept")
+        expect(after.worktreePath).toBe("/tmp/worktrees/acme-widgets-42")
+        expect(
+          after.stepRuns.filter((run) => run.status === "queued"),
+        ).toHaveLength(0)
+        expect(
+          (yield* loadEpisode(seeded.sql, seeded.workItemId))?.status,
+        ).toBe("exhausted")
+      }),
+    )
+  })
+
+  it("still admits when a later generous maximum is inside the original episode", async () => {
+    const steps: LifecycleStepsShape = {
+      ...successfulSteps,
+      implement: () => Effect.fail(capacityError()),
+    }
+    await run(
+      steps,
+      Effect.gen(function* () {
+        const seeded = yield* seedImplementRun
+        yield* seeded.lifecycle.runStep(seeded.implementRunId)
+        const scheduled = yield* loadEpisode(seeded.sql, seeded.workItemId)
+        yield* TestClock.adjust(10_000)
+        yield* seeded.db.setProviderRecoveryMaxWaitMs(2 * 3_600_000)
+        expect(
+          (yield* loadEpisode(seeded.sql, seeded.workItemId))
+            ?.episode_started_at,
+        ).toBe(1_000_000)
+        yield* isolateRecoveryJob(seeded.sql)
+        yield* TestClock.adjust((scheduled?.next_attempt_at ?? 0) - 1_010_000)
+        const queue = yield* QueueService
+        const wake = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+        if (Option.isNone(wake)) {
+          return yield* Effect.die("expected provider recovery wake")
+        }
+        const payload = wake.value.payload as {
+          readonly generation: number
+          readonly nextAttemptAt: number
+        }
+        expect(
+          yield* seeded.lifecycle.wakeProviderRecovery({
+            workItemId: seeded.workItemId,
+            generation: payload.generation,
+            nextAttemptAt: payload.nextAttemptAt,
+          }),
+        ).toEqual({ _tag: "woke" })
+      }),
+    )
+  })
+
   it("cancels a pending wake on Pause and does not admit after the deadline", async () => {
     const steps: LifecycleStepsShape = {
       ...successfulSteps,
