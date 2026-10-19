@@ -67,6 +67,30 @@ Optional browser/e2e setup:
 (cd apps/harness && bunx playwright install --with-deps chromium)
 ```
 
+## Releases and breaking changes
+
+Releases are published only by manually dispatching the **CI/CD** workflow
+from `main`, after the release PR has merged. The workflow computes the
+version from conventional commits since the last release tag; do not bump
+the placeholder package versions by hand.
+
+A breaking-change commit advances the major version even on `0.x`. For the
+OpenCode 2 requirement, merging the following title and footer makes the
+next release after `0.33.1` **1.0.0**:
+
+```text
+docs(opencode)!: require OpenCode 2 for the 1.0 release
+
+BREAKING CHANGE: The OpenCode backend requires OpenCode 2. OpenCode 1 is no longer supported. Upgrade the CLI and any explicitly configured OpenCode server before using this backend.
+```
+
+Keep the `!` in the PR title and the `BREAKING CHANGE:` footer in its body
+when squash-merging: the repository uses the PR title and body for the
+squash commit, and release analysis reads commits on `main`, not PR labels.
+Update the operator upgrade guidance for every breaking change. See
+[the release decision](docs/adr/0024-manual-oidc-npm-release.md) for the
+publication and validation policy.
+
 ## GitHub Actions workflow check
 
 [jactionlint](https://github.com/jdx/jactionlint) `2.2.0`, the version pinned

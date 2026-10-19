@@ -57,6 +57,22 @@ describe("computeNextVersion", () => {
     })
   })
 
+  it("releases 1.0.0 for the OpenCode 2 requirement in a squash title", () => {
+    const result = computeNextVersion({
+      lastVersion: "v0.33.1",
+      commitMessages: [
+        "fix: correct an existing integration",
+        "feat: add another supported workflow",
+        "docs(opencode)!: require OpenCode 2 for the 1.0 release",
+      ],
+    })
+
+    expect(result).toMatchObject({
+      version: "1.0.0",
+      releaseType: "major",
+    })
+  })
+
   it("bumps major for BREAKING CHANGE footer without bang", () => {
     const result = computeNextVersion({
       lastVersion: "2.0.0",
