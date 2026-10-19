@@ -74,6 +74,16 @@ describe("scrubProviderCredentialSecrets", () => {
     expect(clean).not.toContain("sessiontok")
     expect(clean).toContain("[redacted]")
   })
+
+  it("redacts Keymaxxer capability URLs and OpenCode server passwords", () => {
+    const capability = "http://127.0.0.1:6057/cap-secret/mcp"
+    const dirty = `mcp ${capability} OPENCODE_PASSWORD=server-secret OPENCODE_SERVER_PASSWORD=other-secret`
+    const clean = scrubProviderCredentialSecrets(dirty)
+    expect(clean).not.toContain("cap-secret")
+    expect(clean).not.toContain("server-secret")
+    expect(clean).not.toContain("other-secret")
+    expect(clean).toContain("[redacted]")
+  })
 })
 
 describe("formatTerminalAuthErrorMessage", () => {

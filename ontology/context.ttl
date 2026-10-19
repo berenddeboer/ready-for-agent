@@ -947,6 +947,36 @@ rfa:KeymaxxerSidecar
   rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Sidecar for this concept."@en ;
 ] .
 
+rfa:HarnessOwnedOpenCodeServer
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Harness-owned OpenCode server"@en ;
+  skos:definition "The private OpenCode 2 server the Harness starts only while Keymaxxer is enabled, so Agent Turns receive the Sidecar capability URL. It is not the operator's shared OpenCode service, and the Harness does not start, stop, or reconfigure that service. When Keymaxxer is disabled, the Harness does not start this server."@en ;
+  skos:hiddenLabel "OpenCode service"@en, "shared OpenCode server"@en, "standalone OpenCode"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:HarnessOwnedOpenCodeServer ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "OpenCode service"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Harness-owned OpenCode server for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:HarnessOwnedOpenCodeServer ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "shared OpenCode server"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Harness-owned OpenCode server for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:HarnessOwnedOpenCodeServer ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "standalone OpenCode"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Harness-owned OpenCode server for this concept."@en ;
+] .
+
 rfa:AgentBackend
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Agent Backend"@en ;

@@ -74,14 +74,32 @@ export const splitOpenCodeModelReference = (
     : { providerID, id, variant }
 }
 
-/** Prepend `--server` so a turn uses the same explicit server as telemetry. */
+/**
+ * Attach `--server` where OpenCode 2.0.32 accepts it.
+ *
+ * `run` accepts the flag before the subcommand. `api` and `session export`
+ * reject that position and accept the flag only on their own command.
+ */
 export const withOpenCodeServer = (
   args: ReadonlyArray<string>,
   serverUrl: string | undefined,
-): ReadonlyArray<string> =>
-  serverUrl === undefined || serverUrl.trim().length === 0
-    ? args
-    : ["--server", serverUrl, ...args]
+): ReadonlyArray<string> => {
+  if (serverUrl === undefined || serverUrl.trim().length === 0) return args
+  const flag = ["--server", serverUrl] as const
+  const [command, subcommand, ...rest] = args
+  if (command === "api") {
+    return [
+      command,
+      ...flag,
+      ...(subcommand === undefined ? [] : [subcommand]),
+      ...rest,
+    ]
+  }
+  if (command === "session" && subcommand !== undefined) {
+    return [command, subcommand, ...flag, ...rest]
+  }
+  return [...flag, ...args]
+}
 
 export const buildRunArgs = (input: {
   readonly prompt: string
@@ -124,6 +142,21 @@ const commandApiBody = (input: {
 
 const directoryHeader = (directory: string): string =>
   `x-opencode-directory:${encodeURIComponent(directory)}`
+
+/**
+ * Model catalog read for a harness-owned server. The directory header keeps
+ * the catalog on the worktree. Callers prepend `--server`; this is not the
+ * disabled-Keymaxxer `--standalone` catalog read.
+ */
+export const buildModelCatalogApiArgs = (input: {
+  readonly directory: string
+}): ReadonlyArray<string> => [
+  "api",
+  "--header",
+  directoryHeader(input.directory),
+  "get",
+  "/api/model",
+]
 
 const resolvedModel = (
   model: string,

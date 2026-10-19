@@ -23,10 +23,42 @@ const messageFromArgs = (args: ReadonlyArray<string>): string =>
 const obsoleteFlags = ["--dir", "--variant", "--command"]
 
 describe("withOpenCodeServer", () => {
-  it("prepends the explicit server used by telemetry reads", () => {
+  it("places --server where OpenCode 2.0.32 accepts it", () => {
     expect(
       withOpenCodeServer(["run", "--auto"], "http://127.0.0.1:4096"),
     ).toEqual(["--server", "http://127.0.0.1:4096", "run", "--auto"])
+    expect(
+      withOpenCodeServer(
+        [
+          "api",
+          "--header",
+          "x-opencode-directory:%2Fwork",
+          "get",
+          "/api/model",
+        ],
+        "http://127.0.0.1:4096",
+      ),
+    ).toEqual([
+      "api",
+      "--server",
+      "http://127.0.0.1:4096",
+      "--header",
+      "x-opencode-directory:%2Fwork",
+      "get",
+      "/api/model",
+    ])
+    expect(
+      withOpenCodeServer(
+        ["session", "export", "ses_1"],
+        "http://127.0.0.1:4096",
+      ),
+    ).toEqual([
+      "session",
+      "export",
+      "--server",
+      "http://127.0.0.1:4096",
+      "ses_1",
+    ])
     expect(withOpenCodeServer(["api", "get", "/api/info"], undefined)).toEqual([
       "api",
       "get",

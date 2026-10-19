@@ -34,6 +34,8 @@ describe("application runtime disposal", () => {
           | undefined
         let disposed = false
         let closeCalls = 0
+        let ownedServerStarts = 0
+        let ownedServerDisposes = 0
         const client: KeymaxxerToolClient = {
           callTool: async () => ({
             content: [
@@ -80,6 +82,20 @@ describe("application runtime disposal", () => {
                 createClient: async () => client,
                 fetch: async () => new Response(null, { status: 404 }),
               },
+              startOwnedOpenCodeServer: async () => {
+                ownedServerStarts += 1
+                return {
+                  baseUrl: "http://127.0.0.1:9",
+                  password: "test-password",
+                  headers: { authorization: "Basic dGVzdA==" },
+                  pid: 0,
+                  assertAvailable: () =>
+                    "Harness-owned OpenCode server is not running in this disposal test.",
+                  dispose: async () => {
+                    ownedServerDisposes += 1
+                  },
+                }
+              },
             }),
           )
           const response = yield* Effect.promise(() =>
@@ -110,6 +126,8 @@ describe("application runtime disposal", () => {
           yield* Effect.promise(() => application!.dispose())
           disposed = true
           expect(closeCalls).toBe(1)
+          expect(ownedServerStarts).toBe(1)
+          expect(ownedServerDisposes).toBe(1)
         }).pipe(
           // Always dispose a half-built application if the body fails mid-way.
           Effect.ensuring(
