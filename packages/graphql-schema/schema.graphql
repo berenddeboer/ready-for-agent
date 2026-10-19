@@ -1041,7 +1041,10 @@ Successful Retry of one Work Item through ordinary Work Item Retry, including
 Worker Slot re-admission (which may leave the item Waiting for Worker Slot).
 """
 type RetryWorkItemsRetried {
-  issueNumber: Int!
+  """
+  Null for a CI Repair Work Item, which has no Issue.
+  """
+  issueNumber: Int
   workItem: WorkItem!
 }
 
@@ -1050,7 +1053,10 @@ The target was selected but is no longer eligible (ineligible race, paused,
 or a latest Step Run that does not permit Retry). Processing continues.
 """
 type RetryWorkItemsSkipped {
-  issueNumber: Int!
+  """
+  Null for a CI Repair Work Item, which has no Issue.
+  """
+  issueNumber: Int
   workItem: WorkItem!
   reason: RetryWorkItemsError!
 }
@@ -1060,7 +1066,10 @@ Per-item Retry conflict that does not stop later targets, such as a concurrent
 active Step Run. Earlier successful retries are preserved.
 """
 type RetryWorkItemsFailed {
-  issueNumber: Int!
+  """
+  Null for a CI Repair Work Item, which has no Issue.
+  """
+  issueNumber: Int
   workItem: WorkItem!
   error: RetryWorkItemsError!
 }
@@ -1070,7 +1079,10 @@ Autonomous Retry Budget exhausted for this Work Item at its current
 Lifecycle Step. No Step Run is created. Ordinary canRetry is unchanged.
 """
 type RetryWorkItemsLimitReached {
-  issueNumber: Int!
+  """
+  Null for a CI Repair Work Item, which has no Issue.
+  """
+  issueNumber: Int
   workItem: WorkItem!
   reason: RetryWorkItemsError!
 }
@@ -1080,7 +1092,10 @@ A structured future provider retry time is still in effect. No Step Run is
 created and no Autonomous Retry Budget permit is consumed.
 """
 type RetryWorkItemsDeferred {
-  issueNumber: Int!
+  """
+  Null for a CI Repair Work Item, which has no Issue.
+  """
+  issueNumber: Int
   workItem: WorkItem!
   reason: RetryWorkItemsError!
   """
@@ -1299,7 +1314,11 @@ type WorkItem {
   ISSUE is an ordinary Issue Work Item. CI_REPAIR has no Issue.
   """
   origin: WorkItemOrigin!
-  issueNumber: Int!
+  """
+  Positive Issue number for an Issue-origin Work Item. Null for a CI Repair
+  Work Item, which has no Issue.
+  """
+  issueNumber: Int
   """
   Default branch for a CI Repair Work Item. Null for Issue origin.
   """
@@ -1313,10 +1332,11 @@ type WorkItem {
   """
   ciRepairFailingRuns: [CiRepairFailingRun!]!
   """
-  Original Issue Source captured at creation. Survives later Repository
-  Issue Tracker changes. Other Issue contents remain live.
+  Original Issue Source captured at creation. Null for a CI Repair Work Item.
+  Survives later Repository Issue Tracker changes for Issue origin. Other
+  Issue contents remain live.
   """
-  issueSource: IssueSource!
+  issueSource: IssueSource
   issueTitle: String
   pullRequestNumber: Int
   """

@@ -10,11 +10,26 @@
  */
 import {
   JOBS_COMPLETED_WINDOW_MS,
+  type WorkItemRecord,
   type WorkItemState,
   isJobsCompletedWorkItemState,
   isJobsFailedWorkItem,
   isJobsWorkingWorkItem,
 } from "@ready-for-agent/work-item-lifecycle"
+
+/**
+ * Board and Jobs membership. A CI Repair Work Item is not an Issue, so it is
+ * presented on its own rather than matched through Issue native identity.
+ * Issue-origin rows keep the existing relevance rule.
+ */
+export const includeWorkItemOnIssueBoard = (
+  workItem: WorkItemRecord,
+  relevantNativeIds: ReadonlySet<string>,
+): boolean =>
+  workItem.origin === "ci_repair" ||
+  isJobsCompletedWorkItemState(workItem.state) ||
+  isJobsWorkingWorkItem(workItem) ||
+  relevantNativeIds.has(workItem.issueSource.nativeId)
 
 /** Globally newest terminal failures included in the Kanban source set. */
 export const KANBAN_FAILED_LIMIT = 15

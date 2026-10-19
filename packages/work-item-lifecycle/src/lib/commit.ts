@@ -386,7 +386,7 @@ const parseAndNormalize = (
   }
   return normalizePublicationCopy(
     parsed,
-    context.issueNumber,
+    context.issueNumber ?? 0,
     context.issueSource,
     publicationCopyOptions(context.origin),
   )
@@ -417,7 +417,7 @@ const generatePublicationCopy = (
       .continueTurn({
         sessionId,
         prompt: buildPublicationCopyPrompt({
-          issueNumber: context.issueNumber,
+          issueNumber: context.issueNumber ?? 0,
           attachmentDirectory,
           issueSource: context.issueSource,
           ciRepair: workItemOriginPolicy(context.origin)
@@ -449,7 +449,7 @@ const generatePublicationCopy = (
         .continueTurn({
           sessionId,
           prompt: buildPublicationCopyFormatCorrectionPrompt({
-            issueNumber: context.issueNumber,
+            issueNumber: context.issueNumber ?? 0,
             attachmentDirectory,
             issueSource: context.issueSource,
             ciRepair: workItemOriginPolicy(context.origin)
@@ -483,7 +483,7 @@ const generatePublicationCopy = (
           payloadName: "PUBLICATION_COPY",
         })
       copy = buildHarnessPublicationFallbackCopy({
-        issueNumber: context.issueNumber,
+        issueNumber: context.issueNumber ?? 0,
         issueTitle: context.issueTitle,
         workItemId: context.workItemId,
         issueSource: context.issueSource,
@@ -532,7 +532,7 @@ const resolvePublicationCopy = (
       const message = yield* readHeadCommitMessage(worktreePath)
       const seeded = publicationCopyFromCommitMessage(
         message,
-        context.issueNumber,
+        context.issueNumber ?? 0,
         context.issueSource,
         publicationCopyOptions(context.origin),
       )
@@ -553,7 +553,7 @@ const resolvePublicationCopy = (
       const stored = { title: existingTitle, body: existingBody }
       const normalized = normalizePublicationCopy(
         stored,
-        context.issueNumber,
+        context.issueNumber ?? 0,
         context.issueSource,
         publicationCopyOptions(context.origin),
       )
@@ -597,7 +597,7 @@ const alignCopyWithHeadCommit = (
     const actualMessage = yield* readHeadCommitMessage(worktreePath)
     const fromCommit = publicationCopyFromCommitMessage(
       actualMessage,
-      context.issueNumber,
+      context.issueNumber ?? 0,
       context.issueSource,
       publicationCopyOptions(context.origin),
     )
@@ -731,7 +731,7 @@ const askAgentToRepairCommit = (
       .continueTurn({
         sessionId,
         prompt: buildCommitFallbackPromptWithCopy({
-          issueNumber: context.issueNumber,
+          issueNumber: context.issueNumber ?? 0,
           title: copy.title,
           body: copy.body,
           diagnostics,

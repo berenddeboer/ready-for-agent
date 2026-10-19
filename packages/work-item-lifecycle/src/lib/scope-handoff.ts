@@ -27,7 +27,7 @@ export const loadScopeHandoff = (
           workItemOriginPolicy(context.origin).scopeIssueLine({
             issueUrl: context.issueSource?.url ?? null,
             repositoryId: context.repositoryId,
-            issueNumber: context.issueNumber,
+            issueNumber: context.issueNumber ?? 0,
           }),
           "",
           "## Agreed requirements",

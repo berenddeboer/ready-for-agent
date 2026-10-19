@@ -85,7 +85,7 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
 
       const headRefName = workItemBranchName({
         projectPath: repository.projectPath,
-        issueNumber: workItem.issueNumber,
+        issueNumber: workItem.origin === "issue" ? workItem.issueNumber : null,
         workItemId: workItem.id,
         origin: workItem.origin,
       })

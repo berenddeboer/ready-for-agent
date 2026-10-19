@@ -308,18 +308,22 @@ export const workItem = snakeCase.table(
       .references(() => repository.id, { onDelete: "cascade" }),
     /**
      * `issue` is an ordinary Issue Work Item. `ci_repair` is a CI Repair
-     * Work Item with no Issue.
+     * Work Item with no Issue. Issue identity columns are null for CI Repair.
      */
     origin: text({ enum: WORK_ITEM_ORIGINS }).notNull().default("issue"),
-    issueNumber: integer().notNull(),
+    /**
+     * Positive Issue number for an Issue-origin Work Item. Null when this row
+     * is a CI Repair Work Item.
+     */
+    issueNumber: integer(),
     /**
      * Original Issue Source captured at creation. Survives later Repository
-     * Issue Tracker changes.
+     * Issue Tracker changes. Null for a CI Repair Work Item.
      */
-    issueTracker: text({ enum: ISSUE_TRACKERS }).notNull().default("github"),
-    issueNativeId: text().notNull().default(""),
-    issueDisplayId: text().notNull().default(""),
-    issueUrl: text().notNull().default(""),
+    issueTracker: text({ enum: ISSUE_TRACKERS }),
+    issueNativeId: text(),
+    issueDisplayId: text(),
+    issueUrl: text(),
     issueTitle: text(),
     pullRequestNumber: integer(),
     /** Active Agent Backend captured at Work Item creation (provenance). */
@@ -454,24 +458,22 @@ export const workItem = snakeCase.table(
       .$defaultFn(() => Date.now()),
   },
   (t) => [
-    uniqueIndex("work_item_one_unfinished_v5_uidx")
+    uniqueIndex("work_item_one_unfinished_v6_uidx")
       .on(t.repositoryId, t.issueTracker, t.issueNativeId)
-      .where(sql`${t.state} NOT IN ('complete', 'failed', 'abandoned')`),
+      .where(
+        sql`${t.origin} = 'issue' AND ${t.state} NOT IN ('complete', 'failed', 'abandoned')`,
+      ),
     uniqueIndex("work_item_one_unfinished_ci_repair_uidx")
       .on(t.repositoryId)
       .where(
         sql`${t.origin} = 'ci_repair' AND ${t.state} NOT IN ('complete', 'failed', 'abandoned')`,
       ),
-    index("work_item_repository_issue_created_idx").on(
-      t.repositoryId,
-      t.issueNumber,
-      t.createdAt,
-    ),
-    index("work_item_repository_native_id_created_idx").on(
-      t.repositoryId,
-      t.issueNativeId,
-      t.createdAt,
-    ),
+    index("work_item_repository_issue_created_idx")
+      .on(t.repositoryId, t.issueNumber, t.createdAt)
+      .where(sql`${t.origin} = 'issue'`),
+    index("work_item_repository_native_id_created_idx")
+      .on(t.repositoryId, t.issueNativeId, t.createdAt)
+      .where(sql`${t.origin} = 'issue'`),
   ],
 )
 

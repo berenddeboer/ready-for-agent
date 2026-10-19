@@ -1,6 +1,4 @@
 import {
-  CI_REPAIR_ISSUE_NATIVE_ID,
-  CI_REPAIR_ISSUE_NUMBER,
   buildCiRepairImplementPrompt,
   buildCiRepairNoChangeConfirmationPrompt,
   ciRepairIssueTitle,
@@ -12,9 +10,7 @@ import {
 import { describe, expect, it } from "bun:test"
 
 describe("CI Repair Work Item helpers", () => {
-  it("uses a sentinel issue identity and a default-branch title", () => {
-    expect(CI_REPAIR_ISSUE_NUMBER).toBe(0)
-    expect(CI_REPAIR_ISSUE_NATIVE_ID).toBe("ci-repair")
+  it("names the default branch without an Issue identity", () => {
     expect(ciRepairIssueTitle("main")).toBe("Repair CI on main")
   })
 

@@ -1,9 +1,5 @@
 import { classifyCiGateObservedRun } from "@ready-for-agent/forge-contract"
 
-/** Sentinel Issue identity stored on a CI Repair Work Item. Not a live Issue. */
-export const CI_REPAIR_ISSUE_NUMBER = 0
-export const CI_REPAIR_ISSUE_NATIVE_ID = "ci-repair"
-
 export interface CiRepairFailingRun {
   readonly runIdentity: string
   readonly htmlUrl: string | null

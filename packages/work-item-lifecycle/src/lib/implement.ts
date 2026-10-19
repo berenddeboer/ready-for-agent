@@ -120,7 +120,12 @@ const resolveRepository = (context: LifecycleStepContext) =>
   })
 
 const resolveIssueNumber = (context: LifecycleStepContext) => {
-  if (!Number.isInteger(context.issueNumber) || context.issueNumber <= 0) {
+  const issueNumber = context.issueNumber
+  if (
+    issueNumber === null ||
+    !Number.isInteger(issueNumber) ||
+    issueNumber <= 0
+  ) {
     return Effect.fail(
       new ImplementIssueContextMissingError({
         workItemId: context.workItemId,
@@ -128,7 +133,7 @@ const resolveIssueNumber = (context: LifecycleStepContext) => {
       }),
     )
   }
-  return Effect.succeed(context.issueNumber)
+  return Effect.succeed(issueNumber)
 }
 
 const implementTheIssuePromptLine =

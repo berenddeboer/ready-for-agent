@@ -11810,6 +11810,12 @@ describe("GraphQL API", () => {
       ...workItem,
       id: "wi-first",
       issueNumber: 10,
+      issueSource: {
+        tracker: "github",
+        nativeId: "10",
+        displayId: "10",
+        url: "https://github.com/acme/widgets/issues/10",
+      },
       stepRuns: [
         {
           ...workItem.stepRuns[0]!,
@@ -11822,11 +11828,23 @@ describe("GraphQL API", () => {
       ...first,
       id: "wi-second",
       issueNumber: 11,
+      issueSource: {
+        tracker: "github",
+        nativeId: "11",
+        displayId: "11",
+        url: "https://github.com/acme/widgets/issues/11",
+      },
     }
     const third = {
       ...first,
       id: "wi-third",
       issueNumber: 12,
+      issueSource: {
+        tracker: "github",
+        nativeId: "12",
+        displayId: "12",
+        url: "https://github.com/acme/widgets/issues/12",
+      },
     }
     const retried = {
       ...third,
@@ -11929,6 +11947,12 @@ describe("GraphQL API", () => {
       ...workItem,
       id: "wi-limited",
       issueNumber: 10,
+      issueSource: {
+        tracker: "github",
+        nativeId: "10",
+        displayId: "10",
+        url: "https://github.com/acme/widgets/issues/10",
+      },
       stepRuns: [
         {
           ...workItem.stepRuns[0]!,
@@ -11941,6 +11965,12 @@ describe("GraphQL API", () => {
       ...limited,
       id: "wi-deferred",
       issueNumber: 11,
+      issueSource: {
+        tracker: "github",
+        nativeId: "11",
+        displayId: "11",
+        url: "https://github.com/acme/widgets/issues/11",
+      },
     }
     const retryAt = Date.parse("2026-08-15T13:00:00.000Z")
     const seen: Array<{ id: string; autonomous?: number }> = []
@@ -12111,6 +12141,12 @@ describe("GraphQL API", () => {
       ...workItem,
       id: "wi-first",
       issueNumber: 10,
+      issueSource: {
+        tracker: "github",
+        nativeId: "10",
+        displayId: "10",
+        url: "https://github.com/acme/widgets/issues/10",
+      },
       stepRuns: [
         {
           ...workItem.stepRuns[0]!,
@@ -12123,6 +12159,12 @@ describe("GraphQL API", () => {
       ...first,
       id: "wi-second",
       issueNumber: 11,
+      issueSource: {
+        tracker: "github",
+        nativeId: "11",
+        displayId: "11",
+        url: "https://github.com/acme/widgets/issues/11",
+      },
     }
     const retried = {
       ...first,

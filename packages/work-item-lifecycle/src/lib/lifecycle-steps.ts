@@ -80,7 +80,11 @@ import type {
 export interface LifecycleStepContext {
   readonly workItemId: WorkItemId
   readonly repositoryId: string
-  readonly issueNumber: number
+  /**
+   * Positive Issue number for an Issue Work Item. Null for a CI Repair
+   * Work Item, which has no Issue.
+   */
+  readonly issueNumber: number | null
   /** Absent on legacy step-handler tests; production always sets it. */
   readonly origin?: WorkItemOrigin
   readonly ciRepairDefaultBranch?: string | null

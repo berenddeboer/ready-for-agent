@@ -19,12 +19,12 @@ export const repositorySlug = (projectPath: string): string =>
  */
 export const workItemBranchName = (input: {
   readonly projectPath: string
-  readonly issueNumber: number
+  readonly issueNumber?: number | null
   readonly workItemId: string
   readonly origin?: WorkItemOrigin
 }): string =>
   workItemOriginPolicy(input.origin).branchName({
     slug: repositorySlug(input.projectPath),
-    issueNumber: input.issueNumber,
+    issueNumber: input.issueNumber ?? 0,
     workItemId: input.workItemId,
   })

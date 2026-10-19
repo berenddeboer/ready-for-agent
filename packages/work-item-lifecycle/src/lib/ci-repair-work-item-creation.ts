@@ -8,7 +8,6 @@ import {
   RepositoryNotFoundError,
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
-import { defaultIssueTrackerForForge } from "@ready-for-agent/lifecycle-model"
 import {
   EnqueueError,
   InvalidQueueNameError,
@@ -20,8 +19,6 @@ import {
   loadCiRepairBaselines,
 } from "./ci-repair-baseline.js"
 import {
-  CI_REPAIR_ISSUE_NATIVE_ID,
-  CI_REPAIR_ISSUE_NUMBER,
   type CiRepairFailingRun,
   type CiRepairTarget,
   ciRepairIssueTitle,
@@ -107,7 +104,7 @@ export interface CiRepairWorkItemCreationDeps {
     WorkItemLifecycleDatabaseError | EnqueueError | InvalidQueueNameError
   >
   readonly toDatabaseError: (error: SqlError) => WorkItemLifecycleDatabaseError
-  readonly isUnfinishedWorkItemUniqueViolation: (error: SqlError) => boolean
+  readonly isUnfinishedCiRepairUniqueViolation: (error: SqlError) => boolean
 }
 
 /**
@@ -291,7 +288,6 @@ const createCiRepairWorkItem = (
         const workItemId = makeWorkItemId()
         const now = yield* Clock.currentTimeMillis
         const step: OperationalLifecycleStep = "create_worktree"
-        const issueTracker = defaultIssueTrackerForForge(repository.forge)
         const failingRunsJson = serializeCiRepairFailingRuns(
           evidence.failingRuns,
         )
@@ -317,8 +313,8 @@ const createCiRepairWorkItem = (
                  ) VALUES (
                    ?, ?, 'ci_repair',
                    ?, ?, ?,
-                   ?, ?, ?,
-                   ?, '', ?,
+                   NULL, NULL, NULL,
+                   NULL, NULL, ?,
                    ?, ?, ?, 0,
                    ?, 0, 0,
                    'ordinary', ?,
@@ -330,10 +326,6 @@ const createCiRepairWorkItem = (
                   evidence.defaultBranch,
                   evidence.headSha,
                   failingRunsJson,
-                  CI_REPAIR_ISSUE_NUMBER,
-                  issueTracker,
-                  CI_REPAIR_ISSUE_NATIVE_ID,
-                  CI_REPAIR_ISSUE_NATIVE_ID,
                   agentBackendId,
                   ciRepairIssueTitle(evidence.defaultBranch),
                   step,
@@ -365,7 +357,7 @@ const createCiRepairWorkItem = (
                   error !== null &&
                   "_tag" in error &&
                   (error as { _tag: string })._tag === "SqlError" &&
-                  deps.isUnfinishedWorkItemUniqueViolation(error as SqlError)
+                  deps.isUnfinishedCiRepairUniqueViolation(error as SqlError)
                 ) {
                   return Effect.succeed({ _tag: "conflict" as const })
                 }

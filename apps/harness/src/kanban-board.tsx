@@ -145,19 +145,22 @@ export function PipelineTicket({
           workItem.ciRepairDefaultBranch.trim() !== ""
         ? `Repair CI on ${workItem.ciRepairDefaultBranch}`
         : "Repair CI"
-  const issueUrl =
-    issue?.url !== undefined && issue.url !== ""
+  const issueUrl = isCiRepair
+    ? null
+    : issue?.url !== undefined && issue.url !== ""
       ? issue.url
-      : repository === undefined
+      : repository === undefined || workItem.issueSource === null
         ? null
         : workItem.issueSource.url !== ""
           ? workItem.issueSource.url
-          : workItemIssueUrl(
-              repository.forge,
-              repository.forgeHost,
-              repository.projectPath,
-              workItem.issueNumber,
-            )
+          : workItem.issueNumber === null
+            ? null
+            : workItemIssueUrl(
+                repository.forge,
+                repository.forgeHost,
+                repository.projectPath,
+                workItem.issueNumber,
+              )
   const pullRequestUrl =
     repository === undefined
       ? null
@@ -260,14 +263,14 @@ export function PipelineTicket({
           href={issueUrl}
         >
           <span className={ui.jobTicketNum}>
-            {formatIssueDisplayId(workItem.issueSource.displayId)}
+            {formatIssueDisplayId(workItem.issueSource?.displayId ?? "")}
           </span>
           {issueTitle === undefined ? null : ` ${issueTitle}`}
         </a>
       ) : (
         <span className={ui.jobTicketTitle}>
           <span className={ui.jobTicketNum}>
-            {formatIssueDisplayId(workItem.issueSource.displayId)}
+            {formatIssueDisplayId(workItem.issueSource?.displayId ?? "")}
           </span>
           {issueTitle === undefined ? null : ` ${issueTitle}`}
         </span>
@@ -507,12 +510,16 @@ function KanbanJobsBoard() {
                           key={workItem.id}
                           workItem={workItem}
                           repository={repositoryById.get(workItem.repositoryId)}
-                          issue={issueByRepoAndNumber.get(
-                            repositoryIssueKey(
-                              workItem.repositoryId,
-                              workItem.issueSource.nativeId,
-                            ),
-                          )}
+                          issue={
+                            workItem.issueSource === null
+                              ? undefined
+                              : issueByRepoAndNumber.get(
+                                  repositoryIssueKey(
+                                    workItem.repositoryId,
+                                    workItem.issueSource.nativeId,
+                                  ),
+                                )
+                          }
                           laneId={lane.id}
                           departing={departing}
                           arriving={arriving}
