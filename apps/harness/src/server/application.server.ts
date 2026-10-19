@@ -36,10 +36,16 @@ import {
 } from "@ready-for-agent/keymaxxer-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import {
+  OWNED_OPENCODE_SERVER_MISSING_MESSAGE,
   Opencode,
   OpencodeSessionTelemetryLive,
+  type OwnedOpenCodeServer,
+  blockedOpenCodeSessionConnect,
+  keymaxxerRequiresOwnedOpenCodeServer,
   makeOpenCodeServerBaseResolver,
   openCodeSessionWebUrl,
+  selectHarnessOpenCodeConnection,
+  startOwnedOpenCodeServer,
 } from "@ready-for-agent/opencode"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
@@ -76,14 +82,56 @@ export interface CreateApplicationOptions {
   /**
    * Explicit OpenCode server. When set, agent turns, telemetry reads, and
    * Open in OpenCode use this address instead of `opencode service status`.
+   * Ignored while Keymaxxer is enabled: that mode uses the harness-owned server.
    */
   readonly openCodeServerBaseUrl?: string
+  /**
+   * Test seam for the harness-owned OpenCode server. Production uses
+   * `startOwnedOpenCodeServer`.
+   */
+  readonly startOwnedOpenCodeServer?: typeof startOwnedOpenCodeServer
 }
 
 type PlatformServices =
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
   | Path.Path
+
+type OpenCodeRuntimeConnection =
+  | {
+      readonly kind: "dedicated"
+      readonly server: {
+        readonly baseUrl: string
+        readonly password: string
+        readonly headers: Readonly<Record<string, string>>
+        readonly assertAvailable: () => string | undefined
+      }
+    }
+  | { readonly kind: "blocked"; readonly message: string }
+  | { readonly kind: "explicit"; readonly baseUrl: string }
+  | { readonly kind: "default" }
+
+const toOpenCodeRuntimeConnection = (
+  connection: ReturnType<typeof selectHarnessOpenCodeConnection>,
+  owned: OwnedOpenCodeServer | undefined,
+): OpenCodeRuntimeConnection => {
+  if (connection.kind !== "dedicated") return connection
+  if (owned === undefined) {
+    return {
+      kind: "blocked",
+      message: OWNED_OPENCODE_SERVER_MISSING_MESSAGE,
+    }
+  }
+  return {
+    kind: "dedicated",
+    server: {
+      baseUrl: owned.baseUrl,
+      password: owned.password,
+      headers: owned.headers,
+      assertAvailable: owned.assertAvailable,
+    },
+  }
+}
 
 const openCodeExplicitServer = (
   serverBaseUrl: string | undefined,
@@ -96,7 +144,7 @@ const openCodeExplicitServer = (
 const makeResolveRuntime = (
   platformLayer: Layer.Layer<PlatformServices>,
   sidecarUrl: string | undefined,
-  openCodeServer: { readonly baseUrl: string } | undefined,
+  openCode: OpenCodeRuntimeConnection,
 ): ResolveAgentBackendRuntime => {
   const backendLayers = (backendId: AgentBackendId) => {
     if (backendId === AGENT_BACKEND_IDS.grok) {
@@ -117,13 +165,32 @@ const makeResolveRuntime = (
         ClaudeSessionTelemetryLive(),
       )
     }
+    const dedicated =
+      openCode.kind === "dedicated" ? openCode.server : undefined
+    const explicit =
+      openCode.kind === "explicit" ? { baseUrl: openCode.baseUrl } : undefined
     return Layer.mergeAll(
       Opencode.layer({
         ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
-        ...(openCodeServer === undefined ? {} : { server: openCodeServer }),
+        ...(dedicated === undefined ? {} : { dedicatedServer: dedicated }),
+        ...(explicit === undefined ? {} : { server: explicit }),
+        ...(openCode.kind === "blocked"
+          ? { openCodeBlockedReason: openCode.message }
+          : {}),
       }).pipe(Layer.provide(platformLayer)),
       OpencodeSessionTelemetryLive(
-        openCodeServer === undefined ? {} : { server: openCodeServer },
+        dedicated !== undefined
+          ? {
+              server: {
+                baseUrl: dedicated.baseUrl,
+                headers: dedicated.headers,
+              },
+            }
+          : openCode.kind === "blocked"
+            ? { connect: blockedOpenCodeSessionConnect(openCode.message) }
+            : explicit === undefined
+              ? {}
+              : { server: explicit },
       ),
     )
   }
@@ -213,16 +280,56 @@ export const createApplication = async (
   // (orElseSucceed) falls back on expected DB errors only; defects stay
   // visible. Seeding failure must not prevent startup.
   const openCodeServer = openCodeExplicitServer(options.openCodeServerBaseUrl)
+  let ownedOpenCodeServer: OwnedOpenCodeServer | undefined
+  let ownedOpenCodeStartupFailure: string | undefined
+  if (keymaxxerRequiresOwnedOpenCodeServer(sidecarUrl)) {
+    try {
+      ownedOpenCodeServer = await (
+        options.startOwnedOpenCodeServer ?? startOwnedOpenCodeServer
+      )({
+        keymaxxerMcpUrl: sidecarUrl,
+      })
+    } catch (error) {
+      ownedOpenCodeStartupFailure =
+        error instanceof Error
+          ? error.message
+          : "The harness-owned OpenCode server failed to start."
+    }
+  }
+  const openCodeConnection = toOpenCodeRuntimeConnection(
+    selectHarnessOpenCodeConnection({
+      ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
+      ...(ownedOpenCodeServer === undefined
+        ? {}
+        : { ownedBaseUrl: ownedOpenCodeServer.baseUrl }),
+      ...(openCodeServer === undefined
+        ? {}
+        : { explicitBaseUrl: openCodeServer.baseUrl }),
+      ...(ownedOpenCodeStartupFailure === undefined
+        ? {}
+        : { startupFailure: ownedOpenCodeStartupFailure }),
+    }),
+    ownedOpenCodeServer,
+  )
   const resolveRuntime = makeResolveRuntime(
     platformLayer,
     sidecarUrl,
-    openCodeServer,
+    openCodeConnection,
   )
-  const resolveOpenCodeServerBase = makeOpenCodeServerBaseResolver({
-    ...(openCodeServer === undefined
-      ? {}
-      : { explicitServerBase: openCodeServer.baseUrl }),
-  })
+  const resolveOpenCodeServerBase = makeOpenCodeServerBaseResolver(
+    openCodeConnection.kind === "dedicated"
+      ? { explicitServerBase: openCodeConnection.server.baseUrl }
+      : openCodeConnection.kind === "explicit"
+        ? { explicitServerBase: openCodeConnection.baseUrl }
+        : openCodeConnection.kind === "blocked"
+          ? {
+              // Do not discover the shared service for a session the owned
+              // server never created.
+              serviceStatus: () =>
+                Promise.reject(new Error("owned server unavailable")),
+            }
+          : {},
+  )
   const defaultActiveBackendSeed = {
     selectedBackendId: AGENT_BACKEND_IDS.opencode,
     initialBackendIds: [
@@ -324,7 +431,15 @@ export const createApplication = async (
     Layer.provide(configLayer),
     Layer.provideMerge(githubOperationCoordinatorLayer),
   )
-  const runtime = ManagedRuntime.make(appLayer)
+  const runtime = await Promise.resolve()
+    .then(() => ManagedRuntime.make(appLayer))
+    .catch(async (error: unknown) => {
+      await ownedOpenCodeServer?.dispose()
+      throw error
+    })
+  const disposeOwnedOpenCodeServer = async () => {
+    await ownedOpenCodeServer?.dispose()
+  }
 
   try {
     await runtime.runPromise(
@@ -346,7 +461,11 @@ export const createApplication = async (
       }),
     )
   } catch (error) {
-    await runtime.dispose()
+    try {
+      await runtime.dispose()
+    } finally {
+      await disposeOwnedOpenCodeServer()
+    }
     throw error
   }
 
@@ -362,6 +481,12 @@ export const createApplication = async (
         },
       }),
     },
-    dispose: runtime.dispose,
+    dispose: async () => {
+      try {
+        await runtime.dispose()
+      } finally {
+        await disposeOwnedOpenCodeServer()
+      }
+    },
   }
 }

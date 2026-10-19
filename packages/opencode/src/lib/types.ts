@@ -10,9 +10,27 @@ export interface OpencodeLayerOptions {
   /**
    * Explicit OpenCode server. When set, agent turns and telemetry reads use
    * this URL. When omitted, both use local service discovery. Reads never
-   * start the service.
+   * start the service. Ignored for operation routing when `dedicatedServer`
+   * is set.
    */
   readonly server?: OpencodeExplicitServer
+  /**
+   * Harness-owned OpenCode server started because Keymaxxer is enabled.
+   * Every operation, including model discovery, uses this server. There is
+   * no fallback to the shared service.
+   */
+  readonly dedicatedServer?: {
+    readonly baseUrl: string
+    readonly password: string
+    readonly headers: Readonly<Record<string, string>>
+    /** Undefined when the owned server can still accept work. */
+    readonly assertAvailable: () => string | undefined
+  }
+  /**
+   * Keymaxxer is enabled but the owned server is not usable. Operations fail
+   * with this message and do not contact the shared service.
+   */
+  readonly openCodeBlockedReason?: string
   /**
    * Optional OpenCode SQLite path used only by session-model reassertion.
    * Startup-activity detection does not read this path.

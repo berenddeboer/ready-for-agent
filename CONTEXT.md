@@ -151,6 +151,10 @@ _Avoid_: Secret store, credential cache
 The long-lived loopback companion process that owns one Keymaxxer stdio keyholder and exposes the Keymaxxer MCP tools over Streamable HTTP so the Harness and Keymaxxer-capable Agent Backends can share one vault session and Allow-session set without ambient secret values.
 _Avoid_: Credential daemon, token cache, development-only sidecar
 
+**Harness-owned OpenCode server**:
+The private OpenCode 2 server the Harness starts only while Keymaxxer is enabled, so Agent Turns receive the Sidecar capability URL. It is not the operator's shared OpenCode service, and the Harness does not start, stop, or reconfigure that service. When Keymaxxer is disabled, the Harness does not start this server.
+_Avoid_: OpenCode service, shared OpenCode server, standalone OpenCode
+
 **Agent Backend**:
 A supported coding-agent integration shipped with Ready for Agent that can execute Agent Turns for the Harness. Harness Config, Repository settings, and an Explicit Work Item Execution Profile may select among built-in backends; arbitrary external backend plugins are not part of this boundary.
 _Avoid_: Agent (ambiguous), model, provider, ACP (the protocol is not a backend)

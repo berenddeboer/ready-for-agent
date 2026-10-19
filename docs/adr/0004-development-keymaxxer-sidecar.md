@@ -23,7 +23,7 @@ GitHub throttling from helper stderr.
 - Bind `127.0.0.1` only. MCP lives only at `/<capability>/mcp`.
 - Requests with an `Origin` header receive **403**. Wrong or missing capability path receives **404**.
 - Capability is 32-byte CSPRNG base64url, generated once per sidecar listen. Logs may show host:port only after bootstrap.
-- OpenCode receives the capability URL only via forced `OPENCODE_CONFIG_CONTENT` remote MCP config — no Bearer header, no capability files, no ambient `GH_TOKEN` / `GITHUB_TOKEN` in the OpenCode child.
+- OpenCode receives the capability URL only via forced `OPENCODE_CONFIG_CONTENT` remote MCP config — no Bearer header, no capability files, no ambient `GH_TOKEN` / `GITHUB_TOKEN` in the OpenCode child. On OpenCode 2 that override is applied when the server process starts, not when a CLI client connects to an already-running shared service. While Keymaxxer is enabled, the harness runtime therefore owns one private `opencode serve` process (no `--service`) and routes every OpenCode operation to it. See [ADR 0078](0078-harness-owned-opencode-server.md).
 
 ## Credentials
 

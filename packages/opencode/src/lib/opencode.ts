@@ -17,6 +17,7 @@ import {
 import {
   buildCommandApiArgs,
   buildCreateSessionApiArgs,
+  buildModelCatalogApiArgs,
   buildRunArgs,
   buildSessionExportArgs,
   buildSessionInterruptApiArgs,
@@ -134,18 +135,56 @@ export const Opencode = {
             }),
           )
 
+        const dedicated = options.dedicatedServer
+        const blockedReason = options.openCodeBlockedReason
+        const explicitServerUrl = dedicated?.baseUrl ?? options.server?.baseUrl
+        const serviceArgs = (
+          args: ReadonlyArray<string>,
+        ): ReadonlyArray<string> => withOpenCodeServer(args, explicitServerUrl)
+        const readerServer =
+          dedicated === undefined
+            ? options.server
+            : {
+                baseUrl: dedicated.baseUrl,
+                headers: dedicated.headers,
+              }
+
+        const requireOwnedServer = (): Effect.Effect<
+          void,
+          AgentBackendConfigError
+        > => {
+          if (blockedReason !== undefined && blockedReason.length > 0) {
+            return Effect.fail(
+              new AgentBackendConfigError({ message: blockedReason }),
+            )
+          }
+          if (dedicated === undefined) return Effect.void
+          const unavailable = dedicated.assertAvailable()
+          if (unavailable === undefined) return Effect.void
+          return Effect.fail(
+            new AgentBackendConfigError({ message: unavailable }),
+          )
+        }
+
         const inspect = Effect.fn("Opencode.inspect")(function* (
           input: InspectInput,
         ) {
           const timeout = input.timeout ?? defaultTimeout
+          yield* requireOwnedServer()
           yield* assertOpenCodeV2({ cwd: input.cwd, timeout })
-          // `--standalone` pins the catalog to this process cwd. Without it,
-          // V2 `api get` reads the background server's location and ignores cwd.
+          // Disabled Keymaxxer keeps `--standalone`, which pins the catalog to
+          // this process cwd. A harness-owned server is queried with `--server`
+          // and the worktree directory header; that server already has the
+          // Keymaxxer override. Do not fall back to the shared service.
+          const catalogArgs =
+            dedicated === undefined
+              ? ["api", "--standalone", "get", "/api/model"]
+              : serviceArgs(buildModelCatalogApiArgs({ directory: input.cwd }))
           const result = yield* runCliCapture({
             spawner,
             backend: OPENCODE_BACKEND,
             binary,
-            args: ["api", "--standalone", "get", "/api/model"],
+            args: catalogArgs,
             cwd: input.cwd,
             env: turnEnvironment(input.cwd),
             timeout,
@@ -175,10 +214,6 @@ export const Opencode = {
         let cachedStartupReader: OpencodeV2Reader | undefined
         let lastStartupReaderAttemptMs = 0
         const STARTUP_READER_RETRY_MS = 2_000
-        const explicitServerUrl = options.server?.baseUrl
-        const serviceArgs = (
-          args: ReadonlyArray<string>,
-        ): ReadonlyArray<string> => withOpenCodeServer(args, explicitServerUrl)
 
         const resolveStartupReader =
           async (): Promise<OpencodeV2Reader | null> => {
@@ -194,9 +229,7 @@ export const Opencode = {
             }
             lastStartupReaderAttemptMs = now
             const reader = await connectStartupReader({
-              ...(options.server === undefined
-                ? {}
-                : { server: options.server }),
+              ...(readerServer === undefined ? {} : { server: readerServer }),
             })
             if (reader !== null) {
               cachedStartupReader = reader
@@ -207,7 +240,7 @@ export const Opencode = {
         const startupProbe: OpencodeStartupProbe =
           options.startupActivityProbe ??
           makeOpencodeStartupProbe({
-            ...(options.server === undefined ? {} : { server: options.server }),
+            ...(readerServer === undefined ? {} : { server: readerServer }),
             resolveReader: resolveStartupReader,
           })
 
@@ -216,6 +249,10 @@ export const Opencode = {
           // V2 `opencode run` resolves the project from PWD before process cwd.
           // Inherited PWD is the Harness directory, so each turn must pin it.
           PWD: cwd,
+          // CLI `--server` auth. Memory-only; not written to config files.
+          ...(dedicated === undefined
+            ? {}
+            : { OPENCODE_PASSWORD: dedicated.password }),
         })
 
         const runTurn = (input: {
@@ -231,6 +268,15 @@ export const Opencode = {
           { readonly sessionId: string; readonly assistantText: string },
           AgentBackendError
         > => {
+          const unavailable =
+            blockedReason !== undefined && blockedReason.length > 0
+              ? blockedReason
+              : dedicated?.assertAvailable()
+          if (unavailable !== undefined) {
+            return Effect.fail(
+              new AgentBackendConfigError({ message: unavailable }),
+            )
+          }
           const promptOnStdin =
             input.command === undefined &&
             shouldUsePromptStdin({ prompt: input.prompt })

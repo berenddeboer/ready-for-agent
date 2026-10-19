@@ -1,5 +1,7 @@
 # Direct OpenCode launch contract
 
+Server ownership when Keymaxxer is enabled is superseded by [ADR 0078](../adr/0078-harness-owned-opencode-server.md). The environment merge below is unchanged.
+
 Resolution of [Define the direct OpenCode launch contract](https://github.com/berenddeboer/ready-for-agent/issues/112) (part of [Design a shared Keymaxxer broker for OpenCode](https://github.com/berenddeboer/ready-for-agent/issues/106)).
 
 Depends on:

@@ -153,14 +153,49 @@ if [ "\${1-}" = "models" ]; then
   echo "ERROR Unrecognized flag: --verbose in command opencode models" >&2
   exit 1
 fi
-if [ "\${1-}" = "api" ]; then
+if [ "\${1-}" = "serve" ]; then
+  port=""
+  prev=""
   for arg in "$@"; do
-    if [ "$arg" = "/api/model" ]; then
-      cat ${JSON.stringify(controlFile(CONTROL_FILES.opencodeModels))}
-      exit 0
+    if [ "$prev" = "--port" ]; then
+      port="$arg"
     fi
+    prev="$arg"
   done
+  if [ -z "$port" ]; then
+    echo "e2e fake opencode: serve requires --port" >&2
+    exit 1
+  fi
+  export E2E_OPENCODE_PORT="$port"
+  exec python3 -c 'import base64, os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+port = int(os.environ["E2E_OPENCODE_PORT"])
+password = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
+config = os.environ.get("OPENCODE_CONFIG_CONTENT", "{}")
+expected = "Basic " + base64.b64encode(("opencode:" + password).encode()).decode()
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.headers.get("Authorization", "") != expected or self.path.split("?", 1)[0] != "/api/config":
+            self.send_response(401)
+            self.end_headers()
+            return
+        body = config.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, fmt, *args):
+        return
+ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+'
 fi
+for arg in "$@"; do
+  if [ "$arg" = "/api/model" ]; then
+    cat ${JSON.stringify(controlFile(CONTROL_FILES.opencodeModels))}
+    exit 0
+  fi
+done
 echo "e2e fake opencode: unsupported invocation: $*" >&2
 exit 1
 `,

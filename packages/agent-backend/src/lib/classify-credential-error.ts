@@ -82,6 +82,19 @@ export const scrubProviderCredentialSecrets = (text: string): string => {
     /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
     "Bearer [redacted]",
   )
+  // Keymaxxer sidecar capability URLs and OpenCode server passwords.
+  scrubbed = scrubbed.replace(
+    /https?:\/\/127\.0\.0\.1:\d+\/[A-Za-z0-9_-]+\/mcp\b/g,
+    "http://127.0.0.1/[redacted]/mcp",
+  )
+  scrubbed = scrubbed.replace(
+    /\bOPENCODE_(?:SERVER_)?PASSWORD\s*[=:]\s*"?[^"\s,}]+"?/g,
+    (match) => {
+      const keyMatch = match.match(/^(OPENCODE_(?:SERVER_)?PASSWORD)/)
+      const key = keyMatch?.[1] ?? "OPENCODE_PASSWORD"
+      return `${key}=[redacted]`
+    },
+  )
   return scrubbed
 }
 
