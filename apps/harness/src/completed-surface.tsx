@@ -77,12 +77,16 @@ export function CompletedCardGrid({
           key={workItem.id}
           workItem={workItem}
           repository={repositoryById.get(workItem.repositoryId)}
-          issue={issueByRepoAndNumber.get(
-            repositoryIssueKey(
-              workItem.repositoryId,
-              workItem.issueSource.nativeId,
-            ),
-          )}
+          issue={
+            workItem.issueSource === null
+              ? undefined
+              : issueByRepoAndNumber.get(
+                  repositoryIssueKey(
+                    workItem.repositoryId,
+                    workItem.issueSource.nativeId,
+                  ),
+                )
+          }
           onOpenSession={onOpenSession}
         />
       ))}

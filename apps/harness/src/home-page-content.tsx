@@ -325,7 +325,7 @@ export type WorkItem = {
   id: string
   repositoryId: string
   origin: "ISSUE" | "CI_REPAIR"
-  issueNumber: number
+  issueNumber: number | null
   ciRepairDefaultBranch: string | null
   ciRepairHeadSha: string | null
   ciRepairFailingRuns: readonly {
@@ -338,7 +338,7 @@ export type WorkItem = {
     nativeId: string
     displayId: string
     url: string
-  }
+  } | null
   issueTitle: string | null
   pullRequestNumber: number | null
   agentBackend: { id: string; label: string }
@@ -3934,7 +3934,10 @@ function RepositoryIssueRow({
   const queryClient = useQueryClient()
   const query = workItemsQuery(issue.repositoryId)
   const issueWorkItems = workItems.filter(
-    (workItem) => workItem.issueSource.nativeId === issue.nativeId,
+    (workItem) =>
+      workItem.origin !== "CI_REPAIR" &&
+      workItem.issueSource !== null &&
+      workItem.issueSource.nativeId === issue.nativeId,
   )
   const latestWorkItem = issueWorkItems.at(-1)
   const { canImplement, canQueue } = issueActionEligibility({
@@ -4129,12 +4132,14 @@ function RepositoryIssueRow({
               issueUrl={
                 issue.url !== ""
                   ? issue.url
-                  : workItemIssueUrl(
-                      repository.forge,
-                      repository.forgeHost,
-                      repository.projectPath,
-                      latestWorkItem.issueNumber,
-                    )
+                  : latestWorkItem.issueNumber === null
+                    ? null
+                    : workItemIssueUrl(
+                        repository.forge,
+                        repository.forgeHost,
+                        repository.projectPath,
+                        latestWorkItem.issueNumber,
+                      )
               }
               pullRequestUrl={workItemPullRequestUrl(
                 repository.forge,

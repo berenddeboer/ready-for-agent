@@ -11988,6 +11988,7 @@ describe("WorkItemLifecycle", () => {
           expect(seen[0]).toEqual({
             workItemId: created.id,
             repositoryId: repository.id,
+            origin: "issue",
             issueNumber: issue.issueNumber,
             issueSource: created.issueSource,
             issueTitle: issue.title,

@@ -812,7 +812,7 @@ const resolvePublicationCopyForCreatePr = (
     if (title !== "" && body !== "") {
       const normalized = normalizePublicationCopy(
         { title, body },
-        context.issueNumber,
+        context.issueNumber ?? 0,
         context.issueSource,
         ciRepair,
       )
@@ -831,7 +831,7 @@ const resolvePublicationCopyForCreatePr = (
     if (head.exitCode === 0) {
       const seeded = publicationCopyFromCommitMessage(
         head.stdout,
-        context.issueNumber,
+        context.issueNumber ?? 0,
         context.issueSource,
         ciRepair,
       )
@@ -912,11 +912,11 @@ export const createPr = (context: LifecycleStepContext) =>
       forge: repository.forge,
       forgeHost: repository.forgeHost,
       projectPath: repository.projectPath,
-      issueNumber: context.issueNumber,
+      issueNumber: context.issueNumber ?? 0,
     })
     const branch = workItemBranchName({
       projectPath: repository.projectPath,
-      issueNumber: context.issueNumber,
+      issueNumber: context.issueNumber ?? 0,
       workItemId: context.workItemId,
       origin: context.origin,
     })
@@ -1027,7 +1027,7 @@ export const createPr = (context: LifecycleStepContext) =>
             .continueTurn({
               sessionId: prepared.sessionId,
               prompt: buildCreatePrFallbackPromptWithCopy({
-                issueNumber: context.issueNumber,
+                issueNumber: context.issueNumber ?? 0,
                 branch,
                 title: copy.title,
                 body: copy.body,
@@ -1110,13 +1110,13 @@ export const createPr = (context: LifecycleStepContext) =>
         mutations,
         repository: toForgeRepository(repository),
         pullRequestNumber: outcome.value,
-        issueNumber: context.issueNumber,
+        issueNumber: context.issueNumber ?? 0,
       }).pipe(
         Effect.mapError(
           (cause) =>
             new CreatePrPostconditionError({
               repositoryId: context.repositoryId,
-              message: `Failed to associate Azure Boards Issue #${context.issueNumber} with pull request ${outcome.value}`,
+              message: `Failed to associate Azure Boards Issue #${context.issueNumber ?? 0} with pull request ${outcome.value}`,
               diagnostics: boundDiagnostics(errorMessage(cause)),
             }),
         ),

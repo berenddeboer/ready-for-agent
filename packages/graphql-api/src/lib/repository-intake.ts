@@ -26,6 +26,35 @@ import {
 import { preflightRepositoryIntake } from "./repository-intake-preflight.js"
 import { toGraphQLError } from "./to-graphql-error.js"
 
+/**
+ * Issue sync and intake see only Issue-origin Work Items. A CI Repair Work
+ * Item has no Issue and must not occupy an Issue slot.
+ */
+export const issueSyncWorkItems = (
+  workItems: readonly WorkItemRecord[],
+): readonly {
+  readonly issueNumber: number
+  readonly issueTracker: string
+  readonly nativeId: string
+  readonly id: string
+  readonly state: WorkItemRecord["state"]
+  readonly canRetry: boolean
+}[] =>
+  workItems.flatMap((workItem) =>
+    workItem.origin === "issue"
+      ? [
+          {
+            issueNumber: workItem.issueNumber,
+            issueTracker: workItem.issueSource.tracker,
+            nativeId: workItem.issueSource.nativeId,
+            id: workItem.id,
+            state: workItem.state,
+            canRetry: isRetryableFailedWorkItem(workItem),
+          },
+        ]
+      : [],
+  )
+
 export type RepositoryIntakeAction = "IMPLEMENT_NOW" | "QUEUE"
 
 export type RepositoryIntakeIssueError = {
@@ -171,14 +200,7 @@ export const startRepositoryIntake = (
     ])
     const candidates = classifyIntakeCandidates(
       issues,
-      workItems.map((workItem) => ({
-        issueNumber: workItem.issueNumber,
-        issueTracker: workItem.issueSource.tracker,
-        nativeId: workItem.issueSource.nativeId,
-        id: workItem.id,
-        state: workItem.state,
-        canRetry: isRetryableFailedWorkItem(workItem),
-      })),
+      issueSyncWorkItems(workItems),
       repository.issueTracker,
     )
 

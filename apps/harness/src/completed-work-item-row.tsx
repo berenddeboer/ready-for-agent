@@ -61,20 +61,26 @@ export function CompletedWorkItemRow({
   const noChange = isArchiveNoChangeComplete(workItem)
   const repositoryLabel =
     repository === undefined ? workItem.repositoryId : repository.projectPath
-  const issueTitle = issue?.title ?? workItem.issueTitle ?? undefined
-  const issueUrl =
-    issue?.url !== undefined && issue.url !== ""
+  const isCiRepair = workItem.origin === "CI_REPAIR"
+  const issueTitle = isCiRepair
+    ? (workItem.issueTitle ?? "Repair CI")
+    : (issue?.title ?? workItem.issueTitle ?? undefined)
+  const issueUrl = isCiRepair
+    ? null
+    : issue?.url !== undefined && issue.url !== ""
       ? issue.url
-      : repository === undefined
+      : repository === undefined || workItem.issueSource === null
         ? null
         : workItem.issueSource.url !== ""
           ? workItem.issueSource.url
-          : workItemIssueUrl(
-              repository.forge,
-              repository.forgeHost,
-              repository.projectPath,
-              workItem.issueNumber,
-            )
+          : workItem.issueNumber === null
+            ? null
+            : workItemIssueUrl(
+                repository.forge,
+                repository.forgeHost,
+                repository.projectPath,
+                workItem.issueNumber,
+              )
   const pullRequestUrl =
     repository === undefined
       ? null
@@ -88,7 +94,9 @@ export function CompletedWorkItemRow({
   const forge = repository?.forge
   const changeShort = forgeChangeRequestShort(forge)
   const changeNoun = forgeChangeRequestNoun(forge)
-  const issueLabel = formatIssueDisplayId(workItem.issueSource.displayId)
+  const issueLabel = isCiRepair
+    ? "CI Repair"
+    : formatIssueDisplayId(workItem.issueSource?.displayId ?? "")
   const issueIdentity =
     issueTitle === undefined ? issueLabel : `${issueLabel} · ${issueTitle}`
   const { sessionId, worktreePath } = sessionWorktreeParts(

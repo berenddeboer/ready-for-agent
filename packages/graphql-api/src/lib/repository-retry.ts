@@ -40,30 +40,30 @@ export type RetryWorkItemsItemError = {
 export type RetryWorkItemsItemResult =
   | {
       readonly __typename: "RetryWorkItemsRetried"
-      readonly issueNumber: number
+      readonly issueNumber: number | null
       readonly workItem: WorkItemRecord
     }
   | {
       readonly __typename: "RetryWorkItemsSkipped"
-      readonly issueNumber: number
+      readonly issueNumber: number | null
       readonly workItem: WorkItemRecord
       readonly reason: RetryWorkItemsItemError
     }
   | {
       readonly __typename: "RetryWorkItemsFailed"
-      readonly issueNumber: number
+      readonly issueNumber: number | null
       readonly workItem: WorkItemRecord
       readonly error: RetryWorkItemsItemError
     }
   | {
       readonly __typename: "RetryWorkItemsLimitReached"
-      readonly issueNumber: number
+      readonly issueNumber: number | null
       readonly workItem: WorkItemRecord
       readonly reason: RetryWorkItemsItemError
     }
   | {
       readonly __typename: "RetryWorkItemsDeferred"
-      readonly issueNumber: number
+      readonly issueNumber: number | null
       readonly workItem: WorkItemRecord
       readonly reason: RetryWorkItemsItemError
       readonly retryAt: string
@@ -115,8 +115,20 @@ const isTagged = (
 const compareRetryTargets = (
   left: WorkItemRecord,
   right: WorkItemRecord,
-): number =>
-  left.issueNumber - right.issueNumber || left.id.localeCompare(right.id)
+): number => {
+  if (left.origin !== right.origin) {
+    return left.origin === "ci_repair" ? -1 : 1
+  }
+  if (left.origin === "issue" && right.origin === "issue") {
+    return (
+      left.issueNumber - right.issueNumber || left.id.localeCompare(right.id)
+    )
+  }
+  return left.id.localeCompare(right.id)
+}
+
+const displayedIssueNumber = (workItem: WorkItemRecord): number | null =>
+  workItem.origin === "issue" ? workItem.issueNumber : null
 
 const isUnfinishedWorkItem = (workItem: WorkItemRecord): boolean =>
   evaluateUnfinishedWorkItem({
@@ -178,6 +190,9 @@ export const snapshotRetryTargets = (input: {
           if (relevantIssueNumbers === undefined) {
             return true
           }
+          if (workItem.origin !== "issue") {
+            return true
+          }
           const latest = workItem.stepRuns.at(-1)
           return !shouldCompleteParkedAttentionWhenIssueNoLongerRelevant({
             state: workItem.state,
@@ -193,6 +208,8 @@ export const snapshotRetryTargets = (input: {
                 stepRun.status === "queued" || stepRun.status === "running",
             ),
             issueNumber: workItem.issueNumber,
+            issueNativeId: workItem.issueSource.nativeId,
+            origin: workItem.origin,
             issues: [...relevantIssueNumbers].map((issueNumber) => ({
               issueNumber,
               state: "OPEN",
@@ -225,6 +242,7 @@ export const snapshotRetryTargets = (input: {
       const unfinished = input.workItems
         .filter(
           (workItem) =>
+            workItem.origin === "issue" &&
             workItem.issueSource.nativeId === selector.nativeId &&
             isUnfinishedWorkItem(workItem),
         )
@@ -428,7 +446,7 @@ export const retryWorkItems = (
       if (Result.isSuccess(outcome)) {
         results.push({
           __typename: "RetryWorkItemsRetried",
-          issueNumber: outcome.success.issueNumber,
+          issueNumber: displayedIssueNumber(outcome.success),
           workItem: outcome.success,
         })
         continue
@@ -442,7 +460,7 @@ export const retryWorkItems = (
         ) {
           results.push({
             __typename: "RetryWorkItemsLimitReached",
-            issueNumber: target.issueNumber,
+            issueNumber: displayedIssueNumber(target),
             workItem: target,
             reason: {
               code: "LIMIT_REACHED",
@@ -460,7 +478,7 @@ export const retryWorkItems = (
           const retryAt = new Date(failure.retryAt).toISOString()
           results.push({
             __typename: "RetryWorkItemsDeferred",
-            issueNumber: target.issueNumber,
+            issueNumber: displayedIssueNumber(target),
             workItem: target,
             reason: {
               code: "DEFERRED",
@@ -474,7 +492,7 @@ export const retryWorkItems = (
         if (isSkippedRetryError(failure)) {
           results.push({
             __typename: "RetryWorkItemsSkipped",
-            issueNumber: target.issueNumber,
+            issueNumber: displayedIssueNumber(target),
             workItem: target,
             reason: mapped,
           })
@@ -482,7 +500,7 @@ export const retryWorkItems = (
         }
         results.push({
           __typename: "RetryWorkItemsFailed",
-          issueNumber: target.issueNumber,
+          issueNumber: displayedIssueNumber(target),
           workItem: target,
           error: mapped,
         })

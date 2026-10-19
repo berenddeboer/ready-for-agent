@@ -72,12 +72,12 @@ export const worktreeParentPath = (input: {
 }
 
 export const workItemDirectoryName = (input: {
-  readonly issueNumber: number
+  readonly issueNumber?: number | null
   readonly workItemId: string
   readonly origin?: WorkItemOrigin
 }): string =>
   workItemOriginPolicy(input.origin).worktreeDirectoryName({
-    issueNumber: input.issueNumber,
+    issueNumber: input.issueNumber ?? 0,
     workItemId: input.workItemId,
   })
 
@@ -88,7 +88,7 @@ export const workItemWorktreePath = (input: {
   readonly localPath: string
   readonly isBare: boolean
   readonly projectPath: string
-  readonly issueNumber: number
+  readonly issueNumber?: number | null
   readonly workItemId: string
   readonly origin?: WorkItemOrigin
   readonly tmpDir?: string

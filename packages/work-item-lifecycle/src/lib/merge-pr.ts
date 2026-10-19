@@ -84,7 +84,7 @@ export const mergePr = (context: LifecycleStepContext) =>
       context.issueSource,
       mutations.forge,
     )
-    if (issueForge !== "azure-devops") {
+    if (issueForge !== "azure-devops" || context.issueNumber === null) {
       return result
     }
     return yield* completeAzureBoardsIssueAfterNativeMerge({

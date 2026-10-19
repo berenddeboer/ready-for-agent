@@ -8,7 +8,6 @@ import {
   STEP_RUN_REASON,
   TERMINAL_WORK_ITEM_STATES,
   TerminalWorkItemState,
-  type WorkItemOrigin,
   WorkItemState,
   evaluateUnfinishedWorkItem,
   formatIssueDisplayId,
@@ -131,16 +130,12 @@ export type NonPostponedStepRunRecord = StepRunRecordBase & {
  */
 export type StepRunRecord = PostponedStepRunRecord | NonPostponedStepRunRecord
 
-export interface WorkItemRecord {
+interface WorkItemRecordBase {
   readonly id: WorkItemId
   readonly repositoryId: string
-  /** `issue` is an Issue Work Item. `ci_repair` has no Issue. */
-  readonly origin: WorkItemOrigin
   readonly ciRepairDefaultBranch: string | null
   readonly ciRepairHeadSha: string | null
   readonly ciRepairFailingRuns: readonly CiRepairFailingRun[]
-  readonly issueNumber: number
-  readonly issueSource: IssueSource
   readonly issueTitle: string | null
   readonly pullRequestNumber: number | null
   /**
@@ -212,6 +207,28 @@ export interface WorkItemRecord {
   readonly stateResidenceMs: number
   readonly stepRuns: readonly StepRunRecord[]
 }
+
+/** Issue identity is only present after narrowing to `origin: "issue"`. */
+export interface IssueWorkItemRecord extends WorkItemRecordBase {
+  readonly origin: "issue"
+  readonly issueNumber: number
+  readonly issueSource: IssueSource
+}
+
+/** A CI Repair Work Item has no Issue number or Issue source. */
+export interface CiRepairWorkItemRecord extends WorkItemRecordBase {
+  readonly origin: "ci_repair"
+}
+
+export type WorkItemRecord = IssueWorkItemRecord | CiRepairWorkItemRecord
+
+export const isIssueWorkItem = (
+  workItem: WorkItemRecord,
+): workItem is IssueWorkItemRecord => workItem.origin === "issue"
+
+export const isCiRepairWorkItem = (
+  workItem: WorkItemRecord,
+): workItem is CiRepairWorkItemRecord => workItem.origin === "ci_repair"
 
 /** Operator-visible message while Waiting for Worker Slot. */
 export const WAITING_FOR_WORKER_SLOT_MESSAGE =

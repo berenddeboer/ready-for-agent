@@ -67,9 +67,6 @@ import {
   decodeWorkItemMergePolicy,
   filterWorkItemsByListKind,
   forgeObservation,
-  isJobsCompletedWorkItemState,
-  isJobsWorkingWorkItem,
-  isRetryableFailedWorkItem,
   resolveExecutionProfileSelection,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
@@ -88,6 +85,7 @@ import {
 } from "./issue-polling.js"
 import {
   buildKanbanSourceSet,
+  includeWorkItemOnIssueBoard,
   projectKanbanLanes,
 } from "./kanban-projection.js"
 import {
@@ -113,7 +111,10 @@ import {
   repositoryCredential,
   withKeymaxxerMetadataTimeout,
 } from "./repository-credentials.js"
-import { startRepositoryIntake } from "./repository-intake.js"
+import {
+  issueSyncWorkItems,
+  startRepositoryIntake,
+} from "./repository-intake.js"
 import { preflightRepositoryIntake } from "./repository-intake-preflight.js"
 import { retryWorkItems } from "./repository-retry.js"
 import { toGraphQLError } from "./to-graphql-error.js"
@@ -1226,14 +1227,7 @@ export const createGraphqlApi = <R>(
                 ])
                 const candidates = classifyIntakeCandidates(
                   issues,
-                  workItems.map((workItem) => ({
-                    issueNumber: workItem.issueNumber,
-                    issueTracker: workItem.issueSource.tracker,
-                    nativeId: workItem.issueSource.nativeId,
-                    id: workItem.id,
-                    state: workItem.state,
-                    canRetry: isRetryableFailedWorkItem(workItem),
-                  })),
+                  issueSyncWorkItems(workItems),
                   repository.issueTracker,
                 )
 
@@ -1285,11 +1279,8 @@ export const createGraphqlApi = <R>(
                 const relevantNativeIds = new Set(
                   issues.map((issue) => persistedIssueIdentity(issue).nativeId),
                 )
-                const visible = workItems.filter(
-                  (workItem) =>
-                    isJobsCompletedWorkItemState(workItem.state) ||
-                    isJobsWorkingWorkItem(workItem) ||
-                    relevantNativeIds.has(workItem.issueSource.nativeId),
+                const visible = workItems.filter((workItem) =>
+                  includeWorkItemOnIssueBoard(workItem, relevantNativeIds),
                 )
                 return attachProviderRecovery(
                   filterWorkItemsByListKind(visible, listKind, limit, nowMs),
@@ -1484,11 +1475,11 @@ export const createGraphqlApi = <R>(
                           (issue) => persistedIssueIdentity(issue).nativeId,
                         ),
                       )
-                      return workItems.filter(
-                        (workItem) =>
-                          isJobsCompletedWorkItemState(workItem.state) ||
-                          isJobsWorkingWorkItem(workItem) ||
-                          relevantNativeIds.has(workItem.issueSource.nativeId),
+                      return workItems.filter((workItem) =>
+                        includeWorkItemOnIssueBoard(
+                          workItem,
+                          relevantNativeIds,
+                        ),
                       )
                     }),
                   { concurrency: "unbounded" },
@@ -1732,6 +1723,10 @@ export const createGraphqlApi = <R>(
         WorkItem: {
           origin: (workItem: WorkItemRecord) =>
             toGraphqlWorkItemOrigin(workItem.origin),
+          issueNumber: (workItem: WorkItemRecord) =>
+            workItem.origin === "issue" ? workItem.issueNumber : null,
+          issueSource: (workItem: WorkItemRecord) =>
+            workItem.origin === "issue" ? workItem.issueSource : null,
           ciRepairDefaultBranch: (workItem: WorkItemRecord) =>
             workItem.ciRepairDefaultBranch ?? null,
           ciRepairHeadSha: (workItem: WorkItemRecord) =>
@@ -1822,11 +1817,14 @@ export const createGraphqlApi = <R>(
                 const issues = workItem.waitingForBlockers
                   ? yield* db.listIssues(workItem.repositoryId)
                   : []
-                const issue = issues.find(
-                  (candidate) =>
-                    persistedIssueIdentity(candidate).nativeId ===
-                    workItem.issueSource.nativeId,
-                )
+                const issue =
+                  workItem.origin === "issue"
+                    ? issues.find(
+                        (candidate) =>
+                          persistedIssueIdentity(candidate).nativeId ===
+                          workItem.issueSource.nativeId,
+                      )
+                    : undefined
                 const snapshot = workItem.waitingForCiRepair
                   ? yield* db.loadCiGateSnapshot(workItem.repositoryId)
                   : null
