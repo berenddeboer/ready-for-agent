@@ -40,15 +40,55 @@ on any other error.
 bunx nx run opencode:cli-contract
 ```
 
-Normal `nx test opencode` does not run this file, so unit tests stay fast.
-The contract target is uncached: the external binary is not an Nx input.
-Requires OpenCode 2 on `PATH`. No provider credentials.
+That is the same target required CI runs. It needs the supported baseline
+on `PATH` and no provider credentials. Normal `nx test opencode` does not
+run this file, so unit tests stay fast.
 
-The target prints the resolved binary and version, then each case's
-redacted argv. Failures include exit status and truncated stdout/stderr.
-Per-case timeout is 60 seconds. The spec also prints measured runtime.
+The target prints the resolved binary, parsed version, and baseline pin
+before any case. It then prints each case's redacted argv. Failures include
+exit status and truncated stdout/stderr, and CI uploads that log. Per-case
+timeout is 60 seconds. The spec also prints measured runtime. The run fails
+if the passing case count is not the expected count, including an empty or
+all-skipped suite.
 
-CI required-check wiring is BER-36, which depends on this suite.
+Install the baseline the way CI does, then put it first on `PATH`:
+
+```sh
+bash scripts/install-opencode-v2.sh baseline
+export PATH="$HOME/.opencode/bin:$PATH"
+bunx nx run opencode:cli-contract
+```
+
+## Supported baseline and drift
+
+The supported baseline is OpenCode **2.0.32**, recorded as
+`OPENCODE_V2_BASELINE` in `mise.toml`. It is an env pin, not a mise tool
+pin, so entering the repo does not switch the operator binary.
+
+2.0.32 is the pin because that version reproduced the BER-31 `--server`
+ordering incident, and it was the current `@opencode/cli` stable release
+when the pin was set. Required PR and main jobs install that exact version
+and fail if the resolved binary is missing, the probe fails, the major is
+not 2, or the version is not the pin. The installed version and the tested
+version are the same binary.
+
+Scheduled workflow `OpenCode CLI contract drift` installs `@opencode/cli`
+latest and runs this same target with `OPENCODE_CONTRACT_MODE=latest`. It
+prints the baseline pin and the resolved latest version. A failure there
+means upstream changed a command, flag, or contract. It is not a required
+pull-request check, and it is not a license to point required jobs at
+latest.
+
+The Nx target is uncached, and CI passes `--skip-nx-cache`. The external
+binary version is not an Nx input, so a cached pass from another CLI must
+not hide drift. The scheduled job executes the probes.
+
+To move the pin, only after this suite passes on the candidate version:
+
+1. Change `OPENCODE_V2_BASELINE` in `mise.toml`.
+2. Run `bash scripts/install-opencode-v2.sh baseline` and the Nx target.
+3. Confirm the log shows that version as both the pin and the resolved
+   binary.
 
 ## Inventory
 

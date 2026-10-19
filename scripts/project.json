@@ -9,7 +9,7 @@
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "bun test tool-pins.test.ts fix-bun-typescript-for-nx.test.ts commitlint-policy.test.ts",
+          "bun test tool-pins.test.ts fix-bun-typescript-for-nx.test.ts commitlint-policy.test.ts opencode-contract-gate.test.ts opencode-contract-ci.test.ts",
           "node --test ../.opencode/tests/*.test.mjs"
         ],
         "cwd": "{projectRoot}"
@@ -26,7 +26,17 @@
         "{projectRoot}/run-pinned-usage.sh",
         "{projectRoot}/fix-bun-typescript-for-nx.mjs",
         "{projectRoot}/fix-bun-typescript-for-nx.test.ts",
-        "{projectRoot}/commitlint-policy.test.ts"
+        "{projectRoot}/commitlint-policy.test.ts",
+        "{projectRoot}/opencode-contract-gate.ts",
+        "{projectRoot}/opencode-contract-gate.test.ts",
+        "{projectRoot}/opencode-contract-ci.test.ts",
+        "{projectRoot}/run-opencode-cli-contract.ts",
+        "{projectRoot}/install-opencode-v2.sh",
+        "{workspaceRoot}/packages/opencode/project.json",
+        "{workspaceRoot}/packages/opencode/CLI-CONTRACT.md",
+        "{workspaceRoot}/packages/opencode/test/v2-cli-contract.spec.ts",
+        "{workspaceRoot}/apps/ready-for-agent/src/interactive-resume-v2-contract.test.ts",
+        "{workspaceRoot}/docs/e2e-fixture.md"
       ],
       "cache": true
     }

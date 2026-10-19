@@ -23,3 +23,9 @@ description = "Install Playwright Chromium and OS dependencies for Harness e2e"
 dir = "{{config_root}}/apps/harness"
 depends = ["bootstrap"]
 run = "bunx playwright install --with-deps chromium"
+
+[env]
+# Contract baseline only. Not a [tools] pin: mise must not switch the
+# operator binary. Required CI installs this exact version. See
+# packages/opencode/CLI-CONTRACT.md.
+OPENCODE_V2_BASELINE = "2.0.32"

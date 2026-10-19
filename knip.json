@@ -11,7 +11,12 @@
   "ignoreFiles": [".opencode/plugin/**"],
   "workspaces": {
     ".": {
-      "entry": ["scripts/tool-pins.test.ts"],
+      "entry": [
+        "scripts/tool-pins.test.ts",
+        "scripts/opencode-contract-ci.test.ts",
+        "scripts/opencode-contract-gate.test.ts",
+        "scripts/run-opencode-cli-contract.ts"
+      ],
       "project": ["scripts/**/*.{ts,mjs}"]
     },
     "apps/harness": {

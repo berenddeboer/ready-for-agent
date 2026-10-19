@@ -1,0 +1,57 @@
+# Scheduled compatibility coverage against latest stable OpenCode V2.
+#
+# Required PR and main coverage installs the mise.toml baseline and fails
+# if the resolved binary is not that version. This workflow is the other
+# half: it installs @opencode/cli latest, prints both versions, and runs the
+# same probes. A failure here is upstream command/flag drift, not a pin
+# mismatch. It is not a required pull-request check.
+name: OpenCode CLI contract drift
+
+on:
+  schedule:
+    # Daily, after the overnight install smoke, so the two jobs do not pile up.
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  opencode-cli-contract-latest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          filter: tree:0
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
+
+      - name: Install latest stable OpenCode V2
+        run: bash scripts/install-opencode-v2.sh latest
+
+      - name: Add OpenCode to PATH
+        run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: OpenCode CLI contract against latest stable V2
+        env:
+          OPENCODE_CONTRACT_MODE: latest
+          OPENCODE_CONTRACT_DIAGNOSTICS_DIR: ${{ runner.temp }}/opencode-cli-contract
+        run: bash scripts/ci-owned-execution.sh bunx nx run opencode:cli-contract --skip-nx-cache
+
+      - name: Upload OpenCode contract diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: opencode-cli-contract-latest
+          path: ${{ runner.temp }}/opencode-cli-contract/
+          if-no-files-found: ignore
+          retention-days: 14
