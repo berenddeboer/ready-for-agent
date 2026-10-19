@@ -38,6 +38,8 @@ import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import {
   Opencode,
   OpencodeSessionTelemetryLive,
+  makeOpenCodeServerBaseResolver,
+  openCodeSessionWebUrl,
 } from "@ready-for-agent/opencode"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
@@ -71,6 +73,11 @@ export interface Application {
 export interface CreateApplicationOptions {
   readonly startWorker?: boolean
   readonly sidecarLayerOptions?: SidecarLayerOptions
+  /**
+   * Explicit OpenCode server. When set, agent turns, telemetry reads, and
+   * Open in OpenCode use this address instead of `opencode service status`.
+   */
+  readonly openCodeServerBaseUrl?: string
 }
 
 type PlatformServices =
@@ -78,9 +85,18 @@ type PlatformServices =
   | FileSystem.FileSystem
   | Path.Path
 
+const openCodeExplicitServer = (
+  serverBaseUrl: string | undefined,
+): { readonly baseUrl: string } | undefined => {
+  const trimmed = serverBaseUrl?.trim()
+  if (trimmed === undefined || trimmed.length === 0) return undefined
+  return { baseUrl: trimmed }
+}
+
 const makeResolveRuntime = (
   platformLayer: Layer.Layer<PlatformServices>,
   sidecarUrl: string | undefined,
+  openCodeServer: { readonly baseUrl: string } | undefined,
 ): ResolveAgentBackendRuntime => {
   const backendLayers = (backendId: AgentBackendId) => {
     if (backendId === AGENT_BACKEND_IDS.grok) {
@@ -104,8 +120,11 @@ const makeResolveRuntime = (
     return Layer.mergeAll(
       Opencode.layer({
         ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
+        ...(openCodeServer === undefined ? {} : { server: openCodeServer }),
       }).pipe(Layer.provide(platformLayer)),
-      OpencodeSessionTelemetryLive(),
+      OpencodeSessionTelemetryLive(
+        openCodeServer === undefined ? {} : { server: openCodeServer },
+      ),
     )
   }
 
@@ -193,7 +212,17 @@ export const createApplication = async (
   // so it shares ManagedRuntime's databaseLayer memoization. Typed recovery
   // (orElseSucceed) falls back on expected DB errors only; defects stay
   // visible. Seeding failure must not prevent startup.
-  const resolveRuntime = makeResolveRuntime(platformLayer, sidecarUrl)
+  const openCodeServer = openCodeExplicitServer(options.openCodeServerBaseUrl)
+  const resolveRuntime = makeResolveRuntime(
+    platformLayer,
+    sidecarUrl,
+    openCodeServer,
+  )
+  const resolveOpenCodeServerBase = makeOpenCodeServerBaseResolver({
+    ...(openCodeServer === undefined
+      ? {}
+      : { explicitServerBase: openCodeServer.baseUrl }),
+  })
   const defaultActiveBackendSeed = {
     selectedBackendId: AGENT_BACKEND_IDS.opencode,
     initialBackendIds: [
@@ -326,6 +355,11 @@ export const createApplication = async (
       graphqlApi: createGraphqlApi(runtime, {
         agentBackendCwd: toolCwd,
         version: READY_FOR_AGENT_VERSION,
+        resolveOpenCodeSessionUrl: async ({ sessionId }) => {
+          const serverBase = await resolveOpenCodeServerBase()
+          if (serverBase === null) return null
+          return openCodeSessionWebUrl({ serverBase, sessionId })
+        },
       }),
     },
     dispose: runtime.dispose,

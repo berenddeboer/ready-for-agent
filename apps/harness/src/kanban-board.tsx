@@ -24,6 +24,7 @@ import {
   useNowMs,
 } from "./live-duration.js"
 import { MetalLaneHeader } from "./metal-lane-header.js"
+import { OpenInOpenCodeSessionLink } from "./open-in-opencode-link.js"
 import { PipelineBottomOrnament } from "./pipeline-bottom-ornament.js"
 import { PIPELINE_LANES, type PipelineLaneId } from "./pipeline-lanes.js"
 import { PipelineRoute, usePipelineRouteFlights } from "./pipeline-route.js"
@@ -319,6 +320,7 @@ function PipelineTicket({
             >
               {sessionId}
             </button>
+            <OpenInOpenCodeSessionLink url={workItem.openInOpenCodeUrl} />
             <Copy value={sessionId} showValue={false} className="shrink-0" />
           </div>
         ) : null}

@@ -11,6 +11,7 @@ import {
 import { GraphQLError } from "graphql"
 import { createSchema, createYoga } from "graphql-yoga"
 import {
+  AGENT_BACKEND_IDS,
   ActiveAgentBackend,
   type AgentBackendId,
   type AgentBackendRuntimeStatus,
@@ -632,6 +633,15 @@ export const createGraphqlApi = <R>(
      * the host does not inject a build-time version.
      */
     readonly version?: string
+    /**
+     * Builds the browser URL for an OpenCode Session. The host resolves the
+     * server address (explicit agent server, otherwise `opencode service
+     * status`) and must not embed credentials. Null or a thrown error falls
+     * back to no link. Omitted means the link is unavailable.
+     */
+    readonly resolveOpenCodeSessionUrl?: (input: {
+      readonly sessionId: string
+    }) => Promise<string | null>
   } = {},
 ) => {
   const agentBackendCwd =
@@ -642,6 +652,25 @@ export const createGraphqlApi = <R>(
   const environment =
     options.environment ?? (process.env as Record<string, string | undefined>)
   const harnessVersion = options.version ?? "0.0.0"
+  const resolveOpenCodeSessionUrl = options.resolveOpenCodeSessionUrl
+  const openInOpenCodeUrlFor = (
+    backendId: string,
+    sessionId: string | null | undefined,
+  ): Promise<string | null> => {
+    if (backendId !== AGENT_BACKEND_IDS.opencode) return Promise.resolve(null)
+    if (
+      sessionId === null ||
+      sessionId === undefined ||
+      sessionId.trim().length === 0
+    ) {
+      return Promise.resolve(null)
+    }
+    if (resolveOpenCodeSessionUrl === undefined) return Promise.resolve(null)
+    return resolveOpenCodeSessionUrl({ sessionId: sessionId.trim() }).then(
+      (url) => (typeof url === "string" && url.length > 0 ? url : null),
+      () => null,
+    )
+  }
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
   const rejectLinearParentImplementAll = (repositoryId: string) =>
     Effect.gen(function* () {
@@ -1313,10 +1342,18 @@ export const createGraphqlApi = <R>(
                   backendId: workItem.agentBackend,
                   sessionId: workItem.sessionId,
                 })
-                return toGraphqlSession(
-                  session,
-                  agentTurnTailSupportedFor(workItem.agentBackend),
-                )
+                return {
+                  ...toGraphqlSession(
+                    session,
+                    agentTurnTailSupportedFor(workItem.agentBackend),
+                  ),
+                  openInOpenCodeUrl: yield* Effect.promise(() =>
+                    openInOpenCodeUrlFor(
+                      workItem.agentBackend,
+                      workItem.sessionId,
+                    ),
+                  ),
+                }
               }).pipe(Effect.withSpan("graphql-api.session")),
               context,
             ),
@@ -1736,6 +1773,8 @@ export const createGraphqlApi = <R>(
             workItem.createdAt.toISOString(),
           updatedAt: (workItem: { updatedAt: Date }) =>
             workItem.updatedAt.toISOString(),
+          openInOpenCodeUrl: (workItem: WorkItemRecord) =>
+            openInOpenCodeUrlFor(workItem.agentBackend, workItem.sessionId),
           ciRepair: async (
             workItem: WorkItemRecord,
             _args: unknown,
