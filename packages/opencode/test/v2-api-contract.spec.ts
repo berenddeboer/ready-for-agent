@@ -9,6 +9,10 @@ const opencode = spawnSync("opencode", ["--version"], {
 const installed = opencode.status === 0
 
 /**
+ * OpenAPI operation-name presence only. Endpoint method, body, and header
+ * execution lives in the real-CLI contract suite (`opencode:cli-contract`),
+ * which calls those endpoints through production launch paths.
+ *
  * Fails when OpenCode is installed but discovery or the API contract cannot be
  * confirmed. Does not return early on a failed lookup.
  */

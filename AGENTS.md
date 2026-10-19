@@ -53,6 +53,13 @@ Default labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wont
 
 Single-context layout (root CONTEXT.md + docs/adr/). See `docs/agents/domain.md`.
 
+### OpenCode CLI contract
+
+Any added or changed production OpenCode subprocess invocation must update
+`packages/opencode/CLI-CONTRACT.md` and the `opencode:cli-contract` suite in
+the same change. Argv unit tests are not a substitute. Run
+`bunx nx run opencode:cli-contract`.
+
 ### Domain ontology
 
 The Work Item lifecycle, every Step Run reason code, and the CONTEXT.md

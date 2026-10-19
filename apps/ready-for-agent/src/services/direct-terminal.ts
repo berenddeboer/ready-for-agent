@@ -64,6 +64,76 @@ const spawnFailed = (executable: string, error: unknown): JumpFailed =>
     ),
   })
 
+export type InteractiveResumeLaunch = {
+  readonly agentExecutable: string
+  readonly agentArguments: readonly string[]
+  readonly workingDirectory: string
+  readonly modelPinArguments?: readonly string[]
+  readonly env: NodeJS.ProcessEnv
+  /** TUI stdio. The direct Jump path inherits the terminal. */
+  readonly stdio: "inherit" | "pipe"
+}
+
+export type InteractiveResumeLaunchResult =
+  | {
+      readonly kind: "pin-failed"
+      readonly status: number | null
+      readonly stderr: string
+      readonly error?: Error
+    }
+  | {
+      readonly kind: "started"
+      readonly child: ReturnType<typeof spawn>
+    }
+
+/**
+ * Production Jump launch: optional session-model pin, then the TUI.
+ * Direct Jump and the CLI contract both call this. Do not rebuild the argv
+ * here — callers pass the arguments from `interactiveResumeCommand`.
+ */
+export const startInteractiveResume = (
+  input: InteractiveResumeLaunch,
+): InteractiveResumeLaunchResult => {
+  const modelPinArguments = input.modelPinArguments
+  if (modelPinArguments !== undefined) {
+    const pin = spawnSync(input.agentExecutable, [...modelPinArguments], {
+      cwd: input.workingDirectory,
+      env: input.env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: false,
+    })
+    if (pin.error !== undefined || pin.status !== 0) {
+      return {
+        kind: "pin-failed",
+        status: pin.status,
+        stderr: pin.stderr ?? "",
+        ...(pin.error === undefined ? {} : { error: pin.error }),
+      }
+    }
+  }
+
+  try {
+    return {
+      kind: "started",
+      child: spawn(input.agentExecutable, [...input.agentArguments], {
+        cwd: input.workingDirectory,
+        env: input.env,
+        stdio: input.stdio,
+        shell: false,
+        detached: false,
+      }),
+    }
+  } catch (error) {
+    return {
+      kind: "pin-failed",
+      status: null,
+      stderr: "",
+      error: error instanceof Error ? error : new Error(String(error)),
+    }
+  }
+}
+
 const releaseParentTerminalSignals = (): void => {
   process.removeAllListeners("SIGINT")
   process.removeAllListeners("SIGTERM")
@@ -98,27 +168,27 @@ export class DirectTerminal extends Context.Service<
     const run = Effect.fn("DirectTerminal.run")(function* (
       input: DirectLaunchInput,
     ) {
-      const modelPinArguments = input.modelPinArguments
-      if (modelPinArguments !== undefined) {
-        const pin = yield* Effect.sync(() =>
-          spawnSync(input.agentExecutable, [...modelPinArguments], {
-            cwd: input.workingDirectory,
-            env: sanitizeInheritedEnvironment(process.env, {
-              stripForgeTokens: false,
-            }),
-            encoding: "utf8",
-            stdio: ["ignore", "pipe", "pipe"],
-            shell: false,
+      const launched = yield* Effect.sync(() =>
+        startInteractiveResume({
+          agentExecutable: input.agentExecutable,
+          agentArguments: input.agentArguments,
+          workingDirectory: input.workingDirectory,
+          ...(input.modelPinArguments === undefined
+            ? {}
+            : { modelPinArguments: input.modelPinArguments }),
+          env: sanitizeInheritedEnvironment(process.env, {
+            stripForgeTokens: false,
           }),
-        )
-        if (pin.error !== undefined) {
-          return yield* spawnFailed(input.agentExecutable, pin.error)
+          stdio: "inherit",
+        }),
+      )
+      if (launched.kind === "pin-failed") {
+        if (launched.error !== undefined) {
+          return yield* spawnFailed(input.agentExecutable, launched.error)
         }
-        if (pin.status !== 0) {
-          return yield* new JumpFailed({
-            message: modelPinFailedMessage(pin.status, pin.stderr ?? ""),
-          })
-        }
+        return yield* new JumpFailed({
+          message: modelPinFailedMessage(launched.status, launched.stderr),
+        })
       }
 
       return yield* Effect.callback<number, JumpFailed>((resume) => {
@@ -133,21 +203,7 @@ export class DirectTerminal extends Context.Service<
           resume(effect)
         }
 
-        let child: ReturnType<typeof spawn>
-        try {
-          child = spawn(input.agentExecutable, [...input.agentArguments], {
-            cwd: input.workingDirectory,
-            env: sanitizeInheritedEnvironment(process.env, {
-              stripForgeTokens: false,
-            }),
-            stdio: "inherit",
-            shell: false,
-            detached: false,
-          })
-        } catch (error) {
-          finish(Effect.fail(spawnFailed(input.agentExecutable, error)))
-          return
-        }
+        const child = launched.child
 
         // Child already inherited the previous disposition. Detach runMain so
         // a process-group interrupt cannot exit Jump while the backend owns

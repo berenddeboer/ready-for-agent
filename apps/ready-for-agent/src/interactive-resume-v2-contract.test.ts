@@ -1,235 +1,247 @@
-import { spawnSync } from "node:child_process"
-import { mkdtempSync, rmSync } from "node:fs"
+/**
+ * Real OpenCode jump contract. Runs with `nx run opencode:cli-contract`.
+ * Isolated from the operator service. Do not spawn against the shared service.
+ */
+import { type ChildProcess, spawn } from "node:child_process"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { openCodeModelPinArguments } from "./interactive-resume.ts"
-import { describe, expect, test } from "bun:test"
+import { BunServices } from "@effect/platform-bun"
+import { Effect } from "effect"
+import {
+  AgentBackend,
+  AgentBackendExitError,
+} from "@ready-for-agent/agent-backend"
+import { Opencode } from "../../../packages/opencode/src/index.ts"
+import { startOwnedOpenCodeServer } from "../../../packages/opencode/src/lib/owned-server.ts"
+import { interactiveResumeCommand } from "./interactive-resume.ts"
+import { writeJumpLauncherScript } from "./jump-shell-launch.ts"
+import { startInteractiveResume } from "./services/direct-terminal.ts"
+import { ExecutablePath } from "./services/executable-path.ts"
+import { expect, test } from "bun:test"
 
-const opencode = spawnSync("opencode", ["--version"], { encoding: "utf8" })
-const versionText = `${opencode.stdout ?? ""}\n${opencode.stderr ?? ""}`
-const installedV2 =
-  opencode.status === 0 && /(?:^|\s)v?2\.\d+\.\d+/.test(versionText)
+const KEYMAXXER_URL = "http://127.0.0.1:9/ber35-jump-contract/mcp"
+const UNKNOWN_MODEL = "ready-for-agent-contract/no-such-model"
 
-const outputOf = (result: {
-  readonly stdout?: string
-  readonly stderr?: string
-}): string => `${result.stdout ?? ""}\n${result.stderr ?? ""}`
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
 
-const rejectBeforeInference = (args: ReadonlyArray<string>) =>
-  spawnSync("opencode", [...args, "--bogus"], {
-    encoding: "utf8",
-    timeout: 15_000,
+const rejectLauncherFailure = (text: string): void => {
+  expect(text).not.toContain("Unrecognized flag:")
+  expect(text).not.toContain("ready-for-agent jump:")
+  expect(text).not.toContain("could not execute Agent Backend executable")
+  expect(text).not.toContain("could not select the Work Item Agent Model")
+}
+
+/**
+ * The TUI cannot finish in this suite. Still running, with no launcher
+ * failure text, is the evidence it started. A quick nonzero exit is not.
+ */
+const observeStartedTui = async (child: ChildProcess): Promise<void> => {
+  let text = ""
+  child.stdout?.setEncoding("utf8")
+  child.stderr?.setEncoding("utf8")
+  child.stdout?.on("data", (chunk: string) => {
+    text += chunk
   })
-
-describe.skipIf(!installedV2)(
-  "installed OpenCode V2 jump continuation contract",
-  () => {
-    test("root TUI rejects model flags and accepts the session model API pin", () => {
-      const pin = openCodeModelPinArguments({
-        sessionId: "ses_contract",
-        workingDirectory: "/tmp/work-item",
-        agentModel: "provider/model",
-        thinkingLevel: "high",
-      })
-      expect(pin).toBeDefined()
-      if (pin === undefined) {
+  child.stderr?.on("data", (chunk: string) => {
+    text += chunk
+  })
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 1_500))
+    expect(child.exitCode, text.slice(0, 400)).toBeNull()
+    rejectLauncherFailure(text.slice(0, 800))
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL")
+    }
+    await new Promise((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve(undefined)
         return
       }
-      expect(pin).not.toContain("-m")
-      expect(pin).not.toContain("--model")
-
-      const accepted = rejectBeforeInference(pin)
-      const acceptedOutput = outputOf(accepted)
-      expect(accepted.status).toBe(1)
-      expect(acceptedOutput).toContain("Unrecognized flag: --bogus")
-      expect(acceptedOutput).not.toContain("Unrecognized flag: --header")
-      expect(acceptedOutput).not.toContain("Unrecognized flag: --data")
-      expect(acceptedOutput).not.toContain("Unrecognized flag: -m")
-
-      for (const flag of ["-m", "--model"] as const) {
-        const rejected = spawnSync(
-          "opencode",
-          [
-            "/tmp",
-            "--session",
-            "ses_contract",
-            "--auto",
-            flag,
-            "provider/model",
-          ],
-          { encoding: "utf8", timeout: 15_000 },
-        )
-        const rejectedOutput = outputOf(rejected)
-        expect(rejected.status).toBe(1)
-        expect(rejectedOutput).toContain(`Unrecognized flag: ${flag}`)
-      }
-
-      const resume = rejectBeforeInference([
-        "/tmp",
-        "--session",
-        "ses_contract",
-        "--auto",
-      ])
-      const resumeOutput = outputOf(resume)
-      expect(resume.status).toBe(1)
-      expect(resumeOutput).toContain("Unrecognized flag: --bogus")
-      expect(resumeOutput).not.toContain("Unrecognized flag: --session")
-      expect(resumeOutput).not.toContain("Unrecognized flag: --auto")
+      child.once("close", () => resolve(undefined))
     })
+  }
+}
 
-    test("a real session keeps the pinned model across a V2 TUI attach", () => {
-      const directory = mkdtempSync(join(tmpdir(), "rfa-opencode-pin-"))
-      const header = `x-opencode-directory:${encodeURIComponent(directory)}`
-      let sessionId: string | undefined
-      try {
-        const created = spawnSync(
-          "opencode",
-          [
-            "api",
-            "--header",
-            header,
-            "post",
-            "/api/session",
-            "--data",
-            JSON.stringify({
-              location: { directory },
-              title: "rfa-jump-model-contract",
-            }),
-          ],
-          { encoding: "utf8", timeout: 20_000 },
-        )
-        expect(created.status).toBe(0)
-        const createdBody: unknown = JSON.parse(created.stdout)
-        if (
-          typeof createdBody !== "object" ||
-          createdBody === null ||
-          !("data" in createdBody)
-        ) {
-          throw new Error("OpenCode did not return a created session")
-        }
-        const data = createdBody.data
-        if (
-          typeof data !== "object" ||
-          data === null ||
-          !("id" in data) ||
-          typeof data.id !== "string"
-        ) {
-          throw new Error("OpenCode did not return a session id")
-        }
-        sessionId = data.id
-        const catalog = readDefaultModel(directory)
-        const pin = openCodeModelPinArguments({
-          sessionId,
-          workingDirectory: directory,
-          agentModel: `${catalog.providerID}/${catalog.id}`,
-          thinkingLevel: catalog.thinkingLevel,
-        })
-        expect(pin).toBeDefined()
-        if (pin === undefined) {
-          return
-        }
-        const switched = spawnSync("opencode", [...pin], {
-          encoding: "utf8",
-          timeout: 20_000,
-        })
-        expect(switched.status).toBe(0)
-
-        const before = readSessionModel(sessionId)
-        expect(before).toMatchObject({
-          id: catalog.id,
-          providerID: catalog.providerID,
-          ...(catalog.thinkingLevel === null
-            ? {}
-            : { variant: catalog.thinkingLevel }),
-        })
-
-        spawnSync("opencode", [directory, "--session", sessionId, "--auto"], {
-          encoding: "utf8",
-          timeout: 4_000,
-        })
-
-        expect(readSessionModel(sessionId)).toEqual(before)
-      } finally {
-        if (sessionId !== undefined) {
-          spawnSync("opencode", ["session", "delete", sessionId], {
-            encoding: "utf8",
-            timeout: 20_000,
-          })
-        }
-        rmSync(directory, { recursive: true, force: true })
-      }
+test("jump pin and TUI use the production launcher without argument errors", async () => {
+  const binary = Bun.which("opencode")
+  expect(binary).not.toBeNull()
+  if (binary === null) {
+    return
+  }
+  const root = await mkdtemp(join(tmpdir(), "opencode-jump-contract-"))
+  const cwd = join(root, 'work "item"')
+  const env: Record<string, string> = {
+    PATH: process.env.PATH ?? "",
+    HOME: join(root, "home"),
+    XDG_CONFIG_HOME: join(root, "config"),
+    XDG_DATA_HOME: join(root, "data"),
+    XDG_STATE_HOME: join(root, "state"),
+    XDG_CACHE_HOME: join(root, "cache"),
+    TMPDIR: root,
+    LANG: "C",
+    TERM: "dumb",
+    OPENCODE_CONFIG_CONTENT: "{}",
+  }
+  await mkdir(env.HOME, { recursive: true })
+  await mkdir(env.XDG_CONFIG_HOME, { recursive: true })
+  await mkdir(env.XDG_DATA_HOME, { recursive: true })
+  await mkdir(env.XDG_STATE_HOME, { recursive: true })
+  await mkdir(env.XDG_CACHE_HOME, { recursive: true })
+  await mkdir(cwd, { recursive: true })
+  const owned = await startOwnedOpenCodeServer({
+    keymaxxerMcpUrl: KEYMAXXER_URL,
+    environment: env,
+    cwd,
+    readyTimeoutMs: 15_000,
+  })
+  try {
+    const infoResponse = await fetch(`${owned.baseUrl}/api/info`, {
+      headers: owned.headers,
+      signal: AbortSignal.timeout(5_000),
     })
-  },
-)
-
-const readDefaultModel = (
-  directory: string,
-): {
-  readonly providerID: string
-  readonly id: string
-  readonly thinkingLevel: string | null
-} => {
-  const result = spawnSync(
-    "opencode",
-    [
-      "api",
-      "--header",
-      `x-opencode-directory:${encodeURIComponent(directory)}`,
-      "get",
-      "/api/model/default",
-    ],
-    { encoding: "utf8", timeout: 20_000 },
-  )
-  expect(result.status).toBe(0)
-  const body: unknown = JSON.parse(result.stdout)
-  if (typeof body !== "object" || body === null || !("data" in body)) {
-    throw new Error("OpenCode default model response has no data")
-  }
-  const data = body.data
-  if (
-    typeof data !== "object" ||
-    data === null ||
-    !("providerID" in data) ||
-    !("id" in data) ||
-    typeof data.providerID !== "string" ||
-    typeof data.id !== "string"
-  ) {
-    throw new Error("OpenCode default model has no provider/model identity")
-  }
-  const variants = "variants" in data ? data.variants : undefined
-  const hasHigh =
-    Array.isArray(variants) &&
-    variants.some(
-      (variant) =>
-        typeof variant === "object" &&
-        variant !== null &&
-        "id" in variant &&
-        variant.id === "high",
+    const info: unknown = await infoResponse.json()
+    if (
+      !isRecord(info) ||
+      typeof info.version !== "string" ||
+      typeof info.pid !== "number"
+    ) {
+      throw new Error(
+        "ephemeral OpenCode server did not return version and pid",
+      )
+    }
+    const stateDir = join(env.XDG_STATE_HOME, "opencode")
+    await mkdir(stateDir, { recursive: true })
+    await writeFile(
+      join(stateDir, "service.json"),
+      JSON.stringify({
+        id: "ready-for-agent-contract",
+        version: info.version,
+        url: owned.baseUrl,
+        pid: info.pid,
+        password: owned.password,
+      }),
     )
-  return {
-    providerID: data.providerID,
-    id: data.id,
-    thinkingLevel: hasHigh ? "high" : null,
-  }
-}
 
-const readSessionModel = (sessionId: string): unknown => {
-  const result = spawnSync(
-    "opencode",
-    ["api", "get", `/api/session/${sessionId}`],
-    {
-      encoding: "utf8",
-      timeout: 20_000,
-    },
-  )
-  expect(result.status).toBe(0)
-  const body: unknown = JSON.parse(result.stdout)
-  if (typeof body !== "object" || body === null || !("data" in body)) {
-    throw new Error("OpenCode session response has no data")
+    const started = await Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* AgentBackend)
+          .startTurn({
+            cwd,
+            prompt: "jump session",
+            model: UNKNOWN_MODEL,
+            thinkingLevel: null,
+            timeout: "20 seconds",
+          })
+          .pipe(Effect.flip)
+      }).pipe(
+        Effect.provide(
+          Opencode.layer({
+            keymaxxerMcpUrl: KEYMAXXER_URL,
+            environment: env,
+            defaultTimeout: "20 seconds",
+            startupTimeout: "8 seconds",
+          }),
+        ),
+        Effect.provide(BunServices.layer),
+      ),
+    )
+    expect(started).toBeInstanceOf(AgentBackendExitError)
+    if (
+      !(started instanceof AgentBackendExitError) ||
+      started.sessionId === undefined
+    ) {
+      throw new Error("jump session was not created")
+    }
+    const sessionId = started.sessionId
+
+    const catalog = await Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* AgentBackend).inspect({
+          cwd,
+          timeout: "20 seconds",
+        })
+      }).pipe(
+        Effect.provide(
+          Opencode.layer({
+            keymaxxerMcpUrl: KEYMAXXER_URL,
+            environment: env,
+            defaultTimeout: "20 seconds",
+          }),
+        ),
+        Effect.provide(BunServices.layer),
+      ),
+    )
+    const modelId = catalog.models[0]?.id
+    expect(modelId).toBeDefined()
+    if (modelId === undefined) {
+      return
+    }
+
+    const resolved = await Effect.runPromise(
+      Effect.gen(function* () {
+        return yield* (yield* ExecutablePath).resolve("opencode")
+      }).pipe(Effect.provide(ExecutablePath.layer)),
+    )
+    const resume = interactiveResumeCommand({
+      backendId: "opencode",
+      sessionId,
+      workingDirectory: cwd,
+      agentModel: modelId,
+      thinkingLevel: null,
+    })
+    expect(resume?.modelPin?.kind).toBe("ready")
+    if (resume === null || resume.modelPin?.kind !== "ready") {
+      return
+    }
+
+    const launched = startInteractiveResume({
+      agentExecutable: resolved,
+      agentArguments: resume.arguments,
+      workingDirectory: cwd,
+      modelPinArguments: resume.modelPin.arguments,
+      env,
+      stdio: "pipe",
+    })
+    expect(launched.kind).toBe("started")
+    if (launched.kind !== "started") {
+      throw new Error(launched.stderr)
+    }
+    await observeStartedTui(launched.child)
+
+    const readModel = async (): Promise<
+      Record<string, unknown> | undefined
+    > => {
+      const sessionResponse = await fetch(
+        `${owned.baseUrl}/api/session/${sessionId}`,
+        { headers: owned.headers, signal: AbortSignal.timeout(5_000) },
+      )
+      const sessionBody: unknown = await sessionResponse.json()
+      const data = isRecord(sessionBody) ? sessionBody.data : undefined
+      return isRecord(data) && isRecord(data.model) ? data.model : undefined
+    }
+    const model = await readModel()
+    const [providerID, ...modelParts] = modelId.split("/")
+    expect(model?.providerID).toBe(providerID)
+    expect(model?.id).toBe(modelParts.join("/"))
+
+    const scriptPath = writeJumpLauncherScript({
+      directory: join(root, "jump-script"),
+      executableName: resume.executableName,
+      arguments: resume.arguments,
+      modelPinArguments: resume.modelPin.arguments,
+    })
+    const script = spawn(scriptPath, [], {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    await observeStartedTui(script)
+    expect(await readModel()).toEqual(model)
+  } finally {
+    await owned.dispose()
+    await rm(root, { recursive: true, force: true })
   }
-  const data = body.data
-  if (typeof data !== "object" || data === null || !("model" in data)) {
-    throw new Error("OpenCode session response has no model")
-  }
-  return data.model
-}
+}, 45_000)

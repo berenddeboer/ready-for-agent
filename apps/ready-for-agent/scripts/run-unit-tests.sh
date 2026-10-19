@@ -16,7 +16,10 @@ done
 
 # Real tmux sessions plus direnv/mise activation exceed the 15s default.
 # That file skips when the tools are absent.
-integration_ignore=(--path-ignore-patterns="**/jump-tmux-shell.integration.test.ts")
+integration_ignore=(
+  --path-ignore-patterns="**/jump-tmux-shell.integration.test.ts"
+  --path-ignore-patterns="**/interactive-resume-v2-contract.test.ts"
+)
 
 set +e
 # Match the 15s default used for ready-for-agent Bun suites on main (host-binary

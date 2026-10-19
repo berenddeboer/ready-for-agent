@@ -14,7 +14,12 @@ const messageTokensFromArgs = (
   args: ReadonlyArray<string>,
 ): ReadonlyArray<string> => {
   const separatorIndex = args.indexOf("--")
-  return separatorIndex === -1 ? [] : args.slice(separatorIndex + 1)
+  if (separatorIndex !== -1) {
+    return args.slice(separatorIndex + 1)
+  }
+  const sessionAt = args.indexOf("--session")
+  const start = sessionAt === -1 ? args.indexOf("-m") + 2 : sessionAt + 2
+  return start <= 1 ? [] : args.slice(start)
 }
 
 const messageFromArgs = (args: ReadonlyArray<string>): string =>
@@ -111,7 +116,6 @@ describe("buildRunArgs", () => {
       "json",
       "-m",
       "anthropic/claude-sonnet-4-5",
-      "--",
       "fix",
       "the",
       "bug",
@@ -132,7 +136,6 @@ describe("buildRunArgs", () => {
       "json",
       "-m",
       "anthropic/claude-sonnet-4-5#high",
-      "--",
       "fix",
       "the",
       "bug",
@@ -173,10 +176,12 @@ describe("buildRunArgs", () => {
     expect(args).not.toContain(prompt)
   })
 
-  it("uses stdin only for newline-bearing prompts", () => {
+  it("uses stdin for newlines and for tokens that would be parsed as flags", () => {
     for (const [prompt, usesStdin, message] of [
       ["first\nsecond", true, []],
       ["first\tsecond", false, ["first", "second"]],
+      ["--help", true, []],
+      ["fix -urgent", true, []],
     ] as const) {
       const args = buildRunArgs({
         prompt,
@@ -225,7 +230,7 @@ describe("buildRunArgs", () => {
     expect(messageTokensFromArgs(args)).toEqual([prompt])
   })
 
-  it("includes session for continue and protects the prompt with --", () => {
+  it("includes session for continue and does not use the doubling -- separator", () => {
     expect(
       buildRunArgs({
         prompt: "continue the work",
@@ -242,7 +247,6 @@ describe("buildRunArgs", () => {
       "anthropic/claude-sonnet-4-5#max",
       "--session",
       "ses_abc",
-      "--",
       "continue",
       "the",
       "work",
