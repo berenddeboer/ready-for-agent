@@ -1,6 +1,7 @@
 import {
   parseErrorClassificationFromLine,
   parseProviderRetryAtFromLine,
+  parseV2ErrorMessageFromLine,
 } from "../src/lib/parse-error-classification.js"
 import { describe, expect, it } from "bun:test"
 
@@ -151,6 +152,32 @@ describe("parseErrorClassificationFromLine", () => {
       },
     })
     expect(parseErrorClassificationFromLine(line)).toBe("terminal_auth_error")
+  })
+
+  it("reads a V2 provider error message and ignores name-based events", () => {
+    const line = JSON.stringify({
+      type: "error",
+      sessionID: "ses_contract",
+      error: {
+        type: "provider.no-route",
+        message: "Model unavailable: ready-for-agent-contract/no-such-model",
+      },
+    })
+    expect(parseV2ErrorMessageFromLine(line)).toBe(
+      "Model unavailable: ready-for-agent-contract/no-such-model",
+    )
+    expect(parseErrorClassificationFromLine(line)).toBeUndefined()
+    expect(
+      parseV2ErrorMessageFromLine(
+        JSON.stringify({
+          type: "error",
+          error: {
+            name: "UnknownError",
+            data: { message: "Unexpected server error." },
+          },
+        }),
+      ),
+    ).toBeUndefined()
   })
 
   it("returns undefined for non-json lines", () => {

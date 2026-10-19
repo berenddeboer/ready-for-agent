@@ -26,7 +26,33 @@ describe("withOpenCodeServer", () => {
   it("places --server where OpenCode 2.0.32 accepts it", () => {
     expect(
       withOpenCodeServer(["run", "--auto"], "http://127.0.0.1:4096"),
-    ).toEqual(["--server", "http://127.0.0.1:4096", "run", "--auto"])
+    ).toEqual(["run", "--server", "http://127.0.0.1:4096", "--auto"])
+    expect(
+      withOpenCodeServer(
+        [
+          "run",
+          "--auto",
+          "--format",
+          "json",
+          "-m",
+          "p/m",
+          "--session",
+          "ses_1",
+        ],
+        "http://127.0.0.1:4096",
+      ),
+    ).toEqual([
+      "run",
+      "--server",
+      "http://127.0.0.1:4096",
+      "--auto",
+      "--format",
+      "json",
+      "-m",
+      "p/m",
+      "--session",
+      "ses_1",
+    ])
     expect(
       withOpenCodeServer(
         [

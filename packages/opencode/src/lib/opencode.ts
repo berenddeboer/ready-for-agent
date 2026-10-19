@@ -43,6 +43,7 @@ import {
 import {
   parseErrorClassificationFromLine,
   parseProviderRetryAtFromLine,
+  parseV2ErrorMessageFromLine,
 } from "./parse-error-classification.js"
 import {
   OPENCODE_CATALOG_EMPTY_MESSAGE,
@@ -548,7 +549,16 @@ export const Opencode = {
                   const sessionId = parseSessionIdFromLine(line)
                   const errorClassification =
                     parseErrorClassificationFromLine(line)
+                  const errorMessage = parseV2ErrorMessageFromLine(line)
                   const retryAt = parseProviderRetryAtFromLine(line)
+                  const parsed = {
+                    ...(sessionId !== undefined ? { sessionId } : {}),
+                    ...(errorClassification !== undefined
+                      ? { errorClassification }
+                      : {}),
+                    ...(errorMessage !== undefined ? { errorMessage } : {}),
+                    ...(retryAt !== undefined ? { retryAt } : {}),
+                  }
                   if (command !== undefined) {
                     const commandText = parseCommandTaskResultFromLine(
                       line,
@@ -556,21 +566,13 @@ export const Opencode = {
                     )
                     if (commandText !== undefined) {
                       return {
-                        ...(sessionId !== undefined ? { sessionId } : {}),
-                        ...(errorClassification !== undefined
-                          ? { errorClassification }
-                          : {}),
-                        ...(retryAt !== undefined ? { retryAt } : {}),
+                        ...parsed,
                         finalizeText: commandText,
                       }
                     }
                   }
                   return {
-                    ...(sessionId !== undefined ? { sessionId } : {}),
-                    ...(errorClassification !== undefined
-                      ? { errorClassification }
-                      : {}),
-                    ...(retryAt !== undefined ? { retryAt } : {}),
+                    ...parsed,
                     text: parseAssistantTextFromLine(line),
                   }
                 },

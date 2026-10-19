@@ -143,6 +143,29 @@ const parseErrorEvent = (line: string): Record<string, unknown> | undefined => {
   return event as Record<string, unknown>
 }
 
+/**
+ * Human-readable reason from an OpenCode 2 `error` event (`error.type` plus
+ * `error.message`). Name-based events keep their reason in `error.data`
+ * and stay on stderr handling.
+ */
+export const parseV2ErrorMessageFromLine = (
+  line: string,
+): string | undefined => {
+  const event = parseErrorEvent(line)
+  if (event === undefined || event.type !== "error" || !isRecord(event.error)) {
+    return undefined
+  }
+  if (typeof event.error.type !== "string") {
+    return undefined
+  }
+  const message = event.error.message
+  if (typeof message !== "string") {
+    return undefined
+  }
+  const trimmed = message.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
 export const parseErrorClassificationFromLine = (
   line: string,
 ): AgentBackendErrorClassification | undefined => {
