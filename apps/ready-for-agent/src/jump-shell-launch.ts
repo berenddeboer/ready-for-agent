@@ -65,6 +65,11 @@ export const renderJumpLauncherScript = (input: {
   readonly executableName: string
   readonly arguments: readonly string[]
   readonly tmuxExecutable?: string
+  /**
+   * OpenCode V2 model switch, run with the shell's executable before exec.
+   * Omitted for unpinned OpenCode and every other Agent Backend.
+   */
+  readonly modelPinArguments?: readonly string[]
 }): string => {
   const exe = quotePosixShell(input.executableName)
   const tmux = quotePosixShell(input.tmuxExecutable ?? "tmux")
@@ -74,6 +79,17 @@ export const renderJumpLauncherScript = (input: {
       : ` ${input.arguments
           .map((argument) => quotePosixShell(argument))
           .join(" ")}`
+  const modelPin =
+    input.modelPinArguments === undefined
+      ? ""
+      : `"$exe"${input.modelPinArguments
+          .map((argument) => ` ${quotePosixShell(argument)}`)
+          .join("")}
+pin_status=$?
+if [ "$pin_status" -ne 0 ]; then
+  fail "could not select the Work Item Agent Model on OpenCode (status $pin_status)."
+fi
+`
   return `#!/bin/sh
 if [ -z "\${BASH_VERSION-}" ] && [ -x /bin/bash ]; then
   exec /bin/bash "$0" "$@"
@@ -97,7 +113,7 @@ command -v "$exe" >/dev/null 2>&1 || fail "$missing"
 if [ -n "\${BASH_VERSION-}" ]; then
   shopt -s execfail
 fi
-exec "$exe"${execArgs}
+${modelPin}exec "$exe"${execArgs}
 status=$?
 exec_status="could not execute Agent Backend executable '$exe'"
 if [ "$status" -eq 0 ]; then

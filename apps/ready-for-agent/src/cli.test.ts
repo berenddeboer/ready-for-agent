@@ -2545,13 +2545,118 @@ describe("operator binary jump command", () => {
           "--session",
           sessionId,
           "--auto",
-          "-m",
-          "amazon-bedrock/au.anthropic.claude-sonnet-5",
+        ])
+        expect(captured?.agentArguments).not.toContain("-m")
+        expect(captured?.agentArguments).not.toContain("--model")
+        expect(captured?.modelPinArguments).toEqual([
+          "api",
+          "--header",
+          `x-opencode-directory:${encodeURIComponent(worktree)}`,
+          "post",
+          `/api/session/${sessionId}/model`,
+          "--data",
+          JSON.stringify({
+            model: {
+              providerID: "amazon-bedrock",
+              id: "au.anthropic.claude-sonnet-5",
+              variant: "high",
+            },
+          }),
         ])
       } finally {
         rmSync(worktree, { recursive: true, force: true })
       }
     }),
+  )
+
+  it.live(
+    "jump pins the OpenCode model before a direct continuation and does not pass a TUI model flag",
+    () =>
+      Effect.gen(function* () {
+        const worktree = mkdtempSync(join(tmpdir(), "rfa-jump-model-direct-"))
+        let launched: DirectLaunchInput | undefined
+        const previousExitCode = process.exitCode
+        try {
+          yield* runOperator(
+            ["jump", sessionId],
+            successfulJumpLayer({
+              tmuxModeSelected: Effect.succeed(false),
+              workItemBySessionId: () =>
+                Effect.succeed(
+                  foundWorkItem({
+                    backendId: "opencode",
+                    worktreePath: worktree,
+                    agentModel: "xai/grok-4.7",
+                  }),
+                ),
+              runDirect: (input) =>
+                Effect.sync(() => {
+                  launched = input
+                  return 0
+                }),
+            }),
+          )
+          expect(launched?.agentArguments).toEqual([
+            worktree,
+            "--session",
+            sessionId,
+            "--auto",
+          ])
+          expect(launched?.agentArguments).not.toContain("-m")
+          expect(launched?.agentArguments).not.toContain("--model")
+          expect(launched?.modelPinArguments?.[0]).toBe("api")
+          expect(launched?.modelPinArguments).toContain(
+            `/api/session/${sessionId}/model`,
+          )
+          expect(launched?.modelPinArguments?.at(-1)).toBe(
+            JSON.stringify({
+              model: { providerID: "xai", id: "grok-4.7" },
+            }),
+          )
+        } finally {
+          process.exitCode = previousExitCode
+          rmSync(worktree, { recursive: true, force: true })
+        }
+      }),
+  )
+
+  it.live(
+    "jump reports an invalid OpenCode model pin instead of launching",
+    () =>
+      Effect.gen(function* () {
+        let launched = false
+        let created = false
+        const result = yield* runOperator(
+          ["jump", sessionId],
+          successfulJumpLayer({
+            workItemBySessionId: () =>
+              Effect.succeed(
+                foundWorkItem({
+                  backendId: "opencode",
+                  worktreePath: null,
+                  agentModel: "not-a-reference",
+                }),
+              ),
+            createJumpWindow: () => {
+              created = true
+              return Effect.void
+            },
+            runDirect: () => {
+              launched = true
+              return Effect.succeed(0)
+            },
+          }),
+        ).pipe(Effect.flip)
+
+        expect(created).toBe(false)
+        expect(launched).toBe(false)
+        expect(result).toBeInstanceOf(JumpFailed)
+        if (result instanceof JumpFailed) {
+          expect(result.message).toContain(
+            "could not select the Work Item Agent Model on OpenCode",
+          )
+        }
+      }),
   )
 
   it.live("jump uses the CLI cwd when the worktree is missing", () =>

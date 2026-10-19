@@ -1822,7 +1822,12 @@ sys.exit(os.waitstatus_to_exitcode(status))
 `
 
 const recordingBackendScript = `#!/usr/bin/env bun
-import { writeFileSync } from "node:fs"
+import { appendFileSync, writeFileSync } from "node:fs"
+
+const invocations = process.env.BACKEND_INVOCATIONS
+if (invocations !== undefined && invocations.length > 0) {
+  appendFileSync(invocations, JSON.stringify(process.argv.slice(2)) + "\\n")
+}
 
 const recordPath = process.env.BACKEND_RECORD
 if (recordPath !== undefined && recordPath.length > 0) {
@@ -2362,9 +2367,24 @@ if (args[0] === "split-window" && args.includes("-P")) {
       const script = readQueuedLauncher(invocations)
       expect(script).toContain("exe='opencode'")
       expect(script).toContain(
-        `exec "$exe" '${worktree}' '--session' '${jumpSessionId}' '--auto' '-m' 'amazon-bedrock/au.anthropic.claude-sonnet-5'`,
+        `exec "$exe" '${worktree}' '--session' '${jumpSessionId}' '--auto'`,
       )
-      expect(script).not.toContain("high")
+      expect(script).not.toContain("'-m'")
+      expect(script).not.toContain("'--model'")
+      expect(script).toContain(`"$exe" 'api'`)
+      expect(script).toContain(`'/api/session/${jumpSessionId}/model'`)
+      expect(script).toContain(
+        `'${JSON.stringify({
+          model: {
+            providerID: "amazon-bedrock",
+            id: "au.anthropic.claude-sonnet-5",
+            variant: "high",
+          },
+        })}'`,
+      )
+      expect(script.indexOf(`"$exe" 'api'`)).toBeLessThan(
+        script.indexOf(`exec "$exe"`),
+      )
       expect(maskQueuedExec(invocations)).toContainEqual([
         "new-window",
         "-d",
@@ -2834,6 +2854,88 @@ process.exit(1)
       } finally {
         await graphql.close()
       }
+    }
+  })
+
+  test("direct jump selects the OpenCode model before the TUI and does not pass a model flag", async () => {
+    const worktree = join(tempRoot, "worktree-model-direct")
+    mkdirSync(worktree)
+    const invocations = join(tempRoot, "invocations.log")
+    writeFileSync(invocations, "")
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: worktree,
+      agentModel: "xai/grok-4.7",
+      thinkingLevel: "high",
+    })
+    try {
+      const result = await runCliOnPty(["jump", jumpSessionId], graphql.url, {
+        ...directEnv(),
+        BACKEND_INVOCATIONS: invocations,
+      })
+
+      expect(result.status).toBe(0)
+      const calls = readFileSync(invocations, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as readonly string[])
+      expect(calls).toHaveLength(2)
+      expect(calls[0]?.[0]).toBe("api")
+      expect(calls[0]).toContain(`/api/session/${jumpSessionId}/model`)
+      expect(calls[0]).not.toContain("-m")
+      expect(calls[0]).not.toContain("--model")
+      expect(calls[1]).toEqual([worktree, "--session", jumpSessionId, "--auto"])
+      const record = readBackendRecord(backendRecord)
+      expect(record.stdinIsTTY).toBe(true)
+      expect(record.argv).toEqual(calls[1])
+    } finally {
+      await graphql.close()
+    }
+  })
+
+  test("direct jump reports a failed OpenCode model pin and does not start the TUI", async () => {
+    const worktree = join(tempRoot, "worktree-model-fail")
+    mkdirSync(worktree)
+    const invocations = join(tempRoot, "invocations-fail.log")
+    writeFileSync(invocations, "")
+    writeExecutable(
+      join(binDir, "opencode"),
+      `#!/usr/bin/env bun
+import { appendFileSync } from "node:fs"
+const args = process.argv.slice(2)
+appendFileSync(process.env.BACKEND_INVOCATIONS ?? "", JSON.stringify(args) + "\\n")
+if (args[0] === "api") {
+  process.stderr.write("model rejected\\n")
+  process.exit(1)
+}
+process.stdout.write("backend-ready\\n")
+process.exit(0)
+`,
+    )
+    const graphql = await startJumpGraphqlServer({
+      backendId: "opencode",
+      worktreePath: worktree,
+      agentModel: "xai/grok-4.7",
+    })
+    try {
+      const result = await runCliOnPty(["jump", jumpSessionId], graphql.url, {
+        ...directEnv(),
+        BACKEND_INVOCATIONS: invocations,
+      })
+
+      expect(result.status).toBe(1)
+      const output = `${result.stdout}\n${result.stderr}`.replaceAll("\r", "")
+      expect(output).toContain(
+        "could not select the Work Item Agent Model on OpenCode",
+      )
+      expect(output).toContain("model rejected")
+      const calls = readFileSync(invocations, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0)
+      expect(calls).toHaveLength(1)
+      expect(output).not.toContain("backend-ready")
+    } finally {
+      await graphql.close()
     }
   })
 

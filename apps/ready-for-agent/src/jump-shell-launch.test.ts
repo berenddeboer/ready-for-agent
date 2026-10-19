@@ -148,6 +148,71 @@ describe("jump shell launch", () => {
     }
   })
 
+  test("a failed OpenCode model pin stays in the pane and does not exec the TUI", () => {
+    const root = mkdtempSync(join(tmpdir(), "rfa-launch-pin-"))
+    const bin = join(root, "bin")
+    const tmuxLog = join(root, "tmux.log")
+    const calls = join(root, "calls.log")
+    mkdirSync(bin)
+    writeFileSync(tmuxLog, "")
+    writeFileSync(calls, "")
+    const tmuxPath = join(root, "tmux")
+    writeFileSync(
+      tmuxPath,
+      '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$TMUX_LOG"\nexit 0\n',
+      { mode: 0o755 },
+    )
+    chmodSync(tmuxPath, 0o755)
+    const opencode = join(bin, "opencode")
+    writeFileSync(
+      opencode,
+      `#!/bin/sh
+printf '%s\\n' "$*" >> "$CALLS"
+if [ "$1" = "api" ]; then
+  echo model rejected >&2
+  exit 1
+fi
+echo tui-started
+exit 0
+`,
+      { mode: 0o755 },
+    )
+    chmodSync(opencode, 0o755)
+    const scriptPath = join(root, "launch")
+    writeFileSync(
+      scriptPath,
+      renderJumpLauncherScript({
+        executableName: "opencode",
+        arguments: ["/tmp/work", "--session", "ses_pin", "--auto"],
+        modelPinArguments: ["api", "post", "/api/session/ses_pin/model"],
+        tmuxExecutable: tmuxPath,
+      }),
+      { mode: 0o700 },
+    )
+    chmodSync(scriptPath, 0o700)
+    try {
+      const result = spawnSync(scriptPath, [], {
+        encoding: "utf8",
+        env: {
+          PATH: `${bin}:/usr/bin:/bin`,
+          TMUX_PANE: "%9",
+          TMUX_LOG: tmuxLog,
+          CALLS: calls,
+        },
+      })
+      expect(result.status).toBe(127)
+      expect(result.stderr).toContain(
+        "could not select the Work Item Agent Model on OpenCode",
+      )
+      expect(result.stdout).not.toContain("tui-started")
+      expect(readFileSync(calls, "utf8")).toContain("api")
+      expect(readFileSync(calls, "utf8")).not.toContain("--session")
+      expect(readFileSync(tmuxLog, "utf8")).toContain("remain-on-exit on")
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   test("production jump sources do not mention environment managers", () => {
     const sources = ["jump-shell-launch.ts", "services/tmux.ts", "cli.ts"]
       .map((name) =>
