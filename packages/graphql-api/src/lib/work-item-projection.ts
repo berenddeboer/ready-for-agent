@@ -10,6 +10,7 @@ import {
   isTerminalWorkItemState,
 } from "@ready-for-agent/lifecycle-model"
 import {
+  type ProviderRecoverySnapshot,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
   REVIEW_ASSESSING_RERUN_MESSAGE,
   REVIEW_PRE_COMMIT_MESSAGE,
@@ -18,6 +19,7 @@ import {
   type StepRunRecord,
   WAITING_FOR_WORKER_SLOT_MESSAGE,
   type WorkItemRecord,
+  formatProviderRecoveryApiMessage,
   formatWaitingForBlockersMessage,
   formatWaitingForCiRepairMessage,
   isRetryableFailedWorkItem,
@@ -90,6 +92,7 @@ export type WorkItemStatus =
   | "waiting_for_blockers"
   | "waiting_for_ci_repair"
   | "waiting_for_github"
+  | "waiting_for_provider"
 
 type LifecyclePhase =
   | Exclude<
@@ -144,6 +147,8 @@ export const statusLabel = (status: WorkItemStatus): string => {
   switch (status) {
     case "waiting_for_github":
       return "Waiting for GitHub"
+    case "waiting_for_provider":
+      return "Waiting for provider"
     case "waiting_for_ci_repair":
       return "Waiting for CI Repair"
     default:
@@ -269,9 +274,15 @@ export const workItemCanAutonomousRetry = (workItem: WorkItemRecord): boolean =>
   !workItem.paused &&
   !isInterruptedWithPausedReason(workItem)
 
-export const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
+export const workItemStatus = (
+  workItem: WorkItemRecord,
+  episode?: ProviderRecoverySnapshot | null,
+): WorkItemStatus => {
   const higherPriorityStatus = higherPriorityWorkItemStatus(workItem)
   if (higherPriorityStatus !== null) return higherPriorityStatus
+  if (episode?.status === "scheduled" && !workItemHasActiveStepRun(workItem)) {
+    return "waiting_for_provider"
+  }
   if (workItemPostponedUntil(workItem) !== null) return "waiting_for_github"
   const latest = latestStepRun(workItem)
   if (latest === undefined) return "queued"
@@ -282,8 +293,25 @@ export const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
  * Operator-visible status badge. Drain is Pause plus an active Step Run, not
  * a lifecycle state: machine status stays Needs human review.
  */
-export const workItemStatusLabel = (workItem: WorkItemRecord): string => {
-  const status = workItemStatus(workItem)
+export const workItemStatusLabel = (
+  workItem: WorkItemRecord,
+  episode?: ProviderRecoverySnapshot | null,
+): string => {
+  if (
+    episode?.status === "exhausted" &&
+    !workItemIsTerminal(workItem) &&
+    !workItem.paused
+  ) {
+    return "Recovery stopped"
+  }
+  if (
+    episode?.status === "in_attempt" &&
+    workItemHasActiveStepRun(workItem) &&
+    !workItem.paused
+  ) {
+    return "Retrying"
+  }
+  const status = workItemStatus(workItem, episode)
   if (status === "needs_human_review" && workItemHasActiveStepRun(workItem)) {
     return "Draining"
   }
@@ -309,6 +337,7 @@ export const workItemStatusMessage = (
     readonly blockerDisplayIds?: readonly string[]
     readonly failedCiGateDefinitionLabels?: readonly string[]
     readonly ciFailureIncidentSummary?: string | null
+    readonly providerRecovery?: ProviderRecoverySnapshot | null
   },
 ): string | null => {
   if (workItemIsTerminal(workItem)) {
@@ -322,6 +351,13 @@ export const workItemStatusMessage = (
   }
   if (workItem.paused) {
     return workItem.failureMessage
+  }
+  const recoveryMessage =
+    options?.providerRecovery == null
+      ? null
+      : formatProviderRecoveryApiMessage(options.providerRecovery)
+  if (recoveryMessage !== null) {
+    return recoveryMessage
   }
   if (workItem.waitingForCiRepair) {
     return formatWaitingForCiRepairMessage(

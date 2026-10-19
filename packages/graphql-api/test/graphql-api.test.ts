@@ -2535,6 +2535,199 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("validates provider recovery maximum wait and keeps omit unchanged", async () => {
+    const writes: Array<number | null> = []
+    const configWrites: string[] = []
+    const runtime = makeRuntime({
+      getProviderRecoveryMaxWaitMs: Effect.succeed(90 * 60_000),
+      updateConfig: (input) => {
+        configWrites.push(input.selectedAgentBackend)
+        return Effect.succeed({
+          selectedAgentBackend: input.selectedAgentBackend,
+          defaultModel: input.defaultModel,
+          defaultThinkingLevel: input.defaultThinkingLevel,
+          reviewModel: input.reviewModel,
+          reviewThinkingLevel: input.reviewThinkingLevel,
+          maxConcurrentAgentTurns: input.maxConcurrentAgentTurns,
+          maxConcurrentWorkItems: input.maxConcurrentWorkItems,
+        })
+      },
+      setProviderRecoveryMaxWaitMs: (value) => {
+        writes.push(value)
+        return Effect.succeed(value)
+      },
+    })
+    const read = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query { config { providerRecoveryMaxWaitMs } }`,
+      }),
+    )
+    expect(await read.json()).toEqual({
+      data: { config: { providerRecoveryMaxWaitMs: 90 * 60_000 } },
+    })
+
+    const kept = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { maxConcurrentWorkItems }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect((await kept.json()).errors).toBeUndefined()
+    expect(writes).toEqual([])
+
+    const rejected = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { providerRecoveryMaxWaitMs }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+            providerRecoveryMaxWaitMs: 0,
+          },
+        },
+      }),
+    )
+    expect(await rejected.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message:
+            "providerRecoveryMaxWaitMs must be a positive integer or null",
+          extensions: expect.objectContaining({
+            code: "INVALID_CONFIG_INPUT",
+            field: "providerRecoveryMaxWaitMs",
+          }),
+        }),
+      ],
+    })
+    expect(writes).toEqual([])
+    expect(configWrites).toEqual(["opencode"])
+
+    const cleared = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { providerRecoveryMaxWaitMs }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+            providerRecoveryMaxWaitMs: null,
+          },
+        },
+      }),
+    )
+    expect(
+      (await cleared.json()).data.updateConfig.providerRecoveryMaxWaitMs,
+    ).toBe(90 * 60_000)
+    expect(writes).toEqual([null])
+  })
+
+  test("exposes scheduled provider recovery as waiting rather than a manual failure", async () => {
+    const waiting = {
+      ...workItem,
+      state: "investigate_pr_status_checks",
+      holdsWorkerSlot: false,
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0],
+          step: "investigate_pr_status_checks",
+          status: "failed" as const,
+          reasonCode: "transient_provider_error",
+          reasonMessage:
+            "Selected model is at capacity. Please try a different model.",
+          finishedAt: new Date("2026-10-19T12:00:00.000Z"),
+          postponedUntil: null,
+          reasonDetail: null,
+        },
+      ],
+    } as WorkItemRecord
+    const runtime = makeRuntime(
+      {
+        listProviderRecoveryEpisodes: Effect.succeed([
+          {
+            workItemId: waiting.id,
+            lifecycleStep: "investigate_pr_status_checks",
+            status: "scheduled" as const,
+            providerId: "openai",
+            providerLabel: "OpenAI",
+            model: "gpt-5.5",
+            providerCode: "server_overloaded",
+            reasonMessage:
+              "Selected model is at capacity. Please try a different model.",
+            episodeStartedAt: Date.parse("2026-10-19T11:48:00.000Z"),
+            attemptCount: 3,
+            nextAttemptAt: Date.parse("2026-10-19T12:04:00.000Z"),
+            escalated: true,
+            exhaustedAt: null,
+          },
+        ]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([waiting]),
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query($repositoryId: ID!, $nativeId: String!) {
+          workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
+            status
+            statusLabel
+            statusMessage
+            canRetry
+            providerRecovery {
+              status
+              providerLabel
+              model
+              attemptCount
+              escalated
+              nextAttemptAt
+            }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          nativeId: waiting.issueSource.nativeId,
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            status: "WAITING_FOR_PROVIDER",
+            statusLabel: "Waiting for provider",
+            statusMessage:
+              "Model at capacity — next attempt at 2026-10-19T12:04:00.000Z. OpenAI · gpt-5.5. 3 failed attempts.",
+            canRetry: true,
+            providerRecovery: {
+              status: "SCHEDULED",
+              providerLabel: "OpenAI",
+              model: "gpt-5.5",
+              attemptCount: 3,
+              escalated: true,
+              nextAttemptAt: "2026-10-19T12:04:00.000Z",
+            },
+          },
+        ],
+      },
+    })
+  })
+
   test("updateConfig rejects an Agent Model outside the current catalog", async () => {
     // Issue #838: Settings is catalog-only, and a direct GraphQL request must
     // not be able to store a model the Agent Backend does not offer.

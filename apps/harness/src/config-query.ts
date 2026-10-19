@@ -18,6 +18,7 @@ export const configSelection = {
   reviewThinkingLevel: true,
   maxConcurrentAgentTurns: true,
   maxConcurrentWorkItems: true,
+  providerRecoveryMaxWaitMs: true,
   unfinishedWorkItemCount: true,
   blockingUnfinishedWorkItemCount: true,
 } as const

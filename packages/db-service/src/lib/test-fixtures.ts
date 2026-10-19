@@ -64,6 +64,8 @@ export const stubDbService = (
   }),
   getProviderRecoveryMaxWaitMs: Effect.succeed(null),
   setProviderRecoveryMaxWaitMs: () => Effect.succeed(null),
+  listProviderRecoveryEpisodes: Effect.succeed([]),
+  getProviderRecoveryEpisode: () => Effect.succeed(null),
   getBackendModelPrefs: () =>
     Effect.succeed({
       defaultModel: "opencode/deepseek-v4-flash-free",

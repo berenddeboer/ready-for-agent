@@ -45,13 +45,14 @@ Write the payload to a file; shell-escaping GraphQL inline wastes a turn.
 ```graphql
 {
   version
-  config { selectedAgentBackend maxConcurrentWorkItems unfinishedWorkItemCount }
+  config { selectedAgentBackend maxConcurrentWorkItems providerRecoveryMaxWaitMs unfinishedWorkItemCount }
   repositories { id projectPath paused mergePolicy issuesReconciledAt }
   kanbanStatus {
     lanes { id label count
       workItems { repository { projectPath }
         workItem {
           issueNumber issueTitle state status statusMessage canRetry
+          providerRecovery { status providerLabel model attemptCount episodeStartedAt nextAttemptAt escalated }
           stateResidenceMs pullRequestNumber sessionId
           lifecycleLabels { phase status durationMs }
           latestStepRunReason { code message retryAt }

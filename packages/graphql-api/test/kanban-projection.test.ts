@@ -123,6 +123,11 @@ describe("kanbanLaneFor", () => {
     { state: "commit", status: "running", lane: "PR" },
     { state: "create_pr", status: "queued", lane: "PR" },
     { state: "merge_pr", status: "waiting_for_ci_repair", lane: "PR" },
+    {
+      state: "investigate_pr_status_checks",
+      status: "waiting_for_provider",
+      lane: "PR",
+    },
     { state: "merge_pr", status: "cancelled", lane: "PR" },
   ] as const)(
     "places lifecycle progress $state / $status in $lane",
