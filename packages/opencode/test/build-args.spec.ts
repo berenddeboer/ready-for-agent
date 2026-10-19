@@ -232,17 +232,15 @@ describe("buildCommandApiArgs", () => {
       directory: "/worktrees/repository",
     })
 
-    expect(invocation?.slice(0, 5)).toEqual([
+    expect(invocation.slice(0, 5)).toEqual([
       "api",
       "--header",
       `x-opencode-directory:${encodeURIComponent("/worktrees/repository")}`,
       "post",
       "/api/session/ses_review/command",
     ])
-    expect(
-      obsoleteFlags.some((flag) => invocation?.includes(flag) === true),
-    ).toBe(false)
-    const body = JSON.parse(invocation?.at(-1) ?? "") as {
+    expect(obsoleteFlags.some((flag) => invocation.includes(flag))).toBe(false)
+    const body = JSON.parse(invocation.at(-1) ?? "") as {
       name: string
       text: string
       delivery: string
@@ -256,7 +254,7 @@ describe("buildCommandApiArgs", () => {
     expect(body.text).toContain("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS")
   })
 
-  it("refuses a command body that cannot fit in --data", () => {
+  it("leaves the argv-size decision to the caller", () => {
     const prompt = "x".repeat(PROMPT_ARGV_BYTE_LIMIT + 1)
     const input = {
       sessionId: "ses_review",
@@ -266,6 +264,6 @@ describe("buildCommandApiArgs", () => {
     }
 
     expect(commandBodyExceedsArgvLimit(input)).toBe(true)
-    expect(buildCommandApiArgs(input)).toBeUndefined()
+    expect(buildCommandApiArgs(input)).toContain("--data")
   })
 })

@@ -39,8 +39,7 @@ describe.skipIf(!installedV2)("installed OpenCode V2 argument contract", () => {
       directory: "/tmp/work-item",
     })
 
-    expect(command).toBeDefined()
-    for (const args of [start, resume, command ?? []]) {
+    for (const args of [start, resume, command]) {
       expect(flagsOnly(args)).not.toContain("--")
       const result = rejectBeforeInference(args)
       const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`

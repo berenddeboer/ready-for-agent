@@ -383,18 +383,12 @@ export const Opencode = {
                     yield* input.onSessionId(turnSessionId).pipe(Effect.ignore)
                   }
                 }
-                const commandInvocation = buildCommandApiArgs({
+                turnArgs = buildCommandApiArgs({
                   sessionId: turnSessionId,
                   command,
                   prompt: input.prompt,
                   directory: input.cwd,
                 })
-                if (commandInvocation === undefined) {
-                  return yield* new AgentBackendConfigError({
-                    message: `OpenCode cannot start this Agent Command. OpenCode v2 only accepts the command body as --data, and this prompt exceeds the ${PROMPT_ARGV_BYTE_LIMIT} byte limit. The turn was not started.`,
-                  })
-                }
-                turnArgs = commandInvocation
               }
 
               yield* Deferred.await(sessionReady).pipe(

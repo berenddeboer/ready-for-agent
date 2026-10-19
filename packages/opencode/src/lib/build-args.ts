@@ -141,7 +141,8 @@ const apiPost = (input: {
  *
  * `opencode api` does not read a request body from stdin. An oversized `--data`
  * argument fails the spawn with a platform error, so the caller must refuse
- * the turn before starting OpenCode.
+ * the turn before starting OpenCode. Argument building itself does not apply
+ * this check.
  */
 export const commandBodyExceedsArgvLimit = (input: {
   readonly command: string
@@ -152,24 +153,19 @@ export const commandBodyExceedsArgvLimit = (input: {
  * V2 invokes a configured Agent Command through
  * `POST /api/session/{sessionID}/command`, not a `run` flag. The body carries
  * the command name and the raw argument string so `$ARGUMENTS` and shell
- * blocks stay server-owned. Returns undefined when that body cannot fit in
- * `--data`.
+ * blocks stay server-owned.
  */
 export const buildCommandApiArgs = (input: {
   readonly sessionId: string
   readonly command: string
   readonly prompt: string
   readonly directory: string
-}): ReadonlyArray<string> | undefined => {
-  if (commandBodyExceedsArgvLimit(input)) {
-    return undefined
-  }
-  return apiPost({
+}): ReadonlyArray<string> =>
+  apiPost({
     directory: input.directory,
     path: `/api/session/${input.sessionId}/command`,
     body: commandApiBody(input),
   })
-}
 
 export const buildSwitchModelApiArgs = (input: {
   readonly sessionId: string
