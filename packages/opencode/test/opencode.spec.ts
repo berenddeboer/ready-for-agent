@@ -1240,6 +1240,39 @@ describe("Opencode AgentBackend adapter", () => {
     }
   })
 
+  it("rejects OpenCode 1 before reading the model catalog", async () => {
+    await withExecutable(
+      [
+        'if [ "$1" = "--version" ]; then echo 1.19.3; exit 0; fi',
+        "echo spawned >&2; exit 9",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          Effect.gen(function* () {
+            const backend = yield* AgentBackend
+            return yield* backend.inspect({
+              cwd: process.cwd(),
+              timeout: "2 seconds",
+            })
+          }).pipe(
+            Effect.provide(
+              Opencode.layer({
+                binary,
+                keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+              }).pipe(Layer.provide(BunServices.layer)),
+            ),
+            Effect.flip,
+          ),
+        )
+
+        expect(error).toBeInstanceOf(AgentBackendConfigError)
+        if (error instanceof AgentBackendConfigError) {
+          expect(error.message).toContain("OpenCode 2 is required")
+        }
+      },
+    )
+  })
+
   it("surfaces a stderr-only readiness failure as the inspect exit reason", async () => {
     await withExecutable(
       [

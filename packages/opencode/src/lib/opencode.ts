@@ -55,6 +55,12 @@ import type { OpencodeLayerOptions } from "./types.js"
 const DEFAULT_TIMEOUT = Duration.minutes(30)
 const DEFAULT_BINARY = "opencode"
 
+const OPENCODE_V2_REQUIRED_MESSAGE =
+  "OpenCode 2 is required. This CLI is not OpenCode 2. Install OpenCode 2, then Recheck Agent Backend."
+
+const isOpenCodeV1Version = (text: string): boolean =>
+  /(?:^|\s)v?1\.\d+\.\d+/.test(text) && !/(?:^|\s)v?2\.\d+\.\d+/.test(text)
+
 const OPENCODE_BACKEND = {
   id: AGENT_BACKEND_IDS.opencode,
   label: "OpenCode",
@@ -92,9 +98,41 @@ export const Opencode = {
           OPENCODE_DISABLE_CHANNEL_DB:
             environment["OPENCODE_DISABLE_CHANNEL_DB"],
         } satisfies OpencodePathEnv
+        const assertOpenCodeV2 = (input: {
+          readonly cwd: string
+          readonly timeout: Duration.Input
+        }) =>
+          runCliCapture({
+            spawner,
+            backend: OPENCODE_BACKEND,
+            binary,
+            args: ["--version"],
+            cwd: input.cwd,
+            env: turnEnvironment(input.cwd),
+            timeout: "1 second",
+            allowNonZeroExit: true,
+          }).pipe(
+            Effect.orElseSucceed(() => undefined),
+            Effect.flatMap((version) => {
+              if (version === undefined || version.exitCode !== 0) {
+                return Effect.void
+              }
+              const text = `${version.stdout}\n${version.stderr}`
+              return isOpenCodeV1Version(text)
+                ? Effect.fail(
+                    new AgentBackendConfigError({
+                      message: OPENCODE_V2_REQUIRED_MESSAGE,
+                    }),
+                  )
+                : Effect.void
+            }),
+          )
+
         const inspect = Effect.fn("Opencode.inspect")(function* (
           input: InspectInput,
         ) {
+          const timeout = input.timeout ?? defaultTimeout
+          yield* assertOpenCodeV2({ cwd: input.cwd, timeout })
           // `--standalone` pins the catalog to this process cwd. Without it,
           // V2 `api get` reads the background server's location and ignores cwd.
           const result = yield* runCliCapture({
@@ -104,7 +142,7 @@ export const Opencode = {
             args: ["api", "--standalone", "get", "/api/model"],
             cwd: input.cwd,
             env: turnEnvironment(input.cwd),
-            timeout: input.timeout ?? defaultTimeout,
+            timeout,
           })
 
           const parsed = parseOpencodeModelCatalog(result.stdout)

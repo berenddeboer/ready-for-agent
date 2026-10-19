@@ -14,8 +14,8 @@ Forge Host.
 
 Also needed to run or test the harness:
 
-1. The selected Agent Backend on PATH (`opencode` by default), authenticated per
-   its own documentation.
+1. The selected Agent Backend on PATH. The default is OpenCode 2 (`opencode`);
+   OpenCode 1 is not supported. Authenticate it per its own documentation.
 2. Optional: `keymaxxer` on PATH, or `KEYMAXXER_ENTRYPOINT` pointing at an
    existing entrypoint (no hardcoded machine path). Not used by Grok Build
    Agent Turns.
