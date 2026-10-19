@@ -8,6 +8,10 @@ export interface CiRepairFailingRun {
   readonly runIdentity: string
   readonly htmlUrl: string | null
   readonly displayLabel: string
+  /** Selected CI Gate Definition. Omitted on rows written before baseline tracking. */
+  readonly definitionIdentity?: string
+  /** Forge run order captured when the Work Item started. */
+  readonly orderKey?: string
 }
 
 export const serializeCiRepairFailingRuns = (
@@ -45,11 +49,23 @@ export const parseCiRepairFailingRuns = (
         typeof record["htmlUrl"] === "string" && record["htmlUrl"].trim() !== ""
           ? record["htmlUrl"]
           : null
+      const definitionIdentity =
+        typeof record["definitionIdentity"] === "string" &&
+        record["definitionIdentity"].trim() !== ""
+          ? record["definitionIdentity"]
+          : undefined
+      const orderKey =
+        typeof record["orderKey"] === "string" &&
+        record["orderKey"].trim() !== ""
+          ? record["orderKey"]
+          : undefined
       return [
         {
           runIdentity: record["runIdentity"],
           htmlUrl,
           displayLabel,
+          ...(definitionIdentity === undefined ? {} : { definitionIdentity }),
+          ...(orderKey === undefined ? {} : { orderKey }),
         },
       ]
     })
@@ -63,8 +79,8 @@ export const ciRepairIssueTitle = (defaultBranch: string): string =>
 
 /**
  * A latched failure still qualifies when it is older than the newest run.
- * The newest run itself qualifies only when that run is a terminal failure.
- * In-progress observations do not auto-start (earliest signal is BER-18).
+ * The newest run itself qualifies when it is a terminal failure, or when
+ * GitHub has already seen a failed job in that still-running run.
  */
 export const observationQualifiesForAutomaticCiRepair = (input: {
   readonly failureLatched: boolean
@@ -72,6 +88,7 @@ export const observationQualifiesForAutomaticCiRepair = (input: {
   readonly lastRunIdentity: string | null
   readonly lastRawStatus: string | null
   readonly lastRawConclusion: string | null
+  readonly earlyJobFailure?: boolean
 }): boolean => {
   if (!input.failureLatched) {
     return false
@@ -79,6 +96,9 @@ export const observationQualifiesForAutomaticCiRepair = (input: {
   const latched = input.latchedRunIdentity?.trim() ?? ""
   const last = input.lastRunIdentity?.trim() ?? ""
   if (latched !== "" && latched !== last) {
+    return true
+  }
+  if (input.earlyJobFailure === true) {
     return true
   }
   return (

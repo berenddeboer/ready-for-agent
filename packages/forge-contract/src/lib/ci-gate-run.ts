@@ -50,8 +50,25 @@ export const classifyCiGateObservedRun = (
   if (NON_DECISIVE_STATUSES.has(status)) {
     return "non_decisive"
   }
+  // GitHub: the first failed job of a still-running run is a failure.
+  // The run's own status stays non-terminal until it finishes.
+  if (run.earlyJobFailure === true) {
+    return "failure"
+  }
   return "pending"
 }
+
+/**
+ * Zero-padded Forge order key. Higher run id is newer; the same id with a
+ * higher attempt (GitHub rerun, GitLab iid) is newer. Callers compare the
+ * strings and must not sort opaque run identities.
+ */
+export const ciGateRunOrderKey = (runId: number, attempt = 1): string =>
+  `${String(runId).padStart(20, "0")}:${String(Math.max(attempt, 1)).padStart(6, "0")}`
+
+/** Negative when left is older, positive when left is newer, zero when equal. */
+export const compareCiGateRunOrder = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0
 
 export const isDecisiveCiGateObservedRun = (
   run: CiGateObservedRun,

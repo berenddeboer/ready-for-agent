@@ -136,6 +136,15 @@ export const CiGateDefinitionObservationRecord = Schema.Struct({
   latchedRunHtmlUrl: Schema.NullOr(Schema.String),
   observationError: Schema.NullOr(Schema.String),
   observationErrorKind: Schema.NullOr(CiGateObservationErrorKind),
+  /** Forge order of the newest observed run. Absent until the next poll. */
+  lastRunOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Forge order of the latched failure. Absent until the next poll. */
+  latchedRunOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Newest run is still in progress, but a job has already failed.
+   * Absent observations are not an early failure.
+   */
+  lastEarlyJobFailure: Schema.optional(Schema.Boolean),
 })
 export type CiGateDefinitionObservationRecord =
   typeof CiGateDefinitionObservationRecord.Type
@@ -442,6 +451,9 @@ export const CiGateDefinitionObservationSqlRow = Schema.Struct({
   latchedRunHtmlUrl: Schema.NullOr(Schema.String),
   observationError: Schema.NullOr(Schema.String),
   observationErrorKind: Schema.NullOr(CiGateObservationErrorKind),
+  lastRunOrderKey: Schema.NullOr(Schema.String),
+  latchedRunOrderKey: Schema.NullOr(Schema.String),
+  lastEarlyJobFailure: SqlBoolean,
 }).pipe(
   Schema.encodeKeys({
     identity: "definition_identity",
@@ -460,6 +472,9 @@ export const CiGateDefinitionObservationSqlRow = Schema.Struct({
     latchedRunHtmlUrl: "latched_run_html_url",
     observationError: "observation_error",
     observationErrorKind: "observation_error_kind",
+    lastRunOrderKey: "last_run_order_key",
+    latchedRunOrderKey: "latched_run_order_key",
+    lastEarlyJobFailure: "last_early_job_failure",
   }),
 )
 export type CiGateDefinitionObservationSqlRow =

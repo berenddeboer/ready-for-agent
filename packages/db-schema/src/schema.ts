@@ -698,6 +698,9 @@ export const ciGateDefinitionObservation = snakeCase.table(
     failureLatched: integer({ mode: "boolean" }).notNull().default(false),
     latchedRunIdentity: text(),
     latchedRunHtmlUrl: text(),
+    lastRunOrderKey: text(),
+    latchedRunOrderKey: text(),
+    lastEarlyJobFailure: integer({ mode: "boolean" }).notNull().default(false),
     observationError: text(),
     observationErrorKind: text({
       enum: ["permission", "not_found", "error"],
@@ -715,6 +718,38 @@ export const ciGateDefinitionObservation = snakeCase.table(
     ).on(t.repositoryId, t.definitionIdentity),
     index("ci_gate_definition_observation_repository_id_idx").on(
       t.repositoryId,
+    ),
+  ],
+)
+
+/**
+ * Per-definition CI Repair Baseline. Failures older than this run no longer
+ * start automatic repair. Abandon or Reset does not move the run; it records
+ * a suppress-through run so the same failure does not loop.
+ * See xplain: type ci repair baseline "crb"
+ */
+export const ciRepairBaseline = snakeCase.table(
+  "ci_repair_baseline",
+  {
+    repositoryId: text()
+      .notNull()
+      .references(() => repository.id, { onDelete: "cascade" }),
+    definitionIdentity: text().notNull(),
+    runIdentity: text(),
+    orderKey: text(),
+    headSha: text(),
+    inclusive: integer({ mode: "boolean" }).notNull().default(false),
+    floorOrderKey: text(),
+    suppressThroughRunIdentity: text(),
+    suppressThroughOrderKey: text(),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("ci_repair_baseline_repository_id_identity_uidx").on(
+      t.repositoryId,
+      t.definitionIdentity,
     ),
   ],
 )

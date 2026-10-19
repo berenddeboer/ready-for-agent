@@ -6,7 +6,7 @@ job of a run, which also closes the gate), and renames the per-Work-Item
 authorization below to CI Gate Bypass. Gate observation, CI Failure Incidents,
 and ordinary Work Item holding remain in force.
 
-Each Repository may watch operator-selected, Forge-native CI Gate Definitions on its default branch. Observation is periodic and optimistic until an actual terminal failure is seen; that failure latches the Repository CI Gate Closed until a newer success is observed or the definition is removed, while unavailable definitions make the gate Degraded without blocking work.
+Each Repository may watch operator-selected, Forge-native CI Gate Definitions on its default branch. Observation is periodic and optimistic until a failure is seen. On GitHub the first failed job of a still-running run is that failure and closes the gate; GitLab and Azure DevOps keep using a terminal run. That failure latches the Repository CI Gate Closed until a newer success is observed or the definition is removed, while unavailable definitions make the gate Degraded without blocking work.
 
 Newer is the Forge's authoritative run/source order, not wall-clock completion. A successful rerun of the failed run also clears that failure. Pending or running runs do not prevent recovery and must not hide a qualifying success that is already newer than the latched failure. A still-newer observed failure keeps the gate Closed, including when an older run later finishes green.
 

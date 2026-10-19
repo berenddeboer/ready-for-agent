@@ -1,4 +1,5 @@
 import { Duration, Effect, Layer, ManagedRuntime } from "effect"
+import { SqlClient } from "effect/sql"
 import {
   ActiveAgentBackend,
   type AgentBackendId,
@@ -51,6 +52,8 @@ const observedRun = (input: {
   readonly rawConclusion: string | null
   readonly event?: string
   readonly createdAt?: string
+  readonly earlyJobFailure?: boolean
+  readonly orderKey?: string
 }): CiGateObservation["observations"][number] extends infer Observation
   ? Observation extends { readonly kind: "observed" }
     ? Observation["runs"][number]
@@ -66,6 +69,8 @@ const observedRun = (input: {
   startedAt: new Date("2026-09-07T12:00:01.000Z"),
   rawStatus: input.rawStatus,
   rawConclusion: input.rawConclusion,
+  ...(input.earlyJobFailure === true ? { earlyJobFailure: true } : {}),
+  ...(input.orderKey !== undefined ? { orderKey: input.orderKey } : {}),
 })
 
 const observedDefinition = (
@@ -154,6 +159,7 @@ const graphqlRequest = (body: unknown) =>
 describe("Repository CI Gate observation", () => {
   let observe: GitHubServiceShape["observeCiGate"] = () =>
     Effect.succeed({ defaultBranch: "main", observations: [] })
+  const consideredRepositories: string[] = []
   let listReadyIssues: GitHubServiceShape["listReadyIssues"] = () =>
     Effect.succeed([])
 
@@ -290,7 +296,10 @@ describe("Repository CI Gate observation", () => {
       implementCiRepair: unused,
       unfinishedCiRepairWorkItem: () => Effect.succeed(null),
       startCiRepair: unused,
-      considerAutomaticCiRepair: () => Effect.succeed(null),
+      considerAutomaticCiRepair: (repositoryId: string) => {
+        consideredRepositories.push(repositoryId)
+        return Effect.succeed(null)
+      },
       authorizeAsCiRepair: unused,
       implementWith: unused,
       implementLocally: unused,
@@ -383,6 +392,7 @@ describe("Repository CI Gate observation", () => {
     await runtime.dispose()
     observe = () => Effect.succeed({ defaultBranch: "main", observations: [] })
     listReadyIssues = () => Effect.succeed([])
+    consideredRepositories.length = 0
     runtime = ManagedRuntime.make(runtimeLayer)
   })
 
@@ -539,6 +549,112 @@ describe("Repository CI Gate observation", () => {
     expect(gate.definitions[0]?.latestRun?.rawConclusion).toBe("success")
     expect(gate.definitions[0]?.latestRun?.htmlUrl).toContain("/actions/runs/")
     expect(gate.activeIncident).toBeNull()
+  })
+
+  test("a failed job closes the gate before the run finishes and asks for repair", async () => {
+    const repository = await addRepository()
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "700:1",
+              rawStatus: "in_progress",
+              rawConclusion: null,
+              earlyJobFailure: true,
+            }),
+          ]),
+        ],
+      })
+    await saveSelection(repository.id, ["161335"])
+    const gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("CLOSED")
+    expect(gate.definitions[0]?.failureLatched).toBe(true)
+    expect(gate.definitions[0]?.latestRun?.rawStatus).toBe("in_progress")
+    expect(consideredRepositories).toContain(repository.id)
+  })
+
+  test("a new run does not inherit an older order key, and a failed poll keeps the last one", async () => {
+    const repository = await addRepository()
+    await saveSelection(repository.id, ["161335"])
+    const readCursor = () =>
+      runtime.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = (yield* sql.unsafe(
+            `SELECT last_run_identity AS lastRunIdentity,
+                    last_run_order_key AS lastRunOrderKey,
+                    last_early_job_failure AS lastEarlyJobFailure
+             FROM ci_gate_definition_observation
+             WHERE repository_id = ?`,
+            [repository.id],
+          )) as readonly {
+            readonly lastRunIdentity: string | null
+            readonly lastRunOrderKey: string | null
+            readonly lastEarlyJobFailure: number | boolean | null
+          }[]
+          return rows[0]
+        }),
+      )
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "10:1",
+              rawStatus: "in_progress",
+              rawConclusion: null,
+              earlyJobFailure: true,
+              orderKey: "00000000000000000010:000001",
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    expect(await readCursor()).toMatchObject({
+      lastRunIdentity: "10:1",
+      lastRunOrderKey: "00000000000000000010:000001",
+    })
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          {
+            identity: "161335",
+            kind: "unavailable",
+            reason: "error",
+            message: "temporary observation miss",
+          },
+        ],
+      })
+    await refresh(repository.id)
+    const preserved = await readCursor()
+    expect(preserved?.lastRunIdentity).toBe("10:1")
+    expect(preserved?.lastRunOrderKey).toBe("00000000000000000010:000001")
+    expect(Number(preserved?.lastEarlyJobFailure)).toBe(1)
+
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "11:1",
+              rawStatus: "in_progress",
+              rawConclusion: null,
+            }),
+          ]),
+        ],
+      })
+    await refresh(repository.id)
+    const replaced = await readCursor()
+    expect(replaced?.lastRunIdentity).toBe("11:1")
+    expect(replaced?.lastRunOrderKey).toBeNull()
+    expect(Number(replaced?.lastEarlyJobFailure)).toBe(0)
   })
 
   test("failure latches Closed, pending does not clear it, and a newer success resolves the incident", async () => {

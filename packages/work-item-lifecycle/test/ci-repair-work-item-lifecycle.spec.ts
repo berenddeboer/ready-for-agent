@@ -14,6 +14,11 @@ import {
   stubGitLabServiceLayer,
   stubLinearServiceLayer,
 } from "../src/index.js"
+import {
+  recordCiRepairAbandonSuppress,
+  recordCiRepairMergeFloor,
+  recordCiRepairNoChangeBaseline,
+} from "../src/lib/ci-repair-baseline.js"
 import { describe, expect, it, setDefaultTimeout } from "bun:test"
 
 setDefaultTimeout(30_000)
@@ -79,6 +84,10 @@ const seedRepository = (input: {
   readonly automaticCiRepair: boolean
   readonly closed: boolean
   readonly inProgressOnly?: boolean
+  readonly runIdentity?: string
+  readonly orderKey?: string
+  readonly earlyJobFailure?: boolean
+  readonly headSha?: string
 }) =>
   Effect.gen(function* () {
     const db = yield* DbService
@@ -117,7 +126,7 @@ const seedRepository = (input: {
         },
       ],
     })
-    const runIdentity = "10:1"
+    const runIdentity = input.runIdentity ?? "10:1"
     const inProgress = input.inProgressOnly === true
     yield* db.commitCiGateSnapshot({
       repositoryId: repository.id,
@@ -130,7 +139,7 @@ const seedRepository = (input: {
               lastObservedAt: new Date("2026-10-19T00:00:00.000Z"),
               lastRunIdentity: runIdentity,
               lastRunHtmlUrl: "https://ci.example/10",
-              lastHeadSha: inProgress ? null : "abc123",
+              lastHeadSha: input.headSha ?? (inProgress ? null : "abc123"),
               lastHeadRef: "refs/heads/main",
               lastEvent: "push",
               lastRawStatus: inProgress ? "in_progress" : "completed",
@@ -142,6 +151,9 @@ const seedRepository = (input: {
               latchedRunHtmlUrl: "https://ci.example/10",
               observationError: null,
               observationErrorKind: null,
+              lastRunOrderKey: input.orderKey ?? null,
+              latchedRunOrderKey: input.orderKey ?? null,
+              lastEarlyJobFailure: input.earlyJobFailure === true,
             },
           ]
         : [],
@@ -210,6 +222,7 @@ describe("CI Repair Work Item lifecycle", () => {
             runIdentity: "10:1",
             htmlUrl: "https://ci.example/10",
             displayLabel: "Build",
+            definitionIdentity: "build",
           },
         ])
         expect(started.waitingForCiRepair).toBe(false)
@@ -398,6 +411,740 @@ describe("CI Repair Work Item lifecycle", () => {
         expect(admittedRepair.waitingSince).toBeNull()
         expect(stillWaiting.holdsWorkerSlot).toBe(false)
         expect(stillWaiting.waitingSince).not.toBeNull()
+      }),
+    ))
+
+  it("starts a repair from a still-running GitHub run once a job has failed", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/early-job.git",
+          paused: false,
+          automaticCiRepair: true,
+          closed: true,
+          inProgressOnly: true,
+          earlyJobFailure: true,
+          orderKey: "00000000000000000010:000001",
+          headSha: "deadbeef",
+        })
+        const started = yield* lifecycle.considerAutomaticCiRepair(
+          repository.id,
+        )
+        expect(started?.origin).toBe("ci_repair")
+        expect(started?.ciRepairHeadSha).toBe("deadbeef")
+        const db = yield* DbService
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: new Date("2026-10-19T01:00:00.000Z"),
+          observations: [
+            {
+              identity: "build",
+              lastObservedAt: new Date("2026-10-19T01:00:00.000Z"),
+              lastRunIdentity: "99:1",
+              lastRunHtmlUrl: "https://ci.example/99",
+              lastHeadSha: "later",
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "push",
+              lastRawStatus: "completed",
+              lastRawConclusion: "failure",
+              lastRunCreatedAt: new Date("2026-10-19T01:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T01:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "99:1",
+              latchedRunHtmlUrl: "https://ci.example/99",
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000099:000001",
+              latchedRunOrderKey: "00000000000000000099:000001",
+              lastEarlyJobFailure: false,
+            },
+          ],
+          incidentsToUpsert: [],
+        })
+        const unchanged = yield* lifecycle.getWorkItem(started?.id ?? "")
+        expect(
+          unchanged.ciRepairFailingRuns.map((run) => run.runIdentity),
+        ).toEqual(["10:1"])
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+      }),
+    ))
+
+  it("does not loop on already-fixed, and a newer rerun starts one repair", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        const db = yield* DbService
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/already-fixed.git",
+          paused: false,
+          automaticCiRepair: true,
+          closed: true,
+          orderKey: "00000000000000000010:000001",
+        })
+        const started = yield* lifecycle.considerAutomaticCiRepair(
+          repository.id,
+        )
+        expect(started).not.toBeNull()
+        yield* recordCiRepairNoChangeBaseline(sql, repository.id)
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'complete' WHERE id = ?`,
+          [started?.id],
+        )
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: new Date("2026-10-19T01:00:00.000Z"),
+          observations: [
+            {
+              identity: "build",
+              lastObservedAt: new Date("2026-10-19T01:00:00.000Z"),
+              lastRunIdentity: "10:2",
+              lastRunHtmlUrl: "https://ci.example/10",
+              lastHeadSha: "abc123",
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "push",
+              lastRawStatus: "completed",
+              lastRawConclusion: "failure",
+              lastRunCreatedAt: new Date("2026-10-19T01:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T01:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "10:2",
+              latchedRunHtmlUrl: "https://ci.example/10",
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000010:000002",
+              latchedRunOrderKey: "00000000000000000010:000002",
+              lastEarlyJobFailure: false,
+            },
+          ],
+          incidentsToUpsert: [],
+        })
+        const rerun = yield* lifecycle.considerAutomaticCiRepair(repository.id)
+        expect(rerun?.origin).toBe("ci_repair")
+        expect(rerun?.id).not.toBe(started?.id)
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+      }),
+    ))
+
+  it("starts exactly one repair when the merge-commit run fails, and keeps that baseline across a fresh read", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        const db = yield* DbService
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/merge-baseline.git",
+          paused: false,
+          automaticCiRepair: true,
+          closed: true,
+          orderKey: "00000000000000000010:000001",
+        })
+        const started = yield* lifecycle.considerAutomaticCiRepair(
+          repository.id,
+        )
+        expect(started).not.toBeNull()
+        yield* recordCiRepairMergeFloor(
+          sql,
+          repository.id,
+          started?.ciRepairFailingRuns ?? [],
+        )
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'complete' WHERE id = ?`,
+          [started?.id],
+        )
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: new Date("2026-10-19T02:00:00.000Z"),
+          observations: [
+            {
+              identity: "build",
+              lastObservedAt: new Date("2026-10-19T02:00:00.000Z"),
+              lastRunIdentity: "11:1",
+              lastRunHtmlUrl: "https://ci.example/11",
+              lastHeadSha: "mergecommit",
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "push",
+              lastRawStatus: "in_progress",
+              lastRawConclusion: null,
+              lastRunCreatedAt: new Date("2026-10-19T02:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T02:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "11:1",
+              latchedRunHtmlUrl: "https://ci.example/11",
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000011:000001",
+              latchedRunOrderKey: "00000000000000000011:000001",
+              lastEarlyJobFailure: true,
+            },
+          ],
+          incidentsToUpsert: [],
+        })
+        const again = yield* lifecycle.considerAutomaticCiRepair(repository.id)
+        expect(again?.origin).toBe("ci_repair")
+        expect(again?.id).not.toBe(started?.id)
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+        const stored = (yield* sql.unsafe(
+          `SELECT floor_order_key AS floorOrderKey, inclusive AS inclusive
+           FROM ci_repair_baseline
+           WHERE repository_id = ?`,
+          [repository.id],
+        )) as readonly {
+          readonly floorOrderKey: string | null
+          readonly inclusive: number
+        }[]
+        expect(stored[0]?.floorOrderKey).toBe("00000000000000000010:000001")
+        expect(Number(stored[0]?.inclusive)).toBe(0)
+      }),
+    ))
+
+  it("still starts a repair for the merge-commit run after a later run was observed first", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        const db = yield* DbService
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/merge-later-first.git",
+          paused: false,
+          automaticCiRepair: true,
+          closed: true,
+          orderKey: "00000000000000000010:000001",
+        })
+        const started = yield* lifecycle.considerAutomaticCiRepair(
+          repository.id,
+        )
+        expect(started).not.toBeNull()
+        yield* recordCiRepairMergeFloor(
+          sql,
+          repository.id,
+          started?.ciRepairFailingRuns ?? [],
+        )
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'complete' WHERE id = ?`,
+          [started?.id],
+        )
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: new Date("2026-10-19T02:00:00.000Z"),
+          observations: [
+            {
+              identity: "build",
+              lastObservedAt: new Date("2026-10-19T02:00:00.000Z"),
+              lastRunIdentity: "12:1",
+              lastRunHtmlUrl: "https://ci.example/12",
+              lastHeadSha: "schedule",
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "schedule",
+              lastRawStatus: "in_progress",
+              lastRawConclusion: null,
+              lastRunCreatedAt: new Date("2026-10-19T02:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T02:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "10:1",
+              latchedRunHtmlUrl: "https://ci.example/10",
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000012:000001",
+              latchedRunOrderKey: "00000000000000000010:000001",
+              lastEarlyJobFailure: false,
+            },
+          ],
+          incidentsToUpsert: [],
+        })
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: new Date("2026-10-19T02:05:00.000Z"),
+          observations: [
+            {
+              identity: "build",
+              lastObservedAt: new Date("2026-10-19T02:05:00.000Z"),
+              lastRunIdentity: "12:1",
+              lastRunHtmlUrl: "https://ci.example/12",
+              lastHeadSha: "schedule",
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "schedule",
+              lastRawStatus: "in_progress",
+              lastRawConclusion: null,
+              lastRunCreatedAt: new Date("2026-10-19T02:05:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T02:05:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "11:1",
+              latchedRunHtmlUrl: "https://ci.example/11",
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000012:000001",
+              latchedRunOrderKey: "00000000000000000011:000001",
+              lastEarlyJobFailure: false,
+            },
+          ],
+          incidentsToUpsert: [],
+        })
+        const repair = yield* lifecycle.considerAutomaticCiRepair(repository.id)
+        expect(repair?.origin).toBe("ci_repair")
+        expect(repair?.ciRepairFailingRuns[0]?.runIdentity).toBe("11:1")
+      }),
+    ))
+
+  it("records a merge floor when a human merge moves the repair to cleanup", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/human-merge.git",
+          paused: false,
+          automaticCiRepair: true,
+          closed: true,
+          orderKey: "00000000000000000010:000001",
+        })
+        const started = yield* lifecycle.considerAutomaticCiRepair(
+          repository.id,
+        )
+        expect(started).not.toBeNull()
+        if (started === null) {
+          return
+        }
+        yield* sql.unsafe(
+          `UPDATE work_item SET pull_request_number = 7 WHERE id = ?`,
+          [started.id],
+        )
+        const resumed = yield* lifecycle.continueAfterHumanPrOutcome(
+          started.id,
+          "merged",
+        )
+        expect(resumed.state).toBe("local_cleanup")
+        const stored = (yield* sql.unsafe(
+          `SELECT floor_order_key AS floorOrderKey
+           FROM ci_repair_baseline
+           WHERE repository_id = ?`,
+          [repository.id],
+        )) as readonly { readonly floorOrderKey: string | null }[]
+        expect(stored[0]?.floorOrderKey).toBe("00000000000000000010:000001")
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'complete' WHERE id = ?`,
+          [started.id],
+        )
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+      }),
+    ))
+
+  it("keeps the pre-merge floor when the merge-commit run is already the newest observation", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        const db = yield* DbService
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/late-merge-notice.git",
+          paused: false,
+          automaticCiRepair: true,
+          closed: true,
+          orderKey: "00000000000000000010:000001",
+        })
+        const started = yield* lifecycle.considerAutomaticCiRepair(
+          repository.id,
+        )
+        expect(started).not.toBeNull()
+        if (started === null) {
+          return
+        }
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: new Date("2026-10-19T04:00:00.000Z"),
+          observations: [
+            {
+              identity: "build",
+              lastObservedAt: new Date("2026-10-19T04:00:00.000Z"),
+              lastRunIdentity: "11:1",
+              lastRunHtmlUrl: "https://ci.example/11",
+              lastHeadSha: "mergecommit",
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "push",
+              lastRawStatus: "completed",
+              lastRawConclusion: "failure",
+              lastRunCreatedAt: new Date("2026-10-19T04:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T04:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "11:1",
+              latchedRunHtmlUrl: "https://ci.example/11",
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000011:000001",
+              latchedRunOrderKey: "00000000000000000011:000001",
+              lastEarlyJobFailure: false,
+            },
+          ],
+          incidentsToUpsert: [],
+        })
+        yield* sql.unsafe(
+          `UPDATE work_item SET pull_request_number = 8 WHERE id = ?`,
+          [started.id],
+        )
+        yield* lifecycle.continueAfterHumanPrOutcome(started.id, "merged")
+        const stored = (yield* sql.unsafe(
+          `SELECT floor_order_key AS floorOrderKey
+           FROM ci_repair_baseline
+           WHERE repository_id = ?`,
+          [repository.id],
+        )) as readonly { readonly floorOrderKey: string | null }[]
+        expect(stored[0]?.floorOrderKey).toBe("00000000000000000010:000001")
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'complete' WHERE id = ?`,
+          [started.id],
+        )
+        const repair = yield* lifecycle.considerAutomaticCiRepair(repository.id)
+        expect(repair?.origin).toBe("ci_repair")
+        expect(repair?.ciRepairFailingRuns[0]?.runIdentity).toBe("11:1")
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+      }),
+    ))
+
+  it("keeps an abandon suppress when a later repair merges a lower floor", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/abandon-then-older-merge.git",
+          paused: false,
+          automaticCiRepair: true,
+          closed: true,
+          orderKey: "00000000000000000020:000001",
+          runIdentity: "20:1",
+        })
+        const abandoned = yield* lifecycle.considerAutomaticCiRepair(
+          repository.id,
+        )
+        expect(abandoned).not.toBeNull()
+        yield* recordCiRepairAbandonSuppress(
+          sql,
+          repository.id,
+          abandoned?.ciRepairFailingRuns ?? [],
+        )
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'abandoned' WHERE id = ?`,
+          [abandoned?.id],
+        )
+        yield* recordCiRepairMergeFloor(sql, repository.id, [
+          {
+            runIdentity: "10:1",
+            htmlUrl: null,
+            displayLabel: "Build",
+            definitionIdentity: "build",
+            orderKey: "00000000000000000010:000001",
+          },
+        ])
+        const stored = (yield* sql.unsafe(
+          `SELECT floor_order_key AS floorOrderKey,
+                  suppress_through_run_identity AS suppressThroughRunIdentity
+           FROM ci_repair_baseline
+           WHERE repository_id = ?`,
+          [repository.id],
+        )) as readonly {
+          readonly floorOrderKey: string | null
+          readonly suppressThroughRunIdentity: string | null
+        }[]
+        expect(stored[0]?.floorOrderKey).toBe("00000000000000000010:000001")
+        expect(stored[0]?.suppressThroughRunIdentity).toBe("20:1")
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+      }),
+    ))
+
+  it("leaves the prior baseline unchanged when a merge has no order key", () =>
+    run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/merge-without-key.git",
+          paused: false,
+          automaticCiRepair: false,
+          closed: true,
+          orderKey: "00000000000000000010:000001",
+        })
+        yield* recordCiRepairNoChangeBaseline(sql, repository.id)
+        yield* recordCiRepairMergeFloor(sql, repository.id, [
+          {
+            runIdentity: "9:1",
+            htmlUrl: null,
+            displayLabel: "Build",
+            definitionIdentity: "build",
+          },
+        ])
+        const stored = (yield* sql.unsafe(
+          `SELECT run_identity AS runIdentity,
+                  order_key AS orderKey
+           FROM ci_repair_baseline
+           WHERE repository_id = ?`,
+          [repository.id],
+        )) as readonly {
+          readonly runIdentity: string | null
+          readonly orderKey: string | null
+        }[]
+        expect(stored[0]?.runIdentity).toBe("10:1")
+        expect(stored[0]?.orderKey).toBe("00000000000000000010:000001")
+      }),
+    ))
+
+  it("does not let a shared run id assign another definition's order key", () =>
+    run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const db = yield* DbService
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/colliding-run.git",
+          paused: true,
+          automaticCiRepair: false,
+          closed: false,
+        })
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: new Date("2026-10-19T06:00:00.000Z"),
+          observations: [
+            {
+              identity: "nightly",
+              lastObservedAt: new Date("2026-10-19T06:00:00.000Z"),
+              lastRunIdentity: "10:1",
+              lastRunHtmlUrl: null,
+              lastHeadSha: null,
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "push",
+              lastRawStatus: "completed",
+              lastRawConclusion: "failure",
+              lastRunCreatedAt: new Date("2026-10-19T06:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T06:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "10:1",
+              latchedRunHtmlUrl: null,
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000099:000001",
+              latchedRunOrderKey: "00000000000000000099:000001",
+              lastEarlyJobFailure: false,
+            },
+            {
+              identity: "build",
+              lastObservedAt: new Date("2026-10-19T06:00:00.000Z"),
+              lastRunIdentity: "10:1",
+              lastRunHtmlUrl: null,
+              lastHeadSha: null,
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "push",
+              lastRawStatus: "completed",
+              lastRawConclusion: "failure",
+              lastRunCreatedAt: new Date("2026-10-19T06:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T06:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "10:1",
+              latchedRunHtmlUrl: null,
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000010:000001",
+              latchedRunOrderKey: "00000000000000000010:000001",
+              lastEarlyJobFailure: false,
+            },
+          ],
+          incidentsToUpsert: [],
+        })
+        yield* recordCiRepairMergeFloor(sql, repository.id, [
+          {
+            runIdentity: "10:1",
+            htmlUrl: null,
+            displayLabel: "Build",
+            definitionIdentity: "build",
+          },
+        ])
+        const stored = (yield* sql.unsafe(
+          `SELECT definition_identity AS definitionIdentity,
+                  floor_order_key AS floorOrderKey
+           FROM ci_repair_baseline
+           WHERE repository_id = ?
+           ORDER BY definition_identity`,
+          [repository.id],
+        )) as readonly {
+          readonly definitionIdentity: string
+          readonly floorOrderKey: string | null
+        }[]
+        expect(stored).toEqual([
+          {
+            definitionIdentity: "build",
+            floorOrderKey: "00000000000000000010:000001",
+          },
+        ])
+      }),
+    ))
+
+  it("replaces a no-change baseline with the starting-failure floor when a later repair merges", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        const db = yield* DbService
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/no-change-then-merge.git",
+          paused: false,
+          automaticCiRepair: true,
+          closed: true,
+          orderKey: "00000000000000000010:000001",
+        })
+        const started = yield* lifecycle.considerAutomaticCiRepair(
+          repository.id,
+        )
+        expect(started).not.toBeNull()
+        yield* recordCiRepairNoChangeBaseline(sql, repository.id)
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'complete' WHERE id = ?`,
+          [started?.id],
+        )
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+        yield* recordCiRepairMergeFloor(
+          sql,
+          repository.id,
+          started?.ciRepairFailingRuns ?? [],
+        )
+        const stored = (yield* sql.unsafe(
+          `SELECT run_identity AS runIdentity,
+                  floor_order_key AS floorOrderKey,
+                  inclusive AS inclusive
+           FROM ci_repair_baseline
+           WHERE repository_id = ?`,
+          [repository.id],
+        )) as readonly {
+          readonly runIdentity: string | null
+          readonly floorOrderKey: string | null
+          readonly inclusive: number
+        }[]
+        expect(stored[0]?.runIdentity).toBeNull()
+        expect(stored[0]?.floorOrderKey).toBe("00000000000000000010:000001")
+        expect(Number(stored[0]?.inclusive)).toBe(0)
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: new Date("2026-10-19T05:00:00.000Z"),
+          observations: [
+            {
+              identity: "build",
+              lastObservedAt: new Date("2026-10-19T05:00:00.000Z"),
+              lastRunIdentity: "11:1",
+              lastRunHtmlUrl: "https://ci.example/11",
+              lastHeadSha: "mergecommit",
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "push",
+              lastRawStatus: "completed",
+              lastRawConclusion: "failure",
+              lastRunCreatedAt: new Date("2026-10-19T05:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T05:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "11:1",
+              latchedRunHtmlUrl: "https://ci.example/11",
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000011:000001",
+              latchedRunOrderKey: "00000000000000000011:000001",
+              lastEarlyJobFailure: false,
+            },
+          ],
+          incidentsToUpsert: [],
+        })
+        const repair = yield* lifecycle.considerAutomaticCiRepair(repository.id)
+        expect(repair?.origin).toBe("ci_repair")
+        expect(repair?.ciRepairFailingRuns[0]?.runIdentity).toBe("11:1")
+      }),
+    ))
+
+  it("does not restart an abandoned repair for the same failure, and does for a newer one", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const db = yield* DbService
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/abandoned.git",
+          paused: false,
+          automaticCiRepair: true,
+          closed: true,
+          orderKey: "00000000000000000010:000001",
+        })
+        const started = yield* lifecycle.considerAutomaticCiRepair(
+          repository.id,
+        )
+        expect(started).not.toBeNull()
+        if (started === null) {
+          return
+        }
+        yield* lifecycle.abandon(started.id)
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+        const manual = yield* lifecycle.startCiRepair(repository.id)
+        expect(manual.id).not.toBe(started.id)
+        yield* lifecycle.abandon(manual.id)
+
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: new Date("2026-10-19T03:00:00.000Z"),
+          observations: [
+            {
+              identity: "build",
+              lastObservedAt: new Date("2026-10-19T03:00:00.000Z"),
+              lastRunIdentity: "12:1",
+              lastRunHtmlUrl: "https://ci.example/12",
+              lastHeadSha: "newer",
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "push",
+              lastRawStatus: "completed",
+              lastRawConclusion: "failure",
+              lastRunCreatedAt: new Date("2026-10-19T03:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T03:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "12:1",
+              latchedRunHtmlUrl: "https://ci.example/12",
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000012:000001",
+              latchedRunOrderKey: "00000000000000000012:000001",
+              lastEarlyJobFailure: false,
+            },
+          ],
+          incidentsToUpsert: [],
+        })
+        const newer = yield* lifecycle.considerAutomaticCiRepair(repository.id)
+        expect(newer?.origin).toBe("ci_repair")
+        expect(newer?.id).not.toBe(started.id)
       }),
     ))
 })
