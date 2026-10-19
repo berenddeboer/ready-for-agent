@@ -319,6 +319,13 @@ const queueLayer = (
   }) => Effect.Effect<{
     readonly _tag: "woke" | "stale" | "not_due"
   }> = () => Effect.succeed({ _tag: "stale" as const }),
+  wakeProviderRecovery: (input: {
+    readonly workItemId: WorkItemId
+    readonly generation: number
+    readonly nextAttemptAt: number
+  }) => Effect.Effect<{
+    readonly _tag: "woke" | "stale" | "not_due" | "exhausted"
+  }> = () => Effect.succeed({ _tag: "stale" as const }),
 ) =>
   Layer.mergeAll(
     defaultGithubLayer,
@@ -385,6 +392,7 @@ const queueLayer = (
       interruptRunningStepRunsFromPriorWorker,
       runStep,
       wakePostponedStep,
+      wakeProviderRecovery,
       retry: unused,
       pause: unused,
       interrupt: unused,
@@ -2412,6 +2420,8 @@ describe("Job worker", () => {
           interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
           wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
+          wakeProviderRecovery: () =>
+            Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           interrupt: unused,
@@ -2664,6 +2674,8 @@ describe("Job worker", () => {
           }),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
           wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
+          wakeProviderRecovery: () =>
+            Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           interrupt: unused,
@@ -2752,6 +2764,8 @@ describe("Job worker", () => {
           interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
           wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
+          wakeProviderRecovery: () =>
+            Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           interrupt: unused,
@@ -2909,6 +2923,8 @@ describe("Job worker", () => {
           interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
           wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
+          wakeProviderRecovery: () =>
+            Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           interrupt: unused,
@@ -3118,6 +3134,8 @@ describe("Job worker", () => {
           interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
           wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
+          wakeProviderRecovery: () =>
+            Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           interrupt: unused,
@@ -3253,6 +3271,8 @@ describe("Job worker", () => {
           interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
           wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
+          wakeProviderRecovery: () =>
+            Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           interrupt: unused,

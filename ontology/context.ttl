@@ -2418,7 +2418,7 @@ rfa:WaitingForBlockers
 rfa:WaitingForWorkerSlot
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Waiting for Worker Slot"@en ;
-  skos:definition "The state of an unfinished, non-paused Work Item that is not Waiting for blockers and has not yet been Admitted because all Worker Slots are occupied. It does not occupy a Worker Slot and has no Step Run and no lifecycle job until admission. Operators may create more Work Items than the Worker Slot bound with no separate cap on how many may wait; those extras remain Waiting for Worker Slot until admitted **FIFO by time entered this state** (creation time if never admitted; re-queue time after Start when no slot was free; due-wake time when a GitHub wait cannot re-acquire a slot; the same creation time applies when a former Waiting for blockers Work Item joins this line). No priority by Repository, Issue age, or operator. Operator-visible status is Waiting for worker slot with a message that a worker slot must become available; the current Lifecycle Step is unchanged and is not queued until admission."@en ;
+  skos:definition "The state of an unfinished, non-paused Work Item that is not Waiting for blockers and has not yet been Admitted because all Worker Slots are occupied. It does not occupy a Worker Slot and has no Step Run and no lifecycle job until admission. Operators may create more Work Items than the Worker Slot bound with no separate cap on how many may wait; those extras remain Waiting for Worker Slot until admitted **FIFO by time entered this state** (creation time if never admitted; re-queue time after Start when no slot was free; due-wake time when a GitHub wait or a Provider Recovery wake cannot re-acquire a slot; the same creation time applies when a former Waiting for blockers Work Item joins this line). No priority by Repository, Issue age, or operator. Operator-visible status is Waiting for worker slot with a message that a worker slot must become available; the current Lifecycle Step is unchanged and is not queued until admission."@en ;
   skos:hiddenLabel "Queued Step Run"@en, "paused"@en, "Not Implemented"@en, "Waiting for blockers"@en .
 
 [
@@ -3106,7 +3106,7 @@ rfa:PostponedStepRun
 rfa:Retry
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Retry"@en ;
-  skos:definition "An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds or from an unparseable unchanged apply-findings verdict is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. A Needs Human outcome from a missing successful status-check aggregate on an autonomous merge path is also retryable: Retry clears the handoff reason and returns to Watch PR Status Checks in the existing Implement Session, worktree, branch, and PR. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. A Step Run interrupted by Interrupt Work Item is retryable once that request has cleared Pause. Autonomous Retry does not accept a Step Run interrupted with reason paused. Retry is unavailable for a Postponed Step Run. Explicit Retry of an otherwise-retryable idle Needs Human handoff remains available while paused: it atomically clears Pause and retries the appropriate Lifecycle Step through ordinary Worker Slot admission. Autonomous Retry and unattended `--all-retryable` still exclude paused Work Items. Other paused Work Items require Start first. Unattended `--all-retryable` Retry is an Autonomous Retry and is bounded by the Autonomous Retry Budget; explicit single-Issue, single-Work-Item, and UI Retry are not. When an unfinished Attention Work Item does not own a Work Item PR and its Issue is no longer Relevant, explicit Retry advances local cleanup toward Complete instead of re-running the failed step; Autonomous Retry skips that card."@en ;
+  skos:definition "An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically, except Provider Recovery after a classified transient provider failure. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds or from an unparseable unchanged apply-findings verdict is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. A Needs Human outcome from a missing successful status-check aggregate on an autonomous merge path is also retryable: Retry clears the handoff reason and returns to Watch PR Status Checks in the existing Implement Session, worktree, branch, and PR. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. A Step Run interrupted by Interrupt Work Item is retryable once that request has cleared Pause. Autonomous Retry does not accept a Step Run interrupted with reason paused. Retry is unavailable for a Postponed Step Run. Explicit Retry of an otherwise-retryable idle Needs Human handoff remains available while paused: it atomically clears Pause and retries the appropriate Lifecycle Step through ordinary Worker Slot admission. Autonomous Retry and unattended `--all-retryable` still exclude paused Work Items. Other paused Work Items require Start first. Unattended `--all-retryable` Retry is an Autonomous Retry and is bounded by the Autonomous Retry Budget; explicit single-Issue, single-Work-Item, and UI Retry are not. When an unfinished Attention Work Item does not own a Work Item PR and its Issue is no longer Relevant, explicit Retry advances local cleanup toward Complete instead of re-running the failed step; Autonomous Retry skips that card."@en ;
   skos:hiddenLabel "Queue redelivery"@en, "resume"@en .
 
 [
@@ -3150,7 +3150,7 @@ rfa:AutonomousRetry
 rfa:AutonomousRetryBudget
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Autonomous Retry Budget"@en ;
-  skos:definition "A durable, Harness-enforced limit on accepted Autonomous Retry execution attempts for one Work Item at its current Lifecycle Step. The default is 3. The initial Step Run is not an Autonomous Retry. The budget resets only after the Work Item successfully advances to another Lifecycle Step. Exhaustion reports LIMIT_REACHED without changing ordinary canRetry."@en ;
+  skos:definition "A durable, Harness-enforced limit on accepted Autonomous Retry execution attempts for one Work Item at its current Lifecycle Step. The default is 3. The initial Step Run is not an Autonomous Retry. The budget resets only after the Work Item successfully advances to another Lifecycle Step. Exhaustion reports LIMIT_REACHED without changing ordinary canRetry. Provider Recovery does not consume this budget."@en ;
   skos:hiddenLabel "max-attempts"@en, "client-side retry count"@en .
 
 [
@@ -3191,10 +3191,100 @@ rfa:ProviderHold
   rfa:avoidanceRationale "extraction happens at the Agent Backend adapter seam, not by parsing transcripts"@en ;
 ] .
 
+rfa:ProviderRecovery
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Provider Recovery"@en ;
+  skos:definition "Automatic resumption of the same Lifecycle Step after a classified transient provider failure, without an operator Retry and without consuming Autonomous Retry Budget. It keeps the selected Agent Model, resumes the existing Session and worktree, and re-enters that step's ordinary recovery path rather than replaying the workflow. Permanent credential, configuration, billing, and unknown failures are not Provider Recovery. Waiting holds neither an Agent Turn permit nor a Worker Slot; a due attempt re-enters ordinary admission, including repository fairness and CI holds."@en ;
+  skos:hiddenLabel "Automatic Retry"@en, "model substitution"@en, "in-process sleep"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderRecovery ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Automatic Retry"@en ;
+  rfa:avoidanceRationale "Provider Recovery is a dedicated episode, not Autonomous Retry"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderRecovery ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "model substitution"@en ;
+  rfa:avoidanceRationale "the selected model stays"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderRecovery ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "in-process sleep"@en ;
+  rfa:avoidanceRationale "recovery is a durable delayed wake"@en ;
+] .
+
+rfa:ProviderRecoveryEpisode
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Provider Recovery Episode"@en ;
+  skos:definition "The durable record of one unresolved provider outage for a Work Item, measured from its first classified transient failure. It persists provider and model identity, attempt count, next attempt, escalation after one hour, and exhaustion when a configured maximum elapsed wait is exceeded. A successful resumed turn ends the episode; a different permanent failure exits it. Pause, Interrupt, Abandon, Reset, terminal completion, and human-required outcomes cancel a pending episode. Explicit Retry supersedes an outstanding scheduled attempt without discarding the Session."@en ;
+  skos:hiddenLabel "Autonomous Retry Budget"@en, "Postponed Step Run"@en, "Provider Hold"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderRecoveryEpisode ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Autonomous Retry Budget"@en ;
+  rfa:avoidanceRationale "a separate limit that Provider Recovery must not exhaust"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderRecoveryEpisode ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Postponed Step Run"@en ;
+  rfa:avoidanceRationale "GitHub throttle history, not a provider outage"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProviderRecoveryEpisode ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Provider Hold"@en ;
+  rfa:avoidanceRationale "a retry instant on one Step Run, not an episode"@en ;
+] .
+
+rfa:WaitingForProvider
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Waiting for Provider"@en ;
+  skos:definition "A derived hold while a Provider Recovery Episode has a future next attempt. It is not a Lifecycle Step or Work Item state: the Work Item stays in its current pipeline lane, holds no Worker Slot and no Agent Turn permit, and owns no queued or running Step Run. A due attempt re-enters ordinary admission, including repository fairness and CI holds. It is distinct from a failure that requires manual Retry."@en ;
+  skos:hiddenLabel "Waiting for GitHub"@en, "Waiting for Worker Slot"@en, "Failed"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForProvider ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Waiting for GitHub"@en ;
+  rfa:avoidanceRationale "that hold is a Postponed Step Run"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForProvider ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Waiting for Worker Slot"@en ;
+  rfa:avoidanceRationale "that wait starts only when a due attempt cannot acquire a slot"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForProvider ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Failed"@en ;
+  rfa:avoidanceRationale "exhaustion and permanent failures are actionable, not this hold"@en ;
+] .
+
 rfa:PauseWorkItem
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Pause Work Item"@en ;
-  skos:definition "An explicit operator request that marks an unfinished Work Item paused so it will not start further Lifecycle Steps until Start, or until explicit Retry of an otherwise-retryable idle Needs Human handoff. A running Step Run is not interrupted; after it finishes, the next step is neither enqueued nor started while paused. A paused Work Item with a running Step Run may be stopped with Interrupt Work Item. Step Runs still queued (not running) are cancelled. If the Work Item was Admitted and no Step Run is running, Pause releases its Worker Slot immediately; if a Step Run is still running, the Worker Slot is held until that Step Run finishes, then released. Pause is idempotent when already paused and is rejected for missing, terminal, or Waiting for blockers Work Items (the hold already means do not run; cancel with Reset). A paused Work Item remains unfinished and still blocks Implement Now and Queue for that Issue. The harness also applies Pause Work Item when Issue revalidation finds the Issue closed or missing while the Work Item still owns a Work Item PR that is open, closed unmerged, or of indeterminate lifecycle status, recording an operator-visible reason for that branch—never an invisible non-terminal park with no pause flag and no reason. A confirmed merged PR advances to local cleanup instead of Pause. Start after reopening the Issue resumes the current Lifecycle Step; reopening alone does not auto-Start. A later Refresh Job that finds the Work Item PR merged still supersedes this pause and advances cleanup toward Complete. Closed-unmerged Abandon remains limited to Needs Human after Decide PR Merge, Merge PR, or Resolve PR Merge Conflict. Distinct from Repository Paused."@en ;
+  skos:definition "An explicit operator request that marks an unfinished Work Item paused so it will not start further Lifecycle Steps until Start, or until explicit Retry of an otherwise-retryable idle Needs Human handoff. A running Step Run is not interrupted; after it finishes, the next step is neither enqueued nor started while paused. A paused Work Item with a running Step Run may be stopped with Interrupt Work Item. Step Runs still queued (not running) are cancelled. A pending Provider Recovery Episode is cancelled and is not resumed by Start. If the Work Item was Admitted and no Step Run is running, Pause releases its Worker Slot immediately; if a Step Run is still running, the Worker Slot is held until that Step Run finishes, then released. Pause is idempotent when already paused and is rejected for missing, terminal, or Waiting for blockers Work Items (the hold already means do not run; cancel with Reset). A paused Work Item remains unfinished and still blocks Implement Now and Queue for that Issue. The harness also applies Pause Work Item when Issue revalidation finds the Issue closed or missing while the Work Item still owns a Work Item PR that is open, closed unmerged, or of indeterminate lifecycle status, recording an operator-visible reason for that branch—never an invisible non-terminal park with no pause flag and no reason. A confirmed merged PR advances to local cleanup instead of Pause. Start after reopening the Issue resumes the current Lifecycle Step; reopening alone does not auto-Start. A later Refresh Job that finds the Work Item PR merged still supersedes this pause and advances cleanup toward Complete. Closed-unmerged Abandon remains limited to Needs Human after Decide PR Merge, Merge PR, or Resolve PR Merge Conflict. Distinct from Repository Paused."@en ;
   skos:hiddenLabel "Suspend"@en, "hold"@en, "Abandon"@en, "Repository Paused"@en, "Waiting for blockers"@en, "silent park"@en, "Interrupt Work Item"@en .
 
 [
@@ -3256,7 +3346,7 @@ rfa:PauseWorkItem
 rfa:InterruptWorkItem
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Interrupt Work Item"@en ;
-  skos:definition "An explicit operator request that stops a running Step Run on a paused Work Item without deleting the Work Item. It is legal only while the Work Item is paused and a Step Run is running. The Step Run is interrupted with reason paused; the paused flag is cleared; the worktree and Session are kept; the Worker Slot is released after that Step Run finishes. Resume is Retry, not Start. Distinct from Pause Work Item, which does not interrupt a running Step Run, and from Reset, which erases the Work Item."@en ;
+  skos:definition "An explicit operator request that stops a running Step Run on a paused Work Item without deleting the Work Item. It is legal only while the Work Item is paused and a Step Run is running. The Step Run is interrupted with reason paused; the paused flag is cleared; the worktree and Session are kept; the Worker Slot is released after that Step Run finishes. A pending Provider Recovery Episode is cancelled. Resume is Retry, not Start. Distinct from Pause Work Item, which does not interrupt a running Step Run, and from Reset, which erases the Work Item."@en ;
   skos:hiddenLabel "Pause Work Item"@en, "Reset"@en, "Stop"@en, "terminate"@en, "cancel"@en, "Start"@en .
 
 [
@@ -3340,7 +3430,7 @@ rfa:StartWorkItem
 rfa:Abandon
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Abandon"@en ;
-  skos:definition "A transition that moves a Work Item with no running Step Run to the terminal Abandoned state while preserving its history. From an operational Lifecycle Step it does not remove the worktree and releases any Worker Slot; from Needs Human it must re-acquire a Worker Slot, run local cleanup, and only Abandons if cleanup succeeds—if no slot is free, the Work Item becomes Waiting for Worker Slot until admitted for that cleanup. It may be operator-directed (including from Needs Human) or applied automatically when a Refresh Job finds that a Needs Human Work Item whose latest step was Decide PR Merge, Merge PR, or Resolve PR Merge Conflict has a Work Item PR closed unmerged. Repository removal may apply it to non-running Work Items before deleting that Repository's lifecycle history. An Abandoned Work Item no longer prevents a later Implement Now request for the same Issue. Pause does not block Abandon. Abandon of a Work Item that is only Waiting for Worker Slot (never admitted, or waiting after Start) is immediate with no cleanup and no slot involved."@en ;
+  skos:definition "A transition that moves a Work Item with no running Step Run to the terminal Abandoned state while preserving its history. A pending Provider Recovery Episode is cancelled. From an operational Lifecycle Step it does not remove the worktree and releases any Worker Slot; from Needs Human it must re-acquire a Worker Slot, run local cleanup, and only Abandons if cleanup succeeds—if no slot is free, the Work Item becomes Waiting for Worker Slot until admitted for that cleanup. It may be operator-directed (including from Needs Human) or applied automatically when a Refresh Job finds that a Needs Human Work Item whose latest step was Decide PR Merge, Merge PR, or Resolve PR Merge Conflict has a Work Item PR closed unmerged. Repository removal may apply it to non-running Work Items before deleting that Repository's lifecycle history. An Abandoned Work Item no longer prevents a later Implement Now request for the same Issue. Pause does not block Abandon. Abandon of a Work Item that is only Waiting for Worker Slot (never admitted, or waiting after Start) is immediate with no cleanup and no slot involved."@en ;
   skos:hiddenLabel "Delete"@en, "cancel"@en .
 
 [
@@ -3362,7 +3452,7 @@ rfa:Abandon
 rfa:Reset
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Reset"@en ;
-  skos:definition "An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented when it remains Relevant. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused, Waiting for GitHub, Waiting for Worker Slot, or Waiting for blockers and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause). Waiting for blockers has no worktree yet; Reset is the operator cancel for a queued intent. Reset does not close, update, or otherwise mutate a competing Issue-closing PR."@en ;
+  skos:definition "An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item, its Step Run history, and any Provider Recovery Episode so the Issue returns to Not Implemented when it remains Relevant. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused, Waiting for GitHub, Waiting for Worker Slot, or Waiting for blockers and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause). Waiting for blockers has no worktree yet; Reset is the operator cancel for a queued intent. Reset does not close, update, or otherwise mutate a competing Issue-closing PR."@en ;
   skos:hiddenLabel "Abandon"@en, "Retry"@en, "cancel"@en, "Interrupt Work Item"@en .
 
 [

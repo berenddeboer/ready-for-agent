@@ -62,6 +62,8 @@ export const stubDbService = (
     maxConcurrentAgentTurns: 2,
     maxConcurrentWorkItems: 5,
   }),
+  getProviderRecoveryMaxWaitMs: Effect.succeed(null),
+  setProviderRecoveryMaxWaitMs: () => Effect.succeed(null),
   getBackendModelPrefs: () =>
     Effect.succeed({
       defaultModel: "opencode/deepseek-v4-flash-free",

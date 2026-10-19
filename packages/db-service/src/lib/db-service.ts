@@ -476,6 +476,17 @@ export interface DbServiceShape {
   readonly notifyIssuesChanged: (repositoryId: string) => Effect.Effect<void>
   readonly notifyWorkItemsChanged: (repositoryId: string) => Effect.Effect<void>
   readonly getConfig: Effect.Effect<ConfigRecord, DatabaseError>
+  /**
+   * Nullable maximum Provider Recovery wait in milliseconds. Null means keep
+   * retrying. Measured from the episode start, not from the latest failure.
+   */
+  readonly getProviderRecoveryMaxWaitMs: Effect.Effect<
+    number | null,
+    DatabaseError
+  >
+  readonly setProviderRecoveryMaxWaitMs: (
+    value: number | null,
+  ) => Effect.Effect<number | null, InvalidConfigInputError | DatabaseError>
   readonly getBackendModelPrefs: (
     backendId: string,
   ) => Effect.Effect<BackendModelPrefs, DatabaseError>
@@ -834,6 +845,46 @@ export const DbServiceLive = Layer.effect(
         return toConfigRecord(yield* readConfigRow)
       },
     ).pipe(Effect.withSpan("DbService.getConfig"))
+
+    const getProviderRecoveryMaxWaitMs: Effect.Effect<
+      number | null,
+      DatabaseError
+    > = Effect.gen(function* () {
+      yield* readConfigRow
+      const rows = (yield* sql
+        .unsafe(
+          `SELECT provider_recovery_max_wait_ms AS max_wait_ms
+           FROM config WHERE id = 'default'`,
+        )
+        .pipe(Effect.mapError(toDatabaseError))) as readonly {
+        readonly max_wait_ms: number | null
+      }[]
+      const value = rows[0]?.max_wait_ms
+      return typeof value === "number" && Number.isFinite(value) ? value : null
+    }).pipe(Effect.withSpan("DbService.getProviderRecoveryMaxWaitMs"))
+
+    const setProviderRecoveryMaxWaitMs = Effect.fn(
+      "DbService.setProviderRecoveryMaxWaitMs",
+    )(function* (value: number | null) {
+      if (value !== null && (!Number.isSafeInteger(value) || value < 1)) {
+        return yield* new InvalidConfigInputError({
+          field: "providerRecoveryMaxWaitMs",
+          message:
+            "providerRecoveryMaxWaitMs must be a positive integer or null",
+        })
+      }
+      yield* readConfigRow
+      const now = yield* Clock.currentTimeMillis
+      yield* sql
+        .unsafe(
+          `UPDATE config
+           SET provider_recovery_max_wait_ms = ?, updated_at = ?
+           WHERE id = 'default'`,
+          [value, now],
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+      return value
+    })
 
     /**
      * Selected-or-in-use set for Active multi-backend registry sync after Save.
@@ -2713,6 +2764,8 @@ export const DbServiceLive = Layer.effect(
       notifyIssuesChanged,
       notifyWorkItemsChanged,
       getConfig,
+      getProviderRecoveryMaxWaitMs,
+      setProviderRecoveryMaxWaitMs,
       getBackendModelPrefs,
       getRepositoryBackendModelPrefs,
       updateConfig,

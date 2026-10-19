@@ -449,6 +449,7 @@ const makeRuntime = (
     interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
     runStep: unused,
     wakePostponedStep: unused,
+    wakeProviderRecovery: unused,
     retry: unused,
     pause: unused,
     interrupt: unused,
