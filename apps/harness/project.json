@@ -79,6 +79,17 @@
       "cache": true,
       "dependsOn": ["^build"]
     },
+    "e2e-opencode-handoff": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source e2e/opencode-session-handoff.browser.ts",
+        "env": {
+          "KEYMAXXER_ENABLED": "false"
+        }
+      },
+      "dependsOn": ["build"]
+    },
     "e2e": {
       "executor": "nx:run-commands",
       "options": {

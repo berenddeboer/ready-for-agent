@@ -9,7 +9,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun test --path-ignore-patterns '**/v2-cli-contract.spec.ts'"
+        "command": "bun --conditions=@ready-for-agent/source test --path-ignore-patterns '**/v2-cli-contract.spec.ts'"
       },
       "inputs": ["default", "^production"],
       "cache": true,

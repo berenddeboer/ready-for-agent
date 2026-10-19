@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useId, useRef, useState } from "react"
 import { Banner } from "./banner.js"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
-import { OpenInOpenCodeLink } from "./open-in-opencode-link.js"
+import { OpenInOpenCodeButton } from "./open-in-opencode-link.js"
 import { sessionOpenAction } from "./session-open-action.js"
 import { cx, ui } from "./ui.js"
 
@@ -41,7 +41,7 @@ const sessionQuery = (workItemId: string) => ({
         updatedAt: true,
         diagnostic: true,
         agentTurnTailSupported: true,
-        openInOpenCodeUrl: true,
+        canOpenInOpenCode: true,
       },
     })
     return result.session
@@ -119,6 +119,7 @@ export function SessionUsageDialog({
   const titleId = `session-usage-title-${useId().replaceAll(":", "")}`
   const enabled = open && workItemId !== null
   const [tailOpen, setTailOpen] = useState(false)
+  const [launchError, setLaunchError] = useState<string | null>(null)
   const session = useQuery({
     ...sessionQuery(workItemId ?? ""),
     enabled,
@@ -131,12 +132,11 @@ export function SessionUsageDialog({
       ? sessionId
       : (session.data?.id ?? null)
   const openAction = sessionOpenAction({
-    openInOpenCodeUrl: session.data?.openInOpenCodeUrl,
+    canOpenInOpenCode: session.data?.canOpenInOpenCode,
     sessionId: displaySessionId,
     agentTurnTailSupported: session.data?.agentTurnTailSupported,
   })
-  const openInOpenCodeUrl =
-    openAction.kind === "open-in-opencode" ? openAction.url : null
+  const showOpenInOpenCode = openAction.kind === "open-in-opencode"
   const showTailAction = openAction.kind === "tail"
   const tail = useQuery({
     ...agentTurnTailQuery(workItemId ?? ""),
@@ -146,6 +146,7 @@ export function SessionUsageDialog({
   useEffect(() => {
     if (!open) {
       setTailOpen(false)
+      setLaunchError(null)
     }
   }, [open])
 
@@ -306,6 +307,16 @@ export function SessionUsageDialog({
             </tbody>
           </table>
         )}
+        {launchError !== null ? (
+          <Banner
+            className={ui.bannerCompact}
+            tone="alarm"
+            tag="Open"
+            role="alert"
+          >
+            {launchError}
+          </Banner>
+        ) : null}
         {showTailAction && tailOpen ? (
           <AgentTurnTailPanel
             isPending={tail.isPending}
@@ -318,13 +329,16 @@ export function SessionUsageDialog({
         className={cx(
           ui.dialogFooter,
           ui.dialogFooterCompact,
-          (showTailAction || openInOpenCodeUrl !== null) && "justify-between",
+          (showTailAction || showOpenInOpenCode) && "justify-between",
         )}
       >
-        {openInOpenCodeUrl !== null ? (
-          <OpenInOpenCodeLink
-            href={openInOpenCodeUrl}
+        {showOpenInOpenCode && workItemId !== null ? (
+          <OpenInOpenCodeButton
+            workItemId={workItemId}
             className={ui.plateMini}
+            onUnavailable={(message) => {
+              setLaunchError(message.length > 0 ? message : null)
+            }}
           />
         ) : showTailAction ? (
           <button

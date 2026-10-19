@@ -382,12 +382,11 @@ type Session {
   """
   agentTurnTailSupported: Boolean!
   """
-  Browser URL that opens this OpenCode Session in the OpenCode web UI.
-  Null when the captured backend is not OpenCode, the Session ID is missing,
-  or the OpenCode server address cannot be resolved. Contains no credentials
-  or pairing token; the browser uses its existing OpenCode cookie.
+  Whether the operator can open this OpenCode Session from the usage dialog.
+  True only for an OpenCode Session whose server can be resolved. Does not
+  mint a pairing grant and contains no URL or credential.
   """
-  openInOpenCodeUrl: String
+  canOpenInOpenCode: Boolean!
 }
 
 """
@@ -1487,12 +1486,6 @@ type WorkItem {
   """
   completionSummary: String
   sessionId: String
-  """
-  Browser URL that opens this Work Item's OpenCode Session in a new tab.
-  Null for other Agent Backends, when no Session ID is captured, or when the
-  OpenCode server address cannot be resolved. Contains no credentials.
-  """
-  openInOpenCodeUrl: String
   failureCode: String
   createdAt: String!
   updatedAt: String!
@@ -1736,6 +1729,24 @@ type Mutation {
   updateRepositorySettings(input: UpdateRepositorySettingsInput!): Repository!
   pauseRepository(repositoryId: ID!): Repository!
   unpauseRepository(repositoryId: ID!): Repository!
+  """
+  Mint a one-time browser connection to this Work Item's OpenCode Session.
+  Called only when the operator clicks Open in OpenCode. Does not run during
+  list or poll queries. The connect URL is a short-lived single-use pairing
+  grant, not a reusable password. Unavailable launches return a reason and
+  no URL.
+  """
+  openOpenCodeSession(workItemId: ID!): OpenCodeSessionLaunch!
+}
+
+"""
+Click-time OpenCode Session handoff. Exactly one of a ready pair of URLs or
+an unavailable reason. Neither field contains a reusable credential.
+"""
+type OpenCodeSessionLaunch {
+  connectUrl: String
+  sessionUrl: String
+  unavailableReason: String
 }
 
 type Subscription {

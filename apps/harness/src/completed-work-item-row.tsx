@@ -22,7 +22,6 @@ import {
   useNowMs,
   worktreeLeafName,
 } from "./live-duration.js"
-import { OpenInOpenCodeSessionLink } from "./open-in-opencode-link.js"
 import { sessionWorktreeParts } from "./session-worktree-line.js"
 import { cx, ui } from "./ui.js"
 import { workItemIssueUrl } from "./work-item-issue-url.js"
@@ -200,13 +199,6 @@ export function CompletedWorkItemRow({
             >
               {sessionId}
             </button>{" "}
-            {workItem.openInOpenCodeUrl ? (
-              <>
-                <OpenInOpenCodeSessionLink
-                  url={workItem.openInOpenCodeUrl}
-                />{" "}
-              </>
-            ) : null}
             <Copy value={sessionId} showValue={false} className="shrink-0" />
           </>
         ) : (
