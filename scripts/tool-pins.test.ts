@@ -201,7 +201,7 @@ describe("contributor environment pins", () => {
     expect(cicd).toMatch(/branches:\s*\n\s+- main/)
     expect(cicd).not.toMatch(/push:\s*\n\s+paths:/)
     expect(cicd).toContain(
-      "needs: [quality-gates, harness, packed-install, pinact, jactionlint]",
+      "needs: [quality-gates, harness, packed-install, pinact, jactionlint, opencode-cli-contract]",
     )
   })
 

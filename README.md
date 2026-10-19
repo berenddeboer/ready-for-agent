@@ -136,7 +136,7 @@ missing or broken selected backend (default is OpenCode) is shown as
 **Agent Backend Unavailable**; open Settings to choose another
 backend, reinstall the CLI, or use Recheck after fixing it:
 
-- [OpenCode 2](https://opencode.ai/v2/) (`opencode` on PATH). OpenCode 1 is not supported.
+- [OpenCode 2](https://opencode.ai/v2/) (`opencode` on PATH). OpenCode 1 is not supported. The contract baseline and how to run it are in [packages/opencode/CLI-CONTRACT.md](packages/opencode/CLI-CONTRACT.md).
 - [Codex](https://github.com/openai/codex) (`codex` on PATH). Codex Build
   0.153.4 or later is the supported baseline so Settings can list GPT-6
   Astra and current reasoning options. After upgrading Codex, use Recheck

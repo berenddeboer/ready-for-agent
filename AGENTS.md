@@ -55,10 +55,10 @@ Single-context layout (root CONTEXT.md + docs/adr/). See `docs/agents/domain.md`
 
 ### OpenCode CLI contract
 
-Any added or changed production OpenCode subprocess invocation must update
-`packages/opencode/CLI-CONTRACT.md` and the `opencode:cli-contract` suite in
-the same change. Argv unit tests are not a substitute. Run
-`bunx nx run opencode:cli-contract`.
+Any added or changed production OpenCode subprocess invocation, or a change
+to the OpenCode baseline pin, must update `packages/opencode/CLI-CONTRACT.md`
+and pass `bunx nx run opencode:cli-contract`. Argv unit tests are not a
+substitute. Required CI runs that same target and does not skip it.
 
 ### Domain ontology
 

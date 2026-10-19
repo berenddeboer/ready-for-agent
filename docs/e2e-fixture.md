@@ -238,15 +238,22 @@ the fixture vault with repository secret `E2E_KEYMAXXER_MASTER_KEY`.
 | --- | --- | --- |
 | `push` to `main` | required | Fail closed if missing |
 | Same-repo PR | required on live-Forge | Fail closed if missing on `harness-e2e-live-forge`; UI-history and `@no-backend` still run |
-| Fork PR | no (secrets not exposed) | Skip live-Forge e2e only (log + continue); UI-history still runs smoke, vault-free `e2e-no-backend`, and `e2e-ui-history`; quality-gates, pinact, and jactionlint still run |
+| Fork PR | no (secrets not exposed) | Skip live-Forge e2e only (log + continue); UI-history still runs smoke, vault-free `e2e-no-backend`, and `e2e-ui-history`; quality-gates, pinact, jactionlint, and `opencode-cli-contract` still run |
 
 Required status checks (after the former monolithic `main` job was split, then
 the PR `harness` e2e job):
 
 | Workflow | Require |
 | --- | --- |
-| **PR** | `quality-gates`, `harness-e2e-live-forge`, `harness-e2e-ui-history`, `harness`, `pinact`, `jactionlint` |
-| **CI/CD** | `quality-gates`, `harness`, `packed-install`, `pinact`, `jactionlint` |
+| **PR** | `quality-gates`, `harness-e2e-live-forge`, `harness-e2e-ui-history`, `harness`, `pinact`, `jactionlint`, `opencode-cli-contract` |
+| **CI/CD** | `quality-gates`, `harness`, `packed-install`, `pinact`, `jactionlint`, `opencode-cli-contract` |
+
+`opencode-cli-contract` installs the pinned OpenCode baseline and runs
+`bunx nx run opencode:cli-contract`. It does not use secrets. Add it to
+branch protection when this workflow is on the default branch; requiring it
+earlier stalls merges because the check never reports. Scheduled workflow
+`OpenCode CLI contract drift` is not a required check. It installs latest
+stable V2 and fails when upstream changes the command contracts.
 
 ### Overnight published-install smoke (complementary)
 

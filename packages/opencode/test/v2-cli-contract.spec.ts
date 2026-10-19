@@ -6,7 +6,6 @@
  * proves argument acceptance and session side effects. It is not provider
  * coverage and must not call a cloud model.
  */
-import { spawnSync } from "node:child_process"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -20,6 +19,10 @@ import {
   AgentBackendMalformedOutputError,
   PROMPT_ARGV_BYTE_LIMIT,
 } from "@ready-for-agent/agent-backend"
+import {
+  formatGateLog,
+  gateOpenCodeContract,
+} from "../../../scripts/opencode-contract-gate.ts"
 import { Opencode } from "../src/index.js"
 import {
   type OwnedOpenCodeServer,
@@ -41,27 +44,13 @@ const UNRECOGNIZED_VERBOSE =
   "Unrecognized flag: --verbose in command opencode models"
 const CASE_TIMEOUT_MS = 45_000
 
-const binary = Bun.which("opencode")
-if (binary === null) {
-  throw new Error(
-    "opencode is not on PATH. Install OpenCode 2, then rerun nx run opencode:cli-contract.",
-  )
+const gated = gateOpenCodeContract()
+if (!gated.ok) {
+  throw new Error(gated.message)
 }
-const versionProbe = spawnSync(binary, ["--version"], {
-  encoding: "utf8",
-  timeout: 10_000,
-})
-const versionText = `${versionProbe.stdout ?? ""}\n${versionProbe.stderr ?? ""}`
-if (versionProbe.status !== 0 || !/(?:^|\s)v?2\.\d+\.\d+/.test(versionText)) {
-  throw new Error(
-    `OpenCode 2 is required for the CLI contract. Resolved ${binary}, exit ${String(versionProbe.status)}, output ${versionText.trim().slice(0, 200)}`,
-  )
-}
-const versionLine =
-  versionText
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0) ?? versionText.trim()
+const binary = gated.binary
+const versionLine = gated.versionLine
+console.log(formatGateLog(gated))
 
 type LaunchRecord = {
   readonly args: ReadonlyArray<string>

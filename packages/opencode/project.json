@@ -19,8 +19,19 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun --conditions=@ready-for-agent/source test test/v2-cli-contract.spec.ts --timeout 60000 && bun --conditions=@ready-for-agent/source test --cwd ../../apps/ready-for-agent src/interactive-resume-v2-contract.test.ts --timeout 60000"
+        "command": "bun --conditions=@ready-for-agent/source ../../scripts/run-opencode-cli-contract.ts"
       },
+      "inputs": [
+        "default",
+        "{workspaceRoot}/mise.toml",
+        "{workspaceRoot}/scripts/install-opencode-v2.sh",
+        "{workspaceRoot}/scripts/opencode-contract-gate.ts",
+        "{workspaceRoot}/scripts/run-opencode-cli-contract.ts",
+        "{workspaceRoot}/apps/ready-for-agent/src/**/*.ts",
+        "{workspaceRoot}/.github/workflows/pr.yml",
+        "{workspaceRoot}/.github/workflows/ci-cd.yml",
+        "{workspaceRoot}/.github/workflows/opencode-cli-contract-drift.yml"
+      ],
       "cache": false
     }
   }
