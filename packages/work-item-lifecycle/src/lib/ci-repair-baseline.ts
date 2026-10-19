@@ -1,6 +1,10 @@
 import { Clock, Effect } from "effect"
 import type { SqlError } from "effect/sql/SqlError"
 import { compareCiGateRunOrder } from "@ready-for-agent/forge-contract"
+import {
+  type WorkItemOrigin,
+  workItemOriginPolicy,
+} from "@ready-for-agent/lifecycle-model"
 import type { CiRepairFailingRun } from "./ci-repair-work-item.js"
 
 /**
@@ -13,12 +17,12 @@ export type CiRepairBaselineEvent =
   | { readonly _tag: "no_change" }
 
 export const ciRepairBaselineEvent = (input: {
-  readonly origin: string | null | undefined
+  readonly origin: WorkItemOrigin | undefined
   readonly step: string
   readonly nextState: string | null
   readonly ownedPrMerged: boolean
 }): CiRepairBaselineEvent => {
-  if (input.origin !== "ci_repair") {
+  if (!workItemOriginPolicy(input.origin).tracksCiRepairBaseline) {
     return { _tag: "none" }
   }
   if (input.ownedPrMerged) {

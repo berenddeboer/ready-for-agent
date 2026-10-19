@@ -3,7 +3,10 @@ import { SqlClient } from "effect/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { resolveForgeIssuePresentation } from "@ready-for-agent/forge-contract"
-import { formatIssueDisplayId } from "@ready-for-agent/lifecycle-model"
+import {
+  formatIssueDisplayId,
+  workItemOriginPolicy,
+} from "@ready-for-agent/lifecycle-model"
 import {
   type AgentTurnForgeAuth,
   AgentTurnForgeCredentialMissingError,
@@ -381,7 +384,7 @@ export const implement = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
     const repository = yield* resolveRepository(context)
-    if (context.origin === "ci_repair") {
+    if (!workItemOriginPolicy(context.origin).implementsFromIssue) {
       return yield* implementCiRepairOrigin(context, worktreePath, repository)
     }
     const issueNumber = yield* resolveIssueNumber(context)

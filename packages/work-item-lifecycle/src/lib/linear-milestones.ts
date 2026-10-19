@@ -1,6 +1,10 @@
 import { Effect } from "effect"
 import type { RepositoryRecord } from "@ready-for-agent/db-service"
-import type { IssueSource } from "@ready-for-agent/lifecycle-model"
+import {
+  type IssueSource,
+  type WorkItemOrigin,
+  workItemOriginPolicy,
+} from "@ready-for-agent/lifecycle-model"
 import {
   LinearNotConfiguredError,
   type LinearRequestError,
@@ -11,10 +15,13 @@ import {
 export const LINEAR_MERGE_COMPLETION_SUMMARY =
   "Ready for Agent completed this Issue after the GitHub pull request merged."
 
-export const nextStateAfterConfirmedMerge = (
-  source: IssueSource | undefined,
-): "close_issue" | "local_cleanup" =>
-  isLinearIssueSource(source) ? "close_issue" : "local_cleanup"
+export const nextStateAfterConfirmedMerge = (input: {
+  readonly origin?: WorkItemOrigin
+  readonly issueSource: IssueSource | undefined
+}): "close_issue" | "local_cleanup" =>
+  workItemOriginPolicy(input.origin).nextStateAfterConfirmedMerge(
+    input.issueSource,
+  )
 
 export const linearMergeCompletionSummary = (
   existing: string | null | undefined,

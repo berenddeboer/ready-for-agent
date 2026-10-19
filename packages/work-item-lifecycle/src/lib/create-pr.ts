@@ -33,6 +33,10 @@ import {
 } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
+  publicationCopyOptions,
+  workItemOriginPolicy,
+} from "@ready-for-agent/lifecycle-model"
+import {
   type AgentTurnForgeAuth,
   AgentTurnForgeCredentialMissingError,
   InvalidCapturedAgentBackendError,
@@ -804,8 +808,7 @@ const resolvePublicationCopyForCreatePr = (
   Effect.gen(function* () {
     const title = context.publicationTitle?.trim() ?? ""
     const body = context.publicationBody?.trim() ?? ""
-    const ciRepair =
-      context.origin === "ci_repair" ? { ciRepair: true as const } : undefined
+    const ciRepair = publicationCopyOptions(context.origin)
     if (title !== "" && body !== "") {
       const normalized = normalizePublicationCopy(
         { title, body },
@@ -1099,7 +1102,10 @@ export const createPr = (context: LifecycleStepContext) =>
       context.issueSource,
       repository.forge,
     )
-    if (issueForge === "azure-devops" && context.origin !== "ci_repair") {
+    if (
+      issueForge === "azure-devops" &&
+      workItemOriginPolicy(context.origin).associatesPullRequestWithIssue
+    ) {
       yield* associateNativePullRequestWithIssue({
         mutations,
         repository: toForgeRepository(repository),

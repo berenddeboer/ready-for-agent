@@ -1,3 +1,6 @@
+import type { WorkItemOrigin } from "./generated/forge.js"
+import { workItemOriginPolicy } from "./work-item-origin-policy.js"
+
 const sanitizeSegment = (value: string): string => {
   const cleaned = value
     .toLowerCase()
@@ -18,11 +21,10 @@ export const workItemBranchName = (input: {
   readonly projectPath: string
   readonly issueNumber: number
   readonly workItemId: string
-  readonly origin?: "issue" | "ci_repair"
-}): string => {
-  const slug = repositorySlug(input.projectPath)
-  if (input.origin === "ci_repair") {
-    return `rfa/${slug}/ci-repair/${input.workItemId}`
-  }
-  return `rfa/${slug}/${input.issueNumber}/${input.workItemId}`
-}
+  readonly origin?: WorkItemOrigin
+}): string =>
+  workItemOriginPolicy(input.origin).branchName({
+    slug: repositorySlug(input.projectPath),
+    issueNumber: input.issueNumber,
+    workItemId: input.workItemId,
+  })

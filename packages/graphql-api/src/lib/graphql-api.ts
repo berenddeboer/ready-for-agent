@@ -470,8 +470,20 @@ type StartRepositoryCiRepairArgs = {
   repositoryId: string
 }
 
-const toGraphqlWorkItemOrigin = (origin: WorkItemRecord["origin"]) =>
-  origin === "ci_repair" ? "CI_REPAIR" : "ISSUE"
+const toGraphqlWorkItemOrigin = (
+  origin: WorkItemRecord["origin"],
+): "ISSUE" | "CI_REPAIR" => {
+  switch (origin) {
+    case "issue":
+      return "ISSUE"
+    case "ci_repair":
+      return "CI_REPAIR"
+    default: {
+      const _exhaustive: never = origin
+      return _exhaustive
+    }
+  }
+}
 
 export type GraphqlServices =
   | DbService

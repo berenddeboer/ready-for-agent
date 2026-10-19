@@ -8,6 +8,10 @@ import {
   spawnOwned,
 } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
+import {
+  publicationCopyOptions,
+  workItemOriginPolicy,
+} from "@ready-for-agent/lifecycle-model"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import {
   buildNoChangeConfirmationPrompt,
@@ -384,7 +388,7 @@ const parseAndNormalize = (
     parsed,
     context.issueNumber,
     context.issueSource,
-    context.origin === "ci_repair" ? { ciRepair: true } : undefined,
+    publicationCopyOptions(context.origin),
   )
 }
 
@@ -416,7 +420,8 @@ const generatePublicationCopy = (
           issueNumber: context.issueNumber,
           attachmentDirectory,
           issueSource: context.issueSource,
-          ciRepair: context.origin === "ci_repair",
+          ciRepair: workItemOriginPolicy(context.origin)
+            .omitsIssueClosingReference,
         }),
         cwd: worktreePath,
         model: context.model,
@@ -447,7 +452,8 @@ const generatePublicationCopy = (
             issueNumber: context.issueNumber,
             attachmentDirectory,
             issueSource: context.issueSource,
-            ciRepair: context.origin === "ci_repair",
+            ciRepair: workItemOriginPolicy(context.origin)
+              .omitsIssueClosingReference,
           }),
           cwd: worktreePath,
           model: context.model,
@@ -481,7 +487,8 @@ const generatePublicationCopy = (
         issueTitle: context.issueTitle,
         workItemId: context.workItemId,
         issueSource: context.issueSource,
-        ciRepair: context.origin === "ci_repair",
+        ciRepair: workItemOriginPolicy(context.origin)
+          .omitsIssueClosingReference,
       })
       yield* Effect.logInfo("Commit using harness publication-copy fallback", {
         workItemId: context.workItemId,
@@ -527,7 +534,7 @@ const resolvePublicationCopy = (
         message,
         context.issueNumber,
         context.issueSource,
-        context.origin === "ci_repair" ? { ciRepair: true } : undefined,
+        publicationCopyOptions(context.origin),
       )
       if (seeded !== null) {
         const existingTitle = context.publicationTitle?.trim() ?? ""
@@ -548,7 +555,7 @@ const resolvePublicationCopy = (
         stored,
         context.issueNumber,
         context.issueSource,
-        context.origin === "ci_repair" ? { ciRepair: true } : undefined,
+        publicationCopyOptions(context.origin),
       )
       // Already-persisted copy is trusted even if slightly over bounds after deploy;
       // re-normalize when possible, otherwise reuse as stored. Harness fallback
@@ -592,7 +599,7 @@ const alignCopyWithHeadCommit = (
       actualMessage,
       context.issueNumber,
       context.issueSource,
-      context.origin === "ci_repair" ? { ciRepair: true } : undefined,
+      publicationCopyOptions(context.origin),
     )
     if (fromCommit === null) {
       return preferred
@@ -729,7 +736,8 @@ const askAgentToRepairCommit = (
           body: copy.body,
           diagnostics,
           issueSource: context.issueSource,
-          ciRepair: context.origin === "ci_repair",
+          ciRepair: workItemOriginPolicy(context.origin)
+            .omitsIssueClosingReference,
         }),
         cwd: worktreePath,
         model: context.model,
@@ -771,10 +779,9 @@ const confirmLateNoChange = (
     const result = yield* agentBackend
       .continueTurn({
         sessionId,
-        prompt:
-          context.origin === "ci_repair"
-            ? buildCiRepairNoChangeConfirmationPrompt()
-            : buildNoChangeConfirmationPrompt(),
+        prompt: workItemOriginPolicy(context.origin).noChangeConfirmsIssue
+          ? buildNoChangeConfirmationPrompt()
+          : buildCiRepairNoChangeConfirmationPrompt(),
         cwd: worktreePath,
         model: context.model,
         thinkingLevel: context.thinkingLevel,
@@ -792,7 +799,7 @@ const confirmLateNoChange = (
         ),
       )
 
-    if (context.origin === "ci_repair") {
+    if (!workItemOriginPolicy(context.origin).noChangeConfirmsIssue) {
       const parsed = parseCiRepairNoChangeResult(result.assistantText)
       if (parsed === null || parsed._tag === "changes") {
         return yield* new CommitNoChangeConfirmationError({

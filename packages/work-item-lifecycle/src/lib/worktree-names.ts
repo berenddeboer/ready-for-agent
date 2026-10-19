@@ -1,9 +1,12 @@
 import { tmpdir } from "node:os"
-
-export {
+import {
+  type WorkItemOrigin,
   repositorySlug,
   workItemBranchName,
+  workItemOriginPolicy,
 } from "@ready-for-agent/lifecycle-model"
+
+export { repositorySlug, workItemBranchName }
 
 const sanitizeSegment = (value: string): string => {
   const cleaned = value
@@ -71,11 +74,12 @@ export const worktreeParentPath = (input: {
 export const workItemDirectoryName = (input: {
   readonly issueNumber: number
   readonly workItemId: string
-  readonly origin?: "issue" | "ci_repair"
+  readonly origin?: WorkItemOrigin
 }): string =>
-  input.origin === "ci_repair"
-    ? `ci-repair-${input.workItemId}`
-    : `${input.issueNumber}-${input.workItemId}`
+  workItemOriginPolicy(input.origin).worktreeDirectoryName({
+    issueNumber: input.issueNumber,
+    workItemId: input.workItemId,
+  })
 
 /**
  * Absolute worktree path for one Work Item.
@@ -86,7 +90,7 @@ export const workItemWorktreePath = (input: {
   readonly projectPath: string
   readonly issueNumber: number
   readonly workItemId: string
-  readonly origin?: "issue" | "ci_repair"
+  readonly origin?: WorkItemOrigin
   readonly tmpDir?: string
 }): string => {
   const parent = worktreeParentPath(input)

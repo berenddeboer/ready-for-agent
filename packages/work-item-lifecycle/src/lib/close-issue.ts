@@ -4,7 +4,10 @@ import { DbService, type IssueRecord } from "@ready-for-agent/db-service"
 import { resolveForgeIssueOperations } from "@ready-for-agent/forge-contract"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
-import { formatIssueDisplayId } from "@ready-for-agent/lifecycle-model"
+import {
+  formatIssueDisplayId,
+  workItemOriginPolicy,
+} from "@ready-for-agent/lifecycle-model"
 import {
   CloseIssueContextError,
   CloseIssueEligibilityError,
@@ -70,7 +73,7 @@ const rejectIfOpenAndIneligible = (
  */
 export const closeIssue = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
-    if (context.origin === "ci_repair") {
+    if (!workItemOriginPolicy(context.origin).closesIssue) {
       return yield* new CloseIssueContextError({
         workItemId: context.workItemId,
         message: "A CI Repair Work Item has no Issue to close",
