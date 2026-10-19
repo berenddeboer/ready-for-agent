@@ -667,8 +667,10 @@ type WorkItemCiRepair {
   """
   history: [CiRepairAuthorization!]!
   """
-  True when this unfinished Work Item can receive CI Gate Bypass for the
-  active Closed CI Failure Incident.
+  True when this unfinished ordinary Work Item can receive CI Gate Bypass for
+  the active Closed CI Failure Incident. Always false for a CI Repair Work
+  Item: repair origin crosses a Closed gate without CI Gate Bypass, regardless
+  of lifecycle state or gate state.
   """
   canAuthorize: Boolean!
 }
@@ -1527,8 +1529,9 @@ type Mutation {
   """
   startRepositoryCiRepair(repositoryId: ID!): WorkItem!
   """
-  Grant an unfinished Work Item CI Gate Bypass for the active Closed incident
-  without resetting worktree, Session, profile, Merge Policy, PR, or history.
+  Grant an unfinished ordinary Work Item CI Gate Bypass for the active Closed
+  incident without resetting worktree, Session, profile, Merge Policy, PR, or
+  history. Not available for a CI Repair Work Item.
   """
   authorizeWorkItemAsCiRepair(workItemId: ID!): WorkItem!
   """

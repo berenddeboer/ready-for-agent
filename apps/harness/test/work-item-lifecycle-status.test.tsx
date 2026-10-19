@@ -8,6 +8,7 @@ import {
   type WorkItem,
   WorkItemLifecycleStatus,
 } from "../src/home-page-content.js"
+import { PipelineTicket } from "../src/kanban-board.js"
 import { describe, expect, test } from "bun:test"
 
 const waitingForGitHubWorkItem = {
@@ -303,6 +304,105 @@ describe("WorkItemLifecycleStatus", () => {
     expect(html).toContain("Authorize CI Gate Bypass")
     expect(html).not.toContain("Skip CI")
     expect(html).not.toContain("Force merge")
+  })
+
+  test("a running CI Repair card never offers bypass authorize, revoke, or a prompt", () => {
+    const runningRepair = {
+      ...waitingForGitHubWorkItem,
+      repositoryId: "PROCESSFOCUS/MONOREPO",
+      origin: "CI_REPAIR" as const,
+      issueTitle: "Repair CI on trunk",
+      issueNumber: 0,
+      state: "IMPLEMENT" as const,
+      stateLabel: "Build",
+      status: "RUNNING" as const,
+      statusLabel: "Running",
+      statusMessage: null,
+      postponedUntil: null,
+      hasActiveStepRun: true,
+      isTerminal: false,
+      ciRepairDefaultBranch: "trunk",
+      ciRepairHeadSha: "abc123",
+      ciRepairFailingRuns: [
+        {
+          runIdentity: "10:1",
+          htmlUrl: "https://ci.example/10",
+          displayLabel: "Build",
+        },
+      ],
+      lifecycleLabels: [
+        {
+          phase: "IMPLEMENT",
+          label: "Build: Running",
+          status: "RUNNING" as const,
+          durationMs: 45_000,
+        },
+      ],
+      // Stale closed-gate flag. Origin still hides the action.
+      ciRepair: {
+        canAuthorize: true,
+        active: null,
+        history: [],
+      },
+    } satisfies WorkItem
+
+    const card = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <PipelineTicket
+          workItem={runningRepair}
+          repository={undefined}
+          issue={undefined}
+          laneId="build"
+          onOpenSession={() => undefined}
+        />
+      </QueryClientProvider>,
+    )
+    expect(card).toContain("PROCESSFOCUS/MONOREPO")
+    expect(card).toContain("Repair CI on trunk")
+    expect(card).toContain("CI Repair")
+    expect(card).toContain("Build: Running")
+    expect(card).not.toContain("Authorize CI Gate Bypass")
+    expect(card).not.toContain("Revoke CI Gate Bypass")
+    expect(card).not.toContain("authorization prompt")
+    expect(card).not.toContain("<dialog")
+
+    const detail = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkItemLifecycleStatus workItem={runningRepair} />
+      </QueryClientProvider>,
+    )
+    expect(detail).toContain("Build: Running")
+    expect(detail).not.toContain("Authorize CI Gate Bypass")
+    expect(detail).not.toContain("Revoke CI Gate Bypass")
+    expect(detail).not.toContain("<dialog")
+  })
+
+  test("CI Repair hides bypass actions in every lifecycle state even when canAuthorize is stale", () => {
+    for (const state of [
+      "IMPLEMENT",
+      "NEEDS_HUMAN",
+      "COMPLETE",
+      "WATCH_PR_STATUS_CHECKS",
+    ] as const) {
+      const repair = {
+        ...waitingForGitHubWorkItem,
+        origin: "CI_REPAIR" as const,
+        issueTitle: "Repair CI on trunk",
+        state,
+        ciRepair: {
+          canAuthorize: true,
+          active: null,
+          history: [],
+        },
+      } satisfies WorkItem
+      const html = renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <WorkItemLifecycleStatus workItem={repair} compact />
+        </QueryClientProvider>,
+      )
+      expect(html).not.toContain("Authorize CI Gate Bypass")
+      expect(html).not.toContain("Revoke CI Gate Bypass")
+    }
   })
 })
 

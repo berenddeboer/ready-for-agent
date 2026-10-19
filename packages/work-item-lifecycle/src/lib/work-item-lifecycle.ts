@@ -1379,9 +1379,9 @@ export interface WorkItemLifecycleShape {
     nativeId: string,
   ) => Effect.Effect<WorkItemRecord, ImplementCiRepairError>
   /**
-   * Authorize an unfinished Work Item as CI Repair for the active Closed
-   * incident without resetting worktree, Session, profile, Merge Policy, PR,
-   * or history.
+   * Authorize an unfinished ordinary Work Item as CI Gate Bypass for the
+   * active Closed incident. A CI Repair Work Item is not eligible. Does not
+   * reset worktree, Session, profile, Merge Policy, PR, or history.
    */
   readonly authorizeAsCiRepair: (
     workItemId: string,
@@ -9210,6 +9210,14 @@ export const makeWorkItemLifecycleLive = (
                 return yield* new WorkItemTerminalError({
                   workItemId,
                   state: current.state,
+                })
+              }
+              if (current.origin === "ci_repair") {
+                return yield* new CiRepairNotAvailableError({
+                  repositoryId: current.repository_id,
+                  workItemId,
+                  message:
+                    "CI Gate Bypass is not available for a CI Repair Work Item",
                 })
               }
               const incidentId = yield* loadActiveClosedCiFailureIncidentId(

@@ -112,7 +112,7 @@ function PipelineCompleteSummary({
   )
 }
 
-function PipelineTicket({
+export function PipelineTicket({
   workItem,
   repository,
   issue,

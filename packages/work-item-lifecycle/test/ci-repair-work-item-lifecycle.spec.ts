@@ -88,6 +88,7 @@ const seedRepository = (input: {
   readonly orderKey?: string
   readonly earlyJobFailure?: boolean
   readonly headSha?: string
+  readonly openIncident?: boolean
 }) =>
   Effect.gen(function* () {
     const db = yield* DbService
@@ -157,7 +158,29 @@ const seedRepository = (input: {
             },
           ]
         : [],
-      incidentsToUpsert: [],
+      incidentsToUpsert:
+        input.openIncident === true
+          ? [
+              {
+                id: `cfi-${repository.id}`,
+                repositoryId: repository.id,
+                status: "open" as const,
+                openedAt: new Date("2026-10-19T00:00:00.000Z"),
+                resolvedAt: null,
+                recoveryReason: null,
+                summary: "CI Gate closed: CI failed.",
+                definitions: [
+                  {
+                    identity: "build",
+                    displayLabel: "Build",
+                    firstFailedRunIdentity: runIdentity,
+                    firstFailedRunHtmlUrl: "https://ci.example/10",
+                    joinedAt: new Date("2026-10-19T00:00:00.000Z"),
+                  },
+                ],
+              },
+            ]
+          : [],
     })
     return repository
   })
@@ -258,6 +281,77 @@ describe("CI Repair Work Item lifecycle", () => {
           [concurrentRepository.id],
         )) as readonly { readonly count: number }[]
         expect(Number(rows[0]?.count ?? 0)).toBe(1)
+      }),
+    ))
+
+  it("crosses a Closed gate without bypass and rejects bypass authorization", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        const db = yield* DbService
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/bypass-origin.git",
+          paused: true,
+          automaticCiRepair: false,
+          closed: true,
+          openIncident: true,
+        })
+        const issue = yield* db.storeIssue({
+          repositoryId: repository.id,
+          issueNumber: 27,
+          title: "Ordinary work",
+          body: "body",
+          url: "https://github.com/acme/widgets/issues/27",
+          state: "OPEN",
+          githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: false,
+          blockedBy: [],
+        })
+
+        const repair = yield* lifecycle.startCiRepair(repository.id)
+        expect(repair.origin).toBe("ci_repair")
+        expect(repair.waitingForCiRepair).toBe(false)
+        expect(repair.holdsWorkerSlot).toBe(true)
+
+        const ordinary = yield* lifecycle.implementNow(
+          repository.id,
+          issue.nativeId,
+        )
+        expect(ordinary.origin).toBe("issue")
+        expect(ordinary.waitingForCiRepair).toBe(true)
+
+        const rejected = yield* lifecycle
+          .authorizeAsCiRepair(repair.id)
+          .pipe(Effect.flip)
+        expect(rejected).toMatchObject({
+          _tag: "CiRepairNotAvailableError",
+          message: "CI Gate Bypass is not available for a CI Repair Work Item",
+        })
+        const repairAuthorizations = (yield* sql.unsafe(
+          `SELECT COUNT(*) AS count
+           FROM ci_repair_authorization
+           WHERE work_item_id = ?`,
+          [repair.id],
+        )) as readonly { readonly count: number }[]
+        expect(Number(repairAuthorizations[0]?.count ?? 0)).toBe(0)
+        const repairAfter = yield* lifecycle.getWorkItem(repair.id)
+        expect(repairAfter.waitingForCiRepair).toBe(false)
+
+        const authorized = yield* lifecycle.authorizeAsCiRepair(ordinary.id)
+        expect(authorized.waitingForCiRepair).toBe(false)
+        const ordinaryAuthorizations = (yield* sql.unsafe(
+          `SELECT source_action
+           FROM ci_repair_authorization
+           WHERE work_item_id = ?`,
+          [ordinary.id],
+        )) as readonly { readonly source_action: string }[]
+        expect(ordinaryAuthorizations.map((row) => row.source_action)).toEqual([
+          "authorize_as_ci_repair",
+        ])
       }),
     ))
 

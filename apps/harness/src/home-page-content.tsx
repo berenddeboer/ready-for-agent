@@ -44,6 +44,7 @@ import {
 import { Banner } from "./banner.js"
 import { repositoryCardCollapseId, useCardCollapsed } from "./card-collapse.js"
 import { CardCollapseToggle } from "./card-collapse-toggle.js"
+import { ciGateBypassActionsOffered } from "./ci-gate-bypass-actions.js"
 import { createConfigQuery } from "./config-query.js"
 import { Copy } from "./copy.js"
 import type { ImplementWithSubmitInput } from "./execution-profile-draft.js"
@@ -4530,7 +4531,7 @@ export function WorkItemLifecycleStatus({
   })
   const actionsPending =
     retry.isPending || reset.isPending || authorizeAsCiRepair.isPending
-  const canAuthorizeAsCiRepair = workItem.ciRepair.canAuthorize
+  const canAuthorizeAsCiRepair = ciGateBypassActionsOffered(workItem)
   const ciRepairSourceLabel = (
     sourceAction: WorkItem["ciRepair"]["history"][number]["sourceAction"],
   ): string => {
