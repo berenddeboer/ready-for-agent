@@ -82,23 +82,19 @@ import {
   CurrentCapturedAgentBackendId,
   CurrentStepRun,
 } from "./agent-turn-limiter.js"
+import { captureEffectiveAgentBackend } from "./capture-effective-agent-backend.js"
 import {
   ciRepairBaselineEvent,
-  failurePassesCiRepairBaseline,
-  loadCiRepairBaselines,
   recordCiRepairAbandonSuppress,
   recordCiRepairMergeFloor,
   recordCiRepairNoChangeBaseline,
 } from "./ci-repair-baseline.js"
+import { parseCiRepairFailingRuns } from "./ci-repair-work-item.js"
 import {
-  CI_REPAIR_ISSUE_NATIVE_ID,
-  CI_REPAIR_ISSUE_NUMBER,
-  type CiRepairFailingRun,
-  ciRepairIssueTitle,
-  observationQualifiesForAutomaticCiRepair,
-  parseCiRepairFailingRuns,
-  serializeCiRepairFailingRuns,
-} from "./ci-repair-work-item.js"
+  type CiRepairWorkItemCreationDeps,
+  considerAutomaticCiRepairWorkItem,
+  startCiRepairWorkItem,
+} from "./ci-repair-work-item-creation.js"
 import { CloseIssueEligibilityError } from "./close-issue-errors.js"
 import {
   AbandonCleanupError,
@@ -107,8 +103,8 @@ import {
   AutonomousRetryDeferredError,
   AutonomousRetryLimitReachedError,
   BuildModelNotConfiguredError,
-  CiRepairDefaultBranchMissingError,
-  CiRepairGateNotClosedError,
+  type CiRepairDefaultBranchMissingError,
+  type CiRepairGateNotClosedError,
   CiRepairNotAvailableError,
   ImplementAllWithAutoMergeNotEligibleError,
   InterruptNotEligibleError,
@@ -8746,9 +8742,10 @@ export const makeWorkItemLifecycleLive = (
           const createdId = yield* activeAgentBackend.withConfigCoordination(
             Effect.gen(function* () {
               const explicitProfile = options.executionProfile
-              let captureBackendId: AgentBackendId
               let restoreAddedBackend: Effect.Effect<unknown> = Effect.void
+              let agentBackendId: AgentBackendId
               if (explicitProfile !== undefined) {
+                let captureBackendId: AgentBackendId
                 if (!isSelectableAgentBackendId(explicitProfile.agentBackend)) {
                   return yield* new AgentBackendUnavailableError({
                     message: `Unknown or unsupported Agent Backend: ${explicitProfile.agentBackend}`,
@@ -8813,62 +8810,31 @@ export const makeWorkItemLifecycleLive = (
                   yield* restoreAddedBackend
                   return yield* catalogError
                 }
+                yield* activeAgentBackend
+                  .requireAgentTurnsAllowed(captureBackendId)
+                  .pipe(
+                    Effect.mapError(
+                      (error) =>
+                        new AgentBackendUnavailableError({
+                          message: error.message,
+                          reason: error.reason,
+                        }),
+                    ),
+                    Effect.tapError(() => restoreAddedBackend),
+                  )
+                const activeRegistration =
+                  yield* activeAgentBackend.getRegistration(captureBackendId)
+                agentBackendId = activeRegistration.descriptor.id
               } else {
-                // Effective Agent Backend: Repository override or harness default.
-                // Capture it as routing authority for the Work Item lifetime.
-                const harnessConfig = yield* db.getConfig
-                const repositories = yield* db.listRepositories
-                const repository = repositories.find(
-                  ({ id }) => id === repositoryId,
-                )
-                const rawCaptureBackendId =
-                  repository?.selectedAgentBackend ??
-                  harnessConfig.selectedAgentBackend
-                if (!isSelectableAgentBackendId(rawCaptureBackendId)) {
-                  return yield* new AgentBackendUnavailableError({
-                    message: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
-                    reason: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
-                  })
-                }
-                captureBackendId = rawCaptureBackendId
-                // Models are not stored on ordinary Work Items; resolve against
-                // the captured backend's prefs after coordination has locked
-                // the switch.
-                const capturedSelection = yield* resolveModelsForBackend(
+                const captured = yield* captureEffectiveAgentBackend({
                   repositoryId,
-                  captureBackendId,
-                )
-                const captureStatus =
-                  yield* activeAgentBackend.getBackendStatus(captureBackendId)
-                if (captureStatus !== null && captureStatus.kind === "ready") {
-                  const violation = resolvedSelectionCatalogViolation({
-                    backendLabel: captureStatus.backend.label,
-                    catalog: captureStatus.models,
-                    selection: capturedSelection,
-                    includeReviewModel: true,
-                  })
-                  if (violation !== null) {
-                    return yield* new BuildModelNotConfiguredError({
-                      message: violation.message,
-                    })
-                  }
-                }
+                  db,
+                  activeAgentBackend,
+                  resolveModelsForBackend,
+                  whenRepositoryMissing: "use-harness-default",
+                })
+                agentBackendId = captured.agentBackendId
               }
-              yield* activeAgentBackend
-                .requireAgentTurnsAllowed(captureBackendId)
-                .pipe(
-                  Effect.mapError(
-                    (error) =>
-                      new AgentBackendUnavailableError({
-                        message: error.message,
-                        reason: error.reason,
-                      }),
-                  ),
-                  Effect.tapError(() => restoreAddedBackend),
-                )
-              const activeRegistration =
-                yield* activeAgentBackend.getRegistration(captureBackendId)
-              const agentBackendId = activeRegistration.descriptor.id
               const workItemId = makeWorkItemId()
               const now = yield* Clock.currentTimeMillis
               const step: OperationalLifecycleStep = "create_worktree"
@@ -9060,9 +9026,6 @@ export const makeWorkItemLifecycleLive = (
           return created
         })
 
-      const sqlFlag = (value: unknown): boolean =>
-        value === true || value === 1 || value === "1"
-
       const unfinishedCiRepairWorkItem = Effect.fn(
         "WorkItemLifecycle.unfinishedCiRepairWorkItem",
       )(function* (repositoryId: string) {
@@ -9090,434 +9053,32 @@ export const makeWorkItemLifecycleLive = (
         )
       })
 
-      interface CiRepairGateSnapshot {
-        readonly gateClosed: boolean
-        readonly qualifiesAutomatic: boolean
-        readonly defaultBranch: string | null
-        readonly headSha: string | null
-        readonly failingRuns: readonly CiRepairFailingRun[]
+      const ciRepairCreation: CiRepairWorkItemCreationDeps = {
+        sql,
+        db,
+        activeAgentBackend,
+        resolveModelsForBackend,
+        unfinishedCiRepairWorkItem,
+        getWorkItem,
+        maxWorkerSlots,
+        countOccupiedWorkerSlots,
+        enqueueStepRunForWorkItem,
+        toDatabaseError,
+        isUnfinishedWorkItemUniqueViolation,
       }
-
-      const loadCiRepairGateSnapshot = (
-        repositoryId: string,
-      ): Effect.Effect<CiRepairGateSnapshot, WorkItemLifecycleDatabaseError> =>
-        Effect.gen(function* () {
-          const branchRows = (yield* sql
-            .unsafe(
-              `SELECT default_branch
-               FROM ci_gate_state
-               WHERE repository_id = ?
-               LIMIT 1`,
-              [repositoryId],
-            )
-            .pipe(Effect.mapError(toDatabaseError))) as readonly {
-            readonly default_branch: string | null
-          }[]
-          const defaultBranchRaw = branchRows[0]?.default_branch?.trim() ?? ""
-          const defaultBranch =
-            defaultBranchRaw === "" ? null : defaultBranchRaw
-
-          const observations = (yield* sql
-            .unsafe(
-              `SELECT o.definition_identity AS definition_identity,
-                      o.last_run_identity AS last_run_identity,
-                      o.last_run_order_key AS last_run_order_key,
-                      o.last_head_sha AS last_head_sha,
-                      o.last_raw_status AS last_raw_status,
-                      o.last_raw_conclusion AS last_raw_conclusion,
-                      o.failure_latched AS failure_latched,
-                      o.last_early_job_failure AS last_early_job_failure,
-                      o.latched_run_identity AS latched_run_identity,
-                      o.latched_run_order_key AS latched_run_order_key,
-                      o.latched_run_html_url AS latched_run_html_url,
-                      d.display_label AS display_label
-               FROM ci_gate_definition_observation o
-               INNER JOIN ci_gate_definition d
-                 ON d.repository_id = o.repository_id
-                AND d.identity = o.definition_identity
-               WHERE o.repository_id = ?
-               ORDER BY d.identity ASC`,
-              [repositoryId],
-            )
-            .pipe(Effect.mapError(toDatabaseError))) as readonly {
-            readonly definition_identity: string
-            readonly last_run_identity: string | null
-            readonly last_run_order_key: string | null
-            readonly last_head_sha: string | null
-            readonly last_raw_status: string | null
-            readonly last_raw_conclusion: string | null
-            readonly failure_latched: number | boolean | null
-            readonly last_early_job_failure: number | boolean | null
-            readonly latched_run_identity: string | null
-            readonly latched_run_order_key: string | null
-            readonly latched_run_html_url: string | null
-            readonly display_label: string | null
-          }[]
-
-          const baselines = yield* loadCiRepairBaselines(
-            sql,
-            repositoryId,
-          ).pipe(Effect.mapError(toDatabaseError))
-          const failingRuns: CiRepairFailingRun[] = []
-          const seenRunIdentities = new Set<string>()
-          let headSha: string | null = null
-          let gateClosed = false
-          let qualifiesAutomatic = false
-          for (const row of observations) {
-            if (!sqlFlag(row.failure_latched)) {
-              continue
-            }
-            gateClosed = true
-            const latchedIdentity = row.latched_run_identity?.trim() ?? ""
-            const orderKey = row.latched_run_order_key?.trim() ?? ""
-            const definitionIdentity = row.definition_identity?.trim() ?? ""
-            if (
-              latchedIdentity !== "" &&
-              !seenRunIdentities.has(latchedIdentity)
-            ) {
-              seenRunIdentities.add(latchedIdentity)
-              const htmlUrl = row.latched_run_html_url?.trim() ?? ""
-              const label = row.display_label?.trim() ?? ""
-              failingRuns.push({
-                runIdentity: latchedIdentity,
-                htmlUrl: htmlUrl === "" ? null : htmlUrl,
-                displayLabel: label === "" ? latchedIdentity : label,
-                ...(definitionIdentity === "" ? {} : { definitionIdentity }),
-                ...(orderKey === "" ? {} : { orderKey }),
-              })
-            }
-            const lastIdentity = row.last_run_identity?.trim() ?? ""
-            if (
-              headSha === null &&
-              latchedIdentity !== "" &&
-              lastIdentity === latchedIdentity
-            ) {
-              const sha = row.last_head_sha?.trim() ?? ""
-              if (sha !== "") {
-                headSha = sha
-              }
-            }
-            const qualifiesSignal = observationQualifiesForAutomaticCiRepair({
-              failureLatched: true,
-              latchedRunIdentity: row.latched_run_identity,
-              lastRunIdentity: row.last_run_identity,
-              lastRawStatus: row.last_raw_status,
-              lastRawConclusion: row.last_raw_conclusion,
-              earlyJobFailure: sqlFlag(row.last_early_job_failure),
-            })
-            const baseline =
-              baselines.find(
-                (entry) => entry.definitionIdentity === definitionIdentity,
-              ) ?? null
-            if (
-              qualifiesSignal &&
-              latchedIdentity !== "" &&
-              failurePassesCiRepairBaseline({
-                failure: {
-                  definitionIdentity,
-                  runIdentity: latchedIdentity,
-                  orderKey: orderKey === "" ? null : orderKey,
-                },
-                baseline,
-              })
-            ) {
-              qualifiesAutomatic = true
-            }
-          }
-
-          return {
-            gateClosed,
-            qualifiesAutomatic,
-            defaultBranch,
-            headSha,
-            failingRuns,
-          }
-        })
-
-      const createCiRepairWorkItem = (
-        repositoryId: string,
-        evidence: {
-          readonly defaultBranch: string
-          readonly headSha: string | null
-          readonly failingRuns: readonly CiRepairFailingRun[]
-        },
-        onConflict: "return-existing" | "lose",
-      ): Effect.Effect<WorkItemRecord | null, CiRepairStartError> =>
-        Effect.gen(function* () {
-          const createdId = yield* activeAgentBackend.withConfigCoordination(
-            Effect.gen(function* () {
-              const harnessConfig = yield* db.getConfig
-              const repositories = yield* db.listRepositories
-              const repository = repositories.find(
-                ({ id }) => id === repositoryId,
-              )
-              if (repository === undefined) {
-                return yield* new RepositoryNotFoundError({ repositoryId })
-              }
-              const rawCaptureBackendId =
-                repository.selectedAgentBackend ??
-                harnessConfig.selectedAgentBackend
-              if (!isSelectableAgentBackendId(rawCaptureBackendId)) {
-                return yield* new AgentBackendUnavailableError({
-                  message: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
-                  reason: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
-                })
-              }
-              const captureBackendId = rawCaptureBackendId
-              const capturedSelection = yield* resolveModelsForBackend(
-                repositoryId,
-                captureBackendId,
-              )
-              const captureStatus =
-                yield* activeAgentBackend.getBackendStatus(captureBackendId)
-              if (captureStatus !== null && captureStatus.kind === "ready") {
-                const violation = resolvedSelectionCatalogViolation({
-                  backendLabel: captureStatus.backend.label,
-                  catalog: captureStatus.models,
-                  selection: capturedSelection,
-                  includeReviewModel: true,
-                })
-                if (violation !== null) {
-                  return yield* new BuildModelNotConfiguredError({
-                    message: violation.message,
-                  })
-                }
-              }
-              yield* activeAgentBackend
-                .requireAgentTurnsAllowed(captureBackendId)
-                .pipe(
-                  Effect.mapError(
-                    (error) =>
-                      new AgentBackendUnavailableError({
-                        message: error.message,
-                        reason: error.reason,
-                      }),
-                  ),
-                )
-              const activeRegistration =
-                yield* activeAgentBackend.getRegistration(captureBackendId)
-              const agentBackendId = activeRegistration.descriptor.id
-              const workItemId = makeWorkItemId()
-              const now = yield* Clock.currentTimeMillis
-              const step: OperationalLifecycleStep = "create_worktree"
-              const issueTracker = defaultIssueTrackerForForge(repository.forge)
-              const failingRunsJson = serializeCiRepairFailingRuns(
-                evidence.failingRuns,
-              )
-
-              return yield* sql
-                .withTransaction(
-                  Effect.gen(function* () {
-                    const limit = yield* maxWorkerSlots()
-                    const occupied = yield* countOccupiedWorkerSlots()
-                    const admit = occupied < limit
-                    const waitingSince = admit ? null : now
-                    yield* sql.unsafe(
-                      `INSERT INTO work_item (
-                         id, repository_id, origin,
-                         ci_repair_default_branch, ci_repair_head_sha,
-                         ci_repair_failing_runs,
-                         issue_number, issue_tracker, issue_native_id,
-                         issue_display_id, issue_url, agent_backend,
-                         issue_title, state, state_ready_at, paused,
-                         waiting_since, waiting_for_blockers, waiting_for_ci_repair,
-                         merge_mode, holds_worker_slot,
-                         pause_before_step, created_at, updated_at
-                       ) VALUES (
-                         ?, ?, 'ci_repair',
-                         ?, ?, ?,
-                         ?, ?, ?,
-                         ?, '', ?,
-                         ?, ?, ?, 0,
-                         ?, 0, 0,
-                         'ordinary', ?,
-                         NULL, ?, ?
-                       )`,
-                      [
-                        workItemId,
-                        repositoryId,
-                        evidence.defaultBranch,
-                        evidence.headSha,
-                        failingRunsJson,
-                        CI_REPAIR_ISSUE_NUMBER,
-                        issueTracker,
-                        CI_REPAIR_ISSUE_NATIVE_ID,
-                        CI_REPAIR_ISSUE_NATIVE_ID,
-                        agentBackendId,
-                        ciRepairIssueTitle(evidence.defaultBranch),
-                        step,
-                        now,
-                        waitingSince,
-                        admit ? 1 : 0,
-                        now,
-                        now,
-                      ],
-                    )
-                    if (admit) {
-                      yield* enqueueStepRunForWorkItem(workItemId, step, now)
-                    }
-                    return workItemId
-                  }),
-                )
-                .pipe(
-                  Effect.map((id) => ({ _tag: "created" as const, id })),
-                  Effect.catch(
-                    (
-                      error,
-                    ): Effect.Effect<
-                      | { readonly _tag: "created"; readonly id: string }
-                      | { readonly _tag: "conflict" },
-                      CiRepairStartError
-                    > => {
-                      if (
-                        typeof error === "object" &&
-                        error !== null &&
-                        "_tag" in error &&
-                        (error as { _tag: string })._tag === "SqlError" &&
-                        isUnfinishedWorkItemUniqueViolation(error as SqlError)
-                      ) {
-                        return Effect.succeed({ _tag: "conflict" as const })
-                      }
-                      if (error instanceof WorkItemLifecycleDatabaseError) {
-                        return Effect.fail(error)
-                      }
-                      if (error instanceof EnqueueError) {
-                        return Effect.fail(error)
-                      }
-                      if (error instanceof InvalidQueueNameError) {
-                        return Effect.fail(error)
-                      }
-                      if (
-                        typeof error === "object" &&
-                        error !== null &&
-                        "_tag" in error &&
-                        (error as { _tag: string })._tag === "SqlError"
-                      ) {
-                        return Effect.fail(toDatabaseError(error as SqlError))
-                      }
-                      return Effect.fail(
-                        new WorkItemLifecycleDatabaseError({
-                          message: `Unexpected CI Repair create failure: ${String(error)}`,
-                          cause: error,
-                        }),
-                      )
-                    },
-                  ),
-                )
-            }),
-          )
-
-          if (createdId._tag === "conflict") {
-            if (onConflict === "lose") {
-              return null
-            }
-            const existing = yield* unfinishedCiRepairWorkItem(repositoryId)
-            if (existing === null) {
-              return yield* new WorkItemLifecycleDatabaseError({
-                message: `CI Repair Work Item conflict for ${repositoryId} did not leave an unfinished row`,
-              })
-            }
-            return existing
-          }
-
-          const created = yield* getWorkItem(createdId.id).pipe(
-            Effect.catchTag(
-              "WorkItemNotFoundError",
-              (error) =>
-                new WorkItemLifecycleDatabaseError({
-                  message: `CI Repair Work Item missing after create: ${error.workItemId}`,
-                  cause: error,
-                }),
-            ),
-          )
-          yield* notifyWorkItemsChanged(created.repositoryId)
-          return created
-        })
 
       const startCiRepair = Effect.fn("WorkItemLifecycle.startCiRepair")(
         function* (repositoryId: string) {
-          const existing = yield* unfinishedCiRepairWorkItem(repositoryId)
-          if (existing !== null) {
-            return existing
-          }
-          const snapshot = yield* loadCiRepairGateSnapshot(repositoryId)
-          if (!snapshot.gateClosed) {
-            return yield* new CiRepairGateNotClosedError({
-              repositoryId,
-              message:
-                "Start CI Repair is available only while the CI Gate is Closed",
-            })
-          }
-          if (snapshot.defaultBranch === null) {
-            return yield* new CiRepairDefaultBranchMissingError({
-              repositoryId,
-              message:
-                "Start CI Repair needs the Repository default branch from the CI Gate",
-            })
-          }
-          const created = yield* createCiRepairWorkItem(
-            repositoryId,
-            {
-              defaultBranch: snapshot.defaultBranch,
-              headSha: snapshot.headSha,
-              failingRuns: snapshot.failingRuns,
-            },
-            "return-existing",
-          )
-          if (created === null) {
-            return yield* new WorkItemLifecycleDatabaseError({
-              message: `CI Repair Work Item missing after start for ${repositoryId}`,
-            })
-          }
-          return created
+          return yield* startCiRepairWorkItem(ciRepairCreation, repositoryId)
         },
       )
 
       const considerAutomaticCiRepair = Effect.fn(
         "WorkItemLifecycle.considerAutomaticCiRepair",
       )(function* (repositoryId: string) {
-        return yield* Effect.gen(function* () {
-          const repository = (yield* db.listRepositories).find(
-            ({ id }) => id === repositoryId,
-          )
-          if (
-            repository === undefined ||
-            !repository.automaticCiRepair ||
-            repository.paused
-          ) {
-            return null
-          }
-          const existing = yield* unfinishedCiRepairWorkItem(repositoryId)
-          if (existing !== null) {
-            return null
-          }
-          const snapshot = yield* loadCiRepairGateSnapshot(repositoryId)
-          if (!snapshot.gateClosed || !snapshot.qualifiesAutomatic) {
-            return null
-          }
-          if (snapshot.defaultBranch === null) {
-            yield* Effect.logWarning(
-              "Automatic CI Repair skipped because the default branch is unknown",
-              { repositoryId },
-            )
-            return null
-          }
-          return yield* createCiRepairWorkItem(
-            repositoryId,
-            {
-              defaultBranch: snapshot.defaultBranch,
-              headSha: snapshot.headSha,
-              failingRuns: snapshot.failingRuns,
-            },
-            "lose",
-          )
-        }).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("Automatic CI Repair did not start", {
-              repositoryId,
-              error: String(error),
-            }).pipe(Effect.as(null)),
-          ),
+        return yield* considerAutomaticCiRepairWorkItem(
+          ciRepairCreation,
+          repositoryId,
         )
       })
 

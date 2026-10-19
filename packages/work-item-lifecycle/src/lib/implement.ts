@@ -13,7 +13,10 @@ import {
   forgeDisplayName,
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
-import { buildCiRepairImplementPrompt } from "./ci-repair-work-item.js"
+import {
+  type CiRepairTarget,
+  buildCiRepairImplementPrompt,
+} from "./ci-repair-work-item.js"
 import {
   ImplementForgeCredentialError,
   ImplementInvalidWorktreeContextError,
@@ -341,12 +344,15 @@ const implementCiRepairOrigin = (
         })
       }),
     )
+    const target: CiRepairTarget = {
+      defaultBranch:
+        context.ciRepairDefaultBranch?.trim() || "the default branch",
+      headSha: context.ciRepairHeadSha ?? null,
+      failingRuns: context.ciRepairFailingRuns ?? [],
+    }
     const promptBody = [
       buildCiRepairImplementPrompt({
-        defaultBranch:
-          context.ciRepairDefaultBranch?.trim() || "the default branch",
-        headSha: context.ciRepairHeadSha ?? null,
-        failingRuns: context.ciRepairFailingRuns ?? [],
+        ...target,
         mode: priorSessionId(context) === null ? "start" : "continue",
       }),
       agentTurnForgeCredentialGuidance(

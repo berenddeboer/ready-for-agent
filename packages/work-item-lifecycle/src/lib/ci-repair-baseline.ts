@@ -154,7 +154,8 @@ const sqlText = (value: unknown): string | null => {
   return trimmed === "" ? null : trimmed
 }
 
-const sqlFlag = (value: unknown): boolean =>
+/** SQLite returns 0/1 or "1"; Postgres may return a boolean. */
+export const decodeSqlBoolean = (value: unknown): boolean =>
   value === true || value === 1 || value === "1"
 
 type SqlRunner = {
@@ -191,7 +192,7 @@ const loadBaselineRows = (sql: SqlRunner, repositoryId: string) =>
         definitionIdentity: row.definitionIdentity,
         runIdentity: sqlText(row.runIdentity),
         orderKey: sqlText(row.orderKey),
-        inclusive: sqlFlag(row.inclusive),
+        inclusive: decodeSqlBoolean(row.inclusive),
         floorOrderKey: sqlText(row.floorOrderKey),
         suppressThroughRunIdentity: sqlText(row.suppressThroughRunIdentity),
         suppressThroughOrderKey: sqlText(row.suppressThroughOrderKey),
@@ -276,7 +277,7 @@ const loadCursors = (sql: SqlRunner, repositoryId: string) =>
         lastRunOrderKey: sqlText(row.lastRunOrderKey),
         latchedRunIdentity: sqlText(row.latchedRunIdentity),
         latchedRunOrderKey: sqlText(row.latchedRunOrderKey),
-        failureLatched: sqlFlag(row.failureLatched),
+        failureLatched: decodeSqlBoolean(row.failureLatched),
       }),
     )
   })
