@@ -50,6 +50,19 @@ export const formatSilentAgentBackendExitMessage = (input: {
   readonly exitCode: number
 }): string => `${input.backendLabel} failed with exit code ${input.exitCode}`
 
+const SAFE_PROVIDER_CODE = /^[a-z][a-z0-9_]{0,63}$/
+
+const identityText = (value: string | undefined): string | undefined => {
+  if (value === undefined) {
+    return undefined
+  }
+  const sanitized = sanitizeAgentBackendExitMessage(value)
+  if (sanitized.length === 0 || sanitized.includes("[redacted]")) {
+    return undefined
+  }
+  return sanitized
+}
+
 type AgentBackendExitErrorProps = {
   readonly exitCode: number
   readonly cwd: string
@@ -60,6 +73,18 @@ type AgentBackendExitErrorProps = {
    * adapter extracted one from a quota or rate-limit failure.
    */
   readonly retryAt?: number
+  /** Agent Model used for the turn, when known. Never a credential. */
+  readonly model?: string
+  /** Hosting provider known at failure time. Id and label only. */
+  readonly provider?: {
+    readonly id: string
+    readonly label: string
+  }
+  /**
+   * Structured provider discriminator from the CLI event, when present
+   * (`server_overloaded`, `usage_limit_exceeded`, …).
+   */
+  readonly providerCode?: string
   /** Best available human-readable reason. Always non-empty after `.new()`. */
   readonly message: string
 }
@@ -83,6 +108,9 @@ export class AgentBackendExitError extends Schema.TaggedError<AgentBackendExitEr
      * Absent when the adapter had no machine-readable retry time.
      */
     retryAt: Schema.optionalKey(Schema.Finite),
+    model: Schema.optionalKey(Schema.String),
+    provider: Schema.optionalKey(AgentBackendProviderSchema),
+    providerCode: Schema.optionalKey(Schema.String),
     /** Best available human-readable reason. Never empty after construction. */
     message: Schema.String,
   },
@@ -100,12 +128,25 @@ export class AgentBackendExitError extends Schema.TaggedError<AgentBackendExitEr
       typeof props.retryAt === "number" && Number.isFinite(props.retryAt)
         ? props.retryAt
         : undefined
+    const model = identityText(props.model)
+    const providerId = identityText(props.provider?.id)
+    const providerLabel = identityText(props.provider?.label)
+    const providerCode =
+      props.providerCode !== undefined &&
+      SAFE_PROVIDER_CODE.test(props.providerCode)
+        ? props.providerCode
+        : undefined
     return new AgentBackendExitError({
       exitCode: props.exitCode,
       cwd: props.cwd,
       ...(props.sessionId !== undefined ? { sessionId: props.sessionId } : {}),
       ...(classification !== undefined ? { classification } : {}),
       ...(retryAt !== undefined ? { retryAt } : {}),
+      ...(model !== undefined ? { model } : {}),
+      ...(providerId !== undefined && providerLabel !== undefined
+        ? { provider: { id: providerId, label: providerLabel } }
+        : {}),
+      ...(providerCode !== undefined ? { providerCode } : {}),
       message:
         sanitized.length > 0
           ? sanitized

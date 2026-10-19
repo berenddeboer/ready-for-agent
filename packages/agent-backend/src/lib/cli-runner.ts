@@ -82,6 +82,11 @@ export type CliLineEvent = {
    * failures. Never inferred from assistant prose.
    */
   readonly retryAt?: number
+  /**
+   * Structured provider discriminator from this line, when the CLI event
+   * carried one. Sticky like classification.
+   */
+  readonly providerCode?: string
 }
 
 export type RunCliCaptureInput = {
@@ -121,6 +126,13 @@ export type RunCliTurnInput = {
   readonly onSessionId?: OnSessionId
   readonly parseLine: (line: string) => CliLineEvent
   readonly observerLabel?: string
+  /** Agent Model for this turn, copied onto a failing exit when known. */
+  readonly model?: string
+  /** Hosting provider known for this turn. Id and label only. */
+  readonly provider?: {
+    readonly id: string
+    readonly label: string
+  }
   /**
    * Startup-only inactivity bound: when no stdout output arrives within this
    * window of spawn, the process tree is reaped and the turn fails with
@@ -343,6 +355,7 @@ export const runCliTurn = (
               errorClassification?: AgentBackendErrorClassification
               errorMessage?: string
               retryAt?: number
+              providerCode?: string
             } => ({
               assistantText: "",
               finalized: false,
@@ -359,6 +372,7 @@ export const runCliTurn = (
                   event.errorClassification ?? acc.errorClassification
                 const errorMessage = event.errorMessage ?? acc.errorMessage
                 const retryAt = event.retryAt ?? acc.retryAt
+                const providerCode = event.providerCode ?? acc.providerCode
                 if (event.sessionId !== undefined) {
                   yield* Ref.set(seenSessionId, event.sessionId)
                   const alreadyNotified = yield* Ref.getAndSet(
@@ -402,6 +416,7 @@ export const runCliTurn = (
                       : {}),
                     ...(errorMessage !== undefined ? { errorMessage } : {}),
                     ...(retryAt !== undefined ? { retryAt } : {}),
+                    ...(providerCode !== undefined ? { providerCode } : {}),
                   }
                 }
 
@@ -419,6 +434,7 @@ export const runCliTurn = (
                     : {}),
                   ...(errorMessage !== undefined ? { errorMessage } : {}),
                   ...(retryAt !== undefined ? { retryAt } : {}),
+                  ...(providerCode !== undefined ? { providerCode } : {}),
                 }
               }),
           ),
@@ -448,6 +464,7 @@ export const runCliTurn = (
           errorClassification: output.errorClassification,
           errorMessage: output.errorMessage,
           retryAt: output.retryAt,
+          providerCode: output.providerCode,
           stderrTail,
         }
       }),
@@ -491,6 +508,11 @@ export const runCliTurn = (
             ? { classification: result.errorClassification }
             : {}),
           ...(result.retryAt !== undefined ? { retryAt: result.retryAt } : {}),
+          ...(input.model !== undefined ? { model: input.model } : {}),
+          ...(input.provider !== undefined ? { provider: input.provider } : {}),
+          ...(result.providerCode !== undefined
+            ? { providerCode: result.providerCode }
+            : {}),
         })
       }
     }

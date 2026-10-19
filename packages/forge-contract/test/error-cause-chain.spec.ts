@@ -63,6 +63,53 @@ describe("error cause chain", () => {
     expect(buildReasonDetail(null)).toBeNull()
   })
 
+  it("retains classification, provider, model, and retry timing through a wrapped cause", () => {
+    const secret = "ghp_this_must_never_appear_in_exit_message"
+    const retryAt = "2026-10-19T04:30:00.000Z"
+    const wrapped = {
+      _tag: "ImplementOpenCodeError",
+      message: "Codex Build failed to investigate status checks",
+      cause: {
+        _tag: "AgentBackendExitError",
+        classification: "retryable_provider_error",
+        providerCode: "server_overloaded",
+        model: "gpt-5.5",
+        provider: { id: "openai", label: "OpenAI" },
+        retryAt: Date.parse(retryAt),
+        message: `Selected model is at capacity. Please try a different model. (${secret})`,
+        exitCode: 1,
+      },
+    }
+    const detail = buildReasonDetail(wrapped)
+    expect(detail?.classification).toBe("retryable_provider_error")
+    expect(detail?.providerCode).toBe("server_overloaded")
+    expect(detail?.provider).toEqual({ id: "openai", label: "OpenAI" })
+    expect(detail?.model).toBe("gpt-5.5")
+    expect(detail?.retryAt).toBe(retryAt)
+    expect(JSON.stringify(detail)).not.toContain(secret)
+    expect(parseReasonDetail(serializeReasonDetail(detail))).toEqual(detail)
+  })
+
+  it("drops a credential-shaped model or provider instead of persisting it", () => {
+    const detail = buildReasonDetail({
+      _tag: "AgentBackendExitError",
+      classification: "retryable_provider_error",
+      model: "sk-abcdefghijklmnopqrstuvwxyz012345",
+      provider: {
+        id: "ghp_this_must_never_appear_in_exit_message",
+        label: "OpenAI",
+      },
+      message: "rate limited",
+    })
+    expect(detail?.classification).toBe("retryable_provider_error")
+    expect(detail?.model).toBeUndefined()
+    expect(detail?.provider).toBeUndefined()
+    expect(JSON.stringify(detail)).not.toContain(
+      "sk-abcdefghijklmnopqrstuvwxyz",
+    )
+    expect(JSON.stringify(detail)).not.toContain("ghp_")
+  })
+
   it("persists a trustworthy provider retryAt on the Step Run reason", () => {
     const retryAt = "2026-08-15T13:00:00.000Z"
     const error = {

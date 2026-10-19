@@ -59,7 +59,28 @@ describe("parse-stream", () => {
     )
     expect(state.turnFailed).toBe(true)
     expect(state.turnFailedMessage).toBe("model overloaded")
+    expect(state.turnFailedClassification).toBeUndefined()
     expect(isSuccessfulCodexTurn(state)).toBe(false)
+  })
+
+  it("classifies the observed capacity message on turn.failed", () => {
+    let state = createCodexStreamParseState()
+    state = foldCodexStreamLine(
+      state,
+      '{"type":"turn.failed","error":{"message":"Selected model is at capacity. Please try a different model."}}',
+    )
+    expect(state.turnFailedClassification).toBe("retryable_provider_error")
+    expect(state.turnFailedProviderCode).toBeUndefined()
+  })
+
+  it("keeps a structured server_overloaded code from the exec error object", () => {
+    let state = createCodexStreamParseState()
+    state = foldCodexStreamLine(
+      state,
+      '{"type":"turn.failed","error":{"message":"Selected model is at capacity. Please try a different model.","codex_error_info":"server_overloaded"}}',
+    )
+    expect(state.turnFailedClassification).toBe("retryable_provider_error")
+    expect(state.turnFailedProviderCode).toBe("server_overloaded")
   })
 
   it("ignores empty lines and unknown event types", () => {

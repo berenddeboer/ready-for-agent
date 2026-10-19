@@ -7,12 +7,18 @@
  * `turn.failed` (mapped to an exit-style failure by the adapter).
  */
 
+import type { AgentBackendErrorClassification } from "@ready-for-agent/agent-backend"
+import { classifyCodexExecFailure } from "./classify-exec-error.js"
+
 export type CodexStreamParseState = {
   threadId: string | undefined
   agentMessages: string[]
   turnCompleted: boolean
   turnFailed: boolean
   turnFailedMessage: string | undefined
+  turnFailedClassification: AgentBackendErrorClassification | undefined
+  turnFailedRetryAt: number | undefined
+  turnFailedProviderCode: string | undefined
   malformedLine: boolean
 }
 
@@ -22,6 +28,9 @@ export const createCodexStreamParseState = (): CodexStreamParseState => ({
   turnCompleted: false,
   turnFailed: false,
   turnFailedMessage: undefined,
+  turnFailedClassification: undefined,
+  turnFailedRetryAt: undefined,
+  turnFailedProviderCode: undefined,
   malformedLine: false,
 })
 
@@ -104,10 +113,20 @@ export const foldCodexStreamLine = (
         errorMessageFrom(parsed.error) ??
         errorMessageFrom(parsed.message) ??
         "Codex turn.failed"
+      const classified = classifyCodexExecFailure({
+        error: isRecord(parsed.error)
+          ? parsed.error
+          : typeof parsed.error === "string"
+            ? { message: parsed.error }
+            : { message },
+      })
       return {
         ...state,
         turnFailed: true,
         turnFailedMessage: message,
+        turnFailedClassification: classified.classification,
+        turnFailedRetryAt: classified.retryAt,
+        turnFailedProviderCode: classified.providerCode,
       }
     }
     default:
