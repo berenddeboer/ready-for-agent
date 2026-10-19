@@ -111,7 +111,7 @@ const agentModelIdSortKey = (id: string): string => id.toLowerCase()
  * code-point order (`OpenCode/gpt` before `opencode/gpt`). Display names
  * and kind labels are not keys, and release date is not a key.
  */
-export const compareAgentModelIds = (left: string, right: string): number => {
+const compareAgentModelIds = (left: string, right: string): number => {
   const leftKey = agentModelIdSortKey(left)
   const rightKey = agentModelIdSortKey(right)
   if (leftKey < rightKey) {
