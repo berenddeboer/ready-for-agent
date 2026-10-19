@@ -382,9 +382,13 @@ Then(
     await expect(dialog.getByText("Loading usage…")).toHaveCount(0, {
       timeout: 30_000,
     })
+    // The fixture Session is not local. A running OpenCode reports that as
+    // missing. CI often has no OpenCode service, which is a distinct
+    // unavailable diagnostic rather than the old "temporarily unavailable"
+    // copy. History scenarios accept either non-success state.
     await expect(
       dialog.getByText(
-        /no longer has this Session locally|Session Telemetry is temporarily unavailable/i,
+        /no longer has this Session locally|Session Telemetry is temporarily unavailable|OpenCode service is not running|rejected Session Telemetry authentication|not a supported V2 API/i,
       ),
     ).toBeVisible({ timeout: 30_000 })
   },
