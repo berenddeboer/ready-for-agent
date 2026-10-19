@@ -1917,7 +1917,10 @@ export const DbServiceLive = Layer.effect(
                     latched_run_identity,
                     latched_run_html_url,
                     observation_error,
-                    observation_error_kind
+                    observation_error_kind,
+                    last_run_order_key,
+                    latched_run_order_key,
+                    last_early_job_failure
              FROM ci_gate_definition_observation
              WHERE repository_id = ?
              ORDER BY definition_identity ASC`,

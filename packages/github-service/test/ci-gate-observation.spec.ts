@@ -588,6 +588,54 @@ describe("GitHub CI Gate observation", () => {
     expect(requested).toContain("/repos/acme/widgets/actions/runs/700/jobs")
   })
 
+  it("does not treat a job waiting for approval as a failed job", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = new URL(String(input))
+      if (isRepoUrl(url)) {
+        return jsonResponse(repoPayload)
+      }
+      if (url.pathname === "/repos/acme/widgets/actions/runs/701/jobs") {
+        return jsonResponse({
+          jobs: [
+            {
+              id: 1,
+              name: "deploy",
+              status: "completed",
+              conclusion: "action_required",
+            },
+          ],
+        })
+      }
+      if (!isWorkflowRunsUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      return jsonResponse({
+        total_count: 1,
+        workflow_runs: [
+          workflowRunPayload({
+            id: 701,
+            event: "push",
+            status: "in_progress",
+            conclusion: null,
+          }),
+        ],
+      })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["161335"],
+        lastRunIdentities: {},
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs[0]?.earlyJobFailure).not.toBe(true)
+  })
+
   it.effect("keeps a throttled 403 as GitHub throttling", () =>
     Effect.gen(function* () {
       const resetSeconds = Math.floor(Date.now() / 1_000) + 90

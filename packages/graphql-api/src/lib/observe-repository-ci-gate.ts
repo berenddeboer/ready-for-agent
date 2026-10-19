@@ -197,6 +197,9 @@ const unavailableObservation = (input: {
   failureLatched: input.previous?.failureLatched ?? false,
   latchedRunIdentity: input.previous?.latchedRunIdentity ?? null,
   latchedRunHtmlUrl: input.previous?.latchedRunHtmlUrl ?? null,
+  lastRunOrderKey: input.previous?.lastRunOrderKey ?? null,
+  latchedRunOrderKey: input.previous?.latchedRunOrderKey ?? null,
+  lastEarlyJobFailure: input.previous?.lastEarlyJobFailure === true,
   observationError: input.message,
   observationErrorKind: input.reason,
 })
@@ -281,9 +284,17 @@ const applyObservedRuns = (input: {
       failureLatched,
       latchedRunIdentity,
       latchedRunHtmlUrl,
-      lastRunOrderKey: latest?.orderKey ?? previousRun?.lastRunOrderKey ?? null,
+      // A new run with no order key must not keep the previous run's key.
+      // An empty poll keeps the previous run, including its key and flag.
+      lastRunOrderKey:
+        latest === undefined
+          ? (previousRun?.lastRunOrderKey ?? null)
+          : (latest.orderKey ?? null),
       latchedRunOrderKey,
-      lastEarlyJobFailure: latest?.earlyJobFailure === true,
+      lastEarlyJobFailure:
+        latest === undefined
+          ? previousRun?.lastEarlyJobFailure === true
+          : latest.earlyJobFailure === true,
       observationError: null,
       observationErrorKind: null,
     },

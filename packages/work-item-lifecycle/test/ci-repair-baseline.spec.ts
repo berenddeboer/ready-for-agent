@@ -72,6 +72,38 @@ describe("CI Repair Baseline", () => {
     ).toBe(true)
   })
 
+  it("does not loop a baseline recorded before order keys existed", () => {
+    const baseline = {
+      definitionIdentity: "build",
+      runIdentity: "10:1",
+      orderKey: null,
+      inclusive: false,
+      floorOrderKey: null,
+      suppressThroughRunIdentity: null,
+      suppressThroughOrderKey: null,
+    }
+    expect(
+      failurePassesCiRepairBaseline({
+        failure: {
+          ...failure,
+          runIdentity: "10:1",
+          orderKey: null,
+        },
+        baseline,
+      }),
+    ).toBe(false)
+    expect(
+      failurePassesCiRepairBaseline({
+        failure: {
+          ...failure,
+          runIdentity: "11:1",
+          orderKey: "00000000000000000011:000001",
+        },
+        baseline,
+      }),
+    ).toBe(false)
+  })
+
   it("blocks the abandoned failure and allows a newer one", () => {
     const baseline = {
       definitionIdentity: "build",

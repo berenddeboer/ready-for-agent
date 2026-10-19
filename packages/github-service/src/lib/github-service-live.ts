@@ -3457,14 +3457,13 @@ const mapObservedWorkflowRun = (
   }
 }
 
-// Job conclusions, applied while the workflow is still running and has
-// no run conclusion. startup_failure is a job conclusion only.
-// action_required is already a run-level failure; it is listed here so a
-// job that stops for it still counts before the run finishes.
+// Job conclusions for a still-running workflow, which has no run conclusion
+// yet. startup_failure is a job conclusion only. action_required is waiting
+// for approval, not a failed job; a completed run with that conclusion still
+// closes the gate through the run-level classification.
 const JOB_FAILURE_CONCLUSIONS = new Set([
   "failure",
   "timed_out",
-  "action_required",
   "failed",
   "startup_failure",
 ])

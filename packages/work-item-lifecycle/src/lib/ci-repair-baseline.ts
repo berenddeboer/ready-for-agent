@@ -103,6 +103,7 @@ export const failurePassesCiRepairBaseline = (input: {
   ) {
     return false
   }
+  let provedNewerThanSuppress = false
   if (
     baseline.suppressThroughOrderKey !== null &&
     baseline.suppressThroughOrderKey !== ""
@@ -114,6 +115,7 @@ export const failurePassesCiRepairBaseline = (input: {
     if (pastSuppress !== true) {
       return false
     }
+    provedNewerThanSuppress = true
   }
   if (
     baseline.inclusive &&
@@ -137,7 +139,11 @@ export const failurePassesCiRepairBaseline = (input: {
   ) {
     return false
   }
-  return true
+  // A stored baseline with nothing left to compare must not fail open.
+  // That includes a no-change row recorded before order keys existed:
+  // the same run must not loop, and an uncompared run must not auto-start.
+  // A failure already proved newer than an abandon suppress still qualifies.
+  return provedNewerThanSuppress
 }
 
 const sqlText = (value: unknown): string | null => {
