@@ -68,7 +68,6 @@ import {
   liveDurationMs,
   useNowMs,
 } from "./live-duration.js"
-import { OpenInOpenCodeSessionLink } from "./open-in-opencode-link.js"
 import {
   ParentIssueActionsMenu,
   isParentImplementAllWithAutoMergeEligible,
@@ -374,8 +373,6 @@ export type WorkItem = {
   isTerminal: boolean
   failureCode: string | null
   sessionId: string | null
-  /** Null when this Work Item cannot be opened in the OpenCode web UI. */
-  openInOpenCodeUrl?: string | null
   worktreePath: string | null
   completionSummary: string | null
   createdAt: string
@@ -475,7 +472,6 @@ const workItemFields = {
   isTerminal: true,
   failureCode: true,
   sessionId: true,
-  openInOpenCodeUrl: true,
   worktreePath: true,
   completionSummary: true,
   createdAt: true,
@@ -4749,7 +4745,6 @@ export function WorkItemLifecycleStatus({
                   {sessionId}
                 </span>
               )}
-              <OpenInOpenCodeSessionLink url={workItem.openInOpenCodeUrl} />
               <Copy value={sessionId} showValue={false} className="shrink-0" />
             </div>
           ) : null}

@@ -41,10 +41,12 @@ import {
   OpencodeSessionTelemetryLive,
   type OwnedOpenCodeServer,
   blockedOpenCodeSessionConnect,
+  discoverOpenCodeHandoffEndpoint,
   keymaxxerRequiresOwnedOpenCodeServer,
-  makeOpenCodeServerBaseResolver,
-  openCodeSessionWebUrl,
+  mintOpenCodeSessionHandoff,
+  openCodeBasicAuthFromPassword,
   selectHarnessOpenCodeConnection,
+  selectOpenCodeHandoffServer,
   startOwnedOpenCodeServer,
 } from "@ready-for-agent/opencode"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
@@ -81,10 +83,17 @@ export interface CreateApplicationOptions {
   readonly sidecarLayerOptions?: SidecarLayerOptions
   /**
    * Explicit OpenCode server. When set, agent turns, telemetry reads, and
-   * Open in OpenCode use this address instead of `opencode service status`.
+   * Open in OpenCode use this address instead of shared-service discovery.
    * Ignored while Keymaxxer is enabled: that mode uses the harness-owned server.
+   * Also read from `READY_FOR_AGENT_OPENCODE_SERVER` when this option is omitted.
    */
   readonly openCodeServerBaseUrl?: string
+  /**
+   * Password for the explicit server only. Stays in memory. Also read from
+   * `OPENCODE_PASSWORD` when an explicit server URL is set and this is omitted.
+   * Never used as a fallback for the harness-owned server.
+   */
+  readonly openCodeServerPassword?: string
   /**
    * Test seam for the harness-owned OpenCode server. Production uses
    * `startOwnedOpenCodeServer`.
@@ -108,7 +117,11 @@ type OpenCodeRuntimeConnection =
       }
     }
   | { readonly kind: "blocked"; readonly message: string }
-  | { readonly kind: "explicit"; readonly baseUrl: string }
+  | {
+      readonly kind: "explicit"
+      readonly baseUrl: string
+      readonly headers?: Readonly<Record<string, string>>
+    }
   | { readonly kind: "default" }
 
 const toOpenCodeRuntimeConnection = (
@@ -168,7 +181,14 @@ const makeResolveRuntime = (
     const dedicated =
       openCode.kind === "dedicated" ? openCode.server : undefined
     const explicit =
-      openCode.kind === "explicit" ? { baseUrl: openCode.baseUrl } : undefined
+      openCode.kind === "explicit"
+        ? {
+            baseUrl: openCode.baseUrl,
+            ...(openCode.headers === undefined
+              ? {}
+              : { headers: openCode.headers }),
+          }
+        : undefined
     return Layer.mergeAll(
       Opencode.layer({
         ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
@@ -279,7 +299,17 @@ export const createApplication = async (
   // so it shares ManagedRuntime's databaseLayer memoization. Typed recovery
   // (orElseSucceed) falls back on expected DB errors only; defects stay
   // visible. Seeding failure must not prevent startup.
-  const openCodeServer = openCodeExplicitServer(options.openCodeServerBaseUrl)
+  const explicitOpenCodeServerBase =
+    options.openCodeServerBaseUrl?.trim() ||
+    environment.READY_FOR_AGENT_OPENCODE_SERVER?.trim() ||
+    undefined
+  const explicitOpenCodeHeaders = openCodeBasicAuthFromPassword(
+    options.openCodeServerPassword ??
+      (explicitOpenCodeServerBase === undefined
+        ? undefined
+        : environment.OPENCODE_PASSWORD),
+  )
+  const openCodeServer = openCodeExplicitServer(explicitOpenCodeServerBase)
   let ownedOpenCodeServer: OwnedOpenCodeServer | undefined
   let ownedOpenCodeStartupFailure: string | undefined
   if (keymaxxerRequiresOwnedOpenCodeServer(sidecarUrl)) {
@@ -296,7 +326,7 @@ export const createApplication = async (
           : "The harness-owned OpenCode server failed to start."
     }
   }
-  const openCodeConnection = toOpenCodeRuntimeConnection(
+  const selectedOpenCodeConnection = toOpenCodeRuntimeConnection(
     selectHarnessOpenCodeConnection({
       ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
       ...(ownedOpenCodeServer === undefined
@@ -311,25 +341,56 @@ export const createApplication = async (
     }),
     ownedOpenCodeServer,
   )
+  const openCodeConnection: OpenCodeRuntimeConnection =
+    selectedOpenCodeConnection.kind === "explicit"
+      ? {
+          kind: "explicit",
+          baseUrl: selectedOpenCodeConnection.baseUrl,
+          ...(explicitOpenCodeHeaders === undefined
+            ? {}
+            : { headers: explicitOpenCodeHeaders }),
+        }
+      : selectedOpenCodeConnection
   const resolveRuntime = makeResolveRuntime(
     platformLayer,
     sidecarUrl,
     openCodeConnection,
   )
-  const resolveOpenCodeServerBase = makeOpenCodeServerBaseResolver(
-    openCodeConnection.kind === "dedicated"
-      ? { explicitServerBase: openCodeConnection.server.baseUrl }
-      : openCodeConnection.kind === "explicit"
-        ? { explicitServerBase: openCodeConnection.baseUrl }
-        : openCodeConnection.kind === "blocked"
-          ? {
-              // Do not discover the shared service for a session the owned
-              // server never created.
-              serviceStatus: () =>
-                Promise.reject(new Error("owned server unavailable")),
-            }
-          : {},
-  )
+  const selectSessionHandoffServer = async () => {
+    if (openCodeConnection.kind === "dedicated") {
+      return selectOpenCodeHandoffServer({
+        connection: {
+          kind: "dedicated",
+          baseUrl: openCodeConnection.server.baseUrl,
+          headers: openCodeConnection.server.headers,
+          unavailable: openCodeConnection.server.assertAvailable(),
+        },
+      })
+    }
+    if (openCodeConnection.kind === "blocked") {
+      return selectOpenCodeHandoffServer({
+        connection: {
+          kind: "blocked",
+          message: openCodeConnection.message,
+        },
+      })
+    }
+    if (openCodeConnection.kind === "explicit") {
+      return selectOpenCodeHandoffServer({
+        connection: {
+          kind: "explicit",
+          baseUrl: openCodeConnection.baseUrl,
+          ...(openCodeConnection.headers === undefined
+            ? {}
+            : { headers: openCodeConnection.headers }),
+        },
+      })
+    }
+    return selectOpenCodeHandoffServer({
+      connection: { kind: "default" },
+      discovered: await discoverOpenCodeHandoffEndpoint(),
+    })
+  }
   const defaultActiveBackendSeed = {
     selectedBackendId: AGENT_BACKEND_IDS.opencode,
     initialBackendIds: [
@@ -474,10 +535,20 @@ export const createApplication = async (
       graphqlApi: createGraphqlApi(runtime, {
         agentBackendCwd: toolCwd,
         version: READY_FOR_AGENT_VERSION,
-        resolveOpenCodeSessionUrl: async ({ sessionId }) => {
-          const serverBase = await resolveOpenCodeServerBase()
-          if (serverBase === null) return null
-          return openCodeSessionWebUrl({ serverBase, sessionId })
+        canOpenInOpenCode: async () => {
+          const selected = await selectSessionHandoffServer()
+          return selected.kind === "server"
+        },
+        prepareOpenCodeSessionHandoff: async ({ sessionId }) => {
+          const selected = await selectSessionHandoffServer()
+          const handoff = await mintOpenCodeSessionHandoff({
+            server: selected,
+            sessionId,
+          })
+          if (handoff.kind === "unavailable") {
+            return { unavailableReason: handoff.message }
+          }
+          return handoff.launch
         },
       }),
     },

@@ -13266,10 +13266,9 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("session exposes an Open in OpenCode URL only for OpenCode", async () => {
-    const exampleUrl =
-      "http://127.0.0.1:49374/server/aHR0cDovLzEyNy4wLjAuMTo0OTM3NA/session/ses_owned"
+  test("session reports Open in OpenCode only for a resolvable OpenCode session", async () => {
     let requested: string | null = null
+    let paired = false
     runtime = makeRuntime(
       {},
       {},
@@ -13284,14 +13283,21 @@ describe("GraphQL API", () => {
     )
 
     const opened = await createGraphqlApi(runtime, {
-      resolveOpenCodeSessionUrl: async ({ sessionId }) => {
+      canOpenInOpenCode: async ({ sessionId }) => {
         requested = sessionId
-        return exampleUrl
+        return true
+      },
+      prepareOpenCodeSessionHandoff: async () => {
+        paired = true
+        return {
+          connectUrl: "http://127.0.0.1:1/auth/connect/not-minted-here",
+          sessionUrl: "http://127.0.0.1:1/server/x/session/ses_owned",
+        }
       },
     }).fetch(
       graphqlRequest({
         query: `query Session($workItemId: ID!) {
-          session(workItemId: $workItemId) { openInOpenCodeUrl }
+          session(workItemId: $workItemId) { canOpenInOpenCode }
         }`,
         variables: { workItemId: workItem.id },
       }),
@@ -13299,9 +13305,10 @@ describe("GraphQL API", () => {
 
     expect(opened.status).toBe(200)
     expect(await opened.json()).toEqual({
-      data: { session: { openInOpenCodeUrl: exampleUrl } },
+      data: { session: { canOpenInOpenCode: true } },
     })
     expect(requested).toBe("ses_owned")
+    expect(paired).toBe(false)
 
     let grokRequested = false
     runtime = makeRuntime(
@@ -13318,26 +13325,26 @@ describe("GraphQL API", () => {
       },
     )
     const otherBackend = await createGraphqlApi(runtime, {
-      resolveOpenCodeSessionUrl: async () => {
+      canOpenInOpenCode: async () => {
         grokRequested = true
-        return exampleUrl
+        return true
       },
     }).fetch(
       graphqlRequest({
         query: `query Session($workItemId: ID!) {
-          session(workItemId: $workItemId) { openInOpenCodeUrl }
+          session(workItemId: $workItemId) { canOpenInOpenCode }
         }`,
         variables: { workItemId: workItem.id },
       }),
     )
     expect(otherBackend.status).toBe(200)
     expect(await otherBackend.json()).toEqual({
-      data: { session: { openInOpenCodeUrl: null } },
+      data: { session: { canOpenInOpenCode: false } },
     })
     expect(grokRequested).toBe(false)
   })
 
-  test("session omits the Open in OpenCode URL when the server cannot be resolved", async () => {
+  test("session omits Open in OpenCode when the server cannot be resolved", async () => {
     runtime = makeRuntime(
       {},
       {},
@@ -13351,18 +13358,129 @@ describe("GraphQL API", () => {
       },
     )
     const response = await createGraphqlApi(runtime, {
-      resolveOpenCodeSessionUrl: async () => null,
+      canOpenInOpenCode: async () => false,
     }).fetch(
       graphqlRequest({
         query: `query Session($workItemId: ID!) {
-          session(workItemId: $workItemId) { openInOpenCodeUrl }
+          session(workItemId: $workItemId) { canOpenInOpenCode }
         }`,
         variables: { workItemId: workItem.id },
       }),
     )
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
-      data: { session: { openInOpenCodeUrl: null } },
+      data: { session: { canOpenInOpenCode: false } },
+    })
+  })
+
+  test("Open in OpenCode mints a handoff only from the click mutation", async () => {
+    const password = "reusable-server-password"
+    const capability = "http://127.0.0.1:9/mcp/secret"
+    let pairCalls = 0
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.succeed({
+            ...workItem,
+            sessionId: "ses_owned",
+          }),
+      },
+    )
+    const api = createGraphqlApi(runtime, {
+      canOpenInOpenCode: async () => true,
+      prepareOpenCodeSessionHandoff: async ({ sessionId }) => {
+        pairCalls += 1
+        return {
+          connectUrl: `http://127.0.0.1:49374/auth/connect/Ejv80WeudfkqaqHV2ZupcQ`,
+          sessionUrl: `http://127.0.0.1:49374/server/aHR0cDovLzEyNy4wLjAuMTo0OTM3NA/session/${sessionId}`,
+        }
+      },
+    })
+    const listed = await api.fetch(
+      graphqlRequest({
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) { canOpenInOpenCode }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+    expect(listed.status).toBe(200)
+    expect(pairCalls).toBe(0)
+
+    const launched = await api.fetch(
+      graphqlRequest({
+        query: `mutation Open($workItemId: ID!) {
+          openOpenCodeSession(workItemId: $workItemId) {
+            connectUrl
+            sessionUrl
+            unavailableReason
+          }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+    expect(launched.status).toBe(200)
+    const body = await launched.json()
+    expect(body).toEqual({
+      data: {
+        openOpenCodeSession: {
+          connectUrl:
+            "http://127.0.0.1:49374/auth/connect/Ejv80WeudfkqaqHV2ZupcQ",
+          sessionUrl:
+            "http://127.0.0.1:49374/server/aHR0cDovLzEyNy4wLjAuMTo0OTM3NA/session/ses_owned",
+          unavailableReason: null,
+        },
+      },
+    })
+    expect(pairCalls).toBe(1)
+    const serialized = JSON.stringify(body)
+    expect(serialized).not.toContain(password)
+    expect(serialized).not.toContain(capability)
+  })
+
+  test("a failed handoff returns a reason and no URL", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.succeed({
+            ...workItem,
+            sessionId: "ses_owned",
+          }),
+      },
+    )
+    const response = await createGraphqlApi(runtime, {
+      prepareOpenCodeSessionHandoff: async () => ({
+        unavailableReason:
+          "The harness-owned OpenCode server is unavailable. Keymaxxer is enabled, so this request was not sent to the shared OpenCode service. Restart the harness.",
+      }),
+    }).fetch(
+      graphqlRequest({
+        query: `mutation Open($workItemId: ID!) {
+          openOpenCodeSession(workItemId: $workItemId) {
+            connectUrl
+            sessionUrl
+            unavailableReason
+          }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        openOpenCodeSession: {
+          connectUrl: null,
+          sessionUrl: null,
+          unavailableReason:
+            "The harness-owned OpenCode server is unavailable. Keymaxxer is enabled, so this request was not sent to the shared OpenCode service. Restart the harness.",
+        },
+      },
     })
   })
 

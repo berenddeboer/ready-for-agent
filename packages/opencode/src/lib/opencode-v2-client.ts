@@ -152,6 +152,72 @@ const classifyInfo = (
   return { kind: "supported", version }
 }
 
+/**
+ * Shared-service endpoint the telemetry client would use. Does not start the
+ * service. Null when no compatible registration can be read.
+ */
+export const discoverOpenCodeHandoffEndpoint = async (input?: {
+  readonly discover?: (options?: {
+    readonly version?: (version: string) => boolean
+    readonly file?: string
+  }) => Promise<OpencodeServiceEndpoint | undefined>
+  readonly readRegistration?: () => OpencodeServiceEndpoint | null
+  /** Isolated service.json. Production omits this and uses the process default. */
+  readonly file?: string
+}): Promise<{
+  readonly baseUrl: string
+  readonly headers?: Readonly<Record<string, string>>
+} | null> => {
+  const file = input?.file
+  const discover =
+    input?.discover ??
+    ((options) =>
+      Service.discover({
+        ...options,
+        ...(file === undefined ? {} : { file }),
+      }))
+  const readRegistration =
+    input?.readRegistration ??
+    (() => {
+      if (file === undefined) return readRegisteredEndpoint()
+      try {
+        const parsed: unknown = JSON.parse(readFileSync(file, "utf8"))
+        if (!isRecord(parsed) || typeof parsed["url"] !== "string") return null
+        const password = parsed["password"]
+        if (typeof password !== "string" || password.length === 0) {
+          return { url: parsed["url"] }
+        }
+        return {
+          url: parsed["url"],
+          auth: { type: "basic", username: SERVICE_USERNAME, password },
+        }
+      } catch {
+        return null
+      }
+    })
+  try {
+    const compatible = await discover({
+      version: isSupportedOpenCodeServerVersion,
+    })
+    if (compatible !== undefined) {
+      const headers = headersForEndpoint(compatible)
+      return {
+        baseUrl: compatible.url,
+        ...(headers === undefined ? {} : { headers }),
+      }
+    }
+  } catch {
+    // Fall through to the registration file. Do not start the service.
+  }
+  const registered = readRegistration()
+  if (registered === null) return null
+  const headers = headersForEndpoint(registered)
+  return {
+    baseUrl: registered.url,
+    ...(headers === undefined ? {} : { headers }),
+  }
+}
+
 export const connectOpencodeV2 = async (input: {
   readonly server?: OpencodeExplicitServer
   readonly requestTimeoutMs?: number

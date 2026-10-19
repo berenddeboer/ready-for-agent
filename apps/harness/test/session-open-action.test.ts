@@ -1,71 +1,44 @@
 import { sessionOpenAction } from "../src/session-open-action.js"
-import { describe, expect, test } from "bun:test"
-
-const EXAMPLE_URL =
-  "http://127.0.0.1:49374/server/aHR0cDovLzEyNy4wLjAuMTo0OTM3NA/session/ses_ead6dfcf7ffejTs5Mqlo1UD64v"
+import { describe, expect, it } from "bun:test"
 
 describe("sessionOpenAction", () => {
-  test("opens OpenCode instead of the tail viewer when a URL is available", () => {
+  it("opens OpenCode when the server can be resolved", () => {
     expect(
       sessionOpenAction({
-        openInOpenCodeUrl: EXAMPLE_URL,
-        sessionId: "ses_ead6dfcf7ffejTs5Mqlo1UD64v",
+        canOpenInOpenCode: true,
+        sessionId: "ses_example",
         agentTurnTailSupported: true,
       }),
-    ).toEqual({ kind: "open-in-opencode", url: EXAMPLE_URL })
+    ).toEqual({ kind: "open-in-opencode" })
   })
 
-  test("keeps the tail for other backends", () => {
+  it("keeps tail for other backends that can serve one", () => {
     expect(
       sessionOpenAction({
-        openInOpenCodeUrl: null,
-        sessionId: "019fab2c-9466-7432-ad16-9de23f94f2db",
+        canOpenInOpenCode: false,
+        sessionId: "ses_example",
         agentTurnTailSupported: true,
       }),
     ).toEqual({ kind: "tail" })
   })
 
-  test("falls back to the tail when an OpenCode server address is unavailable", () => {
+  it("offers nothing when OpenCode has no server and tail is unsupported", () => {
     expect(
       sessionOpenAction({
-        openInOpenCodeUrl: null,
-        sessionId: "ses_owned",
-        agentTurnTailSupported: true,
-      }),
-    ).toEqual({ kind: "tail" })
-    expect(
-      sessionOpenAction({
-        openInOpenCodeUrl: "   ",
-        sessionId: "ses_owned",
-        agentTurnTailSupported: true,
-      }),
-    ).toEqual({ kind: "tail" })
-  })
-
-  test("does not offer a tail or OpenCode link without a session id and URL", () => {
-    expect(
-      sessionOpenAction({
-        openInOpenCodeUrl: null,
-        sessionId: null,
-        agentTurnTailSupported: true,
-      }),
-    ).toEqual({ kind: "none" })
-    expect(
-      sessionOpenAction({
-        openInOpenCodeUrl: null,
-        sessionId: "ses_owned",
+        canOpenInOpenCode: false,
+        sessionId: "ses_example",
         agentTurnTailSupported: false,
       }),
     ).toEqual({ kind: "none" })
   })
 
-  test("rejects a non-http URL instead of opening it", () => {
+  it("does not offer tail without a session id", () => {
     expect(
       sessionOpenAction({
-        openInOpenCodeUrl: "javascript:alert(1)",
-        sessionId: "ses_owned",
+        canOpenInOpenCode: false,
+        sessionId: "   ",
         agentTurnTailSupported: true,
       }),
-    ).toEqual({ kind: "tail" })
+    ).toEqual({ kind: "none" })
   })
 })

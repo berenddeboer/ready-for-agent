@@ -667,14 +667,25 @@ export const createGraphqlApi = <R>(
      */
     readonly version?: string
     /**
-     * Builds the browser URL for an OpenCode Session. The host resolves the
-     * server address (explicit agent server, otherwise `opencode service
-     * status`) and must not embed credentials. Null or a thrown error falls
-     * back to no link. Omitted means the link is unavailable.
+     * Whether an OpenCode Session can be opened. Resolves the server only.
+     * Must not mint a pairing grant. Omitted means the action is unavailable.
      */
-    readonly resolveOpenCodeSessionUrl?: (input: {
+    readonly canOpenInOpenCode?: (input: {
       readonly sessionId: string
-    }) => Promise<string | null>
+    }) => Promise<boolean>
+    /**
+     * Click-time handoff. Mints a single-use pairing grant for the same
+     * server the agent uses. Must not be called from list or poll resolvers.
+     */
+    readonly prepareOpenCodeSessionHandoff?: (input: {
+      readonly sessionId: string
+    }) => Promise<
+      | {
+          readonly connectUrl: string
+          readonly sessionUrl: string
+        }
+      | { readonly unavailableReason: string }
+    >
   } = {},
 ) => {
   const agentBackendCwd =
@@ -685,23 +696,24 @@ export const createGraphqlApi = <R>(
   const environment =
     options.environment ?? (process.env as Record<string, string | undefined>)
   const harnessVersion = options.version ?? "0.0.0"
-  const resolveOpenCodeSessionUrl = options.resolveOpenCodeSessionUrl
-  const openInOpenCodeUrlFor = (
+  const canOpenInOpenCode = options.canOpenInOpenCode
+  const prepareOpenCodeSessionHandoff = options.prepareOpenCodeSessionHandoff
+  const canOpenInOpenCodeFor = (
     backendId: string,
     sessionId: string | null | undefined,
-  ): Promise<string | null> => {
-    if (backendId !== AGENT_BACKEND_IDS.opencode) return Promise.resolve(null)
+  ): Promise<boolean> => {
+    if (backendId !== AGENT_BACKEND_IDS.opencode) return Promise.resolve(false)
     if (
       sessionId === null ||
       sessionId === undefined ||
       sessionId.trim().length === 0
     ) {
-      return Promise.resolve(null)
+      return Promise.resolve(false)
     }
-    if (resolveOpenCodeSessionUrl === undefined) return Promise.resolve(null)
-    return resolveOpenCodeSessionUrl({ sessionId: sessionId.trim() }).then(
-      (url) => (typeof url === "string" && url.length > 0 ? url : null),
-      () => null,
+    if (canOpenInOpenCode === undefined) return Promise.resolve(false)
+    return canOpenInOpenCode({ sessionId: sessionId.trim() }).then(
+      (available) => available === true,
+      () => false,
     )
   }
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
@@ -1374,8 +1386,8 @@ export const createGraphqlApi = <R>(
                     session,
                     agentTurnTailSupportedFor(workItem.agentBackend),
                   ),
-                  openInOpenCodeUrl: yield* Effect.promise(() =>
-                    openInOpenCodeUrlFor(
+                  canOpenInOpenCode: yield* Effect.promise(() =>
+                    canOpenInOpenCodeFor(
                       workItem.agentBackend,
                       workItem.sessionId,
                     ),
@@ -1878,8 +1890,6 @@ export const createGraphqlApi = <R>(
             workItem.createdAt.toISOString(),
           updatedAt: (workItem: { updatedAt: Date }) =>
             workItem.updatedAt.toISOString(),
-          openInOpenCodeUrl: (workItem: WorkItemRecord) =>
-            openInOpenCodeUrlFor(workItem.agentBackend, workItem.sessionId),
           ciRepair: async (
             workItem: WorkItemRecord,
             _args: unknown,
@@ -1985,6 +1995,69 @@ export const createGraphqlApi = <R>(
           },
         },
         Mutation: {
+          openOpenCodeSession: async (
+            _parent: unknown,
+            args: { readonly workItemId: string },
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                const workItem = yield* lifecycle
+                  .getWorkItem(args.workItemId)
+                  .pipe(
+                    Effect.catchTag("WorkItemNotFoundError", () =>
+                      Effect.succeed(null),
+                    ),
+                  )
+                const sessionId = workItem?.sessionId?.trim() ?? ""
+                if (
+                  workItem === null ||
+                  workItem.agentBackend !== AGENT_BACKEND_IDS.opencode ||
+                  sessionId.length === 0
+                ) {
+                  return {
+                    connectUrl: null,
+                    sessionUrl: null,
+                    unavailableReason:
+                      "This Session cannot be opened in OpenCode.",
+                  }
+                }
+                if (prepareOpenCodeSessionHandoff === undefined) {
+                  return {
+                    connectUrl: null,
+                    sessionUrl: null,
+                    unavailableReason:
+                      "OpenCode is not available for this Session. The window was not opened.",
+                  }
+                }
+                const prepared = yield* Effect.promise(async () => {
+                  try {
+                    return await prepareOpenCodeSessionHandoff({
+                      sessionId,
+                    })
+                  } catch {
+                    return {
+                      unavailableReason:
+                        "Could not connect this browser to the OpenCode server for this Session. Try again.",
+                    }
+                  }
+                })
+                if ("unavailableReason" in prepared) {
+                  return {
+                    connectUrl: null,
+                    sessionUrl: null,
+                    unavailableReason: prepared.unavailableReason,
+                  }
+                }
+                return {
+                  connectUrl: prepared.connectUrl,
+                  sessionUrl: prepared.sessionUrl,
+                  unavailableReason: null,
+                }
+              }).pipe(Effect.withSpan("graphql-api.openOpenCodeSession")),
+              context,
+            ),
           updateConfig: async (
             _parent: unknown,
             args: UpdateConfigArgs,

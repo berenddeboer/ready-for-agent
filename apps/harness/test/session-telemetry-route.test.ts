@@ -119,20 +119,20 @@ describe("Session Telemetry route (issues #841 / #843 / #906 / #1144)", () => {
     expect(dialog).toContain("Could not load Session usage")
     expect(dialog).toContain("ui.dialogTable")
     expect(dialog).toContain("Show tail")
-    expect(dialog).toContain("OpenInOpenCodeLink")
-    expect(dialog).toContain("openInOpenCodeUrl")
+    expect(dialog).toContain("OpenInOpenCodeButton")
+    expect(dialog).toContain("canOpenInOpenCode")
     expect(dialog).toContain("agentTurnTailSupported")
     expect(dialog).toContain('openAction.kind === "tail"')
     expect(readHarnessSource("../src/open-in-opencode-link.tsx")).toContain(
       "Open in OpenCode",
     )
-    expect(readHarnessSource("../src/kanban-board.tsx")).toContain(
+    expect(readHarnessSource("../src/kanban-board.tsx")).not.toContain(
       "OpenInOpenCodeSessionLink",
     )
-    expect(readHarnessSource("../src/completed-work-item-row.tsx")).toContain(
-      "OpenInOpenCodeSessionLink",
-    )
-    expect(readHarnessSource("../src/home-page-content.tsx")).toContain(
+    expect(
+      readHarnessSource("../src/completed-work-item-row.tsx"),
+    ).not.toContain("OpenInOpenCodeSessionLink")
+    expect(readHarnessSource("../src/home-page-content.tsx")).not.toContain(
       "OpenInOpenCodeSessionLink",
     )
     expect(dialog).toContain("No recent activity on this Session")
