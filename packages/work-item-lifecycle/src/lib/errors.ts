@@ -202,9 +202,10 @@ export class WorkItemTerminalError extends Schema.TaggedError<WorkItemTerminalEr
 ) {}
 
 /**
- * CI Gate Bypass is offered only while a CI Failure Incident is active and
- * Closed. The class tag stays CiRepairNotAvailableError so existing failures
- * remain recognizable.
+ * CI Gate Bypass is offered only to an ordinary Work Item while a CI Failure
+ * Incident is active and Closed. A CI Repair Work Item is never eligible: it
+ * crosses a Closed gate by origin. The class tag stays
+ * CiRepairNotAvailableError so existing failures remain recognizable.
  */
 export class CiRepairNotAvailableError extends Schema.TaggedError<CiRepairNotAvailableError>()(
   "CiRepairNotAvailableError",

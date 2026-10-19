@@ -36,8 +36,26 @@ const toGraphqlAuthorization = (
   }
 }
 
+/**
+ * CI Gate Bypass authorization is for ordinary Work Items. A CI Repair Work
+ * Item crosses a Closed gate by origin, so the authorize action stays
+ * unavailable regardless of lifecycle state or gate state.
+ */
+const ciGateBypassCanAuthorize = (input: {
+  readonly origin: WorkItemRecord["origin"]
+  readonly unfinished: boolean
+  readonly gateStatus: ReturnType<typeof deriveRepositoryCiGateStatus>
+  readonly activeIncidentId: string | null
+  readonly alreadyAuthorized: boolean
+}): boolean =>
+  input.origin !== "ci_repair" &&
+  input.unfinished &&
+  input.gateStatus === "closed" &&
+  input.activeIncidentId !== null &&
+  !input.alreadyAuthorized
+
 export const projectWorkItemCiRepair = (input: {
-  readonly workItem: WorkItemRecord
+  readonly workItem: Pick<WorkItemRecord, "origin" | "state" | "failureCode">
   readonly authorizations: readonly CiRepairAuthorizationRecord[]
   readonly definitions: Parameters<typeof projectCiFailureIncident>[1]
   readonly gateStatus: ReturnType<typeof deriveRepositoryCiGateStatus>
@@ -54,11 +72,13 @@ export const projectWorkItemCiRepair = (input: {
           (authorization) =>
             authorization.incident.id === input.activeIncidentId,
         ) ?? null)
-  const canAuthorize =
-    isUnfinishedWorkItem(input.workItem) &&
-    input.gateStatus === "closed" &&
-    input.activeIncidentId !== null &&
-    active === null
+  const canAuthorize = ciGateBypassCanAuthorize({
+    origin: input.workItem.origin,
+    unfinished: isUnfinishedWorkItem(input.workItem),
+    gateStatus: input.gateStatus,
+    activeIncidentId: input.activeIncidentId,
+    alreadyAuthorized: active !== null,
+  })
   return {
     active,
     history,
