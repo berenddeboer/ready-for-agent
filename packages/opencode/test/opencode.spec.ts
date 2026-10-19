@@ -180,6 +180,112 @@ describe("Opencode AgentBackend adapter", () => {
     )
   })
 
+  it("runs V2 start, resume, and review without obsolete flags", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "opencode-v2-run-"))
+    const logPath = join(cwd, "invocations")
+    try {
+      await withExecutable(
+        [
+          'printf "%s\\n" "$PWD" >> "$INVOCATION_LOG"',
+          'printf "%s\\n" "$*" >> "$INVOCATION_LOG"',
+          'case " $* " in',
+          '  *" --dir "*|*" --variant "*|*" --command "*) echo "obsolete flag" >&2; exit 2 ;;',
+          "esac",
+          'case " $* " in',
+          '  *"/model "*) exit 0 ;;',
+          "esac",
+          'case " $* " in',
+          '  *"/command "*)',
+          '    printf \'%s\\n\' \'{"type":"step_start","sessionID":"ses_review"}\'',
+          '    printf \'%s\\n\' \'{"type":"tool_use","sessionID":"ses_review","part":{"type":"tool","tool":"task","state":{"status":"completed","input":{"command":"review"},"output":"<task_result>READY_FOR_AGENT_RESULT: REVIEW_CLEAN</task_result>"}}}\'',
+          "    exit 0 ;;",
+          "esac",
+          'case " $* " in',
+          '  *" -m test/model#high "*|*" -m test/model "*) ;;',
+          '  *) echo "missing model reference: $*" >&2; exit 3 ;;',
+          "esac",
+          'if [ "$1" = "run" ]; then',
+          '  printf \'%s\\n\' \'{"type":"step_start","sessionID":"ses_v2"}\'',
+          '  printf \'%s\\n\' \'{"type":"text","part":{"type":"text","text":"ok"}}\'',
+          "  exit 0",
+          "fi",
+          "exit 4",
+        ].join("\n"),
+        async (binary) => {
+          const layer = Opencode.layer({
+            binary,
+            keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+            environment: {
+              INVOCATION_LOG: logPath,
+              PWD: "/harness/not-the-work-item",
+            },
+          }).pipe(Layer.provide(BunServices.layer))
+          const started = await Effect.runPromise(
+            Effect.gen(function* () {
+              const backend = yield* AgentBackend
+              return yield* backend.startTurn({
+                cwd,
+                prompt: "fix the bug",
+                model: "test/model",
+                thinkingLevel: "high",
+                timeout: "2 seconds",
+              })
+            }).pipe(Effect.provide(layer)),
+          )
+          const continued = await Effect.runPromise(
+            Effect.gen(function* () {
+              const backend = yield* AgentBackend
+              return yield* backend.continueTurn({
+                cwd,
+                sessionId: started.sessionId,
+                prompt: "continue",
+                model: "test/model",
+                thinkingLevel: null,
+                timeout: "2 seconds",
+              })
+            }).pipe(Effect.provide(layer)),
+          )
+          const reviewed = await Effect.runPromise(
+            Effect.gen(function* () {
+              const backend = yield* AgentBackend
+              return yield* backend.continueTurn({
+                cwd,
+                sessionId: started.sessionId,
+                prompt: "Review uncommitted worktree changes.",
+                model: "test/model",
+                thinkingLevel: "high",
+                command: "/review",
+                timeout: "2 seconds",
+              })
+            }).pipe(Effect.provide(layer)),
+          )
+
+          expect(started).toEqual({
+            sessionId: "ses_v2",
+            assistantText: "ok",
+          })
+          expect(continued.sessionId).toBe("ses_v2")
+          expect(reviewed).toEqual({
+            sessionId: "ses_review",
+            assistantText: "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+          })
+          const log = await Bun.file(logPath).text()
+          expect(log).not.toContain("--dir")
+          expect(log).not.toContain("--variant")
+          expect(log).not.toContain("--command")
+          expect(log).toContain("test/model#high")
+          expect(log).toContain("/api/session/ses_v2/command")
+          expect(
+            log.split("\n").filter((line) => line === cwd).length,
+          ).toBeGreaterThan(0)
+          expect(log).not.toContain("/harness/not-the-work-item")
+        },
+      )
+    } finally {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  })
+
   it("omits --variant when thinkingLevel is null", async () => {
     await withExecutable(
       [
@@ -487,6 +593,7 @@ describe("Opencode AgentBackend adapter", () => {
         binaryPath,
         [
           "#!/bin/sh",
+          'case " $* " in *"/model "*) exit 0 ;; esac',
           `printf '%s\\n' '{"type":"step_start","sessionID":"ses_parent"}'`,
           `printf '%s\\n' '${toolUse.replace(/'/g, `'\\''`)}'`,
           // Parent resume would apply findings; kill must stop this before edits.
@@ -557,6 +664,7 @@ describe("Opencode AgentBackend adapter", () => {
         binaryPath,
         [
           "#!/bin/sh",
+          'case " $* " in *"/model "*) exit 0 ;; esac',
           `printf '%s\\n' '{"type":"step_start","sessionID":"ses_parent"}'`,
           `printf '%s\\n' '${toolUse.replace(/'/g, `'\\''`)}'`,
           "exit 0",
@@ -652,6 +760,7 @@ describe("Opencode AgentBackend adapter", () => {
         binaryPath,
         [
           "#!/bin/sh",
+          'case " $* " in *"/model "*) exit 0 ;; esac',
           // Parent stream silent past the startup window, then emits the
           // nested task result — matching real OpenCode /review behaviour.
           // Window is deliberately wider than poll/seed slack to avoid flakes.
@@ -745,45 +854,48 @@ describe("Opencode AgentBackend adapter", () => {
     ).run("ses_hang_parent", parentCreated, parentCreated)
     db.close()
 
-    await withExecutable("sleep 100", async (binary) => {
-      try {
-        const error = await Effect.runPromise(
-          Effect.gen(function* () {
-            const backend = yield* AgentBackend
-            return yield* backend.continueTurn({
-              sessionId: "ses_hang_parent",
-              cwd: process.cwd(),
-              prompt: "Review uncommitted worktree changes.",
-              model: "test/model",
-              thinkingLevel: "test",
-              command: "/review",
-              timeout: "30 seconds",
-            })
-          }).pipe(
-            Effect.provide(
-              Opencode.layer({
-                binary,
-                keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
-                startupActivityDbPath: dbPath,
-                startupTimeout: "200 millis",
-              }).pipe(Layer.provide(BunServices.layer)),
+    await withExecutable(
+      'case " $* " in *"/model "*) exit 0 ;; esac\nsleep 100',
+      async (binary) => {
+        try {
+          const error = await Effect.runPromise(
+            Effect.gen(function* () {
+              const backend = yield* AgentBackend
+              return yield* backend.continueTurn({
+                sessionId: "ses_hang_parent",
+                cwd: process.cwd(),
+                prompt: "Review uncommitted worktree changes.",
+                model: "test/model",
+                thinkingLevel: "test",
+                command: "/review",
+                timeout: "30 seconds",
+              })
+            }).pipe(
+              Effect.provide(
+                Opencode.layer({
+                  binary,
+                  keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+                  startupActivityDbPath: dbPath,
+                  startupTimeout: "200 millis",
+                }).pipe(Layer.provide(BunServices.layer)),
+              ),
+              Effect.flip,
             ),
-            Effect.flip,
-          ),
-        )
-        expect(error).toEqual(
-          new AgentBackendStartupTimeoutError({
-            cwd: process.cwd(),
-            startupTimeoutMs: 200,
-            sessionId: "ses_hang_parent",
-            model: "test/model",
-            attemptCount: 2,
-          }),
-        )
-      } finally {
-        rmSync(fixtureDir, { recursive: true, force: true })
-      }
-    })
+          )
+          expect(error).toEqual(
+            new AgentBackendStartupTimeoutError({
+              cwd: process.cwd(),
+              startupTimeoutMs: 200,
+              sessionId: "ses_hang_parent",
+              model: "test/model",
+              attemptCount: 2,
+            }),
+          )
+        } finally {
+          rmSync(fixtureDir, { recursive: true, force: true })
+        }
+      },
+    )
   })
 
   it("retries a silent known-Session continuation once and returns the second result", async () => {

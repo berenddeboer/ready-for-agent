@@ -36,16 +36,51 @@ const isRetryableApiErrorData = (data: unknown): boolean => {
   return false
 }
 
+const RETRYABLE_V2_ERROR_TYPES = new Set([
+  "provider.rate-limit",
+  "provider.quota",
+  "provider.timeout",
+  "provider.transport",
+  "provider.internal",
+])
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
+
+const classifyV2Error = (
+  error: Record<string, unknown>,
+): AgentBackendErrorClassification | undefined => {
+  const type = error.type
+  if (typeof type !== "string") {
+    return undefined
+  }
+  if (type === "provider.auth") {
+    return "terminal_auth_error"
+  }
+  if (RETRYABLE_V2_ERROR_TYPES.has(type)) {
+    return "retryable_provider_error"
+  }
+  if (typeof error.status === "number") {
+    return error.status === 429 || error.status >= 500
+      ? "retryable_provider_error"
+      : undefined
+  }
+  return undefined
+}
+
 const classifyErrorEvent = (
   event: Record<string, unknown>,
 ): AgentBackendErrorClassification | undefined => {
   const error = event.error
-  if (typeof error !== "object" || error === null || !("name" in error)) {
+  if (!isRecord(error)) {
     return undefined
+  }
+  if (!("name" in error)) {
+    return classifyV2Error(error)
   }
   const name = error.name
   if (typeof name !== "string") {
-    return undefined
+    return classifyV2Error(error)
   }
 
   if (LENGTH_LIMIT_ERROR_NAMES.has(name)) {
@@ -63,7 +98,7 @@ const classifyErrorEvent = (
       : undefined
   }
 
-  return undefined
+  return classifyV2Error(error)
 }
 
 /**
@@ -143,8 +178,24 @@ export const parseProviderRetryAtFromLine = (
     return undefined
   }
   const error = event.error
-  if (typeof error !== "object" || error === null) {
+  if (!isRecord(error)) {
     return undefined
   }
-  return extractProviderRetryAt({ data: error, now })
+  const response = error.response
+  const body =
+    isRecord(response) && typeof response.body === "string"
+      ? response.body
+      : undefined
+  let parsedBody: unknown
+  if (body !== undefined) {
+    try {
+      parsedBody = JSON.parse(body)
+    } catch {
+      parsedBody = undefined
+    }
+  }
+  return (
+    extractProviderRetryAt({ data: parsedBody, now }) ??
+    extractProviderRetryAt({ data: error, now })
+  )
 }

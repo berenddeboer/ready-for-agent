@@ -11,11 +11,11 @@ const taskResultFromOutput = (output: string): string | undefined => {
 }
 
 /**
- * When OpenCode runs `--command`, the command agent executes as a nested task
- * subsession. Its ordered final assistant text is only observable on the parent
- * stream as a completed `tool_use` task part (`state.output`), not as parent
- * `type:"text"` events. Parent text after that is the automatic "summarize and
- * continue" resume and must not be treated as the command result.
+ * When a command runs as a nested task, its ordered final assistant text is
+ * only observable on the parent stream as a completed `tool_use` task part
+ * (`state.output`), not as parent `type:"text"` events. Parent text after that
+ * is the automatic "summarize and continue" resume and must not be treated as
+ * the command result.
  */
 export const parseCommandTaskResultFromLine = (
   line: string,
