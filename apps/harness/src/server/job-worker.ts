@@ -36,6 +36,7 @@ import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { QueueService } from "@ready-for-agent/queue-service"
 import {
   WorkItemLifecycle,
+  WorkItemProviderRecoveryJob,
   WorkItemStepJob,
   WorkItemWakeJob,
 } from "@ready-for-agent/work-item-lifecycle"
@@ -504,7 +505,11 @@ const runLifecycleClaimLoop = (
 
       const claimed = yield* QueueService.claim(
         JOBS_QUEUE,
-        Schema.Union([WorkItemStepJob, WorkItemWakeJob]),
+        Schema.Union([
+          WorkItemStepJob,
+          WorkItemWakeJob,
+          WorkItemProviderRecoveryJob,
+        ]),
         visibilityTimeout,
       ).pipe(
         Effect.catchTag("PayloadParseError", (error) =>
@@ -529,10 +534,16 @@ const runLifecycleClaimLoop = (
       const jobContext =
         payload._tag === "work-item-step"
           ? { stepRunId: payload.stepRunId }
-          : {
-              workItemId: payload.workItemId,
-              postponedUntil: payload.postponedUntil,
-            }
+          : payload._tag === "work-item-provider-recovery"
+            ? {
+                workItemId: payload.workItemId,
+                generation: payload.generation,
+                nextAttemptAt: payload.nextAttemptAt,
+              }
+            : {
+                workItemId: payload.workItemId,
+                postponedUntil: payload.postponedUntil,
+              }
       const leaseExtended = yield* queue
         .extendVisibility(job.jobId, lifecycleJobVisibilityTimeout)
         .pipe(
@@ -552,6 +563,37 @@ const runLifecycleClaimLoop = (
           }),
         )
       if (!leaseExtended) continue
+
+      if (payload._tag === "work-item-provider-recovery") {
+        yield* lifecycle
+          .wakeProviderRecovery({
+            workItemId: payload.workItemId,
+            generation: payload.generation,
+            nextAttemptAt: payload.nextAttemptAt,
+          })
+          .pipe(
+            Effect.tap((result) =>
+              result._tag === "not_due"
+                ? Effect.void
+                : queue
+                    .acknowledge(job.jobId)
+                    .pipe(
+                      Effect.catchTag("JobNotFoundError", () => Effect.void),
+                    ),
+            ),
+            Effect.tapError((error) =>
+              Effect.logError("Provider recovery wake failed", {
+                jobId: job.jobId,
+                workItemId: payload.workItemId,
+                generation: payload.generation,
+                nextAttemptAt: payload.nextAttemptAt,
+                ...logErrorAnnotations(error),
+              }),
+            ),
+            Effect.ignore,
+          )
+        continue
+      }
 
       if (payload._tag === "work-item-wake") {
         yield* lifecycle

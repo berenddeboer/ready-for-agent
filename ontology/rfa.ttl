@@ -464,6 +464,18 @@ rfa:TimeoutReason
   skos:definition
     "The Step Run ended because the Lifecycle Step exceeded its configured timeout budget: an aggregate maximum duration, or for Review a no-progress interval without a completed checkpoint."@en .
 
+rfa:TransientProviderErrorReason
+  a rfa:StepRunReason ;
+  skos:notation "transient_provider_error" ;
+  skos:definition
+    "The Step Run ended because the Agent Backend classified a temporary provider capacity, rate-limit, or server error. Provider Recovery may schedule another attempt of the same Lifecycle Step; this does not consume Autonomous Retry Budget."@en .
+
+rfa:ProviderRecoveryExhaustedReason
+  a rfa:StepRunReason ;
+  skos:notation "provider_recovery_exhausted" ;
+  skos:definition
+    "Automatic Provider Recovery stopped because elapsed waiting from the episode start exceeded the configured maximum. The Session and worktree are retained for explicit Retry."@en .
+
 rfa:WaitingForAgentTurnReason
   a rfa:StepRunReason ;
   skos:notation "waiting_for_agent_turn" ;

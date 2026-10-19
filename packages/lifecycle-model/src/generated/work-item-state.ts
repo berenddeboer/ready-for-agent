@@ -72,6 +72,7 @@ export const STEP_RUN_REASONS = [
   "paused",
   "pr_merged",
   "pr_status_checks_unresolved",
+  "provider_recovery_exhausted",
   "reset",
   "review_accepted",
   "review_applying_findings",
@@ -82,6 +83,7 @@ export const STEP_RUN_REASONS = [
   "review_reviewing",
   "thinking_level_not_in_catalog",
   "timeout",
+  "transient_provider_error",
   "waiting_for_agent_turn",
   "worker_restarted",
 ] as const
@@ -136,6 +138,8 @@ export const STEP_RUN_REASON = {
   prMerged: "pr_merged",
   /** Watch PR Status Checks stopped because the status-check observation did not resolve. */
   prStatusChecksUnresolved: "pr_status_checks_unresolved",
+  /** Automatic Provider Recovery stopped because elapsed waiting from the episode start exceeded the configured maximum. The Session and worktree are retained for explicit Retry. */
+  providerRecoveryExhausted: "provider_recovery_exhausted",
   /** The Step Run was cancelled because the operator reset the Work Item. */
   reset: "reset",
   /** A successful Review that accepted low-severity remediation without a full rerun. */
@@ -156,6 +160,8 @@ export const STEP_RUN_REASON = {
   thinkingLevelNotInCatalog: "thinking_level_not_in_catalog",
   /** The Step Run ended because the Lifecycle Step exceeded its configured timeout budget: an aggregate maximum duration, or for Review a no-progress interval without a completed checkpoint. */
   timeout: "timeout",
+  /** The Step Run ended because the Agent Backend classified a temporary provider capacity, rate-limit, or server error. Provider Recovery may schedule another attempt of the same Lifecycle Step; this does not consume Autonomous Retry Budget. */
+  transientProviderError: "transient_provider_error",
   /** Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns. */
   waitingForAgentTurn: "waiting_for_agent_turn",
   /** The prior harness or job-worker process ended while the Step Run was still Running. */
@@ -188,6 +194,7 @@ export const STEP_RUN_REASON_DEFINITIONS = {
   paused: "The Step Run stopped because the Work Item was paused.",
   pr_merged: "Confirmed Work Item PR merge outcome, used when a Step Run is cancelled because the PR merged before it finished, or a successful Step Run advances to local cleanup after Issue revalidation finds the Issue closed or missing and the owned PR already merged.",
   pr_status_checks_unresolved: "Watch PR Status Checks stopped because the status-check observation did not resolve.",
+  provider_recovery_exhausted: "Automatic Provider Recovery stopped because elapsed waiting from the episode start exceeded the configured maximum. The Session and worktree are retained for explicit Retry.",
   reset: "The Step Run was cancelled because the operator reset the Work Item.",
   review_accepted: "A successful Review that accepted low-severity remediation without a full rerun.",
   review_applying_findings: "Mid-run: Review is applying findings with the build model.",
@@ -198,6 +205,7 @@ export const STEP_RUN_REASON_DEFINITIONS = {
   review_reviewing: "Mid-run: Review is running the reviewing Agent Turn.",
   thinking_level_not_in_catalog: "An agent-dependent step is blocked because the resolved Thinking Level is not advertised by the governing Agent Model's current catalog entry. Rejected before the backend CLI is spawned.",
   timeout: "The Step Run ended because the Lifecycle Step exceeded its configured timeout budget: an aggregate maximum duration, or for Review a no-progress interval without a completed checkpoint.",
+  transient_provider_error: "The Step Run ended because the Agent Backend classified a temporary provider capacity, rate-limit, or server error. Provider Recovery may schedule another attempt of the same Lifecycle Step; this does not consume Autonomous Retry Budget.",
   waiting_for_agent_turn: "Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns.",
   worker_restarted: "The prior harness or job-worker process ended while the Step Run was still Running.",
 } as const satisfies Record<StepRunReason, string>

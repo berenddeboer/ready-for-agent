@@ -131,6 +131,11 @@ export const config = snakeCase.table("config", {
   backendModelPrefs: text().notNull().default("{}"),
   maxConcurrentAgentTurns: integer({ mode: "number" }).notNull().default(2),
   maxConcurrentWorkItems: integer({ mode: "number" }).notNull().default(5),
+  /**
+   * Maximum elapsed Provider Recovery wait in milliseconds, measured from the
+   * episode start. Null means keep retrying.
+   */
+  providerRecoveryMaxWaitMs: integer({ mode: "number" }),
   createdAt: integer({ mode: "number" })
     .notNull()
     .$defaultFn(() => Date.now()),
@@ -616,6 +621,54 @@ export const autonomousRetry = snakeCase.table(
   },
   (t) => [
     index("autonomous_retry_budget_idx").on(t.workItemId, t.lifecycleStep),
+  ],
+)
+
+/**
+ * One Provider Recovery Episode per Work Item. Open statuses are `scheduled`
+ * and `in_attempt`; terminal statuses retain the last outage for the UI.
+ * See xplain: type provider recovery episode "prev"
+ */
+export const providerRecoveryEpisode = snakeCase.table(
+  "provider_recovery_episode",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `prev-${ulid()}`),
+    workItemId: text()
+      .notNull()
+      .references(() => workItem.id, { onDelete: "cascade" }),
+    lifecycleStep: text({ enum: OPERATIONAL_LIFECYCLE_STEPS }).notNull(),
+    status: text({
+      enum: [
+        "scheduled",
+        "in_attempt",
+        "recovered",
+        "exited",
+        "exhausted",
+        "cancelled",
+      ],
+    }).notNull(),
+    providerId: text(),
+    providerLabel: text(),
+    model: text(),
+    providerCode: text(),
+    reasonMessage: text(),
+    episodeStartedAt: integer({ mode: "number" }).notNull(),
+    attemptCount: integer({ mode: "number" }).notNull(),
+    nextAttemptAt: integer({ mode: "number" }),
+    generation: integer({ mode: "number" }).notNull(),
+    escalated: integer({ mode: "boolean" }).notNull().default(false),
+    exhaustedAt: integer({ mode: "number" }),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("provider_recovery_episode_work_item_uidx").on(t.workItemId),
   ],
 )
 

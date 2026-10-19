@@ -190,7 +190,7 @@ describe("Codex provider-error Step Run evidence (BER-28)", () => {
           (run) => run.id === seeded.implementRunId,
         )
         expect(failed?.status).toBe("failed")
-        expect(failed?.reasonCode).toBe(STEP_RUN_REASON.handlerFailed)
+        expect(failed?.reasonCode).toBe(STEP_RUN_REASON.transientProviderError)
         const detail = parseReasonDetail(failed?.reasonDetail)
         expect(detail?.classification).toBe("retryable_provider_error")
         expect(detail?.providerCode).toBe("server_overloaded")

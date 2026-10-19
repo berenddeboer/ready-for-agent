@@ -71,6 +71,7 @@ export class InvalidConfigInputError extends Schema.TaggedError<InvalidConfigInp
       "reviewThinkingLevel",
       "maxConcurrentAgentTurns",
       "maxConcurrentWorkItems",
+      "providerRecoveryMaxWaitMs",
     ]),
     message: Schema.String,
   },

@@ -68,6 +68,8 @@ export const makeStepRunId = (): StepRunId => StepRunId.make(`srun-${ulid()}`)
 
 export const makeAutonomousRetryId = (): string => `artry-${ulid()}`
 
+export const makeProviderRecoveryId = (): string => `prev-${ulid()}`
+
 export const makeCiRepairAuthorizationId = (): string => `cra-${ulid()}`
 
 export const StepRunStatus = Schema.Literals([
@@ -287,6 +289,22 @@ export const WorkItemWakeJob = Schema.TaggedStruct("work-item-wake", {
   postponedUntil: Schema.Finite,
 })
 export type WorkItemWakeJob = typeof WorkItemWakeJob.Type
+
+/**
+ * Durable delayed admission request for one Provider Recovery Episode. It is
+ * not a Step Run: Waiting for Provider owns no Worker Slot and no Agent Turn
+ * permit until this wake reaches ordinary admission.
+ */
+export const WorkItemProviderRecoveryJob = Schema.TaggedStruct(
+  "work-item-provider-recovery",
+  {
+    workItemId: WorkItemId,
+    generation: Schema.Int,
+    nextAttemptAt: Schema.Finite,
+  },
+)
+export type WorkItemProviderRecoveryJob =
+  typeof WorkItemProviderRecoveryJob.Type
 
 export const isTerminalWorkItemState = (
   state: WorkItemState,
