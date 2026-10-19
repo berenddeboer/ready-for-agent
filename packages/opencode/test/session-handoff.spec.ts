@@ -179,7 +179,6 @@ describe("requestOpenCodePairingCode", () => {
     const result = await requestOpenCodePairingCode({
       baseUrl: SERVER,
       headers: openCodeBasicAuthFromPassword(PASSWORD),
-      secrets: [PASSWORD, CAPABILITY],
       fetchImpl: async () => {
         throw new Error(`pair failed password=${PASSWORD} url=${CAPABILITY}`)
       },

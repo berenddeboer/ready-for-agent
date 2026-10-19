@@ -30,6 +30,7 @@ export function OpenInOpenCodeButton({
       onClick={() => {
         if (pending) return
         setPending(true)
+        onUnavailable("")
         void launchOpenCodeSessionWindow({
           openBlank: () => window.open("about:blank", "_blank"),
           request: async () => {

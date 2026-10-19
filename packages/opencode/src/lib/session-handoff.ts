@@ -208,7 +208,6 @@ export const requestOpenCodePairingCode = async (input: {
   readonly headers?: Readonly<Record<string, string>>
   readonly fetchImpl?: typeof fetch
   readonly timeoutMs?: number
-  readonly secrets?: ReadonlyArray<string>
 }): Promise<
   | { readonly kind: "code"; readonly code: string; readonly expiresIn: number }
   | { readonly kind: "failed"; readonly message: string }
@@ -218,7 +217,6 @@ export const requestOpenCodePairingCode = async (input: {
     return { kind: "failed", message: OPENCODE_SESSION_HANDOFF_UNAVAILABLE }
   }
   const fetchImpl = input.fetchImpl ?? fetch
-  const secrets = input.secrets ?? []
   try {
     const response = await fetchImpl(`${baseUrl}/api/pair`, {
       method: "POST",
@@ -236,12 +234,8 @@ export const requestOpenCodePairingCode = async (input: {
       return { kind: "failed", message: OPENCODE_SESSION_HANDOFF_REJECTED }
     }
     return { kind: "code", code: parsed.code, expiresIn: parsed.expiresIn }
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : ""
-    const redacted = redactOpenCodeHandoffSecrets(detail, secrets)
-    if (redacted !== detail) {
-      return { kind: "failed", message: OPENCODE_SESSION_HANDOFF_UNAVAILABLE }
-    }
+  } catch {
+    // Never surface the thrown text. It can contain the server password.
     return { kind: "failed", message: OPENCODE_SESSION_HANDOFF_UNAVAILABLE }
   }
 }

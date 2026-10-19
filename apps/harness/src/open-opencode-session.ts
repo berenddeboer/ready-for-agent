@@ -10,7 +10,7 @@
 export const OPENCODE_SESSION_POPUP_BLOCKED =
   "The browser blocked the OpenCode window. Allow pop-ups for this site, then try again."
 
-export const OPENCODE_SESSION_HANDOFF_CLOSED =
+const OPENCODE_SESSION_HANDOFF_CLOSED =
   "The OpenCode window was closed before the Session opened. Try again."
 
 export const OPENCODE_SESSION_HANDOFF_TIMED_OUT =
@@ -42,7 +42,7 @@ const httpOrigin = (value: string): string | null => {
 }
 
 /** Both URLs must be credential-free and on the same OpenCode origin. */
-export const isOpenCodeSessionLaunch = (value: {
+const isOpenCodeSessionLaunch = (value: {
   readonly connectUrl: string
   readonly sessionUrl: string
 }): boolean => {
@@ -112,7 +112,11 @@ export const launchOpenCodeSessionWindow = async (input: {
       message: OPENCODE_SESSION_HANDOFF_TIMED_OUT,
     }
   }
+  // Clear the reverse link while the tab is still the harness origin.
+  // After it navigates to OpenCode, assigning opener throws and would leave
+  // the OpenCode page able to reach this window.
   try {
+    tab.opener = null
     tab.location.href = launch.connectUrl
   } catch {
     tab.close()
@@ -141,8 +145,7 @@ export const launchOpenCodeSessionWindow = async (input: {
     }
   }
   // The connect response redirects to `/`. Wait until that commit has set
-  // the cookie, then open the Session. A second assignment covers a redirect
-  // that lands after the first Session navigation.
+  // the cookie, then open the Session once.
   await sleep(settleMs)
   if (tab.closed) {
     return { kind: "unavailable", message: OPENCODE_SESSION_HANDOFF_CLOSED }
@@ -154,15 +157,6 @@ export const launchOpenCodeSessionWindow = async (input: {
     return {
       kind: "unavailable",
       message: OPENCODE_SESSION_HANDOFF_TIMED_OUT,
-    }
-  }
-  await sleep(settleMs)
-  if (!tab.closed) {
-    try {
-      tab.location.href = launch.sessionUrl
-      tab.opener = null
-    } catch {
-      // The first assignment already left the harness origin.
     }
   }
   return { kind: "opened" }

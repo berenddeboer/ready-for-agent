@@ -336,7 +336,9 @@ export function SessionUsageDialog({
           <OpenInOpenCodeButton
             workItemId={workItemId}
             className={ui.plateMini}
-            onUnavailable={setLaunchError}
+            onUnavailable={(message) => {
+              setLaunchError(message.length > 0 ? message : null)
+            }}
           />
         ) : showTailAction ? (
           <button
