@@ -18,6 +18,7 @@ action.
 
 - [Quick start](#quick-start)
 - [Requirements](#requirements)
+- [Upgrading to 1.0](#upgrading-to-10)
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
@@ -166,6 +167,29 @@ The harness is designed to run on your local laptop. This avoids
 cloud costs — you already paid for an extensive machine — and your
 machine is already set up for your repo, so you avoid the setup
 issues that come with running compute in the cloud.
+
+## Upgrading to 1.0
+
+**Breaking change: Ready for Agent 1.0 requires OpenCode 2 when using the
+OpenCode backend. OpenCode 1 no longer works.** Other coding agents remain
+supported; OpenCode is not required when you select another backend.
+
+Before upgrading from Ready for Agent 0.x:
+
+1. Follow the [OpenCode 2 installation and migration
+   instructions](https://opencode.ai/v2/) and authenticate it. Confirm that
+   `opencode --version` reports `2.x` in the environment that runs the harness
+   (including its systemd user service or scope, if used).
+2. If you configure `READY_FOR_AGENT_OPENCODE_SERVER`, upgrade that server to
+   OpenCode 2 as well. The harness uses the V2 HTTP API for session telemetry
+   and has no OpenCode 1 fallback.
+3. Upgrade Ready for Agent (`npm install -g ready-for-agent@latest`, or run
+   `npx ready-for-agent@latest`) and restart it. In Settings, use **Recheck
+   Agent Backend** and confirm your OpenCode model selection.
+
+An unsupported OpenCode version shows as **Agent Backend Unavailable**; it
+does not prevent the UI from starting. Upgrade OpenCode and recheck, or
+select another supported backend in Settings.
 
 ## Features
 
@@ -436,8 +460,9 @@ unaffected (`bun run ready-for-agent`).
 
 ### The coding agent shows as Unavailable
 
-Its executable is missing from PATH, or it is not authenticated. Fix
-that and use Recheck in Settings, or pick another backend there.
+Its executable is missing from PATH, it is not authenticated, or its version
+is unsupported. OpenCode must be version 2; see [Upgrading to 1.0](#upgrading-to-10).
+Fix that and use Recheck in Settings, or pick another backend there.
 
 ### Startup fails with "Cannot establish a trusted TLS connection"
 
