@@ -237,7 +237,7 @@ jobs:
           fi
 
       # OpenCode for vault-backed suite only: first-run model catalog via
-      # `opencode models --verbose` (empty catalog fails that suite).
+      # `opencode api --standalone get /api/model` (empty catalog fails that suite).
       - name: Install OpenCode
         env:
           GH_TOKEN: ${{ github.token }}
