@@ -130,18 +130,18 @@ export const failurePassesCiRepairBaseline = (input: {
   if (baseline.floorOrderKey !== null && baseline.floorOrderKey !== "") {
     return newerThan(failure.orderKey, baseline.floorOrderKey) === true
   }
-  // Suppress was already applied. A different run with no order key cannot
-  // be proved newer, so it does not auto-start.
+  // The suppressed run itself was already rejected by identity. A different
+  // run with no order key cannot be proved newer. A different run that has
+  // an order key is not that suppressed run; refusing it would stick
+  // automatic repair after a keyless no-change.
   if (
     baseline.suppressThroughRunIdentity !== null &&
     (baseline.suppressThroughOrderKey === null ||
       baseline.suppressThroughOrderKey === "")
   ) {
-    return false
+    return failure.orderKey !== null && failure.orderKey !== ""
   }
   // A stored baseline with nothing left to compare must not fail open.
-  // That includes a no-change row recorded before order keys existed:
-  // the same run must not loop, and an uncompared run must not auto-start.
   // A failure already proved newer than an abandon suppress still qualifies.
   return provedNewerThanSuppress
 }
@@ -281,7 +281,11 @@ const loadCursors = (sql: SqlRunner, repositoryId: string) =>
     )
   })
 
-/** No-Change: the newest observed run is exclusive. A rerun is newer. */
+/**
+ * No-Change: the newest observed run is exclusive. A rerun is newer.
+ * A newest run that still has no order key does not replace a keyed bound.
+ * It only remembers that run so the same run does not loop.
+ */
 export const recordCiRepairNoChangeBaseline = (
   sql: SqlRunner,
   repositoryId: string,
@@ -289,8 +293,30 @@ export const recordCiRepairNoChangeBaseline = (
   Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
     const cursors = yield* loadCursors(sql, repositoryId)
+    const existing = yield* loadBaselineRows(sql, repositoryId)
     for (const cursor of cursors) {
       if (cursor.lastRunIdentity === null) {
+        continue
+      }
+      const prior = existing.find(
+        (row) => row.definitionIdentity === cursor.definitionIdentity,
+      )
+      if (cursor.lastRunOrderKey === null) {
+        yield* upsertBaseline(sql, {
+          repositoryId,
+          definitionIdentity: cursor.definitionIdentity,
+          runIdentity: prior?.runIdentity ?? cursor.lastRunIdentity,
+          orderKey: prior?.orderKey ?? null,
+          inclusive: prior?.inclusive === true,
+          floorOrderKey: prior?.floorOrderKey ?? null,
+          suppressThroughRunIdentity:
+            prior?.suppressThroughOrderKey !== null &&
+            prior?.suppressThroughOrderKey !== undefined
+              ? prior.suppressThroughRunIdentity
+              : cursor.lastRunIdentity,
+          suppressThroughOrderKey: prior?.suppressThroughOrderKey ?? null,
+          now,
+        })
         continue
       }
       yield* upsertBaseline(sql, {
@@ -312,6 +338,8 @@ export const recordCiRepairNoChangeBaseline = (
  * is known to be before the merge, even when the merge is noticed after the
  * merge-commit CI run is already the newest observation. The merge-commit
  * run and any later run are newer, so either failing starts one repair.
+ * An abandon suppress is left in place. Raising the floor to a newer stored
+ * bound would hide that merge-commit run.
  */
 export const recordCiRepairMergeFloor = (
   sql: SqlRunner,
@@ -321,6 +349,7 @@ export const recordCiRepairMergeFloor = (
   Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis
     const cursors = yield* loadCursors(sql, repositoryId)
+    const existing = yield* loadBaselineRows(sql, repositoryId)
     const seen = new Set<string>()
     for (const run of failingRuns) {
       const located = orderKeyForRun(cursors, run)
@@ -341,6 +370,9 @@ export const recordCiRepairMergeFloor = (
         continue
       }
       seen.add(definitionIdentity)
+      const prior = existing.find(
+        (row) => row.definitionIdentity === definitionIdentity,
+      )
       yield* upsertBaseline(sql, {
         repositoryId,
         definitionIdentity,
@@ -348,8 +380,8 @@ export const recordCiRepairMergeFloor = (
         orderKey: null,
         inclusive: false,
         floorOrderKey,
-        suppressThroughRunIdentity: null,
-        suppressThroughOrderKey: null,
+        suppressThroughRunIdentity: prior?.suppressThroughRunIdentity ?? null,
+        suppressThroughOrderKey: prior?.suppressThroughOrderKey ?? null,
         now,
       })
     }
@@ -362,12 +394,21 @@ const orderKeyForRun = (
   readonly definitionIdentity: string
   readonly orderKey: string | null
 } | null => {
-  const byIdentity = cursors.find(
-    (cursor) =>
-      cursor.definitionIdentity === run.definitionIdentity ||
-      cursor.latchedRunIdentity === run.runIdentity ||
-      cursor.lastRunIdentity === run.runIdentity,
-  )
+  // Definition first. Run ids can collide across definitions on GitLab and
+  // Azure, so a latched-run match must not steal another definition's key.
+  const byDefinition =
+    run.definitionIdentity === undefined
+      ? undefined
+      : cursors.find(
+          (cursor) => cursor.definitionIdentity === run.definitionIdentity,
+        )
+  const byIdentity =
+    byDefinition ??
+    cursors.find(
+      (cursor) =>
+        cursor.latchedRunIdentity === run.runIdentity ||
+        cursor.lastRunIdentity === run.runIdentity,
+    )
   const definitionIdentity =
     run.definitionIdentity ?? byIdentity?.definitionIdentity
   if (definitionIdentity === undefined) {

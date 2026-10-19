@@ -633,6 +633,8 @@ const mapObservedPipeline = (
     ),
     rawStatus,
     rawConclusion: null,
+    // Pipeline id is the order. A retry is a new pipeline, not a higher
+    // attempt. iid is the project counter and only fills the attempt slot.
     orderKey: ciGateRunOrderKey(id, iid ?? 1),
   }
 }

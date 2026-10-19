@@ -104,6 +104,40 @@ describe("CI Repair Baseline", () => {
     ).toBe(false)
   })
 
+  it("does not refuse a later keyed run after a keyless same-run suppress", () => {
+    const baseline = {
+      definitionIdentity: "build",
+      runIdentity: "10:1",
+      orderKey: null,
+      inclusive: false,
+      floorOrderKey: null,
+      suppressThroughRunIdentity: "10:1",
+      suppressThroughOrderKey: null,
+    }
+    expect(
+      failurePassesCiRepairBaseline({
+        failure: { ...failure, runIdentity: "10:1", orderKey: null },
+        baseline,
+      }),
+    ).toBe(false)
+    expect(
+      failurePassesCiRepairBaseline({
+        failure: {
+          ...failure,
+          runIdentity: "11:1",
+          orderKey: "00000000000000000011:000001",
+        },
+        baseline,
+      }),
+    ).toBe(true)
+    expect(
+      failurePassesCiRepairBaseline({
+        failure: { ...failure, runIdentity: "12:1", orderKey: null },
+        baseline,
+      }),
+    ).toBe(false)
+  })
+
   it("blocks the abandoned failure and allows a newer one", () => {
     const baseline = {
       definitionIdentity: "build",

@@ -15,6 +15,7 @@ import {
   stubLinearServiceLayer,
 } from "../src/index.js"
 import {
+  recordCiRepairAbandonSuppress,
   recordCiRepairMergeFloor,
   recordCiRepairNoChangeBaseline,
 } from "../src/lib/ci-repair-baseline.js"
@@ -825,6 +826,183 @@ describe("CI Repair Work Item lifecycle", () => {
         expect(
           yield* lifecycle.considerAutomaticCiRepair(repository.id),
         ).toBeNull()
+      }),
+    ))
+
+  it("keeps an abandon suppress when a later repair merges a lower floor", () =>
+    run(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/abandon-then-older-merge.git",
+          paused: false,
+          automaticCiRepair: true,
+          closed: true,
+          orderKey: "00000000000000000020:000001",
+          runIdentity: "20:1",
+        })
+        const abandoned = yield* lifecycle.considerAutomaticCiRepair(
+          repository.id,
+        )
+        expect(abandoned).not.toBeNull()
+        yield* recordCiRepairAbandonSuppress(
+          sql,
+          repository.id,
+          abandoned?.ciRepairFailingRuns ?? [],
+        )
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'abandoned' WHERE id = ?`,
+          [abandoned?.id],
+        )
+        yield* recordCiRepairMergeFloor(sql, repository.id, [
+          {
+            runIdentity: "10:1",
+            htmlUrl: null,
+            displayLabel: "Build",
+            definitionIdentity: "build",
+            orderKey: "00000000000000000010:000001",
+          },
+        ])
+        const stored = (yield* sql.unsafe(
+          `SELECT floor_order_key AS floorOrderKey,
+                  suppress_through_run_identity AS suppressThroughRunIdentity
+           FROM ci_repair_baseline
+           WHERE repository_id = ?`,
+          [repository.id],
+        )) as readonly {
+          readonly floorOrderKey: string | null
+          readonly suppressThroughRunIdentity: string | null
+        }[]
+        expect(stored[0]?.floorOrderKey).toBe("00000000000000000010:000001")
+        expect(stored[0]?.suppressThroughRunIdentity).toBe("20:1")
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(repository.id),
+        ).toBeNull()
+      }),
+    ))
+
+  it("leaves the prior baseline unchanged when a merge has no order key", () =>
+    run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/merge-without-key.git",
+          paused: false,
+          automaticCiRepair: false,
+          closed: true,
+          orderKey: "00000000000000000010:000001",
+        })
+        yield* recordCiRepairNoChangeBaseline(sql, repository.id)
+        yield* recordCiRepairMergeFloor(sql, repository.id, [
+          {
+            runIdentity: "9:1",
+            htmlUrl: null,
+            displayLabel: "Build",
+            definitionIdentity: "build",
+          },
+        ])
+        const stored = (yield* sql.unsafe(
+          `SELECT run_identity AS runIdentity,
+                  order_key AS orderKey
+           FROM ci_repair_baseline
+           WHERE repository_id = ?`,
+          [repository.id],
+        )) as readonly {
+          readonly runIdentity: string | null
+          readonly orderKey: string | null
+        }[]
+        expect(stored[0]?.runIdentity).toBe("10:1")
+        expect(stored[0]?.orderKey).toBe("00000000000000000010:000001")
+      }),
+    ))
+
+  it("does not let a shared run id assign another definition's order key", () =>
+    run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const db = yield* DbService
+        const repository = yield* seedRepository({
+          localPath: "/repos/acme/colliding-run.git",
+          paused: true,
+          automaticCiRepair: false,
+          closed: false,
+        })
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "main",
+          lastObservedAt: new Date("2026-10-19T06:00:00.000Z"),
+          observations: [
+            {
+              identity: "nightly",
+              lastObservedAt: new Date("2026-10-19T06:00:00.000Z"),
+              lastRunIdentity: "10:1",
+              lastRunHtmlUrl: null,
+              lastHeadSha: null,
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "push",
+              lastRawStatus: "completed",
+              lastRawConclusion: "failure",
+              lastRunCreatedAt: new Date("2026-10-19T06:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T06:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "10:1",
+              latchedRunHtmlUrl: null,
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000099:000001",
+              latchedRunOrderKey: "00000000000000000099:000001",
+              lastEarlyJobFailure: false,
+            },
+            {
+              identity: "build",
+              lastObservedAt: new Date("2026-10-19T06:00:00.000Z"),
+              lastRunIdentity: "10:1",
+              lastRunHtmlUrl: null,
+              lastHeadSha: null,
+              lastHeadRef: "refs/heads/main",
+              lastEvent: "push",
+              lastRawStatus: "completed",
+              lastRawConclusion: "failure",
+              lastRunCreatedAt: new Date("2026-10-19T06:00:00.000Z"),
+              lastRunUpdatedAt: new Date("2026-10-19T06:00:00.000Z"),
+              failureLatched: true,
+              latchedRunIdentity: "10:1",
+              latchedRunHtmlUrl: null,
+              observationError: null,
+              observationErrorKind: null,
+              lastRunOrderKey: "00000000000000000010:000001",
+              latchedRunOrderKey: "00000000000000000010:000001",
+              lastEarlyJobFailure: false,
+            },
+          ],
+          incidentsToUpsert: [],
+        })
+        yield* recordCiRepairMergeFloor(sql, repository.id, [
+          {
+            runIdentity: "10:1",
+            htmlUrl: null,
+            displayLabel: "Build",
+            definitionIdentity: "build",
+          },
+        ])
+        const stored = (yield* sql.unsafe(
+          `SELECT definition_identity AS definitionIdentity,
+                  floor_order_key AS floorOrderKey
+           FROM ci_repair_baseline
+           WHERE repository_id = ?
+           ORDER BY definition_identity`,
+          [repository.id],
+        )) as readonly {
+          readonly definitionIdentity: string
+          readonly floorOrderKey: string | null
+        }[]
+        expect(stored).toEqual([
+          {
+            definitionIdentity: "build",
+            floorOrderKey: "00000000000000000010:000001",
+          },
+        ])
       }),
     ))
 
