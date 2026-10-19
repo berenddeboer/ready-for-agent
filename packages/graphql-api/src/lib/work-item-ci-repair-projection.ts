@@ -41,7 +41,7 @@ const toGraphqlAuthorization = (
  * Item crosses a Closed gate by origin, so the authorize action stays
  * unavailable regardless of lifecycle state or gate state.
  */
-export const ciGateBypassCanAuthorize = (input: {
+const ciGateBypassCanAuthorize = (input: {
   readonly origin: WorkItemRecord["origin"]
   readonly unfinished: boolean
   readonly gateStatus: ReturnType<typeof deriveRepositoryCiGateStatus>
