@@ -1,253 +1,126 @@
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import { Duration, Effect } from "effect"
 import {
   hasOpencodeTaskSubagentActivity,
   observeOpencodeStartupActivity,
 } from "../src/lib/startup-activity.js"
-import { Database } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 
-const createFixtureDb = (dir: string): string => {
-  const path = join(dir, "opencode.db")
-  const db = new Database(path)
-  db.exec(`
-    CREATE TABLE session (
-      id text PRIMARY KEY,
-      project_id text NOT NULL DEFAULT 'proj',
-      parent_id text,
-      slug text NOT NULL DEFAULT 'slug',
-      directory text NOT NULL DEFAULT '/tmp',
-      title text NOT NULL DEFAULT 'title',
-      version text NOT NULL DEFAULT '1',
-      time_created integer NOT NULL,
-      time_updated integer NOT NULL
-    );
-    CREATE TABLE part (
-      id text PRIMARY KEY,
-      message_id text NOT NULL DEFAULT 'msg',
-      session_id text NOT NULL,
-      time_created integer NOT NULL,
-      time_updated integer NOT NULL,
-      data text NOT NULL
-    );
-  `)
-  db.close()
-  return path
-}
-
-const insertSession = (
-  dbPath: string,
-  row: {
-    readonly id: string
-    readonly parentId?: string
-    readonly timeCreated: number
-    readonly timeUpdated: number
-  },
-): void => {
-  const db = new Database(dbPath)
-  db.query(
-    `INSERT INTO session (id, parent_id, time_created, time_updated)
-     VALUES (?, ?, ?, ?)`,
-  ).run(row.id, row.parentId ?? null, row.timeCreated, row.timeUpdated)
-  db.close()
-}
-
-const insertPart = (
-  dbPath: string,
-  row: {
-    readonly id: string
-    readonly sessionId: string
-    readonly timeCreated: number
-    readonly data: string
-  },
-): void => {
-  const db = new Database(dbPath)
-  db.query(
-    `INSERT INTO part (id, session_id, time_created, time_updated, data)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(row.id, row.sessionId, row.timeCreated, row.timeCreated, row.data)
-  db.close()
-}
+const page = (data: ReadonlyArray<unknown>) => ({
+  data,
+  cursor: { previous: null, next: null },
+})
 
 describe("hasOpencodeTaskSubagentActivity", () => {
-  test("returns false when the database is missing", () => {
-    expect(
-      hasOpencodeTaskSubagentActivity(
-        join(tmpdir(), "no-such-opencode-startup.db"),
-        "ses_parent",
-        Date.now(),
-      ),
-    ).toBe(false)
+  test("detects a child session created after the turn started", async () => {
+    const startedAfterMs = 1_000
+    const active = await hasOpencodeTaskSubagentActivity({
+      sessionId: "ses_parent",
+      startedAfterMs,
+      reader: {
+        getServerInfo: async () => ({ version: "2.0.32" }),
+        getSession: async () => {
+          throw new Error("startup must not load the parent transcript")
+        },
+        listChildren: async () =>
+          page([
+            {
+              id: "ses_child",
+              parentID: "ses_parent",
+              time: {
+                created: startedAfterMs + 50,
+                updated: startedAfterMs + 50,
+              },
+            },
+          ]),
+        listMessages: async () => page([]),
+      },
+    })
+    expect(active).toBe(true)
   })
 
-  test("detects a child session created after the turn started", () => {
-    const dir = mkdtempSync(join(tmpdir(), "opencode-startup-"))
-    try {
-      const dbPath = createFixtureDb(dir)
-      const startedAfterMs = 1_000
-      insertSession(dbPath, {
-        id: "ses_parent",
-        timeCreated: 100,
-        timeUpdated: 100,
-      })
-      insertSession(dbPath, {
-        id: "ses_child",
-        parentId: "ses_parent",
-        timeCreated: startedAfterMs + 50,
-        timeUpdated: startedAfterMs + 50,
-      })
-      expect(
-        hasOpencodeTaskSubagentActivity(dbPath, "ses_parent", startedAfterMs),
-      ).toBe(true)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+  test("ignores historical child sessions and time_updated-only changes", async () => {
+    const startedAfterMs = 5_000
+    const active = await hasOpencodeTaskSubagentActivity({
+      sessionId: "ses_parent",
+      startedAfterMs,
+      reader: {
+        getServerInfo: async () => ({ version: "2.0.32" }),
+        getSession: async () => ({}),
+        listChildren: async () =>
+          page([
+            {
+              id: "ses_old_child",
+              parentID: "ses_parent",
+              time: { created: 100, updated: startedAfterMs + 10 },
+            },
+          ]),
+        listMessages: async () => page([]),
+      },
+    })
+    expect(active).toBe(false)
   })
 
-  test("ignores historical child sessions from earlier turns", () => {
-    const dir = mkdtempSync(join(tmpdir(), "opencode-startup-"))
-    try {
-      const dbPath = createFixtureDb(dir)
-      const startedAfterMs = 5_000
-      insertSession(dbPath, {
-        id: "ses_parent",
-        timeCreated: 100,
-        timeUpdated: 100,
-      })
-      insertSession(dbPath, {
-        id: "ses_old_child",
-        parentId: "ses_parent",
-        timeCreated: 200,
-        timeUpdated: 300,
-      })
-      expect(
-        hasOpencodeTaskSubagentActivity(dbPath, "ses_parent", startedAfterMs),
-      ).toBe(false)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+  test("detects a parent task tool created after the turn started", async () => {
+    const startedAfterMs = 2_000
+    const active = await hasOpencodeTaskSubagentActivity({
+      sessionId: "ses_parent",
+      startedAfterMs,
+      reader: {
+        getServerInfo: async () => ({ version: "2.0.32" }),
+        getSession: async () => ({}),
+        listChildren: async () => page([]),
+        listMessages: async () =>
+          page([
+            {
+              id: "msg_asst",
+              type: "assistant",
+              time: { created: startedAfterMs + 20 },
+              content: [
+                {
+                  type: "tool",
+                  name: "task",
+                  state: { status: "running", input: { prompt: "secret" } },
+                  time: { created: startedAfterMs + 20 },
+                },
+              ],
+            },
+          ]),
+      },
+    })
+    expect(active).toBe(true)
   })
 
-  test("ignores a historical child whose time_updated advances after the turn started", () => {
-    const dir = mkdtempSync(join(tmpdir(), "opencode-startup-"))
-    try {
-      const dbPath = createFixtureDb(dir)
-      const startedAfterMs = 5_000
-      insertSession(dbPath, {
-        id: "ses_parent",
-        timeCreated: 100,
-        timeUpdated: 100,
-      })
-      // Old child created long before the turn; bookkeeping bumps time_updated.
-      insertSession(dbPath, {
-        id: "ses_old_child",
-        parentId: "ses_parent",
-        timeCreated: 200,
-        timeUpdated: startedAfterMs + 500,
-      })
-      expect(
-        hasOpencodeTaskSubagentActivity(dbPath, "ses_parent", startedAfterMs),
-      ).toBe(false)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  test("detects a parent task part created after the turn started", () => {
-    const dir = mkdtempSync(join(tmpdir(), "opencode-startup-"))
-    try {
-      const dbPath = createFixtureDb(dir)
-      const startedAfterMs = 1_000
-      insertSession(dbPath, {
-        id: "ses_parent",
-        timeCreated: 100,
-        timeUpdated: 100,
-      })
-      insertPart(dbPath, {
-        id: "prt_task",
-        sessionId: "ses_parent",
-        timeCreated: startedAfterMs + 10,
-        data: JSON.stringify({
-          type: "tool",
-          tool: "task",
-          state: { status: "running", input: { command: "review" } },
-        }),
-      })
-      expect(
-        hasOpencodeTaskSubagentActivity(dbPath, "ses_parent", startedAfterMs),
-      ).toBe(true)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  test("detects a parent subtask part created after the turn started", () => {
-    const dir = mkdtempSync(join(tmpdir(), "opencode-startup-"))
-    try {
-      const dbPath = createFixtureDb(dir)
-      const startedAfterMs = 1_000
-      insertPart(dbPath, {
-        id: "prt_subtask",
-        sessionId: "ses_parent",
-        timeCreated: startedAfterMs + 5,
-        data: JSON.stringify({
-          type: "subtask",
-          command: "review",
-          agent: "build",
-        }),
-      })
-      expect(
-        hasOpencodeTaskSubagentActivity(dbPath, "ses_parent", startedAfterMs),
-      ).toBe(true)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+  test("probe errors are not activity", async () => {
+    const active = await hasOpencodeTaskSubagentActivity({
+      sessionId: "ses_parent",
+      startedAfterMs: 1,
+      reader: {
+        getServerInfo: async () => ({ version: "2.0.32" }),
+        getSession: async () => ({}),
+        listChildren: async () => {
+          throw new Error("network")
+        },
+        listMessages: async () => page([]),
+      },
+    })
+    expect(active).toBe(false)
   })
 })
 
 describe("observeOpencodeStartupActivity", () => {
-  test("succeeds once a child session appears after the turn started", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "opencode-startup-obs-"))
-    try {
-      const dbPath = createFixtureDb(dir)
-      const startedAfterMs = Date.now()
-      insertSession(dbPath, {
-        id: "ses_parent",
-        timeCreated: startedAfterMs - 10_000,
-        timeUpdated: startedAfterMs - 10_000,
-      })
-
-      const observe = observeOpencodeStartupActivity({
+  test("polls until the probe reports activity and keeps the timeout seam", async () => {
+    let polls = 0
+    await Effect.runPromise(
+      observeOpencodeStartupActivity({
         sessionId: "ses_parent",
-        startedAfterMs,
-        resolveDbPath: () => dbPath,
-        pollInterval: Duration.millis(30),
-      })
-
-      // Seed the child shortly after the poller starts.
-      const seed = Effect.gen(function* () {
-        yield* Effect.sleep(Duration.millis(40))
-        insertSession(dbPath, {
-          id: "ses_child_live",
-          parentId: "ses_parent",
-          timeCreated: Date.now(),
-          timeUpdated: Date.now(),
-        })
-      })
-
-      await Effect.runPromise(
-        Effect.all([observe, seed], { concurrency: 2 }).pipe(
-          Effect.timeoutOrElse({
-            duration: Duration.seconds(2),
-            orElse: () =>
-              Effect.die(new Error("observeOpencodeStartupActivity timed out")),
-          }),
-        ),
-      )
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+        startedAfterMs: 10,
+        pollInterval: Duration.millis(5),
+        probe: () => {
+          polls += 1
+          return polls >= 2
+        },
+      }).pipe(Effect.timeout("1 second")),
+    )
+    expect(polls).toBeGreaterThanOrEqual(2)
   })
 })

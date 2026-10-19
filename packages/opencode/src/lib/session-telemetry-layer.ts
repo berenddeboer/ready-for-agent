@@ -32,10 +32,11 @@ const toSessionTelemetry = (session: OpencodeSession): SessionTelemetry => ({
   cost: session.cost,
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
+  ...(session.diagnostic === null ? {} : { diagnostic: session.diagnostic }),
 })
 
 /**
- * Expose OpenCode live SQLite Session Telemetry through the generic provider.
+ * Expose OpenCode V2 Session Telemetry through the generic provider.
  */
 export const OpencodeSessionTelemetryLive = (
   options: OpencodeSessionStoreOptions = {},

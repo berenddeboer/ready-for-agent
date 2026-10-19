@@ -42,6 +42,11 @@ export type AgentTurnTail = {
   readonly backend: AgentBackendDescriptor
   readonly items: ReadonlyArray<AgentTurnTailItem>
   readonly jumpHint: boolean
+  /**
+   * Actionable detail when availability is unavailable. Omitted by backends
+   * that have no extra detail, so existing equality checks stay stable.
+   */
+  readonly diagnostic?: string | null
 }
 
 const lastUserIndex = (
@@ -96,11 +101,15 @@ export const makeAgentTurnTail = (input: {
   readonly availability: AgentTurnTailAvailability
   readonly backend: AgentBackendDescriptor
   readonly items: ReadonlyArray<AgentTurnTailItem>
+  readonly diagnostic?: string | null
 }): AgentTurnTail => ({
   availability: input.availability,
   backend: input.backend,
   items: input.items,
   jumpHint: input.availability === "available" && input.items.length === 0,
+  ...(input.diagnostic === undefined || input.diagnostic === null
+    ? {}
+    : { diagnostic: input.diagnostic }),
 })
 
 export const unsupportedAgentTurnTail = (

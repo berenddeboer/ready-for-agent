@@ -1078,6 +1078,7 @@ describe("Job worker", () => {
             cost: null,
             createdAt: null,
             updatedAt: null,
+            diagnostic: null,
           }),
         getTail: () =>
           Effect.succeed({

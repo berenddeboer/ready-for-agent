@@ -315,6 +315,7 @@ const toGraphqlSession = (
   cost: session.cost,
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
+  diagnostic: session.diagnostic ?? null,
   agentTurnTailSupported,
 })
 
@@ -340,6 +341,7 @@ const toGraphqlAgentTurnTail = (tail: AgentTurnTail) => ({
   backend: toGraphqlBackend(tail.backend),
   items: tail.items.map(toGraphqlAgentTurnTailItem),
   jumpHint: tail.jumpHint,
+  diagnostic: tail.diagnostic ?? null,
 })
 
 const agentTurnTailSupportedFor = (backendId: string): boolean => {

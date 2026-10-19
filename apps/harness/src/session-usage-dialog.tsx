@@ -37,6 +37,7 @@ const sessionQuery = (workItemId: string) => ({
         cost: true,
         createdAt: true,
         updatedAt: true,
+        diagnostic: true,
         agentTurnTailSupported: true,
       },
     })
@@ -53,6 +54,7 @@ const agentTurnTailQuery = (workItemId: string) => ({
         availability: true,
         backend: { id: true, label: true },
         jumpHint: true,
+        diagnostic: true,
         items: {
           __typename: true,
           on_AgentTurnTailAssistantText: {
@@ -220,8 +222,8 @@ export function SessionUsageDialog({
               tag="Session"
               role="status"
             >
-              {session.data.backend.label} Session Telemetry is temporarily
-              unavailable. Retry in a moment.
+              {session.data.diagnostic ??
+                `${session.data.backend.label} Session Telemetry is temporarily unavailable. Retry in a moment.`}
             </Banner>
             <button
               type="button"
@@ -410,7 +412,8 @@ function AgentTurnTailPanel({
         tag="Session"
         role="status"
       >
-        {data.backend.label} Agent Turn Tail is temporarily unavailable.
+        {data.diagnostic ??
+          `${data.backend.label} Agent Turn Tail is temporarily unavailable. Retry in a moment.`}
       </Banner>
     )
   }

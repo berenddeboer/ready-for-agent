@@ -754,36 +754,6 @@ describe("Opencode AgentBackend adapter", () => {
       },
     })
 
-    const fixtureDir = mkdtempSync(join(tmpdir(), "opencode-review-startup-"))
-    const dbPath = join(fixtureDir, "opencode.db")
-    const db = new Database(dbPath)
-    db.exec(`
-      CREATE TABLE session (
-        id text PRIMARY KEY,
-        project_id text NOT NULL DEFAULT 'proj',
-        parent_id text,
-        slug text NOT NULL DEFAULT 'slug',
-        directory text NOT NULL DEFAULT '/tmp',
-        title text NOT NULL DEFAULT 'title',
-        version text NOT NULL DEFAULT '1',
-        time_created integer NOT NULL,
-        time_updated integer NOT NULL
-      );
-      CREATE TABLE part (
-        id text PRIMARY KEY,
-        message_id text NOT NULL DEFAULT 'msg',
-        session_id text NOT NULL,
-        time_created integer NOT NULL,
-        time_updated integer NOT NULL,
-        data text NOT NULL
-      );
-    `)
-    const parentCreated = Date.now() - 60_000
-    db.query(
-      `INSERT INTO session (id, time_created, time_updated) VALUES (?, ?, ?)`,
-    ).run("ses_review_parent", parentCreated, parentCreated)
-    db.close()
-
     const directory = await mkdtemp(join(tmpdir(), "opencode-review-silent-"))
     const binaryPath = join(directory, "opencode")
     try {
@@ -803,19 +773,12 @@ describe("Opencode AgentBackend adapter", () => {
       )
       await chmod(binaryPath, 0o700)
 
-      // Seed child-session activity shortly after spawn so the OpenCode
-      // adapter's observeStartup probe disarms the startup watchdog.
+      // Child-session activity appears shortly after spawn so the V2 startup
+      // probe disarms the watchdog while parent stdout is still silent.
+      let startupActive = false
       const seedChild = async () => {
         await Bun.sleep(40)
-        const live = new Database(dbPath)
-        const now = Date.now()
-        live
-          .query(
-            `INSERT INTO session (id, parent_id, time_created, time_updated)
-             VALUES (?, ?, ?, ?)`,
-          )
-          .run("ses_review_child", "ses_review_parent", now, now)
-        live.close()
+        startupActive = true
       }
       void seedChild()
 
@@ -836,7 +799,7 @@ describe("Opencode AgentBackend adapter", () => {
             Opencode.layer({
               binary: binaryPath,
               keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
-              startupActivityDbPath: dbPath,
+              startupActivityProbe: () => startupActive,
               // Past seed (40ms) and default poll (100ms); before parent stdout.
               startupTimeout: "500 millis",
             }).pipe(Layer.provide(BunServices.layer)),
@@ -850,81 +813,46 @@ describe("Opencode AgentBackend adapter", () => {
       })
     } finally {
       await rm(directory, { recursive: true, force: true })
-      rmSync(fixtureDir, { recursive: true, force: true })
     }
   })
 
   it("still fails startup when a known session has no task subagent activity", async () => {
-    const fixtureDir = mkdtempSync(join(tmpdir(), "opencode-review-hang-"))
-    const dbPath = join(fixtureDir, "opencode.db")
-    const db = new Database(dbPath)
-    db.exec(`
-      CREATE TABLE session (
-        id text PRIMARY KEY,
-        project_id text NOT NULL DEFAULT 'proj',
-        parent_id text,
-        slug text NOT NULL DEFAULT 'slug',
-        directory text NOT NULL DEFAULT '/tmp',
-        title text NOT NULL DEFAULT 'title',
-        version text NOT NULL DEFAULT '1',
-        time_created integer NOT NULL,
-        time_updated integer NOT NULL
-      );
-      CREATE TABLE part (
-        id text PRIMARY KEY,
-        message_id text NOT NULL DEFAULT 'msg',
-        session_id text NOT NULL,
-        time_created integer NOT NULL,
-        time_updated integer NOT NULL,
-        data text NOT NULL
-      );
-    `)
-    const parentCreated = Date.now() - 60_000
-    db.query(
-      `INSERT INTO session (id, time_created, time_updated) VALUES (?, ?, ?)`,
-    ).run("ses_hang_parent", parentCreated, parentCreated)
-    db.close()
-
     await withExecutable(
       'case " $* " in *"/model "*|*"/interrupt"*) exit 0 ;; esac\nsleep 100',
       async (binary) => {
-        try {
-          const error = await Effect.runPromise(
-            Effect.gen(function* () {
-              const backend = yield* AgentBackend
-              return yield* backend.continueTurn({
-                sessionId: "ses_hang_parent",
-                cwd: process.cwd(),
-                prompt: "Review uncommitted worktree changes.",
-                model: "test/model",
-                thinkingLevel: "test",
-                command: "/review",
-                timeout: "30 seconds",
-              })
-            }).pipe(
-              Effect.provide(
-                Opencode.layer({
-                  binary,
-                  keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
-                  startupActivityDbPath: dbPath,
-                  startupTimeout: "200 millis",
-                }).pipe(Layer.provide(BunServices.layer)),
-              ),
-              Effect.flip,
-            ),
-          )
-          expect(error).toEqual(
-            new AgentBackendStartupTimeoutError({
-              cwd: process.cwd(),
-              startupTimeoutMs: 200,
+        const error = await Effect.runPromise(
+          Effect.gen(function* () {
+            const backend = yield* AgentBackend
+            return yield* backend.continueTurn({
               sessionId: "ses_hang_parent",
+              cwd: process.cwd(),
+              prompt: "Review uncommitted worktree changes.",
               model: "test/model",
-              attemptCount: 2,
-            }),
-          )
-        } finally {
-          rmSync(fixtureDir, { recursive: true, force: true })
-        }
+              thinkingLevel: "test",
+              command: "/review",
+              timeout: "30 seconds",
+            })
+          }).pipe(
+            Effect.provide(
+              Opencode.layer({
+                binary,
+                keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+                startupActivityProbe: () => false,
+                startupTimeout: "200 millis",
+              }).pipe(Layer.provide(BunServices.layer)),
+            ),
+            Effect.flip,
+          ),
+        )
+        expect(error).toEqual(
+          new AgentBackendStartupTimeoutError({
+            cwd: process.cwd(),
+            startupTimeoutMs: 200,
+            sessionId: "ses_hang_parent",
+            model: "test/model",
+            attemptCount: 2,
+          }),
+        )
       },
     )
   })
@@ -959,7 +887,7 @@ describe("Opencode AgentBackend adapter", () => {
                 Opencode.layer({
                   binary,
                   keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
-                  startupActivityDbPath: join(directory, "unused.db"),
+                  startupActivityProbe: () => false,
                   startupTimeout: "200 millis",
                 }).pipe(Layer.provide(BunServices.layer)),
               ),

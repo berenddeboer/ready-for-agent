@@ -1,0 +1,13 @@
+# OpenCode Session Telemetry uses the V2 API
+
+Supersedes the OpenCode SQLite sentence in [ADR 0033](0033-backend-scoped-optional-session-telemetry.md) for Session Telemetry, Agent Turn Tail, and startup-activity detection.
+
+OpenCode 2 no longer supports `opencode db path`. Session Telemetry, Agent Turn Tail, and startup-activity detection read the experimental V2 HTTP API through `@opencode/client` 2.x. They use the same local service discovery and authentication as agent execution (`Service.discover` plus `Service.headers`), or the same configured explicit server. Reads do not start the service and do not launch Agent Turns. There is no V1 database fallback and no hardcoded database path.
+
+Accounting uses `GET /api/session/{sessionID}` `Session.Info`: model, variant as Thinking Level, token rollup (input, output, reasoning, cache read/write), cost, and created/updated timestamps. That rollup matches the V2 session record. Summing currently listed assistant messages under-counts compacted history, so message totals are not used. Child sessions stay out of the parent total, matching the previous session-row read. Agent Turn Tail walks bounded newest-first message pages until the latest user message, keeps assistant text and tool name/status, and drops tool payloads and child-session transcripts. Startup activity is a child session or a parent `task`/`subtask` part created at or after the turn spawn. Probe errors do not disarm the startup window; the existing timeout still applies.
+
+A missing session is `MISSING`. Transport failures are transient `UNAVAILABLE` and Retry can recover. Authentication failures and an unsupported server version or response shape are persistent `UNAVAILABLE` with an actionable diagnostic that is not described only as a transient retry. Diagnostics do not include credentials or transcript contents.
+
+Supported servers are OpenCode 2.x compatible with `@opencode/client` 2.x. The API is experimental. A contract check fails when an installed OpenCode cannot confirm that contract, instead of treating a failed lookup as success.
+
+Session-model reassertion still writes the on-disk session record. That write path is outside this decision.
