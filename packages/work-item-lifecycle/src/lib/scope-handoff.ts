@@ -1,5 +1,6 @@
 import { join } from "node:path"
 import { Effect, FileSystem } from "effect"
+import { workItemOriginPolicy } from "@ready-for-agent/lifecycle-model"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { promptUserContentSection } from "./sanitize-prompt-user-content.js"
 
@@ -23,9 +24,11 @@ export const loadScopeHandoff = (
         path,
         [
           `# Scope for Work Item ${context.workItemId}`,
-          context.origin === "ci_repair"
-            ? "Issue: none. This is a CI Repair Work Item. Do not create or close an Issue."
-            : `Issue: ${context.issueSource?.url ?? `${context.repositoryId}#${context.issueNumber}`}`,
+          workItemOriginPolicy(context.origin).scopeIssueLine({
+            issueUrl: context.issueSource?.url ?? null,
+            repositoryId: context.repositoryId,
+            issueNumber: context.issueNumber,
+          }),
           "",
           "## Agreed requirements",
           "Not yet summarized. Read the Issue and explicit operator decisions in this Session.",

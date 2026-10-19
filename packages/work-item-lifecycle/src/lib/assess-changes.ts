@@ -5,6 +5,7 @@ import {
   agentBackendLabel,
   spawnOwned,
 } from "@ready-for-agent/agent-backend"
+import { workItemOriginPolicy } from "@ready-for-agent/lifecycle-model"
 import {
   AssessChangesInvalidWorktreeContextError,
   AssessChangesOpenCodeError,
@@ -201,10 +202,12 @@ const confirmNoObservableChange = (
   sessionId: string,
 ) =>
   Effect.gen(function* () {
-    const ciRepair = context.origin === "ci_repair"
-    const prompt = ciRepair
-      ? buildCiRepairNoChangeConfirmationPrompt()
-      : buildNoChangeConfirmationPrompt()
+    const confirmsIssue = workItemOriginPolicy(
+      context.origin,
+    ).noChangeConfirmsIssue
+    const prompt = confirmsIssue
+      ? buildNoChangeConfirmationPrompt()
+      : buildCiRepairNoChangeConfirmationPrompt()
 
     const agentBackend = yield* AgentBackend
     const result = yield* agentBackend
@@ -231,7 +234,7 @@ const confirmNoObservableChange = (
         ),
       )
 
-    if (ciRepair) {
+    if (!confirmsIssue) {
       const parsed = parseCiRepairNoChangeResult(result.assistantText)
       if (parsed === null) {
         return yield* new AssessChangesResultError({

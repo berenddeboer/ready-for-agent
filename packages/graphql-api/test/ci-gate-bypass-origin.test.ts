@@ -1,11 +1,14 @@
-import { WORK_ITEM_STATES } from "@ready-for-agent/lifecycle-model"
+import {
+  WORK_ITEM_STATES,
+  type WorkItemOrigin,
+} from "@ready-for-agent/lifecycle-model"
 import { projectWorkItemCiRepair } from "../src/lib/work-item-ci-repair-projection.js"
 import { describe, expect, test } from "bun:test"
 
 const gateStatuses = ["disabled", "open", "closed", "degraded"] as const
 
 const project = (input: {
-  readonly origin: "issue" | "ci_repair"
+  readonly origin: WorkItemOrigin
   readonly state: (typeof WORK_ITEM_STATES)[number]
   readonly failureCode?: string | null
   readonly gateStatus: (typeof gateStatuses)[number]

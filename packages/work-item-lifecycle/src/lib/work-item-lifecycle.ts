@@ -53,8 +53,10 @@ import {
   type IssueSource,
   type IssueTracker,
   OperationalLifecycleStep as OperationalLifecycleStepSchema,
+  type WorkItemOrigin,
   type WorkItemPredicateShape,
   competingPullRequestIdentity,
+  decodeWorkItemOrigin,
   defaultIssueTrackerForForge,
   evaluateActionableIssue,
   evaluateImplementableIssue,
@@ -65,6 +67,7 @@ import {
   isForge,
   isIssueTracker,
   persistedIssueIdentity,
+  workItemOriginPolicy,
 } from "@ready-for-agent/lifecycle-model"
 import {
   LinearExecutionNotSupportedError,
@@ -940,53 +943,76 @@ const toIssueSource = (row: WorkItemRow): IssueSource => {
   }
 }
 
-const decodeWorkItemOrigin = (
-  origin: string | null | undefined,
-): WorkItemRecord["origin"] => (origin === "ci_repair" ? "ci_repair" : "issue")
+const storedOrigin = (origin: unknown) =>
+  decodeWorkItemOrigin(origin).pipe(
+    Effect.mapError(
+      (error) =>
+        new WorkItemLifecycleDatabaseError({
+          message: `Work Item origin ${error.value} is not a known value`,
+          cause: error,
+        }),
+    ),
+  )
+
+const confirmedMergeNextState = (row: WorkItemRow) =>
+  storedOrigin(row.origin).pipe(
+    Effect.map((origin) =>
+      nextStateAfterConfirmedMerge({
+        origin,
+        issueSource: toIssueSource(row),
+      }),
+    ),
+  )
 
 const toWorkItemRecord = (
   row: WorkItemRow,
   stepRuns: readonly StepRunRecord[],
   nowMs: number,
-): WorkItemRecord => ({
-  id: row.id as WorkItemId,
-  repositoryId: row.repository_id,
-  origin: decodeWorkItemOrigin(row.origin),
-  ciRepairDefaultBranch: row.ci_repair_default_branch ?? null,
-  ciRepairHeadSha: row.ci_repair_head_sha ?? null,
-  ciRepairFailingRuns: parseCiRepairFailingRuns(row.ci_repair_failing_runs),
-  issueNumber: row.issue_number,
-  issueSource: toIssueSource(row),
-  issueTitle: row.issue_title,
-  pullRequestNumber: row.pull_request_number,
-  agentBackend: row.agent_backend,
-  executionProfile: decodeExecutionProfile(row),
-  state: row.state,
-  stateReadyAt: new Date(row.state_ready_at),
-  paused: Boolean(row.paused),
-  waitingSince:
-    row.waiting_since === null || row.waiting_since === undefined
-      ? null
-      : new Date(row.waiting_since),
-  waitingForBlockers: Boolean(row.waiting_for_blockers),
-  waitingForCiRepair: Boolean(row.waiting_for_ci_repair),
-  mergeMode: decodeMergeMode(row.merge_mode),
-  autoMergeOverride: decodeWorkItemAutoMergeOverride(row.auto_merge_override),
-  holdsWorkerSlot: Boolean(row.holds_worker_slot),
-  pauseBeforeStep: row.pause_before_step,
-  worktreePath: row.worktree_path,
-  startingCommitOid: row.starting_commit_oid,
-  completionSummary: row.completion_summary,
-  publicationTitle: row.publication_title,
-  publicationBody: row.publication_body,
-  sessionId: row.session_id,
-  failureCode: row.failure_code,
-  failureMessage: row.failure_message,
-  createdAt: new Date(row.created_at),
-  updatedAt: new Date(row.updated_at),
-  stateResidenceMs: Math.max(0, nowMs - row.state_ready_at),
-  stepRuns,
-})
+): Effect.Effect<WorkItemRecord, WorkItemLifecycleDatabaseError> =>
+  Effect.gen(function* () {
+    const origin = yield* storedOrigin(row.origin)
+    return {
+      id: row.id as WorkItemId,
+      repositoryId: row.repository_id,
+      origin,
+      ciRepairDefaultBranch: row.ci_repair_default_branch ?? null,
+      ciRepairHeadSha: row.ci_repair_head_sha ?? null,
+      ciRepairFailingRuns: parseCiRepairFailingRuns(row.ci_repair_failing_runs),
+      issueNumber: row.issue_number,
+      issueSource: toIssueSource(row),
+      issueTitle: row.issue_title,
+      pullRequestNumber: row.pull_request_number,
+      agentBackend: row.agent_backend,
+      executionProfile: decodeExecutionProfile(row),
+      state: row.state,
+      stateReadyAt: new Date(row.state_ready_at),
+      paused: Boolean(row.paused),
+      waitingSince:
+        row.waiting_since === null || row.waiting_since === undefined
+          ? null
+          : new Date(row.waiting_since),
+      waitingForBlockers: Boolean(row.waiting_for_blockers),
+      waitingForCiRepair: Boolean(row.waiting_for_ci_repair),
+      mergeMode: decodeMergeMode(row.merge_mode),
+      autoMergeOverride: decodeWorkItemAutoMergeOverride(
+        row.auto_merge_override,
+      ),
+      holdsWorkerSlot: Boolean(row.holds_worker_slot),
+      pauseBeforeStep: row.pause_before_step,
+      worktreePath: row.worktree_path,
+      startingCommitOid: row.starting_commit_oid,
+      completionSummary: row.completion_summary,
+      publicationTitle: row.publication_title,
+      publicationBody: row.publication_body,
+      sessionId: row.session_id,
+      failureCode: row.failure_code,
+      failureMessage: row.failure_message,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+      stateResidenceMs: Math.max(0, nowMs - row.state_ready_at),
+      stepRuns,
+    }
+  })
 
 const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, origin, ci_repair_default_branch,
                    ci_repair_head_sha, ci_repair_failing_runs,
@@ -1732,16 +1758,16 @@ export const shouldCompleteParkedAttentionWhenIssueNoLongerRelevant = (input: {
     readonly nativeId?: string
     readonly state: string
   }[]
-  readonly origin?: string | null
+  readonly origin?: WorkItemOrigin
 }): boolean =>
-  input.origin === "ci_repair"
-    ? false
-    : isParkedAttentionWithoutOwnedPr(input) &&
+  workItemOriginPolicy(input.origin).completesWhenIssueNoLongerRelevant
+    ? isParkedAttentionWithoutOwnedPr(input) &&
       issueIsNoLongerRelevant(
         input.issues,
         input.issueNumber,
         input.issueNativeId,
       )
+    : false
 
 /** Operator-visible reason when Issue is closed/missing and PR was closed unmerged. */
 export const formatIssueClosedPrClosedUnmergedMessage = (
@@ -1966,7 +1992,7 @@ export const makeWorkItemLifecycleLive = (
         }
 
         const stepRunsByWorkItem = yield* loadStepRuns([row.id], nowMs)
-        return toWorkItemRecord(
+        return yield* toWorkItemRecord(
           row,
           stepRunsByWorkItem.get(row.id) ?? [],
           nowMs,
@@ -1998,9 +2024,17 @@ export const makeWorkItemLifecycleLive = (
           rows.map((row) => row.id),
           nowMs,
         )
-        return rows.map((row) =>
-          toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? [], nowMs),
-        )
+        const records = []
+        for (const row of rows) {
+          records.push(
+            yield* toWorkItemRecord(
+              row,
+              stepRunsByWorkItem.get(row.id) ?? [],
+              nowMs,
+            ),
+          )
+        }
+        return records
       })
 
       const listWorkItemsForRepository = Effect.fn(
@@ -2021,9 +2055,17 @@ export const makeWorkItemLifecycleLive = (
           rows.map((row) => row.id),
           nowMs,
         )
-        return rows.map((row) =>
-          toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? [], nowMs),
-        )
+        const records = []
+        for (const row of rows) {
+          records.push(
+            yield* toWorkItemRecord(
+              row,
+              stepRunsByWorkItem.get(row.id) ?? [],
+              nowMs,
+            ),
+          )
+        }
+        return records
       })
 
       /**
@@ -2077,10 +2119,18 @@ export const makeWorkItemLifecycleLive = (
           rows.map((row) => row.id),
           nowMs,
         )
+        const items = []
+        for (const row of rows) {
+          items.push(
+            yield* toWorkItemRecord(
+              row,
+              stepRunsByWorkItem.get(row.id) ?? [],
+              nowMs,
+            ),
+          )
+        }
         return {
-          items: rows.map((row) =>
-            toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? [], nowMs),
-          ),
+          items,
           page,
           pageSize,
           totalCount,
@@ -3033,8 +3083,12 @@ export const makeWorkItemLifecycleLive = (
             .pipe(Effect.mapError(toDatabaseError))) as readonly {
             readonly origin: string | null
           }[]
-          if (originRows[0]?.origin === "ci_repair") {
-            return false
+          const stored = originRows[0]
+          if (stored !== undefined) {
+            const origin = yield* storedOrigin(stored.origin)
+            if (!workItemOriginPolicy(origin).heldForClosedCiGate) {
+              return false
+            }
           }
           if (
             isExemptFromClosedCiGateAdmissionHold({
@@ -3298,21 +3352,24 @@ export const makeWorkItemLifecycleLive = (
           readonly nativeId?: string
           readonly state: string
         }[],
-      ): boolean =>
-        shouldCompleteParkedAttentionWhenIssueNoLongerRelevant({
-          state: workItem.state,
-          paused: Boolean(workItem.paused),
-          waitingForBlockers: Boolean(workItem.waiting_for_blockers),
-          waitingForCiRepair: Boolean(workItem.waiting_for_ci_repair),
-          waitingSince: workItem.waiting_since,
-          pullRequestNumber: workItem.pull_request_number,
-          failureCode: workItem.failure_code,
-          latestStatus: latest?.status,
-          hasActiveStepRun,
-          issueNumber: workItem.issue_number,
-          issueNativeId: workItem.issue_native_id,
-          issues,
-          origin: workItem.origin,
+      ): Effect.Effect<boolean, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const origin = yield* storedOrigin(workItem.origin)
+          return shouldCompleteParkedAttentionWhenIssueNoLongerRelevant({
+            state: workItem.state,
+            paused: Boolean(workItem.paused),
+            waitingForBlockers: Boolean(workItem.waiting_for_blockers),
+            waitingForCiRepair: Boolean(workItem.waiting_for_ci_repair),
+            waitingSince: workItem.waiting_since,
+            pullRequestNumber: workItem.pull_request_number,
+            failureCode: workItem.failure_code,
+            latestStatus: latest?.status,
+            hasActiveStepRun,
+            issueNumber: workItem.issue_number,
+            issueNativeId: workItem.issue_native_id,
+            issues,
+            origin,
+          })
         })
 
       const loadLatestStepRunRow = (
@@ -3370,12 +3427,12 @@ export const makeWorkItemLifecycleLive = (
         const latest = yield* loadLatestStepRunRow(workItemId)
         const hasActiveStepRun = yield* loadHasActiveStepRun(workItemId)
         if (
-          !parkedAttentionEligibilityFromRow(
+          !(yield* parkedAttentionEligibilityFromRow(
             workItem,
             latest,
             hasActiveStepRun,
             issues,
-          )
+          ))
         ) {
           return yield* getWorkItem(workItemId)
         }
@@ -3403,12 +3460,12 @@ export const makeWorkItemLifecycleLive = (
                   ),
                 )
               if (
-                !parkedAttentionEligibilityFromRow(
+                !(yield* parkedAttentionEligibilityFromRow(
                   current,
                   currentLatest,
                   currentActive,
                   currentIssues,
-                )
+                ))
               ) {
                 return false
               }
@@ -3734,27 +3791,24 @@ export const makeWorkItemLifecycleLive = (
               .implement(context)
               .pipe(Effect.map((sessionId) => ({ sessionId })))
           case "assess_changes":
-            return steps.assessChanges(context).pipe(
-              Effect.map((result) =>
-                result._tag === "changes"
-                  ? {}
-                  : {
-                      completionSummary: result.completionSummary,
-                      pauseBeforeStep:
-                        workItem.pause_before_step === "commit"
-                          ? workItem.origin === "ci_repair"
-                            ? ("local_cleanup" as const)
-                            : ("close_issue" as const)
-                          : undefined,
-                      transition: {
-                        nextState:
-                          workItem.origin === "ci_repair"
-                            ? ("local_cleanup" as const)
-                            : ("close_issue" as const),
-                      },
-                    },
-              ),
-            )
+            return Effect.gen(function* () {
+              const policy = workItemOriginPolicy(
+                yield* storedOrigin(workItem.origin),
+              )
+              const result = yield* steps.assessChanges(context)
+              if (result._tag === "changes") {
+                return {}
+              }
+              return {
+                completionSummary: result.completionSummary,
+                pauseBeforeStep: policy.pauseTargetAfterNoChange(
+                  workItem.pause_before_step,
+                ),
+                transition: {
+                  nextState: policy.noChangeNextState,
+                },
+              }
+            })
           case "pre_commit":
             return steps.preCommit(context).pipe(Effect.as({}))
           case "review":
@@ -3796,40 +3850,36 @@ export const makeWorkItemLifecycleLive = (
               }),
             )
           case "commit":
-            return steps.commit(context).pipe(
-              Effect.map((result) => {
-                if (result._tag === "no_changes") {
-                  return {
-                    completionSummary: result.completionSummary,
-                    pauseBeforeStep:
-                      workItem.pause_before_step === "commit"
-                        ? workItem.origin === "ci_repair"
-                          ? ("local_cleanup" as const)
-                          : ("close_issue" as const)
-                        : undefined,
-                    transition: {
-                      nextState:
-                        workItem.origin === "ci_repair"
-                          ? ("local_cleanup" as const)
-                          : ("close_issue" as const),
-                    },
-                    stepRunReasonCode: STEP_RUN_REASON.native,
-                  }
-                }
+            return Effect.gen(function* () {
+              const policy = workItemOriginPolicy(
+                yield* storedOrigin(workItem.origin),
+              )
+              const result = yield* steps.commit(context)
+              if (result._tag === "no_changes") {
                 return {
-                  publicationTitle: result.publicationTitle,
-                  publicationBody: result.publicationBody,
-                  stepRunReasonCode:
-                    result.completion === "native"
-                      ? STEP_RUN_REASON.native
-                      : STEP_RUN_REASON.agentFallback,
-                  stepRunNote:
-                    result.publicationCopySource === "harness_fallback"
-                      ? "Harness publication-copy fallback"
-                      : undefined,
+                  completionSummary: result.completionSummary,
+                  pauseBeforeStep: policy.pauseTargetAfterNoChange(
+                    workItem.pause_before_step,
+                  ),
+                  transition: {
+                    nextState: policy.noChangeNextState,
+                  },
+                  stepRunReasonCode: STEP_RUN_REASON.native,
                 }
-              }),
-            )
+              }
+              return {
+                publicationTitle: result.publicationTitle,
+                publicationBody: result.publicationBody,
+                stepRunReasonCode:
+                  result.completion === "native"
+                    ? STEP_RUN_REASON.native
+                    : STEP_RUN_REASON.agentFallback,
+                stepRunNote:
+                  result.publicationCopySource === "harness_fallback"
+                    ? "Harness publication-copy fallback"
+                    : undefined,
+              }
+            })
           case "create_pr":
             return steps.createPr(context).pipe(
               Effect.map((result) => ({
@@ -4352,9 +4402,10 @@ export const makeWorkItemLifecycleLive = (
               const result = yield* steps.mergePr(context)
               if (result._tag === "merged") {
                 if (
-                  context.origin !== "ci_repair" &&
-                  nextStateAfterConfirmedMerge(context.issueSource) ===
-                    "close_issue"
+                  nextStateAfterConfirmedMerge({
+                    origin: context.origin,
+                    issueSource: context.issueSource,
+                  }) === "close_issue"
                 ) {
                   return {
                     completionSummary: linearMergeCompletionSummary(
@@ -4465,7 +4516,7 @@ export const makeWorkItemLifecycleLive = (
         row: WorkItemRow,
       ): Effect.Effect<
         PullRequestLifecycleStatus | null,
-        GitHubThrottledError
+        GitHubThrottledError | WorkItemLifecycleDatabaseError
       > =>
         Effect.gen(function* () {
           const repositories = yield* db.listRepositories
@@ -4479,7 +4530,7 @@ export const makeWorkItemLifecycleLive = (
             projectPath: repository.projectPath,
             issueNumber: row.issue_number,
             workItemId: row.id,
-            origin: row.origin === "ci_repair" ? "ci_repair" : "issue",
+            origin: yield* storedOrigin(row.origin),
           })
           return yield* resolveForgeObservation(repository.forge, {
             github,
@@ -4515,7 +4566,10 @@ export const makeWorkItemLifecycleLive = (
       const resolveOwnedPrIssueStop = (
         row: WorkItemRow,
         pullRequestNumber: number,
-      ): Effect.Effect<OwnedPrIssueStop, GitHubThrottledError> =>
+      ): Effect.Effect<
+        OwnedPrIssueStop,
+        GitHubThrottledError | WorkItemLifecycleDatabaseError
+      > =>
         Effect.gen(function* () {
           const status = yield* inspectOwnedPrLifecycleStatus(row)
           if (status !== null && status._tag === "merged") {
@@ -4651,11 +4705,10 @@ export const makeWorkItemLifecycleLive = (
             ownedPrIssueStop?.reasonCode ?? output.stepRunReasonCode ?? null
           const stepRunReasonMessage =
             ownedPrIssueStop?.reasonMessage ?? output.stepRunNote ?? null
+          const mergeNextState = yield* confirmedMergeNextState(workItem)
           const appliedNextState =
             ownedPrIssueStop?._tag === "merged"
-              ? workItem.origin === "ci_repair"
-                ? "local_cleanup"
-                : nextStateAfterConfirmedMerge(toIssueSource(workItem))
+              ? mergeNextState
               : ownedPrIssueStop?._tag === "pause"
                 ? null
                 : revalidationBlocksProgress
@@ -4754,10 +4807,6 @@ export const makeWorkItemLifecycleLive = (
                   // Confirmed merge at revalidation seam: same destination as
                   // Refresh / continueAfterHumanPrOutcome (Close Issue for
                   // Linear, otherwise local cleanup).
-                  const mergeNextState =
-                    workItem.origin === "ci_repair"
-                      ? "local_cleanup"
-                      : nextStateAfterConfirmedMerge(toIssueSource(workItem))
                   const mergeSummary =
                     mergeNextState === "close_issue"
                       ? linearMergeCompletionSummary(completionSummary)
@@ -5110,7 +5159,7 @@ export const makeWorkItemLifecycleLive = (
                 }
 
                 const baselineEvent = ciRepairBaselineEvent({
-                  origin: workItem.origin,
+                  origin: yield* storedOrigin(workItem.origin),
                   step: stepRun.step,
                   nextState: appliedNextState,
                   ownedPrMerged: ownedPrIssueStop?._tag === "merged",
@@ -6341,11 +6390,12 @@ export const makeWorkItemLifecycleLive = (
                 }
               }
 
+              const origin = yield* storedOrigin(workItem.origin)
               const context: LifecycleStepContext = {
                 workItemId: workItem.id as WorkItemId,
                 repositoryId: workItem.repository_id,
                 issueNumber: workItem.issue_number,
-                origin: decodeWorkItemOrigin(workItem.origin),
+                origin,
                 ciRepairDefaultBranch:
                   workItem.ci_repair_default_branch ?? null,
                 ciRepairHeadSha: workItem.ci_repair_head_sha ?? null,
@@ -6598,7 +6648,7 @@ export const makeWorkItemLifecycleLive = (
                   const revalidation =
                     stepRun.step === "local_cleanup" ||
                     stepRun.step === "close_issue" ||
-                    workItem.origin === "ci_repair"
+                    workItemOriginPolicy(origin).skipsIssueRevalidation
                       ? ({ ok: true } as const)
                       : yield* revalidateIssue(
                           workItem.repository_id,
@@ -7035,12 +7085,12 @@ export const makeWorkItemLifecycleLive = (
         const startHasActive = yield* loadHasActiveStepRun(workItemId)
         if (
           workItem.paused &&
-          parkedAttentionEligibilityFromRow(
+          (yield* parkedAttentionEligibilityFromRow(
             workItem,
             startLatest,
             startHasActive,
             startIssues,
-          )
+          ))
         ) {
           return yield* advanceParkedAttentionWhenIssueNoLongerRelevant(
             workItemId,
@@ -7497,7 +7547,10 @@ export const makeWorkItemLifecycleLive = (
                 "cancelled",
               )
 
-              if (workItem.origin === "ci_repair") {
+              if (
+                workItemOriginPolicy(yield* storedOrigin(workItem.origin))
+                  .recordsCiRepairAbandonSuppress
+              ) {
                 yield* recordCiRepairAbandonSuppress(
                   sql,
                   workItem.repository_id,
@@ -7776,12 +7829,10 @@ export const makeWorkItemLifecycleLive = (
             reason: "Work Item has no Work Item PR",
           })
         }
+        const mergeNextState = yield* confirmedMergeNextState(workItem)
         if (
           workItem.state === "local_cleanup" ||
-          (workItem.origin !== "ci_repair" &&
-            nextStateAfterConfirmedMerge(toIssueSource(workItem)) ===
-              "close_issue" &&
-            workItem.state === "close_issue")
+          workItem.state === mergeNextState
         ) {
           return yield* getWorkItem(workItemId)
         }
@@ -7849,10 +7900,11 @@ export const makeWorkItemLifecycleLive = (
                     reason: "Work Item has no Work Item PR",
                   })
                 }
-                const mergeNextState =
-                  current.origin === "ci_repair"
-                    ? "local_cleanup"
-                    : nextStateAfterConfirmedMerge(toIssueSource(current))
+                const origin = yield* storedOrigin(current.origin)
+                const policy = workItemOriginPolicy(origin)
+                const mergeNextState = policy.nextStateAfterConfirmedMerge(
+                  toIssueSource(current),
+                )
                 if (
                   current.state === "local_cleanup" ||
                   current.state === mergeNextState
@@ -7994,7 +8046,7 @@ export const makeWorkItemLifecycleLive = (
                   // Same floor as a harness merge: the pre-merge run. The
                   // merge-commit run is newer, so its failure still starts
                   // one repair. Do this even if a Worker Slot is not free.
-                  if (current.origin === "ci_repair") {
+                  if (policy.recordsCiRepairMergeFloor) {
                     yield* recordCiRepairMergeFloor(
                       sql,
                       current.repository_id,
@@ -8459,7 +8511,10 @@ export const makeWorkItemLifecycleLive = (
                   }
                 }
 
-                if (current.origin === "ci_repair") {
+                if (
+                  workItemOriginPolicy(yield* storedOrigin(current.origin))
+                    .recordsCiRepairAbandonSuppress
+                ) {
                   yield* recordCiRepairAbandonSuppress(
                     sql,
                     current.repository_id,
@@ -8555,7 +8610,7 @@ export const makeWorkItemLifecycleLive = (
         const retryIssues = yield* db.listIssues(workItem.repository_id)
         const retryHasActive = yield* loadHasActiveStepRun(workItemId)
         if (
-          parkedAttentionEligibilityFromRow(
+          yield* parkedAttentionEligibilityFromRow(
             workItem,
             latest ?? null,
             retryHasActive,
@@ -8596,7 +8651,8 @@ export const makeWorkItemLifecycleLive = (
         // makes the Work Item retryable. Any other terminal reason, or the
         // Issue still closed/missing, is unaffected.
         const issueClosedOrMissingFailure =
-          workItem.origin !== "ci_repair" &&
+          workItemOriginPolicy(yield* storedOrigin(workItem.origin))
+            .retriesWhenIssueClosedOrMissing &&
           workItem.state === "failed" &&
           (workItem.failure_code === "issue_not_found" ||
             workItem.failure_code === "issue_not_open")
@@ -9400,7 +9456,7 @@ export const makeWorkItemLifecycleLive = (
           return null
         }
         const stepRunsByWorkItem = yield* loadStepRuns([row.id], nowMs)
-        return toWorkItemRecord(
+        return yield* toWorkItemRecord(
           row,
           stepRunsByWorkItem.get(row.id) ?? [],
           nowMs,
@@ -9482,7 +9538,10 @@ export const makeWorkItemLifecycleLive = (
                   state: current.state,
                 })
               }
-              if (current.origin === "ci_repair") {
+              if (
+                !workItemOriginPolicy(yield* storedOrigin(current.origin))
+                  .canAuthorizeCiGateBypass
+              ) {
                 return yield* new CiRepairNotAvailableError({
                   repositoryId: current.repository_id,
                   workItemId,

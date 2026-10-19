@@ -1,4 +1,5 @@
 import type { CiRepairAuthorizationRecord } from "@ready-for-agent/db-service"
+import { workItemOriginPolicy } from "@ready-for-agent/lifecycle-model"
 import {
   type WorkItemRecord,
   isUnfinishedWorkItem,
@@ -48,7 +49,7 @@ const ciGateBypassCanAuthorize = (input: {
   readonly activeIncidentId: string | null
   readonly alreadyAuthorized: boolean
 }): boolean =>
-  input.origin !== "ci_repair" &&
+  workItemOriginPolicy(input.origin).canAuthorizeCiGateBypass &&
   input.unfinished &&
   input.gateStatus === "closed" &&
   input.activeIncidentId !== null &&
