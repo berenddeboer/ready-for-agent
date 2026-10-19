@@ -51,6 +51,7 @@ const observedRun = (input: {
   readonly rawConclusion: string | null
   readonly event?: string
   readonly createdAt?: string
+  readonly earlyJobFailure?: boolean
 }): CiGateObservation["observations"][number] extends infer Observation
   ? Observation extends { readonly kind: "observed" }
     ? Observation["runs"][number]
@@ -66,6 +67,7 @@ const observedRun = (input: {
   startedAt: new Date("2026-09-07T12:00:01.000Z"),
   rawStatus: input.rawStatus,
   rawConclusion: input.rawConclusion,
+  ...(input.earlyJobFailure === true ? { earlyJobFailure: true } : {}),
 })
 
 const observedDefinition = (
@@ -154,6 +156,7 @@ const graphqlRequest = (body: unknown) =>
 describe("Repository CI Gate observation", () => {
   let observe: GitHubServiceShape["observeCiGate"] = () =>
     Effect.succeed({ defaultBranch: "main", observations: [] })
+  const consideredRepositories: string[] = []
   let listReadyIssues: GitHubServiceShape["listReadyIssues"] = () =>
     Effect.succeed([])
 
@@ -290,7 +293,10 @@ describe("Repository CI Gate observation", () => {
       implementCiRepair: unused,
       unfinishedCiRepairWorkItem: () => Effect.succeed(null),
       startCiRepair: unused,
-      considerAutomaticCiRepair: () => Effect.succeed(null),
+      considerAutomaticCiRepair: (repositoryId: string) => {
+        consideredRepositories.push(repositoryId)
+        return Effect.succeed(null)
+      },
       authorizeAsCiRepair: unused,
       implementWith: unused,
       implementLocally: unused,
@@ -383,6 +389,7 @@ describe("Repository CI Gate observation", () => {
     await runtime.dispose()
     observe = () => Effect.succeed({ defaultBranch: "main", observations: [] })
     listReadyIssues = () => Effect.succeed([])
+    consideredRepositories.length = 0
     runtime = ManagedRuntime.make(runtimeLayer)
   })
 
@@ -539,6 +546,30 @@ describe("Repository CI Gate observation", () => {
     expect(gate.definitions[0]?.latestRun?.rawConclusion).toBe("success")
     expect(gate.definitions[0]?.latestRun?.htmlUrl).toContain("/actions/runs/")
     expect(gate.activeIncident).toBeNull()
+  })
+
+  test("a failed job closes the gate before the run finishes and asks for repair", async () => {
+    const repository = await addRepository()
+    observe = () =>
+      Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          observedDefinition("161335", [
+            observedRun({
+              runIdentity: "700:1",
+              rawStatus: "in_progress",
+              rawConclusion: null,
+              earlyJobFailure: true,
+            }),
+          ]),
+        ],
+      })
+    await saveSelection(repository.id, ["161335"])
+    const gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("CLOSED")
+    expect(gate.definitions[0]?.failureLatched).toBe(true)
+    expect(gate.definitions[0]?.latestRun?.rawStatus).toBe("in_progress")
+    expect(consideredRepositories).toContain(repository.id)
   })
 
   test("failure latches Closed, pending does not clear it, and a newer success resolves the incident", async () => {

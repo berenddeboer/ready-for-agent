@@ -27,6 +27,17 @@ export interface CiGateObservedRun {
   readonly startedAt: Date | null
   readonly rawStatus: string | null
   readonly rawConclusion: string | null
+  /**
+   * Forge run order. A lexicographically larger key is newer. Adapters
+   * assign it; callers compare keys and must not sort by run identity.
+   * Absent on observations recorded before order keys existed.
+   */
+  readonly orderKey?: string
+  /**
+   * GitHub: a job in this still-running run has already failed. Other
+   * Forges leave this unset and keep using terminal runs.
+   */
+  readonly earlyJobFailure?: boolean
 }
 
 export type CiGateDefinitionObservation =

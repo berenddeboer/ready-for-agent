@@ -19,6 +19,7 @@ import {
   type PullRequestLifecycleStatus,
   type PullRequestMergeability,
   type TerminalPrStatusCheck,
+  ciGateRunOrderKey,
   extractErrorCode,
   isDecisiveCiGateObservedRun,
 } from "@ready-for-agent/forge-contract"
@@ -632,6 +633,7 @@ const mapObservedPipeline = (
     ),
     rawStatus,
     rawConclusion: null,
+    orderKey: ciGateRunOrderKey(id, iid ?? 1),
   }
 }
 

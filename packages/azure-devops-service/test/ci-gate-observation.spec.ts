@@ -190,6 +190,7 @@ describe("Azure DevOps CI Gate observation", () => {
       startedAt: new Date("2026-09-07T12:00:01Z"),
       rawStatus: "completed",
       rawConclusion: "succeeded",
+      orderKey: "00000000000000000600:000001",
     })
     expect(definition.runs[1]?.rawStatus).toBe("inProgress")
     expect(definition.runs[1]?.rawConclusion).toBeNull()

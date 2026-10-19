@@ -136,6 +136,15 @@ export const CiGateDefinitionObservationRecord = Schema.Struct({
   latchedRunHtmlUrl: Schema.NullOr(Schema.String),
   observationError: Schema.NullOr(Schema.String),
   observationErrorKind: Schema.NullOr(CiGateObservationErrorKind),
+  /** Forge order of the newest observed run. Absent until the next poll. */
+  lastRunOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Forge order of the latched failure. Absent until the next poll. */
+  latchedRunOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
+  /**
+   * Newest run is still in progress, but a job has already failed.
+   * Absent observations are not an early failure.
+   */
+  lastEarlyJobFailure: Schema.optional(Schema.Boolean),
 })
 export type CiGateDefinitionObservationRecord =
   typeof CiGateDefinitionObservationRecord.Type

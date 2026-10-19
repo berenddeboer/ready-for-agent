@@ -2100,8 +2100,10 @@ export const DbServiceLive = Layer.effect(
                        last_run_created_at, last_run_updated_at,
                        failure_latched, latched_run_identity,
                        latched_run_html_url, observation_error,
-                       observation_error_kind, created_at, updated_at
-                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                       observation_error_kind, last_run_order_key,
+                       latched_run_order_key, last_early_job_failure,
+                       created_at, updated_at
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                       `cgo-${ulid()}`,
                       input.repositoryId,
@@ -2121,6 +2123,9 @@ export const DbServiceLive = Layer.effect(
                       observation.latchedRunHtmlUrl,
                       observation.observationError,
                       observation.observationErrorKind,
+                      observation.lastRunOrderKey ?? null,
+                      observation.latchedRunOrderKey ?? null,
+                      observation.lastEarlyJobFailure === true ? 1 : 0,
                       now,
                       now,
                     ],

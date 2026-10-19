@@ -176,6 +176,7 @@ describe("GitLab CI Gate observation", () => {
       startedAt: new Date("2026-09-07T10:00:01.000Z"),
       rawStatus: "success",
       rawConclusion: null,
+      orderKey: "00000000000000000600:000060",
     })
     expect(definition.runs[1]?.rawStatus).toBe("running")
     expect(definition.runs[2]?.rawStatus).toBe("failed")

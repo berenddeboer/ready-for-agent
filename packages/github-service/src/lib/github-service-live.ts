@@ -30,6 +30,7 @@ import {
   type PullRequestCheckStatus,
   type ReadyLabeledIssue,
   type TerminalPrStatusCheck,
+  ciGateRunOrderKey,
   extractErrorCode,
   isDecisiveCiGateObservedRun,
 } from "@ready-for-agent/forge-contract"
@@ -3452,7 +3453,27 @@ const mapObservedWorkflowRun = (
     startedAt: parseGitHubInstant(value.run_started_at),
     rawStatus,
     rawConclusion,
+    orderKey: ciGateRunOrderKey(id, attempt),
   }
+}
+
+const JOB_FAILURE_CONCLUSIONS = new Set([
+  "failure",
+  "timed_out",
+  "action_required",
+  "failed",
+  "startup_failure",
+])
+
+const jobConclusionFailed = (value: unknown): boolean => {
+  if (!isRecord(value)) {
+    return false
+  }
+  const conclusion =
+    typeof value.conclusion === "string"
+      ? value.conclusion.trim().toLowerCase()
+      : ""
+  return conclusion !== "" && JOB_FAILURE_CONCLUSIONS.has(conclusion)
 }
 
 const runIdFromIdentity = (runIdentity: string): string => {
@@ -3485,6 +3506,59 @@ const throwGitHubHttpError = async (
     headers: response.headers,
     message,
   })
+}
+
+/**
+ * A still-running run counts as a failure once any job has failed.
+ * A jobs-list miss leaves the run pending so a later poll can retry;
+ * throttling still fails the observation.
+ */
+const annotateEarlyJobFailure = async (
+  fetchImpl: GitHubFetch,
+  token: string,
+  repository: { readonly owner: string; readonly name: string },
+  run: CiGateObservedRun,
+  signal: AbortSignal | undefined,
+): Promise<CiGateObservedRun> => {
+  const runId = runIdFromIdentity(run.runIdentity)
+  if (!/^[0-9]+$/.test(runId)) {
+    return run
+  }
+  const jobs: unknown[] = []
+  for (let page = 1; ; page += 1) {
+    const url = new URL(
+      `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/runs/${runId}/jobs`,
+    )
+    url.searchParams.set("per_page", String(PAGE_SIZE))
+    url.searchParams.set("page", String(page))
+    const response = await fetchImpl(url, {
+      headers: githubRestHeaders(token),
+      signal,
+    })
+    if (!response.ok) {
+      const body = await response.text()
+      const throttle = githubThrottleFromResponse({
+        statusCode: response.status,
+        headers: response.headers,
+        message: `${response.statusText}: ${body}`,
+      })
+      if (throttle !== undefined) {
+        throw throttle
+      }
+      return run
+    }
+    const payload: unknown = await response.json()
+    const pageJobs =
+      isRecord(payload) && Array.isArray(payload.jobs) ? payload.jobs : []
+    jobs.push(...pageJobs)
+    if (pageJobs.some(jobConclusionFailed)) {
+      return { ...run, earlyJobFailure: true }
+    }
+    if (pageJobs.length < PAGE_SIZE) {
+      break
+    }
+  }
+  return run
 }
 
 const makeObserveCiGate =
@@ -3595,19 +3669,28 @@ const makeObserveCiGate =
           if (mapped === null) {
             continue
           }
-          runs.push(mapped)
+          const run = isDecisiveCiGateObservedRun(mapped)
+            ? mapped
+            : await annotateEarlyJobFailure(
+                fetchImpl,
+                token,
+                repository,
+                mapped,
+                signal,
+              )
+          runs.push(run)
           if (
             lastSeen !== null &&
-            isSameObservedRun(mapped.runIdentity, lastSeen)
+            isSameObservedRun(run.runIdentity, lastSeen)
           ) {
             reachedLastSeen = true
-            if (isDecisiveCiGateObservedRun(mapped)) {
+            if (isDecisiveCiGateObservedRun(run)) {
               collectedDecisiveAfterLastSeen = true
               break
             }
             continue
           }
-          if (reachedLastSeen && isDecisiveCiGateObservedRun(mapped)) {
+          if (reachedLastSeen && isDecisiveCiGateObservedRun(run)) {
             collectedDecisiveAfterLastSeen = true
             break
           }

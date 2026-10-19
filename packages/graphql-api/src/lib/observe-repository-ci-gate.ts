@@ -232,10 +232,14 @@ const applyObservedRuns = (input: {
   let latchedRunHtmlUrl = input.ignorePreviousLatch
     ? null
     : (input.previous?.latchedRunHtmlUrl ?? null)
+  let latchedRunOrderKey = input.ignorePreviousLatch
+    ? null
+    : (input.previous?.latchedRunOrderKey ?? null)
   if (reduced.latestDecisive?.kind === "failure") {
     failureLatched = true
     latchedRunIdentity = reduced.latestDecisive.run.runIdentity
     latchedRunHtmlUrl = reduced.latestDecisive.run.htmlUrl
+    latchedRunOrderKey = reduced.latestDecisive.run.orderKey ?? null
   } else if (reduced.latestDecisive?.kind === "success") {
     const successClearsLatch =
       previousLatchIdentity === null ||
@@ -248,6 +252,7 @@ const applyObservedRuns = (input: {
       failureLatched = false
       latchedRunIdentity = null
       latchedRunHtmlUrl = null
+      latchedRunOrderKey = null
     }
   }
   const sameObservationResolvedFailure =
@@ -276,6 +281,9 @@ const applyObservedRuns = (input: {
       failureLatched,
       latchedRunIdentity,
       latchedRunHtmlUrl,
+      lastRunOrderKey: latest?.orderKey ?? previousRun?.lastRunOrderKey ?? null,
+      latchedRunOrderKey,
+      lastEarlyJobFailure: latest?.earlyJobFailure === true,
       observationError: null,
       observationErrorKind: null,
     },

@@ -160,6 +160,7 @@ describe("GitHub CI Gate observation", () => {
       startedAt: new Date("2026-09-07T10:00:01Z"),
       rawStatus: "completed",
       rawConclusion: "success",
+      orderKey: "00000000000000000600:000001",
     })
     expect(definition.runs[1]?.rawStatus).toBe("in_progress")
     expect(definition.runs[1]?.rawConclusion).toBeNull()
@@ -532,6 +533,60 @@ describe("GitHub CI Gate observation", () => {
         )
       }),
   )
+
+  it("treats the first failed job of a still-running run as a failure", async () => {
+    const requested: string[] = []
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = new URL(String(input))
+      requested.push(url.pathname)
+      if (isRepoUrl(url)) {
+        return jsonResponse(repoPayload)
+      }
+      if (url.pathname === "/repos/acme/widgets/actions/runs/700/jobs") {
+        return jsonResponse({
+          jobs: [
+            { id: 1, name: "lint", status: "completed", conclusion: "success" },
+            {
+              id: 2,
+              name: "test",
+              status: "completed",
+              conclusion: "failure",
+            },
+          ],
+        })
+      }
+      if (!isWorkflowRunsUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      return jsonResponse({
+        total_count: 1,
+        workflow_runs: [
+          workflowRunPayload({
+            id: 700,
+            event: "push",
+            status: "in_progress",
+            conclusion: null,
+          }),
+        ],
+      })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["161335"],
+        lastRunIdentities: {},
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs[0]?.rawStatus).toBe("in_progress")
+    expect(definition.runs[0]?.rawConclusion).toBeNull()
+    expect(definition.runs[0]?.earlyJobFailure).toBe(true)
+    expect(requested).toContain("/repos/acme/widgets/actions/runs/700/jobs")
+  })
 
   it.effect("keeps a throttled 403 as GitHub throttling", () =>
     Effect.gen(function* () {

@@ -83,6 +83,14 @@ import {
   CurrentStepRun,
 } from "./agent-turn-limiter.js"
 import {
+  ciRepairBaselineEvent,
+  failurePassesCiRepairBaseline,
+  loadCiRepairBaselines,
+  recordCiRepairAbandonSuppress,
+  recordCiRepairMergeFloor,
+  recordCiRepairNoChangeBaseline,
+} from "./ci-repair-baseline.js"
+import {
   CI_REPAIR_ISSUE_NATIVE_ID,
   CI_REPAIR_ISSUE_NUMBER,
   type CiRepairFailingRun,
@@ -5007,6 +5015,25 @@ export const makeWorkItemLifecycleLive = (
                   }
                 }
 
+                const baselineEvent = ciRepairBaselineEvent({
+                  origin: workItem.origin,
+                  step: stepRun.step,
+                  nextState: appliedNextState,
+                  ownedPrMerged: ownedPrIssueStop?._tag === "merged",
+                })
+                if (baselineEvent._tag === "no_change") {
+                  yield* recordCiRepairNoChangeBaseline(
+                    sql,
+                    workItem.repository_id,
+                  ).pipe(Effect.mapError(toDatabaseError))
+                } else if (baselineEvent._tag === "merged") {
+                  yield* recordCiRepairMergeFloor(
+                    sql,
+                    workItem.repository_id,
+                    parseCiRepairFailingRuns(workItem.ci_repair_failing_runs),
+                  ).pipe(Effect.mapError(toDatabaseError))
+                }
+
                 if (stepRun.queue_job_id !== null) {
                   yield* queue.acknowledge(stepRun.queue_job_id)
                 }
@@ -7148,6 +7175,14 @@ export const makeWorkItemLifecycleLive = (
                     )
                 }
               }
+
+              if (workItem.origin === "ci_repair") {
+                yield* recordCiRepairAbandonSuppress(
+                  sql,
+                  workItem.repository_id,
+                  parseCiRepairFailingRuns(workItem.ci_repair_failing_runs),
+                ).pipe(Effect.mapError(toDatabaseError))
+              }
             }).pipe((mutation) =>
               applyLifecycleTransition(
                 workItemId,
@@ -7629,6 +7664,17 @@ export const makeWorkItemLifecycleLive = (
                     })
                   }
 
+                  // Same floor as a harness merge: the pre-merge run. The
+                  // merge-commit run is newer, so its failure still starts
+                  // one repair. Do this even if a Worker Slot is not free.
+                  if (current.origin === "ci_repair") {
+                    yield* recordCiRepairMergeFloor(
+                      sql,
+                      current.repository_id,
+                      parseCiRepairFailingRuns(current.ci_repair_failing_runs),
+                    ).pipe(Effect.mapError(toDatabaseError))
+                  }
+
                   const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
                   if (!acquired) {
                     return
@@ -8084,6 +8130,14 @@ export const makeWorkItemLifecycleLive = (
                         Effect.catchTag("JobNotFoundError", () => Effect.void),
                       )
                   }
+                }
+
+                if (current.origin === "ci_repair") {
+                  yield* recordCiRepairAbandonSuppress(
+                    sql,
+                    current.repository_id,
+                    parseCiRepairFailingRuns(current.ci_repair_failing_runs),
+                  ).pipe(Effect.mapError(toDatabaseError))
                 }
 
                 yield* sql.unsafe(
@@ -9065,12 +9119,16 @@ export const makeWorkItemLifecycleLive = (
 
           const observations = (yield* sql
             .unsafe(
-              `SELECT o.last_run_identity AS last_run_identity,
+              `SELECT o.definition_identity AS definition_identity,
+                      o.last_run_identity AS last_run_identity,
+                      o.last_run_order_key AS last_run_order_key,
                       o.last_head_sha AS last_head_sha,
                       o.last_raw_status AS last_raw_status,
                       o.last_raw_conclusion AS last_raw_conclusion,
                       o.failure_latched AS failure_latched,
+                      o.last_early_job_failure AS last_early_job_failure,
                       o.latched_run_identity AS latched_run_identity,
+                      o.latched_run_order_key AS latched_run_order_key,
                       o.latched_run_html_url AS latched_run_html_url,
                       d.display_label AS display_label
                FROM ci_gate_definition_observation o
@@ -9082,16 +9140,24 @@ export const makeWorkItemLifecycleLive = (
               [repositoryId],
             )
             .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly definition_identity: string
             readonly last_run_identity: string | null
+            readonly last_run_order_key: string | null
             readonly last_head_sha: string | null
             readonly last_raw_status: string | null
             readonly last_raw_conclusion: string | null
             readonly failure_latched: number | boolean | null
+            readonly last_early_job_failure: number | boolean | null
             readonly latched_run_identity: string | null
+            readonly latched_run_order_key: string | null
             readonly latched_run_html_url: string | null
             readonly display_label: string | null
           }[]
 
+          const baselines = yield* loadCiRepairBaselines(
+            sql,
+            repositoryId,
+          ).pipe(Effect.mapError(toDatabaseError))
           const failingRuns: CiRepairFailingRun[] = []
           const seenRunIdentities = new Set<string>()
           let headSha: string | null = null
@@ -9103,6 +9169,8 @@ export const makeWorkItemLifecycleLive = (
             }
             gateClosed = true
             const latchedIdentity = row.latched_run_identity?.trim() ?? ""
+            const orderKey = row.latched_run_order_key?.trim() ?? ""
+            const definitionIdentity = row.definition_identity?.trim() ?? ""
             if (
               latchedIdentity !== "" &&
               !seenRunIdentities.has(latchedIdentity)
@@ -9114,6 +9182,8 @@ export const makeWorkItemLifecycleLive = (
                 runIdentity: latchedIdentity,
                 htmlUrl: htmlUrl === "" ? null : htmlUrl,
                 displayLabel: label === "" ? latchedIdentity : label,
+                ...(definitionIdentity === "" ? {} : { definitionIdentity }),
+                ...(orderKey === "" ? {} : { orderKey }),
               })
             }
             const lastIdentity = row.last_run_identity?.trim() ?? ""
@@ -9127,13 +9197,28 @@ export const makeWorkItemLifecycleLive = (
                 headSha = sha
               }
             }
+            const qualifiesSignal = observationQualifiesForAutomaticCiRepair({
+              failureLatched: true,
+              latchedRunIdentity: row.latched_run_identity,
+              lastRunIdentity: row.last_run_identity,
+              lastRawStatus: row.last_raw_status,
+              lastRawConclusion: row.last_raw_conclusion,
+              earlyJobFailure: sqlFlag(row.last_early_job_failure),
+            })
+            const baseline =
+              baselines.find(
+                (entry) => entry.definitionIdentity === definitionIdentity,
+              ) ?? null
             if (
-              observationQualifiesForAutomaticCiRepair({
-                failureLatched: true,
-                latchedRunIdentity: row.latched_run_identity,
-                lastRunIdentity: row.last_run_identity,
-                lastRawStatus: row.last_raw_status,
-                lastRawConclusion: row.last_raw_conclusion,
+              qualifiesSignal &&
+              latchedIdentity !== "" &&
+              failurePassesCiRepairBaseline({
+                failure: {
+                  definitionIdentity,
+                  runIdentity: latchedIdentity,
+                  orderKey: orderKey === "" ? null : orderKey,
+                },
+                baseline,
               })
             ) {
               qualifiesAutomatic = true

@@ -22,6 +22,7 @@ import {
   type PullRequestLifecycleStatus,
   type PullRequestMergeability,
   type TerminalPrStatusCheck,
+  ciGateRunOrderKey,
   extractErrorCode,
   isDecisiveCiGateObservedRun,
 } from "@ready-for-agent/forge-contract"
@@ -798,6 +799,7 @@ const mapObservedBuild = (
     startedAt: parseAzureInstant(value.startTime),
     rawStatus: optionalNonEmptyString(value.status),
     rawConclusion: optionalNonEmptyString(value.result),
+    orderKey: ciGateRunOrderKey(id, 1),
   }
 }
 
