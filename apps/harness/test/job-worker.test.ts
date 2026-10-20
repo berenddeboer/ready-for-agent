@@ -1835,7 +1835,8 @@ describe("Job worker", () => {
           }).pipe(Effect.forkScoped({ startImmediately: true }))
           expect(yield* Deferred.await(postponed)).toEqual({
             jobId: job.jobId,
-            // First consecutive failure: healthy base (60s), not the sample delay.
+            // First consecutive failure: absolute 60s backoff, not the healthy
+            // cadence and not the sample delay.
             delayMs: 60_000,
           })
           expect(notifications).toEqual([])

@@ -38,13 +38,13 @@ export type DecidePrMergeResult =
 export const AUTO_MERGE_DISABLED_FOR_WORK_ITEM =
   "Auto-merge is disabled for this Work Item (a harness Merge Policy setting, " +
   "not a forge restriction). Merge the PR by hand whenever you're ready — " +
-  "the harness's next scheduled Refresh Job (usually within 60-90 seconds) " +
+  "the harness's next scheduled Refresh Job (usually within 45-75 seconds) " +
   "will detect the merge and advance this Work Item to completion on its " +
   "own, with no Step Run history lost. No reset needed."
 export const AUTO_MERGE_DISABLED_FOR_REPOSITORY =
   "Auto-merge is disabled for this repository (a harness Merge Policy " +
   "setting, not a forge restriction). Merge the PR by hand whenever you're " +
-  "ready — the harness's next scheduled Refresh Job (usually within 60-90 " +
+  "ready — the harness's next scheduled Refresh Job (usually within 45-75 " +
   "seconds) will detect the merge and advance this Work Item to completion " +
   "on its own, with no Step Run history lost. No reset needed."
 

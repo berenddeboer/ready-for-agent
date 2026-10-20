@@ -1,7 +1,7 @@
 /**
  * Client-side freshness for a Repository's Issue projection.
  *
- * Scheduled Issue polls run about every 60–90s
+ * Scheduled Issue polls run about every 45–75s
  * (`ISSUE_POLLING_BASE_SECONDS` + jitter in `@ready-for-agent/graphql-api`).
  * Only successful reconciliation advances `issuesReconciledAt`. A non-null
  * timestamp that is older than a small multiple of that cadence means the
@@ -11,8 +11,8 @@
  * No server schema change: the client already receives `issuesReconciledAt`.
  */
 
-/** Upper bound of one healthy poll quiet period (base 60s + jitter 30s). */
-const ISSUE_POLL_CADENCE_UPPER_MS = 90_000
+/** Upper bound of one healthy poll quiet period (base 45s + jitter 30s). */
+const ISSUE_POLL_CADENCE_UPPER_MS = 75_000
 
 /** How many cadence upper bounds without a successful refresh before stale. */
 const ISSUE_PROJECTION_STALE_MULTIPLE = 5

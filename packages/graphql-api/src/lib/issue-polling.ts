@@ -13,11 +13,17 @@ export const POLLING_AUTO_HEAL_KEY = "polling-auto-heal"
 
 export const JOB_RECOVERY_RETRY_LIMIT = 1
 
-/** Base quiet period after a scheduled attempt completes. */
-export const ISSUE_POLLING_BASE_SECONDS = 60
+/** Base quiet period after a successful scheduled attempt. */
+export const ISSUE_POLLING_BASE_SECONDS = 45
 
 /** Inclusive upper bound for additive jitter seconds (0–30). */
 export const ISSUE_POLLING_JITTER_SECONDS = 30
+
+/**
+ * Absolute first delay for consecutive scheduled-poll failure backoff.
+ * Not derived from {@link ISSUE_POLLING_BASE_SECONDS}.
+ */
+export const ISSUE_POLL_FAILURE_BASE_SECONDS = 60
 
 /**
  * Ceiling for consecutive scheduled-poll failure backoff (15 minutes).
@@ -31,16 +37,16 @@ export const POLLING_AUTO_HEAL_BACKOFF = Duration.seconds(5)
 
 /**
  * Quiet period after the Nth consecutive scheduled poll failure (1-based).
- * Grows exponentially from the healthy base and caps at
+ * Starts at {@link ISSUE_POLL_FAILURE_BASE_SECONDS}, doubles, and caps at
  * {@link ISSUE_POLL_FAILURE_MAX_SECONDS}. Count 0 or negative falls back to
- * the healthy base (callers should prefer sampling jitter on success).
+ * that same absolute base (callers should prefer sampling jitter on success).
  */
 export const issuePollFailureBackoffSeconds = (
   consecutiveFailures: number,
 ): number => {
-  if (consecutiveFailures <= 0) return ISSUE_POLLING_BASE_SECONDS
+  if (consecutiveFailures <= 0) return ISSUE_POLL_FAILURE_BASE_SECONDS
   const exponent = Math.min(consecutiveFailures - 1, 31)
-  const seconds = ISSUE_POLLING_BASE_SECONDS * 2 ** exponent
+  const seconds = ISSUE_POLL_FAILURE_BASE_SECONDS * 2 ** exponent
   return Math.min(seconds, ISSUE_POLL_FAILURE_MAX_SECONDS)
 }
 
@@ -60,7 +66,7 @@ export const PollingAutoHealJobPayload = {
 }
 
 /**
- * Sample the next Issue Polling delay: 60s + uniform integer jitter in [0, 30].
+ * Sample the next Issue Polling delay: 45s + uniform integer jitter in [0, 30].
  * Injectable via Effect Random so tests can seed or replace sampling.
  */
 export const sampleIssuePollingDelay: Effect.Effect<Duration.Duration> =

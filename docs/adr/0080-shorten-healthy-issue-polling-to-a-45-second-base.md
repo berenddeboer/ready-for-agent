@@ -1,0 +1,5 @@
+# Shorten healthy Issue Polling to a 45-second base
+
+Status: accepted (supersedes only the 60-second postponement number in ADR 0019; the rest of ADR 0019 stands, including its historical "successful or failed" sentence)
+
+After a successful scheduled Refresh Job, that Repository's next scheduled attempt is postponed by 45 seconds plus the existing uniform integer jitter of 0 through 30 seconds, so it becomes eligible 45 to 75 seconds after the attempt finishes. The cadence is the same for every Forge. Jitter still applies on every successful scheduled attempt, including for Paused Repositories. Manual Refresh Jobs still take precedence, do not interrupt a running attempt, and do not change the cadence. Consecutive scheduled-poll failure backoff stays on its existing absolute schedule — 60 seconds, then doubles, capped at 15 minutes — and is not derived from this 45-second base. GitHub throttling still postpones until the provider retry time. The on-screen Issue projection still marks a successful refresh stale after five healthy ceilings; that ceiling is now 75 seconds, not 90.
