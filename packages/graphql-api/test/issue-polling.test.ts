@@ -15,12 +15,14 @@ import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
   ISSUE_POLLING_BASE_SECONDS,
   ISSUE_POLLING_JITTER_SECONDS,
+  ISSUE_POLL_FAILURE_BASE_SECONDS,
   ISSUE_POLL_FAILURE_MAX_SECONDS,
   ISSUE_POLL_QUEUE,
   ISSUE_REFRESH_QUEUE,
   activateRepositoryPolling,
   issuePollFailureBackoffSeconds,
   repairPollingSchedules,
+  sampleIssuePollingDelay,
   suspendRepositoryPolling,
 } from "../src/lib/issue-polling.js"
 import { describe, expect, test } from "bun:test"
@@ -33,26 +35,52 @@ const repoKeep = "repo-01J00000000000000000000002"
 const repoOrphan = "repo-01J00000000000000000000003"
 const repoAdded = "repo-01J00000000000000000000004"
 
+const randomReturning = (nextDouble: number): Random.Random => ({
+  nextIntUnsafe: () => 0,
+  nextDoubleUnsafe: () => nextDouble,
+})
+
 describe("issue-polling", () => {
-  test("issuePollFailureBackoffSeconds grows exponentially to a ceiling", () => {
-    expect(issuePollFailureBackoffSeconds(0)).toBe(ISSUE_POLLING_BASE_SECONDS)
-    expect(issuePollFailureBackoffSeconds(1)).toBe(ISSUE_POLLING_BASE_SECONDS)
-    expect(issuePollFailureBackoffSeconds(2)).toBe(
-      ISSUE_POLLING_BASE_SECONDS * 2,
+  test("healthy scheduled delay is 45s plus integer jitter in [0, 30]", async () => {
+    expect(ISSUE_POLLING_BASE_SECONDS).toBe(45)
+    expect(ISSUE_POLLING_JITTER_SECONDS).toBe(30)
+
+    const atFloor = await Effect.runPromise(
+      sampleIssuePollingDelay.pipe(
+        Effect.provideService(Random.Random, randomReturning(0)),
+      ),
     )
-    expect(issuePollFailureBackoffSeconds(3)).toBe(
-      ISSUE_POLLING_BASE_SECONDS * 4,
+    const atCeiling = await Effect.runPromise(
+      sampleIssuePollingDelay.pipe(
+        Effect.provideService(Random.Random, randomReturning(0.999999)),
+      ),
     )
-    expect(issuePollFailureBackoffSeconds(4)).toBe(
-      ISSUE_POLLING_BASE_SECONDS * 8,
+
+    expect(Duration.toSeconds(atFloor)).toBe(45)
+    expect(Duration.toSeconds(atCeiling)).toBe(75)
+    expect(Number.isInteger(Duration.toSeconds(atFloor))).toBe(true)
+    expect(Number.isInteger(Duration.toSeconds(atCeiling))).toBe(true)
+  })
+
+  test("issuePollFailureBackoffSeconds stays on the absolute 60s schedule", () => {
+    expect(ISSUE_POLL_FAILURE_BASE_SECONDS).toBe(60)
+    expect(ISSUE_POLL_FAILURE_BASE_SECONDS).not.toBe(ISSUE_POLLING_BASE_SECONDS)
+    expect(issuePollFailureBackoffSeconds(0)).toBe(60)
+    expect(issuePollFailureBackoffSeconds(1)).toBe(60)
+    expect(issuePollFailureBackoffSeconds(2)).toBe(120)
+    expect(issuePollFailureBackoffSeconds(3)).toBe(240)
+    expect(issuePollFailureBackoffSeconds(4)).toBe(480)
+    // 60 * 2^4 = 960 > 900, and 60 * 2^5 = 1920 > 900 → capped.
+    expect(issuePollFailureBackoffSeconds(5)).toBe(
+      ISSUE_POLL_FAILURE_MAX_SECONDS,
     )
-    // 60 * 2^5 = 1920 > 900 → capped.
     expect(issuePollFailureBackoffSeconds(6)).toBe(
       ISSUE_POLL_FAILURE_MAX_SECONDS,
     )
     expect(issuePollFailureBackoffSeconds(20)).toBe(
       ISSUE_POLL_FAILURE_MAX_SECONDS,
     )
+    expect(ISSUE_POLL_FAILURE_MAX_SECONDS).toBe(15 * 60)
   })
 
   test("activateRepositoryPolling ensures keyed schedule and first refresh", async () => {

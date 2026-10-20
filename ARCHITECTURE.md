@@ -7,7 +7,7 @@
 - Database is Turso database (sqlite)
 - Backend is Effect TS
 - Services are implemented as Effect TS
-- The application runtime hosts scoped job worker fibers; see `docs/adr/0007-host-job-worker-in-harness.md` and `docs/adr/0019-serialize-issue-polling-with-keyed-recurring-jobs.md`
+- The application runtime hosts scoped job worker fibers; see `docs/adr/0007-host-job-worker-in-harness.md` and `docs/adr/0019-serialize-issue-polling-with-keyed-recurring-jobs.md`. Healthy Issue Polling cadence is `docs/adr/0080-shorten-healthy-issue-polling-to-a-45-second-base.md`
 - Every job implementation is an Effect; workers compose and run those Effects for work claimed from the database queue
 - Work Item lifecycle jobs use the `jobs` queue; manual Refresh Jobs use the high-priority `issue-refresh` queue. Independent workers claim each queue; Issue Refresh Jobs execute serially on the polling lane while lifecycle work may run in parallel (claim-and-fork, bounded by Config)
 - UI is responsive: anything that takes long is put in a queue and handled by the job workers
