@@ -157,6 +157,14 @@ const SerializedCiGateObservedRun = Schema.Struct({
   startedAt: Schema.NullOr(Schema.DateFromString),
   rawStatus: Schema.NullOr(Schema.String),
   rawConclusion: Schema.NullOr(Schema.String),
+  /**
+   * Optional so observations recorded before run ordering, and Forges
+   * without an early job-failure signal, still decode. Present values must
+   * survive; stripping them blocks automatic CI repair after a keyless
+   * baseline and hides a failed job in a still-running workflow.
+   */
+  orderKey: Schema.optionalKey(RequiredString),
+  earlyJobFailure: Schema.optionalKey(Schema.Boolean),
 })
 
 export const SerializedCiGateObservation = Schema.Struct({
