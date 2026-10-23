@@ -76,9 +76,9 @@ export const repository = snakeCase.table(
       .default(true),
     /**
      * Opt-in automatic CI repair. Off for existing and new Repositories.
-     * When on, a terminal failure of a selected CI Gate Definition starts a
-     * CI Repair Work Item when none is unfinished and the Repository is not
-     * Paused. Allowed on every Forge.
+     * When on, a qualifying failure of a selected CI Gate Definition starts a
+     * CI Repair Work Item when none is unfinished. Repository Paused does not
+     * block that start. Allowed on every Forge.
      */
     automaticCiRepair: integer({ mode: "boolean" }).notNull().default(false),
     /**

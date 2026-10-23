@@ -1,0 +1,5 @@
+# Automatic CI repair does not require the Repository to be unpaused
+
+Status: accepted (amends only the automatic-start pause clause in ADR 0075; the rest of ADR 0075 stands, including manual Start CI Repair while Paused and one unfinished repair at a time)
+
+Enabling automatic CI repair is sufficient authorization to start a CI Repair Work Item. Repository Paused continues to suppress autonomous selection of ordinary Issue work, and still does not block Start CI Repair. A paused Repository with the setting on starts on the same signals as an unpaused one: a selected CI Gate Definition failure newer than the CI Repair Baseline, and no unfinished CI Repair Work Item for that Repository, including the first observation after startup. With the setting off, Paused still does not start automatic repair. An already-running CI Repair Work Item is unchanged: Pause Work Item and one unfinished repair at a time stay as they are. New Repositories may still start paused; enabling automatic repair later is enough for repair to start. Requiring an unpause as well made the checkbox insufficient for operators who want CI repaired while ordinary issue work stays paused.

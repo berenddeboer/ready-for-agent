@@ -354,7 +354,7 @@ describe("CI Repair Work Item lifecycle", () => {
       }),
     ))
 
-  it("starts automatically only when the setting is on, the repository is not paused, and the latched run is a terminal failure", () =>
+  it("starts automatically when the setting is on and the latched run is a terminal failure, including while the repository is paused", () =>
     run(
       Effect.gen(function* () {
         const lifecycle = yield* WorkItemLifecycle
@@ -368,12 +368,27 @@ describe("CI Repair Work Item lifecycle", () => {
           yield* lifecycle.considerAutomaticCiRepair(settingOff.id),
         ).toBeNull()
 
+        const pausedOff = yield* seedRepository({
+          localPath: "/repos/acme/auto-paused-off.git",
+          paused: true,
+          automaticCiRepair: false,
+          closed: true,
+        })
+        expect(
+          yield* lifecycle.considerAutomaticCiRepair(pausedOff.id),
+        ).toBeNull()
+
         const paused = yield* seedRepository({
           localPath: "/repos/acme/auto-paused.git",
           paused: true,
           automaticCiRepair: true,
           closed: true,
         })
+        const pausedStarted = yield* lifecycle.considerAutomaticCiRepair(
+          paused.id,
+        )
+        expect(pausedStarted?.origin).toBe("ci_repair")
+        expect(pausedStarted?.paused).toBe(false)
         expect(yield* lifecycle.considerAutomaticCiRepair(paused.id)).toBeNull()
 
         const inProgress = yield* seedRepository({

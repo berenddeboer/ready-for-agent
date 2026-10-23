@@ -404,7 +404,7 @@ describe("helper observation to automatic CI Repair", () => {
     )
   })
 
-  test("does not start repair while the repository is paused", async () => {
+  test("starts one repair on the first observation while the repository is paused when automatic repair is on", async () => {
     const stdout = helperStdout({
       runIdentity: NEWER_RUN_IDENTITY,
       rawStatus: "completed",
@@ -415,9 +415,37 @@ describe("helper observation to automatic CI Repair", () => {
       () => stdout,
       Effect.gen(function* () {
         const repository = yield* seedRepository({
-          label: "paused",
+          label: "paused-on",
           paused: true,
           automaticCiRepair: true,
+          keylessSuppress: true,
+        })
+        yield* observe(repository.id)
+        const stored = yield* storedObservation(repository.id)
+        expect(stored?.latchedRunOrderKey).toBe(NEWER_ORDER_KEY)
+        const started = yield* repairsFor(repository.id)
+        expect(started).toHaveLength(1)
+        expect(started[0]?.paused).toBe(false)
+        yield* observe(repository.id)
+        expect(yield* repairsFor(repository.id)).toHaveLength(1)
+      }),
+    )
+  })
+
+  test("does not start repair while the repository is paused when automatic repair is off", async () => {
+    const stdout = helperStdout({
+      runIdentity: NEWER_RUN_IDENTITY,
+      rawStatus: "completed",
+      rawConclusion: "failure",
+      orderKey: NEWER_ORDER_KEY,
+    })
+    await run(
+      () => stdout,
+      Effect.gen(function* () {
+        const repository = yield* seedRepository({
+          label: "paused-off",
+          paused: true,
+          automaticCiRepair: false,
           keylessSuppress: true,
         })
         yield* observe(repository.id)

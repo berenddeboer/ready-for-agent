@@ -61,6 +61,9 @@ the Repository is not Paused, a selected CI Gate Definition has a failure newer
 than the **CI Repair Baseline**, and no CI Repair Work Item for the Repository
 is unfinished.
 
+ADR 0081 amends the pause clause: enabling automatic repair is enough.
+Repository Paused no longer blocks that automatic start.
+
 - **Earliest signal.** On GitHub the first failed job of an in-progress run
   counts as the failure; the gate closes on the same signal, so ordinary work
   stops being admitted at the same time. GitLab and Azure DevOps use the

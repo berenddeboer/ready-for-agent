@@ -1482,8 +1482,9 @@ export interface WorkItemLifecycleShape {
     repositoryId: string,
   ) => Effect.Effect<WorkItemRecord, CiRepairStartError>
   /**
-   * Start a CI Repair Work Item when the setting, pause, and terminal-failure
-   * rules allow it. Never fails the caller.
+   * Start a CI Repair Work Item when automatic repair is on and a qualifying
+   * failure is newer than the CI Repair Baseline. Repository Paused does not
+   * block the start. Never fails the caller.
    */
   readonly considerAutomaticCiRepair: (
     repositoryId: string,
