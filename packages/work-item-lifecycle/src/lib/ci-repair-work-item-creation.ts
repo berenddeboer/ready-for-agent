@@ -463,11 +463,9 @@ export const considerAutomaticCiRepairWorkItem = (
     const repository = (yield* deps.db.listRepositories).find(
       ({ id }) => id === repositoryId,
     )
-    if (
-      repository === undefined ||
-      !repository.automaticCiRepair ||
-      repository.paused
-    ) {
+    // The setting alone authorizes automatic start. Repository Paused still
+    // suppresses ordinary Issue selection; it does not block this path.
+    if (repository === undefined || !repository.automaticCiRepair) {
       return null
     }
     const existing = yield* deps.unfinishedCiRepairWorkItem(repositoryId)

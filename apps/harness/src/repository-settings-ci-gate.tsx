@@ -8,7 +8,7 @@ export const CI_GATE_ON_CLOSE_HEADING = "When the gate closes"
 export const CI_GATE_AUTOMATIC_REPAIR_LABEL =
   "Automatically start a CI Repair Work Item"
 export const CI_GATE_AUTOMATIC_REPAIR_HINT =
-  "A terminal failure that closes the CI gate starts one CI Repair Work Item when none is unfinished. Paused repositories do not start automatically."
+  "A qualifying failure that closes the CI gate starts one CI Repair Work Item when none is unfinished, including while the repository is paused."
 export const CI_GATE_AUTOMATIC_REPAIR_DISABLED_HINT =
   "Unavailable until a CI Gate Definition is selected. The saved choice is kept."
 
