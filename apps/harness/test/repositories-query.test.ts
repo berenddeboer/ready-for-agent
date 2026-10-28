@@ -1,4 +1,4 @@
-import { requestHandler } from "@tanstack/react-start/server"
+import { createServerEntry } from "@tanstack/react-start/server"
 import {
   GRAPHQL_PATH,
   resolveGraphqlFetchUrl,
@@ -80,11 +80,13 @@ describe("Configured Repositories GraphQL during SSR", () => {
     }) as typeof fetch
 
     try {
-      const handler = requestHandler(async () => {
-        const repositories = await repositoriesQuery.queryFn()
-        return Response.json(repositories)
+      const handler = createServerEntry({
+        fetch: async () => {
+          const repositories = await repositoriesQuery.queryFn()
+          return Response.json(repositories)
+        },
       })
-      const response = await handler(
+      const response = await handler.fetch(
         new Request("http://127.0.0.1:6056/repos"),
         {},
       )
@@ -109,11 +111,13 @@ describe("Configured Repositories GraphQL during SSR", () => {
     }) as typeof fetch
 
     try {
-      const handler = requestHandler(async () => {
-        await repositoriesQuery.queryFn()
-        return new Response("ok")
+      const handler = createServerEntry({
+        fetch: async () => {
+          await repositoriesQuery.queryFn()
+          return new Response("ok")
+        },
       })
-      await handler(new Request("http://192.168.1.10:4300/"), {})
+      await handler.fetch(new Request("http://192.168.1.10:4300/"), {})
     } finally {
       globalThis.fetch = originalFetch
     }

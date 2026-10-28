@@ -10,6 +10,6 @@
     "@ready-for-agent/keymaxxer-service": "workspace:*"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.3"
+    "@types/bun": "^1.4.4"
   }
 }

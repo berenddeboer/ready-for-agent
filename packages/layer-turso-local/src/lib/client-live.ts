@@ -159,6 +159,7 @@ const makeClient = (path: string, options?: TursoClientOptions) =>
     )
 
     return yield* Client.make({
+      driver: "turso-local",
       acquirer,
       transactionAcquirer,
       beginTransaction: "BEGIN IMMEDIATE",
