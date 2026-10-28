@@ -38,14 +38,14 @@
     "@ready-for-agent/lifecycle-model": "workspace:*",
     "@ready-for-agent/linear-service": "workspace:*",
     "@ready-for-agent/queue-service": "workspace:*",
-    "effect": "4.0.4",
+    "effect": "4.0.6",
     "tslib": "^2.8.1",
     "ulidx": "^2.4.1"
   },
   "devDependencies": {
-    "@effect/platform-bun": "4.0.4",
+    "@effect/platform-bun": "4.0.6",
     "@ready-for-agent/db": "workspace:*",
     "@ready-for-agent/sqlite-queue-service": "workspace:*",
-    "@types/bun": "^1.4.3"
+    "@types/bun": "^1.4.4"
   }
 }

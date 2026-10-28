@@ -69,5 +69,8 @@
       "cache": true,
       "dependsOn": ["^build"]
     }
+  },
+  "affected": {
+    "legacy": true
   }
 }

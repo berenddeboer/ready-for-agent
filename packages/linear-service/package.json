@@ -16,12 +16,12 @@
     }
   },
   "dependencies": {
-    "@effect/platform-bun": "4.0.4",
+    "@effect/platform-bun": "4.0.6",
     "@ready-for-agent/forge-contract": "workspace:*",
-    "effect": "4.0.4",
+    "effect": "4.0.6",
     "tslib": "^2.8.1"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.3"
+    "@types/bun": "^1.4.4"
   }
 }

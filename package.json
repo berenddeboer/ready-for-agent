@@ -25,20 +25,20 @@
   "devDependencies": {
     "@berenddeboer/nx-biome": "^1.0.3",
     "@berenddeboer/nx-knip": "^1.1.0",
-    "@biomejs/biome": "^2.5.15",
-    "@commitlint/cli": "^21.2.3",
-    "@commitlint/config-conventional": "^21.2.3",
-    "@effect/language-service": "^0.87.4",
-    "@effect/tsgo": "^0.51.1",
-    "@nx/js": "23.2.1",
-    "@nx/vite": "23.2.1",
+    "@biomejs/biome": "2.5.15",
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "@effect/language-service": "^0.87.5",
+    "@effect/tsgo": "^0.56.0",
+    "@nx/js": "24.0.2",
+    "@nx/vite": "24.0.2",
     "@swc/helpers": "~0.5.23",
     "@types/node": "^26.6.5",
     "@typescript/native": "npm:typescript@^7.0.2",
     "effect-solutions": "^0.5.3",
     "keymaxxer": "0.2.2",
-    "knip": "^6.41.0",
-    "nx": "23.2.1",
+    "knip": "^6.43.0",
+    "nx": "24.0.2",
     "tslib": "^2.8.1",
     "typescript": "npm:@typescript/typescript6@^6.0.2"
   },
@@ -47,10 +47,10 @@
     "packages/*"
   ],
   "overrides": {
-    "effect": "4.0.4",
-    "@effect/platform-bun": "4.0.4",
-    "@effect/platform-node-shared": "4.0.4",
-    "@effect/vitest": "4.0.4",
-    "@effect/sql-sqlite-bun": "4.0.4"
+    "effect": "4.0.6",
+    "@effect/platform-bun": "4.0.6",
+    "@effect/platform-node-shared": "4.0.6",
+    "@effect/vitest": "4.0.6",
+    "@effect/sql-sqlite-bun": "4.0.6"
   }
 }
