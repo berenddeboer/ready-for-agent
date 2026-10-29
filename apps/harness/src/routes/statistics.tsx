@@ -172,7 +172,10 @@ function StatisticsPage() {
               }}
             >
               <option value="">All models</option>
-              <option value={UNKNOWN_MODEL_FILTER}>Unknown model</option>
+              {(query.data?.choices.hasUnknownModel ||
+                search.model === UNKNOWN_MODEL_FILTER) && (
+                <option value={UNKNOWN_MODEL_FILTER}>Unknown model</option>
+              )}
               {modelOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}

@@ -20,7 +20,7 @@ export type TimingHistoryFilter = {
 
 export type TimingModelHistory = "unknown" | "partial" | "complete"
 
-export type TimingModelChoice = {
+type TimingModelChoice = {
   readonly agentBackend: string
   readonly model: string
 }
@@ -74,9 +74,9 @@ type TimingWorkItem = Pick<
   readonly modelHistory: TimingModelHistory
   readonly attempts: TimingAttempt[]
 }
-export type TimingHistory = readonly TimingWorkItem[]
+type TimingHistory = readonly TimingWorkItem[]
 
-export type TimingHistoryChoices = {
+type TimingHistoryChoices = {
   readonly agentBackends: readonly string[]
   readonly models: readonly TimingModelChoice[]
   readonly hasUnknownModel: boolean

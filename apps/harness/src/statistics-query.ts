@@ -71,7 +71,7 @@ export function timingHistoryQuery(input: {
   }
 }
 
-export type TimingHistoryPayload = Awaited<
+type TimingHistoryPayload = Awaited<
   ReturnType<ReturnType<typeof timingHistoryQuery>["queryFn"]>
 >
 export type TimingWorkItem = TimingHistoryPayload["items"][number]

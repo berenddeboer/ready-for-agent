@@ -4,8 +4,8 @@ import { agentBackendLabel } from "@ready-for-agent/agent-backend"
 export const UNKNOWN_MODEL_FILTER = "__unknown__"
 const MODEL_VALUE_SEPARATOR = "\u001f"
 
-export const TIMING_AGENT_BACKEND_MAX_LENGTH = 64
-export const TIMING_MODEL_MAX_LENGTH = 2048
+const TIMING_AGENT_BACKEND_MAX_LENGTH = 64
+const TIMING_MODEL_MAX_LENGTH = 2048
 
 export function parseStatisticsAgentBackend(raw: unknown): string {
   if (typeof raw !== "string") return ""
@@ -59,7 +59,7 @@ export type StatisticsSelectOption = {
   readonly label: string
 }
 
-export function modelFilterValue(agentBackend: string, model: string): string {
+function modelFilterValue(agentBackend: string, model: string): string {
   return `${agentBackend}${MODEL_VALUE_SEPARATOR}${model}`
 }
 

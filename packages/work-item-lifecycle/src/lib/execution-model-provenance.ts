@@ -4,7 +4,7 @@ import { ulid } from "ulidx"
 import { isAgentDependentLifecycleStep } from "@ready-for-agent/lifecycle-model"
 import { WorkItemLifecycleDatabaseError } from "./errors.js"
 
-export type ExecutionModelRole = "build" | "review"
+type ExecutionModelRole = "build" | "review"
 
 /** Model selected for one role of one agent execution. Thinking level is omitted. */
 export type SelectedExecutionModel = {
