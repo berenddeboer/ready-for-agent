@@ -152,7 +152,7 @@ export const ui = {
    * When pipeline-tabs sits inside jobs-switcher-row.
    * Apply on the tabs element (or compose with pipelineTabs).
    */
-  jobsSwitcherPipelineTabs: "shrink-0 grow-0 basis-auto",
+  jobsSwitcherPipelineTabs: "max-w-full shrink-0 grow-0 basis-auto",
 
   /**
    * When repository-filters sits inside jobs-switcher-row.

@@ -110,6 +110,13 @@ type Query {
   """
   completedWorkItems(page: Int, pageSize: Int): CompletedWorkItemsConnection!
   """
+  Compact timing history for Complete Work Items (excludes Abandoned/Failed).
+  Completion falls in [from, to); omit from for all history. ISO instants.
+  Includes all attempts for each matching Work Item, even before from.
+  Numeric timestamps/durations are milliseconds. No live Forge/Agent calls.
+  """
+  timingHistory(repositoryId: ID, from: String, to: String!): [TimingWorkItem!]!
+  """
   Count of unique Work Items that committed a pull request in [from, to).
   A Work Item counts when it has a non-null GitHub PR number and at least one
   successful commit Step Run whose finished_at falls in the half-open range.
@@ -465,6 +472,32 @@ enum WorkItemsListKind {
   WORKING
   FAILED
   COMPLETED
+}
+
+"""
+A Complete Work Item and its retained Step Run timings.
+"""
+type TimingWorkItem {
+  id: ID!
+  repositoryId: ID!
+  repository: String!
+  displayId: String
+  title: String
+  origin: String!
+  createdAt: Float!
+  completedAt: Float!
+  attempts: [TimingAttempt!]!
+}
+
+type TimingAttempt {
+  id: ID!
+  step: String!
+  status: String!
+  queuedAt: Float!
+  startedAt: Float
+  finishedAt: Float
+  sessionWaitMs: Float!
+  reasonCode: String
 }
 
 """

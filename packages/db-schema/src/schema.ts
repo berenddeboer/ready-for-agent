@@ -458,6 +458,9 @@ export const workItem = snakeCase.table(
       .$defaultFn(() => Date.now()),
   },
   (t) => [
+    index("work_item_complete_ready_at_idx")
+      .on(t.stateReadyAt)
+      .where(sql`${t.state} = 'complete'`),
     uniqueIndex("work_item_one_unfinished_v6_uidx")
       .on(t.repositoryId, t.issueTracker, t.issueNativeId)
       .where(

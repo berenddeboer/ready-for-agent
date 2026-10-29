@@ -1333,6 +1333,36 @@ export const createGraphqlApi = <R>(
               }).pipe(Effect.withSpan("graphql-api.completedWorkItems")),
               context,
             ),
+          timingHistory: async (
+            _parent: unknown,
+            args: {
+              repositoryId?: string | null
+              from?: string | null
+              to: string
+            },
+            context: GraphqlRequestContext,
+          ) => {
+            const fromMs =
+              args.from == null ? null : parseIsoInstantMs(args.from, "from")
+            const toMs = parseIsoInstantMs(args.to, "to")
+            if (fromMs !== null && toMs < fromMs) {
+              throw new GraphQLError(
+                "`to` must be greater than or equal to `from`",
+                { extensions: { code: "BAD_USER_INPUT" } },
+              )
+            }
+            return runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                return yield* lifecycle.timingHistory({
+                  repositoryId: args.repositoryId ?? null,
+                  fromMs,
+                  toMs,
+                })
+              }).pipe(Effect.withSpan("graphql-api.timingHistory")),
+              context,
+            )
+          },
           committedPullRequestsCount: async (
             _parent: unknown,
             args: CommittedPullRequestsCountArgs,

@@ -106,6 +106,7 @@ describe("refreshLoadedRepository", () => {
               ownsSessionId: () => Effect.succeed(false),
               findWorkItemBySessionId: unused,
               countCommittedPullRequests: unused,
+              timingHistory: unused,
               continueAfterHumanPrOutcome: unused,
               stopForCompetingIssueClosingPullRequests: (
                 repositoryId,
@@ -192,6 +193,7 @@ describe("refreshLoadedRepository", () => {
     ownsSessionId: () => Effect.succeed(false),
     findWorkItemBySessionId: unused,
     countCommittedPullRequests: unused,
+    timingHistory: unused,
     continueAfterHumanPrOutcome: unused,
     stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
     admitWaitingWorkItems: Effect.succeed(0),

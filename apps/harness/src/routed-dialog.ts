@@ -218,7 +218,7 @@ export const isCompletedBackgroundPath = (pathname: string): boolean =>
   pathname.startsWith("/completed/")
 
 /** Jobs switcher destination derived from the runtime pathname. */
-export type JobsView = "pipeline" | "repos" | "completed"
+export type JobsView = "pipeline" | "repos" | "completed" | "statistics"
 
 /**
  * Exclusive route → Jobs view. Overlay backgrounds use the same helpers as
@@ -226,6 +226,8 @@ export type JobsView = "pipeline" | "repos" | "completed"
  * Callers pass the runtime pathname (masked Settings / telemetry keep origin).
  */
 export const jobsViewForPath = (pathname: string): JobsView | undefined => {
+  if (pathname === "/statistics" || pathname === "/statistics/")
+    return "statistics"
   if (isReposBackgroundPath(pathname)) {
     return "repos"
   }

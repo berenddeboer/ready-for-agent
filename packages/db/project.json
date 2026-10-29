@@ -38,7 +38,11 @@
         "cwd": "{projectRoot}",
         "command": "bun test"
       },
-      "inputs": ["default", "^production"],
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/packages/db-schema/drizzle/**/migration.sql"
+      ],
       "cache": true,
       "dependsOn": ["generate", "^build"]
     },

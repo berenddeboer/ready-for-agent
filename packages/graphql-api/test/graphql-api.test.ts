@@ -463,6 +463,7 @@ const makeRuntime = (
     ownsSessionId: () => Effect.succeed(false),
     findWorkItemBySessionId: unused,
     countCommittedPullRequests: unused,
+    timingHistory: unused,
     continueAfterHumanPrOutcome: unused,
     stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
     admitWaitingWorkItems: Effect.succeed(0),
@@ -12947,6 +12948,99 @@ describe("GraphQL API", () => {
       errors?: ReadonlyArray<{ message: string }>
     }
     expect(body.errors?.[0]?.message).toContain("Invalid ISO instant for from")
+  })
+
+  test("timingHistory passes completion bounds and preserves millisecond timestamps", async () => {
+    const calls: Array<{
+      repositoryId: string | null
+      fromMs: number | null
+      toMs: number
+    }> = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        timingHistory: (filter) => {
+          calls.push(filter)
+          return Effect.succeed([
+            {
+              id: "wi-timing",
+              repositoryId: "repo",
+              repository: "owner/repo",
+              displayId: "RFA-1",
+              title: "Pre-commit example",
+              origin: "issue",
+              createdAt: 1780000000000,
+              completedAt: 1780000600000,
+              attempts: [
+                {
+                  id: "run",
+                  step: "pre_commit",
+                  status: "succeeded",
+                  queuedAt: 1780000001000,
+                  startedAt: 1780000002000,
+                  finishedAt: 1780000600000,
+                  sessionWaitMs: 1000,
+                  reasonCode: null,
+                },
+              ],
+            },
+          ])
+        },
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+      timingHistory(repositoryId: "repo", to: "2026-07-19T00:00:00.000Z") {
+        id createdAt completedAt attempts { step startedAt finishedAt sessionWaitMs }
+      }
+    }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        timingHistory: [
+          {
+            id: "wi-timing",
+            createdAt: 1780000000000,
+            completedAt: 1780000600000,
+            attempts: [
+              {
+                step: "pre_commit",
+                startedAt: 1780000002000,
+                finishedAt: 1780000600000,
+                sessionWaitMs: 1000,
+              },
+            ],
+          },
+        ],
+      },
+    })
+    expect(calls).toEqual([
+      {
+        repositoryId: "repo",
+        fromMs: null,
+        toMs: Date.parse("2026-07-19T00:00:00.000Z"),
+      },
+    ])
+  })
+
+  test("timingHistory rejects invalid or reversed completion bounds", async () => {
+    for (const from of ["not-a-date", "2026-07-20T00:00:00.000Z"]) {
+      const response = await createGraphqlApi(runtime).fetch(
+        graphqlRequest({
+          query: `query($from: String!) { timingHistory(from: $from, to: "2026-07-19T00:00:00.000Z") { id } }`,
+          variables: { from },
+        }),
+      )
+      const body = await response.json()
+      expect(body).toMatchObject({
+        errors: [{ extensions: { code: "BAD_USER_INPUT" } }],
+      })
+    }
   })
 
   test("session returns null for unknown Work Item", async () => {
