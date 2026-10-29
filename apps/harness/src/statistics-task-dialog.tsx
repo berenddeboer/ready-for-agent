@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react"
+import { agentBackendLabel } from "@ready-for-agent/agent-backend"
 import {
   StatisticsMetric,
   statisticsControl,
   statisticsKicker,
 } from "./statistics-charts.js"
+import { modelHistoryDisclosure } from "./statistics-filters.js"
 import {
   type TimingTask,
   formatTime,
@@ -53,6 +55,16 @@ export function StatisticsTaskDialog({
           </h3>
           <p className="mt-2 text-xs text-ink-dim">
             Completed {new Date(task.completedAt).toLocaleString()} · {task.id}
+          </p>
+          <p className="mt-2 text-xs text-ink-dim">
+            {agentBackendLabel(task.agentBackend)}
+            {task.models.length > 0 ? ` · ${task.models.join(", ")}` : ""}
+          </p>
+          <p className="mt-2 max-w-xl text-xs text-ink-dim">
+            {modelHistoryDisclosure({
+              history: task.modelHistory,
+              models: task.models,
+            })}
           </p>
         </div>
         <button

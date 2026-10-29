@@ -6,6 +6,16 @@ import {
   statisticsControl as control,
   statisticsKicker as kicker,
 } from "../statistics-charts.js"
+import {
+  UNKNOWN_MODEL_FILTER,
+  backendSelectOptions,
+  currentModelSelectValue,
+  modelSelectOptions,
+  parseModelFilterValue,
+  parseStatisticsAgentBackend,
+  parseStatisticsModel,
+  statisticsExplorerKey,
+} from "../statistics-filters.js"
 import { type TimingTask, projectTimingTask } from "../statistics-model.js"
 import { timingHistoryQuery } from "../statistics-query.js"
 import { StatisticsTaskDialog } from "../statistics-task-dialog.js"
@@ -26,6 +36,8 @@ type StatisticsSearch = {
   lane: "build" | "review" | "pr"
   window: StatisticsWindow
   repository: string
+  agentBackend: string
+  model: string
   step: string
 }
 
@@ -38,6 +50,8 @@ export const Route = createFileRoute("/statistics")({
     lane: raw.lane === "review" || raw.lane === "pr" ? raw.lane : "build",
     window: parseStatisticsWindow(raw.window),
     repository: typeof raw.repository === "string" ? raw.repository : "",
+    agentBackend: parseStatisticsAgentBackend(raw.agentBackend),
+    model: parseStatisticsModel(raw.model),
     step:
       typeof raw.step === "string" && raw.step.length < 100
         ? raw.step
@@ -51,11 +65,32 @@ function StatisticsPage() {
   const navigate = Route.useNavigate()
   const [selected, setSelected] = useState<TimingTask | null>(null)
   const repositories = useQuery(repositoriesQuery)
-  const query = useQuery(timingHistoryQuery(search.repository, search.window))
+  const query = useQuery(
+    timingHistoryQuery({
+      repositoryId: search.repository,
+      window: search.window,
+      agentBackend: search.agentBackend,
+      model: search.model,
+    }),
+  )
   const tasks = useMemo(
-    () => (query.data ?? []).map(projectTimingTask),
+    () => (query.data?.items ?? []).map(projectTimingTask),
     [query.data],
   )
+  const backendOptions = backendSelectOptions({
+    backends: query.data?.choices.agentBackends ?? [],
+    selected: search.agentBackend,
+  })
+  const modelOptions = modelSelectOptions({
+    choices: query.data?.choices.models ?? [],
+    agentBackend: search.agentBackend,
+    selectedModel: search.model,
+  })
+  const modelValue = currentModelSelectValue({
+    model: search.model,
+    agentBackend: search.agentBackend,
+    options: modelOptions,
+  })
   const update = (values: Partial<StatisticsSearch>) => {
     setSelected(null)
     void navigate({
@@ -78,11 +113,12 @@ function StatisticsPage() {
             execution.
           </p>
         </div>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="grid gap-1 text-xs">
+        <div className="flex w-full min-w-0 flex-wrap items-end gap-3 sm:w-auto">
+          <label className="grid w-full min-w-0 gap-1 text-xs sm:w-auto">
             Repository
             <select
-              className={`${control} max-w-64`}
+              className={`${control} w-full max-w-full sm:max-w-64`}
+              name="repository"
               value={search.repository}
               onChange={(e) => update({ repository: e.target.value })}
             >
@@ -98,10 +134,57 @@ function StatisticsPage() {
                 )}
             </select>
           </label>
-          <label className="grid gap-1 text-xs">
+          <label className="grid w-full min-w-0 gap-1 text-xs sm:w-auto">
+            Agent Backend
+            <select
+              className={`${control} w-full max-w-full sm:max-w-64`}
+              name="agentBackend"
+              value={search.agentBackend}
+              onChange={(event) => update({ agentBackend: event.target.value })}
+            >
+              <option value="">All agent backends</option>
+              {backendOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid w-full min-w-0 gap-1 text-xs sm:w-auto">
+            Model
+            <select
+              className={`${control} w-full max-w-full sm:max-w-72`}
+              name="model"
+              value={modelValue}
+              onChange={(event) => {
+                const value = event.target.value
+                if (value === "" || value === UNKNOWN_MODEL_FILTER) {
+                  update({ model: value })
+                  return
+                }
+                const parsed = parseModelFilterValue(value)
+                update({
+                  model: parsed.model,
+                  ...(parsed.agentBackend === null
+                    ? {}
+                    : { agentBackend: parsed.agentBackend }),
+                })
+              }}
+            >
+              <option value="">All models</option>
+              <option value={UNKNOWN_MODEL_FILTER}>Unknown model</option>
+              {modelOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid w-full min-w-0 gap-1 text-xs sm:w-auto">
             Completed within
             <select
-              className={control}
+              className={`${control} w-full max-w-full`}
+              name="window"
               value={search.window}
               onChange={(e) =>
                 update({ window: parseStatisticsWindow(e.target.value) })
@@ -193,8 +276,8 @@ function StatisticsPage() {
             No completed work in this selection
           </h3>
           <p className="mt-2 text-ink-dim">
-            Choose a wider completion window or another repository. Failed,
-            abandoned and unfinished Work Items are not included.
+            Change the repository, completion window, agent backend, or model.
+            Failed, abandoned and unfinished Work Items are not included.
           </p>
         </section>
       )}
@@ -219,7 +302,7 @@ function StatisticsPage() {
           )}
           {search.view === "tasks" && (
             <TimingExplorer
-              key={`${search.repository}:${search.window}`}
+              key={statisticsExplorerKey(search)}
               tasks={tasks}
               onSelect={setSelected}
             />
@@ -272,6 +355,26 @@ function StatisticsPage() {
             postponed and cancelled attempts do not count as repeats. Internal
             Review Fix Rounds and individual hook commands are not separately
             timed. Extra work is not automatically wasted work.
+          </p>
+          <p>
+            Agent Backend and Model filter the completed cohort; they do not
+            drop individual attempts. Backend is the backend captured when the
+            Work Item was created. A model matches when it was recorded as used
+            on at least one retained agent execution, including Build, Review,
+            or a retry. A task that used two models matches either one, is
+            counted once, and keeps every Step Run — including non-agent steps
+            and attempts from before the completion window. Filtered totals
+            describe completed work involving that model, not time that belongs
+            only to that model.
+          </p>
+          <p>
+            Unknown model means no historical model was recorded. Those tasks
+            stay in All models. Missing history is not filled from today's
+            settings or from an execution profile that was never recorded as
+            used. Partial history can match a recorded model, but the task
+            dialog says when that list is incomplete. Choices come from retained
+            history for the repository and window, not from backends installed
+            now. Thinking level is not a filter.
           </p>
         </div>
       </details>

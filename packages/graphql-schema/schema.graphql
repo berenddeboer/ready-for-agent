@@ -113,9 +113,20 @@ type Query {
   Compact timing history for Complete Work Items (excludes Abandoned/Failed).
   Completion falls in [from, to); omit from for all history. ISO instants.
   Includes all attempts for each matching Work Item, even before from.
+  agentBackend and model are historical cohort filters (AND). unknownModel
+  selects Work Items with no recorded model identity and cannot be combined
+  with model. Choices ignore backend/model filters and come from retained
+  history for the repository and window, not the live catalog.
   Numeric timestamps/durations are milliseconds. No live Forge/Agent calls.
   """
-  timingHistory(repositoryId: ID, from: String, to: String!): [TimingWorkItem!]!
+  timingHistory(
+    repositoryId: ID
+    from: String
+    to: String!
+    agentBackend: String
+    model: String
+    unknownModel: Boolean
+  ): TimingHistory!
   """
   Count of unique Work Items that committed a pull request in [from, to).
   A Work Item counts when it has a non-null GitHub PR number and at least one
@@ -475,6 +486,40 @@ enum WorkItemsListKind {
 }
 
 """
+Whether recorded Agent Model provenance covers every agent execution.
+UNKNOWN has no recorded model. PARTIAL matched recorded models but is not
+a complete history. COMPLETE has a recorded model for every agent execution.
+"""
+enum TimingModelHistory {
+  UNKNOWN
+  PARTIAL
+  COMPLETE
+}
+
+"""
+Complete Work Items in the filtered cohort, plus historical filter choices
+for the repository and completion window before backend/model filters.
+"""
+type TimingHistory {
+  items: [TimingWorkItem!]!
+  choices: TimingHistoryChoices!
+}
+
+type TimingHistoryChoices {
+  agentBackends: [String!]!
+  models: [TimingModelChoice!]!
+  hasUnknownModel: Boolean!
+}
+
+"""
+Historical model identity recorded under one captured Agent Backend.
+"""
+type TimingModelChoice {
+  agentBackend: String!
+  model: String!
+}
+
+"""
 A Complete Work Item and its retained Step Run timings.
 """
 type TimingWorkItem {
@@ -484,6 +529,15 @@ type TimingWorkItem {
   displayId: String
   title: String
   origin: String!
+  """
+  Agent Backend captured on the Work Item, not the current repository setting.
+  """
+  agentBackend: String!
+  """
+  Distinct models recorded as used on retained agent executions.
+  """
+  models: [String!]!
+  modelHistory: TimingModelHistory!
   createdAt: Float!
   completedAt: Float!
   attempts: [TimingAttempt!]!

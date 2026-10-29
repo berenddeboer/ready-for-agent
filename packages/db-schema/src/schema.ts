@@ -557,6 +557,37 @@ export const stepRun = snakeCase.table(
 )
 
 /**
+ * Model actually selected for one agent execution of a Step Run.
+ * Absent for legacy runs and for steps that did not use that role.
+ * See xplain: type step run agent model "sram"
+ */
+export const stepRunAgentModel = snakeCase.table(
+  "step_run_agent_model",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `sram-${ulid()}`),
+    stepRunId: text()
+      .notNull()
+      .references(() => stepRun.id, { onDelete: "cascade" }),
+    /** `build` or `review`. Thinking level is not part of this identity. */
+    role: text({ enum: ["build", "review"] }).notNull(),
+    /**
+     * Catalog or provider-qualified model id as selected for this execution.
+     * Not rewritten when settings or the live catalog change.
+     */
+    model: text().notNull(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("step_run_agent_model_run_role_uidx").on(t.stepRunId, t.role),
+    index("step_run_agent_model_model_idx").on(t.model),
+  ],
+)
+
+/**
  * Observed green or red PR Status Check execution for a Work Item.
  * See xplain: type pr status check "psc"
  */

@@ -50,6 +50,10 @@ export * from "./lib/review.js"
 export * from "./lib/review-errors.js"
 export * from "./lib/sanitize-prompt-user-content.js"
 export * from "./lib/sync-needs-human-merge-handoffs.js"
+export {
+  TIMING_AGENT_BACKEND_MAX_LENGTH,
+  TIMING_MODEL_MAX_LENGTH,
+} from "./lib/timing-history.js"
 export * from "./lib/types.js"
 export * from "./lib/work-item-attachment-directory.js"
 export * from "./lib/work-item-lifecycle.js"
