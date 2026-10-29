@@ -207,6 +207,11 @@ import {
   formatReviewNoProgressTimeoutMessage,
 } from "./review.js"
 import { computeStepTimeoutElapsedMs } from "./step-run-productive-time.js"
+import {
+  type TimingHistory,
+  type TimingHistoryFilter,
+  loadTimingHistory,
+} from "./timing-history.js"
 import { applyCheckedLifecycleTransition } from "./transition-relation-check.js"
 import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
@@ -1583,6 +1588,9 @@ export interface WorkItemLifecycleShape {
     readonly page: number
     readonly pageSize: number
   }) => Effect.Effect<CompletedWorkItemsPage, ListWorkItemsError>
+  readonly timingHistory: (
+    filter: TimingHistoryFilter,
+  ) => Effect.Effect<TimingHistory, WorkItemLifecycleDatabaseError>
   /**
    * True when any Work Item (any state) has this OpenCode Session id.
    * Used to gate GraphQL session usage reads to harness-owned Sessions.
@@ -10689,6 +10697,7 @@ export const makeWorkItemLifecycleLive = (
         listWorkItemsForIssue,
         listWorkItemsForRepository,
         listCompletedWorkItems,
+        timingHistory: (filter) => loadTimingHistory(sql, filter),
         ownsSessionId,
         findWorkItemBySessionId,
         countCommittedPullRequests,

@@ -1,11 +1,10 @@
 /**
- * Sticky Jobs primary switcher (Pipeline | Repos | Completed) and repository
+ * Sticky Jobs primary switcher (Pipeline | Repos | Completed | Statistics) and repository
  * filters — fixed under throughput.
  *
  * Links are a navigation list (not ARIA tabs): destinations are routes, so
  * every control stays in tab order. Repository filters only apply on Pipeline
- * (in-memory board); Repos and Completed hide them until server-side filter
- * support exists for the archive.
+ * (in-memory board); Statistics owns its server-side repository filter.
  */
 import { useLinkProps, useRouterState } from "@tanstack/react-router"
 import type { ReactNode } from "react"
@@ -72,7 +71,7 @@ function JobsDestinationLink({
   exact = false,
   children,
 }: {
-  readonly to: "/" | "/repos" | "/completed"
+  readonly to: "/" | "/repos" | "/completed" | "/statistics"
   readonly id: string
   readonly current: boolean
   readonly exact?: boolean
@@ -105,6 +104,7 @@ export function JobsViewSwitcher() {
   const pipelineActive = jobsView === "pipeline"
   const reposActive = jobsView === "repos"
   const completedActive = jobsView === "completed"
+  const statisticsActive = jobsView === "statistics"
   // Filters only drive the Pipeline board today (full in-memory item set).
   const showRepositoryFilters = pipelineActive
 
@@ -139,6 +139,22 @@ export function JobsViewSwitcher() {
           >
             <CompletedTabIcon />
             Completed
+          </JobsDestinationLink>
+          <JobsDestinationLink
+            to="/statistics"
+            id="jobs-tab-statistics"
+            current={statisticsActive}
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M5 20V11M12 20V4M19 20V8" />
+            </svg>
+            Statistics
           </JobsDestinationLink>
         </nav>
         {showRepositoryFilters ? (
