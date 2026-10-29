@@ -12,7 +12,7 @@ export const timingLaneColors = {
   review: "var(--lane-review)",
   pr: "var(--lane-pr)",
 }
-export const stepLabels: Record<string, string> = {
+const stepLabels: Record<string, string> = {
   create_worktree: "Create worktree",
   install_dependencies: "Install dependencies",
   implement: "Implement",
@@ -60,7 +60,7 @@ export function formatTime(ms: number | null): string {
   if (ms < 3_600_000) return `${(ms / 60_000).toFixed(1)} min`
   return `${(ms / 3_600_000).toFixed(1)} h`
 }
-export const validDuration = (
+const validDuration = (
   start: number | null,
   end: number | null,
 ): number | null =>
