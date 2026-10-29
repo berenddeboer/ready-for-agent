@@ -1,3 +1,4 @@
+import { OPERATIONAL_LIFECYCLE_STEPS } from "@ready-for-agent/lifecycle-model"
 import {
   describeTimes,
   laneStatistics,
@@ -40,6 +41,16 @@ const item = (
 })
 
 describe("timing statistics", () => {
+  test("every operational lifecycle step contributes to exactly one lane", () => {
+    for (const step of OPERATIONAL_LIFECYCLE_STEPS) {
+      const task = projectTimingTask(item(step, [attempt(step, step, 0, 1000)]))
+      expect(
+        Object.values(task.lanes).filter((lane) => lane.executionMs === 1000),
+      ).toHaveLength(1)
+      expect(stepStatistics([task])[0]?.lane).not.toBeNull()
+    }
+  })
+
   test("sums failed and successful attempts per task; per-attempt and per-task means differ", () => {
     const tasks = [
       projectTimingTask(

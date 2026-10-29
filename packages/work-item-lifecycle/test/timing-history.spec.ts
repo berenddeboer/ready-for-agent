@@ -39,6 +39,14 @@ describe("completed timing history SQL", () => {
           )
         }
         const filter = { repositoryId: "a", fromMs: 1000, toMs: 3000 }
+        const plan = yield* sql.unsafe(
+          `EXPLAIN QUERY PLAN SELECT id FROM work_item
+           WHERE state = 'complete' AND state_ready_at >= ? AND state_ready_at < ?`,
+          [filter.fromMs, filter.toMs],
+        )
+        expect(JSON.stringify(plan)).toContain(
+          "work_item_complete_ready_at_idx",
+        )
         const result = yield* loadTimingHistory(sql, filter)
         expect(result.map((row) => row.id)).toEqual(["empty", "included"])
         expect(result[0]?.attempts).toEqual([])

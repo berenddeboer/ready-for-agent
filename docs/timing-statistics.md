@@ -68,6 +68,14 @@ uses millisecond numeric timestamps; it performs no live Forge or Agent calls.
 The UI computes statistics over the full selected cohort. Explorer pagination
 limits rendered rows, not the underlying statistical sample.
 
+The Complete-only completion-time index narrows date-window reads, and the
+existing `step_run(work_item_id, queued_at)` index serves the attempt join.
+Payload size and browser aggregation cost still grow with the retained attempt
+count: All time fetches the complete history on each one-minute refresh. Choose
+a repository or shorter window to reduce this cost. If larger histories require
+server aggregation or paged loading, preserve full-cohort totals and percentiles
+rather than computing them from only the visible page.
+
 SQLite integration tests cover cohort boundaries, repository isolation,
 tasks without history and attempts before the window. GraphQL tests cover date
 validation and millisecond serialization; statistical tests cover repeat
