@@ -1,7 +1,7 @@
 min_version = "2026.7.0"
 
 [tools]
-# Authoritative Bun pin. GitHub Actions must use the same version.
+# Authoritative Bun pin, read directly by mise-action in GitHub Actions.
 bun = "1.4.4"
 hk = "2.0.1"
 # Authoritative Usage pin for the operator CLI contract.
