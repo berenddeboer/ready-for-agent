@@ -17,7 +17,8 @@ export function parseStatisticsWindow(raw: unknown): StatisticsWindow {
   // TanStack parses unquoted numeric query parameters as numbers.
   const value = typeof raw === "number" ? String(raw) : raw
   return (
-    statisticsWindows.find((option) => option.value === value)?.value ?? "28"
+    statisticsWindows.find((option) => option.value === value)?.value ??
+    "this-week"
   )
 }
 

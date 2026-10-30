@@ -12955,6 +12955,9 @@ describe("GraphQL API", () => {
       repositoryId: string | null
       fromMs: number | null
       toMs: number
+      agentBackend: string | null
+      model: string | null
+      unknownModel: boolean
     }> = []
     await runtime.dispose()
     runtime = makeRuntime(
@@ -12964,59 +12967,84 @@ describe("GraphQL API", () => {
       {
         timingHistory: (filter) => {
           calls.push(filter)
-          return Effect.succeed([
-            {
-              id: "wi-timing",
-              repositoryId: "repo",
-              repository: "owner/repo",
-              displayId: "RFA-1",
-              title: "Pre-commit example",
-              origin: "issue",
-              createdAt: 1780000000000,
-              completedAt: 1780000600000,
-              attempts: [
-                {
-                  id: "run",
-                  step: "pre_commit",
-                  status: "succeeded",
-                  queuedAt: 1780000001000,
-                  startedAt: 1780000002000,
-                  finishedAt: 1780000600000,
-                  sessionWaitMs: 1000,
-                  reasonCode: null,
-                },
+          return Effect.succeed({
+            items: [
+              {
+                id: "wi-timing",
+                repositoryId: "repo",
+                repository: "owner/repo",
+                displayId: "RFA-1",
+                title: "Pre-commit example",
+                origin: "issue",
+                agentBackend: "opencode",
+                models: ["anthropic/claude-sonnet"],
+                modelHistory: "partial" as const,
+                createdAt: 1780000000000,
+                completedAt: 1780000600000,
+                attempts: [
+                  {
+                    id: "run",
+                    step: "pre_commit",
+                    status: "succeeded",
+                    queuedAt: 1780000001000,
+                    startedAt: 1780000002000,
+                    finishedAt: 1780000600000,
+                    sessionWaitMs: 1000,
+                    reasonCode: null,
+                  },
+                ],
+              },
+            ],
+            choices: {
+              agentBackends: ["opencode"],
+              models: [
+                { agentBackend: "opencode", model: "anthropic/claude-sonnet" },
               ],
+              hasUnknownModel: true,
             },
-          ])
+          })
         },
       },
     )
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `query {
-      timingHistory(repositoryId: "repo", to: "2026-07-19T00:00:00.000Z") {
-        id createdAt completedAt attempts { step startedAt finishedAt sessionWaitMs }
+      timingHistory(repositoryId: "repo", to: "2026-07-19T00:00:00.000Z", agentBackend: " opencode ", model: " anthropic/claude-sonnet ") {
+        items { id agentBackend models modelHistory createdAt completedAt attempts { step startedAt finishedAt sessionWaitMs } }
+        choices { agentBackends models { agentBackend model } hasUnknownModel }
       }
     }`,
       }),
     )
     expect(await response.json()).toEqual({
       data: {
-        timingHistory: [
-          {
-            id: "wi-timing",
-            createdAt: 1780000000000,
-            completedAt: 1780000600000,
-            attempts: [
-              {
-                step: "pre_commit",
-                startedAt: 1780000002000,
-                finishedAt: 1780000600000,
-                sessionWaitMs: 1000,
-              },
+        timingHistory: {
+          items: [
+            {
+              id: "wi-timing",
+              agentBackend: "opencode",
+              models: ["anthropic/claude-sonnet"],
+              modelHistory: "PARTIAL",
+              createdAt: 1780000000000,
+              completedAt: 1780000600000,
+              attempts: [
+                {
+                  step: "pre_commit",
+                  startedAt: 1780000002000,
+                  finishedAt: 1780000600000,
+                  sessionWaitMs: 1000,
+                },
+              ],
+            },
+          ],
+          choices: {
+            agentBackends: ["opencode"],
+            models: [
+              { agentBackend: "opencode", model: "anthropic/claude-sonnet" },
             ],
+            hasUnknownModel: true,
           },
-        ],
+        },
       },
     })
     expect(calls).toEqual([
@@ -13024,6 +13052,9 @@ describe("GraphQL API", () => {
         repositoryId: "repo",
         fromMs: null,
         toMs: Date.parse("2026-07-19T00:00:00.000Z"),
+        agentBackend: "opencode",
+        model: "anthropic/claude-sonnet",
+        unknownModel: false,
       },
     ])
   })
@@ -13032,9 +13063,25 @@ describe("GraphQL API", () => {
     for (const from of ["not-a-date", "2026-07-20T00:00:00.000Z"]) {
       const response = await createGraphqlApi(runtime).fetch(
         graphqlRequest({
-          query: `query($from: String!) { timingHistory(from: $from, to: "2026-07-19T00:00:00.000Z") { id } }`,
+          query: `query($from: String!) { timingHistory(from: $from, to: "2026-07-19T00:00:00.000Z") { items { id } } }`,
           variables: { from },
         }),
+      )
+      const body = await response.json()
+      expect(body).toMatchObject({
+        errors: [{ extensions: { code: "BAD_USER_INPUT" } }],
+      })
+    }
+  })
+
+  test("timingHistory rejects oversized identities and contradictory model filters", async () => {
+    for (const query of [
+      `query { timingHistory(to: "2026-07-19T00:00:00.000Z", model: "${"m".repeat(2049)}") { items { id } } }`,
+      `query { timingHistory(to: "2026-07-19T00:00:00.000Z", agentBackend: "${"b".repeat(65)}") { items { id } } }`,
+      `query { timingHistory(to: "2026-07-19T00:00:00.000Z", model: "provider/model", unknownModel: true) { items { id } } }`,
+    ]) {
+      const response = await createGraphqlApi(runtime).fetch(
+        graphqlRequest({ query }),
       )
       const body = await response.json()
       expect(body).toMatchObject({

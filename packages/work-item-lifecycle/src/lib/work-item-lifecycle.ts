@@ -137,6 +137,7 @@ import {
   WorkItemTerminalError,
   WorkItemWaitingForBlockersError,
 } from "./errors.js"
+import { recordStepRunAgentModels } from "./execution-model-provenance.js"
 import {
   type ExplicitWorkItemExecutionProfile,
   type ImplementWithOptionsInput,
@@ -208,8 +209,8 @@ import {
 } from "./review.js"
 import { computeStepTimeoutElapsedMs } from "./step-run-productive-time.js"
 import {
-  type TimingHistory,
   type TimingHistoryFilter,
+  type TimingHistoryResult,
   loadTimingHistory,
 } from "./timing-history.js"
 import { applyCheckedLifecycleTransition } from "./transition-relation-check.js"
@@ -1590,7 +1591,7 @@ export interface WorkItemLifecycleShape {
   }) => Effect.Effect<CompletedWorkItemsPage, ListWorkItemsError>
   readonly timingHistory: (
     filter: TimingHistoryFilter,
-  ) => Effect.Effect<TimingHistory, WorkItemLifecycleDatabaseError>
+  ) => Effect.Effect<TimingHistoryResult, WorkItemLifecycleDatabaseError>
   /**
    * True when any Work Item (any state) has this OpenCode Session id.
    * Used to gate GraphQL session usage reads to harness-owned Sessions.
@@ -6539,6 +6540,19 @@ export const makeWorkItemLifecycleLive = (
                   })
                   return { _tag: "processed" as const, workItem: failed }
                 }
+              }
+
+              if (isAgentDependentLifecycleStep(stepRun.step)) {
+                // Record only after admission, and only on this fresh start.
+                // Recovery of an already-running Step Run must not re-resolve
+                // models from later settings.
+                const recordedAt = yield* Clock.currentTimeMillis
+                yield* recordStepRunAgentModels(sql, {
+                  stepRunId: afterStart.id,
+                  step: stepRun.step,
+                  selection,
+                  nowMs: recordedAt,
+                })
               }
 
               const origin = yield* storedOrigin(workItem.origin)

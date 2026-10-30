@@ -61,6 +61,8 @@ import type { QueueService } from "@ready-for-agent/queue-service"
 import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
   COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE,
+  TIMING_AGENT_BACKEND_MAX_LENGTH,
+  TIMING_MODEL_MAX_LENGTH,
   WorkItemLifecycle,
   type WorkItemRecord,
   type WorkItemsListKind,
@@ -441,6 +443,48 @@ const parseIsoInstantMs = (value: string, field: string): number => {
     })
   }
   return ms
+}
+
+const parseTimingIdentity = (
+  value: string | null | undefined,
+  field: string,
+  maxLength: number,
+): string | null => {
+  if (value == null) {
+    return null
+  }
+  if (typeof value !== "string") {
+    throw new GraphQLError(`Invalid ${field}`, {
+      extensions: { code: "BAD_USER_INPUT" },
+    })
+  }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+  if (trimmed.length > maxLength) {
+    throw new GraphQLError(`${field} is too long`, {
+      extensions: { code: "BAD_USER_INPUT" },
+    })
+  }
+  return trimmed
+}
+
+const toGraphqlModelHistory = (
+  history: "unknown" | "partial" | "complete",
+): "UNKNOWN" | "PARTIAL" | "COMPLETE" => {
+  switch (history) {
+    case "unknown":
+      return "UNKNOWN"
+    case "partial":
+      return "PARTIAL"
+    case "complete":
+      return "COMPLETE"
+    default: {
+      const _exhaustive: never = history
+      return _exhaustive
+    }
+  }
 }
 
 const toWorkItemsListKind = (
@@ -1339,6 +1383,9 @@ export const createGraphqlApi = <R>(
               repositoryId?: string | null
               from?: string | null
               to: string
+              agentBackend?: string | null
+              model?: string | null
+              unknownModel?: boolean | null
             },
             context: GraphqlRequestContext,
           ) => {
@@ -1351,14 +1398,50 @@ export const createGraphqlApi = <R>(
                 { extensions: { code: "BAD_USER_INPUT" } },
               )
             }
+            const agentBackend = parseTimingIdentity(
+              args.agentBackend,
+              "agentBackend",
+              TIMING_AGENT_BACKEND_MAX_LENGTH,
+            )
+            const model = parseTimingIdentity(
+              args.model,
+              "model",
+              TIMING_MODEL_MAX_LENGTH,
+            )
+            if (
+              args.unknownModel !== undefined &&
+              args.unknownModel !== null &&
+              typeof args.unknownModel !== "boolean"
+            ) {
+              throw new GraphQLError("Invalid unknownModel", {
+                extensions: { code: "BAD_USER_INPUT" },
+              })
+            }
+            const unknownModel = args.unknownModel === true
+            if (unknownModel && model !== null) {
+              throw new GraphQLError(
+                "`unknownModel` cannot be combined with `model`",
+                { extensions: { code: "BAD_USER_INPUT" } },
+              )
+            }
             return runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
-                return yield* lifecycle.timingHistory({
+                const history = yield* lifecycle.timingHistory({
                   repositoryId: args.repositoryId ?? null,
                   fromMs,
                   toMs,
+                  agentBackend,
+                  model,
+                  unknownModel,
                 })
+                return {
+                  items: history.items.map((item) => ({
+                    ...item,
+                    modelHistory: toGraphqlModelHistory(item.modelHistory),
+                  })),
+                  choices: history.choices,
+                }
               }).pipe(Effect.withSpan("graphql-api.timingHistory")),
               context,
             )

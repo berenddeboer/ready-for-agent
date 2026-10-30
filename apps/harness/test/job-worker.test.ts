@@ -91,6 +91,16 @@ import {
   transferPersistedRefreshJobs,
 } from "../src/server/job-worker.js"
 
+const emptyTimingHistory = () =>
+  Effect.succeed({
+    items: [],
+    choices: {
+      agentBackends: [],
+      models: [],
+      hasUnknownModel: false,
+    },
+  })
+
 const repository = makeRepositoryRecord({
   id: RepositoryId.make("repo-01J00000000000000000000000"),
   paused: true,
@@ -407,7 +417,7 @@ const queueLayer = (
       ownsSessionId: () => Effect.succeed(false),
       findWorkItemBySessionId: unused,
       countCommittedPullRequests: () => Effect.succeed(0),
-      timingHistory: () => Effect.succeed([]),
+      timingHistory: emptyTimingHistory,
       continueAfterHumanPrOutcome: unused,
       stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
       admitWaitingWorkItems: Effect.succeed(0),
@@ -2438,7 +2448,7 @@ describe("Job worker", () => {
           ownsSessionId: () => Effect.succeed(false),
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
-          timingHistory: () => Effect.succeed([]),
+          timingHistory: emptyTimingHistory,
           continueAfterHumanPrOutcome: unused,
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
@@ -2693,7 +2703,7 @@ describe("Job worker", () => {
           ownsSessionId: () => Effect.succeed(false),
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
-          timingHistory: () => Effect.succeed([]),
+          timingHistory: emptyTimingHistory,
           continueAfterHumanPrOutcome: unused,
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
@@ -2784,7 +2794,7 @@ describe("Job worker", () => {
           ownsSessionId: () => Effect.succeed(false),
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
-          timingHistory: () => Effect.succeed([]),
+          timingHistory: emptyTimingHistory,
           continueAfterHumanPrOutcome: unused,
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
@@ -2944,7 +2954,7 @@ describe("Job worker", () => {
           ownsSessionId: () => Effect.succeed(false),
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
-          timingHistory: () => Effect.succeed([]),
+          timingHistory: emptyTimingHistory,
           continueAfterHumanPrOutcome: unused,
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
@@ -3156,7 +3166,7 @@ describe("Job worker", () => {
           ownsSessionId: () => Effect.succeed(false),
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
-          timingHistory: () => Effect.succeed([]),
+          timingHistory: emptyTimingHistory,
           continueAfterHumanPrOutcome: unused,
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
@@ -3294,7 +3304,7 @@ describe("Job worker", () => {
           ownsSessionId: () => Effect.succeed(false),
           findWorkItemBySessionId: unused,
           countCommittedPullRequests: () => Effect.succeed(0),
-          timingHistory: () => Effect.succeed([]),
+          timingHistory: emptyTimingHistory,
           continueAfterHumanPrOutcome: unused,
           stopForCompetingIssueClosingPullRequests: () => Effect.succeed(0),
           admitWaitingWorkItems: Effect.succeed(0),
