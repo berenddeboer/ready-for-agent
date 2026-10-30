@@ -84,16 +84,14 @@ describe("contributor environment pins", () => {
   })
 
   it("uses the mise.toml Bun pin in every GitHub Actions Bun setup", () => {
-    const bunVersion = quotedAssignment(miseToml, "bun")
-    expect(bunVersion).toBeDefined()
-
     const setupBunBlocks: string[] = []
     for (const relativePath of githubYamlFiles()) {
       const contents = readWorkspace(relativePath)
-      expect(contents, relativePath).not.toMatch(/bun-version:\s*latest\b/)
+      expect(contents, relativePath).not.toContain("oven-sh/setup-bun@")
+      expect(contents, relativePath).not.toContain("bun-version:")
 
       const uses = contents.matchAll(
-        /uses:\s*oven-sh\/setup-bun@[^\n]+\n(?:[ \t]+[^\n]*\n)*/g,
+        /uses:\s*jdx\/mise-action@[^\n]+\n(?:[ \t]+[^\n]*\n)*/g,
       )
       for (const match of uses) {
         setupBunBlocks.push(`${relativePath}:\n${match[0]}`)
@@ -102,9 +100,9 @@ describe("contributor environment pins", () => {
 
     expect(setupBunBlocks.length).toBeGreaterThan(0)
     for (const block of setupBunBlocks) {
-      expect(block).toMatch(
-        new RegExp(`bun-version:\\s*["']?${bunVersion}["']?`),
-      )
+      expect(block).toMatch(/mise-action@[a-f0-9]{40}\b/)
+      expect(block).toMatch(/install_args: bun\s*$/m)
+      expect(block).not.toMatch(/(?:tool_versions|mise_toml):/)
     }
   })
 
