@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { agentBackendLabel } from "@ready-for-agent/agent-backend"
+import { agentBackendLabel } from "@ready-for-agent/agent-backend/registry"
 import {
   StatisticsMetric,
   statisticsControl,

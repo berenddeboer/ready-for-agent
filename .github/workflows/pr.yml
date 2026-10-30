@@ -256,18 +256,19 @@ jobs:
           pr-number: ${{ github.event.pull_request.number }}
           allow-save: "false"
 
-      # Dev-path GraphQL smoke (Bun + Vite SSR); no fixture vault required.
+      # Chromium before dev smoke: that step loads the Vite page in a browser.
+      - name: Restore/install Playwright Chromium
+        uses: ./.github/actions/playwright-chromium
+        with:
+          allow-save: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
+
+      # Dev-path smoke (Bun + Vite). Loads the page in Chromium; no vault.
       - name: Harness dev smoke
         run: bash scripts/ci-owned-execution.sh bunx nx run harness:smoke
 
       - name: Live Harness e2e (uninitialized Keymaxxer)
         id: live-e2e-no-vault
         run: bash scripts/ci-owned-execution.sh bunx nx run harness:e2e-no-vault
-
-      - name: Restore/install Playwright Chromium
-        uses: ./.github/actions/playwright-chromium
-        with:
-          allow-save: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' }}
 
       - name: Live Harness e2e (no backend agents)
         id: live-e2e-no-backend

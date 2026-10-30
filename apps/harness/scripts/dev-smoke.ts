@@ -1,13 +1,18 @@
 /**
  * Boots the monorepo harness:dev path (Bun + vite.js, not the Node shebang),
- * asserts GraphQL `{ health }`, then terminates. Used as `harness:smoke` in CI
- * without a Keymaxxer vault.
+ * asserts GraphQL `{ health }`, then loads the page in Chromium. Used as
+ * `harness:smoke` in CI without a Keymaxxer vault.
+ *
+ * Live e2e loads a production build, which tree-shakes unused re-exports.
+ * The dev server evaluates them, so a Node builtin in that graph crashes
+ * the browser only here.
  */
 import { type ChildProcess, spawn } from "node:child_process"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { type Page, chromium } from "@playwright/test"
 import {
   VITE_LISTENING_MARKER,
   waitForGraphqlHealth,
@@ -117,6 +122,87 @@ child.on("exit", (code) => {
   exitCode = code
 })
 
+/**
+ * SSR already includes the Jobs shell. The client entry is an async module,
+ * so DOMContentLoaded fires before that graph runs. Success is TanStack
+ * hydration after that entry loads (`$_TSR` is deleted only once both the
+ * stream and hydration have finished). A Vite overlay or page error fails
+ * the wait instead of waiting out a cold compile.
+ */
+const CLIENT_SETTLED = `(() => {
+  if (document.querySelector("vite-error-overlay") != null) return "overlay"
+  const started = performance.getEntriesByType("resource").some((entry) =>
+    entry.name.includes("tanstack-start-dev-client-entry")
+  )
+  if (!started) return undefined
+  const bootstrap = window.$_TSR
+  if (bootstrap == null || bootstrap.hydrated === true) return "ready"
+  return undefined
+})()`
+
+const pageErrorsOf = (page: Page): string[] => {
+  const errors: string[] = []
+  page.on("pageerror", (error) => {
+    errors.push(error.stack ?? error.message)
+  })
+  return errors
+}
+
+const clientStatus = (value: unknown): "ready" | "overlay" => {
+  if (value === "ready" || value === "overlay") return value
+  throw new Error(`Dev client returned an unexpected status: ${String(value)}`)
+}
+
+const assertDevPageLoads = async (baseUrl: string): Promise<void> => {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    const pageErrors = pageErrorsOf(page)
+    page.setDefaultNavigationTimeout(60_000)
+    await page.goto(`${baseUrl}/?theme=light`, {
+      waitUntil: "domcontentloaded",
+    })
+    if (pageErrors.length > 0) {
+      throw new Error(
+        `Dev page threw in the browser:\n${pageErrors.join("\n\n")}`,
+      )
+    }
+    const settled = page.waitForFunction(CLIENT_SETTLED, undefined, {
+      timeout: GRAPHQL_HEALTH_TIMEOUT_MS,
+    })
+    void settled.catch(() => undefined)
+    const crashed = new Promise<string>((resolve) => {
+      page.on("pageerror", (error) => {
+        resolve(error.stack ?? error.message)
+      })
+    })
+    const outcome = await Promise.race([
+      settled.then(async (handle) => ({
+        kind: "settled" as const,
+        status: clientStatus(await handle.jsonValue()),
+      })),
+      crashed.then((message) => ({ kind: "pageerror" as const, message })),
+    ])
+    if (outcome.kind === "pageerror") {
+      throw new Error(`Dev page threw in the browser:\n${outcome.message}`)
+    }
+    if (outcome.status === "overlay") {
+      const text = await page.locator("vite-error-overlay").first().innerText()
+      throw new Error(`Dev page threw in the browser:\n${text}`)
+    }
+    if (pageErrors.length > 0) {
+      throw new Error(
+        `Dev page threw in the browser:\n${pageErrors.join("\n\n")}`,
+      )
+    }
+    await page.getByRole("navigation", { name: "Primary" }).waitFor({
+      state: "visible",
+    })
+  } finally {
+    await browser.close()
+  }
+}
+
 const cleanup = async () => {
   await killTree(child)
   rmSync(runDir, { recursive: true, force: true })
@@ -139,7 +225,10 @@ try {
     throw new Error(`GET / failed with status ${root.status}`)
   }
 
-  console.log(`harness:smoke ok (GraphQL health on ${baseUrl})`)
+  console.log("[harness:smoke] loading the dev page in Chromium")
+  await assertDevPageLoads(baseUrl)
+
+  console.log(`harness:smoke ok (dev page loaded on ${baseUrl})`)
   await cleanup()
   process.exit(0)
 } catch (error) {

@@ -72,6 +72,9 @@ describe("single application server topology", () => {
       "bun --conditions @ready-for-agent/source ./node_modules/vite/bin/vite.js",
     )
     expect(smokeScript).toContain("{ health }")
+    expect(smokeScript).toContain("pageerror")
+    expect(smokeScript).toContain("tanstack-start-dev-client-entry")
+    expect(smokeScript).toContain("/?theme=light")
     const healthPoll = await readFile(
       new URL("../scripts/dev-smoke-health.ts", import.meta.url),
       "utf8",
