@@ -1054,9 +1054,10 @@ export const ActiveAgentBackendLive = (
           : AGENT_MODEL_CATALOG_FRESHNESS_MS
 
       /**
-       * OpenCode only reuses a successful catalog. A missing or failed
-       * snapshot is not served for the rest of the window. Other backends
-       * keep today's Save behavior and may reuse any snapshot.
+       * OpenCode only reuses a successful catalog: Ready and at least one
+       * model. A missing, empty, or failed snapshot is not served, so the
+       * next open inspects again. Other backends keep today's Save behavior
+       * and may reuse any snapshot.
        */
       const isReusableCatalogSnapshot = (
         backendId: AgentBackendId,

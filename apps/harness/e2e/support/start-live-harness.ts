@@ -136,8 +136,8 @@ chmodSync(join(binDir, "claude"), 0o755)
 
 /**
  * Fake `opencode` CLI. Catalog-only live scenarios mutate
- * {@link CONTROL_FILES.opencodeModels} while the Harness stays running so
- * Settings must refresh the Active catalog instead of requiring Recheck.
+ * {@link CONTROL_FILES.opencodeModels} while the Harness stays running.
+ * A successful OpenCode catalog is reused until the Harness restarts.
  * Installed only in default mode: `no-opencode` must keep OpenCode absent.
  */
 if (agentBackendMode === "default") {
