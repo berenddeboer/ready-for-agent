@@ -89,7 +89,7 @@ export const OpencodeSessionStoreLive = (
   // restarts on a new address, and Retry has to find that service.
   const connect = async (): Promise<ConnectOpencodeV2Result> => {
     if (options.reader !== undefined) {
-      return { kind: "ready", reader: options.reader, version: "2.test" }
+      return { kind: "ready", reader: options.reader }
     }
     if (options.connect !== undefined) {
       return options.connect()

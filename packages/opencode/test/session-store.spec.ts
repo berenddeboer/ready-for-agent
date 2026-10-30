@@ -4,7 +4,6 @@ import {
   OPENCODE_V2_MALFORMED_DIAGNOSTIC,
   OPENCODE_V2_SERVICE_MISSING_DIAGNOSTIC,
   OPENCODE_V2_TRANSIENT_DIAGNOSTIC,
-  openCodeV2IncompatibleDiagnostic,
 } from "../src/lib/opencode-v2-compatibility.js"
 import type { OpencodeV2Reader } from "../src/lib/opencode-v2-read.js"
 import {
@@ -157,13 +156,15 @@ describe("OpencodeSessionStore V2", () => {
     expect(session.diagnostic).not.toBe(OPENCODE_V2_TRANSIENT_DIAGNOSTIC)
   })
 
-  test("malformed Session.Info is a compatibility failure", async () => {
+  test("malformed Session.Info is not a transient retry", async () => {
     const session = await run(
       reader({ getSession: async () => ({ id: "ses_fixture" }) }),
       (store) => store.getSession("ses_fixture"),
     )
     expect(session.availability).toBe("unavailable")
     expect(session.diagnostic).toBe(OPENCODE_V2_MALFORMED_DIAGNOSTIC)
+    expect(session.diagnostic).not.toContain("V1 fallback")
+    expect(session.diagnostic).not.toContain("supported V2")
   })
 
   test("Retry rediscovers after the previous OpenCode endpoint fails", async () => {
@@ -175,7 +176,6 @@ describe("OpencodeSessionStore V2", () => {
           if (connects === 1) {
             return {
               kind: "ready",
-              version: "2.0.32",
               reader: reader({
                 getSession: async () => {
                   throw new Error("connect ECONNREFUSED")
@@ -185,7 +185,6 @@ describe("OpencodeSessionStore V2", () => {
           }
           return {
             kind: "ready",
-            version: "2.0.32",
             reader: reader({
               getSession: async () => sessionInfo,
             }),
@@ -259,28 +258,6 @@ describe("OpencodeSessionStore V2", () => {
     expect(session.availability).toBe("unavailable")
     expect(session.diagnostic).toBe(OPENCODE_V2_SERVICE_MISSING_DIAGNOSTIC)
     expect(session.diagnostic).not.toContain("no longer has this Session")
-  })
-
-  test("incompatible server is not described as a transient retry", async () => {
-    const diagnostic = openCodeV2IncompatibleDiagnostic("1.2.3")
-    const runtime = ManagedRuntime.make(
-      OpencodeSessionStoreLive({
-        connect: async () => ({
-          kind: "unavailable",
-          persistence: "persistent",
-          diagnostic,
-        }),
-      }),
-    )
-    const session = await runtime.runPromise(
-      Effect.gen(function* () {
-        const store = yield* OpencodeSessionStore
-        return yield* store.getSession("ses_any")
-      }),
-    )
-    await runtime.dispose()
-    expect(session.diagnostic).toBe(diagnostic)
-    expect(session.diagnostic).not.toContain("Retry in a moment")
   })
 
   test("reads the latest Agent Turn Tail without tool payloads or child sessions", async () => {

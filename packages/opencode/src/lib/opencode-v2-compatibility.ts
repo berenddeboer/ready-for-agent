@@ -1,10 +1,12 @@
 /**
- * Supported OpenCode V2 client/server policy.
+ * OpenCode V2 telemetry read policy.
  *
- * The HTTP API is experimental. This package talks to it only through
- * `@opencode/client` 2.x and accepts only an OpenCode 2.x server. There is no
- * V1 SQLite or `opencode db path` fallback. A server that does not meet this
- * policy is a persistent compatibility failure, not a transient retry.
+ * Session Telemetry talks to the experimental HTTP API through
+ * `@opencode/client`. A server version string is not proof of API
+ * compatibility, so connection does not accept or reject a server from that
+ * string and does not probe compatibility before a telemetry read. Startup
+ * and discovery failures stay transient. There is no V1 SQLite or
+ * `opencode db path` read.
  *
  * Accounting: Session Telemetry uses `GET /api/session/{sessionID}`
  * `Session.Info` (model, variant as Thinking Level, token rollup including
@@ -17,9 +19,6 @@
  */
 
 export const OPENCODE_V2_CLIENT_PACKAGE = "@opencode/client" as const
-
-/** Major line this package is generated and tested against. */
-export const OPENCODE_V2_SUPPORTED_MAJOR = 2 as const
 
 export const OPENCODE_V2_REQUIRED_OPERATIONS = [
   "server.info",
@@ -37,19 +36,8 @@ export const OPENCODE_V2_SERVICE_MISSING_DIAGNOSTIC =
 export const OPENCODE_V2_AUTHENTICATION_DIAGNOSTIC =
   "OpenCode rejected Session Telemetry authentication. This is not a transient outage. Use the same OpenCode service credentials as agent execution, then Retry."
 
-export const openCodeV2IncompatibleDiagnostic = (version: string): string =>
-  `OpenCode server ${version} is not a supported V2 API. Supported servers are OpenCode 2.x compatible with ${OPENCODE_V2_CLIENT_PACKAGE} 2.x. This is a compatibility failure, not a transient outage. There is no V1 fallback.`
-
 export const OPENCODE_V2_MALFORMED_DIAGNOSTIC =
-  "OpenCode returned a response that does not match the supported V2 contract. This is a compatibility failure, not a transient outage. There is no V1 fallback."
-
-export const isSupportedOpenCodeServerVersion = (version: string): boolean => {
-  const match = /(?:^|\s)v?(\d+)\.\d+\.\d+/.exec(version.trim())
-  if (match === null) {
-    return false
-  }
-  return Number(match[1]) === OPENCODE_V2_SUPPORTED_MAJOR
-}
+  "OpenCode returned a response that does not match the session data the harness can read. This is not a transient outage."
 
 type OpencodeUnavailablePersistence = "transient" | "persistent"
 
@@ -63,7 +51,7 @@ export type OpencodeReadFailure =
   | { readonly kind: "missing" }
   | OpencodeUnavailable
 
-export const transientFailure = (
+const transientFailure = (
   diagnostic: string = OPENCODE_V2_TRANSIENT_DIAGNOSTIC,
 ): OpencodeUnavailable => ({
   kind: "unavailable",

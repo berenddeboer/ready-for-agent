@@ -388,7 +388,7 @@ Then(
     // copy. History scenarios accept either non-success state.
     await expect(
       dialog.getByText(
-        /no longer has this Session locally|Session Telemetry is temporarily unavailable|OpenCode service is not running|rejected Session Telemetry authentication|not a supported V2 API/i,
+        /no longer has this Session locally|Session Telemetry is temporarily unavailable|OpenCode service is not running|rejected Session Telemetry authentication/i,
       ),
     ).toBeVisible({ timeout: 30_000 })
   },
