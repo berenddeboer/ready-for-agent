@@ -14,30 +14,29 @@ const discoveredServer = {
   },
 } satisfies OpencodeServiceEndpoint
 
-const unsupportedVersion = (value: unknown): void => {
+const expectNoVersionDiagnostic = (value: unknown): void => {
   const text = JSON.stringify(value)
   expect(text).not.toContain("supported V2")
   expect(text).not.toContain("V1 fallback")
 }
 
 describe("OpenCode V2 connection", () => {
-  test("a server found through fallback discovery is not an unsupported version", async () => {
+  test("a discovered server is ready without a version filter", async () => {
     let calls = 0
     const result = await connectOpencodeV2({
       requestTimeoutMs: 20,
       discover: async (options) => {
         expect(options?.version).toBeUndefined()
         calls += 1
-        if (calls === 1) return undefined
         return discoveredServer
       },
       readRegistration: () => {
         throw new Error("registration must not replace a discovered server")
       },
     })
-    expect(calls).toBe(2)
+    expect(calls).toBe(1)
     expect(result.kind).toBe("ready")
-    unsupportedVersion(result)
+    expectNoVersionDiagnostic(result)
   })
 
   test("temporary startup unavailability is not an unsupported-version rejection", async () => {
@@ -67,7 +66,7 @@ describe("OpenCode V2 connection", () => {
       },
     })
     expect(result.kind).toBe("ready")
-    unsupportedVersion(result)
+    expectNoVersionDiagnostic(result)
   })
 
   test("a registered server that discovery has not marked ready is not a compatibility failure", async () => {
@@ -81,9 +80,9 @@ describe("OpenCode V2 connection", () => {
       },
       readRegistration: () => discoveredServer,
     })
-    expect(calls).toBe(2)
+    expect(calls).toBe(1)
     expect(result.kind).toBe("ready")
-    unsupportedVersion(result)
+    expectNoVersionDiagnostic(result)
   })
 
   test("a missing service stays a transient startup failure", async () => {
@@ -96,6 +95,6 @@ describe("OpenCode V2 connection", () => {
       persistence: "transient",
       diagnostic: OPENCODE_V2_SERVICE_MISSING_DIAGNOSTIC,
     })
-    unsupportedVersion(result)
+    expectNoVersionDiagnostic(result)
   })
 })

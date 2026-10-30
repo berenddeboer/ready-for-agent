@@ -51,7 +51,7 @@ export type OpencodeReadFailure =
   | { readonly kind: "missing" }
   | OpencodeUnavailable
 
-export const transientFailure = (
+const transientFailure = (
   diagnostic: string = OPENCODE_V2_TRANSIENT_DIAGNOSTIC,
 ): OpencodeUnavailable => ({
   kind: "unavailable",

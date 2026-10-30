@@ -213,10 +213,8 @@ export const connectOpencodeV2 = async (input: {
   }
 
   try {
-    // No version predicate. If the first lookup misses, the unfiltered
-    // fallback is the server to read — not a compatibility failure.
-    const primary = await discover()
-    const discovered = primary ?? (await discover())
+    // No version predicate. A missed lookup is not a compatibility failure.
+    const discovered = await discover()
     if (discovered !== undefined) {
       return readyReader(
         discovered.url,
