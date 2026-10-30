@@ -1182,7 +1182,7 @@ rfa:AgentBackendUnavailable
 rfa:AgentBackendPreview
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Agent Backend Preview"@en ;
-  skos:definition "An inspection that loads an Agent Backend's Agent Model catalog for Settings or Implement With without activating an inactive backend. Opening Settings always Previews the effective backend and, when it is already Active, a successful result becomes the Harness catalog used by Save and later Agent Turns for one minute; a failed Preview keeps the previous Active catalog and readiness."@en ;
+  skos:definition "An inspection that loads an Agent Backend's Agent Model catalog for Settings or Implement With without activating an inactive backend. Opening Settings always Previews the effective backend. A successful OpenCode catalog is the Harness catalog: Settings, Implement With, and Save reuse that snapshot for fifteen minutes, including a catalog already published for the running Harness. A missing or failed OpenCode catalog is not reused; the next open inspects again. A failed Preview of an already Active backend keeps the previous Active catalog and readiness. Other Agent Backends are inspected on each Settings or Implement With open, and Save reuses their snapshot for one minute. Restarting the Harness is how a new successful OpenCode catalog is loaded before fifteen minutes; there is no in-app bypass."@en ;
   skos:hiddenLabel "Hot activate"@en, "Recheck Agent Backend"@en, "Settings-local catalog cache"@en .
 
 [

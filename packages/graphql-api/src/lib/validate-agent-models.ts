@@ -49,11 +49,13 @@ const backendLabel = (backendId: string): string =>
 /**
  * Catalog for the backend a mutation is about to make selected/effective.
  *
- * Save reuses a Settings-open or Recheck snapshot that is still fresh, and
- * inspects only when that window has expired, so a model offered by Settings
- * is judged against the same authoritative catalog. A backend that is
- * Unavailable (or unknown) yields no catalog — membership cannot be
- * established, so explicit models are rejected rather than trusted.
+ * Save reuses the Harness catalog while it is still fresh, and inspects
+ * only when that window has expired, so a model offered by Settings is
+ * judged against the same authoritative catalog. OpenCode keeps a
+ * successful catalog for fifteen minutes; other backends keep one minute.
+ * A backend that is Unavailable (or unknown) yields no catalog —
+ * membership cannot be established, so explicit models are rejected
+ * rather than trusted.
  */
 const resolveValidationCatalog = (
   backendId: string,

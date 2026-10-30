@@ -5,8 +5,9 @@
  * binary (no Anthropic login, no AWS call, no billable model) and the Harness
  * started without `CLAUDE_CODE_USE_BEDROCK`, so Claude Code is in first-party
  * configuration mode with its static alias catalog. Default-mode runs also
- * install a fake `opencode` whose catalog can change while the Harness stays
- * running, so Settings must refresh an already-Active override catalog.
+ * install a fake `opencode`. A successful OpenCode catalog is reused for
+ * fifteen minutes, so a model added while the Harness stays running does not
+ * appear until the Harness restarts.
  *
  * A legacy Bedrock model is seeded straight into the database: the mutations now
  * refuse such a value, so GraphQL cannot produce the upgraded-installation state
@@ -244,6 +245,10 @@ When("I save Harness settings", async ({ page }) => {
   await expect(dialog).toBeHidden({ timeout: 60_000 })
 })
 
+When("the Harness restarts", async () => {
+  await seedLiveHarnessAndRestart("")
+})
+
 When(
   "Claude Code stops being authenticated and the Harness restarts",
   async () => {
@@ -430,6 +435,14 @@ Then(
   async ({ page }, model: string) => {
     const values = await optionValues(buildModelSelect(repositoryDialog(page)))
     expect(values).toContain(model)
+  },
+)
+
+Then(
+  "the Repository build model dropdown does not offer {string}",
+  async ({ page }, model: string) => {
+    const values = await optionValues(buildModelSelect(repositoryDialog(page)))
+    expect(values).not.toContain(model)
   },
 )
 

@@ -98,6 +98,8 @@ export function ImplementWithIssueDialog({
       return result.repositoryModelPrefs
     },
   })
+  // Always ask the Harness. Do not cache the catalog in the browser.
+  // A successful OpenCode catalog is reused server-side for fifteen minutes.
   const preview = useQuery({
     queryKey: ["implement-with", "preview", backendId] as const,
     staleTime: 0,

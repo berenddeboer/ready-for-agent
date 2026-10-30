@@ -506,8 +506,9 @@ function SettingsChrome() {
     setPreviewPending(true)
   }, [dialogOpen, config.data])
 
-  // Opening Settings always Previews the selected backend so the dropdown and
-  // Save share one fresh catalog. Switching the draft backend does the same.
+  // Opening Settings Previews the selected backend so the dropdown and Save
+  // share the Harness catalog. OpenCode reuses a successful catalog for
+  // fifteen minutes; other backends inspect on each open.
   useEffect(() => {
     if (!dialogOpen) {
       return

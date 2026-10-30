@@ -184,7 +184,7 @@ A per-backend degraded state established by failed startup inspection, failed ho
 _Avoid_: Startup failure, automatic fallback, harness-wide block when another backend is healthy, Paused Repository, restart required
 
 **Agent Backend Preview**:
-An inspection that loads an Agent Backend's Agent Model catalog for Settings or Implement With without activating an inactive backend. Opening Settings always Previews the effective backend and, when it is already Active, a successful result becomes the Harness catalog used by Save and later Agent Turns for one minute; a failed Preview keeps the previous Active catalog and readiness.
+An inspection that loads an Agent Backend's Agent Model catalog for Settings or Implement With without activating an inactive backend. Opening Settings always Previews the effective backend. A successful OpenCode catalog is the Harness catalog: Settings, Implement With, and Save reuse that snapshot for fifteen minutes, including a catalog already published for the running Harness. A missing or failed OpenCode catalog is not reused; the next open inspects again. A failed Preview of an already Active backend keeps the previous Active catalog and readiness. Other Agent Backends are inspected on each Settings or Implement With open, and Save reuses their snapshot for one minute. Restarting the Harness is how a new successful OpenCode catalog is loaded before fifteen minutes; there is no in-app bypass.
 _Avoid_: Hot activate, Recheck Agent Backend, Settings-local catalog cache
 
 **Recheck Agent Backend**:

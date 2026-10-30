@@ -33,16 +33,17 @@ import {
   missingSessionTelemetry,
   unsupportedSessionTelemetry,
 } from "./session-telemetry.js"
-import type {
-  AgentBackendDescriptor,
-  AgentBackendId,
-  AgentBackendProvider,
-  AgentModel,
-  AgentTurnResult,
-  ContinueTurnInput,
-  InspectInput,
-  InspectResult,
-  StartTurnInput,
+import {
+  AGENT_BACKEND_IDS,
+  type AgentBackendDescriptor,
+  type AgentBackendId,
+  type AgentBackendProvider,
+  type AgentModel,
+  type AgentTurnResult,
+  type ContinueTurnInput,
+  type InspectInput,
+  type InspectResult,
+  type StartTurnInput,
 } from "./types.js"
 
 export type AgentBackendStatusKind = "ready" | "unavailable"
@@ -95,17 +96,23 @@ export type AgentBackendPreview = {
 }
 
 /**
- * Save reuses a Settings-open or Recheck catalog newer than this. Opening
- * Settings always inspects (force), so a newly configured model appears without
- * waiting for the window to expire.
+ * Non-OpenCode Save reuses a catalog newer than this. Opening Settings or
+ * Implement With for those backends always inspects.
  */
 export const AGENT_MODEL_CATALOG_FRESHNESS_MS = 60_000
 
+/**
+ * Settings, Implement With, and Save reuse a successful OpenCode catalog
+ * newer than this. Do not expire it sooner. A missing or failed catalog is
+ * not reused. Restart the Harness to load a new catalog before this ends.
+ */
+export const OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS = 15 * 60 * 1000
+
 export type RefreshAgentModelCatalogOptions = {
   /**
-   * When true (Settings / Preview), always inspect. When false or omitted
-   * (Save), reuse a catalog inspected within
-   * {@link AGENT_MODEL_CATALOG_FRESHNESS_MS}.
+   * When true, always inspect. Non-OpenCode Preview sets this. OpenCode
+   * Preview and Save omit it so a successful catalog inside that backend's
+   * freshness window is reused.
    */
   readonly force?: boolean
 }
@@ -386,21 +393,24 @@ export type ActiveAgentBackendShape = {
     backendId: AgentBackendId,
   ) => Effect.Effect<void, AgentBackendUnavailableError>
   /**
-   * Settings-only inspect of a backend catalog. Always inspects (does not
-   * reuse a still-fresh snapshot). When the backend is already Active, a
-   * successful inspect publishes the catalog for Save and Agent Turns; a
-   * failed inspect leaves the previous Active catalog and readiness
-   * unchanged. Does not add an inactive backend to the Active set.
+   * Settings and Implement With catalog inspection. Does not activate an
+   * inactive backend. OpenCode reuses a successful Harness catalog younger
+   * than {@link OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS}. Other backends
+   * always inspect. When the backend is already Active, a successful inspect
+   * publishes the catalog; a failed inspect leaves the previous Active
+   * catalog and readiness unchanged.
    */
   readonly preview: (
     backendId: AgentBackendId,
     input: InspectInput,
   ) => Effect.Effect<AgentBackendPreview>
   /**
-   * Load the Agent Model catalog for Settings or Save. `force` (Preview)
-   * always inspects; otherwise a snapshot newer than
-   * {@link AGENT_MODEL_CATALOG_FRESHNESS_MS} is reused. Overlapping calls for
-   * the same backend join one in-flight inspect.
+   * Load the Agent Model catalog for Settings, Implement With, or Save.
+   * `force` always inspects. Otherwise a reusable snapshot inside the
+   * backend freshness window is reused. OpenCode reuses only a successful
+   * catalog for fifteen minutes; other backends reuse any snapshot for one
+   * minute. Overlapping calls for the same backend join one in-flight
+   * inspect.
    */
   readonly refreshCatalog: (
     backendId: AgentBackendId,
@@ -1038,25 +1048,51 @@ export const ActiveAgentBackendLive = (
           }
         }).pipe(Effect.asVoid)
 
+      const catalogFreshnessMs = (backendId: AgentBackendId): number =>
+        backendId === AGENT_BACKEND_IDS.opencode
+          ? OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS
+          : AGENT_MODEL_CATALOG_FRESHNESS_MS
+
+      /**
+       * OpenCode only reuses a successful catalog: Ready and at least one
+       * model. A missing, empty, or failed snapshot is not served, so the
+       * next open inspects again. Other backends keep today's Save behavior
+       * and may reuse any snapshot.
+       */
+      const isReusableCatalogSnapshot = (
+        backendId: AgentBackendId,
+        snapshot: AgentBackendPreview,
+      ): boolean => {
+        if (backendId !== AGENT_BACKEND_IDS.opencode) {
+          return true
+        }
+        return snapshot.kind === "ready" && snapshot.models.length > 0
+      }
+
       const readFreshCatalog = (
         resolvedId: AgentBackendId,
       ): Effect.Effect<AgentBackendPreview | null> =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
+          const freshnessMs = catalogFreshnessMs(resolvedId)
           const current = yield* Ref.get(stateRef)
           const existing = current.entries.get(resolvedId)
           if (
             existing !== undefined &&
             existing.catalogInspectedAt !== null &&
-            now - existing.catalogInspectedAt < AGENT_MODEL_CATALOG_FRESHNESS_MS
+            now - existing.catalogInspectedAt < freshnessMs
           ) {
-            return toAgentBackendPreview(toRuntimeStatus(existing))
+            const snapshot = toAgentBackendPreview(toRuntimeStatus(existing))
+            if (isReusableCatalogSnapshot(resolvedId, snapshot)) {
+              return snapshot
+            }
           }
           if (existing === undefined) {
             const cached = (yield* Ref.get(previewCacheRef)).get(resolvedId)
             if (
               cached !== undefined &&
-              now - cached.inspectedAt < AGENT_MODEL_CATALOG_FRESHNESS_MS
+              now - cached.inspectedAt < freshnessMs &&
+              isReusableCatalogSnapshot(resolvedId, cached.preview)
             ) {
               return cached.preview
             }
@@ -1115,14 +1151,16 @@ export const ActiveAgentBackendLive = (
             warnings: normalizeInspectWarnings(inspected.success.warnings),
           }
           const inspectedAt = yield* Clock.currentTimeMillis
-          yield* Ref.update(previewCacheRef, (cache) => {
-            const next = new Map(cache)
-            next.set(resolvedId, {
-              preview: previewResult,
-              inspectedAt,
+          if (isReusableCatalogSnapshot(resolvedId, previewResult)) {
+            yield* Ref.update(previewCacheRef, (cache) => {
+              const next = new Map(cache)
+              next.set(resolvedId, {
+                preview: previewResult,
+                inspectedAt,
+              })
+              return next
             })
-            return next
-          })
+          }
           return previewResult
         })
 
@@ -1198,8 +1236,13 @@ export const ActiveAgentBackendLive = (
       const preview = (
         backendId: AgentBackendId,
         input: InspectInput,
-      ): Effect.Effect<AgentBackendPreview> =>
-        refreshCatalog(backendId, input, { force: true })
+      ): Effect.Effect<AgentBackendPreview> => {
+        const resolvedId = normalizeBackendId(backendId)
+        if (resolvedId === AGENT_BACKEND_IDS.opencode) {
+          return refreshCatalog(resolvedId, input)
+        }
+        return refreshCatalog(resolvedId, input, { force: true })
+      }
 
       const getRegistration = (backendId: AgentBackendId) =>
         Ref.get(stateRef).pipe(
