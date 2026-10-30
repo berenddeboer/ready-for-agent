@@ -133,9 +133,7 @@ describe("Harness settings Agent Backend change", () => {
     expect(prepare).toContain("void backendStatus.refetch()")
     expect(prepare).toContain("setPreviewPending(true)")
     expect(source).toContain("previewAgentBackend")
-    expect(source).toContain(
-      "Opening Settings always Previews the selected backend",
-    )
+    expect(source).toContain("Opening Settings Previews the selected backend")
     // Explicit openers still prepare then mask `/settings` (issues #840 / #1146).
     expect(source).toContain("openHarnessSettings")
     expect(source).toContain("prepareSettingsSession()")

@@ -12,6 +12,7 @@ import {
   type AgentBackendId,
   AgentBackendMalformedOutputError,
   type AgentTurnResult,
+  OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS,
   type ResolveAgentBackendRuntime,
   SessionTelemetryProvider,
   getBuiltInAgentBackend,
@@ -886,6 +887,7 @@ describe("Agent Model catalog refresh freshness", () => {
   const makeMutableResolve = (options: {
     readonly models: () => ReadonlyArray<{
       id: string
+      name?: string
       thinkingLevels: readonly string[]
     }>
     readonly inspectStarted?: () => void
@@ -934,9 +936,18 @@ describe("Agent Model catalog refresh freshness", () => {
       program.pipe(Effect.provide(layer), Effect.provide(TestClock.layer())),
     )
 
-  it("Preview of an Active backend publishes the inspected catalog", async () => {
+  it("reuses a successful OpenCode catalog for fifteen minutes, then inspects and publishes", async () => {
     const inspectCount = { value: 0 }
-    let models = [{ id: "opencode/old", thinkingLevels: ["low"] as const }]
+    const cached = {
+      id: "opencode/old",
+      name: "OpenCode Old",
+      thinkingLevels: ["low", "high"] as const,
+    }
+    let models: Array<{
+      id: string
+      name?: string
+      thinkingLevels: readonly string[]
+    }> = [cached]
     const layer = ActiveAgentBackendLive({
       selectedBackendId: AGENT_BACKEND_IDS.opencode,
       resolveRuntime: makeMutableResolve({
@@ -949,23 +960,48 @@ describe("Agent Model catalog refresh freshness", () => {
       layer,
       Effect.gen(function* () {
         const active = yield* ActiveAgentBackend
-        yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
-        expect(
-          (yield* active.getBackendStatus(
-            AGENT_BACKEND_IDS.opencode,
-          ))?.models.map((model) => model.id),
-        ).toEqual(["opencode/old"])
-
+        yield* active.inspectStartupBackend(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        const afterStartup = inspectCount.value
         models = [
-          { id: "opencode/old", thinkingLevels: ["low"] },
-          { id: "azure/gpt-6-astra", thinkingLevels: ["low", "high"] },
+          cached,
+          {
+            id: "azure/gpt-6-astra",
+            name: "Astra",
+            thinkingLevels: ["low", "high"],
+          },
         ]
+
         const preview = yield* active.preview(
           AGENT_BACKEND_IDS.opencode,
           inspectInput,
         )
+        expect(inspectCount.value).toBe(afterStartup)
         expect(preview.kind).toBe("ready")
-        expect(preview.models.map((model) => model.id)).toEqual([
+        expect(preview.models).toEqual([cached])
+        expect(
+          (yield* active.getBackendStatus(AGENT_BACKEND_IDS.opencode))?.models,
+        ).toEqual([cached])
+
+        yield* TestClock.adjust(
+          `${OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS - 1} millis`,
+        )
+        const stillCached = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterStartup)
+        expect(stillCached.models).toEqual([cached])
+
+        yield* TestClock.adjust("1 millis")
+        const refreshed = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterStartup + 1)
+        expect(refreshed.models.map((model) => model.id)).toEqual([
           "opencode/old",
           "azure/gpt-6-astra",
         ])
@@ -1032,7 +1068,22 @@ describe("Agent Model catalog refresh freshness", () => {
         expect(inspectCount.value).toBe(afterOpen)
         expect(reused.models.map((model) => model.id)).toEqual(["opencode/old"])
 
-        yield* TestClock.adjust(`${AGENT_MODEL_CATALOG_FRESHNESS_MS} millis`)
+        yield* TestClock.adjust(
+          `${OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS - 1} millis`,
+        )
+        const stillCached = yield* active.refreshCatalog(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterOpen)
+        expect(stillCached.models.map((model) => model.id)).toEqual([
+          "opencode/old",
+        ])
+        expect(stillCached.models.map((model) => model.id)).not.toContain(
+          "azure/gpt-6-astra",
+        )
+
+        yield* TestClock.adjust("1 millis")
         const refreshed = yield* active.refreshCatalog(
           AGENT_BACKEND_IDS.opencode,
           inspectInput,
@@ -1109,6 +1160,9 @@ describe("Agent Model catalog refresh freshness", () => {
       Effect.gen(function* () {
         const active = yield* ActiveAgentBackend
         yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        yield* TestClock.adjust(
+          `${OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS} millis`,
+        )
         failInspect = true
         const preview = yield* active.preview(
           AGENT_BACKEND_IDS.opencode,
@@ -1123,6 +1177,16 @@ describe("Agent Model catalog refresh freshness", () => {
         expect(status?.models.map((model) => model.id)).toEqual([
           "opencode/live",
         ])
+        const afterFailedPreview = inspectCount.value
+        const retried = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterFailedPreview + 1)
+        expect(retried.kind).toBe("unavailable")
+        expect(
+          (yield* active.getBackendStatus(AGENT_BACKEND_IDS.opencode))?.kind,
+        ).toBe("ready")
       }),
     )
   })
@@ -1194,6 +1258,9 @@ describe("Agent Model catalog refresh freshness", () => {
       Effect.gen(function* () {
         const active = yield* ActiveAgentBackend
         yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        yield* TestClock.adjust(
+          `${OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS} millis`,
+        )
         const recheckFiber = yield* Effect.forkChild(
           active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput),
         )
@@ -1300,6 +1367,9 @@ describe("Agent Model catalog refresh freshness", () => {
       Effect.gen(function* () {
         const active = yield* ActiveAgentBackend
         yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        yield* TestClock.adjust(
+          `${OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS} millis`,
+        )
         const recheckFiber = yield* Effect.forkChild(
           active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput),
         )
@@ -1416,6 +1486,9 @@ describe("Agent Model catalog refresh freshness", () => {
       Effect.gen(function* () {
         const active = yield* ActiveAgentBackend
         yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        yield* TestClock.adjust(
+          `${OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS} millis`,
+        )
         const recheckFiber = yield* Effect.forkChild(
           active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput),
         )
@@ -1512,6 +1585,9 @@ describe("Agent Model catalog refresh freshness", () => {
       Effect.gen(function* () {
         const active = yield* ActiveAgentBackend
         yield* active.recheck(AGENT_BACKEND_IDS.opencode, inspectInput)
+        yield* TestClock.adjust(
+          `${OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS} millis`,
+        )
         const previewFiber = yield* Effect.forkChild(
           active.preview(AGENT_BACKEND_IDS.opencode, inspectInput),
         )
@@ -1687,6 +1763,252 @@ describe("Agent Model catalog refresh freshness", () => {
         expect(statuses.map((status) => status.backend.id)).toEqual(["grok"])
       }),
     )
+  })
+
+  it("reuses a successful inactive OpenCode preview without activating it", async () => {
+    const inspectCount = { value: 0 }
+    const cached = {
+      id: "opencode/preview",
+      name: "Preview model",
+      thinkingLevels: ["low", "max"] as const,
+    }
+    let models: Array<{
+      id: string
+      name?: string
+      thinkingLevels: readonly string[]
+    }> = [cached]
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.claude,
+      resolveRuntime: makeMutableResolve({
+        models: () => models,
+        inspectCount,
+      }),
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const first = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        const afterOpen = inspectCount.value
+        models = [
+          {
+            id: "opencode/later",
+            name: "Later",
+            thinkingLevels: ["high"],
+          },
+        ]
+        const second = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterOpen)
+        expect(first.models).toEqual([cached])
+        expect(second.models).toEqual([cached])
+        expect(yield* active.getBackendStatus(AGENT_BACKEND_IDS.opencode)).toBe(
+          null,
+        )
+
+        yield* TestClock.adjust(
+          `${OPENCODE_AGENT_MODEL_CATALOG_FRESHNESS_MS} millis`,
+        )
+        const expired = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterOpen + 1)
+        expect(expired.models[0]?.id).toBe("opencode/later")
+        expect(yield* active.getBackendStatus(AGENT_BACKEND_IDS.opencode)).toBe(
+          null,
+        )
+      }),
+    )
+  })
+
+  it("does not reuse a failed or missing OpenCode catalog", async () => {
+    const inspectCount = { value: 0 }
+    let failInspect = true
+    let models: Array<{
+      id: string
+      thinkingLevels: readonly string[]
+    }> = []
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.claude,
+      resolveRuntime: makeMutableResolve({
+        models: () => models,
+        inspectCount,
+        failInspect: () => failInspect,
+      }),
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const failed = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(failed.kind).toBe("unavailable")
+        const afterFailure = inspectCount.value
+        const retried = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterFailure + 1)
+        expect(retried.kind).toBe("unavailable")
+        expect(yield* active.getBackendStatus(AGENT_BACKEND_IDS.opencode)).toBe(
+          null,
+        )
+
+        failInspect = false
+        const empty = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(empty.kind).toBe("ready")
+        expect(empty.models).toEqual([])
+        const afterEmpty = inspectCount.value
+        models = [{ id: "opencode/recovered", thinkingLevels: ["low"] }]
+        const afterMissing = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterEmpty + 1)
+        expect(afterMissing.models[0]?.id).toBe("opencode/recovered")
+      }),
+    )
+  })
+
+  it("does not serve a failed OpenCode startup catalog", async () => {
+    const inspectCount = { value: 0 }
+    const failInspect = true
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime: makeMutableResolve({
+        models: () => [{ id: "opencode/recovered", thinkingLevels: ["low"] }],
+        inspectCount,
+        failInspect: () => failInspect,
+      }),
+    })
+
+    await runWithTestClock(
+      layer,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const startup = yield* active.inspectStartupBackend(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(startup.kind).toBe("unavailable")
+        const afterStartup = inspectCount.value
+        const preview = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterStartup + 1)
+        expect(preview.kind).toBe("unavailable")
+        expect(
+          (yield* active.getBackendStatus(AGENT_BACKEND_IDS.opencode))?.kind,
+        ).toBe("unavailable")
+      }),
+    )
+  })
+
+  it("a new Harness starts from an empty OpenCode catalog cache", async () => {
+    const inspectCount = { value: 0 }
+    const resolveRuntime = makeMutableResolve({
+      models: () => [{ id: "opencode/cached", thinkingLevels: ["low"] }],
+      inspectCount,
+    })
+    const first = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+    await runWithTestClock(
+      first,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        yield* active.preview(AGENT_BACKEND_IDS.opencode, inspectInput)
+      }),
+    )
+    const afterFirstHarness = inspectCount.value
+
+    const restarted = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime,
+    })
+    await runWithTestClock(
+      restarted,
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const preview = yield* active.preview(
+          AGENT_BACKEND_IDS.opencode,
+          inspectInput,
+        )
+        expect(inspectCount.value).toBe(afterFirstHarness + 1)
+        expect(preview.models[0]?.id).toBe("opencode/cached")
+      }),
+    )
+  })
+
+  it("Claude, Codex, and Grok still inspect on every Preview and keep a one-minute Save window", async () => {
+    for (const backendId of [
+      AGENT_BACKEND_IDS.claude,
+      AGENT_BACKEND_IDS.codex,
+      AGENT_BACKEND_IDS.grok,
+    ]) {
+      const inspectCount = { value: 0 }
+      let models = [
+        { id: `${backendId}/old`, thinkingLevels: ["low"] as const },
+      ]
+      const layer = ActiveAgentBackendLive({
+        selectedBackendId: backendId,
+        resolveRuntime: makeMutableResolve({
+          models: () => models,
+          inspectCount,
+        }),
+      })
+
+      await runWithTestClock(
+        layer,
+        Effect.gen(function* () {
+          const active = yield* ActiveAgentBackend
+          yield* active.recheck(backendId, inspectInput)
+          const afterStartup = inspectCount.value
+          models = [{ id: `${backendId}/new`, thinkingLevels: ["high"] }]
+
+          const firstPreview = yield* active.preview(backendId, inspectInput)
+          const secondPreview = yield* active.preview(backendId, inspectInput)
+          expect(inspectCount.value).toBe(afterStartup + 2)
+          expect(firstPreview.models[0]?.id).toBe(`${backendId}/new`)
+          expect(secondPreview.models[0]?.id).toBe(`${backendId}/new`)
+
+          const saved = yield* active.refreshCatalog(backendId, inspectInput)
+          expect(inspectCount.value).toBe(afterStartup + 2)
+          expect(saved.models[0]?.id).toBe(`${backendId}/new`)
+
+          yield* TestClock.adjust(
+            `${AGENT_MODEL_CATALOG_FRESHNESS_MS - 1} millis`,
+          )
+          const stillFresh = yield* active.refreshCatalog(
+            backendId,
+            inspectInput,
+          )
+          expect(inspectCount.value).toBe(afterStartup + 2)
+          expect(stillFresh.models[0]?.id).toBe(`${backendId}/new`)
+
+          yield* TestClock.adjust("1 millis")
+          models = [{ id: `${backendId}/expired`, thinkingLevels: ["low"] }]
+          const expired = yield* active.refreshCatalog(backendId, inspectInput)
+          expect(inspectCount.value).toBe(afterStartup + 3)
+          expect(expired.models[0]?.id).toBe(`${backendId}/expired`)
+        }),
+      )
+    }
   })
 })
 

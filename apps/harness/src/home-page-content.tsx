@@ -1720,8 +1720,9 @@ function RepositoryCard({
   const harnessReviewModel = inheritHarnessReviewModel()
   const harnessReviewVariant = inheritHarnessReviewVariant()
 
-  // Opening Settings always Previews the effective backend so the dropdown
-  // and Save share one fresh catalog, including the harness default.
+  // Opening Settings Previews the effective backend so the dropdown and Save
+  // share the Harness catalog, including the harness default. OpenCode reuses
+  // a successful catalog for fifteen minutes.
   const catalogModels: readonly AgentModelOption[] | undefined =
     previewModels ?? undefined
   const modelIds = (catalogModels ?? []).map((model) => model.id)

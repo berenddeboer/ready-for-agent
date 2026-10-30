@@ -36,10 +36,14 @@ type Query {
   """
   agentBackendStatus: AgentBackendStatus!
   """
-  Settings inspection of an Agent Backend catalog. Always inspects.
-  Does not activate an inactive backend. When the backend is already
-  Active, a successful inspect publishes the catalog for Save and Agent
-  Turns; a failed inspect leaves the previous Active catalog unchanged.
+  Settings and Implement With inspection of an Agent Backend catalog.
+  Does not activate an inactive backend. A successful OpenCode catalog
+  is reused for fifteen minutes by later opens and by Save, including a
+  catalog already published for the running Harness. A missing or failed
+  OpenCode catalog is not reused. Other backends are inspected on each
+  open; their Save freshness stays one minute. When the backend is
+  already Active, a successful inspect publishes the catalog; a failed
+  inspect leaves the previous Active catalog unchanged.
   """
   previewAgentBackend(backendId: String!): AgentBackendPreview!
   """

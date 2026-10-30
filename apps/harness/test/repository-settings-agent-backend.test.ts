@@ -124,9 +124,7 @@ describe("Repository settings Agent Backend override", () => {
     expect(prepare).toContain("void models.refetch()")
     expect(prepare).toContain("void agentBackends.refetch()")
     expect(prepare).toContain("setPreviewPending(true)")
-    expect(source).toContain(
-      "Opening Settings always Previews the effective backend",
-    )
+    expect(source).toContain("Opening Settings Previews the effective backend")
     const openSettings = source.slice(
       source.indexOf("const openSettings = () => {"),
       source.indexOf("const harnessDefaultBackendId"),
