@@ -71,6 +71,6 @@
     }
   },
   "affected": {
-    "legacy": true
+    "legacy": false
   }
 }
