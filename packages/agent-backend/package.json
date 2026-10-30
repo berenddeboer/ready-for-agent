@@ -13,6 +13,12 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./registry": {
+      "@ready-for-agent/source": "./src/lib/registry.ts",
+      "types": "./dist/lib/registry.d.ts",
+      "import": "./dist/lib/registry.js",
+      "default": "./dist/lib/registry.js"
     }
   },
   "dependencies": {

@@ -191,18 +191,19 @@ jobs:
         with:
           mode: restore-main
 
-      # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
+      # Chromium before dev smoke: that step loads the Vite page in a browser.
+      # The same install serves both live suites.
+      - name: Install Playwright Chromium
+        working-directory: apps/harness
+        run: bunx playwright install --with-deps chromium
+
+      # Dev-path smoke (Bun + Vite). Loads the page in Chromium; no vault.
       - name: Harness dev smoke
         run: bash scripts/ci-owned-execution.sh bunx nx run harness:smoke
 
       - name: Live Harness e2e (uninitialized Keymaxxer)
         id: live-e2e-no-vault
         run: bash scripts/ci-owned-execution.sh bunx nx run harness:e2e-no-vault
-
-      # Chromium once for both live suites.
-      - name: Install Playwright Chromium
-        working-directory: apps/harness
-        run: bunx playwright install --with-deps chromium
 
       # Product default-backend / first-run without OpenCode (vault-free).
       - name: Live Harness e2e (no backend agents)

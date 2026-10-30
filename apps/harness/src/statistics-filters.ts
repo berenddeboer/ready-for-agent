@@ -1,4 +1,4 @@
-import { agentBackendLabel } from "@ready-for-agent/agent-backend"
+import { agentBackendLabel } from "@ready-for-agent/agent-backend/registry"
 
 /** Reserved URL value. Not a catalog model id. */
 export const UNKNOWN_MODEL_FILTER = "__unknown__"
