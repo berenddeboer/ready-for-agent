@@ -29,7 +29,7 @@
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@effect/language-service": "^0.87.5",
-    "@effect/tsgo": "^0.56.0",
+    "@effect/tsgo": "^0.63.0",
     "@nx/js": "24.0.2",
     "@nx/vite": "24.0.2",
     "@swc/helpers": "~0.5.23",
