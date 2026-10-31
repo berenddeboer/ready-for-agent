@@ -1,4 +1,7 @@
+import { Banner } from "./banner.js"
 import { CI_GATE_DISABLED_LABEL } from "./ci-gate-status-label.js"
+import type { CiGateStoryInput } from "./ci-gate-status-story.js"
+import { CiGateStatusStory } from "./ci-gate-status-story-view.js"
 import { cx, ui } from "./ui.js"
 
 export const CI_GATE_DEFINITIONS_LOADING_LABEL = "Loading CI Gate Definitions…"
@@ -36,22 +39,19 @@ export type CiGateCatalogView =
       readonly unavailable: readonly CiGateDefinitionChoice[]
     }
 
-type RepositoryCiGateStatusView = {
-  readonly disabled: boolean
-  readonly statusLabel: string
-  readonly diagnostic: string | null
-  readonly activeIncidentSummary: string | null
-  readonly latestResolvedIncidentSummary: string | null
-}
-
 export type RepositorySettingsCiGateSectionProps = {
   readonly repositoryId: string
   readonly catalog: CiGateCatalogView
   readonly selectedIdentities: readonly string[]
   readonly onSelectedIdentitiesChange: (identities: string[]) => void
-  readonly status: RepositoryCiGateStatusView
+  readonly story: CiGateStoryInput
   /** Null hides the control. The settings dialog offers it on every Forge. */
   readonly automaticCiRepair: AutomaticCiRepairControl | null
+  readonly repairPending?: boolean
+  readonly onStartRepair?: () => void
+  /** Shown in this dialog when Start CI Repair fails. The card banner is behind the modal. */
+  readonly repairError?: string
+  readonly nowMs?: number
 }
 
 export const ciGateCatalogViewFromQuery = (input: {
@@ -260,8 +260,12 @@ export function RepositorySettingsCiGateSection({
   catalog,
   selectedIdentities,
   onSelectedIdentitiesChange,
-  status,
+  story,
   automaticCiRepair,
+  repairPending = false,
+  onStartRepair,
+  repairError,
+  nowMs,
 }: RepositorySettingsCiGateSectionProps) {
   const onToggle = (input: { identity: string; selected: boolean }) => {
     onSelectedIdentitiesChange(
@@ -293,23 +297,28 @@ export function RepositorySettingsCiGateSection({
         onToggle={onToggle}
       />
       <span className={ui.dialogFieldHint}>{CI_GATE_EMPTY_SELECTION_HINT}</span>
-      <span className={ui.dialogFieldHint}>
-        Current status:{" "}
-        {status.disabled ? CI_GATE_DISABLED_LABEL : status.statusLabel}
-        {!status.disabled && status.diagnostic !== null
-          ? ` — ${status.diagnostic}`
-          : ""}
-      </span>
-      {status.activeIncidentSummary !== null ? (
+      {story.status === "DISABLED" ? (
         <span className={ui.dialogFieldHint}>
-          Active incident: {status.activeIncidentSummary}
+          Current status: {CI_GATE_DISABLED_LABEL}
         </span>
-      ) : null}
-      {status.latestResolvedIncidentSummary !== null ? (
-        <span className={ui.dialogFieldHint}>
-          Last resolved: {status.latestResolvedIncidentSummary}
-        </span>
-      ) : null}
+      ) : (
+        <CiGateStatusStory
+          ciGate={story}
+          nowMs={nowMs}
+          repairPending={repairPending}
+          onStartRepair={onStartRepair}
+        />
+      )}
+      {repairError === undefined || repairError === "" ? null : (
+        <Banner
+          className={ui.bannerCompact}
+          tone="alarm"
+          tag="Error"
+          role="alert"
+        >
+          {repairError}
+        </Banner>
+      )}
       {automaticCiRepair === null ? null : (
         <AutomaticCiRepairSubsection
           repositoryId={repositoryId}

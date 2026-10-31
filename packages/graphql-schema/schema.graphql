@@ -708,6 +708,30 @@ type CiGateObservedRun {
   rawConclusion: String
   createdAt: String
   updatedAt: String
+  """
+  Forge order of this run. A lexicographically larger key is newer.
+  Absent on observations recorded before order keys existed.
+  """
+  orderKey: String
+  """
+  True when a job in this still-running run has already failed.
+  """
+  earlyJobFailure: Boolean!
+}
+
+"""
+Latched failing run that keeps a CI Gate Definition closed.
+Timestamps are the run's own times, never the observation time.
+"""
+type CiGateFailingRun {
+  runIdentity: String!
+  htmlUrl: String
+  orderKey: String
+  """
+  When the failing run was updated, or created if that is all that was stored.
+  Null when the latched run is not the latest observed run, or its time was not stored.
+  """
+  detectedAt: String
 }
 
 """
@@ -720,8 +744,22 @@ type CiGateDefinitionObservation {
   diagnosticMetadata: String
   failureLatched: Boolean!
   latestRun: CiGateObservedRun
+  """
+  Run that latched this definition's failure. Null when the failure is not latched.
+  """
+  failingRun: CiGateFailingRun
   observedAt: String
   diagnostic: String
+}
+
+"""
+Failing run recorded when a definition joined a CI Failure Incident.
+"""
+type CiFailureIncidentRun {
+  definitionIdentity: String!
+  displayLabel: String!
+  runIdentity: String
+  htmlUrl: String
 }
 
 """
@@ -736,6 +774,30 @@ type CiFailureIncident {
   recoveryReason: CiGateRecoveryReason
   summary: String!
   failedDefinitions: [CiGateDefinition!]!
+  """
+  Failing runs captured when definitions joined this incident.
+  """
+  failedRuns: [CiFailureIncidentRun!]!
+}
+
+"""
+Unfinished CI Repair Work Item for a Repository CI Gate.
+"""
+type CiGateRepairProgress {
+  workItemId: ID!
+  """
+  Lifecycle step, such as Implement or Review.
+  """
+  stateLabel: String!
+  """
+  Operator-visible repair progress, such as Running or Needs human.
+  """
+  statusLabel: String!
+  """
+  Pull request for the repair when one exists. Null when the repair has not
+  opened a pull request yet. Never invented from a CI run URL.
+  """
+  htmlUrl: String
 }
 
 """
@@ -807,6 +869,15 @@ type RepositoryCiGate {
   definitions: [CiGateDefinitionObservation!]!
   activeIncident: CiFailureIncident
   latestResolvedIncident: CiFailureIncident
+  """
+  Resolved CI Failure Incidents, newest recovery first. Does not include the
+  active incident.
+  """
+  incidentHistory: [CiFailureIncident!]!
+  """
+  Unfinished CI Repair Work Item, if any. Null when none is running.
+  """
+  activeRepair: CiGateRepairProgress
   """
   True while the gate is Closed and no CI Repair Work Item is unfinished.
   Independent of automatic CI repair and of Paused. Allowed on every Forge.

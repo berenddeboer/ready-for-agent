@@ -114,7 +114,6 @@ import {
 import {
   type Forge,
   type Repository,
-  ciGateStatusLabel,
   decodeForge,
   repositoriesQuery,
 } from "./repositories-query.js"
@@ -2172,6 +2171,13 @@ function RepositoryCard({
       })
     },
   })
+  const ciRepairStartError = startCiRepair.isError
+    ? startWorkBannerMessage({
+        error: startCiRepair.error,
+        fallback:
+          "Could not start CI Repair. Refresh the repository and try again.",
+      })
+    : undefined
 
   const pausePending = pauseRepository.isPending || unpauseRepository.isPending
   const pauseFailed = pauseRepository.isError || unpauseRepository.isError
@@ -3085,15 +3091,10 @@ function RepositoryCard({
                   checked: automaticCiRepair,
                   onCheckedChange: setAutomaticCiRepair,
                 }}
-                status={{
-                  disabled: repository.ciGate.status === "DISABLED",
-                  statusLabel: ciGateStatusLabel(repository.ciGate.status),
-                  diagnostic: repository.ciGate.diagnostic,
-                  activeIncidentSummary:
-                    repository.ciGate.activeIncident?.summary ?? null,
-                  latestResolvedIncidentSummary:
-                    repository.ciGate.latestResolvedIncident?.summary ?? null,
-                }}
+                story={repository.ciGate}
+                repairPending={startCiRepair.isPending}
+                onStartRepair={() => startCiRepair.mutate()}
+                repairError={ciRepairStartError}
               />
 
               {updateSettings.isError && (
@@ -3233,20 +3234,16 @@ function RepositoryCard({
                     repairPending={startCiRepair.isPending}
                     onStartRepair={() => startCiRepair.mutate()}
                   />
-                  {startCiRepair.isError ? (
+                  {ciRepairStartError === undefined ? null : (
                     <Banner
                       className={cx(ui.bannerCompact, "mt-2")}
                       tone="alarm"
                       tag="Error"
                       role="alert"
                     >
-                      {startWorkBannerMessage({
-                        error: startCiRepair.error,
-                        fallback:
-                          "Could not start CI Repair. Refresh the repository and try again.",
-                      })}
+                      {ciRepairStartError}
                     </Banner>
-                  ) : null}
+                  )}
                 </dd>
               </div>
             </dl>

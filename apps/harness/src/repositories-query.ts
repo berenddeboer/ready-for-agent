@@ -8,6 +8,10 @@
 
 import { type Forge, isForge } from "@ready-for-agent/lifecycle-model"
 import type { RepositoryCiGateStatus } from "./ci-gate-status-label.js"
+import type {
+  CiGateStoryIncident,
+  CiGateStoryInput,
+} from "./ci-gate-status-story.js"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
 
 export { ciGateStatusLabel } from "./ci-gate-status-label.js"
@@ -46,50 +50,17 @@ type CiGateDefinition = {
   diagnosticMetadata: string | null
 }
 
-type RepositoryCiGate = {
+type RepositoryCiGate = CiGateStoryInput & {
   enabled: boolean
   status: RepositoryCiGateStatus
-  observedAt: string | null
-  defaultBranch: string | null
-  diagnostic: string | null
-  definitions: readonly {
-    identity: string
-    displayLabel: string
+  definitions: readonly (CiGateStoryInput["definitions"][number] & {
     kind: string
     diagnosticMetadata: string | null
-    failureLatched: boolean
-    diagnostic: string | null
-    latestRun: {
-      runIdentity: string
-      htmlUrl: string | null
-      headSha: string | null
-      headRef: string | null
-      event: string | null
-      rawStatus: string | null
-      rawConclusion: string | null
-      createdAt: string | null
-      updatedAt: string | null
-    } | null
-  }[]
-  activeIncident: {
-    id: string
-    status: "OPEN" | "RESOLVED"
-    openedAt: string
-    resolvedAt: string | null
-    recoveryReason: string | null
-    summary: string
-    failedDefinitions: readonly CiGateDefinition[]
-  } | null
+  })[]
+  activeIncident: CiGateStoryInput["activeIncident"]
+  incidentHistory: readonly CiGateStoryIncident[]
+  activeRepair: CiGateStoryInput["activeRepair"]
   canStartCiRepair: boolean
-  latestResolvedIncident: {
-    id: string
-    status: "OPEN" | "RESOLVED"
-    openedAt: string
-    resolvedAt: string | null
-    recoveryReason: string | null
-    summary: string
-    failedDefinitions: readonly CiGateDefinition[]
-  } | null
 }
 
 type LinearTeamWorkflowSelection = {
@@ -198,35 +169,37 @@ export const repositoriesQuery = {
               rawConclusion: true,
               createdAt: true,
               updatedAt: true,
+              orderKey: true,
+              earlyJobFailure: true,
+            },
+            failingRun: {
+              runIdentity: true,
+              htmlUrl: true,
+              orderKey: true,
+              detectedAt: true,
             },
           },
           activeIncident: {
             id: true,
-            status: true,
+            openedAt: true,
+          },
+          incidentHistory: {
+            id: true,
             openedAt: true,
             resolvedAt: true,
-            recoveryReason: true,
             summary: true,
-            failedDefinitions: {
-              identity: true,
+            failedRuns: {
+              definitionIdentity: true,
               displayLabel: true,
-              kind: true,
-              diagnosticMetadata: true,
+              runIdentity: true,
+              htmlUrl: true,
             },
           },
-          latestResolvedIncident: {
-            id: true,
-            status: true,
-            openedAt: true,
-            resolvedAt: true,
-            recoveryReason: true,
-            summary: true,
-            failedDefinitions: {
-              identity: true,
-              displayLabel: true,
-              kind: true,
-              diagnosticMetadata: true,
-            },
+          activeRepair: {
+            workItemId: true,
+            stateLabel: true,
+            statusLabel: true,
+            htmlUrl: true,
           },
           canStartCiRepair: true,
         },

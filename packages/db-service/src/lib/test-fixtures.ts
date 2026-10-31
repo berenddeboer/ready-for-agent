@@ -95,6 +95,7 @@ export const stubDbService = (
       activeIncident: null,
       latestResolvedIncident: null,
     }),
+  listResolvedCiFailureIncidents: () => Effect.succeed([]),
   listCiRepairAuthorizations: () => Effect.succeed([]),
   commitCiGateSnapshot: () => Effect.void,
   pauseRepository: unused,

@@ -131,17 +131,30 @@ const ciGateQuery = (repositoryId: string) => ({
             headSha
             headRef
           }
+          failingRun {
+            runIdentity
+            htmlUrl
+            detectedAt
+          }
         }
         activeIncident {
           status
           summary
           failedDefinitions { identity displayLabel }
+          failedRuns { definitionIdentity displayLabel htmlUrl }
         }
         latestResolvedIncident {
           status
           summary
           recoveryReason
           failedDefinitions { identity displayLabel }
+        }
+        incidentHistory {
+          id
+          status
+          summary
+          recoveryReason
+          resolvedAt
         }
       }
     }
@@ -440,6 +453,11 @@ describe("Repository CI Gate observation", () => {
                 headSha: string | null
                 headRef: string | null
               } | null
+              failingRun: {
+                runIdentity: string
+                htmlUrl: string | null
+                detectedAt: string | null
+              } | null
             }>
             activeIncident: {
               status: string
@@ -447,6 +465,11 @@ describe("Repository CI Gate observation", () => {
               failedDefinitions: ReadonlyArray<{
                 identity: string
                 displayLabel: string
+              }>
+              failedRuns: ReadonlyArray<{
+                definitionIdentity: string
+                displayLabel: string
+                htmlUrl: string | null
               }>
             } | null
             latestResolvedIncident: {
@@ -458,6 +481,13 @@ describe("Repository CI Gate observation", () => {
                 displayLabel: string
               }>
             } | null
+            incidentHistory: ReadonlyArray<{
+              id: string
+              status: string
+              summary: string
+              recoveryReason: string | null
+              resolvedAt: string | null
+            }>
           }
         }>
       }
@@ -574,6 +604,13 @@ describe("Repository CI Gate observation", () => {
     expect(gate.status).toBe("CLOSED")
     expect(gate.definitions[0]?.failureLatched).toBe(true)
     expect(gate.definitions[0]?.latestRun?.rawStatus).toBe("in_progress")
+    expect(gate.definitions[0]?.failingRun?.runIdentity).toBe("700:1")
+    expect(gate.definitions[0]?.failingRun?.htmlUrl).toContain(
+      "/actions/runs/700",
+    )
+    expect(gate.definitions[0]?.failingRun?.detectedAt).toBe(
+      "2026-09-07T12:05:00.000Z",
+    )
     expect(consideredRepositories).toContain(repository.id)
   })
 
@@ -996,6 +1033,11 @@ describe("Repository CI Gate observation", () => {
     expect(gate.activeIncident).toBeNull()
     expect(gate.latestResolvedIncident?.status).toBe("RESOLVED")
     expect(gate.latestResolvedIncident?.recoveryReason).toBe("NEWER_SUCCESS")
+    expect(gate.incidentHistory[0]?.status).toBe("RESOLVED")
+    expect(gate.incidentHistory[0]?.recoveryReason).toBe("NEWER_SUCCESS")
+    expect(gate.incidentHistory[0]?.summary).toBe(
+      gate.latestResolvedIncident?.summary,
+    )
   })
 
   test("Closed outranks a later permission error, which otherwise degrades an Open gate", async () => {

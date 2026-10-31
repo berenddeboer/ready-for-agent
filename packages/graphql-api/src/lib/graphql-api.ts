@@ -36,6 +36,7 @@ import {
   InvalidRepositorySettingsError,
   type MergePolicy,
   RepositoryNotFoundError,
+  type RepositoryRecord,
 } from "@ready-for-agent/db-service"
 import type { GitHubService } from "@ready-for-agent/github-service"
 import {
@@ -79,7 +80,11 @@ import {
   ciGateCatalogErrorMessage,
   resolveSelectedCiGateDefinitions,
 } from "./ci-gate-definitions.js"
-import { projectRepositoryCiGate } from "./ci-gate-projection.js"
+import {
+  ciRepairPullRequestUrl,
+  projectCiFailureIncident,
+  projectRepositoryCiGate,
+} from "./ci-gate-projection.js"
 import {
   activateRepositoryPolling,
   enqueueRefreshRepositoryJob,
@@ -1802,7 +1807,7 @@ export const createGraphqlApi = <R>(
               context,
             ),
           ciGate: async (
-            repository: { id: string },
+            repository: RepositoryRecord,
             _args: unknown,
             context: GraphqlRequestContext,
           ) =>
@@ -1814,6 +1819,8 @@ export const createGraphqlApi = <R>(
                   repository.id,
                 )
                 const snapshot = yield* db.loadCiGateSnapshot(repository.id)
+                const resolvedIncidents =
+                  yield* db.listResolvedCiFailureIncidents(repository.id)
                 const status = deriveRepositoryCiGateStatus({
                   selectedCount: definitions.length,
                   observations: snapshot.observations,
@@ -1823,6 +1830,27 @@ export const createGraphqlApi = <R>(
                 )
                 return {
                   ...projectRepositoryCiGate({ definitions, snapshot }),
+                  incidentHistory: resolvedIncidents.flatMap((incident) => {
+                    const projected = projectCiFailureIncident(
+                      incident,
+                      definitions,
+                    )
+                    return projected === null ? [] : [projected]
+                  }),
+                  activeRepair:
+                    unfinished === null
+                      ? null
+                      : {
+                          workItemId: unfinished.id,
+                          stateLabel: workItemStateLabel(unfinished),
+                          statusLabel: workItemStatusLabel(unfinished),
+                          htmlUrl: ciRepairPullRequestUrl({
+                            forge: repository.forge,
+                            forgeHost: repository.forgeHost,
+                            projectPath: repository.projectPath,
+                            pullRequestNumber: unfinished.pullRequestNumber,
+                          }),
+                        },
                   canStartCiRepair: status === "closed" && unfinished === null,
                 }
               }).pipe(Effect.withSpan("graphql-api.Repository.ciGate")),
