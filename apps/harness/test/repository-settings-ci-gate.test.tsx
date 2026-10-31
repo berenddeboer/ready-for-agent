@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { renderToStaticMarkup } from "react-dom/server"
+import type { CiGateStoryInput } from "../src/ci-gate-status-story.js"
 import {
   CI_GATE_AUTOMATIC_REPAIR_DISABLED_HINT,
   CI_GATE_AUTOMATIC_REPAIR_HINT,
@@ -53,13 +54,17 @@ const lintDefinition = {
 const DISABLED_GATE_SENTENCE =
   "No CI Gate Definitions selected — Repository CI Gate is disabled."
 
-const baseStatus = {
-  disabled: false,
-  statusLabel: "Open",
-  diagnostic: "Repository CI Gate is open.",
-  activeIncidentSummary: null,
-  latestResolvedIncidentSummary: null,
-}
+const openStory = {
+  status: "OPEN",
+  observedAt: null,
+  defaultBranch: null,
+  diagnostic: null,
+  definitions: [],
+  activeIncident: null,
+  incidentHistory: [],
+  activeRepair: null,
+  canStartCiRepair: false,
+} satisfies CiGateStoryInput
 
 const renderSection = (
   overrides: Partial<
@@ -72,7 +77,7 @@ const renderSection = (
       catalog={{ kind: "pending" }}
       selectedIdentities={[]}
       onSelectedIdentitiesChange={() => {}}
-      status={baseStatus}
+      story={openStory}
       automaticCiRepair={null}
       {...overrides}
     />,
@@ -150,18 +155,21 @@ describe("Repository settings CI Gate Definitions", () => {
     expect(source).toMatch(/<dt(?:\s[^>]*)?>CI Gate<\/dt>/)
     expect(source).toContain("<RepositoryCiGateCardDetails")
     expect(source).toContain("ciGate={repository.ciGate}")
-    expect(source).toContain(
-      'disabled: repository.ciGate.status === "DISABLED"',
-    )
+    expect(source).toContain("story={repository.ciGate}")
     const card = readFileSync(
       join(import.meta.dir, "../src/repository-ci-gate-card.tsx"),
       "utf8",
     )
     expect(card).toContain('ciGate.status === "DISABLED"')
-    expect(card).toContain("ciGate.activeIncident")
-    expect(card).toContain("ciGate.latestResolvedIncident")
-    expect(card).toContain("View run")
-    expect(card).toContain("Observed")
+    const story = readFileSync(
+      join(import.meta.dir, "../src/ci-gate-status-story-view.tsx"),
+      "utf8",
+    )
+    expect(story).toContain("View run")
+    expect(story).toContain("Last checked")
+    expect(story).toContain("Incident history")
+    expect(story).not.toContain("Active incident")
+    expect(story).not.toContain("Last resolved")
   })
 
   test("repositories query asks for selected CI Gate Definitions and gate projection", () => {
@@ -171,7 +179,9 @@ describe("Repository settings CI Gate Definitions", () => {
     expect(source).toContain("diagnosticMetadata: true")
     expect(source).toContain("ciGate:")
     expect(source).toContain("activeIncident:")
-    expect(source).toContain("latestResolvedIncident:")
+    expect(source).toContain("incidentHistory:")
+    expect(source).toContain("activeRepair:")
+    expect(source).toContain("failingRun:")
     expect(source).toContain("htmlUrl: true")
   })
 })
@@ -263,59 +273,90 @@ describe("Repository settings CI Gate catalog presentation", () => {
   test("status and incidents stay visible while the catalog is pending", () => {
     const html = renderSection({
       catalog: { kind: "pending" },
-      status: {
-        disabled: false,
-        statusLabel: "Closed",
-        diagnostic: "Repository CI Gate is closed: CI failed.",
-        activeIncidentSummary: "CI Gate closed: CI failed.",
-        latestResolvedIncidentSummary:
-          "CI Gate recovered: newer success on CI.",
+      story: {
+        ...openStory,
+        status: "CLOSED",
+        defaultBranch: "trunk",
+        incidentHistory: [
+          {
+            id: "cfi-resolved",
+            openedAt: "2026-10-28T00:00:00.000Z",
+            resolvedAt: "2026-10-29T18:00:00.000Z",
+            summary: "CI Gate recovered: newer success on CI.",
+            failedRuns: [],
+          },
+        ],
       },
     })
-    expect(html).toContain("Current status: Closed")
-    expect(html).toContain("Repository CI Gate is closed: CI failed.")
-    expect(html).toContain("Active incident: CI Gate closed: CI failed.")
+    expect(html).toContain("CI Gate · Closed")
     expect(html).toContain(
-      "Last resolved: CI Gate recovered: newer success on CI.",
+      "CI failed on trunk. The gate remains closed until recovery is confirmed.",
     )
+    expect(html).not.toContain("Active incident")
+    expect(html).toContain("Incident history")
+    expect(html).toContain("CI Gate recovered: newer success on CI.")
+    expect(html).not.toContain("Last resolved")
   })
 
   test("a disabled gate status line does not repeat the long sentence or a timestamp", () => {
     const html = renderSection({
       selectedIdentities: [],
-      status: {
-        disabled: true,
-        statusLabel: "Disabled",
+      story: {
+        ...openStory,
+        status: "DISABLED",
         diagnostic: `${DISABLED_GATE_SENTENCE} Observed 2026-09-22T02:21:07.785Z on main`,
-        activeIncidentSummary: "CI Gate closed: CI failed.",
-        latestResolvedIncidentSummary:
-          "CI Gate recovered: CI Gate selection cleared.",
+        observedAt: "2026-09-22T02:21:07.785Z",
+        incidentHistory: [
+          {
+            id: "cfi-resolved",
+            openedAt: "2026-09-21T00:00:00.000Z",
+            resolvedAt: "2026-09-22T02:21:07.785Z",
+            summary: "CI Gate recovered: CI Gate selection cleared.",
+            failedRuns: [],
+          },
+        ],
       },
     })
     expect(html).toContain("Current status: CI disabled")
     expect(html).not.toContain(DISABLED_GATE_SENTENCE)
     expect(html).not.toContain("Observed")
     expect(html).not.toContain("2026-09-22T02:21:07.785Z")
-    expect(html).toContain("Active incident: CI Gate closed: CI failed.")
-    expect(html).toContain(
-      "Last resolved: CI Gate recovered: CI Gate selection cleared.",
-    )
+    expect(html).not.toContain("Active incident")
+    expect(html).not.toContain("Last resolved")
     expect(html).toContain(CI_GATE_EMPTY_SELECTION_HINT)
+  })
+
+  test("a failed start is visible inside the settings dialog", () => {
+    const html = renderSection({
+      story: {
+        ...openStory,
+        status: "CLOSED",
+        defaultBranch: "trunk",
+        canStartCiRepair: true,
+      },
+      onStartRepair: () => {},
+      repairError:
+        "Could not start CI Repair. Refresh the repository and try again.",
+    })
+    expect(html).toContain('role="alert"')
+    expect(html).toContain(
+      "Could not start CI Repair. Refresh the repository and try again.",
+    )
   })
 
   test("an enabled gate keeps its current status while the selection draft is empty", () => {
     const html = renderSection({
       selectedIdentities: [],
-      status: {
-        disabled: false,
-        statusLabel: "Closed",
-        diagnostic: "Repository CI Gate is closed: CI failed.",
-        activeIncidentSummary: null,
-        latestResolvedIncidentSummary: null,
+      story: {
+        ...openStory,
+        status: "CLOSED",
+        defaultBranch: "trunk",
       },
     })
-    expect(html).toContain("Current status: Closed")
-    expect(html).toContain("Repository CI Gate is closed: CI failed.")
+    expect(html).toContain("CI Gate · Closed")
+    expect(html).toContain(
+      "CI failed on trunk. The gate remains closed until recovery is confirmed.",
+    )
     expect(html).not.toContain("Current status: CI disabled")
   })
 

@@ -65,8 +65,12 @@ describe("Repository settings automatic CI repair", () => {
       join(import.meta.dir, "../src/repository-ci-gate-card.tsx"),
       "utf8",
     )
+    const story = readFileSync(
+      join(import.meta.dir, "../src/ci-gate-status-story-view.tsx"),
+      "utf8",
+    )
     expect(card).not.toContain("automaticCiRepair")
-    expect(card).toContain("Start CI Repair")
+    expect(story).toContain("Start CI Repair")
     expect(card).toContain("canStartCiRepair")
     expect(card).not.toContain("Retry CI repair")
     expect(card).not.toContain('data-testid="ci-repair-request-source"')

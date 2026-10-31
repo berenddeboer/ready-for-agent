@@ -1,109 +1,37 @@
-import {
-  type RepositoryCiGateStatus,
-  ciGateStatusLabel,
-} from "./ci-gate-status-label.js"
-import { ui } from "./ui.js"
-
-type RepositoryCiGateCard = {
-  readonly status: RepositoryCiGateStatus
-  readonly diagnostic: string | null
-  readonly observedAt: string | null
-  readonly defaultBranch: string | null
-  readonly definitions: readonly {
-    readonly identity: string
-    readonly displayLabel: string
-    readonly diagnostic: string | null
-    readonly latestRun: {
-      readonly rawConclusion: string | null
-      readonly htmlUrl: string | null
-    } | null
-  }[]
-  readonly activeIncident: {
-    readonly id?: string
-    readonly summary: string
-  } | null
-  readonly latestResolvedIncident: { readonly summary: string } | null
-}
+import { CI_GATE_DISABLED_LABEL } from "./ci-gate-status-label.js"
+import type { CiGateStoryInput } from "./ci-gate-status-story.js"
+import { CiGateStatusStory } from "./ci-gate-status-story-view.js"
 
 export function RepositoryCiGateCardDetails({
   ciGate,
-  canStartCiRepair = false,
+  canStartCiRepair,
   repairPending = false,
   onStartRepair,
+  nowMs,
 }: {
-  readonly ciGate: RepositoryCiGateCard
+  readonly ciGate: CiGateStoryInput
   /**
    * Server predicate: gate Closed and no unfinished CI Repair Work Item.
    * Do not also require automatic CI repair, Paused, or an active incident.
+   * An unfinished repair hides this action even if the predicate is stale.
    */
   readonly canStartCiRepair?: boolean
   readonly repairPending?: boolean
   readonly onStartRepair?: () => void
+  readonly nowMs?: number
 }) {
-  const statusLabel = ciGateStatusLabel(ciGate.status)
   if (ciGate.status === "DISABLED") {
-    return statusLabel
+    return CI_GATE_DISABLED_LABEL
   }
-  const repairAction =
-    canStartCiRepair && onStartRepair !== undefined ? (
-      <button
-        type="button"
-        className={ui.plateMini}
-        data-testid="ci-repair-action"
-        disabled={repairPending}
-        aria-busy={repairPending || undefined}
-        onClick={onStartRepair}
-      >
-        {repairPending ? "Starting..." : "Start CI Repair"}
-      </button>
-    ) : null
   return (
-    <span className="flex min-w-0 flex-col gap-1 break-words">
-      <span>{statusLabel}</span>
-      {ciGate.diagnostic !== null ? (
-        <span className={ui.dialogFieldHint}>{ciGate.diagnostic}</span>
-      ) : null}
-      {ciGate.observedAt !== null ? (
-        <span className={ui.dialogFieldHint}>
-          Observed {ciGate.observedAt}
-          {ciGate.defaultBranch !== null ? ` on ${ciGate.defaultBranch}` : ""}
-        </span>
-      ) : null}
-      {ciGate.definitions.map((definition) => (
-        <span key={definition.identity} className={ui.dialogFieldHint}>
-          {definition.displayLabel}
-          {definition.latestRun?.rawConclusion !== null &&
-          definition.latestRun?.rawConclusion !== undefined
-            ? ` · ${definition.latestRun.rawConclusion}`
-            : definition.diagnostic !== null
-              ? ` · ${definition.diagnostic}`
-              : ""}
-          {definition.latestRun?.htmlUrl !== null &&
-          definition.latestRun?.htmlUrl !== undefined ? (
-            <>
-              {" "}
-              <a
-                href={definition.latestRun.htmlUrl}
-                rel="noreferrer"
-                target="_blank"
-              >
-                View run
-              </a>
-            </>
-          ) : null}
-        </span>
-      ))}
-      {ciGate.activeIncident !== null ? (
-        <span className={ui.dialogFieldHint}>
-          Active incident: {ciGate.activeIncident.summary}
-        </span>
-      ) : null}
-      {ciGate.latestResolvedIncident !== null ? (
-        <span className={ui.dialogFieldHint}>
-          Last resolved: {ciGate.latestResolvedIncident.summary}
-        </span>
-      ) : null}
-      {repairAction}
-    </span>
+    <CiGateStatusStory
+      ciGate={{
+        ...ciGate,
+        canStartCiRepair: canStartCiRepair ?? ciGate.canStartCiRepair,
+      }}
+      nowMs={nowMs}
+      repairPending={repairPending}
+      onStartRepair={onStartRepair}
+    />
   )
 }

@@ -586,6 +586,16 @@ export interface DbServiceShape {
     CiGateSnapshotRecord,
     RepositoryNotFoundError | DatabaseError
   >
+  /**
+   * Resolved CI Failure Incidents, newest recovery first. Does not include
+   * an open incident.
+   */
+  readonly listResolvedCiFailureIncidents: (
+    repositoryId: string,
+  ) => Effect.Effect<
+    readonly CiFailureIncidentRecord[],
+    RepositoryNotFoundError | DatabaseError
+  >
   readonly commitCiGateSnapshot: (
     input: CommitCiGateSnapshotInput,
   ) => Effect.Effect<void, RepositoryNotFoundError | DatabaseError>
@@ -2080,6 +2090,29 @@ export const DbServiceLive = Layer.effect(
       },
     )
 
+    const listResolvedCiFailureIncidents = Effect.fn(
+      "DbService.listResolvedCiFailureIncidents",
+    )(function* (repositoryId: string) {
+      yield* ensureRepositoryExists(repositoryId)
+      const rows = yield* sql
+        .unsafe(
+          `SELECT id, repository_id, status, opened_at, resolved_at,
+                  recovery_reason, summary
+           FROM ci_failure_incident
+           WHERE repository_id = ? AND status = 'resolved'
+           ORDER BY resolved_at DESC, opened_at DESC, id DESC`,
+          [repositoryId],
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+      const decoded = yield* decodeCiFailureIncidentRows(rows)
+      const incidents: CiFailureIncidentRecord[] = []
+      for (const row of decoded) {
+        const definitions = yield* loadIncidentDefinitions(row.id)
+        incidents.push(toIncidentRecord(row, definitions))
+      }
+      return incidents
+    })
+
     const upsertIncident = Effect.fn("DbService.upsertIncident")(function* (
       incident: CiFailureIncidentRecord,
       now: number,
@@ -2844,6 +2877,7 @@ export const DbServiceLive = Layer.effect(
       updateRepositorySettings,
       listCiGateDefinitions,
       loadCiGateSnapshot,
+      listResolvedCiFailureIncidents,
       listCiRepairAuthorizations,
       commitCiGateSnapshot,
       pauseRepository,

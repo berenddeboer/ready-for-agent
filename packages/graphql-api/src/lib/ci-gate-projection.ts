@@ -1,3 +1,7 @@
+import {
+  azureDevOpsRepositoryName,
+  splitAzureDevOpsProjectPath,
+} from "@ready-for-agent/azure-devops-service/types"
 import type {
   CiFailureIncidentRecord,
   CiGateDefinitionObservationRecord,
@@ -68,6 +72,66 @@ const observationDiagnostic = (
   return null
 }
 
+const sameObservedRun = (
+  left: string | null,
+  right: string | null,
+): boolean => {
+  if (left === null || right === null || left === "" || right === "") {
+    return false
+  }
+  if (left === right) {
+    return true
+  }
+  const runId = (identity: string): string => {
+    const separator = identity.indexOf(":")
+    return separator === -1 ? identity : identity.slice(0, separator)
+  }
+  return runId(left) === runId(right)
+}
+
+/**
+ * Failure time is the latched run's own timestamp. That time is stored only
+ * on the latest run, so it is available only when the latched run is that
+ * run. Observation time is never used here.
+ */
+const failingRunDetectedAt = (
+  observation: CiGateDefinitionObservationRecord,
+): string | null => {
+  if (
+    !sameObservedRun(
+      observation.latchedRunIdentity,
+      observation.lastRunIdentity,
+    )
+  ) {
+    return null
+  }
+  return (
+    observation.lastRunUpdatedAt?.toISOString() ??
+    observation.lastRunCreatedAt?.toISOString() ??
+    null
+  )
+}
+
+const toGraphqlFailingRun = (
+  observation: CiGateDefinitionObservationRecord,
+) => {
+  if (!observation.failureLatched) {
+    return null
+  }
+  if (
+    observation.latchedRunIdentity === null &&
+    observation.latchedRunHtmlUrl === null
+  ) {
+    return null
+  }
+  return {
+    runIdentity: observation.latchedRunIdentity ?? "",
+    htmlUrl: observation.latchedRunHtmlUrl,
+    orderKey: observation.latchedRunOrderKey ?? null,
+    detectedAt: failingRunDetectedAt(observation),
+  }
+}
+
 const toGraphqlLatestRun = (observation: CiGateDefinitionObservationRecord) => {
   if (
     observation.lastRunIdentity === null &&
@@ -86,6 +150,8 @@ const toGraphqlLatestRun = (observation: CiGateDefinitionObservationRecord) => {
     rawConclusion: observation.lastRawConclusion,
     createdAt: observation.lastRunCreatedAt?.toISOString() ?? null,
     updatedAt: observation.lastRunUpdatedAt?.toISOString() ?? null,
+    orderKey: observation.lastRunOrderKey ?? null,
+    earlyJobFailure: observation.lastEarlyJobFailure === true,
   }
 }
 
@@ -110,6 +176,15 @@ export const projectCiFailureIncident = (
         displayLabel: entry.displayLabel || selected.displayLabel,
         kind: selected.kind,
         diagnosticMetadata: selected.diagnosticMetadata,
+      }
+    }),
+    failedRuns: incident.definitions.map((entry) => {
+      const selected = definitionLookup(definitions, entry.identity)
+      return {
+        definitionIdentity: entry.identity,
+        displayLabel: entry.displayLabel || selected.displayLabel,
+        runIdentity: entry.firstFailedRunIdentity,
+        htmlUrl: entry.firstFailedRunHtmlUrl,
       }
     }),
   }
@@ -182,6 +257,7 @@ export const projectRepositoryCiGate = (input: {
           diagnosticMetadata: definition.diagnosticMetadata,
           failureLatched: false,
           latestRun: null,
+          failingRun: null,
           observedAt: null,
           diagnostic: notObservedDiagnostic,
         }
@@ -193,6 +269,7 @@ export const projectRepositoryCiGate = (input: {
         diagnosticMetadata: definition.diagnosticMetadata,
         failureLatched: observation.failureLatched,
         latestRun: toGraphqlLatestRun(observation),
+        failingRun: toGraphqlFailingRun(observation),
         observedAt: observation.lastObservedAt?.toISOString() ?? null,
         diagnostic: observationDiagnostic(observation),
       }
@@ -205,5 +282,36 @@ export const projectRepositoryCiGate = (input: {
       input.snapshot.latestResolvedIncident,
       input.definitions,
     ),
+  }
+}
+
+/**
+ * Pull request for an unfinished CI Repair Work Item. This is the repair
+ * activity we can link. A CI run URL is not a repair link and is not invented.
+ */
+export const ciRepairPullRequestUrl = (input: {
+  readonly forge: string
+  readonly forgeHost: string
+  readonly projectPath: string
+  readonly pullRequestNumber: number | null
+}): string | null => {
+  if (input.pullRequestNumber === null) {
+    return null
+  }
+  switch (input.forge) {
+    case "azure-devops": {
+      const identity = splitAzureDevOpsProjectPath(input.projectPath)
+      if (identity === null) {
+        return null
+      }
+      const repositoryName = azureDevOpsRepositoryName(identity)
+      return `https://${input.forgeHost}/${encodeURIComponent(identity.organization)}/${encodeURIComponent(identity.project)}/_git/${encodeURIComponent(repositoryName)}/pullrequest/${input.pullRequestNumber}`
+    }
+    case "gitlab":
+      return `https://${input.forgeHost}/${input.projectPath}/-/merge_requests/${input.pullRequestNumber}`
+    case "github":
+      return `https://${input.forgeHost}/${input.projectPath}/pull/${input.pullRequestNumber}`
+    default:
+      return null
   }
 }
