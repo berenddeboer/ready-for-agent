@@ -14,8 +14,6 @@ import type {
 } from "./ci-gate-status-story.js"
 import { createHarnessGraphqlClient } from "./harness-graphql.js"
 
-export { ciGateStatusLabel } from "./ci-gate-status-label.js"
-
 const graphql = createHarnessGraphqlClient({ batch: true })
 
 type RepositoryCredential = {

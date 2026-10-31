@@ -4,7 +4,7 @@ import {
   compareCiGateRunOrder,
 } from "@ready-for-agent/forge-contract"
 
-export type CiGateStoryRun = {
+type CiGateStoryRun = {
   readonly runIdentity: string
   readonly htmlUrl: string | null
   readonly rawStatus: string | null
@@ -15,14 +15,14 @@ export type CiGateStoryRun = {
   readonly earlyJobFailure: boolean
 }
 
-export type CiGateStoryFailingRun = {
+type CiGateStoryFailingRun = {
   readonly runIdentity: string
   readonly htmlUrl: string | null
   readonly orderKey: string | null
   readonly detectedAt: string | null
 }
 
-export type CiGateStoryIncidentRun = {
+type CiGateStoryIncidentRun = {
   readonly definitionIdentity: string
   readonly displayLabel: string
   readonly runIdentity: string | null
@@ -64,13 +64,13 @@ export type CiGateStoryInput = {
   readonly canStartCiRepair: boolean
 }
 
-export type CiGateStoryLink = {
+type CiGateStoryLink = {
   readonly role: "Failing CI" | "Repair run" | "Recovery verification"
   readonly definitionLabel: string | null
   readonly htmlUrl: string | null
 }
 
-export type CiGateHistoryEntry = {
+type CiGateHistoryEntry = {
   readonly id: string
   readonly openedAt: string
   readonly resolvedAt: string | null
