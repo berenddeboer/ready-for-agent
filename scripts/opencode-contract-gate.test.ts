@@ -7,6 +7,7 @@ import {
   gateOpenCodeContract,
   readOpenCodeBaseline,
 } from "./opencode-contract-gate.ts"
+import { serverPlacementCapability } from "./opencode-server-placement.ts"
 import {
   EXPECTED_OPENCODE_CLI_CONTRACT_CASES,
   parseSuiteCounts,
@@ -211,7 +212,7 @@ describe("OpenCode contract version gate", () => {
     expect(redactContractText("token=supersecret", ["supersecret"])).toBe(
       "token=[redacted]",
     )
-    expect(EXPECTED_OPENCODE_CLI_CONTRACT_CASES).toBe(11)
+    expect(EXPECTED_OPENCODE_CLI_CONTRACT_CASES).toBe(14)
   })
 
   it("installs the baseline pin without calling the network", () => {
@@ -227,5 +228,24 @@ describe("OpenCode contract version gate", () => {
     expect(result.stdout).toContain(
       `[opencode-install] mode=baseline version=${BASELINE}`,
     )
+  })
+})
+
+describe("OpenCode --server placement capability", () => {
+  it("requires historical rejection on the baseline pin", () => {
+    expect(
+      serverPlacementCapability({ version: BASELINE, baseline: BASELINE }),
+    ).toEqual({ kind: "historical-rejection" })
+  })
+
+  it("permits only the evidenced accepting version, not a semver cutoff", () => {
+    expect(
+      serverPlacementCapability({ version: "2.2.5", baseline: BASELINE }),
+    ).toEqual({ kind: "evidenced-acceptance", version: "2.2.5" })
+    for (const version of ["2.0.33", "2.1.0", "2.2.0", "2.2.4", "2.2.6"]) {
+      expect(() =>
+        serverPlacementCapability({ version, baseline: BASELINE }),
+      ).toThrow(/Refusing to guess a cutoff/)
+    }
   })
 })

@@ -23,11 +23,13 @@ import {
   formatGateLog,
   gateOpenCodeContract,
 } from "../../../scripts/opencode-contract-gate.ts"
+import { serverPlacementCapability } from "../../../scripts/opencode-server-placement.ts"
 import { Opencode } from "../src/index.js"
 import {
   type OwnedOpenCodeServer,
   startOwnedOpenCodeServer,
 } from "../src/lib/owned-server.js"
+import { parseCommandTranscript } from "../src/lib/parse-command-transcript.js"
 import { readOpenCodeServiceStatus } from "../src/lib/resolve-server-base.js"
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 
@@ -249,6 +251,125 @@ const insertRunFlag = (
   ]
 }
 
+const placementCapability = () =>
+  serverPlacementCapability({
+    version: gated.version,
+    baseline: gated.baseline,
+  })
+
+const flagBefore = (
+  args: ReadonlyArray<string>,
+  command: string,
+): {
+  readonly flagAt: number
+  readonly url: string
+  readonly commandAt: number
+} => {
+  const flagAt = args.indexOf("--server")
+  const url = args[flagAt + 1]
+  const commandAt = args.indexOf(command)
+  if (flagAt < 0 || url === undefined || url.startsWith("-") || commandAt < 0) {
+    throw new Error(`argv is missing --server or ${command}: ${args.join(" ")}`)
+  }
+  return { flagAt, url, commandAt }
+}
+
+const assertHistoricalServerRejection = (
+  error: unknown,
+  diagnosticText: string,
+  records: ReadonlyArray<LaunchRecord>,
+  secrets: ReadonlyArray<string>,
+): void => {
+  expect(error, diagnostic(records, secrets)).toBeInstanceOf(
+    AgentBackendExitError,
+  )
+  if (!(error instanceof AgentBackendExitError)) {
+    return
+  }
+  expect(error.message).toContain(diagnosticText)
+  expect(error.message.match(/Unrecognized flag:/g)).toEqual([
+    "Unrecognized flag:",
+  ])
+  expect(error.message).not.toContain("Model unavailable")
+  expect(error.message).not.toContain("Could not reach server")
+  expect(error.sessionId).toBeUndefined()
+}
+
+const textParts = (value: unknown): ReadonlyArray<string> => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.flatMap((part) => {
+    if (
+      !isRecord(part) ||
+      part.type !== "text" ||
+      typeof part.text !== "string"
+    ) {
+      return []
+    }
+    const text = part.text.trim()
+    return text.length > 0 ? [text] : []
+  })
+}
+
+/** Assistant, synthetic, or system text a command export could satisfy. */
+const commandResultTexts = (value: unknown): ReadonlyArray<string> => {
+  if (Array.isArray(value)) {
+    return value.flatMap(commandResultTexts)
+  }
+  if (!isRecord(value)) {
+    return []
+  }
+  const own: string[] = []
+  if (value.type === "assistant") {
+    own.push(...textParts(value.content))
+    if (typeof value.text === "string" && value.text.trim().length > 0) {
+      own.push(value.text.trim())
+    }
+  }
+  if (
+    (value.type === "synthetic" || value.type === "system") &&
+    typeof value.text === "string" &&
+    value.text.trim().length > 0
+  ) {
+    own.push(value.text.trim())
+  }
+  return [...own, ...Object.values(value).flatMap(commandResultTexts)]
+}
+
+const parsedExport = (
+  stdout: string,
+): {
+  readonly id: string
+  readonly directory: string
+  readonly body: unknown
+} => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stdout)
+  } catch {
+    throw new Error(`export stdout is not JSON: ${stdout.slice(0, 300)}`)
+  }
+  if (!isRecord(parsed)) {
+    throw new Error("export stdout is not a JSON object")
+  }
+  const info = isRecord(parsed.info) ? parsed.info : parsed
+  const location = isRecord(info.location) ? info.location : undefined
+  if (typeof info.id !== "string" || typeof location?.directory !== "string") {
+    throw new Error(
+      `export JSON has no session id and worktree: ${JSON.stringify(info).slice(0, 400)}`,
+    )
+  }
+  return { id: info.id, directory: location.directory, body: parsed }
+}
+
+const assertStoredOnce = (
+  messages: ReadonlyArray<Record<string, unknown>>,
+  text: string,
+): void => {
+  expect(messages.filter((message) => message.text === text)).toHaveLength(1)
+}
+
 const registerIsolatedService = async (
   env: Record<string, string>,
   owned: OwnedOpenCodeServer,
@@ -456,6 +577,100 @@ const logCase = (label: string, records: ReadonlyArray<LaunchRecord>): void => {
     .map((record) => redact(record.args.join(" "), current.secrets))
     .join(" || ")
   console.log(`[opencode-cli-contract] ${label} ${argv}`)
+}
+
+/**
+ * Accepted `--server` before `api` or `export` must reach the same no-inference
+ * command boundary as the supported path. Malformed output is that oracle only
+ * when the export is valid and contains no command result. It is not success
+ * by itself.
+ */
+const proveAcceptedCommandPlacement = async (input: {
+  readonly current: Fixture
+  readonly prompt: string
+  readonly mutate: (cliArgs: ReadonlyArray<string>) => ReadonlyArray<string>
+  readonly assertArgv: (
+    records: ReadonlyArray<LaunchRecord>,
+    url: string,
+  ) => void
+}): Promise<ReadonlyArray<LaunchRecord>> => {
+  const records: LaunchRecord[] = []
+  let created: string | undefined
+  const error = await runOwned(
+    "explicit",
+    records,
+    (backend) =>
+      backend
+        .startTurn({
+          cwd: input.current.cwd,
+          prompt: input.prompt,
+          model: UNKNOWN_MODEL,
+          thinkingLevel: null,
+          command: "review",
+          timeout: "20 seconds",
+          onSessionId: (sessionId) =>
+            Effect.sync(() => {
+              created = sessionId
+            }),
+        })
+        .pipe(Effect.flip),
+    input.mutate,
+  )
+  const detail = diagnostic(records, input.current.secrets)
+  expect(created, detail).toMatch(/^ses_[A-Za-z0-9]+$/)
+  if (created === undefined) {
+    throw new Error(detail)
+  }
+  input.assertArgv(records, input.current.owned.baseUrl)
+
+  const session = await sessionBody(input.current.owned, created)
+  expect(
+    isRecord(session.location) ? session.location.directory : undefined,
+    detail,
+  ).toBe(input.current.cwd)
+  const model = modelOf(session)
+  expect(model?.providerID).toBe("ready-for-agent-contract")
+  expect(model?.id).toBe("no-such-model")
+  const messages = await sessionMessages(input.current.owned, created)
+  assertStoredOnce(messages, `Review ${input.prompt}`)
+
+  const exported = records.find(
+    (record) => record.args[0] === "session" && record.args.includes("export"),
+  )
+  expect(exported, detail).toBeDefined()
+  if (exported === undefined) {
+    throw new Error(detail)
+  }
+  const transcript = parsedExport(exported.stdout)
+  expect(transcript.id).toBe(created)
+  expect(transcript.directory).toBe(input.current.cwd)
+  const resultTexts = commandResultTexts(transcript.body)
+  if (resultTexts.length > 0 || /<task_result>\s*\S/i.test(exported.stdout)) {
+    throw new Error(
+      `export contained a command result the harness did not accept. This is an export compatibility problem, not a placement success.\n${detail}`,
+    )
+  }
+  expect(
+    parseCommandTranscript({
+      transcript: exported.stdout,
+      command: "review",
+      startedAfterMs: 0,
+    }),
+  ).toBeUndefined()
+  assertNoArgumentError(`${exported.stdout}\n${exported.stderr}`, detail)
+  const wait = records.find((record) =>
+    record.args.some((arg) => arg.includes("/wait")),
+  )
+  expect(wait, detail).toBeDefined()
+  assertNoArgumentError(`${wait?.stdout ?? ""}\n${wait?.stderr ?? ""}`, detail)
+
+  expect(error, detail).toBeInstanceOf(AgentBackendMalformedOutputError)
+  expect(error, detail).not.toBeInstanceOf(AgentBackendExitError)
+  if (error instanceof AgentBackendMalformedOutputError) {
+    expect(error.cwd).toBe(input.current.cwd)
+    expect(error.byteLength).toBe(Buffer.byteLength(exported.stdout, "utf8"))
+  }
+  return records
 }
 
 describe("installed OpenCode V2 production CLI contract", () => {
@@ -996,69 +1211,145 @@ describe("installed OpenCode V2 production CLI contract", () => {
   )
 
   test(
-    "BER-31 and other flag mutations fail with the exact diagnostic",
+    "BER-31 --server before run is rejected on the pin and proven when accepted",
     async () => {
       await exclusive(async () => {
         const current = requireFixture()
-        const start = (
-          mutate: (cliArgs: ReadonlyArray<string>) => ReadonlyArray<string>,
-        ) => {
-          const records: LaunchRecord[] = []
-          return runOwned(
-            "explicit",
-            records,
-            (backend) =>
-              backend
-                .startTurn({
-                  cwd: current.cwd,
-                  prompt: "Contract probe",
-                  model: UNKNOWN_MODEL,
-                  thinkingLevel: "high",
-                  timeout: "20 seconds",
-                })
-                .pipe(Effect.flip),
-            mutate,
-          ).then((error) => ({ error, records }))
-        }
-
-        const serverBeforeRun = await start((cliArgs) =>
-          cliArgs.includes("run") ? moveServerBefore(cliArgs, "run") : cliArgs,
+        const prompt = "Contract probe"
+        const records: LaunchRecord[] = []
+        const error = await runOwned(
+          "explicit",
+          records,
+          (backend) =>
+            backend
+              .startTurn({
+                cwd: current.cwd,
+                prompt,
+                model: UNKNOWN_MODEL,
+                thinkingLevel: "high",
+                timeout: "20 seconds",
+              })
+              .pipe(Effect.flip),
+          (cliArgs) =>
+            cliArgs.includes("run")
+              ? moveServerBefore(cliArgs, "run")
+              : cliArgs,
         )
-        expect(serverBeforeRun.error).toBeInstanceOf(AgentBackendExitError)
-        if (serverBeforeRun.error instanceof AgentBackendExitError) {
-          expect(serverBeforeRun.error.message).toContain(
-            UNRECOGNIZED_SERVER_RUN,
-          )
-          expect(
-            serverBeforeRun.error.message.match(/Unrecognized flag:/g),
-          ).toEqual(["Unrecognized flag:"])
-          expect(serverBeforeRun.error.sessionId).toBeUndefined()
+        const run = records.find((record) => record.args.includes("run"))
+        expect(run, diagnostic(records, current.secrets)).toBeDefined()
+        if (run === undefined) {
+          return
         }
+        const placed = flagBefore(run.args, "run")
+        expect(placed.flagAt).toBeLessThan(placed.commandAt)
+        expect(placed.url).toBe(current.owned.baseUrl)
+        const capability = placementCapability()
+        if (capability.kind === "historical-rejection") {
+          assertHistoricalServerRejection(
+            error,
+            UNRECOGNIZED_SERVER_RUN,
+            records,
+            current.secrets,
+          )
+          logCase("server-before-run rejected", records)
+          return
+        }
+        expect(error, diagnostic(records, current.secrets)).toBeInstanceOf(
+          AgentBackendExitError,
+        )
+        if (!(error instanceof AgentBackendExitError)) {
+          return
+        }
+        expect(error.exitCode).toBe(1)
+        expect(error.message).toBe(MODEL_UNAVAILABLE)
+        expect(error.sessionId).toMatch(/^ses_[A-Za-z0-9]+$/)
+        assertNoArgumentError(
+          error.message,
+          diagnostic(records, current.secrets),
+        )
+        const sessionId = error.sessionId
+        if (sessionId === undefined) {
+          return
+        }
+        const session = await sessionBody(current.owned, sessionId)
+        expect(
+          isRecord(session.location) ? session.location.directory : undefined,
+        ).toBe(current.cwd)
+        const model = modelOf(session)
+        expect(model?.providerID).toBe("ready-for-agent-contract")
+        expect(model?.id).toBe("no-such-model")
+        expect(model?.variant).toBe("high")
+        assertStoredOnce(
+          await sessionMessages(current.owned, sessionId),
+          prompt,
+        )
+        logCase("server-before-run accepted", records)
+      })
+    },
+    CASE_TIMEOUT_MS,
+  )
 
+  test(
+    "obsolete run flags still fail with the exact diagnostic",
+    async () => {
+      await exclusive(async () => {
+        const current = requireFixture()
+        const failures: string[] = []
         for (const [flag, value, diagnosticText] of [
           ["--dir", "/tmp", "Unrecognized flag: --dir"],
           ["--variant", "high", "Unrecognized flag: --variant"],
           ["--command", "review", "Unrecognized flag: --command"],
         ] as const) {
-          const mutated = await start((cliArgs) =>
-            cliArgs.includes("run")
-              ? insertRunFlag(cliArgs, flag, value)
-              : cliArgs,
-          )
-          expect(
-            mutated.error,
-            diagnostic(mutated.records, current.secrets),
-          ).toBeInstanceOf(AgentBackendExitError)
-          if (mutated.error instanceof AgentBackendExitError) {
-            expect(mutated.error.message).toContain(diagnosticText)
-            expect(mutated.error.message).not.toContain("Model unavailable")
+          const records: LaunchRecord[] = []
+          try {
+            const error = await runOwned(
+              "explicit",
+              records,
+              (backend) =>
+                backend
+                  .startTurn({
+                    cwd: current.cwd,
+                    prompt: "Contract probe",
+                    model: UNKNOWN_MODEL,
+                    thinkingLevel: "high",
+                    timeout: "20 seconds",
+                  })
+                  .pipe(Effect.flip),
+              (cliArgs) =>
+                cliArgs.includes("run")
+                  ? insertRunFlag(cliArgs, flag, value)
+                  : cliArgs,
+            )
+            expect(error, diagnostic(records, current.secrets)).toBeInstanceOf(
+              AgentBackendExitError,
+            )
+            if (error instanceof AgentBackendExitError) {
+              expect(error.message).toContain(diagnosticText)
+              expect(error.message).not.toContain("Model unavailable")
+              expect(error.message).not.toContain("Could not reach server")
+              expect(error.sessionId).toBeUndefined()
+            }
+          } catch (caught) {
+            failures.push(
+              `${flag}: ${caught instanceof Error ? caught.message : String(caught)}`,
+            )
           }
         }
+        expect(failures, failures.join("\n\n")).toEqual([])
+      })
+    },
+    CASE_TIMEOUT_MS,
+  )
 
-        const catalogRecords: LaunchRecord[] = []
+  test(
+    "former models --verbose fails with the exact diagnostic",
+    async () => {
+      await exclusive(async () => {
+        const current = requireFixture()
+        const records: LaunchRecord[] = []
         const verbose = await runOwned(
           "explicit",
-          catalogRecords,
+          records,
           (backend) =>
             backend
               .inspect({ cwd: current.cwd, timeout: "20 seconds" })
@@ -1068,90 +1359,180 @@ describe("installed OpenCode V2 production CLI contract", () => {
               ? ["models", "--verbose"]
               : cliArgs,
         )
-        expect(verbose).toBeInstanceOf(AgentBackendExitError)
+        expect(verbose, diagnostic(records, current.secrets)).toBeInstanceOf(
+          AgentBackendExitError,
+        )
         if (verbose instanceof AgentBackendExitError) {
           expect(verbose.message).toContain(UNRECOGNIZED_VERBOSE)
           expect(verbose.message.match(/Unrecognized flag:/g)).toEqual([
             "Unrecognized flag:",
           ])
+          expect(verbose.message).not.toContain("Model unavailable")
         }
-        logCase("mutations", [...serverBeforeRun.records, ...catalogRecords])
+        logCase("verbose", records)
       })
     },
     CASE_TIMEOUT_MS,
   )
 
   test(
-    "misplaced --server on api and export fails with the exact diagnostic",
+    "--server before api is rejected on the pin and proven when accepted",
     async () => {
       await exclusive(async () => {
         const current = requireFixture()
-        const records: LaunchRecord[] = []
-        const error = await runOwned(
-          "explicit",
-          records,
-          (backend) =>
-            backend
-              .startTurn({
-                cwd: current.cwd,
-                prompt: "place the flag",
-                model: UNKNOWN_MODEL,
-                thinkingLevel: null,
-                command: "review",
-                timeout: "20 seconds",
-              })
-              .pipe(Effect.flip),
-          (cliArgs) => {
-            if (cliArgs[0] === "api" && cliArgs.includes("--server")) {
-              return moveServerBefore(cliArgs, "api")
-            }
-            if (
-              cliArgs[0] === "session" &&
-              cliArgs[1] === "export" &&
-              cliArgs.includes("--server")
-            ) {
-              return moveServerBefore(cliArgs, "export")
-            }
-            return cliArgs
-          },
-        )
-        expect(error, diagnostic(records, current.secrets)).toBeInstanceOf(
-          AgentBackendExitError,
-        )
-        if (error instanceof AgentBackendExitError) {
-          expect(error.message).toContain(UNRECOGNIZED_SERVER_API)
-          expect(error.message).not.toContain("Could not reach server")
+        const prompt = "place the flag"
+        const capability = placementCapability()
+        if (capability.kind === "historical-rejection") {
+          const records: LaunchRecord[] = []
+          const error = await runOwned(
+            "explicit",
+            records,
+            (backend) =>
+              backend
+                .startTurn({
+                  cwd: current.cwd,
+                  prompt,
+                  model: UNKNOWN_MODEL,
+                  thinkingLevel: null,
+                  command: "review",
+                  timeout: "20 seconds",
+                })
+                .pipe(Effect.flip),
+            (cliArgs) =>
+              cliArgs[0] === "api" && cliArgs.includes("--server")
+                ? moveServerBefore(cliArgs, "api")
+                : cliArgs,
+          )
+          const moved = records.find((record) => record.args.includes("api"))
+          expect(moved, diagnostic(records, current.secrets)).toBeDefined()
+          if (moved !== undefined) {
+            const placed = flagBefore(moved.args, "api")
+            expect(placed.flagAt).toBeLessThan(placed.commandAt)
+            expect(placed.url).toBe(current.owned.baseUrl)
+          }
+          assertHistoricalServerRejection(
+            error,
+            UNRECOGNIZED_SERVER_API,
+            records,
+            current.secrets,
+          )
+          logCase("server-before-api rejected", records)
+          return
         }
+        const accepted = await proveAcceptedCommandPlacement({
+          current,
+          prompt,
+          mutate: (cliArgs) =>
+            cliArgs[0] === "api" && cliArgs.includes("--server")
+              ? moveServerBefore(cliArgs, "api")
+              : cliArgs,
+          assertArgv: (records, url) => {
+            const apiCalls = records.filter((record) =>
+              record.args.includes("api"),
+            )
+            expect(apiCalls.length).toBeGreaterThan(0)
+            for (const call of apiCalls) {
+              const placed = flagBefore(call.args, "api")
+              expect(placed.flagAt).toBeLessThan(placed.commandAt)
+              expect(placed.url).toBe(url)
+            }
+            const exported = records.find(
+              (record) =>
+                record.args[0] === "session" && record.args.includes("export"),
+            )
+            expect(exported?.args.slice(0, 4)).toEqual([
+              "session",
+              "export",
+              "--server",
+              url,
+            ])
+          },
+        })
+        logCase("server-before-api accepted", accepted)
+      })
+    },
+    CASE_TIMEOUT_MS,
+  )
 
-        const exportRecords: LaunchRecord[] = []
-        const exportError = await runOwned(
-          "explicit",
-          exportRecords,
-          (backend) =>
-            backend
-              .startTurn({
-                cwd: current.cwd,
-                prompt: "export placement",
-                model: UNKNOWN_MODEL,
-                thinkingLevel: null,
-                command: "review",
-                timeout: "20 seconds",
-              })
-              .pipe(Effect.flip),
-          (cliArgs) =>
+  test(
+    "--server before export is rejected on the pin and proven when accepted",
+    async () => {
+      await exclusive(async () => {
+        const current = requireFixture()
+        const prompt = "export placement"
+        const capability = placementCapability()
+        if (capability.kind === "historical-rejection") {
+          const records: LaunchRecord[] = []
+          const error = await runOwned(
+            "explicit",
+            records,
+            (backend) =>
+              backend
+                .startTurn({
+                  cwd: current.cwd,
+                  prompt,
+                  model: UNKNOWN_MODEL,
+                  thinkingLevel: null,
+                  command: "review",
+                  timeout: "20 seconds",
+                })
+                .pipe(Effect.flip),
+            (cliArgs) =>
+              cliArgs[0] === "session" && cliArgs.includes("--server")
+                ? moveServerBefore(cliArgs, "export")
+                : cliArgs,
+          )
+          const exported = records.find(
+            (record) =>
+              record.args[0] === "session" && record.args.includes("export"),
+          )
+          expect(exported, diagnostic(records, current.secrets)).toBeDefined()
+          if (exported !== undefined) {
+            expect(exported.args.slice(0, 4)).toEqual([
+              "session",
+              "--server",
+              current.owned.baseUrl,
+              "export",
+            ])
+          }
+          assertHistoricalServerRejection(
+            error,
+            UNRECOGNIZED_SERVER_SESSION,
+            records,
+            current.secrets,
+          )
+          logCase("server-before-export rejected", records)
+          return
+        }
+        const accepted = await proveAcceptedCommandPlacement({
+          current,
+          prompt,
+          mutate: (cliArgs) =>
             cliArgs[0] === "session" && cliArgs.includes("--server")
               ? moveServerBefore(cliArgs, "export")
               : cliArgs,
-        )
-        expect(
-          exportError,
-          diagnostic(exportRecords, current.secrets),
-        ).toBeInstanceOf(AgentBackendExitError)
-        if (exportError instanceof AgentBackendExitError) {
-          expect(exportError.message).toContain(UNRECOGNIZED_SERVER_SESSION)
-          expect(exportError.message).not.toContain("Could not reach server")
-        }
-        logCase("placement", [...records, ...exportRecords])
+          assertArgv: (records, url) => {
+            const apiCalls = records.filter(
+              (record) => record.args[0] === "api",
+            )
+            expect(apiCalls.length).toBeGreaterThan(0)
+            for (const call of apiCalls) {
+              expect(call.args[1]).toBe("--server")
+              expect(call.args[2]).toBe(url)
+            }
+            const exported = records.find(
+              (record) =>
+                record.args[0] === "session" && record.args.includes("export"),
+            )
+            expect(exported?.args.slice(0, 4)).toEqual([
+              "session",
+              "--server",
+              url,
+              "export",
+            ])
+          },
+        })
+        logCase("server-before-export accepted", accepted)
       })
     },
     CASE_TIMEOUT_MS,

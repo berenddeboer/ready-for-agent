@@ -82,12 +82,13 @@ export const splitOpenCodeModelReference = (
 }
 
 /**
- * Attach `--server` where OpenCode 2.0.32 accepts it.
+ * Attach `--server` where the baseline pin, OpenCode 2.0.32, accepts it.
  *
- * `run`, `api`, and `session export` reject the flag before the subcommand.
- * `opencode --server URL run` exits with `Unrecognized flag: --server`.
- * `run` and `api` accept the flag immediately after the command name.
- * `session export` accepts it only after `export`.
+ * That pin rejects the flag before `run`, `api`, and `session export`.
+ * Production keeps this order so the pin still reaches the isolated server.
+ * A later CLI may also accept the earlier placement; that historical
+ * restriction is not a reason to emit it. The real-CLI suite records which
+ * evidenced version rejects and which accepts.
  */
 export const withOpenCodeServer = (
   args: ReadonlyArray<string>,

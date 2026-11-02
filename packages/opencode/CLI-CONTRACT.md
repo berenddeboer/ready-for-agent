@@ -30,9 +30,9 @@ validation boundary (`Model unavailable` JSON, or command acceptance plus
 the stored user message). They are not provider-semantic coverage and must
 not call a cloud model.
 
-`--help`, an unreachable server, a generic nonzero exit, or argv equality
-alone is not a pass. Mutation cases require the exact diagnostic and fail
-on any other error.
+`--help`, an unreachable server, a generic nonzero exit, malformed
+output, or argv equality alone is not a pass. Mutations that remain
+invalid require the exact diagnostic and fail on any other error.
 
 ## How to run
 
@@ -90,6 +90,34 @@ To move the pin, only after this suite passes on the candidate version:
 3. Confirm the log shows that version as both the pin and the resolved
    binary.
 
+## Historical `--server` placement
+
+Production still places `--server` where baseline **2.0.32** accepts it:
+after `run`, after `api`, and after `session export`. That pin rejects the
+flag before those commands (`Unrecognized flag: --server`). BER-31 is that
+ordering bug. Required coverage keeps the exact rejection checks on the pin.
+
+Drift run
+[41303873900](https://github.com/berenddeboer/ready-for-agent/actions/runs/41303873900)
+showed OpenCode **2.2.5** accepts those three placements and reaches the
+no-inference boundary. A direct 2.2.0 parser probe also got past flag
+rejection, but it only reported an unreachable server. That is not proof of
+an isolated server, worktree, or stored session, so 2.2.0 is not an
+accepting contract version and not a cutoff. The suite does not use a
+semver comparison. The pin must reject. 2.2.5 must prove acceptance. Any
+other version fails closed until a real-binary run records its capability.
+
+An accepted placement proves the explicit isolated server URL was used, the
+session is on that server in the worktree, and the turn reached the same
+boundary as the supported path: exact `Model unavailable` for `run`, or a
+stored command plus a valid export for `api` and `export`. The command
+export on that no-inference boundary has no assistant text, so the harness
+returns `AgentBackendMalformedOutputError`. That error is the same oracle
+as the supported command turn. It is not itself success, and it is not an
+export-shape defect: the export JSON parses, contains the session id and
+worktree, and `parseCommandTranscript` finds no command result. A result
+the parser misses fails the case instead of being treated as compatibility.
+
 ## Inventory
 
 | Invocation | Production entry | Variants | Contract case | Boundary |
@@ -111,9 +139,10 @@ To move the pin, only after this suite passes on the candidate version:
 | `service status` | `readOpenCodeServiceStatus` | isolated stopped service; isolated registration of the ephemeral server | service discovery | exact `stopped` text, then the ephemeral URL; does not print the operator URL |
 | jump model pin | `interactiveResumeCommand` + `startInteractiveResume` | `POST .../model` `--data`, directory header, quoting-sensitive path | `apps/ready-for-agent/src/interactive-resume-v2-contract.test.ts` jump pin | pin exits 0; session model matches. Same Nx target as this package |
 | jump TUI | same launcher, and `writeJumpLauncherScript` for the tmux script | `opencode <dir> --session <id> --auto`, quoting-sensitive path | same app contract file, jump TUI | both the direct launcher and the tmux script are still running after startup, with no launcher-failure text; a quick nonzero exit fails the case; pinned model remains after the script |
-| BER-31 `--server` before `run` | production `startTurn`, spawner moves the flag | explicit server | BER-31 mutation | exact `Unrecognized flag: --server in command opencode run` |
-| `--server` before `api` / before `export` | production command turn, spawner moves the flag | explicit server | placement mutations | exact unrecognized-flag diagnostic for that command |
-| removed `--dir`, `--variant`, `--command` | production `startTurn`, spawner inserts the flag | explicit server | obsolete flag mutations | exact unrecognized-flag diagnostic |
+| BER-31 `--server` before `run` | production `startTurn`, spawner moves the flag | explicit server | run placement | pin: exact `Unrecognized flag: --server in command opencode run`. 2.2.5: exact `Model unavailable`, session on the isolated server, prompt stored once |
+| `--server` before `api` | production command turn, spawner moves only `api` | explicit server | api placement | pin: exact unrecognized-flag diagnostic. 2.2.5: isolated session, worktree, stored command, production export order, valid export with no command result |
+| `--server` before `export` | production command turn, spawner moves only `export` | explicit server | export placement | pin: exact `Unrecognized flag: --server in command opencode session`. 2.2.5: `api` keeps production order; export uses the moved flag and the same stored-command/export proof |
+| removed `--dir`, `--variant`, `--command` | production `startTurn`, spawner inserts the flag | explicit server | obsolete flag mutations | exact unrecognized-flag diagnostic. Independent of placement, so one changed flag does not hide the others |
 | former `models --verbose` | production `inspect`, spawner replaces the catalog argv | explicit server | verbose mutation | exact `Unrecognized flag: --verbose in command opencode models` |
 
 ## Not a harness invocation

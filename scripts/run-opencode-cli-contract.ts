@@ -15,7 +15,7 @@ import {
 } from "./opencode-contract-gate.ts"
 
 /** Passing cases in the two real-CLI files. Not a skip allowance. */
-export const EXPECTED_OPENCODE_CLI_CONTRACT_CASES = 11
+export const EXPECTED_OPENCODE_CLI_CONTRACT_CASES = 14
 
 const SECRET_NAME = /(TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL)/i
 
