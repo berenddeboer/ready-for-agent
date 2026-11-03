@@ -23,8 +23,8 @@ import {
   type PullRequestMergeability,
   type TerminalPrStatusCheck,
   ciGateRunOrderKey,
+  compareCiGateRunOrder,
   extractErrorCode,
-  isDecisiveCiGateObservedRun,
 } from "@ready-for-agent/forge-contract"
 import {
   AzureDevOpsService,
@@ -738,18 +738,6 @@ const mapActiveBuildDefinition = (
     }),
   }
 }
-
-const runIdFromIdentity = (runIdentity: string): string => {
-  const separator = runIdentity.indexOf(":")
-  return separator === -1 ? runIdentity : runIdentity.slice(0, separator)
-}
-
-const isSameObservedRun = (
-  runIdentity: string,
-  lastRunIdentity: string,
-): boolean =>
-  runIdentity === lastRunIdentity ||
-  runIdFromIdentity(runIdentity) === runIdFromIdentity(lastRunIdentity)
 
 const mapObservedBuild = (
   value: unknown,
@@ -1542,7 +1530,11 @@ export const makeAzureDevOpsService = (options: {
     identity: AzureDevOpsProjectIdentity,
     gitRepository: { readonly id: string; readonly defaultBranch: string },
     definitionIdentity: string,
-    lastRunIdentity: string | null,
+    bounds: {
+      readonly createdBefore: Date | null
+      readonly notNewerThanOrderKey: string | null
+      readonly revisitRunIdentity: string | null
+    } | null,
     permissionMessage: string,
   ): Effect.Effect<CiGateDefinitionObservation, AzureDevOpsServiceError> =>
     Effect.gen(function* () {
@@ -1605,14 +1597,19 @@ export const makeAzureDevOpsService = (options: {
         }
       }
       const runs: CiGateObservedRun[] = []
-      let reachedLastSeen = false
-      const buildsPath = `/${encodeURIComponent(identity.project)}/_apis/build/builds?definitions=${String(definitionId)}&branchName=${encodeURIComponent(gitRepository.defaultBranch)}&queryOrder=QueueTimeDescending&$top=${String(CI_GATE_PAGE_SIZE)}`
+      let historyExhausted = true
+      const maxTime =
+        bounds?.createdBefore === null || bounds?.createdBefore === undefined
+          ? ""
+          : `&maxTime=${encodeURIComponent(new Date(bounds.createdBefore.getTime() + 1000).toISOString())}`
+      const buildsPath = `/${encodeURIComponent(identity.project)}/_apis/build/builds?definitions=${String(definitionId)}&branchName=${encodeURIComponent(gitRepository.defaultBranch)}&queryOrder=QueueTimeDescending&$top=${String(CI_GATE_PAGE_SIZE)}${maxTime}`
       yield* collectCiGatePages(
         identity.organization,
         buildsPath,
         `Failed to observe CI Gate Definition ${trimmed} for ${repository.projectPath}`,
         permissionMessage,
         (values) => {
+          historyExhausted = values.length < CI_GATE_PAGE_SIZE
           for (const value of values) {
             const mapped = mapObservedBuild(
               value,
@@ -1622,30 +1619,52 @@ export const makeAzureDevOpsService = (options: {
             if (mapped === null) {
               continue
             }
-            runs.push(mapped)
             if (
-              lastRunIdentity !== null &&
-              isSameObservedRun(mapped.runIdentity, lastRunIdentity)
+              bounds?.notNewerThanOrderKey !== null &&
+              bounds?.notNewerThanOrderKey !== undefined &&
+              mapped.orderKey !== undefined &&
+              compareCiGateRunOrder(
+                mapped.orderKey,
+                bounds.notNewerThanOrderKey,
+              ) > 0
             ) {
-              reachedLastSeen = true
-              if (isDecisiveCiGateObservedRun(mapped)) {
-                return "stop"
-              }
               continue
             }
-            if (reachedLastSeen && isDecisiveCiGateObservedRun(mapped)) {
-              return "stop"
-            }
+            runs.push(mapped)
           }
-          // First observation (no last-seen run) uses one official API page.
-          // An unfinished last-seen run is not a stable cursor.
-          return lastRunIdentity === null ? "stop" : "continue"
+          return "stop"
         },
       )
+      const revisitId = bounds?.revisitRunIdentity?.split(":")[0] ?? ""
+      if (/^[0-9]+$/.test(revisitId)) {
+        const revisited = yield* requestUnknown(
+          identity.organization,
+          `/${encodeURIComponent(identity.project)}/_apis/build/builds/${revisitId}`,
+          `Failed to revisit build ${revisitId} for ${repository.projectPath}`,
+        ).pipe(Effect.result)
+        if (Result.isSuccess(revisited)) {
+          const mapped = mapObservedBuild(
+            revisited.success,
+            gitRepository.defaultBranch,
+            identity,
+          )
+          if (mapped !== null) {
+            const existing = runs.findIndex(
+              (run) => run.runIdentity.split(":")[0] === revisitId,
+            )
+            if (existing === -1) {
+              runs.push(mapped)
+            } else {
+              runs[existing] = mapped
+            }
+          }
+        }
+      }
       return {
         identity: trimmed,
         kind: "observed" as const,
         runs,
+        historyExhausted,
       }
     })
 
@@ -1666,18 +1685,26 @@ export const makeAzureDevOpsService = (options: {
       )
       const observations: CiGateDefinitionObservation[] = []
       for (const definitionIdentity of input.definitionIdentities) {
-        const lastSeenRaw = input.lastRunIdentities[definitionIdentity]
-        const lastSeen =
-          lastSeenRaw !== undefined && lastSeenRaw.trim() !== ""
-            ? lastSeenRaw
-            : null
+        const scope = input.scope ?? { kind: "latest" as const }
+        if (
+          scope.kind === "catch_up" &&
+          scope.definitionIdentity !== definitionIdentity
+        ) {
+          continue
+        }
         observations.push(
           yield* observeDefinition(
             repository,
             identity,
             gitRepository,
             definitionIdentity,
-            lastSeen,
+            scope.kind === "catch_up"
+              ? {
+                  createdBefore: scope.notNewerThan.createdAt,
+                  notNewerThanOrderKey: scope.notNewerThan.orderKey,
+                  revisitRunIdentity: scope.revisit?.runIdentity ?? null,
+                }
+              : null,
             permissionMessage,
           ),
         )

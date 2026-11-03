@@ -5,6 +5,7 @@ import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import { ciGateRunOrderKey } from "@ready-for-agent/forge-contract"
 import {
+  GitHubRequestError,
   type GitHubService,
   githubHelperSuccess,
   serializeGitHubHelperControl,
@@ -20,6 +21,7 @@ import {
   WorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
   stubAzureDevOpsServiceLayer,
+  stubGitHubServiceLayer,
   stubGitLabServiceLayer,
   stubLinearServiceLayer,
 } from "@ready-for-agent/work-item-lifecycle"
@@ -489,6 +491,124 @@ describe("helper observation to automatic CI Repair", () => {
           NEWER_RUN_IDENTITY,
         )
       }),
+    )
+  })
+
+  test("starts one repair from a newest-page failure before historical catch-up, even when paused", async () => {
+    const staleIdentity = "20383721706:1"
+    const failureIdentity = "41698504657:1"
+    const floorIdentity = "41565112739:1"
+    const failureOrderKey = ciGateRunOrderKey(41698504657, 1)
+    const calls: string[] = []
+    let phase: "stale" | "failure" = "stale"
+    const github = stubGitHubServiceLayer({
+      observeCiGate: (_repository, input) => {
+        if (input.scope?.kind === "catch_up") {
+          calls.push("catch_up")
+          return Effect.fail(
+            new GitHubRequestError({
+              message: "historical fetch timed out",
+              code: "TIMEOUT",
+              retryable: true,
+            }),
+          )
+        }
+        calls.push("latest")
+        const runIdentity = phase === "stale" ? staleIdentity : failureIdentity
+        return Effect.succeed({
+          defaultBranch: "trunk",
+          observations: [
+            {
+              identity: DEFINITION_IDENTITY,
+              kind: "observed" as const,
+              historyExhausted: phase === "stale",
+              runs: [
+                {
+                  runIdentity,
+                  htmlUrl: `https://github.com/processfocus/monorepo/actions/runs/${runIdentity.split(":")[0]}`,
+                  headSha: `sha-${runIdentity}`,
+                  headRef: "trunk",
+                  event: "push",
+                  createdAt: new Date(
+                    phase === "stale"
+                      ? "2025-12-01T00:00:00.000Z"
+                      : "2026-11-03T18:56:07.000Z",
+                  ),
+                  updatedAt: new Date("2026-11-03T19:00:00.000Z"),
+                  startedAt: new Date("2026-11-03T18:56:08.000Z"),
+                  rawStatus: "completed",
+                  rawConclusion: phase === "stale" ? "success" : "failure",
+                  orderKey:
+                    phase === "stale"
+                      ? ciGateRunOrderKey(20383721706, 1)
+                      : failureOrderKey,
+                },
+              ],
+            },
+          ],
+        })
+      },
+    })
+    const layer = WorkItemLifecycleLive.pipe(
+      Layer.provideMerge(
+        stubActiveAgentBackendLayer({
+          models: [
+            {
+              id: "opencode/deepseek-v4-flash-free",
+              thinkingLevels: ["low", "high"],
+            },
+          ],
+        }),
+      ),
+      Layer.provideMerge(github),
+      Layer.provideMerge(stubGitLabServiceLayer()),
+      Layer.provideMerge(stubAzureDevOpsServiceLayer()),
+      Layer.provideMerge(stubLinearServiceLayer()),
+      Layer.provideMerge(
+        Layer.succeed(LifecycleSteps, LifecycleSteps.of(idleSteps)),
+      ),
+      Layer.provideMerge(DbServiceLive),
+      Layer.provideMerge(SqliteQueueServiceLive),
+      Layer.provideMerge(DatabaseTest),
+    )
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const repository = yield* seedRepository({
+          label: "stale-cursor",
+          paused: true,
+          automaticCiRepair: true,
+          keylessSuppress: false,
+        })
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `INSERT INTO ci_repair_baseline (
+             repository_id, definition_identity, run_identity, order_key,
+             head_sha, inclusive, floor_order_key,
+             suppress_through_run_identity, suppress_through_order_key, updated_at
+           ) VALUES (?, ?, ?, ?, NULL, 0, ?, NULL, NULL, ?)`,
+          [
+            repository.id,
+            DEFINITION_IDENTITY,
+            floorIdentity,
+            ciGateRunOrderKey(41565112739, 1),
+            ciGateRunOrderKey(41565112739, 1),
+            Date.now(),
+          ],
+        )
+        yield* observeRepositoryCiGate({ repository, origin: "polling" })
+        phase = "failure"
+        yield* observeRepositoryCiGate({ repository, origin: "polling" })
+        expect(calls).toContain("catch_up")
+        const repairs = yield* repairsFor(repository.id)
+        expect(repairs).toHaveLength(1)
+        expect(repairs[0]?.ciRepairFailingRuns[0]?.runIdentity).toBe(
+          failureIdentity,
+        )
+        const stored = yield* storedObservation(repository.id)
+        expect(stored?.failureLatched).toBe(true)
+        expect(stored?.lastRunIdentity).toBe(failureIdentity)
+        expect(stored?.coverageState).toBe("gap")
+      }).pipe(Effect.provide(layer)),
     )
   })
 })

@@ -211,7 +211,7 @@ describe("GitHub CI Gate observation", () => {
     expect(definition.runs.at(-1)?.runIdentity).toBe("901:1")
   })
 
-  it("stops paging once the last-seen run identity is included", async () => {
+  it("fetches one newest page and does not scan to a stale cursor", async () => {
     const requestedPages: string[] = []
     const pageOne = Array.from({ length: 100 }, (_, index) =>
       workflowRunPayload({
@@ -250,8 +250,9 @@ describe("GitHub CI Gate observation", () => {
       throw new Error("expected observed definition")
     }
     expect(definition.runs[0]?.runIdentity).toBe("2000:1")
-    expect(definition.runs.at(-1)?.runIdentity).toBe("1950:1")
-    expect(definition.runs).toHaveLength(51)
+    expect(definition.runs.at(-1)?.runIdentity).toBe("1901:1")
+    expect(definition.runs).toHaveLength(100)
+    expect(definition.historyExhausted).toBe(false)
   })
 
   it("returns a qualifying success behind a saved pending bookmark", async () => {
@@ -322,6 +323,7 @@ describe("GitHub CI Gate observation", () => {
     expect(definition.runs.map((run) => run.runIdentity)).toEqual([
       "300:1",
       "200:1",
+      "100:1",
     ])
     expect(definition.runs.some((run) => run.headRef === "feature")).toBe(false)
     expect(definition.runs.some((run) => run.event === "pull_request")).toBe(
@@ -329,7 +331,7 @@ describe("GitHub CI Gate observation", () => {
     )
   })
 
-  it("pages past a pending bookmark to a qualifying success on a later API page", async () => {
+  it("does not page past a pending newest run during live observation", async () => {
     const requestedPages: string[] = []
     const pageOne = Array.from({ length: 100 }, (_, index) =>
       workflowRunPayload({
@@ -379,17 +381,14 @@ describe("GitHub CI Gate observation", () => {
       }),
     )
     const definition = observation.observations[0]
-    expect(requestedPages).toEqual(["1", "2"])
+    expect(requestedPages).toEqual(["1"])
     expect(definition?.kind).toBe("observed")
     if (definition?.kind !== "observed") {
       throw new Error("expected observed definition")
     }
     expect(definition.runs[0]?.runIdentity).toBe("2000:1")
-    expect(definition.runs.at(-1)?.runIdentity).toBe("1900:1")
-    expect(definition.runs.at(-1)?.rawConclusion).toBe("success")
-    expect(definition.runs.some((run) => run.runIdentity === "1899:1")).toBe(
-      false,
-    )
+    expect(definition.runs).toHaveLength(100)
+    expect(definition.historyExhausted).toBe(false)
   })
 
   it("stops paging at the latest attempt of the last-seen run", async () => {
@@ -431,8 +430,10 @@ describe("GitHub CI Gate observation", () => {
     if (definition?.kind !== "observed") {
       throw new Error("expected observed definition")
     }
-    expect(definition.runs.at(-1)?.runIdentity).toBe("1950:2")
-    expect(definition.runs).toHaveLength(51)
+    expect(
+      definition.runs.find((run) => run.runIdentity === "1950:2"),
+    ).toBeDefined()
+    expect(definition.runs).toHaveLength(100)
   })
 
   it("marks a deleted workflow unavailable without dropping other selections", async () => {
@@ -664,4 +665,327 @@ describe("GitHub CI Gate observation", () => {
       expect(error.retryAt).toBe(resetSeconds * 1_000)
     }),
   )
+
+  it("does not scan 2400 historical runs when the cursor is stale", async () => {
+    const requestedPages: string[] = []
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = new URL(String(input))
+      if (isRepoUrl(url)) {
+        return jsonResponse(repoPayload)
+      }
+      if (!isWorkflowRunsUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      const page = url.searchParams.get("page") ?? "1"
+      requestedPages.push(page)
+      if (page !== "1") {
+        throw new Error(`all-or-nothing scan requested page ${page}`)
+      }
+      return jsonResponse({
+        total_count: 2426,
+        workflow_runs: [
+          workflowRunPayload({
+            id: 41698504657,
+            event: "push",
+            status: "completed",
+            conclusion: "failure",
+            createdAt: "2026-11-03T18:56:07Z",
+          }),
+        ],
+      })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["161335"],
+        lastRunIdentities: { "161335": "20383721706:1" },
+      }),
+    )
+    expect(requestedPages).toEqual(["1"])
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs[0]?.runIdentity).toBe("41698504657:1")
+    expect(definition.historyExhausted).toBe(true)
+  })
+
+  it("catch-up fetches one created-bounded page and does not use a shifting offset", async () => {
+    const requested: string[] = []
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = new URL(String(input))
+      if (isRepoUrl(url)) {
+        return jsonResponse(repoPayload)
+      }
+      if (!isWorkflowRunsUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      requested.push(
+        `${url.searchParams.get("page") ?? "1"}:${url.searchParams.get("created") ?? ""}`,
+      )
+      if (url.searchParams.get("page") !== "1") {
+        throw new Error("catch-up used a shifting page offset")
+      }
+      return jsonResponse({
+        total_count: 50,
+        workflow_runs: [
+          workflowRunPayload({
+            id: 100,
+            event: "push",
+            status: "completed",
+            conclusion: "failure",
+            createdAt: "2025-12-01T00:00:00Z",
+          }),
+        ],
+      })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["161335"],
+        lastRunIdentities: {},
+        scope: {
+          kind: "catch_up",
+          definitionIdentity: "161335",
+          notNewerThan: {
+            runIdentity: "200:1",
+            orderKey: "00000000000000000200:000001",
+            createdAt: new Date("2026-01-01T00:00:00Z"),
+          },
+          stopAt: null,
+        },
+      }),
+    )
+    expect(requested).toEqual(["1:<=2026-01-01T00:00:01Z"])
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind === "observed") {
+      expect(definition.runs[0]?.runIdentity).toBe("100:1")
+      expect(definition.historyExhausted).toBe(true)
+    }
+  })
+
+  it("inspects the newest pending run when a cancelled run is newer", async () => {
+    const requested: string[] = []
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = new URL(String(input))
+      requested.push(url.pathname)
+      if (isRepoUrl(url)) {
+        return jsonResponse(repoPayload)
+      }
+      if (url.pathname === "/repos/acme/widgets/actions/runs/800/jobs") {
+        return jsonResponse({
+          jobs: [
+            {
+              id: 2,
+              name: "test",
+              status: "completed",
+              conclusion: "failure",
+            },
+          ],
+        })
+      }
+      if (url.pathname.includes("/jobs")) {
+        throw new Error(`unexpected jobs request ${url.pathname}`)
+      }
+      return jsonResponse({
+        total_count: 2,
+        workflow_runs: [
+          workflowRunPayload({
+            id: 900,
+            event: "push",
+            status: "completed",
+            conclusion: "cancelled",
+          }),
+          workflowRunPayload({
+            id: 800,
+            event: "push",
+            status: "in_progress",
+            conclusion: null,
+          }),
+        ],
+      })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["161335"],
+        lastRunIdentities: {},
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs[1]?.earlyJobFailure).toBe(true)
+    expect(requested).toContain("/repos/acme/widgets/actions/runs/800/jobs")
+    expect(requested).not.toContain("/repos/acme/widgets/actions/runs/900/jobs")
+  })
+
+  it("refreshes one pending run above the catch-up page without replacing that page", async () => {
+    const requested: string[] = []
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = new URL(String(input))
+      requested.push(url.pathname + (url.search ? `?${url.searchParams}` : ""))
+      if (isRepoUrl(url)) {
+        return jsonResponse(repoPayload)
+      }
+      if (url.pathname === "/repos/acme/widgets/actions/runs/450") {
+        return jsonResponse(
+          workflowRunPayload({
+            id: 450,
+            event: "push",
+            status: "completed",
+            conclusion: "failure",
+            createdAt: "2026-02-01T00:00:00Z",
+          }),
+        )
+      }
+      if (!isWorkflowRunsUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      expect(url.searchParams.get("page")).toBe("1")
+      expect(url.searchParams.get("created")).toContain("2026-01-01")
+      return jsonResponse({
+        total_count: 1,
+        workflow_runs: [
+          workflowRunPayload({
+            id: 100,
+            event: "push",
+            status: "completed",
+            conclusion: "success",
+            createdAt: "2025-12-01T00:00:00Z",
+          }),
+        ],
+      })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["161335"],
+        lastRunIdentities: {},
+        scope: {
+          kind: "catch_up",
+          definitionIdentity: "161335",
+          notNewerThan: {
+            runIdentity: "200:1",
+            orderKey: "00000000000000000200:000001",
+            createdAt: new Date("2026-01-01T00:00:00Z"),
+          },
+          stopAt: null,
+          revisit: {
+            runIdentity: "450:1",
+            orderKey: "00000000000000000450:000001",
+            createdAt: new Date("2026-02-01T00:00:00Z"),
+          },
+        },
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs.map((run) => run.runIdentity)).toEqual([
+      "100:1",
+      "450:1",
+    ])
+    expect(definition.runs[1]?.rawConclusion).toBe("failure")
+    expect(requested.some((path) => path.includes("/actions/runs/450"))).toBe(
+      true,
+    )
+    expect(
+      requested.some((path) => path.includes("/workflows/161335/runs")),
+    ).toBe(true)
+  })
+
+  it("does not wait on job requests for older runs when the newest run already failed", async () => {
+    const requested: string[] = []
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = new URL(String(input))
+      requested.push(url.pathname)
+      if (isRepoUrl(url)) {
+        return jsonResponse(repoPayload)
+      }
+      if (url.pathname.includes("/jobs")) {
+        throw new Error("completed failure waited on a jobs request")
+      }
+      return jsonResponse({
+        total_count: 2,
+        workflow_runs: [
+          workflowRunPayload({
+            id: 900,
+            event: "push",
+            status: "completed",
+            conclusion: "failure",
+          }),
+          workflowRunPayload({
+            id: 800,
+            event: "push",
+            status: "in_progress",
+            conclusion: null,
+          }),
+        ],
+      })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["161335"],
+        lastRunIdentities: {},
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind === "observed") {
+      expect(definition.runs[0]?.rawConclusion).toBe("failure")
+      expect(definition.runs[1]?.earlyJobFailure).not.toBe(true)
+    }
+    expect(requested.some((path) => path.includes("/jobs"))).toBe(false)
+  })
+
+  it("keeps completed runs when early-job inspection fails", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = new URL(String(input))
+      if (isRepoUrl(url)) {
+        return jsonResponse(repoPayload)
+      }
+      if (url.pathname.includes("/jobs")) {
+        return new Response("forbidden", { status: 403 })
+      }
+      return jsonResponse({
+        total_count: 2,
+        workflow_runs: [
+          workflowRunPayload({
+            id: 700,
+            event: "push",
+            status: "in_progress",
+            conclusion: null,
+          }),
+          workflowRunPayload({
+            id: 600,
+            event: "push",
+            status: "completed",
+            conclusion: "failure",
+          }),
+        ],
+      })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["161335"],
+        lastRunIdentities: {},
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs[0]?.earlyJobFailure).not.toBe(true)
+    expect(definition.runs[1]?.rawConclusion).toBe("failure")
+  })
 })

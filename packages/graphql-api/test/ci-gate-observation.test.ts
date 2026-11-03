@@ -46,6 +46,9 @@ const catalog = [
   },
 ] as const
 
+const orderKeyFor = (id: number): string =>
+  `${String(id).padStart(20, "0")}:000001`
+
 const observedRun = (input: {
   readonly runIdentity: string
   readonly rawStatus: string
@@ -1801,5 +1804,445 @@ describe("Repository CI Gate observation", () => {
     expect(gate.definitions[0]?.failureLatched).toBe(true)
     expect(gate.definitions[0]?.diagnostic).toContain("Actions read required")
     expect(gate.activeIncident?.status).toBe("OPEN")
+  })
+
+  test("commits a newest-page failure and considers repair before historical catch-up", async () => {
+    const repository = await addRepository()
+    const events: string[] = []
+    let repairBeforeCatchUp = false
+    const staleKey = "00000000000020383721706:000001"
+    const newestKey = "00000000000041698504657:000001"
+    observe = (_repository, input) => {
+      if (input.scope?.kind === "catch_up") {
+        repairBeforeCatchUp = consideredRepositories.includes(repository.id)
+        events.push("catch_up")
+        return Effect.fail(
+          new GitHubRequestError({
+            message:
+              "Failed to observe CI Gate Definitions for acme/widgets timed out",
+            code: "TIMEOUT",
+            retryable: true,
+          }),
+        )
+      }
+      events.push("latest")
+      if (events.filter((event) => event === "latest").length === 1) {
+        return Effect.succeed({
+          defaultBranch: "main",
+          observations: [
+            {
+              ...observedDefinition("161335", [
+                observedRun({
+                  runIdentity: "20383721706:1",
+                  rawStatus: "completed",
+                  rawConclusion: "success",
+                  orderKey: staleKey,
+                  createdAt: "2025-12-01T00:00:00.000Z",
+                }),
+              ]),
+              historyExhausted: true,
+            },
+          ],
+        })
+      }
+      return Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          {
+            ...observedDefinition("161335", [
+              observedRun({
+                runIdentity: "41698504657:1",
+                rawStatus: "completed",
+                rawConclusion: "failure",
+                orderKey: newestKey,
+                createdAt: "2026-11-03T18:56:07.000Z",
+              }),
+            ]),
+            historyExhausted: false,
+          },
+        ],
+      })
+    }
+    await saveSelection(repository.id, ["161335"])
+    consideredRepositories.length = 0
+    await refresh(repository.id)
+    expect(events.at(-1)).toBe("catch_up")
+    expect(events.filter((event) => event === "catch_up")).toHaveLength(1)
+    expect(repairBeforeCatchUp).toBe(true)
+    expect(consideredRepositories).toContain(repository.id)
+    const gate = await fetchCiGate(repository.id)
+    expect(gate.status).toBe("CLOSED")
+    expect(gate.definitions[0]?.failureLatched).toBe(true)
+    expect(gate.definitions[0]?.latestRun?.runIdentity).toBe("41698504657:1")
+    const stored = await runtime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const rows = (yield* sql.unsafe(
+          `SELECT coverage_state AS coverageState,
+                  coverage_checkpoint_run_identity AS checkpoint,
+                  coverage_gap_upper_run_identity AS gapUpper,
+                  coverage_diagnostic AS diagnostic
+           FROM ci_gate_definition_observation
+           WHERE repository_id = ?`,
+          [repository.id],
+        )) as readonly {
+          readonly coverageState: string
+          readonly checkpoint: string | null
+          readonly gapUpper: string | null
+          readonly diagnostic: string | null
+        }[]
+        return rows[0]
+      }),
+    )
+    expect(stored?.coverageState).toBe("gap")
+    expect(stored?.checkpoint).toBe("20383721706:1")
+    expect(stored?.gapUpper).toBe("41698504657:1")
+    expect(stored?.diagnostic).toContain("timed out")
+  })
+
+  const observeGapThenCatchUp = async (input: {
+    readonly repositoryId: string
+    readonly newest: ReturnType<typeof observedRun>[]
+    readonly catchUp: ReturnType<typeof observedRun>[]
+  }) => {
+    let catchUpCalls = 0
+    let latestCalls = 0
+    observe = (_repository, scopeInput) => {
+      if (scopeInput.scope?.kind === "catch_up") {
+        catchUpCalls += 1
+        return Effect.succeed({
+          defaultBranch: "main",
+          observations: [
+            {
+              ...observedDefinition("161335", input.catchUp),
+              historyExhausted: false,
+            },
+          ],
+        })
+      }
+      latestCalls += 1
+      if (latestCalls === 1) {
+        return Effect.succeed({
+          defaultBranch: "main",
+          observations: [
+            {
+              ...observedDefinition("161335", [
+                observedRun({
+                  runIdentity: "100:1",
+                  rawStatus: "completed",
+                  rawConclusion: "success",
+                  createdAt: "2025-06-01T00:00:00.000Z",
+                  orderKey: orderKeyFor(100),
+                }),
+              ]),
+              historyExhausted: true,
+            },
+          ],
+        })
+      }
+      return Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          {
+            ...observedDefinition("161335", input.newest),
+            historyExhausted: false,
+          },
+        ],
+      })
+    }
+    await saveSelection(input.repositoryId, ["161335"])
+    await refresh(input.repositoryId)
+    return { gate: await fetchCiGate(input.repositoryId), catchUpCalls }
+  }
+
+  test("catch-up does not close the gate on a failure older than a newest-page success", async () => {
+    const repository = await addRepository()
+    const { gate, catchUpCalls } = await observeGapThenCatchUp({
+      repositoryId: repository.id,
+      newest: [
+        observedRun({
+          runIdentity: "900:1",
+          rawStatus: "queued",
+          rawConclusion: null,
+          createdAt: "2026-03-01T00:00:00.000Z",
+          orderKey: orderKeyFor(900),
+        }),
+        observedRun({
+          runIdentity: "850:1",
+          rawStatus: "completed",
+          rawConclusion: "success",
+          createdAt: "2026-02-01T00:00:00.000Z",
+          orderKey: orderKeyFor(850),
+        }),
+        observedRun({
+          runIdentity: "800:1",
+          rawStatus: "completed",
+          rawConclusion: "failure",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          orderKey: orderKeyFor(800),
+        }),
+      ],
+      catchUp: [
+        observedRun({
+          runIdentity: "800:1",
+          rawStatus: "completed",
+          rawConclusion: "failure",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          orderKey: orderKeyFor(800),
+        }),
+        observedRun({
+          runIdentity: "400:1",
+          rawStatus: "completed",
+          rawConclusion: "failure",
+          createdAt: "2025-08-01T00:00:00.000Z",
+          orderKey: orderKeyFor(400),
+        }),
+      ],
+    })
+    expect(catchUpCalls).toBe(1)
+    expect(gate.status).toBe("OPEN")
+    expect(gate.definitions[0]?.failureLatched).toBe(false)
+    expect(gate.activeIncident).toBeNull()
+    expect(gate.definitions[0]?.latestRun?.runIdentity).toBe("900:1")
+  })
+
+  test("catch-up does not clear or replace a newer latched failure", async () => {
+    const repository = await addRepository()
+    const { gate, catchUpCalls } = await observeGapThenCatchUp({
+      repositoryId: repository.id,
+      newest: [
+        observedRun({
+          runIdentity: "900:1",
+          rawStatus: "queued",
+          rawConclusion: null,
+          createdAt: "2026-03-01T00:00:00.000Z",
+          orderKey: orderKeyFor(900),
+        }),
+        observedRun({
+          runIdentity: "850:1",
+          rawStatus: "completed",
+          rawConclusion: "failure",
+          createdAt: "2026-02-01T00:00:00.000Z",
+          orderKey: orderKeyFor(850),
+        }),
+        observedRun({
+          runIdentity: "800:1",
+          rawStatus: "completed",
+          rawConclusion: "success",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          orderKey: orderKeyFor(800),
+        }),
+      ],
+      catchUp: [
+        observedRun({
+          runIdentity: "800:1",
+          rawStatus: "completed",
+          rawConclusion: "success",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          orderKey: orderKeyFor(800),
+        }),
+        observedRun({
+          runIdentity: "400:1",
+          rawStatus: "completed",
+          rawConclusion: "failure",
+          createdAt: "2025-08-01T00:00:00.000Z",
+          orderKey: orderKeyFor(400),
+        }),
+      ],
+    })
+    expect(catchUpCalls).toBe(1)
+    expect(gate.status).toBe("CLOSED")
+    expect(gate.definitions[0]?.failureLatched).toBe(true)
+    expect(gate.definitions[0]?.failingRun?.runIdentity).toBe("850:1")
+    expect(gate.activeIncident?.status).toBe("OPEN")
+  })
+
+  test("catch-up still records a historical failure when the newest page has no decisive success", async () => {
+    const repository = await addRepository()
+    const { gate, catchUpCalls } = await observeGapThenCatchUp({
+      repositoryId: repository.id,
+      newest: [
+        observedRun({
+          runIdentity: "900:1",
+          rawStatus: "queued",
+          rawConclusion: null,
+          createdAt: "2026-03-01T00:00:00.000Z",
+          orderKey: orderKeyFor(900),
+        }),
+      ],
+      catchUp: [
+        observedRun({
+          runIdentity: "400:1",
+          rawStatus: "completed",
+          rawConclusion: "failure",
+          createdAt: "2025-08-01T00:00:00.000Z",
+          orderKey: orderKeyFor(400),
+        }),
+      ],
+    })
+    expect(catchUpCalls).toBe(1)
+    expect(gate.status).toBe("CLOSED")
+    expect(gate.definitions[0]?.failureLatched).toBe(true)
+    expect(gate.definitions[0]?.failingRun?.runIdentity).toBe("400:1")
+  })
+
+  test("a revisited pending run that fails newer than a newest-page success still closes the gate", async () => {
+    const repository = await addRepository()
+    const { gate, catchUpCalls } = await observeGapThenCatchUp({
+      repositoryId: repository.id,
+      newest: [
+        observedRun({
+          runIdentity: "900:1",
+          rawStatus: "queued",
+          rawConclusion: null,
+          createdAt: "2026-03-01T00:00:00.000Z",
+          orderKey: orderKeyFor(900),
+        }),
+        observedRun({
+          runIdentity: "850:1",
+          rawStatus: "completed",
+          rawConclusion: "success",
+          createdAt: "2026-02-01T00:00:00.000Z",
+          orderKey: orderKeyFor(850),
+        }),
+        observedRun({
+          runIdentity: "800:1",
+          rawStatus: "completed",
+          rawConclusion: "failure",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          orderKey: orderKeyFor(800),
+        }),
+      ],
+      catchUp: [
+        observedRun({
+          runIdentity: "900:1",
+          rawStatus: "completed",
+          rawConclusion: "failure",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          orderKey: orderKeyFor(900),
+        }),
+        observedRun({
+          runIdentity: "800:1",
+          rawStatus: "completed",
+          rawConclusion: "failure",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          orderKey: orderKeyFor(800),
+        }),
+      ],
+    })
+    expect(catchUpCalls).toBe(1)
+    expect(gate.status).toBe("CLOSED")
+    expect(gate.definitions[0]?.failingRun?.runIdentity).toBe("900:1")
+  })
+
+  test("older catch-up does not clear or replace a latched failure that is off the newest page", async () => {
+    const repository = await addRepository()
+    let latestCalls = 0
+    let catchUpCalls = 0
+    const pendingNewest = [
+      observedRun({
+        runIdentity: "900:1",
+        rawStatus: "queued",
+        rawConclusion: null,
+        createdAt: "2026-03-01T00:00:00.000Z",
+        orderKey: orderKeyFor(900),
+      }),
+    ]
+    observe = (_repository, scopeInput) => {
+      if (scopeInput.scope?.kind === "catch_up") {
+        catchUpCalls += 1
+        const runs =
+          catchUpCalls === 1
+            ? [
+                observedRun({
+                  runIdentity: "500:1",
+                  rawStatus: "completed",
+                  rawConclusion: "failure",
+                  createdAt: "2026-01-15T00:00:00.000Z",
+                  orderKey: orderKeyFor(500),
+                }),
+                observedRun({
+                  runIdentity: "450:1",
+                  rawStatus: "completed",
+                  rawConclusion: "success",
+                  createdAt: "2026-01-01T00:00:00.000Z",
+                  orderKey: orderKeyFor(450),
+                }),
+              ]
+            : catchUpCalls === 2
+              ? [
+                  observedRun({
+                    runIdentity: "400:1",
+                    rawStatus: "completed",
+                    rawConclusion: "success",
+                    createdAt: "2025-12-01T00:00:00.000Z",
+                    orderKey: orderKeyFor(400),
+                  }),
+                  observedRun({
+                    runIdentity: "300:1",
+                    rawStatus: "completed",
+                    rawConclusion: "failure",
+                    createdAt: "2025-11-01T00:00:00.000Z",
+                    orderKey: orderKeyFor(300),
+                  }),
+                ]
+              : [
+                  observedRun({
+                    runIdentity: "900:1",
+                    rawStatus: "completed",
+                    rawConclusion: "success",
+                    createdAt: "2026-03-01T00:00:00.000Z",
+                    orderKey: orderKeyFor(900),
+                  }),
+                ]
+        return Effect.succeed({
+          defaultBranch: "main",
+          observations: [
+            {
+              ...observedDefinition("161335", runs),
+              historyExhausted: false,
+            },
+          ],
+        })
+      }
+      latestCalls += 1
+      return Effect.succeed({
+        defaultBranch: "main",
+        observations: [
+          {
+            ...observedDefinition(
+              "161335",
+              latestCalls === 1
+                ? [
+                    observedRun({
+                      runIdentity: "100:1",
+                      rawStatus: "completed",
+                      rawConclusion: "success",
+                      createdAt: "2025-06-01T00:00:00.000Z",
+                      orderKey: orderKeyFor(100),
+                    }),
+                  ]
+                : pendingNewest,
+            ),
+            historyExhausted: latestCalls === 1,
+          },
+        ],
+      })
+    }
+    await saveSelection(repository.id, ["161335"])
+    await refresh(repository.id)
+    const latched = await fetchCiGate(repository.id)
+    expect(latched.definitions[0]?.failingRun?.runIdentity).toBe("500:1")
+    await refresh(repository.id)
+    const kept = await fetchCiGate(repository.id)
+    expect(catchUpCalls).toBe(2)
+    expect(kept.status).toBe("CLOSED")
+    expect(kept.definitions[0]?.failureLatched).toBe(true)
+    expect(kept.definitions[0]?.failingRun?.runIdentity).toBe("500:1")
+    await refresh(repository.id)
+    const cleared = await fetchCiGate(repository.id)
+    expect(catchUpCalls).toBe(3)
+    expect(cleared.status).toBe("OPEN")
+    expect(cleared.definitions[0]?.failureLatched).toBe(false)
   })
 })

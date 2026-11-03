@@ -10,18 +10,30 @@ import {
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
 import {
+  CI_GATE_OBSERVATION_PAGE_SIZE,
   type CiGateDefinitionObservation,
+  type CiGateHistoryBound,
   type CiGateObservation,
   type CiGateObservedRun,
   type ForgeOperationOrigin,
-  type ObserveCiGateInput,
+  applyCatchUpHistoricalCoverage,
+  applyLatestHistoricalCoverage,
+  ciGateOrderKeyOf,
   classifyCiGateObservedRun,
+  compareCiGateRunOrder,
   formatUserFacingError,
+  nextCiGateCatchUpBound,
+  pendingRunAboveFrontier,
+  sortCiGateRunsNewestFirst,
 } from "@ready-for-agent/forge-contract"
 import {
   WorkItemLifecycle,
   forgeObservation,
 } from "@ready-for-agent/work-item-lifecycle"
+import {
+  historicalCoverageFromRecord,
+  withHistoricalCoverage,
+} from "./ci-gate-coverage-record.js"
 
 export type RepositoryCiGateStatus = "disabled" | "open" | "closed" | "degraded"
 
@@ -64,9 +76,19 @@ const isSameObservedRun = (
 const newlyObservedRuns = (
   runs: readonly CiGateObservedRun[],
   lastRunIdentity: string | null,
+  lastOrderKey: string | null,
 ): readonly CiGateObservedRun[] => {
   if (lastRunIdentity === null) {
     return runs
+  }
+  if (lastOrderKey !== null && lastOrderKey !== "") {
+    return runs.filter((run) => {
+      const orderKey = ciGateOrderKeyOf(run)
+      if (orderKey === null) {
+        return !isSameObservedRun(run.runIdentity, lastRunIdentity)
+      }
+      return compareCiGateRunOrder(orderKey, lastOrderKey) > 0
+    })
   }
   const next: CiGateObservedRun[] = []
   for (const run of runs) {
@@ -77,6 +99,105 @@ const newlyObservedRuns = (
   }
   return next
 }
+
+const retainedLatestRun = (
+  previous: CiGateDefinitionObservationRecord | undefined,
+): CiGateObservedRun | null => {
+  if (
+    previous === undefined ||
+    previous.lastRunIdentity === null ||
+    previous.lastRunIdentity === ""
+  ) {
+    return null
+  }
+  return {
+    runIdentity: previous.lastRunIdentity,
+    htmlUrl: previous.lastRunHtmlUrl,
+    headSha: previous.lastHeadSha,
+    headRef: previous.lastHeadRef,
+    event: previous.lastEvent ?? "",
+    createdAt: previous.lastRunCreatedAt ?? new Date(0),
+    updatedAt: previous.lastRunUpdatedAt,
+    startedAt: null,
+    rawStatus: previous.lastRawStatus,
+    rawConclusion: previous.lastRawConclusion,
+    ...(previous.lastRunOrderKey === null ||
+    previous.lastRunOrderKey === undefined
+      ? {}
+      : { orderKey: previous.lastRunOrderKey }),
+    earlyJobFailure: previous.lastEarlyJobFailure === true,
+  }
+}
+
+type CiGateDecisiveObservation = {
+  readonly kind: "failure" | "success"
+  readonly run: CiGateObservedRun
+}
+
+/**
+ * Decisive result from this turn's newest page. Catch-up runs are older than
+ * that page's frontier, so they must be compared against this result. Without
+ * it, an older failure can close the gate after a newer success, or an older
+ * success can clear a newer failure.
+ */
+type NewestPageLatchContext =
+  | { readonly kind: "unavailable" }
+  | {
+      readonly kind: "observed"
+      readonly latestDecisive: CiGateDecisiveObservation | null
+    }
+
+const comparableRun = (run: CiGateObservedRun): CiGateObservedRun => {
+  const orderKey = ciGateOrderKeyOf(run)
+  if (orderKey === null || run.orderKey === orderKey) {
+    return run
+  }
+  return { ...run, orderKey }
+}
+
+/**
+ * Stored failure, placed by order key so an older catch-up run cannot clear
+ * or replace it. A newer decisive success still sorts ahead and clears it.
+ */
+const storedLatchedFailure = (
+  record: CiGateDefinitionObservationRecord | undefined,
+): CiGateObservedRun | null => {
+  if (
+    record === undefined ||
+    record.failureLatched !== true ||
+    record.latchedRunIdentity === null ||
+    record.latchedRunIdentity === ""
+  ) {
+    return null
+  }
+  const storedKey = record.latchedRunOrderKey?.trim() ?? ""
+  const orderKey =
+    storedKey !== ""
+      ? storedKey
+      : ciGateOrderKeyOf({ runIdentity: record.latchedRunIdentity })
+  if (orderKey === null) {
+    return null
+  }
+  return {
+    runIdentity: record.latchedRunIdentity,
+    htmlUrl: record.latchedRunHtmlUrl,
+    headSha: null,
+    headRef: null,
+    event: "",
+    createdAt: new Date(0),
+    updatedAt: null,
+    startedAt: null,
+    rawStatus: "completed",
+    rawConclusion: "failure",
+    orderKey,
+  }
+}
+
+const isThrottle = (error: unknown): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  "_tag" in error &&
+  (error as { readonly _tag?: unknown })._tag === "GitHubThrottledError"
 
 const reduceObservedRuns = (
   runs: readonly CiGateObservedRun[],
@@ -210,22 +331,46 @@ const applyObservedRuns = (input: {
   readonly observedAt: Date
   readonly runs: readonly CiGateObservedRun[]
   readonly ignorePreviousLatch: boolean
+  readonly retainNewerLatest: boolean
+  /** Decisive runs already known to be newer than this page. Not stored as latest. */
+  readonly decisiveContext?: readonly CiGateObservedRun[]
 }): {
   readonly observation: CiGateDefinitionObservationRecord
   readonly sameObservationResolvedFailure: CiGateObservedRun | null
+  readonly latestDecisive: CiGateDecisiveObservation | null
 } => {
   const lastSeen = input.ignorePreviousLatch
     ? null
     : (input.previous?.lastRunIdentity ?? null)
+  const lastOrderKey = input.ignorePreviousLatch
+    ? null
+    : (input.previous?.lastRunOrderKey ?? null)
   const previousLatchIdentity = input.ignorePreviousLatch
     ? null
     : input.previous?.failureLatched === true
       ? input.previous.latchedRunIdentity
       : null
-  const fresh = newlyObservedRuns(input.runs, lastSeen)
+  const sorted = sortCiGateRunsNewestFirst(input.runs)
+  const retained = input.retainNewerLatest
+    ? retainedLatestRun(input.ignorePreviousLatch ? undefined : input.previous)
+    : null
+  const newestKey = sorted[0] === undefined ? null : ciGateOrderKeyOf(sorted[0])
+  const keepPreviousLatest =
+    retained !== null &&
+    lastOrderKey !== null &&
+    lastOrderKey !== "" &&
+    newestKey !== null &&
+    compareCiGateRunOrder(newestKey, lastOrderKey) < 0
+  const contextRuns = (input.decisiveContext ?? []).map(comparableRun)
+  const compared = sortCiGateRunsNewestFirst([
+    ...(keepPreviousLatest && retained !== null ? [retained] : []),
+    ...sorted,
+    ...contextRuns,
+  ])
+  const fresh = newlyObservedRuns(sorted, lastSeen, lastOrderKey)
   const reducedFresh = reduceObservedRuns(fresh, previousLatchIdentity)
-  const reduced = reduceObservedRuns(input.runs, previousLatchIdentity)
-  const latest = input.runs[0]
+  const reduced = reduceObservedRuns(compared, previousLatchIdentity)
+  const latest = keepPreviousLatest ? retained : sorted[0]
   let failureLatched = input.ignorePreviousLatch
     ? false
     : (input.previous?.failureLatched ?? false)
@@ -275,8 +420,12 @@ const applyObservedRuns = (input: {
       lastHeadRef: latest?.headRef ?? previousRun?.lastHeadRef ?? null,
       lastEvent: latest?.event ?? previousRun?.lastEvent ?? null,
       lastRawStatus: latest?.rawStatus ?? previousRun?.lastRawStatus ?? null,
+      // A new run with no conclusion must not keep the previous run's conclusion.
+      // Otherwise a still-pending newest run is later read as a success.
       lastRawConclusion:
-        latest?.rawConclusion ?? previousRun?.lastRawConclusion ?? null,
+        latest === undefined
+          ? (previousRun?.lastRawConclusion ?? null)
+          : (latest.rawConclusion ?? null),
       lastRunCreatedAt:
         latest?.createdAt ?? previousRun?.lastRunCreatedAt ?? null,
       lastRunUpdatedAt:
@@ -299,6 +448,7 @@ const applyObservedRuns = (input: {
       observationErrorKind: null,
     },
     sameObservationResolvedFailure,
+    latestDecisive: reduced.latestDecisive,
   }
 }
 
@@ -307,9 +457,12 @@ const observationFromAdapter = (input: {
   readonly observedAt: Date
   readonly result: CiGateDefinitionObservation
   readonly ignorePreviousLatch: boolean
+  readonly retainNewerLatest: boolean
+  readonly decisiveContext?: readonly CiGateObservedRun[]
 }): {
   readonly observation: CiGateDefinitionObservationRecord
   readonly sameObservationResolvedFailure: CiGateObservedRun | null
+  readonly latestDecisive: CiGateDecisiveObservation | null
 } => {
   if (input.result.kind === "unavailable") {
     return {
@@ -321,6 +474,7 @@ const observationFromAdapter = (input: {
         message: input.result.message,
       }),
       sameObservationResolvedFailure: null,
+      latestDecisive: null,
     }
   }
   return applyObservedRuns({
@@ -329,6 +483,10 @@ const observationFromAdapter = (input: {
     observedAt: input.observedAt,
     runs: input.result.runs,
     ignorePreviousLatch: input.ignorePreviousLatch,
+    retainNewerLatest: input.retainNewerLatest,
+    ...(input.decisiveContext === undefined
+      ? {}
+      : { decisiveContext: input.decisiveContext }),
   })
 }
 
@@ -390,12 +548,22 @@ const observeRepositoryCiGateBody = Effect.fn("observeRepositoryCiGate.body")(
           !definitions.some((definition) => definition.identity === identity),
       )
 
-    const lastRunIdentities: { [definitionIdentity: string]: string } = {}
-    for (const definition of definitions) {
-      const last = previousByIdentity.get(definition.identity)?.lastRunIdentity
-      if (last !== null && last !== undefined && last !== "") {
-        lastRunIdentities[definition.identity] = last
+    const baselines = yield* db.listCiRepairBaselineBounds(input.repository.id)
+    const baselineBoundFor = (identity: string): CiGateHistoryBound | null => {
+      const row = baselines.find(
+        (baseline) => baseline.definitionIdentity === identity,
+      )
+      const orderKey = row?.orderKey ?? row?.floorOrderKey ?? null
+      const runIdentity = row?.runIdentity ?? null
+      if (
+        orderKey === null ||
+        orderKey === "" ||
+        runIdentity === null ||
+        runIdentity === ""
+      ) {
+        return null
       }
+      return { runIdentity, orderKey, createdAt: new Date(0) }
     }
 
     const forgeRepository = {
@@ -403,66 +571,162 @@ const observeRepositoryCiGateBody = Effect.fn("observeRepositoryCiGate.body")(
       forgeHost: input.repository.forgeHost,
       projectPath: input.repository.projectPath,
     }
-    const observationInput: ObserveCiGateInput = {
-      definitionIdentities: definitions.map(
-        (definition) => definition.identity,
-      ),
-      lastRunIdentities,
-    }
     const observationsAdapter = yield* forgeObservation(input.repository)
-    const adapterResult: Result.Result<CiGateObservation, unknown> =
-      yield* observationsAdapter
-        .observeCiGate(forgeRepository, observationInput, {
-          origin: input.origin,
-        })
-        .pipe(Effect.result)
+    let snapshot = previous
+    let defaultBranch = previous.state?.defaultBranch ?? null
+    let branchChanged = false
+    let stopForThrottle = false
+    const newestPageLatch = new Map<string, NewestPageLatchContext>()
 
-    if (Result.isFailure(adapterResult)) {
-      const message = ciGateObservationErrorMessage(adapterResult.failure)
-      const reason = isPermissionError(adapterResult.failure)
-        ? ("permission" as const)
-        : ("error" as const)
-      yield* Effect.logWarning("CI Gate observation failed", {
-        repositoryId: input.repository.id,
-        error: message,
-      })
-      const observations = definitions.map((definition) =>
-        unavailableObservation({
-          previous: previousByIdentity.get(definition.identity),
-          identity: definition.identity,
-          observedAt,
-          reason,
-          message,
-        }),
+    const selectedObservations = () =>
+      snapshot.observations.filter((observation) =>
+        definitions.some(
+          (definition) => definition.identity === observation.identity,
+        ),
       )
-      yield* commitWithIncidents({
-        repository: input.repository,
-        defaultBranch: previous.state?.defaultBranch ?? null,
-        observedAt,
-        definitions,
-        previous,
-        observations,
-        removedIdentities,
-        sameObservationFailures: [],
-        recoveryIfCleared:
-          removedIdentities.length > 0 ? "definition_removed" : "newer_success",
-        previousStatus,
-      })
-      return
+
+    const commitProgress = Effect.fn("commitCiGateDefinitionProgress")(
+      function* (progress: {
+        readonly observations: readonly CiGateDefinitionObservationRecord[]
+        readonly sameObservationFailures: readonly {
+          readonly identity: string
+          readonly run: CiGateObservedRun
+        }[]
+        readonly phase: "latest" | "catch_up"
+      }) {
+        let recoveryIfCleared: CiGateRecoveryReason = "newer_success"
+        if (branchChanged) {
+          recoveryIfCleared = "default_branch_changed"
+        } else if (removedIdentities.length > 0) {
+          const successClearedLatch = progress.observations.some((current) => {
+            const prior = previousByIdentity.get(current.identity)
+            return (
+              prior?.failureLatched === true &&
+              current.failureLatched === false &&
+              current.observationError === null
+            )
+          })
+          recoveryIfCleared = successClearedLatch
+            ? "newer_success"
+            : "definition_removed"
+        }
+        yield* commitWithIncidents({
+          repository: input.repository,
+          defaultBranch,
+          observedAt,
+          definitions,
+          previous: snapshot,
+          observations: progress.observations,
+          removedIdentities,
+          sameObservationFailures: progress.sameObservationFailures,
+          recoveryIfCleared,
+          previousStatus,
+        })
+        snapshot = yield* db.loadCiGateSnapshot(input.repository.id)
+        for (const observation of progress.observations) {
+          yield* Effect.logInfo("CI Gate observation committed", {
+            repositoryId: input.repository.id,
+            definitionIdentity: observation.identity,
+            phase: progress.phase,
+            latestRunIdentity: observation.lastRunIdentity,
+            coverageState: observation.coverageState ?? "complete",
+            checkpointRunIdentity:
+              observation.coverageCheckpointRunIdentity ?? null,
+            gapUpperRunIdentity:
+              observation.coverageGapUpperRunIdentity ?? null,
+            progressRunIdentity:
+              observation.coverageProgressRunIdentity ?? null,
+            pagesProcessed: observation.coveragePagesProcessed ?? 0,
+            coverageDiagnostic: observation.coverageDiagnostic,
+            liveObservationFailed: observation.observationError !== null,
+            historicalCoverageIncomplete:
+              observation.coverageState === "gap" ||
+              observation.coverageState === "truncated",
+          })
+        }
+      },
+    )
+
+    const replaceObservation = (
+      updated: CiGateDefinitionObservationRecord,
+    ): CiGateDefinitionObservationRecord[] => {
+      const current = selectedObservations()
+      const without = current.filter(
+        (observation) => observation.identity !== updated.identity,
+      )
+      return [...without, updated]
     }
 
-    const observation = adapterResult.success
-    const defaultBranchChanged =
-      previous.state?.defaultBranch !== null &&
-      previous.state?.defaultBranch !== undefined &&
-      previous.state.defaultBranch !== observation.defaultBranch
-    const ignorePreviousLatch = defaultBranchChanged
-    const sameObservationFailures: {
-      readonly identity: string
-      readonly run: CiGateObservedRun
-    }[] = []
-    const observations: CiGateDefinitionObservationRecord[] = []
     for (const definition of definitions) {
+      if (stopForThrottle) {
+        break
+      }
+      const prior = snapshot.observations.find(
+        (observation) => observation.identity === definition.identity,
+      )
+      const lastRunIdentities: { [definitionIdentity: string]: string } = {}
+      if (
+        prior?.lastRunIdentity !== null &&
+        prior?.lastRunIdentity !== undefined &&
+        prior.lastRunIdentity !== ""
+      ) {
+        lastRunIdentities[definition.identity] = prior.lastRunIdentity
+      }
+      const adapterResult: Result.Result<CiGateObservation, unknown> =
+        yield* observationsAdapter
+          .observeCiGate(
+            forgeRepository,
+            {
+              definitionIdentities: [definition.identity],
+              lastRunIdentities,
+              scope: { kind: "latest" },
+            },
+            { origin: input.origin },
+          )
+          .pipe(Effect.result)
+      if (Result.isFailure(adapterResult)) {
+        const message = ciGateObservationErrorMessage(adapterResult.failure)
+        const reason = isPermissionError(adapterResult.failure)
+          ? ("permission" as const)
+          : ("error" as const)
+        yield* Effect.logWarning("CI Gate live observation failed", {
+          repositoryId: input.repository.id,
+          definitionIdentity: definition.identity,
+          error: message,
+          historicalCoverageIncomplete: false,
+        })
+        newestPageLatch.set(definition.identity, { kind: "unavailable" })
+        const failed = withHistoricalCoverage(
+          unavailableObservation({
+            previous: branchChanged ? undefined : prior,
+            identity: definition.identity,
+            observedAt,
+            reason,
+            message,
+          }),
+          historicalCoverageFromRecord(
+            branchChanged ? undefined : prior,
+            defaultBranch,
+          ),
+        )
+        yield* commitProgress({
+          observations: replaceObservation(failed),
+          sameObservationFailures: [],
+          phase: "latest",
+        })
+        if (isThrottle(adapterResult.failure)) {
+          stopForThrottle = true
+        }
+        continue
+      }
+      const observation = adapterResult.success
+      if (
+        defaultBranch !== null &&
+        defaultBranch !== observation.defaultBranch
+      ) {
+        branchChanged = true
+      }
+      defaultBranch = observation.defaultBranch
       const result =
         observation.observations.find(
           (entry) => entry.identity === definition.identity,
@@ -474,49 +738,181 @@ const observeRepositoryCiGateBody = Effect.fn("observeRepositoryCiGate.body")(
           message: `CI Gate Definition ${definition.identity} could not be observed`,
         } satisfies CiGateDefinitionObservation)
       const applied = observationFromAdapter({
-        previous: previousByIdentity.get(definition.identity),
+        previous: prior,
         observedAt,
         result,
-        ignorePreviousLatch,
+        ignorePreviousLatch: branchChanged,
+        retainNewerLatest: false,
       })
-      observations.push(applied.observation)
-      if (applied.sameObservationResolvedFailure !== null) {
-        sameObservationFailures.push({
-          identity: definition.identity,
-          run: applied.sameObservationResolvedFailure,
+      newestPageLatch.set(
+        definition.identity,
+        result.kind === "observed"
+          ? { kind: "observed", latestDecisive: applied.latestDecisive }
+          : { kind: "unavailable" },
+      )
+      const previousCoverage = historicalCoverageFromRecord(
+        branchChanged ? undefined : prior,
+        defaultBranch,
+      )
+      const runs = result.kind === "observed" ? result.runs : []
+      const exhausted =
+        result.kind === "observed"
+          ? (result.historyExhausted ??
+            runs.length < CI_GATE_OBSERVATION_PAGE_SIZE)
+          : false
+      const coverage =
+        result.kind === "unavailable"
+          ? previousCoverage
+          : applyLatestHistoricalCoverage({
+              previous: previousCoverage,
+              branch: observation.defaultBranch,
+              runs,
+              historyExhausted: exhausted,
+              repairBaseline: baselineBoundFor(definition.identity),
+              baselineIrrelevant:
+                applied.observation.failureLatched ||
+                applied.observation.lastRawConclusion === "success" ||
+                applied.observation.lastRawConclusion === "succeeded" ||
+                applied.observation.lastRawConclusion === "failure" ||
+                applied.observation.lastRawConclusion === "failed" ||
+                applied.observation.lastEarlyJobFailure === true,
+            })
+      const stored = withHistoricalCoverage(applied.observation, coverage)
+      yield* commitProgress({
+        observations: replaceObservation(stored),
+        sameObservationFailures:
+          applied.sameObservationResolvedFailure === null
+            ? []
+            : [
+                {
+                  identity: definition.identity,
+                  run: applied.sameObservationResolvedFailure,
+                },
+              ],
+        phase: "latest",
+      })
+    }
+
+    const lifecycle = yield* WorkItemLifecycle
+    yield* lifecycle.considerAutomaticCiRepair(input.repository.id)
+
+    if (!stopForThrottle) {
+      for (const definition of definitions) {
+        if (stopForThrottle) {
+          break
+        }
+        const prior = snapshot.observations.find(
+          (observation) => observation.identity === definition.identity,
+        )
+        const coverage = historicalCoverageFromRecord(prior, defaultBranch)
+        const bound = nextCiGateCatchUpBound(coverage)
+        if (coverage.state !== "gap" || bound === null) {
+          continue
+        }
+        const adapterResult: Result.Result<CiGateObservation, unknown> =
+          yield* observationsAdapter
+            .observeCiGate(
+              forgeRepository,
+              {
+                definitionIdentities: [definition.identity],
+                lastRunIdentities: {},
+                scope: {
+                  kind: "catch_up",
+                  definitionIdentity: definition.identity,
+                  notNewerThan: bound,
+                  stopAt: coverage.stop,
+                  revisit: pendingRunAboveFrontier(coverage, bound),
+                },
+              },
+              { origin: "background" },
+            )
+            .pipe(Effect.result)
+        if (Result.isFailure(adapterResult)) {
+          const message = ciGateObservationErrorMessage(adapterResult.failure)
+          yield* Effect.logWarning("CI Gate historical catch-up failed", {
+            repositoryId: input.repository.id,
+            definitionIdentity: definition.identity,
+            error: message,
+            historicalCoverageIncomplete: true,
+            liveObservationFailed: false,
+          })
+          if (prior !== undefined) {
+            const diagnosed = withHistoricalCoverage(prior, {
+              ...coverage,
+              diagnostic: `Historical catch-up stopped: ${message}`,
+            })
+            yield* commitProgress({
+              observations: replaceObservation(diagnosed),
+              sameObservationFailures: [],
+              phase: "catch_up",
+            })
+          }
+          if (isThrottle(adapterResult.failure)) {
+            stopForThrottle = true
+          }
+          continue
+        }
+        const observation = adapterResult.success
+        const result = observation.observations.find(
+          (entry) => entry.identity === definition.identity,
+        )
+        if (result === undefined || result.kind !== "observed") {
+          continue
+        }
+        const nextCoverage = applyCatchUpHistoricalCoverage({
+          previous: coverage,
+          runs: result.runs,
+          historyExhausted:
+            result.historyExhausted ??
+            result.runs.length < CI_GATE_OBSERVATION_PAGE_SIZE,
+        })
+        const pageLatch = newestPageLatch.get(definition.identity)
+        // No fresh newest-page result: do not let older history change the latch
+        // or hide a live observation failure.
+        if (pageLatch === undefined || pageLatch.kind === "unavailable") {
+          if (prior !== undefined) {
+            yield* commitProgress({
+              observations: replaceObservation(
+                withHistoricalCoverage(prior, nextCoverage),
+              ),
+              sameObservationFailures: [],
+              phase: "catch_up",
+            })
+          }
+          continue
+        }
+        const latched = storedLatchedFailure(prior)
+        const decisiveContext = [
+          ...(pageLatch.latestDecisive === null
+            ? []
+            : [pageLatch.latestDecisive.run]),
+          ...(latched === null ? [] : [latched]),
+        ]
+        const applied = observationFromAdapter({
+          previous: prior,
+          observedAt,
+          result,
+          ignorePreviousLatch: branchChanged,
+          retainNewerLatest: true,
+          ...(decisiveContext.length === 0 ? {} : { decisiveContext }),
+        })
+        yield* commitProgress({
+          observations: replaceObservation(
+            withHistoricalCoverage(applied.observation, nextCoverage),
+          ),
+          sameObservationFailures:
+            applied.sameObservationResolvedFailure === null
+              ? []
+              : [
+                  {
+                    identity: definition.identity,
+                    run: applied.sameObservationResolvedFailure,
+                  },
+                ],
+          phase: "catch_up",
         })
       }
     }
-
-    let recoveryIfCleared: CiGateRecoveryReason = "newer_success"
-    if (defaultBranchChanged) {
-      recoveryIfCleared = "default_branch_changed"
-    } else if (removedIdentities.length > 0) {
-      const successClearedLatch = observations.some((current) => {
-        const prior = previousByIdentity.get(current.identity)
-        return (
-          prior?.failureLatched === true &&
-          current.failureLatched === false &&
-          current.observationError === null
-        )
-      })
-      recoveryIfCleared = successClearedLatch
-        ? "newer_success"
-        : "definition_removed"
-    }
-
-    yield* commitWithIncidents({
-      repository: input.repository,
-      defaultBranch: observation.defaultBranch,
-      observedAt,
-      definitions,
-      previous,
-      observations,
-      removedIdentities,
-      sameObservationFailures,
-      recoveryIfCleared,
-      previousStatus,
-    })
   },
 )
 

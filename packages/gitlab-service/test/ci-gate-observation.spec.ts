@@ -229,7 +229,7 @@ describe("GitLab CI Gate observation", () => {
     expect(definition.runs.at(-1)?.runIdentity).toBe("901:901")
   })
 
-  test("stops paging once the last-seen pipeline identity is included", async () => {
+  test("fetches one newest page and does not scan to a stale cursor", async () => {
     const requestedPages: string[] = []
     const pageOne = Array.from({ length: 100 }, (_, index) =>
       pipelinePayload({
@@ -268,8 +268,58 @@ describe("GitLab CI Gate observation", () => {
       throw new Error("expected observed definition")
     }
     expect(definition.runs[0]?.runIdentity).toBe("2000:2000")
-    expect(definition.runs.at(-1)?.runIdentity).toBe("1950:1950")
-    expect(definition.runs).toHaveLength(51)
+    expect(definition.runs.at(-1)?.runIdentity).toBe("1901:1901")
+    expect(definition.runs).toHaveLength(100)
+    expect(definition.historyExhausted).toBe(false)
+  })
+
+  test("catch-up requests pipelines by creation time, not update time", async () => {
+    let createdBefore: string | null = null
+    let updatedBefore = false
+    const service = makeGitLabServiceFromToken("token", (async (input) => {
+      const url = new URL(String(input))
+      if (isProjectUrl(url)) {
+        return jsonResponse(projectPayload)
+      }
+      if (!isPipelinesUrl(url)) {
+        return new Response("not found", { status: 404 })
+      }
+      createdBefore = url.searchParams.get("created_before")
+      updatedBefore = url.searchParams.has("updated_before")
+      return jsonResponse([
+        pipelinePayload({
+          id: 50,
+          source: "push",
+          status: "failed",
+          createdAt: "2025-12-01T00:00:00.000Z",
+        }),
+      ])
+    }) as typeof fetch)
+
+    const observation = await Effect.runPromise(
+      service.observeCiGate(repository, {
+        definitionIdentities: ["42"],
+        lastRunIdentities: {},
+        scope: {
+          kind: "catch_up",
+          definitionIdentity: "42",
+          notNewerThan: {
+            runIdentity: "100:1",
+            orderKey: "00000000000000000100:000001",
+            createdAt: new Date("2026-01-01T00:00:00.000Z"),
+          },
+          stopAt: null,
+        },
+      }),
+    )
+    const definition = observation.observations[0]
+    expect(createdBefore).toBe("2026-01-01T00:00:01.000Z")
+    expect(updatedBefore).toBe(false)
+    expect(definition?.kind).toBe("observed")
+    if (definition?.kind !== "observed") {
+      throw new Error("expected observed definition")
+    }
+    expect(definition.runs.map((run) => run.runIdentity)).toEqual(["50:50"])
   })
 
   test("returns a qualifying success behind a saved pending bookmark", async () => {
@@ -323,10 +373,11 @@ describe("GitLab CI Gate observation", () => {
     expect(definition.runs.map((run) => run.runIdentity)).toEqual([
       "300:300",
       "200:200",
+      "100:100",
     ])
   })
 
-  test("pages past a pending bookmark to a qualifying success on a later API page", async () => {
+  test("does not page past a pending newest pipeline during live observation", async () => {
     const requestedPages: string[] = []
     const pageOne = Array.from({ length: 100 }, (_, index) =>
       pipelinePayload({
@@ -376,16 +427,14 @@ describe("GitLab CI Gate observation", () => {
       }),
     )
     const definition = observation.observations[0]
-    expect(requestedPages).toEqual(["1", "2"])
+    expect(requestedPages).toEqual(["1"])
     expect(definition?.kind).toBe("observed")
     if (definition?.kind !== "observed") {
       throw new Error("expected observed definition")
     }
     expect(definition.runs[0]?.runIdentity).toBe("2000:2000")
-    expect(definition.runs.at(-1)?.runIdentity).toBe("1900:1900")
-    expect(definition.runs.some((run) => run.runIdentity === "1899:1899")).toBe(
-      false,
-    )
+    expect(definition.runs).toHaveLength(100)
+    expect(definition.historyExhausted).toBe(false)
   })
 
   test("marks disabled project CI unavailable without listing pipeline history", async () => {
@@ -514,7 +563,12 @@ describe("GitLab CI Gate observation", () => {
     )
 
     expect(observation.observations).toEqual([
-      { identity: "42", kind: "observed", runs: [] },
+      {
+        identity: "42",
+        kind: "observed",
+        runs: [],
+        historyExhausted: true,
+      },
     ])
   })
 

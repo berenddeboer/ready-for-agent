@@ -36,6 +36,7 @@ import {
   CiGateStateSqlRow,
   type CiRepairAuthorizationRecord,
   CiRepairAuthorizationSqlRow,
+  type CiRepairBaselineBoundRecord,
   type CommitCiGateSnapshotInput,
   ConfigRecord,
   ConfigSqlRow,
@@ -578,6 +579,12 @@ export interface DbServiceShape {
     repositoryId: string,
   ) => Effect.Effect<
     readonly CiGateDefinitionRecord[],
+    RepositoryNotFoundError | DatabaseError
+  >
+  readonly listCiRepairBaselineBounds: (
+    repositoryId: string,
+  ) => Effect.Effect<
+    readonly CiRepairBaselineBoundRecord[],
     RepositoryNotFoundError | DatabaseError
   >
   readonly loadCiGateSnapshot: (
@@ -2011,6 +2018,34 @@ export const DbServiceLive = Layer.effect(
       },
     )
 
+    const listCiRepairBaselineBounds = Effect.fn(
+      "DbService.listCiRepairBaselineBounds",
+    )(function* (repositoryId: string) {
+      yield* ensureRepositoryExists(repositoryId)
+      const rows = yield* sql
+        .unsafe(
+          `SELECT definition_identity AS definitionIdentity,
+                  run_identity AS runIdentity,
+                  order_key AS orderKey,
+                  floor_order_key AS floorOrderKey
+           FROM ci_repair_baseline
+           WHERE repository_id = ?
+           ORDER BY definition_identity ASC`,
+          [repositoryId],
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+      return yield* Schema.decodeUnknownEffect(
+        Schema.Array(
+          Schema.Struct({
+            definitionIdentity: Schema.String,
+            runIdentity: Schema.NullOr(Schema.String),
+            orderKey: Schema.NullOr(Schema.String),
+            floorOrderKey: Schema.NullOr(Schema.String),
+          }),
+        ),
+      )(rows).pipe(Effect.mapError(toSchemaDatabaseError))
+    })
+
     const loadCiGateSnapshot = Effect.fn("DbService.loadCiGateSnapshot")(
       function* (repositoryId: string) {
         yield* ensureRepositoryExists(repositoryId)
@@ -2046,7 +2081,27 @@ export const DbServiceLive = Layer.effect(
                     observation_error_kind,
                     last_run_order_key,
                     latched_run_order_key,
-                    last_early_job_failure
+                    last_early_job_failure,
+                    coverage_state,
+                    coverage_branch,
+                    coverage_checkpoint_run_identity,
+                    coverage_checkpoint_order_key,
+                    coverage_checkpoint_created_at,
+                    coverage_gap_upper_run_identity,
+                    coverage_gap_upper_order_key,
+                    coverage_gap_upper_created_at,
+                    coverage_progress_run_identity,
+                    coverage_progress_order_key,
+                    coverage_progress_created_at,
+                    coverage_stop_run_identity,
+                    coverage_stop_order_key,
+                    coverage_stop_created_at,
+                    coverage_head_floor_run_identity,
+                    coverage_head_floor_order_key,
+                    coverage_head_floor_created_at,
+                    coverage_pages_processed,
+                    coverage_diagnostic,
+                    coverage_pending_runs
              FROM ci_gate_definition_observation
              WHERE repository_id = ?
              ORDER BY definition_identity ASC`,
@@ -2254,8 +2309,27 @@ export const DbServiceLive = Layer.effect(
                        latched_run_html_url, observation_error,
                        observation_error_kind, last_run_order_key,
                        latched_run_order_key, last_early_job_failure,
+                       coverage_state, coverage_branch,
+                       coverage_checkpoint_run_identity,
+                       coverage_checkpoint_order_key,
+                       coverage_checkpoint_created_at,
+                       coverage_gap_upper_run_identity,
+                       coverage_gap_upper_order_key,
+                       coverage_gap_upper_created_at,
+                       coverage_progress_run_identity,
+                       coverage_progress_order_key,
+                       coverage_progress_created_at,
+                       coverage_stop_run_identity,
+                       coverage_stop_order_key,
+                       coverage_stop_created_at,
+                       coverage_head_floor_run_identity,
+                       coverage_head_floor_order_key,
+                       coverage_head_floor_created_at,
+                       coverage_pages_processed,
+                       coverage_diagnostic,
+                       coverage_pending_runs,
                        created_at, updated_at
-                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                       `cgo-${ulid()}`,
                       input.repositoryId,
@@ -2278,6 +2352,34 @@ export const DbServiceLive = Layer.effect(
                       observation.lastRunOrderKey ?? null,
                       observation.latchedRunOrderKey ?? null,
                       observation.lastEarlyJobFailure === true ? 1 : 0,
+                      observation.coverageState ?? "complete",
+                      observation.coverageBranch ?? null,
+                      observation.coverageCheckpointRunIdentity ?? null,
+                      observation.coverageCheckpointOrderKey ?? null,
+                      millisOrNull(
+                        observation.coverageCheckpointCreatedAt ?? null,
+                      ),
+                      observation.coverageGapUpperRunIdentity ?? null,
+                      observation.coverageGapUpperOrderKey ?? null,
+                      millisOrNull(
+                        observation.coverageGapUpperCreatedAt ?? null,
+                      ),
+                      observation.coverageProgressRunIdentity ?? null,
+                      observation.coverageProgressOrderKey ?? null,
+                      millisOrNull(
+                        observation.coverageProgressCreatedAt ?? null,
+                      ),
+                      observation.coverageStopRunIdentity ?? null,
+                      observation.coverageStopOrderKey ?? null,
+                      millisOrNull(observation.coverageStopCreatedAt ?? null),
+                      observation.coverageHeadFloorRunIdentity ?? null,
+                      observation.coverageHeadFloorOrderKey ?? null,
+                      millisOrNull(
+                        observation.coverageHeadFloorCreatedAt ?? null,
+                      ),
+                      observation.coveragePagesProcessed ?? 0,
+                      observation.coverageDiagnostic ?? null,
+                      observation.coveragePendingRuns ?? null,
                       now,
                       now,
                     ],
@@ -2876,6 +2978,7 @@ export const DbServiceLive = Layer.effect(
       addRepository,
       updateRepositorySettings,
       listCiGateDefinitions,
+      listCiRepairBaselineBounds,
       loadCiGateSnapshot,
       listResolvedCiFailureIncidents,
       listCiRepairAuthorizations,

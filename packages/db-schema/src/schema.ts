@@ -836,6 +836,35 @@ export const ciGateDefinitionObservation = snakeCase.table(
     observationErrorKind: text({
       enum: ["permission", "not_found", "error"],
     }),
+    /**
+     * Historical Coverage is independent of the latest run. complete, gap,
+     * or truncated. A gap's upper boundary stays fixed while catch-up walks
+     * from progress down to stop.
+     */
+    coverageState: text({
+      enum: ["complete", "gap", "truncated"],
+    })
+      .notNull()
+      .default("complete"),
+    coverageBranch: text(),
+    coverageCheckpointRunIdentity: text(),
+    coverageCheckpointOrderKey: text(),
+    coverageCheckpointCreatedAt: integer({ mode: "number" }),
+    coverageGapUpperRunIdentity: text(),
+    coverageGapUpperOrderKey: text(),
+    coverageGapUpperCreatedAt: integer({ mode: "number" }),
+    coverageProgressRunIdentity: text(),
+    coverageProgressOrderKey: text(),
+    coverageProgressCreatedAt: integer({ mode: "number" }),
+    coverageStopRunIdentity: text(),
+    coverageStopOrderKey: text(),
+    coverageStopCreatedAt: integer({ mode: "number" }),
+    coverageHeadFloorRunIdentity: text(),
+    coverageHeadFloorOrderKey: text(),
+    coverageHeadFloorCreatedAt: integer({ mode: "number" }),
+    coveragePagesProcessed: integer({ mode: "number" }).notNull().default(0),
+    coverageDiagnostic: text(),
+    coveragePendingRuns: text(),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),

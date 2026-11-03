@@ -63,6 +63,13 @@ const observationDiagnostic = (
     return observation.observationError
   }
   if (
+    observation.coverageDiagnostic !== null &&
+    observation.coverageDiagnostic !== undefined &&
+    observation.coverageDiagnostic !== ""
+  ) {
+    return observation.coverageDiagnostic
+  }
+  if (
     observation.lastRunIdentity === null &&
     observation.lastRawStatus === null &&
     observation.lastRawConclusion === null
