@@ -154,7 +154,7 @@ export const buildCiRepairImplementPrompt = (
     "Read CI logs yourself. You have read-only access to CI. Do not rerun, cancel, or otherwise mutate CI jobs; the harness reruns jobs only when you report a No-Change Outcome that names them.",
     "Do not create or close an Issue. Keep the completion summary on this Work Item.",
     "Make the implementation in this worktree and run appropriate verification.",
-    "Deliver the smallest change that fixes the failing CI. Existing upstream limitations and speculative hardening are follow-up observations, not new requirements.",
+    "Deliver the smallest change that fixes the failing CI. Existing upstream limitations and speculative hardening are follow-up observations, not new requirements. If a genuine operator decision is unresolved, write the request and end with READY_FOR_AGENT_RESULT: DECISION_NEEDED. Do not combine that marker with another result line.",
     "Run appropriate verification; the harness owns the full review cycle. Do not launch your own full-worktree reviews.",
   ].join("\n")
 }
@@ -177,6 +177,7 @@ export const buildCiRepairNoChangeConfirmationPrompt = (): string =>
     "READY_FOR_AGENT_RESULT: NO_CHANGES",
     "or",
     "READY_FOR_AGENT_RESULT: RERUN_JOBS: <runIdentity> ...",
+    "If a genuine operator decision is unresolved, write that request instead and end with READY_FOR_AGENT_RESULT: DECISION_NEEDED. Do not combine it with another result line.",
   ].join("\n")
 
 export type CiRepairNoChangeParse =

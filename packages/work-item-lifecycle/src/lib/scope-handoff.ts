@@ -47,7 +47,7 @@ export const loadScopeHandoff = (
       "## Scope handoff",
       `Durable scope file: ${path}`,
       "Before implementing, reviewing, or delegating, reconcile this handoff with the Issue and the latest explicit operator decisions in this Session. Update only this scope file to record the agreed requirements, amendments, accepted limitations, and deferred work with source quotes or references.",
-      "Explicit operator amendments override the original Issue where they conflict. Agent suggestions and review findings are not operator approval to change scope. Preserve decisions across retries; never infer acceptance from silence. If a material conflict cannot be resolved from those sources, request a scope decision instead of inventing one.",
+      "Explicit operator amendments override the original Issue where they conflict. Agent suggestions and review findings are not operator approval to change scope. Preserve decisions across retries; never infer acceptance from silence. If a material conflict cannot be resolved from those sources, request a scope decision instead of inventing one. Write the request, options, and recommendation, then end with exactly READY_FOR_AGENT_RESULT: DECISION_NEEDED. Do not combine that marker with another result line, and do not treat silence as acceptance.",
       "Pass the complete reconciled scope handoff to every delegated agent, including reviewers; an Issue link alone is insufficient. Keep it current when the operator changes scope, before returning or compacting the Session.",
       promptUserContentSection("scope_handoff", contents),
     ].join("\n")

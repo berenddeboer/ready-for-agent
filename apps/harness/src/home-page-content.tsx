@@ -369,6 +369,8 @@ export type WorkItem = {
   paused: boolean
   hasActiveStepRun: boolean
   canRetry: boolean
+  canResume?: boolean
+  decisionRequest?: string | null
   isTerminal: boolean
   failureCode: string | null
   sessionId: string | null
@@ -468,6 +470,8 @@ const workItemFields = {
   paused: true,
   hasActiveStepRun: true,
   canRetry: true,
+  canResume: true,
+  decisionRequest: true,
   isTerminal: true,
   failureCode: true,
   sessionId: true,
@@ -4477,6 +4481,7 @@ export function WorkItemLifecycleStatus({
   )
   // Queue hold: Retry is never offered; API also sets canRetry false.
   const canRetry = compact && workItem.canRetry && !heldForBlockers
+  const canResume = compact && workItem.canResume && !heldForBlockers
   const retriesStatusChecks =
     workItem.failureCode === "pr_status_checks_unresolved" ||
     workItem.state === "WATCH_PR_STATUS_CHECKS" ||
@@ -4526,6 +4531,18 @@ export function WorkItemLifecycleStatus({
     },
     onSuccess: patchWorkItem,
   })
+  const resumeDecision = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        resumeWorkItem: {
+          __args: { workItemId: workItem.id },
+          ...workItemFields,
+        },
+      })
+      return result.resumeWorkItem
+    },
+    onSuccess: patchWorkItem,
+  })
   const authorizeAsCiRepair = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -4554,7 +4571,10 @@ export function WorkItemLifecycleStatus({
     },
   })
   const actionsPending =
-    retry.isPending || reset.isPending || authorizeAsCiRepair.isPending
+    retry.isPending ||
+    resumeDecision.isPending ||
+    reset.isPending ||
+    authorizeAsCiRepair.isPending
   const canAuthorizeAsCiRepair = ciGateBypassActionsOffered(workItem)
   const ciRepairSourceLabel = (
     sourceAction: WorkItem["ciRepair"]["history"][number]["sourceAction"],
@@ -4906,7 +4926,7 @@ export function WorkItemLifecycleStatus({
       {workItem.latestStepRunDetail !== null && (
         <CauseChainDisclosure detail={workItem.latestStepRunDetail} />
       )}
-      {(canReset || canRetry || canAuthorizeAsCiRepair) && (
+      {(canReset || canRetry || canResume || canAuthorizeAsCiRepair) && (
         <div className="mt-2 flex flex-wrap gap-2">
           {canReset && (
             <WorkItemResetButton
@@ -4914,6 +4934,16 @@ export function WorkItemLifecycleStatus({
               disabled={actionsPending}
               onReset={() => reset.mutate()}
             />
+          )}
+          {canResume && (
+            <button
+              type="button"
+              className={ui.plateMini}
+              disabled={actionsPending || resumeDecision.isPending}
+              onClick={() => resumeDecision.mutate()}
+            >
+              {resumeDecision.isPending ? "Resuming..." : "Resume"}
+            </button>
           )}
           {canRetry && (
             <button

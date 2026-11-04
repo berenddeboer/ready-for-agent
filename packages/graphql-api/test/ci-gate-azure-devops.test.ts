@@ -315,6 +315,7 @@ describe("Azure DevOps Repository CI Gate", () => {
       wakePostponedStep: unused,
       wakeProviderRecovery: unused,
       retry: unused,
+      resume: unused,
       pause: unused,
       interrupt: unused,
       start: unused,

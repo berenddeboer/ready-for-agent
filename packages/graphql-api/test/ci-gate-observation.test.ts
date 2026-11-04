@@ -327,6 +327,7 @@ describe("Repository CI Gate observation", () => {
       wakePostponedStep: unused,
       wakeProviderRecovery: unused,
       retry: unused,
+      resume: unused,
       pause: unused,
       interrupt: unused,
       start: unused,

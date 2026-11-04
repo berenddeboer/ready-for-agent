@@ -20,6 +20,7 @@ import {
   parseCiRepairNoChangeResult,
 } from "./ci-repair-work-item.js"
 import { GitCommandError } from "./create-worktree-errors.js"
+import { parseDecisionNeeded } from "./decision-needed.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { repositoryProcessOptions } from "./repository-process-environment.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
@@ -27,6 +28,7 @@ import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 export type AssessChangesResult =
   | { readonly _tag: "changes" }
   | { readonly _tag: "no_changes"; readonly completionSummary: string }
+  | { readonly _tag: "decision_needed"; readonly request: string }
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -151,6 +153,13 @@ const hasCommitsAfterStartingOid = (
 export const parseAssessChangesResult = (
   output: string,
 ): AssessChangesResult | null => {
+  const decision = parseDecisionNeeded(output)
+  if (decision._tag === "needed") {
+    return { _tag: "decision_needed", request: decision.request }
+  }
+  if (decision._tag === "invalid") {
+    return null
+  }
   const lines = output.split("\n").map((line) => line.trim())
   const nonEmptyLines = lines.filter((line) => line !== "")
   const resultLines = lines.filter((line) =>
@@ -194,6 +203,7 @@ export const buildNoChangeConfirmationPrompt = (): string =>
     "READY_FOR_AGENT_RESULT: CHANGES",
     "or",
     "READY_FOR_AGENT_RESULT: NO_CHANGES",
+    "If a genuine scope or operator decision is unresolved, do not answer CHANGES or NO_CHANGES. Write the decision request, options, and recommendation, then end with READY_FOR_AGENT_RESULT: DECISION_NEEDED as the only result line.",
   ].join("\n")
 
 const confirmNoObservableChange = (
@@ -233,6 +243,17 @@ const confirmNoObservableChange = (
             }),
         ),
       )
+
+    const decision = parseDecisionNeeded(result.assistantText)
+    if (decision._tag === "needed") {
+      return { _tag: "decision_needed" as const, request: decision.request }
+    }
+    if (decision._tag === "invalid") {
+      return yield* new AssessChangesResultError({
+        workItemId: context.workItemId,
+        message: `${agentBackendLabel(context.agentBackend)} reported an invalid decision marker: ${decision.message}`,
+      })
+    }
 
     if (!confirmsIssue) {
       const parsed = parseCiRepairNoChangeResult(result.assistantText)

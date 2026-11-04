@@ -33,6 +33,7 @@ import {
   CommitStartingCommitMissingError,
   CommitWorktreeContextMissingError,
 } from "./commit-errors.js"
+import { parseDecisionNeeded } from "./decision-needed.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   PUBLICATION_COPY_SOURCE,
@@ -81,6 +82,10 @@ export type CommitResult =
   | {
       readonly _tag: "no_changes"
       readonly completionSummary: string
+    }
+  | {
+      readonly _tag: "decision_needed"
+      readonly request: string
     }
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
@@ -799,6 +804,17 @@ const confirmLateNoChange = (
         ),
       )
 
+    const decision = parseDecisionNeeded(result.assistantText)
+    if (decision._tag === "needed") {
+      return { _tag: "decision_needed" as const, request: decision.request }
+    }
+    if (decision._tag === "invalid") {
+      return yield* new CommitNoChangeConfirmationError({
+        workItemId: context.workItemId,
+        message: `${agentBackendLabel(context.agentBackend)} reported an invalid decision marker: ${decision.message}`,
+      })
+    }
+
     if (!workItemOriginPolicy(context.origin).noChangeConfirmsIssue) {
       const parsed = parseCiRepairNoChangeResult(result.assistantText)
       if (parsed === null || parsed._tag === "changes") {
@@ -836,6 +852,9 @@ const confirmLateNoChange = (
         workItemId: context.workItemId,
         message: `${agentBackendLabel(context.agentBackend)} did not return a valid READY_FOR_AGENT_RESULT: CHANGES or NO_CHANGES with a non-blank summary when required`,
       })
+    }
+    if (parsed._tag === "decision_needed") {
+      return parsed
     }
     if (parsed._tag === "changes") {
       return yield* new CommitNoChangeConfirmationError({

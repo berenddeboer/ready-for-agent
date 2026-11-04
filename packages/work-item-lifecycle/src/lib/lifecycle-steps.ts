@@ -45,6 +45,7 @@ import type {
   LifecycleStepFailedError,
   WorkItemLifecycleDatabaseError,
 } from "./errors.js"
+import type { ImplementTurnResult } from "./implement.js"
 import type { ImplementError } from "./implement-errors.js"
 import type { InstallDependenciesError } from "./install-dependencies-errors.js"
 import type { MarkPrReadyForReviewResult } from "./mark-pr-ready-for-review.js"
@@ -57,6 +58,7 @@ import type {
   PrStatusChecksOpenCodeError,
   PrStatusChecksUnresolvedError,
 } from "./pr-status-checks.js"
+import type { PreCommitTurnResult } from "./pre-commit.js"
 import type { PreCommitError } from "./pre-commit-errors.js"
 import type { RemoveWorktreeError } from "./remove-worktree.js"
 import type {
@@ -201,13 +203,13 @@ export interface LifecycleStepsShape {
   ) => Effect.Effect<void, LifecycleStepError>
   readonly implement: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<string, LifecycleStepError>
+  ) => Effect.Effect<ImplementTurnResult, LifecycleStepError>
   readonly assessChanges: (
     context: LifecycleStepContext,
   ) => Effect.Effect<AssessChangesResult, LifecycleStepError>
   readonly preCommit: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<void, LifecycleStepError>
+  ) => Effect.Effect<PreCommitTurnResult, LifecycleStepError>
   readonly review: (
     context: LifecycleStepContext,
   ) => Effect.Effect<ReviewResult, LifecycleStepError>

@@ -11,7 +11,9 @@ import {
   lifecycleLabels,
   statusLabel,
   workItemCanAutonomousRetry,
+  workItemCanResume,
   workItemCanRetry,
+  workItemDecisionRequest,
   workItemHasActiveStepRun,
   workItemLatestStepRunDetail,
   workItemLatestStepRunReason,
@@ -1143,6 +1145,49 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
       detail: null,
       retryAt: null,
     })
+  })
+
+  test("Decision needed is Attention copy with Resume, not Retry", () => {
+    const decisionNeeded = workItemWith({
+      state: "needs_human",
+      holdsWorkerSlot: false,
+      failureCode: "decision_needed",
+      failureMessage:
+        "Should private-repository onboarding use signed enrollment or a GitHub App?",
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "implement",
+          status: "succeeded",
+          reasonCode: STEP_RUN_REASON.decisionNeeded,
+          reasonMessage:
+            "Should private-repository onboarding use signed enrollment or a GitHub App?",
+        },
+      ],
+    })
+    expect(workItemCanRetry(decisionNeeded)).toBe(false)
+    expect(workItemCanResume(decisionNeeded)).toBe(true)
+    expect(workItemDecisionRequest(decisionNeeded)).toContain(
+      "signed enrollment",
+    )
+    expect(workItemStatusLabel(decisionNeeded)).toBe("Decision needed")
+    expect(workItemStateLabel(decisionNeeded)).toBe("Decision needed")
+    expect(workItemStatusMessage(decisionNeeded)).toContain("signed enrollment")
+    expect(
+      workItemCanResume({
+        ...decisionNeeded,
+        stepRuns: [
+          ...decisionNeeded.stepRuns,
+          {
+            ...baseStepRun,
+            id: "srun-running",
+            step: "implement",
+            status: "running",
+            reasonCode: null,
+          },
+        ],
+      }),
+    ).toBe(false)
   })
 
   test("retryable Needs Human handoff exposes canRetry and the latest Step Run reason", () => {

@@ -251,6 +251,15 @@ export class RetryNotEligibleError extends Schema.TaggedError<RetryNotEligibleEr
   },
 ) {}
 
+/** Resume is legal only for an idle Decision needed handoff. */
+export class ResumeNotEligibleError extends Schema.TaggedError<ResumeNotEligibleError>()(
+  "ResumeNotEligibleError",
+  {
+    workItemId: Schema.String,
+    reason: Schema.String,
+  },
+) {}
+
 /** Interrupt is legal only while paused with a running Step Run. */
 export class InterruptNotEligibleError extends Schema.TaggedError<InterruptNotEligibleError>()(
   "InterruptNotEligibleError",

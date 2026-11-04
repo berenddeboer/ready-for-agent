@@ -61,6 +61,36 @@ const waitingForGitHubWorkItem = {
 } satisfies WorkItem
 
 describe("WorkItemLifecycleStatus", () => {
+  test("shows Decision needed and Resume without an answer form or Retry", () => {
+    const decisionNeeded = {
+      ...waitingForGitHubWorkItem,
+      state: "NEEDS_HUMAN",
+      stateLabel: "Decision needed",
+      status: "NEEDS_HUMAN",
+      statusLabel: "Decision needed",
+      statusMessage:
+        "Should private-repository onboarding use signed enrollment or a GitHub App?",
+      canResume: true,
+      canRetry: false,
+      isTerminal: true,
+      failureCode: "decision_needed",
+      decisionRequest:
+        "Should private-repository onboarding use signed enrollment or a GitHub App?",
+      sessionId: "ses_decision",
+    } satisfies WorkItem
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkItemLifecycleStatus workItem={decisionNeeded} compact />
+      </QueryClientProvider>,
+    )
+    expect(html).toContain("Decision needed")
+    expect(html).toContain("signed enrollment")
+    expect(html).toContain(">Resume<")
+    expect(html).not.toContain(">Retry<")
+    expect(html).not.toContain("<textarea")
+    expect(html).not.toContain("Approve")
+  })
+
   test("renders the GitHub hold, retry deadline, and Postponed history without Retry", () => {
     const queryClient = new QueryClient()
     const html = renderToStaticMarkup(

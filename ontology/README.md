@@ -173,7 +173,7 @@ Notes on the modelling:
 
 ## The lifecycle state space
 
-16 operational Lifecycle Steps, 4 terminal Work Item states, and 180 declared
+16 operational Lifecycle Steps, 4 terminal Work Item states, and 188 declared
 transitions, each carrying a named guard and one Step Run reason code from the
 generated vocabulary.
 The happy path:

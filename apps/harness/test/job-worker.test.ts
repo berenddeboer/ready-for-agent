@@ -404,6 +404,7 @@ const queueLayer = (
       wakePostponedStep,
       wakeProviderRecovery,
       retry: unused,
+      resume: unused,
       pause: unused,
       interrupt: unused,
       start: unused,
@@ -2435,6 +2436,7 @@ describe("Job worker", () => {
           wakeProviderRecovery: () =>
             Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
+          resume: unused,
           pause: unused,
           interrupt: unused,
           start: unused,
@@ -2690,6 +2692,7 @@ describe("Job worker", () => {
           wakeProviderRecovery: () =>
             Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
+          resume: unused,
           pause: unused,
           interrupt: unused,
           start: unused,
@@ -2781,6 +2784,7 @@ describe("Job worker", () => {
           wakeProviderRecovery: () =>
             Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
+          resume: unused,
           pause: unused,
           interrupt: unused,
           start: unused,
@@ -2941,6 +2945,7 @@ describe("Job worker", () => {
           wakeProviderRecovery: () =>
             Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
+          resume: unused,
           pause: unused,
           interrupt: unused,
           start: unused,
@@ -3153,6 +3158,7 @@ describe("Job worker", () => {
           wakeProviderRecovery: () =>
             Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
+          resume: unused,
           pause: unused,
           interrupt: unused,
           start: unused,
@@ -3291,6 +3297,7 @@ describe("Job worker", () => {
           wakeProviderRecovery: () =>
             Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
+          resume: unused,
           pause: unused,
           interrupt: unused,
           start: unused,

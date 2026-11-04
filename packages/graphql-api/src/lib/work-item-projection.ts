@@ -226,6 +226,28 @@ const isInterruptedWithPausedReason = (workItem: WorkItemRecord): boolean => {
   )
 }
 
+export const workItemCanResume = (workItem: WorkItemRecord): boolean => {
+  if (workItem.state !== "needs_human" || workItemHasActiveStepRun(workItem)) {
+    return false
+  }
+  const latest = latestStepRun(workItem)
+  return (
+    latest?.status === "succeeded" &&
+    latest.reasonCode === STEP_RUN_REASON.decisionNeeded
+  )
+}
+
+export const workItemDecisionRequest = (
+  workItem: WorkItemRecord,
+): string | null =>
+  workItemCanResume(workItem) ? workItem.failureMessage : null
+
+const decisionNeededLabel = (workItem: WorkItemRecord): string | null =>
+  workItem.state === "needs_human" &&
+  latestStepRun(workItem)?.reasonCode === STEP_RUN_REASON.decisionNeeded
+    ? "Decision needed"
+    : null
+
 export const workItemCanRetry = (workItem: WorkItemRecord): boolean => {
   if (
     workItem.waitingSince != null ||
@@ -314,6 +336,10 @@ export const workItemStatusLabel = (
   const status = workItemStatus(workItem, episode)
   if (status === "needs_human_review" && workItemHasActiveStepRun(workItem)) {
     return "Draining"
+  }
+  const decisionLabel = decisionNeededLabel(workItem)
+  if (decisionLabel !== null && status === "needs_human") {
+    return decisionLabel
   }
   return statusLabel(status)
 }
@@ -514,6 +540,10 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
 }
 
 export const workItemStateLabel = (workItem: WorkItemRecord): string => {
+  const decisionLabel = decisionNeededLabel(workItem)
+  if (decisionLabel !== null) {
+    return decisionLabel
+  }
   if (workItemIsTerminal(workItem)) {
     return statusLabel(workItem.state)
   }

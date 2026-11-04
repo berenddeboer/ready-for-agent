@@ -232,6 +232,11 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         `Work Item ${error.workItemId} cannot be retried: ${error.reason}`,
         "RETRY_NOT_ELIGIBLE",
       )
+    case "ResumeNotEligibleError":
+      return gql(
+        `Work Item ${error.workItemId} cannot be resumed: ${error.reason}`,
+        "RESUME_NOT_ELIGIBLE",
+      )
     case "InterruptNotEligibleError":
       return gql(
         `Work Item ${error.workItemId} cannot be interrupted: ${error.reason}`,
