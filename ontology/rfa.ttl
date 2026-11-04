@@ -14,7 +14,7 @@
     "The Ready for Agent domain vocabulary and Work Item lifecycle model."@en ;
   dcterms:source
     <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
-  owl:versionInfo "0.8.0" .
+  owl:versionInfo "0.9.0" .
 
 rfa:ContextTerm
   a owl:Class ;
@@ -343,6 +343,12 @@ rfa:HandlerDefectReason
   skos:notation "handler_defect" ;
   skos:definition
     "The Step Run ended because the Lifecycle Step handler threw a defect rather than a typed failure."@en .
+
+rfa:DecisionNeededReason
+  a rfa:StepRunReason ;
+  skos:notation "decision_needed" ;
+  skos:definition
+    "The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry."@en .
 
 rfa:HandlerFailedReason
   a rfa:StepRunReason ;
@@ -788,6 +794,12 @@ rfa:FailedRetryIssueReopenedReviewTransition a rfa:Transition ; rfa:fromStep rfa
 rfa:FailedRetryIssueReopenedCommitTransition a rfa:Transition ; rfa:fromStep rfa:Failed ; rfa:toStep rfa:Commit ; rfa:guard "retry_issue_reopened_after_revalidation_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:FailedRetryIssueReopenedCreatePrTransition a rfa:Transition ; rfa:fromStep rfa:Failed ; rfa:toStep rfa:CreatePr ; rfa:guard "retry_issue_reopened_after_revalidation_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:FailedRetryIssueReopenedCloseIssueTransition a rfa:Transition ; rfa:fromStep rfa:Failed ; rfa:toStep rfa:CloseIssue ; rfa:guard "retry_issue_reopened_after_close_issue_eligibility_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:ImplementDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:NeedsHuman ; rfa:guard "decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
+rfa:AssessChangesDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:NeedsHuman ; rfa:guard "decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
+rfa:PreCommitDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:PreCommit ; rfa:toStep rfa:NeedsHuman ; rfa:guard "decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
+rfa:ReviewDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:NeedsHuman ; rfa:guard "decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
+rfa:CommitDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:NeedsHuman ; rfa:guard "decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
+rfa:NeedsHumanResumeDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:Implement ; rfa:guard "resume_decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
 rfa:NeedsHumanRetryInvestigationTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:InvestigatePrStatusChecks ; rfa:guard "retry_status_check_handoff" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:NeedsHumanRetryReviewTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:Review ; rfa:guard "retry_review_fix_limit" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:NeedsHumanRetryMissingSuccessfulChecksTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "retry_missing_successful_checks" ; rfa:reasonCode rfa:MissingSuccessfulChecksReason .

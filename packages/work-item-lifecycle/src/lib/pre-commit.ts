@@ -6,6 +6,7 @@ import {
   agentBackendLabel,
   spawnOwned,
 } from "@ready-for-agent/agent-backend"
+import { parseDecisionNeeded } from "./decision-needed.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   PreCommitInvalidWorktreeContextError,
@@ -128,6 +129,7 @@ const buildFixPrompt = (exitCode: number, logPath: string) =>
     "When re-checking, use a sub-agent again for the same reason; only bring back pass/fail plus a short failure summary.",
     "Keep repairs limited to the failed checks within the agreed scope. The harness owns full review; these delegates verify checks, not the entire feature.",
     "Do not create a git commit or open a pull request.",
+    "If a genuine scope or operator decision is unresolved, do not guess. Write the decision request, options, and recommendation, then end with READY_FOR_AGENT_RESULT: DECISION_NEEDED as the only result line.",
   ].join("\n")
 
 const askOpencodeToFix = (
@@ -142,7 +144,7 @@ const askOpencodeToFix = (
       const logPath = yield* writeHookOutputLog(context.workItemId, output)
       const agentBackend = yield* AgentBackend
       const scopeHandoff = yield* loadScopeHandoff(context, worktreePath)
-      yield* agentBackend
+      const turn = yield* agentBackend
         .continueTurn({
           sessionId,
           prompt: `${buildFixPrompt(exitCode, logPath)}\n\n${scopeHandoff}`,
@@ -163,6 +165,21 @@ const askOpencodeToFix = (
               }),
           ),
         )
+      const decision = parseDecisionNeeded(turn.assistantText ?? "")
+      if (decision._tag === "invalid") {
+        return yield* new PreCommitOpenCodeError({
+          message: `${agentBackendLabel(context.agentBackend)} reported an invalid decision marker: ${decision.message}`,
+          worktreePath,
+          sessionId,
+        })
+      }
+      if (decision._tag === "needed") {
+        return {
+          _tag: "decision_needed" as const,
+          request: decision.request,
+        }
+      }
+      return undefined
     }),
   )
 
@@ -176,6 +193,13 @@ const askOpencodeToFix = (
  * passes (bounded by the step max duration). OpenCode or stage failures fail
  * the Step Run.
  */
+export type PreCommitTurnResult =
+  | undefined
+  | {
+      readonly _tag: "decision_needed"
+      readonly request: string
+    }
+
 export const preCommit = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
@@ -202,12 +226,15 @@ export const preCommit = (context: LifecycleStepContext) =>
         return
       }
 
-      yield* askOpencodeToFix(
+      const fix = yield* askOpencodeToFix(
         context,
         worktreePath,
         sessionId,
         hook.exitCode,
         hook.output || "(no output)",
       )
+      if (fix?._tag === "decision_needed") {
+        return fix
+      }
     }
   })

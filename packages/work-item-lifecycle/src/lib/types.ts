@@ -375,6 +375,9 @@ export const isRetryableNeedsHumanWorkItem = (
     return false
   }
   const latest = item.stepRuns.at(-1)
+  if (latest?.reasonCode === STEP_RUN_REASON.decisionNeeded) {
+    return false
+  }
   return (
     latest?.status === "succeeded" &&
     (latest.step === "investigate_pr_status_checks" ||

@@ -58,6 +58,7 @@ export const STEP_RUN_REASONS = [
   "commit_hooks",
   "commit_repair",
   "copy_generation",
+  "decision_needed",
   "forge_auth_rejected",
   "github_throttled",
   "green-no-review-evidence",
@@ -110,6 +111,8 @@ export const STEP_RUN_REASON = {
   commitRepair: "commit_repair",
   /** Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt. */
   copyGeneration: "copy_generation",
+  /** The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry. */
+  decisionNeeded: "decision_needed",
   /** The Step Run ended because the Forge rejected credentials or permission with HTTP 401 or 403. Deterministic; not retryable and does not consume Autonomous Retry Budget. */
   forgeAuthRejected: "forge_auth_rejected",
   /** Watch PR Status Checks stopped cleanly at GitHub's explicit retry time. */
@@ -180,6 +183,7 @@ export const STEP_RUN_REASON_DEFINITIONS = {
   commit_hooks: "Mid-run: Commit is running the native git commit attempt, including repository hooks.",
   commit_repair: "Mid-run: Commit is repairing a failed native commit via Agent Repair Fallback.",
   copy_generation: "Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt.",
+  decision_needed: "The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry.",
   forge_auth_rejected: "The Step Run ended because the Forge rejected credentials or permission with HTTP 401 or 403. Deterministic; not retryable and does not consume Autonomous Retry Budget.",
   github_throttled: "Watch PR Status Checks stopped cleanly at GitHub's explicit retry time.",
   "green-no-review-evidence": "A green-only Status Check Handoff completed without an Agent Turn because harness-owned GitHub observation found no positive automated-review evidence.",
@@ -334,6 +338,12 @@ export const LIFECYCLE_TRANSITIONS = [
   {
     from: "assess_changes",
     to: "needs_human",
+    guard: "decision_needed",
+    reasonCode: "decision_needed",
+  },
+  {
+    from: "assess_changes",
+    to: "needs_human",
     guard: "refresh_observed_unowned_issue_closing_pull_request",
     reasonCode: "native",
   },
@@ -432,6 +442,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "commit",
+    to: "needs_human",
+    guard: "decision_needed",
+    reasonCode: "decision_needed",
   },
   {
     from: "commit",
@@ -708,6 +724,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "implement",
+    to: "needs_human",
+    guard: "decision_needed",
+    reasonCode: "decision_needed",
   },
   {
     from: "implement",
@@ -1041,6 +1063,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "needs_human",
+    to: "implement",
+    guard: "resume_decision_needed",
+    reasonCode: "decision_needed",
+  },
+  {
+    from: "needs_human",
     to: "investigate_pr_status_checks",
     guard: "retry_status_check_handoff",
     reasonCode: "handler_failed",
@@ -1110,6 +1138,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "pre_commit",
+    to: "needs_human",
+    guard: "decision_needed",
+    reasonCode: "decision_needed",
   },
   {
     from: "pre_commit",
@@ -1236,6 +1270,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "local_cleanup",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "review",
+    to: "needs_human",
+    guard: "decision_needed",
+    reasonCode: "decision_needed",
   },
   {
     from: "review",

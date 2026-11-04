@@ -10,6 +10,10 @@ import {
 } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
+import {
+  decisionNeededPromptSection,
+  parseDecisionNeeded,
+} from "./decision-needed.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { preCommit } from "./pre-commit.js"
 import { repositoryProcessOptions } from "./repository-process-environment.js"
@@ -162,6 +166,7 @@ export type ReviewResult =
       } | null
     }
   | { readonly _tag: "needs_human"; readonly reason: string }
+  | { readonly _tag: "decision_needed"; readonly request: string }
 
 /** Machine-readable outcome of the reviewing pass only. */
 export type ReviewingPassResult =
@@ -232,6 +237,7 @@ export const buildReviewingPrompt = () =>
     "when there are no in-scope, evidenced Review Findings (follow-up observations do not prevent CLEAN), or",
     "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
     "using the highest Review Severity among the findings.",
+    decisionNeededPromptSection(),
   ].join("\n")
 
 export const buildReviewVerdictPrompt = () =>
@@ -269,6 +275,7 @@ const buildApplyFindingsPrompt = (severity: ReviewSeverity) =>
     "or",
     "READY_FOR_AGENT_RESULT: REVIEW_UNRESOLVED_HIGH: <short reason>",
     "when high-severity findings remain unresolved or disputed without a fix.",
+    decisionNeededPromptSection(),
   ].join("\n")
 
 export const buildApplyFindingsVerdictPrompt = () =>
@@ -296,6 +303,7 @@ export const buildRerunAssessmentPrompt = () =>
     "when the remediation may advance without another reviewing pass, or",
     "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: <short reason>",
     "when a full reviewing pass is required.",
+    decisionNeededPromptSection(),
   ].join("\n")
 
 const REVIEWING_RESULT_NAMES = new Set(["REVIEW_CLEAN", "REVIEW_HAS_FINDINGS"])
@@ -745,7 +753,29 @@ export const review = (context: LifecycleStepContext) =>
           ),
         )
 
+      const takeDecision = (output: string) =>
+        Effect.gen(function* () {
+          const parsed = parseDecisionNeeded(output)
+          if (parsed._tag === "absent") {
+            return null
+          }
+          if (parsed._tag === "invalid") {
+            return yield* new ReviewResultError({
+              workItemId: context.workItemId,
+              message: `${agentBackendLabel(context.agentBackend)} reported an invalid decision marker: ${parsed.message}`,
+            })
+          }
+          return {
+            _tag: "decision_needed" as const,
+            request: parsed.request,
+          }
+        })
+
       let reviewingOutput = reviewing.assistantText
+      const reviewingDecision = yield* takeDecision(reviewingOutput)
+      if (reviewingDecision !== null) {
+        return reviewingDecision
+      }
       let reviewingParsed = parseReviewResult(reviewingOutput)
       let reviewingCorrectionUsed = false
       if (reviewingParsed === null) {
@@ -779,6 +809,10 @@ export const review = (context: LifecycleStepContext) =>
             ),
           )
         reviewingOutput = verdict.assistantText
+        const verdictDecision = yield* takeDecision(reviewingOutput)
+        if (verdictDecision !== null) {
+          return verdictDecision
+        }
         reviewingParsed = parseReviewResult(reviewingOutput)
       }
 
@@ -861,6 +895,10 @@ export const review = (context: LifecycleStepContext) =>
       )
 
       let applyOutput = applying.assistantText
+      const applyDecision = yield* takeDecision(applyOutput)
+      if (applyDecision !== null) {
+        return applyDecision
+      }
       let applyParsed = parseApplyReviewResult(applyOutput)
       let applyCorrectionUsed = false
       if (applyParsed === null) {
@@ -894,6 +932,10 @@ export const review = (context: LifecycleStepContext) =>
             ),
           )
         applyOutput = repair.assistantText
+        const repairDecision = yield* takeDecision(applyOutput)
+        if (repairDecision !== null) {
+          return repairDecision
+        }
         applyParsed = parseApplyReviewResult(applyOutput)
       }
 
@@ -928,7 +970,14 @@ export const review = (context: LifecycleStepContext) =>
         // revalidate via Pre-Commit plus a fresh reviewing pass.
         fixRoundsUsed += 1
         yield* markReviewPreCommitPhase
-        yield* preCommit(context)
+        const nestedPreCommit = yield* preCommit(context)
+        if (
+          nestedPreCommit !== undefined &&
+          typeof nestedPreCommit === "object" &&
+          nestedPreCommit._tag === "decision_needed"
+        ) {
+          return nestedPreCommit
+        }
         yield* recordReviewProgressCheckpoint(
           REVIEW_PROGRESS_CHECKPOINT_KIND.verifiedApply,
         )
@@ -965,7 +1014,14 @@ export const review = (context: LifecycleStepContext) =>
         if (worktreeChanged) {
           fixRoundsUsed += 1
           yield* markReviewPreCommitPhase
-          yield* preCommit(context)
+          const nestedPreCommit = yield* preCommit(context)
+          if (
+            nestedPreCommit !== undefined &&
+            typeof nestedPreCommit === "object" &&
+            nestedPreCommit._tag === "decision_needed"
+          ) {
+            return nestedPreCommit
+          }
           yield* recordReviewProgressCheckpoint(
             REVIEW_PROGRESS_CHECKPOINT_KIND.verifiedApply,
           )
@@ -988,7 +1044,14 @@ export const review = (context: LifecycleStepContext) =>
           : null
 
       yield* markReviewPreCommitPhase
-      yield* preCommit(context)
+      const nestedPreCommit = yield* preCommit(context)
+      if (
+        nestedPreCommit !== undefined &&
+        typeof nestedPreCommit === "object" &&
+        nestedPreCommit._tag === "decision_needed"
+      ) {
+        return nestedPreCommit
+      }
       yield* recordReviewProgressCheckpoint(
         REVIEW_PROGRESS_CHECKPOINT_KIND.verifiedApply,
       )
@@ -1024,6 +1087,10 @@ export const review = (context: LifecycleStepContext) =>
             ),
           )
 
+        const assessmentDecision = yield* takeDecision(assessment.assistantText)
+        if (assessmentDecision !== null) {
+          return assessmentDecision
+        }
         const assessmentParsed = parseRerunAssessmentResult(
           assessment.assistantText,
         )

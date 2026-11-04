@@ -101,6 +101,11 @@ import {
 } from "./ci-repair-work-item-creation.js"
 import { CloseIssueEligibilityError } from "./close-issue-errors.js"
 import {
+  DECISION_NEEDED_FAILURE_CODE,
+  decisionNeededHandlerOutput,
+  isDecisionNeededReason,
+} from "./decision-needed.js"
+import {
   AbandonCleanupError,
   ActiveStepRunExistsError,
   AgentBackendUnavailableError,
@@ -125,6 +130,7 @@ import {
   ParentImplementWithPauseNotAllowedError,
   ParentIssueError,
   ResetCleanupError,
+  ResumeNotEligibleError,
   RetryNotEligibleError,
   SessionIdAmbiguousError,
   SessionIdNotFoundError,
@@ -1342,6 +1348,15 @@ export type RunStepError =
   | LinearRequestError
   | LinearNotConfiguredError
 
+export type ResumeError =
+  | WorkItemNotFoundError
+  | ResumeNotEligibleError
+  | WorkItemLifecycleDatabaseError
+  | EnqueueError
+  | InvalidQueueNameError
+  | RepositoryNotFoundError
+  | DatabaseError
+
 export type RetryError =
   | WorkItemNotFoundError
   | WorkItemTerminalError
@@ -1557,6 +1572,14 @@ export interface WorkItemLifecycleShape {
     workItemId: string,
     options?: RetryOptions,
   ) => Effect.Effect<WorkItemRecord, RetryError>
+  /**
+   * Continue a Decision needed handoff in the existing session. Does not
+   * accept an answer. Idempotent while a resumed Step Run is already queued,
+   * running, or waiting for a Worker Slot.
+   */
+  readonly resume: (
+    workItemId: string,
+  ) => Effect.Effect<WorkItemRecord, ResumeError>
   readonly pause: (
     workItemId: string,
   ) => Effect.Effect<WorkItemRecord, PauseError>
@@ -3843,6 +3866,7 @@ export const makeWorkItemLifecycleLive = (
           readonly checkStartLastObservedIsDraft?: number | null
           readonly stepRunReasonCode?: StepRunReasonCode
           readonly stepRunNote?: string
+          readonly stepRunReasonDetail?: string
           readonly holdForCiRepair?: boolean
           readonly transition?: {
             readonly nextState:
@@ -3851,6 +3875,7 @@ export const makeWorkItemLifecycleLive = (
               | "needs_human"
             readonly delay?: Duration.Duration
             readonly reason?: string
+            readonly failureCode?: string
           }
         },
         RunHandlerError
@@ -3866,15 +3891,29 @@ export const makeWorkItemLifecycleLive = (
           case "install_dependencies":
             return steps.installDependencies(context).pipe(Effect.as({}))
           case "implement":
-            return steps
-              .implement(context)
-              .pipe(Effect.map((sessionId) => ({ sessionId })))
+            return steps.implement(context).pipe(
+              Effect.map((result) =>
+                typeof result === "string"
+                  ? { sessionId: result }
+                  : decisionNeededHandlerOutput({
+                      request: result.request,
+                      originatingStep: "implement",
+                      sessionId: result.sessionId,
+                    }),
+              ),
+            )
           case "assess_changes":
             return Effect.gen(function* () {
               const policy = workItemOriginPolicy(
                 yield* storedOrigin(workItem.origin),
               )
               const result = yield* steps.assessChanges(context)
+              if (result._tag === "decision_needed") {
+                return decisionNeededHandlerOutput({
+                  request: result.request,
+                  originatingStep: "assess_changes",
+                })
+              }
               if (result._tag === "changes") {
                 return {}
               }
@@ -3889,10 +3928,27 @@ export const makeWorkItemLifecycleLive = (
               }
             })
           case "pre_commit":
-            return steps.preCommit(context).pipe(Effect.as({}))
+            return steps.preCommit(context).pipe(
+              Effect.map((result) =>
+                result !== undefined &&
+                typeof result === "object" &&
+                result._tag === "decision_needed"
+                  ? decisionNeededHandlerOutput({
+                      request: result.request,
+                      originatingStep: "pre_commit",
+                    })
+                  : {},
+              ),
+            )
           case "review":
             return steps.review(context).pipe(
               Effect.map((result) => {
+                if (result._tag === "decision_needed") {
+                  return decisionNeededHandlerOutput({
+                    request: result.request,
+                    originatingStep: "review",
+                  })
+                }
                 if (result._tag === "deferred") {
                   return {
                     stepRunReasonCode: STEP_RUN_REASON.reviewDeferred,
@@ -3934,6 +3990,12 @@ export const makeWorkItemLifecycleLive = (
                 yield* storedOrigin(workItem.origin),
               )
               const result = yield* steps.commit(context)
+              if (result._tag === "decision_needed") {
+                return decisionNeededHandlerOutput({
+                  request: result.request,
+                  originatingStep: "commit",
+                })
+              }
               if (result._tag === "no_changes") {
                 return {
                   completionSummary: result.completionSummary,
@@ -4718,6 +4780,7 @@ export const makeWorkItemLifecycleLive = (
           readonly checkStartLastObservedIsDraft?: number | null
           readonly stepRunReasonCode?: StepRunReasonCode
           readonly stepRunNote?: string
+          readonly stepRunReasonDetail?: string
           readonly holdForCiRepair?: boolean
           readonly transition?: {
             readonly nextState:
@@ -4726,6 +4789,7 @@ export const makeWorkItemLifecycleLive = (
               | "needs_human"
             readonly delay?: Duration.Duration
             readonly reason?: string
+            readonly failureCode?: string
           }
         }
         readonly revalidation:
@@ -4825,12 +4889,14 @@ export const makeWorkItemLifecycleLive = (
                      finished_at = ?,
                      reason_code = ?,
                      reason_message = ?,
+                     reason_detail = COALESCE(?, reason_detail),
                      updated_at = ?
                   WHERE id = ? AND status = 'running'`,
                   [
                     now,
                     stepRunReasonCode,
                     stepRunReasonMessage,
+                    output.stepRunReasonDetail ?? null,
                     now,
                     stepRun.id,
                   ],
@@ -5046,7 +5112,7 @@ export const makeWorkItemLifecycleLive = (
                     `UPDATE work_item
                    SET state = 'needs_human',
                        state_ready_at = ?,
-                       failure_code = 'needs_human',
+                       failure_code = ?,
                        failure_message = ?,
                         worktree_path = ?,
                         starting_commit_oid = ?,
@@ -5062,6 +5128,7 @@ export const makeWorkItemLifecycleLive = (
                    WHERE id = ?`,
                     [
                       now,
+                      transition?.failureCode ?? "needs_human",
                       attentionReason ??
                         `${agentBackendLabel(workItem.agent_backend)} requested human intervention`,
                       worktreePath,
@@ -8810,16 +8877,23 @@ export const makeWorkItemLifecycleLive = (
             workItemId,
           )
         }
+        const decisionNeededHandoff =
+          workItem.state === "needs_human" &&
+          (workItem.failure_code === DECISION_NEEDED_FAILURE_CODE ||
+            isDecisionNeededReason(latest?.reason_code))
         const retryableInvestigateNeedsHuman =
           workItem.state === "needs_human" &&
+          !decisionNeededHandoff &&
           latest?.step === "investigate_pr_status_checks" &&
           latest.status === "succeeded"
         const retryableReviewFixLimitNeedsHuman =
           workItem.state === "needs_human" &&
+          !decisionNeededHandoff &&
           latest?.step === "review" &&
           latest.status === "succeeded"
         const retryableMissingSuccessfulChecksNeedsHuman =
           workItem.state === "needs_human" &&
+          !decisionNeededHandoff &&
           latest?.status === "succeeded" &&
           latest.reason_code === STEP_RUN_REASON.missingSuccessfulChecks
         const retryableNeedsHumanHandoff =
@@ -9251,6 +9325,139 @@ export const makeWorkItemLifecycleLive = (
         )
         yield* notifyWorkItemsChanged(retried.repositoryId)
         return retried
+      })
+
+      const resume = Effect.fn("WorkItemLifecycle.resume")(function* (
+        workItemId: string,
+      ) {
+        const current = yield* getWorkItem(workItemId)
+        const decisionRun = [...current.stepRuns]
+          .reverse()
+          .find(
+            (stepRun) =>
+              stepRun.status === "succeeded" &&
+              isDecisionNeededReason(stepRun.reasonCode),
+          )
+        const decisionApplied =
+          decisionRun !== undefined &&
+          current.stepRuns.some(
+            (stepRun) =>
+              stepRun.step === "implement" &&
+              stepRun.status === "succeeded" &&
+              !isDecisionNeededReason(stepRun.reasonCode) &&
+              stepRun.finishedAt !== null &&
+              decisionRun.finishedAt !== null &&
+              stepRun.finishedAt.getTime() > decisionRun.finishedAt.getTime(),
+          )
+        const openDecision = decisionRun !== undefined && !decisionApplied
+        const active = current.stepRuns.find(
+          (stepRun) =>
+            stepRun.status === "queued" || stepRun.status === "running",
+        )
+        const parkedForDecision =
+          current.state === "needs_human" &&
+          (current.failureCode === DECISION_NEEDED_FAILURE_CODE || openDecision)
+        const resumeInProgress =
+          openDecision &&
+          current.state === "implement" &&
+          (active !== undefined ||
+            current.waitingSince !== null ||
+            current.holdsWorkerSlot)
+        if ((parkedForDecision && active !== undefined) || resumeInProgress) {
+          return current
+        }
+        if (!parkedForDecision) {
+          return yield* new ResumeNotEligibleError({
+            workItemId,
+            reason: "not_decision_needed",
+          })
+        }
+
+        const now = yield* Clock.currentTimeMillis
+        // State change, slot admission, and the Step Run insert commit together.
+        // A failure after clearing the handoff must not leave Implement with no
+        // step and no way back to Decision needed.
+        yield* sql
+          .withTransaction(
+            applyLifecycleTransition(
+              workItemId,
+              "implement",
+              Effect.gen(function* () {
+                const activeBeforeResume = (yield* sql.unsafe(
+                  `SELECT id FROM step_run
+                   WHERE work_item_id = ?
+                     AND status IN ('queued', 'running')
+                   LIMIT 1`,
+                  [workItemId],
+                )) as readonly { readonly id: string }[]
+                if (activeBeforeResume[0]) {
+                  return false
+                }
+                const updated = (yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET state = 'implement',
+                       state_ready_at = ?,
+                       failure_code = NULL,
+                       failure_message = NULL,
+                       paused = 0,
+                       updated_at = ?
+                   WHERE id = ? AND state = 'needs_human'
+                   RETURNING id`,
+                  [now, now, workItemId],
+                )) as readonly { readonly id: string }[]
+                if (updated.length === 0) {
+                  return false
+                }
+                const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+                if (acquired) {
+                  yield* enqueueStepRunForWorkItem(workItemId, "implement", now)
+                }
+                return true
+              }),
+              (applied) => applied,
+            ),
+          )
+          .pipe(
+            Effect.catch((error): Effect.Effect<boolean, ResumeError> => {
+              if (
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                (error as { _tag: string })._tag === "SqlError" &&
+                isActiveStepRunUniqueViolation(error as SqlError)
+              ) {
+                return Effect.succeed(false)
+              }
+              if (error instanceof WorkItemLifecycleDatabaseError) {
+                return Effect.fail(error)
+              }
+              if (error instanceof EnqueueError) {
+                return Effect.fail(error)
+              }
+              if (error instanceof InvalidQueueNameError) {
+                return Effect.fail(error)
+              }
+              return Effect.fail(
+                new WorkItemLifecycleDatabaseError({
+                  message: `Unexpected resume failure: ${String(error)}`,
+                  cause: error,
+                }),
+              )
+            }),
+          )
+
+        const resumed = yield* getWorkItem(workItemId).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after resume: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
+        )
+        yield* notifyWorkItemsChanged(resumed.repositoryId)
+        return resumed
       })
 
       const createWorkItem = (
@@ -10702,6 +10909,7 @@ export const makeWorkItemLifecycleLive = (
         wakePostponedStep,
         wakeProviderRecovery,
         retry,
+        resume,
         pause,
         interrupt,
         start,

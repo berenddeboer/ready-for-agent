@@ -130,7 +130,9 @@ import { projectWorkItemCiRepair } from "./work-item-ci-repair-projection.js"
 import {
   lifecycleLabels,
   workIssueProjection,
+  workItemCanResume,
   workItemCanRetry,
+  workItemDecisionRequest,
   workItemHasActiveStepRun,
   workItemIsTerminal,
   workItemLatestStepRunDetail,
@@ -2023,6 +2025,8 @@ export const createGraphqlApi = <R>(
           paused: (workItem: WorkItemRecord) => workItem.paused,
           hasActiveStepRun: workItemHasActiveStepRun,
           canRetry: workItemCanRetry,
+          canResume: workItemCanResume,
+          decisionRequest: workItemDecisionRequest,
           isTerminal: workItemIsTerminal,
           lifecycleLabels,
           stateReadyAt: (workItem: { stateReadyAt: Date }) =>
@@ -3317,6 +3321,18 @@ export const createGraphqlApi = <R>(
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.retry(args.workItemId)
               }).pipe(Effect.withSpan("graphql-api.retryWorkItem")),
+              context,
+            ),
+          resumeWorkItem: async (
+            _parent: unknown,
+            args: WorkItemArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                return yield* lifecycle.resume(args.workItemId)
+              }).pipe(Effect.withSpan("graphql-api.resumeWorkItem")),
               context,
             ),
           pauseWorkItem: async (

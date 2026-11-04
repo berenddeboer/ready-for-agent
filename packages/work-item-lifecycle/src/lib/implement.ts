@@ -4,6 +4,7 @@ import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { resolveForgeIssuePresentation } from "@ready-for-agent/forge-contract"
 import {
+  STEP_RUN_REASON,
   formatIssueDisplayId,
   workItemOriginPolicy,
 } from "@ready-for-agent/lifecycle-model"
@@ -20,6 +21,11 @@ import {
   type CiRepairTarget,
   buildCiRepairImplementPrompt,
 } from "./ci-repair-work-item.js"
+import {
+  decisionNeededPromptSection,
+  decisionResumePromptSection,
+  parseDecisionNeeded,
+} from "./decision-needed.js"
 import {
   ImplementForgeCredentialError,
   ImplementInvalidWorktreeContextError,
@@ -195,6 +201,8 @@ const buildImplementPrompt = (
         ? "Make the implementation in this worktree and run appropriate verification."
         : "Finish the implementation in this worktree and run appropriate verification.",
       implementTheIssuePromptLine,
+      "Deliver the smallest change satisfying the agreed scope. If a requirement genuinely needs broader work, request a scope decision before expanding it.",
+      decisionNeededPromptSection(),
       ...visualEvidencePromptLines(workItemId),
     ].join("\n")
   }
@@ -240,6 +248,7 @@ const buildImplementPrompt = (
       : "Finish the implementation in this worktree and run appropriate verification.",
     implementTheIssuePromptLine,
     "Deliver the smallest change satisfying the agreed scope. Existing upstream limitations and speculative hardening are follow-up observations, not new requirements. If a requirement genuinely needs broader work, request a scope decision before expanding it.",
+    decisionNeededPromptSection(),
     "Run appropriate verification; the harness owns the full review cycle. Do not launch your own full-worktree reviews.",
     ...visualEvidencePromptLines(workItemId),
   ].join("\n")
@@ -253,6 +262,47 @@ const priorSessionId = (context: LifecycleStepContext): string | null => {
   return sessionId
 }
 
+export type ImplementTurnResult =
+  | string
+  | {
+      readonly _tag: "decision_needed"
+      readonly sessionId: string
+      readonly request: string
+    }
+
+const loadOpenDecisionRequest = (workItemId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = (yield* sql
+      .unsafe(
+        `SELECT reason_message
+         FROM step_run
+         WHERE work_item_id = ?
+           AND status = 'succeeded'
+           AND reason_code = ?
+           AND finished_at > COALESCE((
+             SELECT MAX(finished_at) FROM step_run
+             WHERE work_item_id = ?
+               AND step = 'implement'
+               AND status = 'succeeded'
+               AND (reason_code IS NULL OR reason_code != ?)
+           ), 0)
+         ORDER BY finished_at DESC, rowid DESC
+         LIMIT 1`,
+        [
+          workItemId,
+          STEP_RUN_REASON.decisionNeeded,
+          workItemId,
+          STEP_RUN_REASON.decisionNeeded,
+        ],
+      )
+      .pipe(Effect.orElseSucceed(() => []))) as readonly {
+      readonly reason_message: string | null
+    }[]
+    const request = rows[0]?.reason_message?.trim() ?? ""
+    return request === "" ? null : request
+  })
+
 const runImplementTurn = (
   context: LifecycleStepContext,
   worktreePath: string,
@@ -262,7 +312,12 @@ const runImplementTurn = (
   Effect.gen(function* () {
     const db = yield* DbService
     const scopeHandoff = yield* loadScopeHandoff(context, worktreePath)
-    const prompt = `${promptBody}\n\n${scopeHandoff}`
+    const openDecision = yield* loadOpenDecisionRequest(context.workItemId)
+    const resumeSection =
+      openDecision === null
+        ? ""
+        : `${decisionResumePromptSection(openDecision)}\n\n`
+    const prompt = `${resumeSection}${promptBody}\n\n${scopeHandoff}`
     const existingSessionId = priorSessionId(context)
     const agentBackend = yield* AgentBackend
     const sql = yield* SqlClient.SqlClient
@@ -314,6 +369,21 @@ const runImplementTurn = (
         message: `${agentBackendLabel(context.agentBackend)} completed without returning a Session ID`,
         worktreePath,
       })
+    }
+
+    const decision = parseDecisionNeeded(result.assistantText ?? "")
+    if (decision._tag === "invalid") {
+      return yield* new ImplementOpenCodeError({
+        message: `${agentBackendLabel(context.agentBackend)} reported an invalid decision marker: ${decision.message}`,
+        worktreePath,
+      })
+    }
+    if (decision._tag === "needed") {
+      return {
+        _tag: "decision_needed" as const,
+        sessionId: result.sessionId,
+        request: decision.request,
+      }
     }
 
     return result.sessionId

@@ -1616,6 +1616,18 @@ type WorkItem {
   paused Work Items.
   """
   canRetry: Boolean!
+  """
+  True when this Work Item is parked for an unresolved operator decision and
+  explicit Resume may continue the existing session. False while a Step Run is
+  already queued or running, and false for failures and other Needs Human
+  handoffs. Chatting in the session does not make this true.
+  """
+  canResume: Boolean!
+  """
+  Decision request recorded for a Decision needed handoff. Null when this Work
+  Item is not waiting on that handoff.
+  """
+  decisionRequest: String
   isTerminal: Boolean!
   stateReadyAt: String!
   worktreePath: String
@@ -1851,6 +1863,12 @@ type Mutation {
     maxAutonomousRetries: Int
   ): RetryWorkItemsResult!
   retryWorkItem(workItemId: ID!): WorkItem!
+  """
+  Continue a Decision needed handoff in the existing agent session. Does not
+  accept an answer; the operator answers in OpenCode or Jump. Idempotent while
+  a resumed Step Run is already queued, running, or waiting for a Worker Slot.
+  """
+  resumeWorkItem(workItemId: ID!): WorkItem!
   pauseWorkItem(workItemId: ID!): WorkItem!
   """
   Stop a running Step Run on a paused Work Item without deleting it.
