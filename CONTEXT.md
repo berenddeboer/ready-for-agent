@@ -52,6 +52,14 @@ _Avoid_: repair agent, repair attempt, CI repair ticket
 The default-branch CI run before which failures no longer start a CI Repair Work Item. It becomes the CI run on the merge commit when a CI Repair Work Item's PR merges, and the newest observed run when one ends in a No-Change Outcome. Abandon or Reset does not move it, but automatic repair then waits for a failure newer than the one that started the abandoned Work Item.
 _Avoid_: last green run
 
+**Latest Observation**:
+The newest default-branch run and current gate evidence for one selected CI Gate Definition. It decides Repository CI Gate state and automatic CI Repair eligibility as soon as it is committed, and advancing it does not mean older runs were scanned.
+_Avoid_: polling cursor (it records a scan position, not current gate evidence), last-seen run (it was reused as both the newest run and the history boundary)
+
+**Historical Coverage**:
+The durable record of which older runs of one selected CI Gate Definition on one default branch have actually been processed. It is complete, a resumable gap with a fixed upper boundary, or truncated when that history is unavailable. Incomplete coverage does not by itself change current gate health.
+_Avoid_: polling cursor (it is not a record of which older runs were processed), lastRunIdentity (that names the newest run, not the coverage checkpoint)
+
 **CI Failure Incident**:
 A durable Repository episode beginning when an observed CI Gate Definition failure closes the Repository CI Gate and ending when every latched failure clears. Additional failures while the gate remains Closed join the same incident; CI Gate Bypass authorization is scoped to that incident.
 _Avoid_: PR check failure, permanent CI bypass, outage

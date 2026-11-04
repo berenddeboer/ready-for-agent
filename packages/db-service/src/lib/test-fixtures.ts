@@ -88,6 +88,7 @@ export const stubDbService = (
   addRepository: unused,
   updateRepositorySettings: unused,
   listCiGateDefinitions: () => Effect.succeed([]),
+  listCiRepairBaselineBounds: () => Effect.succeed([]),
   loadCiGateSnapshot: () =>
     Effect.succeed({
       state: null,

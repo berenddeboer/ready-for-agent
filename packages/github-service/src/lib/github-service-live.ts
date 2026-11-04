@@ -31,6 +31,8 @@ import {
   type ReadyLabeledIssue,
   type TerminalPrStatusCheck,
   ciGateRunOrderKey,
+  classifyCiGateObservedRun,
+  compareCiGateRunOrder,
   extractErrorCode,
   isDecisiveCiGateObservedRun,
 } from "@ready-for-agent/forge-contract"
@@ -3484,13 +3486,6 @@ const runIdFromIdentity = (runIdentity: string): string => {
   return separator === -1 ? runIdentity : runIdentity.slice(0, separator)
 }
 
-const isSameObservedRun = (
-  runIdentity: string,
-  lastRunIdentity: string,
-): boolean =>
-  runIdentity === lastRunIdentity ||
-  runIdFromIdentity(runIdentity) === runIdFromIdentity(lastRunIdentity)
-
 const throwGitHubHttpError = async (
   response: Response,
   message: string,
@@ -3528,7 +3523,8 @@ const annotateEarlyJobFailure = async (
     return run
   }
   const jobs: unknown[] = []
-  for (let page = 1; ; page += 1) {
+  const maxPages = 1
+  for (let page = 1; page <= maxPages; page += 1) {
     const url = new URL(
       `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/runs/${runId}/jobs`,
     )
@@ -3557,15 +3553,156 @@ const annotateEarlyJobFailure = async (
     if (pageJobs.some(jobConclusionFailed)) {
       return { ...run, earlyJobFailure: true }
     }
-    if (pageJobs.length < PAGE_SIZE) {
+    if (pageJobs.length < PAGE_SIZE || page >= maxPages) {
       break
     }
   }
   return run
 }
 
+const isoSecond = (value: Date): string =>
+  value.toISOString().replace(/\.\d{3}Z$/, "Z")
+
+const createdNotAfter = (value: Date): string => {
+  const overlapped = new Date(value.getTime() + 1000)
+  return `<=${isoSecond(overlapped)}`
+}
+
+const fetchWorkflowRunPage = async (
+  fetchImpl: GitHubFetch,
+  token: string,
+  repository: { readonly owner: string; readonly name: string },
+  workflowId: number,
+  defaultBranch: string,
+  signal: AbortSignal | undefined,
+  createdBefore: Date | null,
+): Promise<{
+  readonly workflowRuns: readonly unknown[]
+  readonly exhausted: boolean
+  readonly notFound: boolean
+}> => {
+  const url = new URL(
+    `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/workflows/${String(workflowId)}/runs`,
+  )
+  url.searchParams.set("branch", defaultBranch)
+  url.searchParams.set("exclude_pull_requests", "true")
+  url.searchParams.set("per_page", String(PAGE_SIZE))
+  url.searchParams.set("page", "1")
+  if (createdBefore !== null) {
+    url.searchParams.set("created", createdNotAfter(createdBefore))
+  }
+  const response = await fetchImpl(url, {
+    headers: githubRestHeaders(token),
+    signal,
+  })
+  if (!response.ok) {
+    if (response.status === 404) {
+      return { workflowRuns: [], exhausted: true, notFound: true }
+    }
+    const body = await response.text()
+    const throttle = githubThrottleFromResponse({
+      statusCode: response.status,
+      headers: response.headers,
+      message: `${response.statusText}: ${body}`,
+    })
+    if (throttle !== undefined) {
+      throw throttle
+    }
+    throw new GitHubHttpError({
+      statusCode: response.status,
+      headers: response.headers,
+      message:
+        response.status === 403
+          ? `Failed to observe CI Gate Definitions for ${repository.owner}/${repository.name}: Actions read required`
+          : `Failed to observe CI Gate Definition ${String(workflowId)} for ${repository.owner}/${repository.name}: ${response.statusText}: ${body}`,
+    })
+  }
+  const payload: unknown = await response.json()
+  const workflowRuns =
+    isRecord(payload) && Array.isArray(payload.workflow_runs)
+      ? payload.workflow_runs
+      : []
+  return {
+    workflowRuns,
+    exhausted: workflowRuns.length < PAGE_SIZE,
+    notFound: false,
+  }
+}
+
+const newestPendingRun = (
+  runs: readonly CiGateObservedRun[],
+): CiGateObservedRun | undefined => {
+  let newest: CiGateObservedRun | undefined
+  for (const run of runs) {
+    if (classifyCiGateObservedRun(run) !== "pending") {
+      continue
+    }
+    if (newest === undefined) {
+      newest = run
+      continue
+    }
+    const newestKey = newest.orderKey
+    const runKey = run.orderKey
+    if (
+      newestKey !== undefined &&
+      runKey !== undefined &&
+      compareCiGateRunOrder(runKey, newestKey) > 0
+    ) {
+      newest = run
+    }
+  }
+  return newest
+}
+
+/**
+ * One pending run above the history page. A miss does not fail the page.
+ */
+const fetchRevisitedWorkflowRun = async (
+  fetchImpl: GitHubFetch,
+  token: string,
+  repository: { readonly owner: string; readonly name: string },
+  defaultBranch: string,
+  runIdentity: string,
+  signal: AbortSignal | undefined,
+  observeThrottle: GitHubThrottleObserver | undefined,
+): Promise<CiGateObservedRun | null> => {
+  const runId = runIdFromIdentity(runIdentity)
+  if (!/^[0-9]+$/.test(runId)) {
+    return null
+  }
+  try {
+    const response = await fetchImpl(
+      `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/runs/${runId}`,
+      { headers: githubRestHeaders(token), signal },
+    )
+    if (!response.ok) {
+      const body = await response.text()
+      const throttle = githubThrottleFromResponse({
+        statusCode: response.status,
+        headers: response.headers,
+        message: `${response.statusText}: ${body}`,
+      })
+      if (throttle !== undefined) {
+        observeThrottle?.(throttle)
+      }
+      return null
+    }
+    const payload: unknown = await response.json()
+    return mapObservedWorkflowRun(payload, defaultBranch)
+  } catch (error) {
+    if (isGitHubThrottledError(error)) {
+      observeThrottle?.(error)
+    }
+    return null
+  }
+}
+
 const makeObserveCiGate =
-  (token: string, fetchImpl: GitHubFetch): ObserveCiGate =>
+  (
+    token: string,
+    fetchImpl: GitHubFetch,
+    observeThrottle?: GitHubThrottleObserver,
+  ): ObserveCiGate =>
   async (repository, input, signal) => {
     const repoResponse = await fetchImpl(
       `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}`,
@@ -3613,109 +3750,109 @@ const makeObserveCiGate =
         continue
       }
 
-      const lastSeenRaw = input.lastRunIdentities[identity]
-      const lastSeen =
-        lastSeenRaw !== undefined && lastSeenRaw.trim() !== ""
-          ? lastSeenRaw
-          : null
-      const runs: CiGateObservedRun[] = []
-      let unavailable: CiGateDefinitionObservation | null = null
-      let reachedLastSeen = false
-      let collectedDecisiveAfterLastSeen = false
-      for (let page = 1; ; page += 1) {
-        const url = new URL(
-          `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/workflows/${String(workflowId)}/runs`,
-        )
-        url.searchParams.set("branch", defaultBranch)
-        url.searchParams.set("exclude_pull_requests", "true")
-        url.searchParams.set("per_page", String(PAGE_SIZE))
-        url.searchParams.set("page", String(page))
-        const response = await fetchImpl(url, {
-          headers: githubRestHeaders(token),
-          signal,
+      const scope = input.scope ?? { kind: "latest" as const }
+      if (scope.kind === "catch_up" && scope.definitionIdentity !== identity) {
+        continue
+      }
+      const page = await fetchWorkflowRunPage(
+        fetchImpl,
+        token,
+        repository,
+        workflowId,
+        defaultBranch,
+        signal,
+        scope.kind === "catch_up" ? scope.notNewerThan.createdAt : null,
+      )
+      if (page.notFound) {
+        observations.push({
+          identity,
+          kind: "unavailable",
+          reason: "not_found",
+          message: `CI Gate Definition ${identity} could not be observed`,
         })
-        if (!response.ok) {
-          if (response.status === 404) {
-            unavailable = {
-              identity,
-              kind: "unavailable",
-              reason: "not_found",
-              message: `CI Gate Definition ${identity} could not be observed`,
-            }
-            break
-          }
-          const body = await response.text()
-          const throttle = githubThrottleFromResponse({
-            statusCode: response.status,
-            headers: response.headers,
-            message: `${response.statusText}: ${body}`,
-          })
-          if (throttle !== undefined) {
-            throw throttle
-          }
-          throw new GitHubHttpError({
-            statusCode: response.status,
-            headers: response.headers,
-            message:
-              response.status === 403
-                ? `Failed to observe CI Gate Definitions for ${repository.owner}/${repository.name}: Actions read required`
-                : `Failed to observe CI Gate Definition ${identity} for ${repository.owner}/${repository.name}: ${response.statusText}: ${body}`,
-          })
+        continue
+      }
+      const runs: CiGateObservedRun[] = []
+      for (const workflowRun of page.workflowRuns) {
+        const mapped = mapObservedWorkflowRun(workflowRun, defaultBranch)
+        if (mapped === null) {
+          continue
         }
-        const payload: unknown = await response.json()
-        const workflowRuns =
-          isRecord(payload) && Array.isArray(payload.workflow_runs)
-            ? payload.workflow_runs
-            : []
-        for (const workflowRun of workflowRuns) {
-          const mapped = mapObservedWorkflowRun(workflowRun, defaultBranch)
-          if (mapped === null) {
-            continue
-          }
-          const run = isDecisiveCiGateObservedRun(mapped)
-            ? mapped
-            : await annotateEarlyJobFailure(
-                fetchImpl,
-                token,
-                repository,
-                mapped,
-                signal,
-              )
-          runs.push(run)
-          if (
-            lastSeen !== null &&
-            isSameObservedRun(run.runIdentity, lastSeen)
-          ) {
-            reachedLastSeen = true
-            if (isDecisiveCiGateObservedRun(run)) {
-              collectedDecisiveAfterLastSeen = true
-              break
-            }
-            continue
-          }
-          if (reachedLastSeen && isDecisiveCiGateObservedRun(run)) {
-            collectedDecisiveAfterLastSeen = true
-            break
-          }
-        }
-        // First observation (no last-seen run) uses one official API page.
-        // An unfinished last-seen run is not a stable cursor: keep paging
-        // until a decisive older result is included.
         if (
-          collectedDecisiveAfterLastSeen ||
-          lastSeen === null ||
-          workflowRuns.length < PAGE_SIZE
+          scope.kind === "catch_up" &&
+          mapped.orderKey !== undefined &&
+          compareCiGateRunOrder(mapped.orderKey, scope.notNewerThan.orderKey) >
+            0
         ) {
-          break
+          continue
+        }
+        runs.push(mapped)
+      }
+      if (scope.kind === "catch_up" && scope.revisit != null) {
+        const revisited = await fetchRevisitedWorkflowRun(
+          fetchImpl,
+          token,
+          repository,
+          defaultBranch,
+          scope.revisit.runIdentity,
+          signal,
+          observeThrottle,
+        )
+        if (revisited !== null) {
+          const existing = runs.findIndex(
+            (run) =>
+              runIdFromIdentity(run.runIdentity) ===
+              runIdFromIdentity(revisited.runIdentity),
+          )
+          if (existing === -1) {
+            runs.push(revisited)
+          } else {
+            runs[existing] = revisited
+          }
         }
       }
-      observations.push(
-        unavailable ?? {
-          identity,
-          kind: "observed",
-          runs,
-        },
-      )
+      const newestPending = newestPendingRun(runs)
+      const newest = runs.reduce<CiGateObservedRun | undefined>((best, run) => {
+        if (best === undefined) {
+          return run
+        }
+        const bestKey = best.orderKey
+        const runKey = run.orderKey
+        if (bestKey === undefined || runKey === undefined) {
+          return best
+        }
+        return compareCiGateRunOrder(runKey, bestKey) > 0 ? run : best
+      }, undefined)
+      // A completed newest failure must not wait on jobs for older runs.
+      // Otherwise inspect the newest pending run, not a cancelled or skipped
+      // run that happens to be first.
+      if (
+        newestPending !== undefined &&
+        (newest === undefined || !isDecisiveCiGateObservedRun(newest))
+      ) {
+        const pendingIndex = runs.indexOf(newestPending)
+        if (pendingIndex !== -1) {
+          try {
+            runs[pendingIndex] = await annotateEarlyJobFailure(
+              fetchImpl,
+              token,
+              repository,
+              newestPending,
+              signal,
+            )
+          } catch (error) {
+            if (isGitHubThrottledError(error)) {
+              observeThrottle?.(error)
+            }
+          }
+        }
+      }
+      observations.push({
+        identity,
+        kind: "observed",
+        runs,
+        historyExhausted: page.exhausted,
+      })
     }
 
     return { defaultBranch, observations }
@@ -4433,7 +4570,7 @@ export const makeGitHubServiceFromToken = (
     makeObserveAutomatedReviewEvidence(token, observingFetch),
     makeUploadUserAttachment(token, observingFetch),
     makeListCiGateCatalog(token, observingFetch),
-    makeObserveCiGate(token, observingFetch),
+    makeObserveCiGate(token, observingFetch, observeThrottle),
   )
 }
 

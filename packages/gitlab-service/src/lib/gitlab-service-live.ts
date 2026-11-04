@@ -21,7 +21,6 @@ import {
   type TerminalPrStatusCheck,
   ciGateRunOrderKey,
   extractErrorCode,
-  isDecisiveCiGateObservedRun,
 } from "@ready-for-agent/forge-contract"
 import { GitLabProjectUnavailableError, GitLabRequestError } from "./errors.js"
 import {
@@ -558,19 +557,6 @@ const mapCiGatePermissionError = (
       })
     : error
 
-const pipelineIdFromIdentity = (runIdentity: string): string => {
-  const separator = runIdentity.indexOf(":")
-  return separator === -1 ? runIdentity : runIdentity.slice(0, separator)
-}
-
-const isSameObservedPipeline = (
-  runIdentity: string,
-  lastRunIdentity: string,
-): boolean =>
-  runIdentity === lastRunIdentity ||
-  pipelineIdFromIdentity(runIdentity) ===
-    pipelineIdFromIdentity(lastRunIdentity)
-
 const mapObservedPipeline = (
   value: unknown,
   defaultBranch: string,
@@ -909,69 +895,60 @@ export const makeGitLabService = (options: {
   const listObservedPipelines = (
     repository: GitLabRepository,
     defaultBranch: string,
-    lastSeen: string | null,
-  ): Effect.Effect<readonly CiGateObservedRun[], GitLabRequestError> => {
+    bounds: {
+      readonly createdBefore: Date | null
+      readonly notNewerThanOrderKey: string | null
+    } | null,
+  ): Effect.Effect<
+    {
+      readonly runs: readonly CiGateObservedRun[]
+      readonly historyExhausted: boolean
+    },
+    GitLabRequestError
+  > => {
     const message = `Failed to observe CI Gate Definitions for ${repository.projectPath}`
     return Effect.tryPromise({
       try: async () => {
         const runs: CiGateObservedRun[] = []
-        let page = 1
-        let reachedLastSeen = false
-        let collectedDecisiveAfterLastSeen = false
-        const path = `${projectApiPath(repository)}/pipelines?ref=${encodeURIComponent(defaultBranch)}&order_by=id&sort=desc`
-        while (true) {
-          const response = await fetchImpl(
-            `${apiBase(repository)}${path}&per_page=${PAGE_SIZE}&page=${page}`,
-            { headers },
+        const createdBefore =
+          bounds?.createdBefore === null || bounds?.createdBefore === undefined
+            ? ""
+            : `&created_before=${encodeURIComponent(new Date(bounds.createdBefore.getTime() + 1000).toISOString())}`
+        const path = `${projectApiPath(repository)}/pipelines?ref=${encodeURIComponent(defaultBranch)}&order_by=id&sort=desc${createdBefore}`
+        const response = await fetchImpl(
+          `${apiBase(repository)}${path}&per_page=${PAGE_SIZE}&page=1`,
+          { headers },
+        )
+        if (!response.ok) {
+          throw new GitLabHttpError(
+            response.status,
+            `${message}: GitLab returned HTTP ${response.status}`,
           )
-          if (!response.ok) {
-            throw new GitLabHttpError(
-              response.status,
-              `${message}: GitLab returned HTTP ${response.status}`,
-            )
-          }
-          const decoded: unknown = await response.json()
-          if (!Array.isArray(decoded)) {
-            throw new Error(`${message}: GitLab returned a non-array page`)
-          }
-          for (const value of decoded) {
-            const mapped = mapObservedPipeline(value, defaultBranch)
-            if (mapped === null) {
-              continue
-            }
-            runs.push(mapped)
-            if (
-              lastSeen !== null &&
-              isSameObservedPipeline(mapped.runIdentity, lastSeen)
-            ) {
-              reachedLastSeen = true
-              if (isDecisiveCiGateObservedRun(mapped)) {
-                collectedDecisiveAfterLastSeen = true
-                break
-              }
-              continue
-            }
-            if (reachedLastSeen && isDecisiveCiGateObservedRun(mapped)) {
-              collectedDecisiveAfterLastSeen = true
-              break
-            }
-          }
-          // First observation (no last-seen run) uses one official API page.
-          // An unfinished last-seen run is not a stable cursor.
-          if (collectedDecisiveAfterLastSeen || lastSeen === null) {
-            break
-          }
-          const nextPage = response.headers.get("x-next-page")?.trim() ?? ""
-          if (nextPage === "") {
-            break
-          }
-          const parsed = Number(nextPage)
-          if (!Number.isSafeInteger(parsed) || parsed <= page) {
-            throw new Error(`${message}: invalid GitLab x-next-page header`)
-          }
-          page = parsed
         }
-        return runs
+        const decoded: unknown = await response.json()
+        if (!Array.isArray(decoded)) {
+          throw new Error(`${message}: GitLab returned a non-array page`)
+        }
+        for (const value of decoded) {
+          const mapped = mapObservedPipeline(value, defaultBranch)
+          if (mapped === null) {
+            continue
+          }
+          if (
+            bounds?.notNewerThanOrderKey !== null &&
+            bounds?.notNewerThanOrderKey !== undefined &&
+            mapped.orderKey !== undefined &&
+            mapped.orderKey > bounds.notNewerThanOrderKey
+          ) {
+            continue
+          }
+          runs.push(mapped)
+        }
+        const nextPage = response.headers.get("x-next-page")?.trim() ?? ""
+        return {
+          runs,
+          historyExhausted: decoded.length < PAGE_SIZE || nextPage === "",
+        }
       },
       catch: (cause) => requestError(message, cause),
     }).pipe(
@@ -1401,15 +1378,22 @@ export const makeGitLabService = (options: {
             })
             continue
           }
-          const lastSeenRaw = input.lastRunIdentities[identity]
-          const lastSeen =
-            lastSeenRaw !== undefined && lastSeenRaw.trim() !== ""
-              ? lastSeenRaw
-              : null
-          const runs = yield* listObservedPipelines(
+          const scope = input.scope ?? { kind: "latest" as const }
+          if (
+            scope.kind === "catch_up" &&
+            scope.definitionIdentity !== identity
+          ) {
+            continue
+          }
+          const listed = yield* listObservedPipelines(
             repository,
             defaultBranch,
-            lastSeen,
+            scope.kind === "catch_up"
+              ? {
+                  createdBefore: scope.notNewerThan.createdAt,
+                  notNewerThanOrderKey: scope.notNewerThan.orderKey,
+                }
+              : null,
           ).pipe(
             Effect.mapError((error) =>
               mapCiGatePermissionError(
@@ -1418,10 +1402,38 @@ export const makeGitLabService = (options: {
               ),
             ),
           )
+          const runs = [...listed.runs]
+          if (scope.kind === "catch_up" && scope.revisit != null) {
+            const pipelineId = scope.revisit.runIdentity.split(":")[0] ?? ""
+            if (/^[0-9]+$/.test(pipelineId)) {
+              const revisited = yield* requestUnknown(
+                repository,
+                `${projectApiPath(repository)}/pipelines/${pipelineId}`,
+                `Failed to revisit pipeline ${pipelineId} for ${repository.projectPath}`,
+              ).pipe(Effect.result)
+              if (Result.isSuccess(revisited)) {
+                const mapped = mapObservedPipeline(
+                  revisited.success,
+                  defaultBranch,
+                )
+                if (mapped !== null) {
+                  const existing = runs.findIndex(
+                    (run) => run.runIdentity.split(":")[0] === pipelineId,
+                  )
+                  if (existing === -1) {
+                    runs.push(mapped)
+                  } else {
+                    runs[existing] = mapped
+                  }
+                }
+              }
+            }
+          }
           observations.push({
             identity,
             kind: "observed",
             runs,
+            historyExhausted: listed.historyExhausted,
           })
         }
         return { defaultBranch, observations }

@@ -350,7 +350,7 @@ describe("Azure DevOps CI Gate observation", () => {
     expect(definition.runs.at(-1)?.runIdentity).toBe("901:20260907.901")
   })
 
-  test("stops paging once the last-seen build identity is included", async () => {
+  test("fetches one newest page and does not scan to a stale cursor", async () => {
     const requestedTokens: Array<string | null> = []
     const pageOne = Array.from({ length: 100 }, (_, index) =>
       buildPayload({
@@ -397,8 +397,9 @@ describe("Azure DevOps CI Gate observation", () => {
       throw new Error("expected observed definition")
     }
     expect(definition.runs[0]?.runIdentity).toBe("2000:20260907.2000")
-    expect(definition.runs.at(-1)?.runIdentity).toBe("1950:20260907.1950")
-    expect(definition.runs).toHaveLength(51)
+    expect(definition.runs.at(-1)?.runIdentity).toBe("1901:20260907.1901")
+    expect(definition.runs).toHaveLength(100)
+    expect(definition.historyExhausted).toBe(false)
   })
 
   test("returns a qualifying success behind a saved pending bookmark", async () => {
@@ -460,10 +461,11 @@ describe("Azure DevOps CI Gate observation", () => {
     expect(definition.runs.map((run) => run.runIdentity)).toEqual([
       "300:20260907.300",
       "200:20260907.200",
+      "100:20260907.100",
     ])
   })
 
-  test("pages past a pending bookmark to a qualifying success on a later API page", async () => {
+  test("does not continue past a pending newest build during live observation", async () => {
     const requestedTokens: Array<string | null> = []
     const pageOne = Array.from({ length: 100 }, (_, index) =>
       buildPayload({
@@ -518,16 +520,14 @@ describe("Azure DevOps CI Gate observation", () => {
       }),
     )
     const definition = observation.observations[0]
-    expect(requestedTokens).toEqual([null, "page-2"])
+    expect(requestedTokens).toEqual([null])
     expect(definition?.kind).toBe("observed")
     if (definition?.kind !== "observed") {
       throw new Error("expected observed definition")
     }
     expect(definition.runs[0]?.runIdentity).toBe("2000:20260907.2000")
-    expect(definition.runs.at(-1)?.runIdentity).toBe("1900:20260907.1900")
-    expect(
-      definition.runs.some((run) => run.runIdentity === "1899:20260907.1899"),
-    ).toBe(false)
+    expect(definition.runs).toHaveLength(100)
+    expect(definition.historyExhausted).toBe(false)
   })
 
   test("marks deleted, disabled, and paused definitions unavailable without dropping others", async () => {

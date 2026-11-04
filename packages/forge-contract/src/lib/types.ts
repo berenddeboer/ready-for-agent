@@ -45,6 +45,12 @@ export type CiGateDefinitionObservation =
       readonly identity: string
       readonly kind: "observed"
       readonly runs: readonly CiGateObservedRun[]
+      /**
+       * True when this request's provider page was short, so no older runs
+       * remain in the queried window. Absent means the caller may infer it
+       * from a short run list.
+       */
+      readonly historyExhausted?: boolean
     }
   | {
       readonly identity: string
@@ -62,14 +68,46 @@ export interface CiGateObservation {
   readonly observations: readonly CiGateDefinitionObservation[]
 }
 
+/**
+ * One comparable run bound. Catch-up uses created time as a stable window
+ * and order key as the canonical edge, with the boundary run included.
+ */
+export interface CiGateHistoryBound {
+  readonly runIdentity: string
+  readonly orderKey: string
+  readonly createdAt: Date
+}
+
+/**
+ * Newest-page live observation, or one older page inside a fixed gap.
+ * Omitted scope means latest: one newest page, never a scan to a cursor.
+ * `lastRunIdentities` is not a paging cursor.
+ */
+export type CiGateObservationScope =
+  | { readonly kind: "latest" }
+  | {
+      readonly kind: "catch_up"
+      readonly definitionIdentity: string
+      /** Include this run and older. Adapters must not use a shifting page offset. */
+      readonly notNewerThan: CiGateHistoryBound
+      /** When set, a run at or older than this bound ends the useful window. */
+      readonly stopAt: CiGateHistoryBound | null
+      /**
+       * One pending run newer than the history page. Adapters refresh it with
+       * a single-run request and must not replace the history page with it.
+       * A revisit miss leaves the page intact.
+       */
+      readonly revisit?: CiGateHistoryBound | null
+    }
+
 export interface ObserveCiGateInput {
   readonly definitionIdentities: readonly string[]
   /**
-   * Latest observed run identity per definition; empty when none yet.
-   * Adapters treat a decisive last-seen run as a stable cursor and keep
-   * paging past an unfinished last-seen run until a decisive older result.
+   * Retained newest-run identities. Not a paging cursor: live observation
+   * fetches one newest page, and catch-up uses `scope` bounds.
    */
   readonly lastRunIdentities: { readonly [definitionIdentity: string]: string }
+  readonly scope?: CiGateObservationScope
 }
 
 export type TerminalPrStatusCheckOutcome = "green" | "red"

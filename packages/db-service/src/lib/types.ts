@@ -112,6 +112,13 @@ export const CiGateObservationErrorKind = Schema.Literals([
 ])
 export type CiGateObservationErrorKind = typeof CiGateObservationErrorKind.Type
 
+export const CiGateCoverageState = Schema.Literals([
+  "complete",
+  "gap",
+  "truncated",
+])
+export type CiGateCoverageState = typeof CiGateCoverageState.Type
+
 export const CiGateStateRecord = Schema.Struct({
   repositoryId: RepositoryId,
   defaultBranch: Schema.NullOr(Schema.String),
@@ -145,6 +152,27 @@ export const CiGateDefinitionObservationRecord = Schema.Struct({
    * Absent observations are not an early failure.
    */
   lastEarlyJobFailure: Schema.optional(Schema.Boolean),
+  /** Historical Coverage. Absent in-memory rows are treated as a checkpoint at the latest run. */
+  coverageState: Schema.optional(CiGateCoverageState),
+  coverageBranch: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageCheckpointRunIdentity: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageCheckpointOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageCheckpointCreatedAt: Schema.optional(Schema.NullOr(Schema.Date)),
+  coverageGapUpperRunIdentity: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageGapUpperOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageGapUpperCreatedAt: Schema.optional(Schema.NullOr(Schema.Date)),
+  coverageProgressRunIdentity: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageProgressOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageProgressCreatedAt: Schema.optional(Schema.NullOr(Schema.Date)),
+  coverageStopRunIdentity: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageStopOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageStopCreatedAt: Schema.optional(Schema.NullOr(Schema.Date)),
+  coverageHeadFloorRunIdentity: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageHeadFloorOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
+  coverageHeadFloorCreatedAt: Schema.optional(Schema.NullOr(Schema.Date)),
+  coveragePagesProcessed: Schema.optional(Schema.Number),
+  coverageDiagnostic: Schema.optional(Schema.NullOr(Schema.String)),
+  coveragePendingRuns: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type CiGateDefinitionObservationRecord =
   typeof CiGateDefinitionObservationRecord.Type
@@ -187,6 +215,15 @@ export const CiRepairAuthorizationRecord = Schema.Struct({
 })
 export type CiRepairAuthorizationRecord =
   typeof CiRepairAuthorizationRecord.Type
+
+export const CiRepairBaselineBoundRecord = Schema.Struct({
+  definitionIdentity: Schema.String,
+  runIdentity: Schema.NullOr(Schema.String),
+  orderKey: Schema.NullOr(Schema.String),
+  floorOrderKey: Schema.NullOr(Schema.String),
+})
+export type CiRepairBaselineBoundRecord =
+  typeof CiRepairBaselineBoundRecord.Type
 
 export const CiGateSnapshotRecord = Schema.Struct({
   state: Schema.NullOr(CiGateStateRecord),
@@ -454,6 +491,26 @@ export const CiGateDefinitionObservationSqlRow = Schema.Struct({
   lastRunOrderKey: Schema.NullOr(Schema.String),
   latchedRunOrderKey: Schema.NullOr(Schema.String),
   lastEarlyJobFailure: SqlBoolean,
+  coverageState: CiGateCoverageState,
+  coverageBranch: Schema.NullOr(Schema.String),
+  coverageCheckpointRunIdentity: Schema.NullOr(Schema.String),
+  coverageCheckpointOrderKey: Schema.NullOr(Schema.String),
+  coverageCheckpointCreatedAt: Schema.NullOr(Schema.DateFromMillis),
+  coverageGapUpperRunIdentity: Schema.NullOr(Schema.String),
+  coverageGapUpperOrderKey: Schema.NullOr(Schema.String),
+  coverageGapUpperCreatedAt: Schema.NullOr(Schema.DateFromMillis),
+  coverageProgressRunIdentity: Schema.NullOr(Schema.String),
+  coverageProgressOrderKey: Schema.NullOr(Schema.String),
+  coverageProgressCreatedAt: Schema.NullOr(Schema.DateFromMillis),
+  coverageStopRunIdentity: Schema.NullOr(Schema.String),
+  coverageStopOrderKey: Schema.NullOr(Schema.String),
+  coverageStopCreatedAt: Schema.NullOr(Schema.DateFromMillis),
+  coverageHeadFloorRunIdentity: Schema.NullOr(Schema.String),
+  coverageHeadFloorOrderKey: Schema.NullOr(Schema.String),
+  coverageHeadFloorCreatedAt: Schema.NullOr(Schema.DateFromMillis),
+  coveragePagesProcessed: Schema.Number,
+  coverageDiagnostic: Schema.NullOr(Schema.String),
+  coveragePendingRuns: Schema.NullOr(Schema.String),
 }).pipe(
   Schema.encodeKeys({
     identity: "definition_identity",
@@ -475,6 +532,26 @@ export const CiGateDefinitionObservationSqlRow = Schema.Struct({
     lastRunOrderKey: "last_run_order_key",
     latchedRunOrderKey: "latched_run_order_key",
     lastEarlyJobFailure: "last_early_job_failure",
+    coverageState: "coverage_state",
+    coverageBranch: "coverage_branch",
+    coverageCheckpointRunIdentity: "coverage_checkpoint_run_identity",
+    coverageCheckpointOrderKey: "coverage_checkpoint_order_key",
+    coverageCheckpointCreatedAt: "coverage_checkpoint_created_at",
+    coverageGapUpperRunIdentity: "coverage_gap_upper_run_identity",
+    coverageGapUpperOrderKey: "coverage_gap_upper_order_key",
+    coverageGapUpperCreatedAt: "coverage_gap_upper_created_at",
+    coverageProgressRunIdentity: "coverage_progress_run_identity",
+    coverageProgressOrderKey: "coverage_progress_order_key",
+    coverageProgressCreatedAt: "coverage_progress_created_at",
+    coverageStopRunIdentity: "coverage_stop_run_identity",
+    coverageStopOrderKey: "coverage_stop_order_key",
+    coverageStopCreatedAt: "coverage_stop_created_at",
+    coverageHeadFloorRunIdentity: "coverage_head_floor_run_identity",
+    coverageHeadFloorOrderKey: "coverage_head_floor_order_key",
+    coverageHeadFloorCreatedAt: "coverage_head_floor_created_at",
+    coveragePagesProcessed: "coverage_pages_processed",
+    coverageDiagnostic: "coverage_diagnostic",
+    coveragePendingRuns: "coverage_pending_runs",
   }),
 )
 export type CiGateDefinitionObservationSqlRow =
