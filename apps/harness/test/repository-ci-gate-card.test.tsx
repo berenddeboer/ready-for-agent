@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { renderToStaticMarkup } from "react-dom/server"
+import { ciGateRunOrderKey } from "@ready-for-agent/forge-contract"
 import { ciGateStatusLabel } from "../src/ci-gate-status-label.js"
 import type { CiGateStoryInput } from "../src/ci-gate-status-story.js"
 import { RepositoryCiGateCardDetails } from "../src/repository-ci-gate-card.js"
@@ -473,6 +474,418 @@ describe("Repository CI Gate presentation", () => {
     expect(html).toContain("Repair run link unavailable")
     expect(html).not.toContain("Start CI Repair")
     expect(html).not.toContain("href=")
+  })
+})
+
+const OBSERVED_RUN_ID = 42706569032
+const OBSERVED_FAILING_URL =
+  "https://github.com/processfocus/monorepo/actions/runs/42706569032"
+const OBSERVED_RERUN_URL =
+  "https://github.com/processfocus/monorepo/actions/runs/42706569032/attempts/2"
+
+const latchedWorkflow = (input: {
+  readonly identity: string
+  readonly displayLabel: string
+  readonly runId?: number
+  readonly failingAttempt?: number
+  readonly latestAttempt?: number
+  readonly latestStatus: string
+  readonly latestConclusion: string | null
+  readonly failingUrl?: string
+  readonly latestUrl?: string
+  readonly earlyJobFailure?: boolean
+}): Story["definitions"][number] => {
+  const runId = input.runId ?? OBSERVED_RUN_ID
+  const failingAttempt = input.failingAttempt ?? 1
+  const latestAttempt = input.latestAttempt ?? failingAttempt
+  return {
+    identity: input.identity,
+    displayLabel: input.displayLabel,
+    failureLatched: true,
+    diagnostic: null,
+    failingRun: {
+      runIdentity: `${String(runId)}:${String(failingAttempt)}`,
+      htmlUrl: input.failingUrl ?? OBSERVED_FAILING_URL,
+      orderKey: ciGateRunOrderKey(runId, failingAttempt),
+      detectedAt: FAILURE_DETECTED,
+    },
+    latestRun: {
+      runIdentity: `${String(runId)}:${String(latestAttempt)}`,
+      htmlUrl: input.latestUrl ?? OBSERVED_RERUN_URL,
+      rawStatus: input.latestStatus,
+      rawConclusion: input.latestConclusion,
+      createdAt: "2026-10-30T23:50:00.000Z",
+      updatedAt: "2026-10-30T23:51:00.000Z",
+      orderKey: ciGateRunOrderKey(runId, latestAttempt),
+      earlyJobFailure: input.earlyJobFailure ?? false,
+    },
+  }
+}
+
+describe("CI rerun recovery presentation", () => {
+  test("a running rerun waits for recovery instead of asking for repair", () => {
+    const ciGate = story({
+      status: "CLOSED",
+      observedAt: LAST_CHECKED,
+      defaultBranch: "trunk",
+      canStartCiRepair: true,
+      activeIncident: { id: "cfi-open", openedAt: "2026-10-30T23:40:00.000Z" },
+      definitions: [
+        latchedWorkflow({
+          identity: "ci.yml",
+          displayLabel: "CI",
+          latestAttempt: 2,
+          latestStatus: "in_progress",
+          latestConclusion: null,
+        }),
+      ],
+    })
+    const card = renderCard(ciGate, {
+      canStartCiRepair: true,
+      onStartRepair: () => undefined,
+    })
+    const settings = renderSettings(ciGate, {
+      onStartRepair: () => undefined,
+    })
+    for (const html of [card, settings]) {
+      expect(html).toContain("CI Gate · Closed")
+      expect(html).toContain("CI rerun in progress; waiting for recovery.")
+      expect(html).not.toContain(
+        "CI failed on trunk. The gate remains closed until recovery is confirmed.",
+      )
+      expect(html).toContain("CI rerun · in progress · CI")
+      expect(html).toContain(`href="${OBSERVED_RERUN_URL}"`)
+      expect(html).toContain("Failing CI · CI")
+      expect(html).toContain(`href="${OBSERVED_FAILING_URL}"`)
+      expect(html).not.toContain("Start CI Repair")
+      expect(html).not.toContain('data-testid="ci-repair-action"')
+    }
+  })
+
+  test("a queued rerun says it is queued and does not ask for repair", () => {
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        canStartCiRepair: true,
+        definitions: [
+          latchedWorkflow({
+            identity: "ci.yml",
+            displayLabel: "CI",
+            latestAttempt: 2,
+            latestStatus: "queued",
+            latestConclusion: null,
+          }),
+        ],
+      }),
+      { canStartCiRepair: true, onStartRepair: () => undefined },
+    )
+    expect(html).toContain("CI Gate · Closed")
+    expect(html).toContain("CI rerun queued; waiting for recovery.")
+    expect(html).toContain("CI rerun · queued · CI")
+    expect(html).toContain(`href="${OBSERVED_RERUN_URL}"`)
+    expect(html).not.toContain("CI rerun in progress; waiting for recovery.")
+    expect(html).not.toContain("Start CI Repair")
+  })
+
+  test("a failed rerun returns to repair messaging", () => {
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        canStartCiRepair: true,
+        definitions: [
+          latchedWorkflow({
+            identity: "ci.yml",
+            displayLabel: "CI",
+            failingAttempt: 2,
+            latestAttempt: 2,
+            latestStatus: "completed",
+            latestConclusion: "failure",
+            latestUrl: OBSERVED_RERUN_URL,
+          }),
+        ],
+      }),
+      { canStartCiRepair: true, onStartRepair: () => undefined },
+    )
+    expect(html).toContain("CI Gate · Closed")
+    expect(html).toContain(
+      "CI failed on trunk. The gate remains closed until recovery is confirmed.",
+    )
+    expect(html).toContain("Start CI Repair")
+    expect(html).not.toContain("CI rerun")
+    expect(html).not.toContain("waiting for recovery")
+  })
+
+  test("a newer failed attempt is not described as a recovery wait", () => {
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        canStartCiRepair: true,
+        definitions: [
+          latchedWorkflow({
+            identity: "ci.yml",
+            displayLabel: "CI",
+            latestAttempt: 2,
+            latestStatus: "completed",
+            latestConclusion: "failure",
+          }),
+        ],
+      }),
+      { canStartCiRepair: true, onStartRepair: () => undefined },
+    )
+    expect(html).toContain(
+      "CI failed on trunk. The gate remains closed until recovery is confirmed.",
+    )
+    expect(html).toContain("Start CI Repair")
+    expect(html).not.toContain("CI rerun")
+  })
+
+  test("a rerun that already has a failed job is not a recovery wait", () => {
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        canStartCiRepair: true,
+        definitions: [
+          latchedWorkflow({
+            identity: "ci.yml",
+            displayLabel: "CI",
+            latestAttempt: 2,
+            latestStatus: "in_progress",
+            latestConclusion: null,
+            earlyJobFailure: true,
+          }),
+        ],
+      }),
+      { canStartCiRepair: true, onStartRepair: () => undefined },
+    )
+    expect(html).toContain(
+      "CI failed on trunk. The gate remains closed until recovery is confirmed.",
+    )
+    expect(html).toContain("Start CI Repair")
+    expect(html).not.toContain("CI rerun")
+  })
+
+  test("a confirmed recovery shows the open gate, not a rerun wait", () => {
+    const html = renderCard(
+      story({
+        status: "OPEN",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        canStartCiRepair: false,
+        incidentHistory: [
+          {
+            id: "cfi-resolved",
+            openedAt: "2026-10-30T23:00:00.000Z",
+            resolvedAt: LAST_CHECKED,
+            summary: "CI Gate recovered: newer success on CI.",
+            failedRuns: [],
+          },
+        ],
+        definitions: [
+          {
+            identity: "ci.yml",
+            displayLabel: "CI",
+            failureLatched: false,
+            diagnostic: null,
+            failingRun: null,
+            latestRun: {
+              runIdentity: `${String(OBSERVED_RUN_ID)}:2`,
+              htmlUrl: OBSERVED_RERUN_URL,
+              rawStatus: "completed",
+              rawConclusion: "success",
+              createdAt: "2026-10-30T23:50:00.000Z",
+              updatedAt: LAST_CHECKED,
+              orderKey: ciGateRunOrderKey(OBSERVED_RUN_ID, 2),
+              earlyJobFailure: false,
+            },
+          },
+        ],
+      }),
+      { onStartRepair: () => undefined },
+    )
+    expect(html).toContain("CI Gate · Open")
+    expect(html).toContain("Default-branch CI is healthy on trunk.")
+    expect(html).toContain("CI Gate recovered: newer success on CI.")
+    expect(html).not.toContain("CI rerun")
+    expect(html).not.toContain("Start CI Repair")
+    expect(html).not.toContain("CI Gate · Closed")
+  })
+
+  test("a successful rerun that has not cleared the latch stays actionable", () => {
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        canStartCiRepair: true,
+        definitions: [
+          latchedWorkflow({
+            identity: "ci.yml",
+            displayLabel: "CI",
+            latestAttempt: 2,
+            latestStatus: "completed",
+            latestConclusion: "success",
+          }),
+        ],
+      }),
+      { canStartCiRepair: true, onStartRepair: () => undefined },
+    )
+    expect(html).toContain("CI Gate · Closed")
+    expect(html).toContain(
+      "A successful result was recorded for the latched failure on CI, but that failure has not cleared.",
+    )
+    expect(html).toContain("Start CI Repair")
+    expect(html).not.toContain("CI rerun")
+    expect(html).not.toContain("Default-branch CI is healthy")
+  })
+
+  test("a pending rerun on one workflow does not hide the other failure", () => {
+    const schoolUrl =
+      "https://github.com/processfocus/monorepo/actions/runs/100"
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        canStartCiRepair: true,
+        definitions: [
+          latchedWorkflow({
+            identity: "deploy.yml",
+            displayLabel: "Deploy demo",
+            latestAttempt: 2,
+            latestStatus: "in_progress",
+            latestConclusion: null,
+          }),
+          latchedWorkflow({
+            identity: "e2e.yml",
+            displayLabel: "School E2E tests",
+            runId: 100,
+            latestStatus: "completed",
+            latestConclusion: "failure",
+            failingUrl: schoolUrl,
+            latestUrl: schoolUrl,
+          }),
+        ],
+      }),
+      { canStartCiRepair: true, onStartRepair: () => undefined },
+    )
+    expect(html).toContain("CI Gate · Closed")
+    expect(html).toContain(
+      "CI rerun in progress on Deploy demo; waiting for recovery. School E2E tests failed on trunk. The gate remains closed until recovery is confirmed.",
+    )
+    expect(html).not.toContain("CI rerun in progress; waiting for recovery.")
+    expect(html).toContain("CI rerun · in progress · Deploy demo")
+    expect(html).toContain(`href="${OBSERVED_RERUN_URL}"`)
+    expect(html).toContain("Failing CI · School E2E tests")
+    expect(html).toContain("Start CI Repair")
+    expect(html).not.toContain("CI rerun · in progress · School E2E tests")
+  })
+
+  test("a rerun does not hide recovery verification on another workflow", () => {
+    const verificationUrl = "https://github.com/acme/widgets/actions/runs/901"
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        canStartCiRepair: true,
+        activeIncident: {
+          id: "cfi-open",
+          openedAt: "2026-10-30T23:00:00.000Z",
+        },
+        definitions: [
+          latchedWorkflow({
+            identity: "deploy.yml",
+            displayLabel: "Deploy demo",
+            latestAttempt: 2,
+            latestStatus: "in_progress",
+            latestConclusion: null,
+          }),
+          {
+            identity: "ci.yml",
+            displayLabel: "CI",
+            failureLatched: true,
+            diagnostic: null,
+            failingRun: {
+              runIdentity: "900:1",
+              htmlUrl: "https://github.com/acme/widgets/actions/runs/900",
+              orderKey: ciGateRunOrderKey(900, 1),
+              detectedAt: null,
+            },
+            latestRun: {
+              runIdentity: "901:1",
+              htmlUrl: verificationUrl,
+              rawStatus: "in_progress",
+              rawConclusion: null,
+              createdAt: "2026-10-30T23:50:00.000Z",
+              updatedAt: "2026-10-30T23:51:00.000Z",
+              orderKey: ciGateRunOrderKey(901, 1),
+              earlyJobFailure: false,
+            },
+          },
+        ],
+      }),
+      { canStartCiRepair: true, onStartRepair: () => undefined },
+    )
+    expect(html).toContain(
+      "CI rerun in progress on Deploy demo; waiting for recovery.",
+    )
+    expect(html).toContain(
+      "Recovery verification is still in progress on CI. The gate stays closed until that run succeeds.",
+    )
+    expect(html).toContain("Recovery verification · CI")
+    expect(html).toContain(`href="${verificationUrl}"`)
+    expect(html).toContain("Start CI Repair")
+    expect(html).not.toContain("CI rerun in progress; waiting for recovery.")
+  })
+
+  test("mixed queued and running reruns do not claim every failure is in progress", () => {
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        canStartCiRepair: true,
+        definitions: [
+          latchedWorkflow({
+            identity: "deploy.yml",
+            displayLabel: "Deploy demo",
+            latestAttempt: 2,
+            latestStatus: "in_progress",
+            latestConclusion: null,
+          }),
+          latchedWorkflow({
+            identity: "e2e.yml",
+            displayLabel: "School E2E tests",
+            runId: 100,
+            latestAttempt: 2,
+            latestStatus: "queued",
+            latestConclusion: null,
+            failingUrl:
+              "https://github.com/processfocus/monorepo/actions/runs/100",
+            latestUrl:
+              "https://github.com/processfocus/monorepo/actions/runs/100/attempts/2",
+          }),
+        ],
+      }),
+      { canStartCiRepair: true, onStartRepair: () => undefined },
+    )
+    expect(html).toContain(
+      "CI rerun in progress on Deploy demo; CI rerun queued on School E2E tests; waiting for recovery.",
+    )
+    expect(html).not.toContain("CI rerun in progress; waiting for recovery.")
+    expect(html).not.toContain("CI rerun queued; waiting for recovery.")
+    expect(html).toContain("CI rerun · in progress · Deploy demo")
+    expect(html).toContain("CI rerun · queued · School E2E tests")
+    expect(html).not.toContain("Start CI Repair")
+    expect(html).toContain("CI Gate · Closed")
   })
 })
 

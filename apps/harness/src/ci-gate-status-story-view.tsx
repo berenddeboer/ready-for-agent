@@ -52,6 +52,15 @@ const RelativeTime = ({
   )
 }
 
+const runLinkRole = (
+  run: Extract<CiGateStatusStoryView, { kind: "status" }>["runs"][number],
+): string => {
+  if (run.role !== "CI rerun") {
+    return run.role
+  }
+  return run.pace === "running" ? "CI rerun · in progress" : "CI rerun · queued"
+}
+
 const RunLink = ({
   role,
   definitionLabel,
@@ -214,8 +223,8 @@ export function CiGateStatusStory({
       ))}
       {view.runs.map((run) => (
         <RunLink
-          key={`${run.role}-${run.definitionLabel ?? "run"}-${run.htmlUrl ?? "none"}`}
-          role={run.role}
+          key={`${runLinkRole(run)}-${run.definitionLabel ?? "run"}-${run.htmlUrl ?? "none"}`}
+          role={runLinkRole(run)}
           definitionLabel={run.definitionLabel}
           htmlUrl={run.htmlUrl}
         />
