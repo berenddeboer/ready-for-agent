@@ -64,11 +64,20 @@ export type CiGateStoryInput = {
   readonly canStartCiRepair: boolean
 }
 
-type CiGateStoryLink = {
-  readonly role: "Failing CI" | "Repair run" | "Recovery verification"
-  readonly definitionLabel: string | null
-  readonly htmlUrl: string | null
-}
+type RecoveryPace = "queued" | "running"
+
+type CiGateStoryLink =
+  | {
+      readonly role: "Failing CI" | "Repair run" | "Recovery verification"
+      readonly definitionLabel: string | null
+      readonly htmlUrl: string | null
+    }
+  | {
+      readonly role: "CI rerun"
+      readonly definitionLabel: string | null
+      readonly htmlUrl: string | null
+      readonly pace: RecoveryPace
+    }
 
 type CiGateHistoryEntry = {
   readonly id: string
@@ -175,6 +184,105 @@ const latchIsNewer = (
   return compareCiGateRunOrder(failing.orderKey, latest.orderKey) > 0
 }
 
+/**
+ * A GitHub rerun keeps the workflow run id and raises the attempt. That is
+ * newer only when the order key says so. A missing key is not proof.
+ */
+const newerAttemptThanLatch = (
+  failing: CiGateStoryFailingRun | null,
+  latest: CiGateStoryRun,
+): boolean => {
+  if (!hasText(failing?.runIdentity) || !hasText(latest.runIdentity)) {
+    return false
+  }
+  if (failing.runIdentity === latest.runIdentity) {
+    return false
+  }
+  if (
+    runIdFromIdentity(failing.runIdentity) !==
+    runIdFromIdentity(latest.runIdentity)
+  ) {
+    return false
+  }
+  if (!hasText(failing.orderKey) || !hasText(latest.orderKey)) {
+    return false
+  }
+  return compareCiGateRunOrder(latest.orderKey, failing.orderKey) > 0
+}
+
+const recoveryPace = (rawStatus: string | null): RecoveryPace | null => {
+  const status = (rawStatus ?? "").trim().toLowerCase()
+  if (
+    status === "in_progress" ||
+    status === "inprogress" ||
+    status === "running"
+  ) {
+    return "running"
+  }
+  if (
+    status === "queued" ||
+    status === "pending" ||
+    status === "requested" ||
+    status === "waiting" ||
+    status === "notstarted" ||
+    status === "created" ||
+    status === "preparing" ||
+    status === "scheduled" ||
+    status === "waiting_for_resource" ||
+    status === "postponed"
+  ) {
+    return "queued"
+  }
+  return null
+}
+
+const pendingRerunPace = (
+  failing: CiGateStoryFailingRun | null,
+  latest: CiGateStoryRun,
+): RecoveryPace | null => {
+  if (!newerAttemptThanLatch(failing, latest)) {
+    return null
+  }
+  if (classifyLatest(latest) !== "pending") {
+    return null
+  }
+  return recoveryPace(latest.rawStatus)
+}
+
+const uniformRecoveryPace = (
+  reruns: readonly { readonly pace: RecoveryPace }[],
+): RecoveryPace | null => {
+  const pace = reruns[0]?.pace
+  if (pace === undefined || !reruns.every((rerun) => rerun.pace === pace)) {
+    return null
+  }
+  return pace
+}
+
+const uniformRecoveryMessage = (pace: RecoveryPace): string =>
+  pace === "running"
+    ? "CI rerun in progress; waiting for recovery."
+    : "CI rerun queued; waiting for recovery."
+
+const namedRecoveryMessage = (
+  reruns: readonly { readonly label: string; readonly pace: RecoveryPace }[],
+): string => {
+  const running = reruns
+    .filter((rerun) => rerun.pace === "running")
+    .map((rerun) => rerun.label)
+  const queued = reruns
+    .filter((rerun) => rerun.pace === "queued")
+    .map((rerun) => rerun.label)
+  const parts: string[] = []
+  if (running.length > 0) {
+    parts.push(`CI rerun in progress on ${joinLabels(running)}`)
+  }
+  if (queued.length > 0) {
+    parts.push(`CI rerun queued on ${joinLabels(queued)}`)
+  }
+  return `${parts.join("; ")}; waiting for recovery.`
+}
+
 const predatesIncident = (
   run: CiGateStoryRun,
   openedAt: string | null | undefined,
@@ -215,6 +323,8 @@ const statusHeadline = (
 /**
  * One current-status story. Run roles and history come from stored gate
  * evidence. A missing order key or timestamp is not treated as proof.
+ * A newer pending attempt of a latched failure is a recovery check, not a
+ * request to start repair. It does not clear the gate.
  */
 export const presentCiGateStory = (
   input: CiGateStoryInput,
@@ -223,17 +333,15 @@ export const presentCiGateStory = (
     return { kind: "disabled" }
   }
 
-  const failedLabels = input.definitions
-    .filter((definition) => definition.failureLatched)
-    .map((definition) =>
-      hasText(definition.displayLabel)
-        ? definition.displayLabel
-        : definition.identity,
-    )
   const where = branchPhrase(input.defaultBranch)
   const outstanding: string[] = []
   const notes: string[] = []
   const runs: CiGateStoryLink[] = []
+  const pendingReruns: {
+    readonly identity: string
+    readonly label: string
+    readonly pace: RecoveryPace
+  }[] = []
   const earlierRuns: {
     readonly label: string
     readonly htmlUrl: string | null
@@ -273,7 +381,26 @@ export const presentCiGateStory = (
       hasText(failingIdentity) &&
       isSameObservedRun(latest.runIdentity, failingIdentity)
     if (sameAsLatch) {
-      if (definition.failureLatched && classifyLatest(latest) === "success") {
+      const pace =
+        input.status === "CLOSED"
+          ? pendingRerunPace(definition.failingRun, latest)
+          : null
+      if (pace !== null) {
+        pendingReruns.push({
+          identity: definition.identity,
+          label,
+          pace,
+        })
+        runs.push({
+          role: "CI rerun",
+          definitionLabel: label,
+          htmlUrl: hasText(latest.htmlUrl) ? latest.htmlUrl : null,
+          pace,
+        })
+      } else if (
+        definition.failureLatched &&
+        classifyLatest(latest) === "success"
+      ) {
         outstanding.push(
           `A successful result was recorded for the latched failure on ${label}, but that failure has not cleared.`,
         )
@@ -361,14 +488,42 @@ export const presentCiGateStory = (
     (run) => run.at === null || !attachedTimes.has(run.at),
   )
 
+  const recoveringIdentities = new Set(
+    pendingReruns.map((rerun) => rerun.identity),
+  )
+  const stillFailedLabels = input.definitions
+    .filter(
+      (definition) =>
+        definition.failureLatched &&
+        !recoveringIdentities.has(definition.identity),
+    )
+    .map((definition) =>
+      hasText(definition.displayLabel)
+        ? definition.displayLabel
+        : definition.identity,
+    )
+  const allLatchedRecovering =
+    pendingReruns.length > 0 && stillFailedLabels.length === 0
+  const recoveryExplanation = (): string => {
+    const pace = uniformRecoveryPace(pendingReruns)
+    return pace === null
+      ? namedRecoveryMessage(pendingReruns)
+      : uniformRecoveryMessage(pace)
+  }
+  const closedFailure = `${joinLabels(stillFailedLabels)} failed${where}. ${
+    outstanding.length > 0
+      ? outstanding.join(" ")
+      : "The gate remains closed until recovery is confirmed."
+  }`
+
   let explanation: string
   switch (input.status) {
     case "CLOSED":
-      explanation = `${joinLabels(failedLabels)} failed${where}. ${
-        outstanding.length > 0
-          ? outstanding.join(" ")
-          : "The gate remains closed until recovery is confirmed."
-      }`
+      explanation = allLatchedRecovering
+        ? recoveryExplanation()
+        : pendingReruns.length > 0
+          ? `${namedRecoveryMessage(pendingReruns)} ${closedFailure}`
+          : closedFailure
       break
     case "OPEN": {
       const unobserved = input.definitions.filter(
@@ -403,7 +558,7 @@ export const presentCiGateStory = (
   const closed = input.status === "CLOSED"
   const repair =
     input.activeRepair === null
-      ? input.canStartCiRepair
+      ? input.canStartCiRepair && !allLatchedRecovering
         ? ({ kind: "can_start" } as const)
         : ({ kind: "none" } as const)
       : {
