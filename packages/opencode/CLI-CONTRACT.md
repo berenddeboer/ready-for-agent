@@ -100,12 +100,43 @@ ordering bug. Required coverage keeps the exact rejection checks on the pin.
 Drift run
 [41303873900](https://github.com/berenddeboer/ready-for-agent/actions/runs/41303873900)
 showed OpenCode **2.2.5** accepts those three placements and reaches the
-no-inference boundary. A direct 2.2.0 parser probe also got past flag
-rejection, but it only reported an unreachable server. That is not proof of
-an isolated server, worktree, or stored session, so 2.2.0 is not an
-accepting contract version and not a cutoff. The suite does not use a
-semver comparison. The pin must reject. 2.2.5 must prove acceptance. Any
-other version fails closed until a real-binary run records its capability.
+no-inference boundary. A local real-binary probe on 2026-11-10 showed
+OpenCode **2.2.6** does the same. That probe installed 2.2.6 the way CI
+does: `bash scripts/install-opencode-v2.sh latest` resolved npm latest to
+2.2.6 and ran the official installer with `--version 2.2.6
+--no-modify-path`, into an isolated `HOME` so the operator binary and
+service were not changed. The contract gate parsed that binary as `2.2.6`.
+The three production placement cases in `test/v2-cli-contract.spec.ts` then
+ran with `OPENCODE_CONTRACT_MODE=latest` and that binary first on `PATH`.
+All three passed the existing oracles, not a new success condition:
+
+- `--server` before `run` logged `server-before-run accepted` with argv
+  `--server <isolated-url> run --auto --format json -m
+  ready-for-agent-contract/no-such-model#high Contract probe`, exact
+  `Model unavailable`, the session on that server, and the prompt stored
+  once.
+- `--server` before `api` logged `server-before-api accepted`. Every `api`
+  call placed `--server` before `api`. Export stayed in production order
+  (`session export --server <url>`). The case proved the isolated session,
+  worktree, stored command, and a valid export with no command result.
+- `--server` before `export` logged `server-before-export accepted`. `api`
+  kept production order. Export used `session --server <url> export` and
+  the same stored-command/export proof.
+
+That same installed binary then passed `bunx nx run opencode:cli-contract`
+with `OPENCODE_CONTRACT_MODE=latest`: 14 pass, 0 skip, 0 fail, including
+interactive-resume.
+
+Drift run
+[42478079669](https://github.com/berenddeboer/ready-for-agent/actions/runs/42478079669)
+installed 2.2.6 but threw before those cases probed the binary. It is not
+this evidence. A direct 2.2.0 parser probe also got past flag rejection,
+but it only reported an unreachable server. That is not proof of an
+isolated server, worktree, or stored session, so 2.2.0 is not an accepting
+contract version and not a cutoff. The suite does not use a semver
+comparison. The pin must reject. 2.2.5 and 2.2.6 must prove acceptance.
+Any other version, including 2.2.7 and later, fails closed until a
+real-binary run records its capability.
 
 An accepted placement proves the explicit isolated server URL was used, the
 session is on that server in the worktree, and the turn reached the same
@@ -139,9 +170,9 @@ the parser misses fails the case instead of being treated as compatibility.
 | `service status` | `readOpenCodeServiceStatus` | isolated stopped service; isolated registration of the ephemeral server | service discovery | exact `stopped` text, then the ephemeral URL; does not print the operator URL |
 | jump model pin | `interactiveResumeCommand` + `startInteractiveResume` | `POST .../model` `--data`, directory header, quoting-sensitive path | `apps/ready-for-agent/src/interactive-resume-v2-contract.test.ts` jump pin | pin exits 0; session model matches. Same Nx target as this package |
 | jump TUI | same launcher, and `writeJumpLauncherScript` for the tmux script | `opencode <dir> --session <id> --auto`, quoting-sensitive path | same app contract file, jump TUI | both the direct launcher and the tmux script are still running after startup, with no launcher-failure text; a quick nonzero exit fails the case; pinned model remains after the script |
-| BER-31 `--server` before `run` | production `startTurn`, spawner moves the flag | explicit server | run placement | pin: exact `Unrecognized flag: --server in command opencode run`. 2.2.5: exact `Model unavailable`, session on the isolated server, prompt stored once |
-| `--server` before `api` | production command turn, spawner moves only `api` | explicit server | api placement | pin: exact unrecognized-flag diagnostic. 2.2.5: isolated session, worktree, stored command, production export order, valid export with no command result |
-| `--server` before `export` | production command turn, spawner moves only `export` | explicit server | export placement | pin: exact `Unrecognized flag: --server in command opencode session`. 2.2.5: `api` keeps production order; export uses the moved flag and the same stored-command/export proof |
+| BER-31 `--server` before `run` | production `startTurn`, spawner moves the flag | explicit server | run placement | pin: exact `Unrecognized flag: --server in command opencode run`. 2.2.5 and 2.2.6: exact `Model unavailable`, session on the isolated server, prompt stored once |
+| `--server` before `api` | production command turn, spawner moves only `api` | explicit server | api placement | pin: exact unrecognized-flag diagnostic. 2.2.5 and 2.2.6: isolated session, worktree, stored command, production export order, valid export with no command result |
+| `--server` before `export` | production command turn, spawner moves only `export` | explicit server | export placement | pin: exact `Unrecognized flag: --server in command opencode session`. 2.2.5 and 2.2.6: `api` keeps production order; export uses the moved flag and the same stored-command/export proof |
 | removed `--dir`, `--variant`, `--command` | production `startTurn`, spawner inserts the flag | explicit server | obsolete flag mutations | exact unrecognized-flag diagnostic. Independent of placement, so one changed flag does not hide the others |
 | former `models --verbose` | production `inspect`, spawner replaces the catalog argv | explicit server | verbose mutation | exact `Unrecognized flag: --verbose in command opencode models` |
 

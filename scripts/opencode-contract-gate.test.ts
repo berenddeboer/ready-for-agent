@@ -238,11 +238,21 @@ describe("OpenCode --server placement capability", () => {
     ).toEqual({ kind: "historical-rejection" })
   })
 
-  it("permits only the evidenced accepting version, not a semver cutoff", () => {
+  it("permits only evidenced accepting versions, not a semver cutoff", () => {
     expect(
       serverPlacementCapability({ version: "2.2.5", baseline: BASELINE }),
     ).toEqual({ kind: "evidenced-acceptance", version: "2.2.5" })
-    for (const version of ["2.0.33", "2.1.0", "2.2.0", "2.2.4", "2.2.6"]) {
+    expect(
+      serverPlacementCapability({ version: "2.2.6", baseline: BASELINE }),
+    ).toEqual({ kind: "evidenced-acceptance", version: "2.2.6" })
+    for (const version of [
+      "2.0.33",
+      "2.1.0",
+      "2.2.0",
+      "2.2.4",
+      "2.2.7",
+      "2.3.0",
+    ]) {
       expect(() =>
         serverPlacementCapability({ version, baseline: BASELINE }),
       ).toThrow(/Refusing to guess a cutoff/)
