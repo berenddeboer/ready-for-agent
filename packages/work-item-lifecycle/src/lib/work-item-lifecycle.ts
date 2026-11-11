@@ -9527,22 +9527,36 @@ export const makeWorkItemLifecycleLive = (
           current.state === "needs_human" &&
           (current.failureCode === DECISION_NEEDED_FAILURE_CODE || openDecision)
         const mergeHandoff = isMergeAssessmentResumeHandoff(current)
-        const priorMergeAssessment = current.stepRuns.some(
-          (stepRun) =>
-            stepRun.step === "decide_pr_merge" &&
-            stepRun.status === "succeeded",
-        )
-        const admittedOrWaiting =
-          active !== undefined ||
-          current.waitingSince !== null ||
-          current.holdsWorkerSlot ||
-          current.waitingForCiRepair
+        const latestSucceeded = current.stepRuns.reduce<
+          (typeof current.stepRuns)[number] | undefined
+        >((latest, stepRun) => {
+          if (stepRun.status !== "succeeded" || stepRun.finishedAt === null) {
+            return latest
+          }
+          if (
+            latest?.finishedAt == null ||
+            stepRun.finishedAt.getTime() >= latest.finishedAt.getTime()
+          ) {
+            return stepRun
+          }
+          return latest
+        }, undefined)
+        // Same boundary as the continuation prompt: only a Resume leaves
+        // Decide PR Merge as the latest succeeded step. An ordinary in-flight
+        // reassessment must be rejected, not treated as a duplicate Resume.
         const mergeResumeInProgress =
-          priorMergeAssessment &&
+          latestSucceeded?.step === "decide_pr_merge" &&
           current.state === "decide_pr_merge" &&
-          admittedOrWaiting
+          (active !== undefined ||
+            current.waitingSince !== null ||
+            current.holdsWorkerSlot ||
+            current.waitingForCiRepair)
         const resumeInProgress =
-          openDecision && current.state === "implement" && admittedOrWaiting
+          openDecision &&
+          current.state === "implement" &&
+          (active !== undefined ||
+            current.waitingSince !== null ||
+            current.holdsWorkerSlot)
         if ((mergeHandoff && active !== undefined) || mergeResumeInProgress) {
           return current
         }

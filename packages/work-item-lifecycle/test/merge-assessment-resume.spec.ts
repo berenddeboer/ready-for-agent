@@ -510,6 +510,8 @@ describe("Resume a Decide PR Merge handoff", () => {
           step: "decide_pr_merge",
           status: "queued",
         })
+        const blocked = yield* Effect.flip(lifecycle.resume(created.id))
+        expect(blocked).toBeInstanceOf(ResumeNotEligibleError)
         const reassessed = yield* claimAndRunPending
         expect(reassessed._tag).toBe("processed")
         expect(lastDecideContext).toEqual({
