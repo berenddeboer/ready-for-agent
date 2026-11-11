@@ -67,6 +67,7 @@ export const STEP_RUN_REASONS = [
   "interrupted",
   "issue_closed_pr_closed_unmerged",
   "issue_closed_while_pr_open",
+  "merge_assessment_resume",
   "merge_revalidation",
   "missing_successful_checks",
   "native",
@@ -111,7 +112,7 @@ export const STEP_RUN_REASON = {
   commitRepair: "commit_repair",
   /** Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt. */
   copyGeneration: "copy_generation",
-  /** The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry. */
+  /** The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry. Distinct from a Decide PR Merge handoff, whose Resume re-enters Decide PR Merge. */
   decisionNeeded: "decision_needed",
   /** The Step Run ended because the Forge rejected credentials or permission with HTTP 401 or 403. Deterministic; not retryable and does not consume Autonomous Retry Budget. */
   forgeAuthRejected: "forge_auth_rejected",
@@ -129,6 +130,8 @@ export const STEP_RUN_REASON = {
   issueClosedPrClosedUnmerged: "issue_closed_pr_closed_unmerged",
   /** A successful Step Run stopped because Issue revalidation found the Issue closed or missing while a Work Item PR is still open or PR status was indeterminate. The Work Item is paused for operator Start after reopen. */
   issueClosedWhilePrOpen: "issue_closed_while_pr_open",
+  /** Explicit operator Resume of a Decide PR Merge Needs Human handoff. Continues Decide PR Merge in the existing session. Not a Merge Policy override, not Retry, and not authorization to merge. */
+  mergeAssessmentResume: "merge_assessment_resume",
   /** A successful Merge PR run that returned to Watch PR Status Checks for fresh validation. */
   mergeRevalidation: "merge_revalidation",
   /** Autonomous merge stopped because the Forge reported no successful status-check aggregate by the deadline. */
@@ -183,7 +186,7 @@ export const STEP_RUN_REASON_DEFINITIONS = {
   commit_hooks: "Mid-run: Commit is running the native git commit attempt, including repository hooks.",
   commit_repair: "Mid-run: Commit is repairing a failed native commit via Agent Repair Fallback.",
   copy_generation: "Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt.",
-  decision_needed: "The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry.",
+  decision_needed: "The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry. Distinct from a Decide PR Merge handoff, whose Resume re-enters Decide PR Merge.",
   forge_auth_rejected: "The Step Run ended because the Forge rejected credentials or permission with HTTP 401 or 403. Deterministic; not retryable and does not consume Autonomous Retry Budget.",
   github_throttled: "Watch PR Status Checks stopped cleanly at GitHub's explicit retry time.",
   "green-no-review-evidence": "A green-only Status Check Handoff completed without an Agent Turn because harness-owned GitHub observation found no positive automated-review evidence.",
@@ -192,6 +195,7 @@ export const STEP_RUN_REASON_DEFINITIONS = {
   interrupted: "The Step Run was stopped before completion by an operator or harness interrupt.",
   issue_closed_pr_closed_unmerged: "A successful Step Run stopped because Issue revalidation found the Issue closed or missing and the Work Item PR was closed without merge. The Work Item is paused for an operator Start, Abandon, or Reset decision.",
   issue_closed_while_pr_open: "A successful Step Run stopped because Issue revalidation found the Issue closed or missing while a Work Item PR is still open or PR status was indeterminate. The Work Item is paused for operator Start after reopen.",
+  merge_assessment_resume: "Explicit operator Resume of a Decide PR Merge Needs Human handoff. Continues Decide PR Merge in the existing session. Not a Merge Policy override, not Retry, and not authorization to merge.",
   merge_revalidation: "A successful Merge PR run that returned to Watch PR Status Checks for fresh validation.",
   missing_successful_checks: "Autonomous merge stopped because the Forge reported no successful status-check aggregate by the deadline.",
   native: "A conditionally agent-using step completed via the harness-owned native path with no Agent Turn.",
@@ -1060,6 +1064,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "close_issue",
     guard: "refresh_observed_merged_work_item_pr",
     reasonCode: "pr_merged",
+  },
+  {
+    from: "needs_human",
+    to: "decide_pr_merge",
+    guard: "resume_merge_assessment",
+    reasonCode: "merge_assessment_resume",
   },
   {
     from: "needs_human",

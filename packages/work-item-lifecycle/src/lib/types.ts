@@ -386,6 +386,24 @@ export const isRetryableNeedsHumanWorkItem = (
   )
 }
 
+/**
+ * Decide PR Merge parked Needs Human, including already-persisted generic
+ * records whose Step Run reason is null. Competing-PR and other coded stops
+ * are not this handoff. Retry does not continue it; explicit Resume does.
+ */
+export const isMergeAssessmentResumeHandoff = (
+  item: Pick<WorkItemRecord, "state" | "failureCode" | "stepRuns">,
+): boolean => {
+  if (item.state !== "needs_human") {
+    return false
+  }
+  if (item.failureCode !== null && item.failureCode !== "needs_human") {
+    return false
+  }
+  const latest = item.stepRuns.at(-1)
+  return latest?.status === "succeeded" && latest.step === "decide_pr_merge"
+}
+
 /** Jobs card Failed tab: non-retryable terminal failures only. */
 export const isJobsFailedWorkItem = (item: JobsListMembershipItem): boolean =>
   item.state === "failed" && !isRetryableFailedWorkItem(item)

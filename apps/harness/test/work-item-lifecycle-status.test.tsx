@@ -91,6 +91,34 @@ describe("WorkItemLifecycleStatus", () => {
     expect(html).not.toContain("Approve")
   })
 
+  test("shows Resume for a Decide PR Merge handoff without Retry or an answer form", () => {
+    const mergeHandoff = {
+      ...waitingForGitHubWorkItem,
+      state: "NEEDS_HUMAN",
+      stateLabel: "Needs human",
+      status: "NEEDS_HUMAN",
+      statusLabel: "Needs human",
+      statusMessage:
+        "Merge would trigger production deployment despite the deployment freeze",
+      canResume: true,
+      canRetry: false,
+      isTerminal: true,
+      failureCode: "needs_human",
+      decisionRequest: null,
+      sessionId: "ses_merge_assessment",
+    } satisfies WorkItem
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WorkItemLifecycleStatus workItem={mergeHandoff} compact />
+      </QueryClientProvider>,
+    )
+    expect(html).toContain("deployment freeze")
+    expect(html).toContain(">Resume<")
+    expect(html).not.toContain(">Retry<")
+    expect(html).not.toContain("<textarea")
+    expect(html).not.toContain("Approve")
+  })
+
   test("renders the GitHub hold, retry deadline, and Postponed history without Retry", () => {
     const queryClient = new QueryClient()
     const html = renderToStaticMarkup(

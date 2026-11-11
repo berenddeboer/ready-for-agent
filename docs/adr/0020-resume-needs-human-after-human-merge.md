@@ -4,7 +4,7 @@ Needs Human after Decide PR Merge or Merge PR stays non-advancing for ordinary l
 
 ## Consequences
 
-- Refresh is the only automatic exit from merge-related Needs Human; there is no dedicated PR poll loop while Needs Human.
+- Refresh is the only automatic exit from merge-related Needs Human; there is no dedicated PR poll loop while Needs Human. Explicit Resume of a Decide PR Merge handoff is a separate operator continuation back into Decide PR Merge (ADR 0015), not an automatic exit and not a substitute for Refresh when the PR was merged outside the harness.
 - A human-merge path from Decide PR Merge has no Merge PR Step Run; one from Merge PR retains its handled merge attempts.
 - Abandon from Needs Human (operator or closed-PR Refresh) requires successful local cleanup first.
 - ADR 0039 extends the same Refresh merge path to unfinished operational Lifecycle Steps, not only Needs Human.

@@ -1617,10 +1617,13 @@ type WorkItem {
   """
   canRetry: Boolean!
   """
-  True when this Work Item is parked for an unresolved operator decision and
-  explicit Resume may continue the existing session. False while a Step Run is
-  already queued or running, and false for failures and other Needs Human
-  handoffs. Chatting in the session does not make this true.
+  True when explicit Resume may continue the existing session. That is either
+  an unresolved operator decision, which continues at Implement, or a Decide PR
+  Merge Needs Human handoff, including a generic needs_human record whose latest
+  succeeded Step Run is Decide PR Merge with a null reason, which continues at
+  Decide PR Merge. False while a Step Run is already queued or running, and
+  false for failures and other Needs Human handoffs. Chatting in the session
+  does not make this true and is not merge authorization.
   """
   canResume: Boolean!
   """

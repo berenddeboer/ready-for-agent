@@ -348,7 +348,13 @@ rfa:DecisionNeededReason
   a rfa:StepRunReason ;
   skos:notation "decision_needed" ;
   skos:definition
-    "The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry."@en .
+    "The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry. Distinct from a Decide PR Merge handoff, whose Resume re-enters Decide PR Merge."@en .
+
+rfa:MergeAssessmentResumeReason
+  a rfa:StepRunReason ;
+  skos:notation "merge_assessment_resume" ;
+  skos:definition
+    "Explicit operator Resume of a Decide PR Merge Needs Human handoff. Continues Decide PR Merge in the existing session. Not a Merge Policy override, not Retry, and not authorization to merge."@en .
 
 rfa:HandlerFailedReason
   a rfa:StepRunReason ;
@@ -633,7 +639,7 @@ rfa:DecidePrMerge
   rfa:retryable true ;
   skos:prefLabel "Decide PR Merge"@en ;
   skos:definition
-    "The Lifecycle Step that decides whether a settled Work Item PR may be merged by the harness or requires a human."@en .
+    "The Lifecycle Step that decides whether a settled Work Item PR may be merged by the harness or requires a human. A Needs Human handoff from this step, including an already-persisted generic needs_human record whose latest succeeded Step Run is Decide PR Merge with a null reason, exposes explicit Resume. Resume re-enters this step in the existing session, reconciles the operator's clarification, and does not restart Implement, recreate the PR, or reset history. Chatting in the session does not resume the harness and is not merge authorization. A stale interactive CLANKER_MERGE marker does not bypass a fresh assessment or the normal merge path. If the assessment is still unresolved, the Work Item remains an explained resumable Needs Human handoff. An approved decision continues to Merge PR. Resume acquires an ordinary Worker Slot, is idempotent, and is not a Merge Policy override; Off does not become an automated merge."@en .
 
 rfa:MergePr
   a owl:Class, owl:NamedIndividual, skos:Concept,
@@ -800,6 +806,7 @@ rfa:PreCommitDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:PreCom
 rfa:ReviewDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:NeedsHuman ; rfa:guard "decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
 rfa:CommitDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:NeedsHuman ; rfa:guard "decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
 rfa:NeedsHumanResumeDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:Implement ; rfa:guard "resume_decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
+rfa:NeedsHumanResumeMergeAssessmentTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:DecidePrMerge ; rfa:guard "resume_merge_assessment" ; rfa:reasonCode rfa:MergeAssessmentResumeReason .
 rfa:NeedsHumanRetryInvestigationTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:InvestigatePrStatusChecks ; rfa:guard "retry_status_check_handoff" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:NeedsHumanRetryReviewTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:Review ; rfa:guard "retry_review_fix_limit" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:NeedsHumanRetryMissingSuccessfulChecksTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "retry_missing_successful_checks" ; rfa:reasonCode rfa:MissingSuccessfulChecksReason .

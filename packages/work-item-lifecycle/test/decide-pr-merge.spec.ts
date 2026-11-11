@@ -378,6 +378,107 @@ describe("decidePrMerge", () => {
     })
   })
 
+  it("reassesses a resumed handoff and ignores a stale clanker marker", async () => {
+    let prompt = ""
+    const agentBackend = Layer.succeed(
+      AgentBackend,
+      AgentBackend.of({
+        startTurn: () => Effect.die("unused"),
+        continueTurn: (input) => {
+          prompt = input.prompt
+          return Effect.succeed({
+            sessionId: input.sessionId,
+            assistantText: [
+              "The earlier interactive turn said CLANKER_MERGE after the freeze was lifted.",
+              "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: deployment freeze still applies",
+            ].join("\n"),
+          })
+        },
+        inspect: () =>
+          Effect.succeed({
+            backend: { id: "opencode" as const, label: "OpenCode" },
+            models: [],
+          }),
+      }),
+    )
+
+    const result = await Effect.runPromise(
+      decidePrMerge({
+        ...context,
+        mergeAssessmentResume: {
+          recordedReason:
+            "Merge would trigger production deployment despite the deployment freeze",
+        },
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            keymaxxer,
+            agentBackend,
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({
+      _tag: "needs_human",
+      reason: "deployment freeze still applies",
+    })
+    expect(prompt).toContain("deployment freeze")
+    expect(prompt).toContain("not merge authorization")
+    expect(prompt).toContain("Resume is not a Merge Policy override")
+  })
+
+  it("does not treat Resume as a Merge Policy override when policy is off", async () => {
+    const pausedRepoDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([{ ...repository, mergePolicy: "off" }]),
+    })
+    let continued = false
+    const agentBackend = Layer.succeed(
+      AgentBackend,
+      AgentBackend.of({
+        startTurn: () => Effect.die("unused"),
+        continueTurn: () => {
+          continued = true
+          return Effect.succeed({
+            sessionId: "ses_implement",
+            assistantText: "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
+          })
+        },
+        inspect: () =>
+          Effect.succeed({
+            backend: { id: "opencode" as const, label: "OpenCode" },
+            models: [],
+          }),
+      }),
+    )
+
+    const result = await Effect.runPromise(
+      decidePrMerge({
+        ...context,
+        mergeAssessmentResume: {
+          recordedReason: AUTO_MERGE_DISABLED_FOR_REPOSITORY,
+        },
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            pausedRepoDb,
+            keymaxxer,
+            agentBackend,
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+
+    expect(continued).toBe(false)
+    expect(result).toEqual({
+      _tag: "needs_human",
+      reason: AUTO_MERGE_DISABLED_FOR_REPOSITORY,
+    })
+  })
+
   it("skips OpenCode when auto-merge is disabled", async () => {
     const pausedRepoDb = stubDbServiceLayer({
       listRepositories: Effect.succeed([{ ...repository, mergePolicy: "off" }]),
