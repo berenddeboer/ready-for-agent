@@ -244,6 +244,7 @@ import {
   WorkItemStepJob,
   WorkItemWakeJob,
   isIssueWorkItem,
+  isMergeAssessmentResumeHandoff,
   isRetryableFailedWorkItem,
   isTerminalWorkItemState,
   isUnfinishedWorkItem,
@@ -1573,9 +1574,11 @@ export interface WorkItemLifecycleShape {
     options?: RetryOptions,
   ) => Effect.Effect<WorkItemRecord, RetryError>
   /**
-   * Continue a Decision needed handoff in the existing session. Does not
-   * accept an answer. Idempotent while a resumed Step Run is already queued,
-   * running, or waiting for a Worker Slot.
+   * Continue an eligible Needs Human handoff in the existing session. A
+   * Decision needed handoff returns to Implement. A Decide PR Merge handoff
+   * returns to Decide PR Merge. Does not accept an answer or a chat marker as
+   * merge authorization. Idempotent while a resumed Step Run is already
+   * queued, running, or waiting for a Worker Slot.
    */
   readonly resume: (
     workItemId: string,
@@ -4522,6 +4525,7 @@ export const makeWorkItemLifecycleLive = (
                 return {}
               }
               return {
+                stepRunNote: result.reason,
                 transition: {
                   nextState: "needs_human" as const,
                   reason: result.reason,
@@ -6623,6 +6627,10 @@ export const makeWorkItemLifecycleLive = (
               }
 
               const origin = yield* storedOrigin(workItem.origin)
+              const mergeAssessmentResume =
+                stepRun.step === "decide_pr_merge"
+                  ? yield* loadPriorMergeAssessment(workItem.id, afterStart.id)
+                  : null
               const context: LifecycleStepContext = {
                 workItemId: workItem.id as WorkItemId,
                 repositoryId: workItem.repository_id,
@@ -6654,6 +6662,9 @@ export const makeWorkItemLifecycleLive = (
                     : Boolean(workItem.auto_merge_override),
                 mergeMode: decodeMergeMode(workItem.merge_mode),
                 maxDuration,
+                ...(mergeAssessmentResume === null
+                  ? {}
+                  : { mergeAssessmentResume }),
               }
 
               const productiveTimeout: Effect.Effect<
@@ -7580,6 +7591,40 @@ export const makeWorkItemLifecycleLive = (
       ): boolean =>
         isMergeNeedsHumanHandoff(row, latestStep) ||
         isResolveNeedsHumanHandoff(row, latestStep)
+
+      const loadPriorMergeAssessment = (
+        workItemId: string,
+        currentStepRunId: string,
+      ): Effect.Effect<
+        { readonly recordedReason: string | null } | null,
+        WorkItemLifecycleDatabaseError
+      > =>
+        Effect.gen(function* () {
+          // Only an explicit Resume leaves Decide PR Merge as the latest
+          // succeeded step. Revalidation and conflict recovery succeed Watch
+          // (or Resolve) before the next assessment, so those turns stay
+          // ordinary risk decisions.
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT step, reason_message FROM step_run
+               WHERE work_item_id = ?
+                 AND status = 'succeeded'
+                 AND id != ?
+               ORDER BY finished_at DESC, rowid DESC
+               LIMIT 1`,
+              [workItemId, currentStepRunId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly step: string
+            readonly reason_message: string | null
+          }[]
+          const prior = rows[0]
+          if (prior === undefined || prior.step !== "decide_pr_merge") {
+            return null
+          }
+          const recorded = prior.reason_message?.trim() ?? ""
+          return { recordedReason: recorded === "" ? null : recorded }
+        })
 
       const loadLatestStep = (
         workItemId: string,
@@ -9327,6 +9372,130 @@ export const makeWorkItemLifecycleLive = (
         return retried
       })
 
+      const resumeInto = (
+        workItemId: string,
+        step: "implement" | "decide_pr_merge",
+      ) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          // State change, slot admission, and the Step Run insert commit together.
+          // A failure after clearing the handoff must not leave the target step
+          // with no Step Run and no way back to the handoff.
+          yield* sql
+            .withTransaction(
+              applyLifecycleTransition(
+                workItemId,
+                step,
+                Effect.gen(function* () {
+                  const activeBeforeResume = (yield* sql.unsafe(
+                    `SELECT id FROM step_run
+                     WHERE work_item_id = ?
+                       AND status IN ('queued', 'running')
+                     LIMIT 1`,
+                    [workItemId],
+                  )) as readonly { readonly id: string }[]
+                  if (activeBeforeResume[0]) {
+                    return false
+                  }
+                  const parked = (yield* sql.unsafe(
+                    `SELECT failure_message FROM work_item
+                     WHERE id = ? AND state = 'needs_human'
+                     LIMIT 1`,
+                    [workItemId],
+                  )) as readonly {
+                    readonly failure_message: string | null
+                  }[]
+                  if (parked.length === 0) {
+                    return false
+                  }
+                  const recordedReason = parked[0]?.failure_message ?? null
+                  const updated = (yield* sql.unsafe(
+                    `UPDATE work_item
+                     SET state = ?,
+                         state_ready_at = ?,
+                         failure_code = NULL,
+                         failure_message = NULL,
+                         paused = 0,
+                         updated_at = ?
+                     WHERE id = ? AND state = 'needs_human'
+                     RETURNING id`,
+                    [step, now, now, workItemId],
+                  )) as readonly { readonly id: string }[]
+                  if (updated.length === 0) {
+                    return false
+                  }
+                  if (
+                    step === "decide_pr_merge" &&
+                    recordedReason !== null &&
+                    recordedReason.trim() !== ""
+                  ) {
+                    yield* sql.unsafe(
+                      `UPDATE step_run
+                       SET reason_message = ?, updated_at = ?
+                       WHERE id = (
+                         SELECT id FROM step_run
+                         WHERE work_item_id = ?
+                           AND step = 'decide_pr_merge'
+                           AND status = 'succeeded'
+                           AND (reason_message IS NULL OR TRIM(reason_message) = '')
+                         ORDER BY finished_at DESC, rowid DESC
+                         LIMIT 1
+                       )`,
+                      [recordedReason, now, workItemId],
+                    )
+                  }
+                  const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+                  if (acquired) {
+                    yield* enqueueStepRunForWorkItem(workItemId, step, now)
+                  }
+                  return true
+                }),
+                (applied) => applied,
+              ),
+            )
+            .pipe(
+              Effect.catch((error): Effect.Effect<boolean, ResumeError> => {
+                if (
+                  typeof error === "object" &&
+                  error !== null &&
+                  "_tag" in error &&
+                  (error as { _tag: string })._tag === "SqlError" &&
+                  isActiveStepRunUniqueViolation(error as SqlError)
+                ) {
+                  return Effect.succeed(false)
+                }
+                if (error instanceof WorkItemLifecycleDatabaseError) {
+                  return Effect.fail(error)
+                }
+                if (error instanceof EnqueueError) {
+                  return Effect.fail(error)
+                }
+                if (error instanceof InvalidQueueNameError) {
+                  return Effect.fail(error)
+                }
+                return Effect.fail(
+                  new WorkItemLifecycleDatabaseError({
+                    message: `Unexpected resume failure: ${String(error)}`,
+                    cause: error,
+                  }),
+                )
+              }),
+            )
+
+          const resumed = yield* getWorkItem(workItemId).pipe(
+            Effect.catchTag(
+              "WorkItemNotFoundError",
+              (error) =>
+                new WorkItemLifecycleDatabaseError({
+                  message: `Work Item missing after resume: ${error.workItemId}`,
+                  cause: error,
+                }),
+            ),
+          )
+          yield* notifyWorkItemsChanged(resumed.repositoryId)
+          return resumed
+        })
+
       const resume = Effect.fn("WorkItemLifecycle.resume")(function* (
         workItemId: string,
       ) {
@@ -9357,14 +9526,31 @@ export const makeWorkItemLifecycleLive = (
         const parkedForDecision =
           current.state === "needs_human" &&
           (current.failureCode === DECISION_NEEDED_FAILURE_CODE || openDecision)
+        const mergeHandoff = isMergeAssessmentResumeHandoff(current)
+        const priorMergeAssessment = current.stepRuns.some(
+          (stepRun) =>
+            stepRun.step === "decide_pr_merge" &&
+            stepRun.status === "succeeded",
+        )
+        const admittedOrWaiting =
+          active !== undefined ||
+          current.waitingSince !== null ||
+          current.holdsWorkerSlot ||
+          current.waitingForCiRepair
+        const mergeResumeInProgress =
+          priorMergeAssessment &&
+          current.state === "decide_pr_merge" &&
+          admittedOrWaiting
         const resumeInProgress =
-          openDecision &&
-          current.state === "implement" &&
-          (active !== undefined ||
-            current.waitingSince !== null ||
-            current.holdsWorkerSlot)
+          openDecision && current.state === "implement" && admittedOrWaiting
+        if ((mergeHandoff && active !== undefined) || mergeResumeInProgress) {
+          return current
+        }
         if ((parkedForDecision && active !== undefined) || resumeInProgress) {
           return current
+        }
+        if (mergeHandoff) {
+          return yield* resumeInto(workItemId, "decide_pr_merge")
         }
         if (!parkedForDecision) {
           return yield* new ResumeNotEligibleError({
@@ -9372,92 +9558,7 @@ export const makeWorkItemLifecycleLive = (
             reason: "not_decision_needed",
           })
         }
-
-        const now = yield* Clock.currentTimeMillis
-        // State change, slot admission, and the Step Run insert commit together.
-        // A failure after clearing the handoff must not leave Implement with no
-        // step and no way back to Decision needed.
-        yield* sql
-          .withTransaction(
-            applyLifecycleTransition(
-              workItemId,
-              "implement",
-              Effect.gen(function* () {
-                const activeBeforeResume = (yield* sql.unsafe(
-                  `SELECT id FROM step_run
-                   WHERE work_item_id = ?
-                     AND status IN ('queued', 'running')
-                   LIMIT 1`,
-                  [workItemId],
-                )) as readonly { readonly id: string }[]
-                if (activeBeforeResume[0]) {
-                  return false
-                }
-                const updated = (yield* sql.unsafe(
-                  `UPDATE work_item
-                   SET state = 'implement',
-                       state_ready_at = ?,
-                       failure_code = NULL,
-                       failure_message = NULL,
-                       paused = 0,
-                       updated_at = ?
-                   WHERE id = ? AND state = 'needs_human'
-                   RETURNING id`,
-                  [now, now, workItemId],
-                )) as readonly { readonly id: string }[]
-                if (updated.length === 0) {
-                  return false
-                }
-                const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
-                if (acquired) {
-                  yield* enqueueStepRunForWorkItem(workItemId, "implement", now)
-                }
-                return true
-              }),
-              (applied) => applied,
-            ),
-          )
-          .pipe(
-            Effect.catch((error): Effect.Effect<boolean, ResumeError> => {
-              if (
-                typeof error === "object" &&
-                error !== null &&
-                "_tag" in error &&
-                (error as { _tag: string })._tag === "SqlError" &&
-                isActiveStepRunUniqueViolation(error as SqlError)
-              ) {
-                return Effect.succeed(false)
-              }
-              if (error instanceof WorkItemLifecycleDatabaseError) {
-                return Effect.fail(error)
-              }
-              if (error instanceof EnqueueError) {
-                return Effect.fail(error)
-              }
-              if (error instanceof InvalidQueueNameError) {
-                return Effect.fail(error)
-              }
-              return Effect.fail(
-                new WorkItemLifecycleDatabaseError({
-                  message: `Unexpected resume failure: ${String(error)}`,
-                  cause: error,
-                }),
-              )
-            }),
-          )
-
-        const resumed = yield* getWorkItem(workItemId).pipe(
-          Effect.catchTag(
-            "WorkItemNotFoundError",
-            (error) =>
-              new WorkItemLifecycleDatabaseError({
-                message: `Work Item missing after resume: ${error.workItemId}`,
-                cause: error,
-              }),
-          ),
-        )
-        yield* notifyWorkItemsChanged(resumed.repositoryId)
-        return resumed
+        return yield* resumeInto(workItemId, "implement")
       })
 
       const createWorkItem = (

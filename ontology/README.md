@@ -173,7 +173,7 @@ Notes on the modelling:
 
 ## The lifecycle state space
 
-16 operational Lifecycle Steps, 4 terminal Work Item states, and 188 declared
+16 operational Lifecycle Steps, 4 terminal Work Item states, and 189 declared
 transitions, each carrying a named guard and one Step Run reason code from the
 generated vocabulary.
 The happy path:
@@ -221,7 +221,8 @@ stateDiagram-v2
 ```
 
 The full relation — including per-state revalidation failures, operator
-abandon, merged-PR supersession, refresh-observed merges, and the Needs
+abandon, merged-PR supersession, refresh-observed merges, the Needs Human
+Resume back to Decide PR Merge (`resume_merge_assessment`), and the Needs
 Human / Failed retry edges — lives in `rfa.ttl` and is exported verbatim as
 `LIFECYCLE_TRANSITIONS`.
 

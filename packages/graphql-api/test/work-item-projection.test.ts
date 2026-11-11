@@ -1173,6 +1173,7 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
     expect(workItemStatusLabel(decisionNeeded)).toBe("Decision needed")
     expect(workItemStateLabel(decisionNeeded)).toBe("Decision needed")
     expect(workItemStatusMessage(decisionNeeded)).toContain("signed enrollment")
+    expect(workItemDecisionRequest(decisionNeeded)).not.toBeNull()
     expect(
       workItemCanResume({
         ...decisionNeeded,
@@ -1183,6 +1184,69 @@ describe("operator Retry eligibility and latest Step Run reason", () => {
             id: "srun-running",
             step: "implement",
             status: "running",
+            reasonCode: null,
+          },
+        ],
+      }),
+    ).toBe(false)
+  })
+
+  test("a persisted Decide PR Merge handoff exposes Resume, not Retry", () => {
+    const mergeHandoff = workItemWith({
+      state: "needs_human",
+      holdsWorkerSlot: false,
+      failureCode: "needs_human",
+      failureMessage:
+        "Merge would trigger production deployment despite issue #948’s deployment freeze",
+      sessionId: "ses_e36fb3ecfffeh54NP6LygR24Ce",
+      pullRequestNumber: 952,
+      stepRuns: [
+        {
+          ...baseStepRun,
+          step: "decide_pr_merge",
+          status: "succeeded",
+          reasonCode: null,
+          reasonMessage: null,
+        },
+      ],
+    })
+    expect(workItemCanRetry(mergeHandoff)).toBe(false)
+    expect(workItemCanResume(mergeHandoff)).toBe(true)
+    expect(workItemDecisionRequest(mergeHandoff)).toBeNull()
+    expect(workItemStatusMessage(mergeHandoff)).toContain("deployment freeze")
+    expect(workItemStateLabel(mergeHandoff)).toBe("Needs human")
+    expect(lifecycleLabels(mergeHandoff).at(-1)?.label).toBe(
+      "Decide PR merge: Human review before merge",
+    )
+    expect(
+      workItemCanResume({
+        ...mergeHandoff,
+        stepRuns: [
+          ...mergeHandoff.stepRuns,
+          {
+            ...baseStepRun,
+            id: "srun-running",
+            step: "decide_pr_merge",
+            status: "queued",
+            reasonCode: null,
+          },
+        ],
+      }),
+    ).toBe(false)
+    expect(
+      workItemCanResume({
+        ...mergeHandoff,
+        failureCode: "issue_closing_pull_request_unowned",
+      }),
+    ).toBe(false)
+    expect(
+      workItemCanResume({
+        ...mergeHandoff,
+        stepRuns: [
+          {
+            ...baseStepRun,
+            step: "merge_pr",
+            status: "succeeded",
             reasonCode: null,
           },
         ],

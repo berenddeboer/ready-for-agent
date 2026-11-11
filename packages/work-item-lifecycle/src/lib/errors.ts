@@ -251,7 +251,7 @@ export class RetryNotEligibleError extends Schema.TaggedError<RetryNotEligibleEr
   },
 ) {}
 
-/** Resume is legal only for an idle Decision needed handoff. */
+/** Resume is legal only for an idle Decision needed or Decide PR Merge handoff. */
 export class ResumeNotEligibleError extends Schema.TaggedError<ResumeNotEligibleError>()(
   "ResumeNotEligibleError",
   {

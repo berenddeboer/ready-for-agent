@@ -8072,7 +8072,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!, $nativeId: String!) {
           workItems(repositoryId: $repositoryId, nativeId: $nativeId) {
-            state status statusLabel statusMessage paused isTerminal
+            state status statusLabel statusMessage paused isTerminal canResume canRetry
           }
         }`,
         variables: {
@@ -8092,6 +8092,8 @@ describe("GraphQL API", () => {
             statusMessage: "Human must approve merge",
             paused: false,
             isTerminal: true,
+            canResume: true,
+            canRetry: false,
           },
         ],
       },

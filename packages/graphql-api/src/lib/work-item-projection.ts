@@ -22,6 +22,7 @@ import {
   formatProviderRecoveryApiMessage,
   formatWaitingForBlockersMessage,
   formatWaitingForCiRepairMessage,
+  isMergeAssessmentResumeHandoff,
   isRetryableFailedWorkItem,
   isRetryableNeedsHumanWorkItem,
 } from "@ready-for-agent/work-item-lifecycle"
@@ -230,6 +231,9 @@ export const workItemCanResume = (workItem: WorkItemRecord): boolean => {
   if (workItem.state !== "needs_human" || workItemHasActiveStepRun(workItem)) {
     return false
   }
+  if (isMergeAssessmentResumeHandoff(workItem)) {
+    return true
+  }
   const latest = latestStepRun(workItem)
   return (
     latest?.status === "succeeded" &&
@@ -239,8 +243,15 @@ export const workItemCanResume = (workItem: WorkItemRecord): boolean => {
 
 export const workItemDecisionRequest = (
   workItem: WorkItemRecord,
-): string | null =>
-  workItemCanResume(workItem) ? workItem.failureMessage : null
+): string | null => {
+  if (
+    !workItemCanResume(workItem) ||
+    isMergeAssessmentResumeHandoff(workItem)
+  ) {
+    return null
+  }
+  return workItem.failureMessage
+}
 
 const decisionNeededLabel = (workItem: WorkItemRecord): string | null =>
   workItem.state === "needs_human" &&

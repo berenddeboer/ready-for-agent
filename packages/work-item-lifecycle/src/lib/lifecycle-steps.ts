@@ -133,6 +133,14 @@ export interface LifecycleStepContext {
    */
   readonly mergeMode?: MergeMode
   readonly maxDuration?: Duration.Duration
+  /**
+   * Set only when this Decide PR Merge turn continues an earlier handoff.
+   * Absent on the first assessment. The recorded reason is the prior park
+   * text, not a new merge authorization.
+   */
+  readonly mergeAssessmentResume?: {
+    readonly recordedReason: string | null
+  }
 }
 
 /** Result of a successful Create Worktree Step Run. */
