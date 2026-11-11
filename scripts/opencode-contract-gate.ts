@@ -8,10 +8,9 @@
 import { spawnSync } from "node:child_process"
 import { accessSync, constants, readFileSync, statSync } from "node:fs"
 import { delimiter, join } from "node:path"
+import type { OpenCodeContractMode } from "./opencode-server-placement.ts"
 
 const OPENCODE_BASELINE_KEY = "OPENCODE_V2_BASELINE"
-
-type OpenCodeContractMode = "baseline" | "latest"
 
 type OpenCodeContractFailureReason =
   | "missing-executable"
