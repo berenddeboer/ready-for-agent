@@ -613,7 +613,7 @@ const assertUnprobedAcceptance = (
   }
   if (
     error instanceof AgentBackendExitError &&
-    error.message.includes("Unrecognized flag:")
+    error.message.includes("Unrecognized flag: --server")
   ) {
     throw new Error(
       `OpenCode ${capability.version} rejects --server before ${placement} again (BER-31). Drift coverage probed an unrecorded version and production places the flag there, so this is upstream drift, not a missing evidence record.\n${diagnostic(records, secrets)}`,
