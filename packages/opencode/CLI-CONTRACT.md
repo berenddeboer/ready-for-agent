@@ -79,6 +79,17 @@ means upstream changed a command, flag, or contract. It is not a required
 pull-request check, and it is not a license to point required jobs at
 latest.
 
+Drift coverage probes a version that is not yet in the `--server`
+placement evidence table instead of refusing before it runs. The three
+placement cases keep the same oracle; an unrecorded version that reaches
+the no-inference boundary passes and logs `unprobed <version>`, and one
+that rejects `--server` again fails as upstream drift. Required coverage
+stays fail-closed: the pin must reject, and a non-pin version without an
+evidence record throws `Refusing to guess a cutoff`. A drift pass is not
+evidence. Record its resolved version in
+`scripts/opencode-server-placement.ts` before it counts as an accepting
+contract version.
+
 The Nx target is uncached, and CI passes `--skip-nx-cache`. The external
 binary version is not an Nx input, so a cached pass from another CLI must
 not hide drift. The scheduled job executes the probes.
@@ -134,9 +145,23 @@ this evidence. A direct 2.2.0 parser probe also got past flag rejection,
 but it only reported an unreachable server. That is not proof of an
 isolated server, worktree, or stored session, so 2.2.0 is not an accepting
 contract version and not a cutoff. The suite does not use a semver
-comparison. The pin must reject. 2.2.5 and 2.2.6 must prove acceptance.
-Any other version, including 2.2.7 and later, fails closed until a
-real-binary run records its capability.
+comparison. The pin must reject. 2.2.5, 2.2.6, and 2.2.7 must prove
+acceptance.
+
+A local real-binary probe on 2026-11-11 did the same for OpenCode
+**2.2.7**, which was npm latest after the 2026-11-10 probe. The three
+production placement cases again reached the no-inference boundary, and
+the same binary passed `bunx nx run opencode:cli-contract` with
+`OPENCODE_CONTRACT_MODE=latest`: 14 pass, 0 skip, 0 fail. Drift run
+[42825652031](https://github.com/berenddeboer/ready-for-agent/actions/runs/42825652031)
+installed 2.2.7 but threw before probing because that version was not yet
+recorded. It is not this evidence.
+
+Drift coverage no longer throws before probing an unrecorded version. It
+runs the same placement cases and logs `unprobed <version>` on acceptance;
+a rejection is reported as upstream drift. Required coverage still fails
+closed for an unlisted version, so the table stays the record of proven
+acceptance rather than a semver cutoff.
 
 An accepted placement proves the explicit isolated server URL was used, the
 session is on that server in the worktree, and the turn reached the same
@@ -170,9 +195,9 @@ the parser misses fails the case instead of being treated as compatibility.
 | `service status` | `readOpenCodeServiceStatus` | isolated stopped service; isolated registration of the ephemeral server | service discovery | exact `stopped` text, then the ephemeral URL; does not print the operator URL |
 | jump model pin | `interactiveResumeCommand` + `startInteractiveResume` | `POST .../model` `--data`, directory header, quoting-sensitive path | `apps/ready-for-agent/src/interactive-resume-v2-contract.test.ts` jump pin | pin exits 0; session model matches. Same Nx target as this package |
 | jump TUI | same launcher, and `writeJumpLauncherScript` for the tmux script | `opencode <dir> --session <id> --auto`, quoting-sensitive path | same app contract file, jump TUI | both the direct launcher and the tmux script are still running after startup, with no launcher-failure text; a quick nonzero exit fails the case; pinned model remains after the script |
-| BER-31 `--server` before `run` | production `startTurn`, spawner moves the flag | explicit server | run placement | pin: exact `Unrecognized flag: --server in command opencode run`. 2.2.5 and 2.2.6: exact `Model unavailable`, session on the isolated server, prompt stored once |
-| `--server` before `api` | production command turn, spawner moves only `api` | explicit server | api placement | pin: exact unrecognized-flag diagnostic. 2.2.5 and 2.2.6: isolated session, worktree, stored command, production export order, valid export with no command result |
-| `--server` before `export` | production command turn, spawner moves only `export` | explicit server | export placement | pin: exact `Unrecognized flag: --server in command opencode session`. 2.2.5 and 2.2.6: `api` keeps production order; export uses the moved flag and the same stored-command/export proof |
+| BER-31 `--server` before `run` | production `startTurn`, spawner moves the flag | explicit server | run placement | pin: exact `Unrecognized flag: --server in command opencode run`. 2.2.5, 2.2.6, and 2.2.7: exact `Model unavailable`, session on the isolated server, prompt stored once |
+| `--server` before `api` | production command turn, spawner moves only `api` | explicit server | api placement | pin: exact unrecognized-flag diagnostic. 2.2.5, 2.2.6, and 2.2.7: isolated session, worktree, stored command, production export order, valid export with no command result |
+| `--server` before `export` | production command turn, spawner moves only `export` | explicit server | export placement | pin: exact `Unrecognized flag: --server in command opencode session`. 2.2.5, 2.2.6, and 2.2.7: `api` keeps production order; export uses the moved flag and the same stored-command/export proof |
 | removed `--dir`, `--variant`, `--command` | production `startTurn`, spawner inserts the flag | explicit server | obsolete flag mutations | exact unrecognized-flag diagnostic. Independent of placement, so one changed flag does not hide the others |
 | former `models --verbose` | production `inspect`, spawner replaces the catalog argv | explicit server | verbose mutation | exact `Unrecognized flag: --verbose in command opencode models` |
 

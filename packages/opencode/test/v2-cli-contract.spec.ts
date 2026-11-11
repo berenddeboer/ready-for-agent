@@ -23,7 +23,10 @@ import {
   formatGateLog,
   gateOpenCodeContract,
 } from "../../../scripts/opencode-contract-gate.ts"
-import { serverPlacementCapability } from "../../../scripts/opencode-server-placement.ts"
+import {
+  type ServerPlacementCapability,
+  serverPlacementCapability,
+} from "../../../scripts/opencode-server-placement.ts"
 import { Opencode } from "../src/index.js"
 import {
   type OwnedOpenCodeServer,
@@ -255,6 +258,7 @@ const placementCapability = () =>
   serverPlacementCapability({
     version: gated.version,
     baseline: gated.baseline,
+    mode: gated.mode,
   })
 
 const flagBefore = (
@@ -580,6 +584,44 @@ const logCase = (label: string, records: ReadonlyArray<LaunchRecord>): void => {
 }
 
 /**
+ * Drift coverage probes a version that has no evidence record yet. The three
+ * placement cases stay the same oracle; only the label and the failure text
+ * differ, so a new release does not turn the scheduled job red before the
+ * binary is exercised.
+ */
+const unprobedAcceptanceNote = (
+  capability: ServerPlacementCapability,
+): string => {
+  if (capability.kind !== "unprobed-acceptance") {
+    return ""
+  }
+  console.log(
+    `[opencode-cli-contract] drift probe: OpenCode ${capability.version} is not recorded in scripts/opencode-server-placement.ts. The placement cases proved the boundary. Record the version with this run's evidence to stop probing it.`,
+  )
+  return ` (unprobed ${capability.version})`
+}
+
+const assertUnprobedAcceptance = (
+  capability: ServerPlacementCapability,
+  placement: string,
+  error: unknown,
+  records: ReadonlyArray<LaunchRecord>,
+  secrets: ReadonlyArray<string>,
+): void => {
+  if (capability.kind !== "unprobed-acceptance") {
+    return
+  }
+  if (
+    error instanceof AgentBackendExitError &&
+    error.message.includes("Unrecognized flag:")
+  ) {
+    throw new Error(
+      `OpenCode ${capability.version} rejects --server before ${placement} again (BER-31). Drift coverage probed an unrecorded version and production places the flag there, so this is upstream drift, not a missing evidence record.\n${diagnostic(records, secrets)}`,
+    )
+  }
+}
+
+/**
  * Accepted `--server` before `api` or `export` must reach the same no-inference
  * command boundary as the supported path. Malformed output is that oracle only
  * when the export is valid and contains no command result. It is not success
@@ -588,6 +630,8 @@ const logCase = (label: string, records: ReadonlyArray<LaunchRecord>): void => {
 const proveAcceptedCommandPlacement = async (input: {
   readonly current: Fixture
   readonly prompt: string
+  readonly capability: ServerPlacementCapability
+  readonly placement: string
   readonly mutate: (cliArgs: ReadonlyArray<string>) => ReadonlyArray<string>
   readonly assertArgv: (
     records: ReadonlyArray<LaunchRecord>,
@@ -617,6 +661,13 @@ const proveAcceptedCommandPlacement = async (input: {
     input.mutate,
   )
   const detail = diagnostic(records, input.current.secrets)
+  assertUnprobedAcceptance(
+    input.capability,
+    input.placement,
+    error,
+    records,
+    input.current.secrets,
+  )
   expect(created, detail).toMatch(/^ses_[A-Za-z0-9]+$/)
   if (created === undefined) {
     throw new Error(detail)
@@ -1254,6 +1305,13 @@ describe("installed OpenCode V2 production CLI contract", () => {
           logCase("server-before-run rejected", records)
           return
         }
+        assertUnprobedAcceptance(
+          capability,
+          "run",
+          error,
+          records,
+          current.secrets,
+        )
         expect(error, diagnostic(records, current.secrets)).toBeInstanceOf(
           AgentBackendExitError,
         )
@@ -1283,7 +1341,10 @@ describe("installed OpenCode V2 production CLI contract", () => {
           await sessionMessages(current.owned, sessionId),
           prompt,
         )
-        logCase("server-before-run accepted", records)
+        logCase(
+          `server-before-run accepted${unprobedAcceptanceNote(capability)}`,
+          records,
+        )
       })
     },
     CASE_TIMEOUT_MS,
@@ -1422,6 +1483,8 @@ describe("installed OpenCode V2 production CLI contract", () => {
         const accepted = await proveAcceptedCommandPlacement({
           current,
           prompt,
+          capability,
+          placement: "api",
           mutate: (cliArgs) =>
             cliArgs[0] === "api" && cliArgs.includes("--server")
               ? moveServerBefore(cliArgs, "api")
@@ -1448,7 +1511,10 @@ describe("installed OpenCode V2 production CLI contract", () => {
             ])
           },
         })
-        logCase("server-before-api accepted", accepted)
+        logCase(
+          `server-before-api accepted${unprobedAcceptanceNote(capability)}`,
+          accepted,
+        )
       })
     },
     CASE_TIMEOUT_MS,
@@ -1507,6 +1573,8 @@ describe("installed OpenCode V2 production CLI contract", () => {
         const accepted = await proveAcceptedCommandPlacement({
           current,
           prompt,
+          capability,
+          placement: "export",
           mutate: (cliArgs) =>
             cliArgs[0] === "session" && cliArgs.includes("--server")
               ? moveServerBefore(cliArgs, "export")
@@ -1532,7 +1600,10 @@ describe("installed OpenCode V2 production CLI contract", () => {
             ])
           },
         })
-        logCase("server-before-export accepted", accepted)
+        logCase(
+          `server-before-export accepted${unprobedAcceptanceNote(capability)}`,
+          accepted,
+        )
       })
     },
     CASE_TIMEOUT_MS,

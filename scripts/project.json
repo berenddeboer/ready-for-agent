@@ -29,6 +29,7 @@
         "{projectRoot}/commitlint-policy.test.ts",
         "{projectRoot}/opencode-contract-gate.ts",
         "{projectRoot}/opencode-contract-gate.test.ts",
+        "{projectRoot}/opencode-server-placement.ts",
         "{projectRoot}/opencode-contract-ci.test.ts",
         "{projectRoot}/run-opencode-cli-contract.ts",
         "{projectRoot}/install-opencode-v2.sh",
