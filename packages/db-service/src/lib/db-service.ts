@@ -594,11 +594,15 @@ export interface DbServiceShape {
     RepositoryNotFoundError | DatabaseError
   >
   /**
-   * Resolved CI Failure Incidents, newest recovery first. Does not include
-   * an open incident.
+   * Resolved CI Failure Incidents with `resolved_at` at or after
+   * `resolvedSinceMs`, newest recovery first. Does not include an open
+   * incident. Rows outside the window are not loaded, and their definitions
+   * are not loaded. This is a query window, not deletion. It does not change
+   * `latestResolvedIncident`.
    */
   readonly listResolvedCiFailureIncidents: (
     repositoryId: string,
+    options: { readonly resolvedSinceMs: number },
   ) => Effect.Effect<
     readonly CiFailureIncidentRecord[],
     RepositoryNotFoundError | DatabaseError
@@ -2147,7 +2151,10 @@ export const DbServiceLive = Layer.effect(
 
     const listResolvedCiFailureIncidents = Effect.fn(
       "DbService.listResolvedCiFailureIncidents",
-    )(function* (repositoryId: string) {
+    )(function* (
+      repositoryId: string,
+      options: { readonly resolvedSinceMs: number },
+    ) {
       yield* ensureRepositoryExists(repositoryId)
       const rows = yield* sql
         .unsafe(
@@ -2155,8 +2162,9 @@ export const DbServiceLive = Layer.effect(
                   recovery_reason, summary
            FROM ci_failure_incident
            WHERE repository_id = ? AND status = 'resolved'
+             AND resolved_at >= ?
            ORDER BY resolved_at DESC, opened_at DESC, id DESC`,
-          [repositoryId],
+          [repositoryId, options.resolvedSinceMs],
         )
         .pipe(Effect.mapError(toDatabaseError))
       const decoded = yield* decodeCiFailureIncidentRows(rows)

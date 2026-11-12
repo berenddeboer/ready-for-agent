@@ -2,6 +2,7 @@ import {
   type CiGateStatusStoryView,
   type CiGateStoryInput,
   formatIncidentDate,
+  formatIncidentDateTime,
   formatRelativeTimestamp,
   presentCiGateStory,
 } from "./ci-gate-status-story.js"
@@ -98,8 +99,12 @@ const HistoryList = ({
     return null
   }
   return (
-    <details data-testid="ci-gate-history">
-      <summary className={ui.dialogFieldHint}>Incident history</summary>
+    <details data-testid="ci-gate-resolved-history">
+      <summary className={ui.dialogFieldHint}>
+        {view.history.length === 0
+          ? "Earlier runs"
+          : "Resolved incidents from the last 7 days"}
+      </summary>
       {view.history.map((incident) => (
         <div key={incident.id}>
           <span className={ui.dialogFieldHint}>
@@ -164,7 +169,7 @@ export function CiGateStatusStory({
 }) {
   const liveNow = useNowMs(nowMs === undefined)
   const now = nowMs ?? liveNow
-  const view = presentCiGateStory(ciGate)
+  const view = presentCiGateStory(ciGate, { nowMs: now })
   if (view.kind === "disabled") {
     return "CI disabled"
   }
@@ -215,6 +220,27 @@ export function CiGateStatusStory({
       <span className={ui.dialogFieldHint} data-testid="ci-gate-explanation">
         {view.explanation}
       </span>
+      {view.currentIncident === null ? null : (
+        <span
+          className="flex min-w-0 flex-col gap-1"
+          data-testid="ci-gate-current-incident"
+        >
+          <strong>Current incident</strong>
+          {view.currentIncident.openedAt === null ? (
+            <span className={ui.dialogFieldHint}>
+              Incident opened: unavailable
+            </span>
+          ) : (
+            <span className={ui.dialogFieldHint}>
+              Incident opened:{" "}
+              <ExactTime iso={view.currentIncident.openedAt}>
+                {formatIncidentDateTime(view.currentIncident.openedAt) ??
+                  view.currentIncident.openedAt}
+              </ExactTime>
+            </span>
+          )}
+        </span>
+      )}
       {repair}
       {view.notes.map((note) => (
         <span key={note} className={ui.dialogFieldHint}>
@@ -243,6 +269,14 @@ export function CiGateStatusStory({
           iso={view.failureDetectedAt}
           nowMs={now}
         />
+      )}
+      {view.resolvedHistoryEmptyLabel === null ? null : (
+        <span
+          className={ui.dialogFieldHint}
+          data-testid="ci-gate-resolved-history-empty"
+        >
+          {view.resolvedHistoryEmptyLabel}
+        </span>
       )}
       <HistoryList view={view} />
     </div>

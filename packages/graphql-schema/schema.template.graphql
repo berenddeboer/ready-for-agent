@@ -865,10 +865,17 @@ type RepositoryCiGate {
   diagnostic: String
   definitions: [CiGateDefinitionObservation!]!
   activeIncident: CiFailureIncident
+  """
+  Newest resolved CI Failure Incident, regardless of age. Not limited to the
+  resolved-history window. Null when none has resolved.
+  """
   latestResolvedIncident: CiFailureIncident
   """
-  Resolved CI Failure Incidents, newest recovery first. Does not include the
-  active incident.
+  Resolved CI Failure Incidents whose resolution time falls within the rolling
+  previous 7 × 24 hours, inclusive of the cutoff, newest resolved first. A
+  recently resolved incident is included even if it opened earlier. Does not
+  include the active incident. Older incidents stay stored and are omitted
+  from this view only.
   """
   incidentHistory: [CiFailureIncident!]!
   """

@@ -1,4 +1,5 @@
 export * from "./lib/ci-gate-coverage.js"
+export * from "./lib/ci-gate-incident-history.js"
 export * from "./lib/ci-gate-run.js"
 export * from "./lib/error-cause-chain.js"
 export * from "./lib/issue-operations.js"
