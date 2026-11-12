@@ -2246,4 +2246,252 @@ describe("Repository CI Gate observation", () => {
     expect(cleared.status).toBe("OPEN")
     expect(cleared.definitions[0]?.failureLatched).toBe(false)
   })
+
+  test("a closed gate keeps the active incident and windows resolved history", async () => {
+    const repository = await addRepository()
+    await saveSelection(repository.id, ["161335"])
+    const now = Date.now()
+    const day = 24 * 60 * 60 * 1000
+    const openedAt = new Date(now - 30 * day)
+    const recentResolvedAt = new Date(now - 2 * day)
+    const insideResolvedAt = new Date(now - 6 * day)
+    const outsideResolvedAt = new Date(now - 8 * day)
+    const justInsideResolvedAt = new Date(now - 7 * day + 60_000)
+    const justOutsideResolvedAt = new Date(now - 7 * day - 60_000)
+    const incident = (
+      id: string,
+      status: "open" | "resolved",
+      opened: Date,
+      resolved: Date | null,
+      summary: string,
+    ) => ({
+      id,
+      repositoryId: repository.id,
+      status,
+      openedAt: opened,
+      resolvedAt: resolved,
+      recoveryReason: status === "resolved" ? ("newer_success" as const) : null,
+      summary,
+      definitions: [
+        {
+          identity: "161335",
+          displayLabel: "CI",
+          firstFailedRunIdentity: `${id}:1`,
+          firstFailedRunHtmlUrl: `https://github.com/acme/widgets/actions/runs/${id}`,
+          joinedAt: opened,
+        },
+      ],
+    })
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "trunk",
+          lastObservedAt: new Date(now),
+          observations: [
+            {
+              identity: "161335",
+              lastObservedAt: new Date(now),
+              lastRunIdentity: "901:1",
+              lastRunHtmlUrl:
+                "https://github.com/acme/widgets/actions/runs/901",
+              lastHeadSha: "sha-901",
+              lastHeadRef: "trunk",
+              lastEvent: "push",
+              lastRawStatus: "in_progress",
+              lastRawConclusion: null,
+              lastRunCreatedAt: new Date(now),
+              lastRunUpdatedAt: new Date(now),
+              failureLatched: true,
+              latchedRunIdentity: "900:1",
+              latchedRunHtmlUrl:
+                "https://github.com/acme/widgets/actions/runs/900",
+              observationError: null,
+              observationErrorKind: null,
+            },
+          ],
+          incidentsToUpsert: [
+            incident(
+              "cfi-active",
+              "open",
+              openedAt,
+              null,
+              "CI Gate closed: CI failed.",
+            ),
+            incident(
+              "cfi-recent-old",
+              "resolved",
+              new Date(now - 20 * day),
+              recentResolvedAt,
+              "Resolved recently after an old opening.",
+            ),
+            incident(
+              "cfi-inside",
+              "resolved",
+              new Date(now - 9 * day),
+              insideResolvedAt,
+              "Resolved six days ago.",
+            ),
+            incident(
+              "cfi-just-inside",
+              "resolved",
+              new Date(now - 12 * day),
+              justInsideResolvedAt,
+              "Resolved just inside the window.",
+            ),
+            incident(
+              "cfi-outside",
+              "resolved",
+              new Date(now - 40 * day),
+              outsideResolvedAt,
+              "Resolved eight days ago.",
+            ),
+            incident(
+              "cfi-just-outside",
+              "resolved",
+              new Date(now - 15 * day),
+              justOutsideResolvedAt,
+              "Resolved just outside the window.",
+            ),
+          ],
+        })
+      }),
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          repositories {
+            id
+            ciGate {
+              status
+              definitions {
+                failureLatched
+                failingRun { detectedAt htmlUrl }
+                latestRun { rawStatus }
+              }
+              activeIncident { id openedAt status }
+              latestResolvedIncident { id summary }
+              incidentHistory { id summary resolvedAt failedRuns { htmlUrl } }
+            }
+          }
+        }`,
+      }),
+    )
+    const payload = (await response.json()) as {
+      data: {
+        repositories: ReadonlyArray<{
+          id: string
+          ciGate: {
+            status: string
+            definitions: ReadonlyArray<{
+              failureLatched: boolean
+              failingRun: {
+                detectedAt: string | null
+                htmlUrl: string | null
+              } | null
+              latestRun: { rawStatus: string | null } | null
+            }>
+            activeIncident: {
+              id: string
+              openedAt: string
+              status: string
+            } | null
+            latestResolvedIncident: { id: string; summary: string } | null
+            incidentHistory: ReadonlyArray<{
+              id: string
+              summary: string
+              resolvedAt: string | null
+              failedRuns: ReadonlyArray<{ htmlUrl: string | null }>
+            }>
+          }
+        }>
+      }
+    }
+    const gate = payload.data.repositories.find(
+      (entry) => entry.id === repository.id,
+    )?.ciGate
+    if (gate === undefined) {
+      throw new Error(`Missing repository ${repository.id}`)
+    }
+    expect(gate.status).toBe("CLOSED")
+    expect(gate.definitions[0]?.failureLatched).toBe(true)
+    expect(gate.definitions[0]?.latestRun?.rawStatus).toBe("in_progress")
+    expect(gate.definitions[0]?.failingRun?.htmlUrl).toContain(
+      "/actions/runs/900",
+    )
+    expect(gate.definitions[0]?.failingRun?.detectedAt).toBeNull()
+    expect(gate.activeIncident?.status).toBe("OPEN")
+    expect(gate.activeIncident?.openedAt).toBe(openedAt.toISOString())
+    expect(gate.latestResolvedIncident?.id).toBe("cfi-recent-old")
+    expect(gate.incidentHistory.map((entry) => entry.id)).toEqual([
+      "cfi-recent-old",
+      "cfi-inside",
+      "cfi-just-inside",
+    ])
+    expect(gate.incidentHistory[0]?.failedRuns[0]?.htmlUrl).toContain(
+      "cfi-recent-old",
+    )
+    expect(gate.incidentHistory.map((entry) => entry.summary)).not.toContain(
+      "Resolved eight days ago.",
+    )
+    expect(gate.incidentHistory.map((entry) => entry.summary)).not.toContain(
+      "Resolved just outside the window.",
+    )
+
+    const stored = await runtime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return (yield* sql.unsafe(
+          `SELECT id FROM ci_failure_incident WHERE repository_id = ?`,
+          [repository.id],
+        )) as readonly { readonly id: string }[]
+      }),
+    )
+    expect(stored.map((row) => row.id).sort()).toEqual(
+      [
+        "cfi-active",
+        "cfi-recent-old",
+        "cfi-inside",
+        "cfi-just-inside",
+        "cfi-outside",
+        "cfi-just-outside",
+      ].sort(),
+    )
+  })
+
+  test("latest resolved stays available when it is older than the history window", async () => {
+    const repository = await addRepository()
+    const resolvedAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000)
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        yield* db.commitCiGateSnapshot({
+          repositoryId: repository.id,
+          defaultBranch: "trunk",
+          lastObservedAt: resolvedAt,
+          observations: [],
+          incidentsToUpsert: [
+            {
+              id: "cfi-only-old",
+              repositoryId: repository.id,
+              status: "resolved",
+              openedAt: new Date(resolvedAt.getTime() - 24 * 60 * 60 * 1000),
+              resolvedAt,
+              recoveryReason: "newer_success",
+              summary: "Resolved long before the window.",
+              definitions: [],
+            },
+          ],
+        })
+      }),
+    )
+    const gate = await fetchCiGate(repository.id)
+    expect(gate.latestResolvedIncident?.summary).toBe(
+      "Resolved long before the window.",
+    )
+    expect(gate.incidentHistory).toEqual([])
+    expect(gate.activeIncident).toBeNull()
+  })
 })

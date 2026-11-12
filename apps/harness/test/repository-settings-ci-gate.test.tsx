@@ -167,7 +167,9 @@ describe("Repository settings CI Gate Definitions", () => {
     )
     expect(story).toContain("View run")
     expect(story).toContain("Last checked")
-    expect(story).toContain("Incident history")
+    expect(story).toContain("Current incident")
+    expect(story).toContain("Incident opened:")
+    expect(story).toContain("Resolved incidents from the last 7 days")
     expect(story).not.toContain("Active incident")
     expect(story).not.toContain("Last resolved")
   })
@@ -287,13 +289,15 @@ describe("Repository settings CI Gate catalog presentation", () => {
           },
         ],
       },
+      nowMs: Date.parse("2026-10-30T12:00:00.000Z"),
     })
     expect(html).toContain("CI Gate · Closed")
     expect(html).toContain(
       "CI failed on trunk. The gate remains closed until recovery is confirmed.",
     )
+    expect(html).not.toContain("Current incident")
     expect(html).not.toContain("Active incident")
-    expect(html).toContain("Incident history")
+    expect(html).toContain("Resolved incidents from the last 7 days")
     expect(html).toContain("CI Gate recovered: newer success on CI.")
     expect(html).not.toContain("Last resolved")
   })

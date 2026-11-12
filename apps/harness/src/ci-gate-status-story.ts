@@ -2,6 +2,7 @@ import {
   type CiGateObservedRun,
   classifyCiGateObservedRun,
   compareCiGateRunOrder,
+  isResolvedCiFailureIncidentWithinHistoryWindow,
 } from "@ready-for-agent/forge-contract"
 
 type CiGateStoryRun = {
@@ -107,9 +108,14 @@ export type CiGateStatusStoryView =
         | { readonly kind: "none" }
       readonly runs: readonly CiGateStoryLink[]
       readonly notes: readonly string[]
+      readonly currentIncident: {
+        readonly id: string
+        readonly openedAt: string | null
+      } | null
       readonly failureDetectedAt: string | null
       readonly failureTimeUnavailable: boolean
       readonly lastCheckedAt: string | null
+      readonly resolvedHistoryEmptyLabel: string | null
       readonly history: readonly CiGateHistoryEntry[]
       readonly earlierRuns: readonly {
         readonly label: string
@@ -320,14 +326,37 @@ const statusHeadline = (
   }
 }
 
+const compareResolvedIncidentsDesc = (
+  left: CiGateStoryIncident,
+  right: CiGateStoryIncident,
+): number => {
+  const leftResolved = parseTime(left.resolvedAt) ?? Number.NEGATIVE_INFINITY
+  const rightResolved = parseTime(right.resolvedAt) ?? Number.NEGATIVE_INFINITY
+  if (rightResolved !== leftResolved) {
+    return rightResolved - leftResolved
+  }
+  const leftOpened = parseTime(left.openedAt) ?? Number.NEGATIVE_INFINITY
+  const rightOpened = parseTime(right.openedAt) ?? Number.NEGATIVE_INFINITY
+  if (rightOpened !== leftOpened) {
+    return rightOpened - leftOpened
+  }
+  if (left.id === right.id) {
+    return 0
+  }
+  return left.id < right.id ? 1 : -1
+}
+
 /**
  * One current-status story. Run roles and history come from stored gate
  * evidence. A missing order key or timestamp is not treated as proof.
  * A newer pending attempt of a latched failure is a recovery check, not a
  * request to start repair. It does not clear the gate.
+ * Resolved history is the rolling previous 7 × 24 hours. The active incident
+ * is not part of that window.
  */
 export const presentCiGateStory = (
   input: CiGateStoryInput,
+  options: { readonly nowMs: number },
 ): CiGateStatusStoryView => {
   if (input.status === "DISABLED") {
     return { kind: "disabled" }
@@ -450,7 +479,16 @@ export const presentCiGateStory = (
     }
   }
 
-  const history = input.incidentHistory.map((incident) => ({
+  const visibleIncidents = [...input.incidentHistory]
+    .filter((incident) =>
+      isResolvedCiFailureIncidentWithinHistoryWindow({
+        resolvedAtMs: parseTime(incident.resolvedAt),
+        nowMs: options.nowMs,
+      }),
+    )
+    .sort(compareResolvedIncidentsDesc)
+
+  const history = visibleIncidents.map((incident) => ({
     id: incident.id,
     openedAt: incident.openedAt,
     resolvedAt: incident.resolvedAt,
@@ -476,7 +514,7 @@ export const presentCiGateStory = (
     ],
   }))
   const attachedTimes = new Set(
-    input.incidentHistory.flatMap((incident) =>
+    visibleIncidents.flatMap((incident) =>
       earlierRuns.flatMap((run) =>
         run.at !== null && incidentWindowContains(incident, run.at)
           ? [run.at]
@@ -556,6 +594,19 @@ export const presentCiGateStory = (
     hasText(definition.failingRun?.detectedAt),
   )?.failingRun?.detectedAt
   const closed = input.status === "CLOSED"
+  const incidentOpenedAt =
+    closed && input.activeIncident !== null
+      ? input.activeIncident.openedAt
+      : null
+  const knownIncidentOpenedAt =
+    parseTime(incidentOpenedAt) === null ? null : incidentOpenedAt
+  const currentIncident =
+    closed && input.activeIncident !== null
+      ? {
+          id: input.activeIncident.id,
+          openedAt: knownIncidentOpenedAt,
+        }
+      : null
   const repair =
     input.activeRepair === null
       ? input.canStartCiRepair && !allLatchedRecovering
@@ -575,9 +626,15 @@ export const presentCiGateStory = (
     repair,
     runs,
     notes,
+    currentIncident,
     failureDetectedAt: hasText(failureDetectedAt) ? failureDetectedAt : null,
-    failureTimeUnavailable: closed && !hasText(failureDetectedAt),
+    failureTimeUnavailable:
+      closed && !hasText(failureDetectedAt) && knownIncidentOpenedAt === null,
     lastCheckedAt: input.observedAt,
+    resolvedHistoryEmptyLabel:
+      closed && visibleIncidents.length === 0
+        ? "No resolved incidents in the last 7 days"
+        : null,
     history,
     earlierRuns: unattached.map((run) => ({
       label: `Earlier successful run · ${run.label}`,
@@ -622,4 +679,35 @@ export const formatIncidentDate = (iso: string): string => {
     year: "numeric",
     timeZone: "UTC",
   }).format(new Date(parsed))
+}
+
+const UTC_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const
+
+/** Visible incident opening time. Not a failing-run detection time. */
+export const formatIncidentDateTime = (iso: string): string | null => {
+  const parsed = Date.parse(iso)
+  if (Number.isNaN(parsed)) {
+    return null
+  }
+  const date = new Date(parsed)
+  const month = UTC_MONTHS[date.getUTCMonth()]
+  if (month === undefined) {
+    return null
+  }
+  const hours = String(date.getUTCHours()).padStart(2, "0")
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0")
+  return `${String(date.getUTCDate())} ${month} ${String(date.getUTCFullYear())}, ${hours}:${minutes} UTC`
 }

@@ -1,5 +1,6 @@
 import {
   Cause,
+  Clock,
   Duration,
   Effect,
   Exit,
@@ -38,6 +39,7 @@ import {
   RepositoryNotFoundError,
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
+import { resolvedCiFailureIncidentHistorySinceMs } from "@ready-for-agent/forge-contract"
 import type { GitHubService } from "@ready-for-agent/github-service"
 import {
   GitLabService,
@@ -1821,8 +1823,12 @@ export const createGraphqlApi = <R>(
                   repository.id,
                 )
                 const snapshot = yield* db.loadCiGateSnapshot(repository.id)
+                const nowMs = yield* Clock.currentTimeMillis
                 const resolvedIncidents =
-                  yield* db.listResolvedCiFailureIncidents(repository.id)
+                  yield* db.listResolvedCiFailureIncidents(repository.id, {
+                    resolvedSinceMs:
+                      resolvedCiFailureIncidentHistorySinceMs(nowMs),
+                  })
                 const status = deriveRepositoryCiGateStatus({
                   selectedCount: definitions.length,
                   observations: snapshot.observations,

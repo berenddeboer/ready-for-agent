@@ -1,9 +1,15 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { renderToStaticMarkup } from "react-dom/server"
-import { ciGateRunOrderKey } from "@ready-for-agent/forge-contract"
+import {
+  CI_GATE_RESOLVED_HISTORY_WINDOW_MS,
+  ciGateRunOrderKey,
+} from "@ready-for-agent/forge-contract"
 import { ciGateStatusLabel } from "../src/ci-gate-status-label.js"
-import type { CiGateStoryInput } from "../src/ci-gate-status-story.js"
+import {
+  type CiGateStoryInput,
+  formatIncidentDateTime,
+} from "../src/ci-gate-status-story.js"
 import { RepositoryCiGateCardDetails } from "../src/repository-ci-gate-card.js"
 import { RepositorySettingsCiGateSection } from "../src/repository-settings-ci-gate.js"
 import { describe, expect, test } from "bun:test"
@@ -146,9 +152,19 @@ describe("Repository CI Gate presentation", () => {
     expect(html).toContain(`title="${FAILURE_DETECTED}"`)
     expect(html).toContain("Last checked")
     expect(html).toContain("2 minutes ago")
+    expect(html).toContain("Current incident")
+    expect(html).toContain("Incident opened:")
+    const openedBlock = html.slice(
+      html.indexOf("Incident opened:"),
+      html.indexOf("Failure detected"),
+    )
+    expect(openedBlock).toContain("2026-10-30T23:40:00.000Z")
+    expect(openedBlock).toContain("30 Oct 2026, 23:40 UTC")
+    expect(openedBlock).not.toContain(FAILURE_DETECTED)
     expect(html).not.toContain("Active incident")
     expect(html).not.toContain("Last resolved")
     expect(html).not.toContain("Incident history")
+    expect(html).toContain("No resolved incidents in the last 7 days")
     expect(html).not.toContain("CI · failure")
     expect(html).toContain("Lint: Not observed yet")
   })
@@ -232,14 +248,19 @@ describe("Repository CI Gate presentation", () => {
       expect(html).toContain("Failing CI · CI")
       expect(html).toContain(`href="${failingUrl}"`)
       expect(html).not.toContain("CI · success")
+      expect(html).toContain("Current incident")
+      expect(html).toContain("Incident opened:")
+      expect(html).toContain("30 Oct 2026, 23:00 UTC")
+      expect(html).toContain('dateTime="2026-10-30T23:00:00.000Z"')
+      expect(html).not.toContain("Failure detected")
+      expect(html).not.toContain("Failure time unavailable")
       expect(html).not.toContain("Active incident")
       expect(html).not.toContain("Last resolved")
-      expect(html).toContain("Failure time unavailable")
       expect(html).toContain("Last checked")
       expect(html).toContain("<details")
       expect(html).not.toContain("<details open")
-      expect(html).toContain("Incident history")
-      const historyAt = html.indexOf("Incident history")
+      expect(html).toContain("Resolved incidents from the last 7 days")
+      const historyAt = html.indexOf("Resolved incidents from the last 7 days")
       const recoveryAt = html.indexOf("CI Gate recovered: newer success on CI.")
       expect(recoveryAt).toBeGreaterThan(historyAt)
       expect(html).toContain("Successful run · CI")
@@ -290,8 +311,16 @@ describe("Repository CI Gate presentation", () => {
     expect(html).toContain("Recovery verification is still in progress on CI")
     expect(html).toContain("Recovery verification · CI")
     expect(html).toContain(`href="${verificationUrl}"`)
+    expect(html).toContain("Failing CI · CI")
+    expect(html).toContain("Current incident")
+    expect(html).toContain("Incident opened:")
+    expect(html).toContain("30 Oct 2026, 23:00 UTC")
+    expect(html).not.toContain("Failure detected")
+    expect(html).not.toContain("Failure time unavailable")
+    expect(html).toContain("No resolved incidents in the last 7 days")
     expect(html).not.toContain("CI · success")
     expect(html).not.toContain("Active incident")
+    expect(html).not.toContain("Resolved incidents from the last 7 days")
     expect(html).not.toContain("Incident history")
   })
 
@@ -336,9 +365,12 @@ describe("Repository CI Gate presentation", () => {
     expect(html).not.toContain("Start CI Repair")
     expect(html).not.toContain("Failing CI")
     expect(html).not.toContain("CI · success")
-    expect(html).toContain("Incident history")
+    expect(html).toContain("Resolved incidents from the last 7 days")
     expect(html).toContain("CI Gate recovered: newer success on CI.")
+    expect(html).not.toContain("Current incident")
+    expect(html).not.toContain("Incident opened:")
     expect(html).not.toContain("Last resolved")
+    expect(html).not.toContain("No resolved incidents in the last 7 days")
   })
 
   test("an open gate does not claim health before a definition is observed", () => {
@@ -474,6 +506,198 @@ describe("Repository CI Gate presentation", () => {
     expect(html).toContain("Repair run link unavailable")
     expect(html).not.toContain("Start CI Repair")
     expect(html).not.toContain("href=")
+  })
+})
+
+const resolvedIncident = (input: {
+  readonly id: string
+  readonly openedAt: string
+  readonly resolvedAt: string | null
+  readonly summary: string
+}): CiGateStoryInput["incidentHistory"][number] => ({
+  id: input.id,
+  openedAt: input.openedAt,
+  resolvedAt: input.resolvedAt,
+  summary: input.summary,
+  failedRuns: [],
+})
+
+describe("current CI Failure Incident and resolved history window", () => {
+  const openedLongAgo = new Date(NOW - 30 * 24 * 60 * 60 * 1000).toISOString()
+  const cutoff = new Date(
+    NOW - CI_GATE_RESOLVED_HISTORY_WINDOW_MS,
+  ).toISOString()
+  const justOutside = new Date(
+    NOW - CI_GATE_RESOLVED_HISTORY_WINDOW_MS - 1,
+  ).toISOString()
+
+  test("a long-running active incident stays visible and is not treated as resolved history", () => {
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        activeIncident: { id: "cfi-long", openedAt: openedLongAgo },
+        incidentHistory: [
+          resolvedIncident({
+            id: "cfi-old",
+            openedAt: openedLongAgo,
+            resolvedAt: justOutside,
+            summary: "CI Gate recovered: older than the window.",
+          }),
+        ],
+        definitions: [
+          {
+            identity: "ci.yml",
+            displayLabel: "CI",
+            failureLatched: true,
+            diagnostic: null,
+            failingRun: {
+              runIdentity: "900:1",
+              htmlUrl: "https://github.com/acme/widgets/actions/runs/900",
+              orderKey: "00000000000000000900:000001",
+              detectedAt: null,
+            },
+            latestRun: null,
+          },
+        ],
+      }),
+    )
+    const currentAt = html.indexOf('data-testid="ci-gate-current-incident"')
+    const historyAt = html.indexOf("No resolved incidents in the last 7 days")
+    expect(currentAt).toBeGreaterThan(-1)
+    expect(historyAt).toBeGreaterThan(currentAt)
+    expect(html).toContain("Current incident")
+    expect(html).toContain("Incident opened:")
+    expect(html).toContain(
+      formatIncidentDateTime(openedLongAgo) ?? openedLongAgo,
+    )
+    expect(html).toContain(`dateTime="${openedLongAgo}"`)
+    expect(html).not.toContain("Failure time unavailable")
+    expect(html).not.toContain("Failure detected")
+    expect(html).not.toContain("CI Gate recovered: older than the window.")
+    expect(html).not.toContain("Resolved incidents from the last 7 days")
+    expect(html).toContain("Failing CI · CI")
+  })
+
+  test("an unavailable incident opening time is stated only when that time is missing", () => {
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: null,
+        defaultBranch: "trunk",
+        activeIncident: { id: "cfi-open", openedAt: "not-a-time" },
+        definitions: [
+          {
+            identity: "ci.yml",
+            displayLabel: "CI",
+            failureLatched: true,
+            diagnostic: null,
+            failingRun: {
+              runIdentity: "900:1",
+              htmlUrl: null,
+              orderKey: null,
+              detectedAt: null,
+            },
+            latestRun: null,
+          },
+        ],
+      }),
+    )
+    expect(html).toContain("Current incident")
+    expect(html).toContain("Incident opened: unavailable")
+    expect(html).toContain("Failure time unavailable")
+    expect(html).not.toContain("Failure detected")
+  })
+
+  test("an open gate does not show a current incident and hides history outside the window", () => {
+    const html = renderCard(
+      story({
+        status: "OPEN",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        activeIncident: { id: "cfi-stale", openedAt: openedLongAgo },
+        incidentHistory: [
+          resolvedIncident({
+            id: "cfi-old",
+            openedAt: openedLongAgo,
+            resolvedAt: justOutside,
+            summary: "CI Gate recovered: older than the window.",
+          }),
+        ],
+      }),
+    )
+    expect(html).toContain("CI Gate · Open")
+    expect(html).not.toContain("Current incident")
+    expect(html).not.toContain("Incident opened:")
+    expect(html).not.toContain("No resolved incidents in the last 7 days")
+    expect(html).not.toContain("Resolved incidents from the last 7 days")
+    expect(html).not.toContain("CI Gate recovered: older than the window.")
+    expect(html).not.toContain("Failure time unavailable")
+  })
+
+  test("resolved history keeps the cutoff, recently resolved old incidents, and newest-first order", () => {
+    const recentOldOpen = new Date(NOW - 60 * 60 * 1000).toISOString()
+    const html = renderCard(
+      story({
+        status: "OPEN",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        incidentHistory: [
+          resolvedIncident({
+            id: "cfi-outside",
+            openedAt: openedLongAgo,
+            resolvedAt: justOutside,
+            summary: "Resolved just outside the window.",
+          }),
+          resolvedIncident({
+            id: "cfi-cutoff",
+            openedAt: openedLongAgo,
+            resolvedAt: cutoff,
+            summary: "Resolved at the cutoff.",
+          }),
+          resolvedIncident({
+            id: "cfi-recent-old",
+            openedAt: openedLongAgo,
+            resolvedAt: recentOldOpen,
+            summary: "Resolved recently after an old opening.",
+          }),
+          resolvedIncident({
+            id: "cfi-undated",
+            openedAt: openedLongAgo,
+            resolvedAt: null,
+            summary: "Resolved date missing.",
+          }),
+        ],
+      }),
+    )
+    expect(html).toContain("Resolved incidents from the last 7 days")
+    expect(html).toContain("Resolved recently after an old opening.")
+    expect(html).toContain("Resolved at the cutoff.")
+    expect(html).not.toContain("Resolved just outside the window.")
+    expect(html).not.toContain("Resolved date missing.")
+    expect(html).not.toContain("Current incident")
+    const recentAt = html.indexOf("Resolved recently after an old opening.")
+    const cutoffAt = html.indexOf("Resolved at the cutoff.")
+    expect(recentAt).toBeGreaterThan(-1)
+    expect(cutoffAt).toBeGreaterThan(recentAt)
+    expect(html).not.toContain("No resolved incidents in the last 7 days")
+  })
+
+  test("a closed gate with no recent resolved incidents does not look recovered", () => {
+    const html = renderCard(
+      story({
+        status: "CLOSED",
+        observedAt: LAST_CHECKED,
+        defaultBranch: "trunk",
+        activeIncident: { id: "cfi-open", openedAt: LAST_CHECKED },
+        incidentHistory: [],
+      }),
+    )
+    expect(html).toContain("Current incident")
+    expect(html).toContain("No resolved incidents in the last 7 days")
+    expect(html).not.toContain("Resolved incidents from the last 7 days")
+    expect(html).not.toContain("CI Gate recovered")
   })
 })
 
