@@ -272,7 +272,13 @@ describe("implement", () => {
       expect(error).toBeInstanceOf(ImplementIssueContextMissingError)
     }))
 
-  it.each(["landed", "not landed", "unknown", "decision still needed"])(
+  it.each([
+    "landed",
+    "not landed",
+    "unknown",
+    "malformed",
+    "decision still needed",
+  ])(
     "checks prerequisite ancestry before parking the Work Item: %s",
     (scenario) =>
       withTemp(async (root) => {
@@ -299,7 +305,7 @@ describe("implement", () => {
                   "not on branch",
                 )
               : landed
-        const request = `Refresh the worktree?\nMissing prerequisite commit: ${oid}`
+        const request = `Refresh the worktree?\nMissing prerequisite commit: ${oid}${scenario === "malformed" ? "?" : ""}`
         const ask = `${request}\nREADY_FOR_AGENT_RESULT: DECISION_NEEDED`
         const sessionId = "ses_prerequisite"
         const corrections: string[] = []
