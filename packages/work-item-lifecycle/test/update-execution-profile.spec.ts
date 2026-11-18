@@ -237,6 +237,52 @@ describe("updateWorkItemExecutionProfile", () => {
     )
   })
 
+  it("keeps both fields when two partial updates overlap", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const sql = yield* SqlClient.SqlClient
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets.git",
+          isBare: true,
+        })
+        yield* insertProfiledWorkItem(sql, {
+          id: "wi-race",
+          repositoryId: repo.id,
+          issueNumber: 1,
+        })
+
+        yield* Effect.all(
+          [
+            lifecycle.updateWorkItemExecutionProfile("wi-race", {
+              buildThinkingLevel: "low",
+            }),
+            lifecycle.updateWorkItemExecutionProfile("wi-race", {
+              reviewModel: "provider/review-b",
+              reviewThinkingLevel: "max",
+            }),
+          ],
+          { concurrency: "unbounded" },
+        )
+
+        const final = yield* lifecycle.getWorkItem("wi-race")
+        expect(final.executionProfile).toEqual({
+          agentBackend: "opencode",
+          build: { model: "provider/build", thinkingLevel: "low" },
+          review: {
+            kind: "explicit",
+            model: "provider/review-b",
+            thinkingLevel: "max",
+          },
+        })
+      }).pipe(Effect.provide(lifecycleLayer)),
+    )
+  })
+
   it("rejects invalid models, stale thinking levels, missing pins, and closed Work Items", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
