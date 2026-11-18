@@ -17,6 +17,7 @@ export type FiniteCommandName =
   | "candidates"
   | "intake"
   | "retry"
+  | "set-model"
   | "status"
   | "skills"
 
@@ -155,6 +156,26 @@ export type RetrySuccessDocument = {
   readonly command: "retry"
   readonly repository: CanonicalRepositoryIdentity
   readonly results: readonly RetryWorkItemResult[]
+}
+
+export type SetModelExecutionProfile = {
+  readonly buildModel: string
+  readonly buildThinkingLevel: string | null
+  readonly reviewSameAsBuild: boolean
+  readonly reviewModel: string
+  readonly reviewThinkingLevel: string | null
+}
+
+export type SetModelSuccessDocument = {
+  readonly schemaVersion: typeof CLI_SCHEMA_VERSION
+  readonly command: "set-model"
+  readonly repository: CanonicalRepositoryIdentity
+  readonly workItem: {
+    readonly id: string
+    readonly state: string
+    readonly paused: boolean
+    readonly executionProfile: SetModelExecutionProfile | null
+  }
 }
 
 export type StatusLaneId =
@@ -324,6 +345,16 @@ export const intakeHasFailedResults = (
   results: readonly IntakeIssueResult[],
 ): boolean => results.some((result) => result.outcome === "FAILED")
 
+export const buildSetModelSuccessDocument = (input: {
+  readonly repository: CanonicalRepositoryIdentity
+  readonly workItem: SetModelSuccessDocument["workItem"]
+}): SetModelSuccessDocument => ({
+  schemaVersion: CLI_SCHEMA_VERSION,
+  command: "set-model",
+  repository: input.repository,
+  workItem: input.workItem,
+})
+
 export const buildRetrySuccessDocument = (input: {
   readonly repository: CanonicalRepositoryIdentity
   readonly results: readonly RetryWorkItemResult[]
@@ -385,6 +416,7 @@ const FiniteCommandNameSchema = Schema.Literals([
   "candidates",
   "intake",
   "retry",
+  "set-model",
   "status",
   "skills",
 ])

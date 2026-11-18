@@ -145,14 +145,19 @@ import {
 } from "./errors.js"
 import { recordStepRunAgentModels } from "./execution-model-provenance.js"
 import {
+  type ExecutionProfileUpdatePatch,
   type ExplicitWorkItemExecutionProfile,
   type ImplementWithOptionsInput,
   type ImplementWithProfileInput,
+  applyExecutionProfileUpdate,
   decodeImplementWithOptions,
   decodeImplementWithProfile,
   resolveExecutionProfileSelection,
   validateExecutionProfileCatalog,
 } from "./execution-profile.js"
+
+export type { ExecutionProfileUpdatePatch }
+
 import { resolveForgeObservation } from "./forge-observation.js"
 import { selectJumpAgentModel } from "./jump-agent-model.js"
 import {
@@ -1300,6 +1305,13 @@ export type ImplementWithError =
   | ParentImplementWithPauseNotAllowedError
   | LinearExecutionNotSupportedError
 
+export type UpdateWorkItemExecutionProfileError =
+  | WorkItemNotFoundError
+  | WorkItemTerminalError
+  | InvalidExecutionProfileError
+  | AgentBackendUnavailableError
+  | WorkItemLifecycleDatabaseError
+
 export type QueueError =
   | IssueNotFoundError
   | IssueIdentityAmbiguousError
@@ -1524,6 +1536,17 @@ export interface WorkItemLifecycleShape {
     profile: ImplementWithProfileInput,
     options?: ImplementWithOptionsInput,
   ) => Effect.Effect<readonly WorkItemRecord[], ImplementWithError>
+  /**
+   * Change the pinned Explicit Work Item Execution Profile. Unspecified
+   * fields keep their current values. Applies from the next Step Run
+   * start; a Step Run that is already running keeps the model recorded
+   * when it started. Does not unpause. Rejects complete, failed, and
+   * abandoned Work Items.
+   */
+  readonly updateWorkItemExecutionProfile: (
+    workItemId: string,
+    patch: ExecutionProfileUpdatePatch,
+  ) => Effect.Effect<WorkItemRecord, UpdateWorkItemExecutionProfileError>
   readonly implementLocally: (
     repositoryId: string,
     nativeId: string,
@@ -11006,6 +11029,126 @@ export const makeWorkItemLifecycleLive = (
         return created
       })
 
+      const closedWorkItemState = (
+        state: string,
+      ): state is "complete" | "failed" | "abandoned" =>
+        state === "complete" || state === "failed" || state === "abandoned"
+
+      const updateWorkItemExecutionProfile = Effect.fn(
+        "WorkItemLifecycle.updateWorkItemExecutionProfile",
+      )(function* (workItemId: string, patch: ExecutionProfileUpdatePatch) {
+        const row = yield* loadWorkItemRow(workItemId)
+        if (!row) {
+          return yield* new WorkItemNotFoundError({ workItemId })
+        }
+        if (closedWorkItemState(row.state)) {
+          return yield* new WorkItemTerminalError({
+            workItemId,
+            state: row.state,
+          })
+        }
+        const current = decodeExecutionProfile(row)
+        if (current === null) {
+          return yield* new InvalidExecutionProfileError({
+            message:
+              "This Work Item has no Explicit Work Item Execution Profile to change",
+            field: "executionProfile",
+          })
+        }
+        if (!isSelectableAgentBackendId(current.agentBackend)) {
+          return yield* new AgentBackendUnavailableError({
+            message: `Work Item captured Agent Backend is not selectable: ${current.agentBackend}`,
+            reason: `Unknown or unsupported Agent Backend: ${current.agentBackend}`,
+          })
+        }
+        const status = yield* activeAgentBackend.getBackendStatus(
+          current.agentBackend,
+        )
+        if (status === null || status.kind === "unavailable") {
+          const reason =
+            status?.reason ??
+            (status === null
+              ? "Agent Backend is not Active"
+              : "Agent Backend is unavailable")
+          return yield* new AgentBackendUnavailableError({
+            message: reason,
+            reason,
+          })
+        }
+        const updated = applyExecutionProfileUpdate({
+          current,
+          patch,
+          catalog: status.models,
+          backendLabel: status.backend.label,
+        })
+        if (updated instanceof InvalidExecutionProfileError) {
+          return yield* updated
+        }
+
+        const now = yield* Clock.currentTimeMillis
+        const reviewSameAsBuild = updated.review.kind === "same_as_build"
+        const written = (yield* sql
+          .unsafe(
+            `UPDATE work_item
+             SET execution_profile_build_model = ?,
+                 execution_profile_build_thinking_level = ?,
+                 execution_profile_review_same_as_build = ?,
+                 execution_profile_review_model = ?,
+                 execution_profile_review_thinking_level = ?,
+                 updated_at = ?
+             WHERE id = ?
+               AND execution_profile_present = 1
+               AND state NOT IN ('complete', 'failed', 'abandoned')
+             RETURNING id`,
+            [
+              updated.build.model,
+              updated.build.thinkingLevel,
+              reviewSameAsBuild ? 1 : 0,
+              reviewSameAsBuild
+                ? null
+                : updated.review.kind === "explicit"
+                  ? updated.review.model
+                  : null,
+              reviewSameAsBuild
+                ? null
+                : updated.review.kind === "explicit"
+                  ? updated.review.thinkingLevel
+                  : null,
+              now,
+              workItemId,
+            ],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly id: string
+        }[]
+        if (!written[0]) {
+          const currentRow = yield* loadWorkItemRow(workItemId)
+          if (!currentRow) {
+            return yield* new WorkItemNotFoundError({ workItemId })
+          }
+          if (closedWorkItemState(currentRow.state)) {
+            return yield* new WorkItemTerminalError({
+              workItemId,
+              state: currentRow.state,
+            })
+          }
+          return yield* new WorkItemLifecycleDatabaseError({
+            message: `Could not update the Explicit Work Item Execution Profile for ${workItemId}`,
+          })
+        }
+        yield* notifyWorkItemsChanged(row.repository_id)
+        return yield* getWorkItem(workItemId).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after execution profile update: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
+        )
+      })
+
       return WorkItemLifecycle.of({
         maxDurations,
         recoverOrphanedStepRuns,
@@ -11017,6 +11160,7 @@ export const makeWorkItemLifecycleLive = (
         startCiRepair,
         considerAutomaticCiRepair,
         implementWith,
+        updateWorkItemExecutionProfile,
         implementLocally,
         implementAllWithAutoMerge,
         queue: queueIssue,

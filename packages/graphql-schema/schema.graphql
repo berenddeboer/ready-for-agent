@@ -257,6 +257,35 @@ input ExplicitWorkItemExecutionProfileInput {
 }
 
 """
+Partial change to a pinned Explicit Work Item Execution Profile. Omit a
+field to keep its current value. A null Thinking Level clears that level.
+"""
+input UpdateWorkItemExecutionProfileInput {
+  """
+  Omit to keep the current build Agent Model.
+  """
+  buildModel: String
+  """
+  Omit to keep the current build Thinking Level. Null clears it.
+  """
+  buildThinkingLevel: String
+  """
+  When true, review collapses onto the build selection. Mutually exclusive
+  with reviewModel and reviewThinkingLevel.
+  """
+  reviewSameAsBuild: Boolean
+  """
+  Omit to keep the current review Agent Model. Setting this selects an
+  explicit review model.
+  """
+  reviewModel: String
+  """
+  Omit to keep the current review Thinking Level. Null clears it.
+  """
+  reviewThinkingLevel: String
+}
+
+"""
 Implement With options, separate from the Explicit Work Item Execution Profile.
 Omission leaves Work Item Merge Policy unset and keeps the remote path. The
 Harness dialog always submits a concrete Merge Policy pin.
@@ -1584,8 +1613,9 @@ type WorkItem {
   """
   mergeMode: MergeMode!
   """
-  Explicit Work Item Execution Profile when created through Implement With.
-  Null for ordinary settings-resolved Work Items.
+  Pinned Explicit Work Item Execution Profile. Set by Implement With and
+  changeable with updateWorkItemExecutionProfile. Null for ordinary
+  settings-resolved Work Items.
   """
   executionProfile: WorkItemExecutionProfile
   """
@@ -1895,6 +1925,20 @@ type Mutation {
     maxAutonomousRetries: Int
   ): RetryWorkItemsResult!
   retryWorkItem(workItemId: ID!): WorkItem!
+  """
+  Change the pinned Explicit Work Item Execution Profile. Unspecified fields
+  keep their current values. Applies from the next Step Run start; a Step Run
+  that is already running keeps the model recorded when it started. Does not
+  unpause. Rejects complete, failed, and abandoned Work Items.
+  """
+  updateWorkItemExecutionProfile(
+    workItemId: ID!
+    profile: UpdateWorkItemExecutionProfileInput!
+    """
+    When set, the Work Item must belong to this Repository.
+    """
+    repositoryId: ID
+  ): WorkItem!
   """
   Continue a Decision needed handoff in the existing agent session. Does not
   accept an answer; the operator answers in OpenCode or Jump. Idempotent while

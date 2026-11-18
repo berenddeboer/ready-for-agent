@@ -7,6 +7,7 @@ import {
   buildCandidatesSuccessDocument,
   buildIntakeSuccessDocument,
   buildRetrySuccessDocument,
+  buildSetModelSuccessDocument,
   buildStatusSuccessDocument,
   encodeCompactJson,
   intakeHasFailedResults,
@@ -100,6 +101,49 @@ const retryAllRetryableFlag = Flag.Boolean("all-retryable").pipe(
   Flag.withDefault(false),
   Flag.withDescription(
     "Retry every Work Item eligible for Autonomous Retry in the Repository (excludes paused Work Items)",
+  ),
+)
+
+const setModelWorkItemFlag = Flag.String("work-item").pipe(
+  Flag.withDescription(
+    "Work Item whose pinned build or review Agent Model to change",
+  ),
+)
+
+const setModelReviewModelFlag = Flag.String("review-model").pipe(
+  Flag.withDescription(
+    "Review Agent Model to pin. Omit to keep the current review model",
+  ),
+  Flag.optional,
+)
+
+const setModelReviewThinkingLevelFlag = Flag.String(
+  "review-thinking-level",
+).pipe(
+  Flag.withDescription(
+    "Review Thinking Level for the review Agent Model. Omit to keep the current level when it is still offered",
+  ),
+  Flag.optional,
+)
+
+const setModelBuildModelFlag = Flag.String("build-model").pipe(
+  Flag.withDescription(
+    "Build Agent Model to pin. Omit to keep the current build model",
+  ),
+  Flag.optional,
+)
+
+const setModelBuildThinkingLevelFlag = Flag.String("build-thinking-level").pipe(
+  Flag.withDescription(
+    "Build Thinking Level. Omit to keep the current level when it is still offered",
+  ),
+  Flag.optional,
+)
+
+const setModelReviewSameAsBuildFlag = Flag.Boolean("review-same-as-build").pipe(
+  Flag.withDefault(false),
+  Flag.withDescription(
+    "Collapse review onto the build Agent Model and Thinking Level",
   ),
 )
 
@@ -384,6 +428,88 @@ const retryWorkflow = Effect.fn("Cli.retry")(function* (
   })
 })
 
+const setModelWorkflow = Effect.fn("Cli.setModel")(function* (
+  repositoryArgument: string,
+  input: {
+    readonly workItemId: string
+    readonly reviewModel: string | undefined
+    readonly reviewThinkingLevel: string | undefined
+    readonly buildModel: string | undefined
+    readonly buildThinkingLevel: string | undefined
+    readonly reviewSameAsBuild: boolean
+  },
+) {
+  const workItemId = input.workItemId.trim()
+  if (workItemId.length === 0) {
+    return yield* new FiniteCommandFailed({
+      command: "set-model",
+      code: "INVALID_EXECUTION_PROFILE",
+      message: "--work-item is required",
+    })
+  }
+  if (
+    input.reviewSameAsBuild &&
+    (input.reviewModel !== undefined || input.reviewThinkingLevel !== undefined)
+  ) {
+    return yield* new FiniteCommandFailed({
+      command: "set-model",
+      code: "INVALID_EXECUTION_PROFILE",
+      message:
+        "Same as build cannot include a distinct review Agent Model or Thinking Level",
+    })
+  }
+  if (
+    !input.reviewSameAsBuild &&
+    input.reviewModel === undefined &&
+    input.reviewThinkingLevel === undefined &&
+    input.buildModel === undefined &&
+    input.buildThinkingLevel === undefined
+  ) {
+    return yield* new FiniteCommandFailed({
+      command: "set-model",
+      code: "INVALID_EXECUTION_PROFILE",
+      message:
+        "Set at least one of --review-model, --review-thinking-level, --build-model, --build-thinking-level, or --review-same-as-build",
+    })
+  }
+
+  const graphqlApi = yield* GraphqlApi
+  const repositories = yield* graphqlApi.listRepositories.pipe(
+    Effect.mapError((error) => toFiniteCommandFailed("set-model", error)),
+  )
+  const resolved = resolveRepositoryIdentity(repositoryArgument, repositories)
+  if (resolved._tag !== "matched") {
+    return yield* repositoryIdentityCommandFailed("set-model", resolved)
+  }
+
+  const workItem = yield* graphqlApi
+    .updateWorkItemExecutionProfile(resolved.repository.id, workItemId, {
+      ...(input.buildModel !== undefined
+        ? { buildModel: input.buildModel }
+        : {}),
+      ...(input.buildThinkingLevel !== undefined
+        ? { buildThinkingLevel: input.buildThinkingLevel }
+        : {}),
+      ...(input.reviewSameAsBuild ? { reviewSameAsBuild: true as const } : {}),
+      ...(input.reviewModel !== undefined
+        ? { reviewModel: input.reviewModel }
+        : {}),
+      ...(input.reviewThinkingLevel !== undefined
+        ? { reviewThinkingLevel: input.reviewThinkingLevel }
+        : {}),
+    })
+    .pipe(Effect.mapError((error) => toFiniteCommandFailed("set-model", error)))
+
+  yield* Console.log(
+    encodeCompactJson(
+      buildSetModelSuccessDocument({
+        repository: toCanonicalRepositoryIdentity(resolved.repository),
+        workItem,
+      }),
+    ),
+  )
+})
+
 const statusWorkflow = Effect.fn("Cli.status")(function* (
   repositoryArgument: string | undefined,
 ) {
@@ -577,6 +703,40 @@ const retryCommand = Command.make(
   ),
 )
 
+const setModelCommand = Command.make(
+  "set-model",
+  {
+    repository: repositoryIdentityArg,
+    workItem: setModelWorkItemFlag,
+    reviewModel: setModelReviewModelFlag,
+    reviewThinkingLevel: setModelReviewThinkingLevelFlag,
+    buildModel: setModelBuildModelFlag,
+    buildThinkingLevel: setModelBuildThinkingLevelFlag,
+    reviewSameAsBuild: setModelReviewSameAsBuildFlag,
+  },
+  ({
+    repository,
+    workItem,
+    reviewModel,
+    reviewThinkingLevel,
+    buildModel,
+    buildThinkingLevel,
+    reviewSameAsBuild,
+  }) =>
+    setModelWorkflow(repository, {
+      workItemId: workItem,
+      reviewModel: Option.getOrUndefined(reviewModel),
+      reviewThinkingLevel: Option.getOrUndefined(reviewThinkingLevel),
+      buildModel: Option.getOrUndefined(buildModel),
+      buildThinkingLevel: Option.getOrUndefined(buildThinkingLevel),
+      reviewSameAsBuild,
+    }),
+).pipe(
+  Command.withDescription(
+    "Change a Work Item's pinned build or review Agent Model. Applies from the next Step Run start; a Step Run that is already running keeps the model recorded when it started. Does not unpause. Rejects complete, failed, and abandoned Work Items",
+  ),
+)
+
 const statusCommand = Command.make(
   "status",
   { repository: optionalRepositoryIdentityArg },
@@ -616,7 +776,7 @@ export const cli = Command.make(
     startHarnessWorkflow(noOpen, Option.getOrUndefined(host)),
 ).pipe(
   Command.withDescription(
-    "Ready for Agent operator binary (start Harness, add repositories, intake, retry, Kanban status, jump, skills)",
+    "Ready for Agent operator binary (start Harness, add repositories, intake, retry, set-model, Kanban status, jump, skills)",
   ),
   Command.withSubcommands([
     startCommand,
@@ -624,6 +784,7 @@ export const cli = Command.make(
     candidatesCommand,
     intakeCommand,
     retryCommand,
+    setModelCommand,
     statusCommand,
     jumpCommand,
     skillsCommand,

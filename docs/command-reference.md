@@ -18,7 +18,7 @@ HOST
   Listen host for the default start and `start`. The --host flag wins when given. Bare --host binds all IPv4 interfaces (0.0.0.0).
 
 READY_FOR_AGENT_GRAPHQL_URL
-  GraphQL endpoint for finite commands (add, candidates, intake, retry, status, jump). Defaults to http://127.0.0.1:6056/graphql. Does not start the Harness. `skills` is offline and does not use this variable.
+  GraphQL endpoint for finite commands (add, candidates, intake, retry, set-model, status, jump). Defaults to http://127.0.0.1:6056/graphql. Does not start the Harness. `skills` is offline and does not use this variable.
 
 
 ## Examples
@@ -301,6 +301,55 @@ Retry every Work Item eligible for Autonomous Retry in the Repository
 
 ```
 ready-for-agent retry github.com/owner/repo --all-retryable
+```
+
+## `ready-for-agent set-model`
+
+- **Usage**: `ready-for-agent set-model [FLAGS] <repository>`
+- **Effect**: modifies state
+
+Change a Work Item's pinned build or review Agent Model. Applies from the next Step Run start; a Step Run that is already running keeps the model recorded when it started. Does not unpause. Rejects complete, failed, and abandoned Work Items
+
+### Arguments
+
+#### `<repository>`
+
+Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)
+
+### Flags
+
+#### `--work-item <id>`
+
+Work Item whose pinned build or review Agent Model to change
+
+#### `--review-model <model>`
+
+Review Agent Model to pin. Omit to keep the current review model
+
+#### `--review-thinking-level <level>`
+
+Review Thinking Level for the review Agent Model. Omit to keep the current level when it is still offered
+
+#### `--build-model <model>`
+
+Build Agent Model to pin. Omit to keep the current build model
+
+#### `--build-thinking-level <level>`
+
+Build Thinking Level. Omit to keep the current level when it is still offered
+
+#### `--review-same-as-build`
+
+Collapse review onto the build Agent Model and Thinking Level
+
+### Examples
+
+**Change review model**
+
+Pin a new review Agent Model. Applies from the next Step Run start
+
+```
+ready-for-agent set-model github.com/owner/repo --work-item wi-1 --review-model provider/review --review-thinking-level high
 ```
 
 ## `ready-for-agent status`

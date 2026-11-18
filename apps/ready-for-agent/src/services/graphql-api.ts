@@ -112,6 +112,27 @@ export type RetryWorkItemsResult = {
   readonly results: readonly RetryWorkItemResult[]
 }
 
+export type UpdateWorkItemExecutionProfilePatch = {
+  readonly buildModel?: string
+  readonly buildThinkingLevel?: string | null
+  readonly reviewSameAsBuild?: boolean
+  readonly reviewModel?: string
+  readonly reviewThinkingLevel?: string | null
+}
+
+export type SetModelWorkItem = {
+  readonly id: string
+  readonly state: string
+  readonly paused: boolean
+  readonly executionProfile: {
+    readonly buildModel: string
+    readonly buildThinkingLevel: string | null
+    readonly reviewSameAsBuild: boolean
+    readonly reviewModel: string
+    readonly reviewThinkingLevel: string | null
+  } | null
+}
+
 export type KanbanStatusResult = {
   readonly repository: CanonicalRepositoryIdentity | null
   readonly ciGate?: StatusCiGate | null
@@ -367,6 +388,11 @@ export class GraphqlApi extends Context.Service<
       selector: RetryWorkItemsSelector,
       maxAutonomousRetries?: number,
     ) => Effect.Effect<RetryWorkItemsResult, GraphqlRequestFailed>
+    readonly updateWorkItemExecutionProfile: (
+      repositoryId: string,
+      workItemId: string,
+      patch: UpdateWorkItemExecutionProfilePatch,
+    ) => Effect.Effect<SetModelWorkItem, GraphqlRequestFailed>
     readonly kanbanStatus: (
       repositoryId: string | null,
     ) => Effect.Effect<KanbanStatusResult, GraphqlRequestFailed>
@@ -1040,6 +1066,84 @@ export class GraphqlApi extends Context.Service<
         })
       })
 
+      const updateWorkItemExecutionProfile = Effect.fn(
+        "GraphqlApi.updateWorkItemExecutionProfile",
+      )(function* (
+        repositoryId: string,
+        workItemId: string,
+        patch: UpdateWorkItemExecutionProfilePatch,
+      ) {
+        return yield* Effect.tryPromise({
+          try: () =>
+            executeGraphql(async () => {
+              const profile: {
+                buildModel?: string
+                buildThinkingLevel?: string | null
+                reviewSameAsBuild?: boolean
+                reviewModel?: string
+                reviewThinkingLevel?: string | null
+              } = {}
+              if (patch.buildModel !== undefined) {
+                profile.buildModel = patch.buildModel
+              }
+              if (patch.buildThinkingLevel !== undefined) {
+                profile.buildThinkingLevel = patch.buildThinkingLevel
+              }
+              if (patch.reviewSameAsBuild !== undefined) {
+                profile.reviewSameAsBuild = patch.reviewSameAsBuild
+              }
+              if (patch.reviewModel !== undefined) {
+                profile.reviewModel = patch.reviewModel
+              }
+              if (patch.reviewThinkingLevel !== undefined) {
+                profile.reviewThinkingLevel = patch.reviewThinkingLevel
+              }
+              const result = await client.mutation({
+                updateWorkItemExecutionProfile: {
+                  __args: {
+                    repositoryId,
+                    workItemId,
+                    profile,
+                  },
+                  id: true,
+                  state: true,
+                  paused: true,
+                  executionProfile: {
+                    buildModel: true,
+                    buildThinkingLevel: true,
+                    reviewSameAsBuild: true,
+                    reviewModel: true,
+                    reviewThinkingLevel: true,
+                  },
+                },
+              })
+              const payload = result.updateWorkItemExecutionProfile
+              if (!payload) {
+                throw new Error("updateWorkItemExecutionProfile returned null")
+              }
+              const executionProfile = payload.executionProfile
+              return {
+                id: payload.id,
+                state: payload.state,
+                paused: payload.paused,
+                executionProfile:
+                  executionProfile === null || executionProfile === undefined
+                    ? null
+                    : {
+                        buildModel: executionProfile.buildModel,
+                        buildThinkingLevel:
+                          executionProfile.buildThinkingLevel ?? null,
+                        reviewSameAsBuild: executionProfile.reviewSameAsBuild,
+                        reviewModel: executionProfile.reviewModel,
+                        reviewThinkingLevel:
+                          executionProfile.reviewThinkingLevel ?? null,
+                      },
+              }
+            }),
+          catch: mapFailure,
+        })
+      })
+
       const workItemBySessionId = Effect.fn("GraphqlApi.workItemBySessionId")(
         function* (sessionId: string) {
           return yield* Effect.tryPromise({
@@ -1084,6 +1188,7 @@ export class GraphqlApi extends Context.Service<
         intakeCandidates,
         startRepositoryIntake,
         retryWorkItems,
+        updateWorkItemExecutionProfile,
         kanbanStatus,
         workItemBySessionId,
       }

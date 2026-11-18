@@ -146,8 +146,8 @@ interface WorkItemRecordBase {
    */
   readonly agentBackend: string
   /**
-   * Immutable Explicit Work Item Execution Profile when created through
-   * Implement With. Null for ordinary settings-resolved Work Items.
+   * Pinned Explicit Work Item Execution Profile. Set by Implement With and
+   * changeable afterwards. Null for ordinary settings-resolved Work Items.
    */
   readonly executionProfile: ExplicitWorkItemExecutionProfile | null
   readonly state: WorkItemState

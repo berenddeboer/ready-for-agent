@@ -443,6 +443,7 @@ describe("production GraphQL SSE idle timeout", () => {
         considerAutomaticCiRepair: () => Effect.succeed(null),
         authorizeAsCiRepair: unused,
         implementWith: unused,
+        updateWorkItemExecutionProfile: unused,
         implementLocally: unused,
         implementAllWithAutoMerge: unused,
         queue: unused,
