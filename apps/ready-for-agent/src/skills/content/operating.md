@@ -57,6 +57,12 @@ No CLI verbs. They hold and release a Work Item without destroying anything. Pau
 
 `implementLocally` stops before commit/PR so a human can inspect. `implementWith` pins backend/model/merge policy for that Work Item.
 
+Change a pinned build or review model on an existing Work Item with `ready-for-agent set-model`. It applies from the next Step Run start and does not unpause. Complete, failed, and abandoned Work Items are rejected.
+
+```bash
+ready-for-agent set-model <repo> --work-item wi-... --review-model provider/model
+```
+
 `queue` is not a generic “start later.” It is only for a Relevant open leaf Issue that has listed blockers and no unfinished Work Item. It creates a Work Item in Waiting for blockers (no Worker Slot, no Step Run). Actionable Issues use `implementNow` or `intake`, not `queue`.
 
 ```json

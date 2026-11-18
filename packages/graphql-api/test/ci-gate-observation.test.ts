@@ -318,6 +318,7 @@ describe("Repository CI Gate observation", () => {
       },
       authorizeAsCiRepair: unused,
       implementWith: unused,
+      updateWorkItemExecutionProfile: unused,
       implementLocally: unused,
       implementAllWithAutoMerge: unused,
       queue: unused,

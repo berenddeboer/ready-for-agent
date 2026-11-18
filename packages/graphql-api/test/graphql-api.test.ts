@@ -442,6 +442,7 @@ const makeRuntime = (
     considerAutomaticCiRepair: () => Effect.succeed(null),
     authorizeAsCiRepair: unused,
     implementWith: unused,
+    updateWorkItemExecutionProfile: unused,
     implementLocally: unused,
     implementAllWithAutoMerge: unused,
     queue: unused,
@@ -6291,6 +6292,92 @@ describe("GraphQL API", () => {
             pauseBeforeStep: null,
           },
         ],
+      },
+    })
+  })
+
+  test("updateWorkItemExecutionProfile forwards a partial pin and repository check", async () => {
+    const profiled = {
+      ...workItem,
+      paused: true,
+      executionProfile: {
+        agentBackend: "opencode",
+        build: { model: "provider/build", thinkingLevel: "high" },
+        review: {
+          kind: "explicit" as const,
+          model: "provider/review-b",
+          thinkingLevel: "high",
+        },
+      },
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.succeed({
+            ...workItem,
+            repositoryId: repository.id,
+          } as WorkItemRecord),
+        updateWorkItemExecutionProfile: (workItemId, patch) => {
+          expect(workItemId).toBe(workItem.id)
+          expect(patch).toEqual({
+            reviewModel: "provider/review-b",
+            reviewThinkingLevel: "high",
+          })
+          return Effect.succeed(profiled)
+        },
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateProfile(
+          $workItemId: ID!
+          $repositoryId: ID!
+          $profile: UpdateWorkItemExecutionProfileInput!
+        ) {
+          updateWorkItemExecutionProfile(
+            workItemId: $workItemId
+            repositoryId: $repositoryId
+            profile: $profile
+          ) {
+            id
+            paused
+            executionProfile {
+              buildModel
+              buildThinkingLevel
+              reviewSameAsBuild
+              reviewModel
+              reviewThinkingLevel
+            }
+          }
+        }`,
+        variables: {
+          workItemId: workItem.id,
+          repositoryId: repository.id,
+          profile: {
+            reviewModel: "provider/review-b",
+            reviewThinkingLevel: "high",
+          },
+        },
+      }),
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        updateWorkItemExecutionProfile: {
+          id: workItem.id,
+          paused: true,
+          executionProfile: {
+            buildModel: "provider/build",
+            buildThinkingLevel: "high",
+            reviewSameAsBuild: false,
+            reviewModel: "provider/review-b",
+            reviewThinkingLevel: "high",
+          },
+        },
       },
     })
   })

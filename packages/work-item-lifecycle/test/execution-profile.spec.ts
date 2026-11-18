@@ -1,5 +1,6 @@
 import { InvalidExecutionProfileError } from "../src/lib/errors.js"
 import {
+  applyExecutionProfileUpdate,
   decodeImplementWithOptions,
   decodeImplementWithProfile,
   resolveExecutionProfileSelection,
@@ -193,5 +194,95 @@ describe("validateExecutionProfileCatalog", () => {
         profile,
       }),
     ).toBeNull()
+  })
+})
+
+const pinned = {
+  agentBackend: "opencode",
+  build: { model: "build-model", thinkingLevel: "high" as string | null },
+  review: {
+    kind: "explicit" as const,
+    model: "review-model",
+    thinkingLevel: "max" as string | null,
+  },
+}
+
+describe("applyExecutionProfileUpdate", () => {
+  it("keeps unspecified fields and changes only the review model", () => {
+    expect(
+      applyExecutionProfileUpdate({
+        current: pinned,
+        patch: { reviewModel: "review-model", reviewThinkingLevel: "max" },
+        catalog,
+        backendLabel: "OpenCode",
+      }),
+    ).toEqual(pinned)
+    expect(
+      applyExecutionProfileUpdate({
+        current: pinned,
+        patch: { buildThinkingLevel: "low" },
+        catalog,
+        backendLabel: "OpenCode",
+      }),
+    ).toEqual({
+      ...pinned,
+      build: { model: "build-model", thinkingLevel: "low" },
+    })
+  })
+
+  it("rejects a thinking level the chosen model does not offer", () => {
+    const error = applyExecutionProfileUpdate({
+      current: pinned,
+      patch: { reviewModel: "build-model" },
+      catalog,
+      backendLabel: "OpenCode",
+    })
+    expect(error).toBeInstanceOf(InvalidExecutionProfileError)
+    expect(error).toMatchObject({ field: "reviewThinkingLevel" })
+    if (error instanceof InvalidExecutionProfileError) {
+      expect(error.message).toContain("max")
+      expect(error.message).toContain("low")
+      expect(error.message).not.toContain("cannot substitute another effort")
+    }
+  })
+
+  it("clears a leftover thinking level when the model offers none", () => {
+    const noEffort = [...catalog, { id: "plain", thinkingLevels: [] as const }]
+    expect(
+      applyExecutionProfileUpdate({
+        current: pinned,
+        patch: { reviewModel: "plain" },
+        catalog: noEffort,
+        backendLabel: "OpenCode",
+      }),
+    ).toEqual({
+      ...pinned,
+      review: { kind: "explicit", model: "plain", thinkingLevel: null },
+    })
+  })
+
+  it("collapses review onto the build model", () => {
+    expect(
+      applyExecutionProfileUpdate({
+        current: pinned,
+        patch: { reviewSameAsBuild: true },
+        catalog,
+        backendLabel: "OpenCode",
+      }),
+    ).toEqual({
+      ...pinned,
+      review: { kind: "same_as_build" },
+    })
+  })
+
+  it("rejects an unknown model", () => {
+    const error = applyExecutionProfileUpdate({
+      current: pinned,
+      patch: { reviewModel: "missing" },
+      catalog,
+      backendLabel: "OpenCode",
+    })
+    expect(error).toBeInstanceOf(InvalidExecutionProfileError)
+    expect(error).toMatchObject({ field: "reviewModel" })
   })
 })

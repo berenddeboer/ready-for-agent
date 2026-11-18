@@ -6,7 +6,7 @@ name "Ready for Agent"
 bin "ready-for-agent"
 license "MIT"
 repository "https://github.com/berenddeboer/ready-for-agent"
-about "Ready for Agent operator binary (start Harness, add repositories, intake, retry, Kanban status, jump, skills). Default invocation is write (same as start)."
+about "Ready for Agent operator binary (start Harness, add repositories, intake, retry, set-model, Kanban status, jump, skills). Default invocation is write (same as start)."
 long_about #"""
 Default invocation (`ready-for-agent`) starts the Harness. It is classified write, matching `start`.
 
@@ -19,7 +19,7 @@ HOST
   Listen host for the default start and `start`. The --host flag wins when given. Bare --host binds all IPv4 interfaces (0.0.0.0).
 
 READY_FOR_AGENT_GRAPHQL_URL
-  GraphQL endpoint for finite commands (add, candidates, intake, retry, status, jump). Defaults to http://127.0.0.1:6056/graphql. Does not start the Harness. `skills` is offline and does not use this variable.
+  GraphQL endpoint for finite commands (add, candidates, intake, retry, set-model, status, jump). Defaults to http://127.0.0.1:6056/graphql. Does not start the Harness. `skills` is offline and does not use this variable.
 """#
 
 flag "-h --help" help="Show help information" global=#true
@@ -79,6 +79,17 @@ cmd "retry" help="Retry one Work Item, the unfinished Work Item for one Issue, o
   flag "--all-retryable" help="Retry every Work Item eligible for Autonomous Retry in the Repository (excludes paused Work Items)"
   flag "--max-autonomous-retries <count>" help="Maximum accepted Autonomous Retry execution attempts per Work Item at its current Lifecycle Step (default 3; --all-retryable only)"
   example "ready-for-agent retry github.com/owner/repo --all-retryable" header="Retry all retryable" help="Retry every Work Item eligible for Autonomous Retry in the Repository"
+}
+
+cmd "set-model" help="Change a Work Item's pinned build or review Agent Model. Applies from the next Step Run start; a Step Run that is already running keeps the model recorded when it started. Does not unpause. Rejects complete, failed, and abandoned Work Items" effect="write" {
+  arg "<repository>" help="Repository identity as <forge-host>://<project-path>, <forge-host>/<project-path>, a unique project path, or a unique final project-path segment (case-insensitive)"
+  flag "--work-item <id>" help="Work Item whose pinned build or review Agent Model to change"
+  flag "--review-model <model>" help="Review Agent Model to pin. Omit to keep the current review model"
+  flag "--review-thinking-level <level>" help="Review Thinking Level for the review Agent Model. Omit to keep the current level when it is still offered"
+  flag "--build-model <model>" help="Build Agent Model to pin. Omit to keep the current build model"
+  flag "--build-thinking-level <level>" help="Build Thinking Level. Omit to keep the current level when it is still offered"
+  flag "--review-same-as-build" help="Collapse review onto the build Agent Model and Thinking Level"
+  example "ready-for-agent set-model github.com/owner/repo --work-item wi-1 --review-model provider/review --review-thinking-level high" header="Change review model" help="Pin a new review Agent Model. Applies from the next Step Run start"
 }
 
 cmd "status" help="Print the current six-lane Kanban status as versioned JSON (optional repository selector)" effect="read" {

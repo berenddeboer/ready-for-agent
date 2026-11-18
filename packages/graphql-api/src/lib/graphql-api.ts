@@ -64,6 +64,7 @@ import type { QueueService } from "@ready-for-agent/queue-service"
 import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
   COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE,
+  type ExecutionProfileUpdatePatch,
   TIMING_AGENT_BACKEND_MAX_LENGTH,
   TIMING_MODEL_MAX_LENGTH,
   WorkItemLifecycle,
@@ -125,7 +126,10 @@ import {
   startRepositoryIntake,
 } from "./repository-intake.js"
 import { preflightRepositoryIntake } from "./repository-intake-preflight.js"
-import { retryWorkItems } from "./repository-retry.js"
+import {
+  WorkItemNotInRepositoryError,
+  retryWorkItems,
+} from "./repository-retry.js"
 import { toGraphQLError } from "./to-graphql-error.js"
 import { validateAgentModelsAgainstCatalog } from "./validate-agent-models.js"
 import { projectWorkItemCiRepair } from "./work-item-ci-repair-projection.js"
@@ -527,6 +531,38 @@ type ImplementWithArgs = ImplementNowArgs & {
 type WorkItemArgs = {
   workItemId: string
 }
+
+type UpdateWorkItemExecutionProfileArgs = WorkItemArgs & {
+  readonly repositoryId?: string | null
+  readonly profile: {
+    readonly buildModel?: string | null
+    readonly buildThinkingLevel?: string | null
+    readonly reviewSameAsBuild?: boolean | null
+    readonly reviewModel?: string | null
+    readonly reviewThinkingLevel?: string | null
+  }
+}
+
+const executionProfileUpdatePatch = (
+  profile: UpdateWorkItemExecutionProfileArgs["profile"],
+): ExecutionProfileUpdatePatch => ({
+  ...(profile.buildModel !== undefined
+    ? { buildModel: profile.buildModel ?? "" }
+    : {}),
+  ...(profile.buildThinkingLevel !== undefined
+    ? { buildThinkingLevel: profile.buildThinkingLevel }
+    : {}),
+  ...(profile.reviewSameAsBuild !== undefined &&
+  profile.reviewSameAsBuild !== null
+    ? { reviewSameAsBuild: profile.reviewSameAsBuild }
+    : {}),
+  ...(profile.reviewModel !== undefined
+    ? { reviewModel: profile.reviewModel ?? "" }
+    : {}),
+  ...(profile.reviewThinkingLevel !== undefined
+    ? { reviewThinkingLevel: profile.reviewThinkingLevel }
+    : {}),
+})
 
 type RetryWorkItemsArgs = {
   repositoryId: string
@@ -3327,6 +3363,33 @@ export const createGraphqlApi = <R>(
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.retry(args.workItemId)
               }).pipe(Effect.withSpan("graphql-api.retryWorkItem")),
+              context,
+            ),
+          updateWorkItemExecutionProfile: async (
+            _parent: unknown,
+            args: UpdateWorkItemExecutionProfileArgs,
+            context: GraphqlRequestContext,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                const repositoryId = args.repositoryId?.trim() ?? ""
+                if (repositoryId.length > 0) {
+                  const current = yield* lifecycle.getWorkItem(args.workItemId)
+                  if (current.repositoryId !== repositoryId) {
+                    return yield* new WorkItemNotInRepositoryError({
+                      workItemId: args.workItemId,
+                      repositoryId,
+                    })
+                  }
+                }
+                return yield* lifecycle.updateWorkItemExecutionProfile(
+                  args.workItemId,
+                  executionProfileUpdatePatch(args.profile),
+                )
+              }).pipe(
+                Effect.withSpan("graphql-api.updateWorkItemExecutionProfile"),
+              ),
               context,
             ),
           resumeWorkItem: async (

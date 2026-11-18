@@ -37,6 +37,7 @@ const PUBLIC_COMMANDS = [
   "candidates",
   "intake",
   "retry",
+  "set-model",
   "status",
   "jump",
   "skills",

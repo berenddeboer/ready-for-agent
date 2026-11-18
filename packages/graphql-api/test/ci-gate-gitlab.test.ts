@@ -309,6 +309,7 @@ describe("GitLab Repository CI Gate", () => {
       considerAutomaticCiRepair: () => Effect.succeed(null),
       authorizeAsCiRepair: unused,
       implementWith: unused,
+      updateWorkItemExecutionProfile: unused,
       implementLocally: unused,
       implementAllWithAutoMerge: unused,
       queue: unused,

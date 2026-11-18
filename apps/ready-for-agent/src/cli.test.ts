@@ -54,6 +54,8 @@ const unusedGraphql = {
   startRepositoryIntake: () =>
     Effect.die("startRepositoryIntake should not run"),
   retryWorkItems: () => Effect.die("retryWorkItems should not run"),
+  updateWorkItemExecutionProfile: () =>
+    Effect.die("updateWorkItemExecutionProfile should not run"),
   kanbanStatus: () => Effect.die("kanbanStatus should not run"),
   workItemBySessionId: () => Effect.die("workItemBySessionId should not run"),
 } as const
@@ -1962,6 +1964,7 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("candidates")
     expect(output).toContain("intake")
     expect(output).toContain("retry")
+    expect(output).toContain("set-model")
     expect(output).toContain("status")
     expect(output).toContain("jump")
     expect(output).toContain("skills")
@@ -1995,6 +1998,143 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("max-autonomous-retries")
     expect(output).toContain("versioned JSON")
   })
+
+  it("set-model help documents that the change applies from the next Step Run", () => {
+    const result = spawnSync(
+      "bun",
+      [
+        "--conditions",
+        "@ready-for-agent/source",
+        "src/main.ts",
+        "set-model",
+        "--help",
+      ],
+      {
+        cwd: packageRoot,
+        encoding: "utf8",
+      },
+    )
+
+    const output = `${result.stdout}\n${result.stderr}`
+    expect(result.status).toBe(0)
+    expect(output).toContain("set-model")
+    expect(output).toContain("--work-item")
+    expect(output).toContain("--review-model")
+    expect(output).toContain("--review-thinking-level")
+    expect(output).toContain("--build-model")
+    expect(output).toContain("--build-thinking-level")
+    expect(output).toContain("--review-same-as-build")
+    expect(output).toContain("next Step Run")
+    expect(output).toContain("already running")
+  })
+
+  it.live(
+    "set-model changes only the review model and prints the pinned profile",
+    () =>
+      Effect.gen(function* () {
+        const logs: string[] = []
+        const originalLog = console.log
+        const previousExitCode = process.exitCode
+        console.log = (...args: unknown[]) => {
+          logs.push(args.map(String).join(" "))
+        }
+        process.exitCode = undefined
+
+        try {
+          let requested:
+            | {
+                readonly repositoryId: string
+                readonly workItemId: string
+                readonly patch: unknown
+              }
+            | undefined
+          const layer = mockStart.pipe(
+            Layer.provideMerge(mockLocalGit),
+            Layer.provideMerge(
+              Layer.succeed(GraphqlApi, {
+                ...unusedGraphql,
+                listRepositories: Effect.succeed([
+                  {
+                    id: "repo-1",
+                    forge: "github",
+                    forgeHost: "github.com",
+                    projectPath: "owner/repo",
+                  },
+                ]),
+                updateWorkItemExecutionProfile: (
+                  repositoryId,
+                  workItemId,
+                  patch,
+                ) =>
+                  Effect.sync(() => {
+                    requested = { repositoryId, workItemId, patch }
+                    return {
+                      id: workItemId,
+                      state: "review",
+                      paused: true,
+                      executionProfile: {
+                        buildModel: "provider/build",
+                        buildThinkingLevel: "high",
+                        reviewSameAsBuild: false,
+                        reviewModel: "provider/review-b",
+                        reviewThinkingLevel: "high",
+                      },
+                    }
+                  }),
+              }),
+            ),
+          )
+
+          yield* runOperator(
+            [
+              "set-model",
+              "github.com/owner/repo",
+              "--work-item",
+              "wi-1",
+              "--review-model",
+              "provider/review-b",
+              "--review-thinking-level",
+              "high",
+            ],
+            layer,
+          )
+
+          expect(requested).toEqual({
+            repositoryId: "repo-1",
+            workItemId: "wi-1",
+            patch: {
+              reviewModel: "provider/review-b",
+              reviewThinkingLevel: "high",
+            },
+          })
+          expect(JSON.parse(logs[0] ?? "")).toEqual({
+            schemaVersion: CLI_SCHEMA_VERSION,
+            command: "set-model",
+            repository: {
+              id: "repo-1",
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "owner/repo",
+            },
+            workItem: {
+              id: "wi-1",
+              state: "review",
+              paused: true,
+              executionProfile: {
+                buildModel: "provider/build",
+                buildThinkingLevel: "high",
+                reviewSameAsBuild: false,
+                reviewModel: "provider/review-b",
+                reviewThinkingLevel: "high",
+              },
+            },
+          })
+        } finally {
+          console.log = originalLog
+          process.exitCode = previousExitCode
+        }
+      }),
+  )
 
   it.live(
     "default and start accept --no-open without starting GraphQL commands",
