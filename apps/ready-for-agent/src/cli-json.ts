@@ -158,7 +158,7 @@ export type RetrySuccessDocument = {
   readonly results: readonly RetryWorkItemResult[]
 }
 
-export type SetModelExecutionProfile = {
+type SetModelExecutionProfile = {
   readonly buildModel: string
   readonly buildThinkingLevel: string | null
   readonly reviewSameAsBuild: boolean
