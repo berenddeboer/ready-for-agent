@@ -26,6 +26,7 @@ import {
   decisionResumePromptSection,
   parseDecisionNeeded,
 } from "./decision-needed.js"
+import { gitExitCode } from "./git.js"
 import {
   ImplementForgeCredentialError,
   ImplementInvalidWorktreeContextError,
@@ -533,10 +534,32 @@ export const implement = (context: LifecycleStepContext) =>
       context.issueSource,
       isLinearIssueSource(context.issueSource) ? liveIssue : null,
     )
-    return yield* runImplementTurn(
+    const failureMessage = `${agentBackendLabel(context.agentBackend)} failed to implement the Work Item issue`
+    const outcome = yield* runImplementTurn(
       context,
       worktreePath,
-      implementationPrompt,
-      `${agentBackendLabel(context.agentBackend)} failed to implement the Work Item issue`,
+      `${implementationPrompt}\nBefore requesting a rebase for a merged prerequisite, run \`git merge-base --is-ancestor <landed-oid> HEAD\` in this worktree and inspect the changed paths at HEAD. If missing ancestry is the only blocker, write \`Missing prerequisite commit: <full landed OID>\` immediately before the decision marker.`,
+      failureMessage,
+    )
+    if (typeof outcome === "string") return outcome
+    const oid =
+      /^Missing prerequisite commit: ([0-9a-f]{40}(?:[0-9a-f]{24})?)$/i.exec(
+        outcome.request.split("\n").at(-1) ?? "",
+      )?.[1]
+    if (!oid) return outcome
+
+    const ancestry = yield* gitExitCode(
+      { localPath: worktreePath, isBare: false },
+      ["merge-base", "--is-ancestor", oid, "HEAD"],
+    ).pipe(Effect.orElseSucceed(() => null))
+    if (ancestry !== 0) return outcome
+
+    // One correction only: an ancestor may have been reverted. A decision
+    // about the actual contents of HEAD must still reach the operator.
+    return yield* runImplementTurn(
+      { ...context, sessionId: outcome.sessionId },
+      worktreePath,
+      `Git confirms ${oid} is already an ancestor of HEAD in this worktree. Inspect that commit's changed paths at HEAD. Continue implementation and verification if the prerequisite is present; if it was reverted or a decision is still needed, report that evidence. This check does not authorize a rebase.`,
+      failureMessage,
     )
   })

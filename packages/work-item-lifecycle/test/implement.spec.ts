@@ -272,6 +272,70 @@ describe("implement", () => {
       expect(error).toBeInstanceOf(ImplementIssueContextMissingError)
     }))
 
+  it.each(["landed", "not landed", "unknown", "decision still needed"])(
+    "checks prerequisite ancestry before parking the Work Item: %s",
+    (scenario) =>
+      withTemp(async (root) => {
+        const git = (...args: string[]) =>
+          Bun.$`git -c user.name=Fixture -c user.email=fixture@example.test -c commit.gpgsign=false ${args}`
+            .cwd(root)
+            .quiet()
+            .text()
+            .then((output) => output.trim())
+        await git("init", "-q")
+        await git("commit", "--allow-empty", "-qm", "prerequisite")
+        const landed = await git("rev-parse", "HEAD")
+        await git("commit", "--allow-empty", "-qm", "later work")
+        const oid =
+          scenario === "unknown"
+            ? "f".repeat(40)
+            : scenario === "not landed"
+              ? await git(
+                  "commit-tree",
+                  "HEAD^{tree}",
+                  "-p",
+                  "HEAD",
+                  "-m",
+                  "not on branch",
+                )
+              : landed
+        const request = `Refresh the worktree?\nMissing prerequisite commit: ${oid}`
+        const ask = `${request}\nREADY_FOR_AGENT_RESULT: DECISION_NEEDED`
+        const sessionId = "ses_prerequisite"
+        const corrections: string[] = []
+        const outcome = await run(
+          Effect.gen(function* () {
+            const repository = yield* seedRepository(root)
+            return yield* implement(
+              baseContext(root, { repositoryId: repository.id }),
+            )
+          }),
+          stubOpencode({
+            startTurn: () => Effect.succeed({ sessionId, assistantText: ask }),
+            continueTurn: (input) => {
+              expect(input.sessionId).toBe(sessionId)
+              expect(input.cwd).toBe(root)
+              corrections.push(input.prompt)
+              return Effect.succeed({
+                sessionId,
+                assistantText:
+                  scenario === "decision still needed" ? ask : "Implemented.",
+              })
+            },
+          }),
+        )
+        const ancestor =
+          scenario === "landed" || scenario === "decision still needed"
+        expect(corrections).toHaveLength(ancestor ? 1 : 0)
+        if (ancestor) expect(corrections[0]).toContain(landed)
+        expect(outcome).toEqual(
+          scenario === "landed"
+            ? sessionId
+            : { _tag: "decision_needed", sessionId, request },
+        )
+      }),
+  )
+
   it("starts OpenCode with exact issue identity, worktree, model, and variant when no prior session", () =>
     withTemp(async (root) => {
       const workItemId = makeWorkItemId()
