@@ -3385,6 +3385,10 @@ export const createGraphqlApi = <R>(
     fetchAPI: { Response },
     graphqlEndpoint: "/graphql",
     graphiql: true,
+    // Yoga defaults to info and logs every request ("Request processed").
+    // The UI polls /graphql, so that line floods the terminal in dev and
+    // production. Warn keeps warnings and errors; false would hide them.
+    logging: "warn",
   })
 
   return {
