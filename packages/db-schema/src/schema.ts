@@ -424,8 +424,9 @@ export const workItem = snakeCase.table(
      */
     ciRepairFailingRuns: text(),
     /**
-     * JSON CI Repair retry request retained across restarts. Null when no
-     * retry is in flight. Cleared when the observed attempt is green.
+     * JSON CI Repair retry request and its observed result, retained with the
+     * Work Item across restarts. Null until a retry is requested. Keeping the
+     * result lets Implement resume without authorizing a second retry.
      */
     ciRepairRetry: text(),
     sessionId: text(),

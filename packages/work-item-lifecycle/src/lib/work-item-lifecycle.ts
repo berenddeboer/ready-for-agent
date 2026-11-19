@@ -5651,6 +5651,16 @@ export const makeWorkItemLifecycleLive = (
           return failed
         })
 
+      const loadCiRepairRetryForScheduling = (workItemId: string) =>
+        loadCiRepairRetryRequest(sql, workItemId).pipe(
+          Effect.catchTag("CiRepairRetryError", (error) =>
+            Effect.logWarning("Could not schedule from the stored CI retry", {
+              workItemId,
+              message: error.message,
+            }).pipe(Effect.as(null)),
+          ),
+        )
+
       /**
        * A GitHub throttle is a finished, non-failing lifecycle attempt. The
        * wake is deliberately a queue job rather than a queued Step Run so the
@@ -5667,10 +5677,7 @@ export const makeWorkItemLifecycleLive = (
           const { stepRun, workItem, retryAt } = input
           const retry =
             workItem.origin === "ci_repair" && stepRun.step === "implement"
-              ? yield* loadCiRepairRetryRequest(sql, workItem.id).pipe(
-                  Effect.catchTag("CiRepairRetryError", () =>
-                    Effect.succeed(null),
-                  ),
+              ? yield* loadCiRepairRetryForScheduling(workItem.id).pipe(
                   Effect.mapError(toDatabaseError),
                 )
               : null
@@ -5786,9 +5793,7 @@ export const makeWorkItemLifecycleLive = (
             [workItemId],
           )
           if (candidate === undefined) return false
-          const retry = yield* loadCiRepairRetryRequest(sql, workItemId).pipe(
-            Effect.catchTag("CiRepairRetryError", () => Effect.succeed(null)),
-          )
+          const retry = yield* loadCiRepairRetryForScheduling(workItemId)
           if (retry === null) return false
           yield* enqueueStepRunForWorkItem(workItemId, "implement", now)
           return true

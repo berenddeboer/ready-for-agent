@@ -37,7 +37,7 @@ type Request = typeof Request.Type
 const encodeRequest = ({ runId, attempt, requestedAt, phase }: Request) =>
   JSON.stringify({ runId, attempt, requestedAt, phase })
 
-export class CiRepairRetryError extends Schema.TaggedError<CiRepairRetryError>()(
+class CiRepairRetryError extends Schema.TaggedError<CiRepairRetryError>()(
   "CiRepairRetryError",
   { message: Schema.String },
 ) {}
