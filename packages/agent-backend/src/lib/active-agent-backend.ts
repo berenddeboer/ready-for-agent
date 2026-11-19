@@ -146,6 +146,9 @@ export type AgentBackendAdapter = {
   readonly inspect: AgentBackend["Service"]["inspect"]
   readonly startTurn: AgentBackend["Service"]["startTurn"]
   readonly continueTurn: AgentBackend["Service"]["continueTurn"]
+  readonly verifyImplementStopped?: NonNullable<
+    AgentBackend["Service"]["verifyImplementStopped"]
+  >
 }
 
 export type AgentBackendTelemetry = {
@@ -443,6 +446,12 @@ export type ActiveAgentBackendShape = {
     backendId: AgentBackendId,
     input: ContinueTurnInput,
   ) => Effect.Effect<AgentTurnResult, AgentBackendError>
+  readonly verifyImplementStopped?: (
+    backendId: AgentBackendId,
+    input: Parameters<
+      NonNullable<AgentBackend["Service"]["verifyImplementStopped"]>
+    >[0],
+  ) => Effect.Effect<void, AgentBackendError>
   /** Dispatch inspect to the Active adapter for `backendId`. */
   readonly inspectBackend: (
     backendId: AgentBackendId,
@@ -1308,6 +1317,28 @@ export const ActiveAgentBackendLive = (
           Effect.flatMap((entry) => entry.adapter.inspect(input)),
         )
 
+      const verifyImplementStopped: NonNullable<
+        ActiveAgentBackend["Service"]["verifyImplementStopped"]
+      > = (backendId, input) =>
+        // Recovery must work even if this backend is not currently admitted to
+        // run turns (for example, its model catalog could not refresh).
+        Ref.get(stateRef).pipe(
+          Effect.flatMap((state) =>
+            state.entries.get(backendId) === undefined
+              ? resolveOrUnavailable(backendId)
+              : Effect.succeed(state.entries.get(backendId)),
+          ),
+          Effect.flatMap(
+            (entry) =>
+              entry?.adapter.verifyImplementStopped?.(input) ??
+              Effect.fail(
+                new AgentBackendConfigError({
+                  message: `Cannot verify that session ${input.sessionId} stopped on ${backendId}.`,
+                }),
+              ),
+          ),
+        )
+
       const getSessionTelemetry = Effect.fn(
         "ActiveAgentBackend.getSessionTelemetry",
       )(function* (input: {
@@ -1386,6 +1417,7 @@ export const ActiveAgentBackendLive = (
         getActiveRegistration,
         startTurn,
         continueTurn,
+        verifyImplementStopped,
         inspectBackend,
         getSessionTelemetry,
         getAgentTurnTail,

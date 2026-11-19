@@ -2,15 +2,15 @@
  * Real OpenCode V2 contract. Every passing launch goes through a production
  * entry point and the installed binary. See packages/opencode/CLI-CONTRACT.md.
  *
- * Inference-triggering turns stop at the model-unavailable boundary. That
- * proves argument acceptance and session side effects. It is not provider
- * coverage and must not call a cloud model.
+ * Inference-triggering turns stop at the model-unavailable boundary or use
+ * a blocked loopback provider to prove server-side interruption. No cloud
+ * model is called.
  */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
-import { type Context, Effect, Layer, Stream } from "effect"
+import { type Context, Effect, Fiber, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import {
   AgentBackend,
@@ -18,6 +18,7 @@ import {
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
   PROMPT_ARGV_BYTE_LIMIT,
+  type PendingImplementStop,
 } from "@ready-for-agent/agent-backend"
 import {
   formatGateLog,
@@ -39,6 +40,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 const KEYMAXXER_URL = "http://127.0.0.1:9/ber35-cli-contract/mcp"
 const UNKNOWN_MODEL = "ready-for-agent-contract/no-such-model"
 const MODEL_UNAVAILABLE = `Model unavailable: ${UNKNOWN_MODEL}`
+const BLOCKED_MODEL = "contract-loopback/blocked"
 const UNRECOGNIZED_SERVER_RUN =
   "Unrecognized flag: --server in command opencode run"
 const UNRECOGNIZED_SERVER_API =
@@ -69,7 +71,10 @@ type Fixture = {
   readonly otherCwd: string
   readonly env: Record<string, string>
   readonly explicitEnv: Record<string, string>
+  readonly standaloneEnv: Record<string, string>
   readonly owned: OwnedOpenCodeServer
+  readonly providerRequests: ReadonlyArray<string>
+  readonly providerCancellations: ReadonlyArray<string>
   readonly secrets: ReadonlyArray<string>
   dispose: () => Promise<void>
 }
@@ -414,14 +419,42 @@ const openFixture = async (): Promise<Fixture> => {
   const state = join(root, "state")
   const cache = join(root, "cache")
   const explicitState = join(root, "explicit-state")
+  const standaloneConfig = join(root, "standalone-config")
   await mkdir(home, { recursive: true })
   await mkdir(config, { recursive: true })
   await mkdir(data, { recursive: true })
   await mkdir(state, { recursive: true })
   await mkdir(cache, { recursive: true })
   await mkdir(explicitState, { recursive: true })
+  await mkdir(join(standaloneConfig, "opencode"), { recursive: true })
+  await writeFile(
+    join(standaloneConfig, "opencode", "service.json"),
+    JSON.stringify({ disabled: true }),
+  )
   await mkdir(cwd, { recursive: true })
   await mkdir(otherCwd, { recursive: true })
+  const providerRequests: string[] = []
+  const providerCancellations: string[] = []
+  const provider = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const body = await request.text()
+      providerRequests.push(body)
+      // Once inference starts, the only way for the turn to leave this
+      // streaming response is for OpenCode to cancel it.
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          cancel: () => {
+            providerCancellations.push(body)
+          },
+        }),
+        {
+          headers: { "content-type": "text/event-stream" },
+        },
+      )
+    },
+  })
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? "",
     HOME: home,
@@ -433,6 +466,13 @@ const openFixture = async (): Promise<Fixture> => {
     LANG: "C",
     TERM: "dumb",
     OPENCODE_CONFIG_CONTENT: JSON.stringify({
+      providers: {
+        "contract-loopback": {
+          package: "@opencode/ai/providers/openai-compatible",
+          settings: { baseURL: `${provider.url.origin}/v1`, apiKey: "fixture" },
+          models: { blocked: { name: "Blocked contract model" } },
+        },
+      },
       commands: {
         review: {
           description: "Contract review",
@@ -446,6 +486,9 @@ const openFixture = async (): Promise<Fixture> => {
     environment: env,
     cwd,
     readyTimeoutMs: 15_000,
+  }).catch(async (error) => {
+    await provider.stop(true)
+    throw error
   })
   await registerIsolatedService(env, owned)
   let disposed = false
@@ -455,7 +498,14 @@ const openFixture = async (): Promise<Fixture> => {
     otherCwd,
     env,
     explicitEnv: { ...env, XDG_STATE_HOME: explicitState },
+    standaloneEnv: {
+      ...env,
+      XDG_STATE_HOME: explicitState,
+      XDG_CONFIG_HOME: standaloneConfig,
+    },
     owned,
+    providerRequests,
+    providerCancellations,
     secrets: [owned.password, KEYMAXXER_URL],
     dispose: async () => {
       if (disposed) {
@@ -463,6 +513,7 @@ const openFixture = async (): Promise<Fixture> => {
       }
       disposed = true
       await owned.dispose()
+      await provider.stop(true)
       await rm(root, { recursive: true, force: true })
     },
   }
@@ -476,7 +527,7 @@ const requireFixture = (): Fixture => {
 }
 
 const runOwned = <A>(
-  mode: "default" | "explicit",
+  mode: "default" | "explicit" | "standalone",
   records: LaunchRecord[],
   use: (backend: OpenCodeBackend) => Effect.Effect<A, unknown>,
   mutate?: (cliArgs: ReadonlyArray<string>) => ReadonlyArray<string>,
@@ -493,7 +544,11 @@ const runOwned = <A>(
           Opencode.layer({
             keymaxxerMcpUrl: KEYMAXXER_URL,
             environment:
-              mode === "explicit" ? current.explicitEnv : current.env,
+              mode === "explicit"
+                ? current.explicitEnv
+                : mode === "standalone"
+                  ? current.standaloneEnv
+                  : current.env,
             ...(mode === "explicit"
               ? {
                   dedicatedServer: {
@@ -552,6 +607,21 @@ const sessionMessages = async (
     throw new Error(`message response has no data: ${text.slice(0, 300)}`)
   }
   return body.data.filter(isRecord)
+}
+
+const activeSessions = async (
+  owned: OwnedOpenCodeServer,
+): Promise<string[]> => {
+  const response = await fetch(`${owned.baseUrl}/api/session/active`, {
+    headers: owned.headers,
+    signal: AbortSignal.timeout(5_000),
+  })
+  const body: unknown = await response.json()
+  expect(response.ok).toBe(true)
+  if (!isRecord(body) || !isRecord(body.data)) {
+    throw new Error("active sessions response has no data")
+  }
+  return Object.keys(body.data)
 }
 
 const modelOf = (
@@ -1256,6 +1326,217 @@ describe("installed OpenCode V2 production CLI contract", () => {
           diagnostic(records, current.secrets),
         )
         logCase("interrupt", records)
+      })
+    },
+    CASE_TIMEOUT_MS,
+  )
+
+  test(
+    "aborting a plain prompt stops the active server turn and retains history",
+    async () => {
+      await exclusive(async () => {
+        const current = requireFixture()
+        for (const mode of ["explicit", "default"] as const) {
+          const records: LaunchRecord[] = []
+          const decoyPrompt = `Unrelated plain prompt (${mode})`
+          let sessionId: string | undefined
+          await runOwned(mode, records, (backend) =>
+            Effect.gen(function* () {
+              const pending = new Map<string, PendingImplementStop>()
+              const verify = backend.verifyImplementStopped
+              if (verify === undefined)
+                throw new Error("Missing Implement recovery")
+              const options = {
+                cwd: current.cwd,
+                model: BLOCKED_MODEL,
+                thinkingLevel: null,
+                trackImplementStop: {
+                  started: (target: PendingImplementStop) =>
+                    Effect.sync(() => {
+                      pending.set(target.sessionId, target)
+                    }),
+                  stopped: (target: PendingImplementStop) =>
+                    Effect.sync(() => {
+                      pending.delete(target.sessionId)
+                    }),
+                },
+              }
+              const awaitProvider = (prompt: string) =>
+                Effect.gen(function* () {
+                  const wireText = JSON.stringify(prompt).slice(1, -1)
+                  while (
+                    !current.providerRequests.some((body) =>
+                      body.includes(wireText),
+                    )
+                  ) {
+                    yield* Effect.sleep("25 millis")
+                  }
+                })
+              const decoy = yield* backend
+                .startTurn({
+                  ...options,
+                  prompt: decoyPrompt,
+                })
+                .pipe(Effect.forkChild)
+              yield* awaitProvider(decoyPrompt)
+              const [decoyId] = yield* Effect.promise(() =>
+                activeSessions(current.owned),
+              )
+              expect(decoyId).toBeDefined()
+
+              const submitted: string[] = []
+              for (const kind of ["fresh", "resumed"] as const) {
+                const prompt = `Block the ${kind} plain prompt (${mode})\nKeep the model stream open.`
+                let observed = false
+                const input = {
+                  ...options,
+                  prompt,
+                  onSessionId: () =>
+                    Effect.sync(() => {
+                      observed = true
+                    }),
+                }
+                const firstRecord = records.length
+                const turn = yield* (
+                  sessionId === undefined
+                    ? backend.startTurn(input)
+                    : backend.continueTurn({ ...input, sessionId })
+                ).pipe(Effect.forkChild)
+                yield* awaitProvider(prompt)
+                const before = yield* Effect.promise(() =>
+                  activeSessions(current.owned),
+                )
+                const target = before.find((id) => id !== decoyId)
+                if (target === undefined)
+                  throw new Error("Missing active target session")
+                const obligation = pending.get(target)
+                if (obligation === undefined)
+                  throw new Error("Missing durable stop target")
+                const recoveryInput = { ...obligation, cwd: current.cwd }
+                const verification = yield* verify(recoveryInput).pipe(
+                  Effect.exit,
+                )
+                expect(verification._tag).toBe("Failure")
+                expect(
+                  records
+                    .slice(firstRecord)
+                    .some((record) =>
+                      record.args.some((arg) => arg.endsWith("/interrupt")),
+                    ),
+                ).toBe(false)
+                if (sessionId !== undefined) expect(target).toBe(sessionId)
+                sessionId = target
+                if (kind === "fresh" && gated.version === gated.baseline) {
+                  expect(observed).toBe(false)
+                }
+                yield* Fiber.interrupt(turn)
+                expect(pending.has(target)).toBe(false)
+                yield* verify(recoveryInput)
+                expect(
+                  yield* Effect.promise(() => activeSessions(current.owned)),
+                ).toEqual([decoyId])
+                const launched = records.slice(firstRecord)
+                const userMessages = launched.filter((record) =>
+                  record.args.some((arg) => arg.includes("/message?")),
+                )
+                expect(userMessages.length).toBeGreaterThan(0)
+                for (const read of userMessages) {
+                  expect(
+                    read.args.some((arg) => arg.endsWith("&type=user")),
+                  ).toBe(true)
+                  const data = jsonObject(read.stdout)?.data
+                  expect(Array.isArray(data)).toBe(true)
+                  if (Array.isArray(data)) {
+                    expect(
+                      data.every(
+                        (message: unknown) =>
+                          isRecord(message) && message.type === "user",
+                      ),
+                    ).toBe(true)
+                  }
+                }
+                const interrupt = launched.find((record) =>
+                  record.args.includes(`/api/session/${target}/interrupt`),
+                )
+                expect(
+                  jsonObject(interrupt?.stdout ?? "")?.interrupted,
+                  diagnostic(launched, current.secrets),
+                ).toBe(true)
+                submitted.push(prompt)
+                const history = yield* Effect.promise(() =>
+                  sessionMessages(current.owned, target),
+                )
+                for (const text of submitted) assertStoredOnce(history, text)
+              }
+              yield* Fiber.interrupt(decoy)
+              expect(pending.size).toBe(0)
+            }).pipe(Effect.timeout("25 seconds")),
+          )
+          logCase(`${mode} plain prompt interrupt`, records)
+        }
+        const records: LaunchRecord[] = []
+        const standalonePrompt = "Block the private plain prompt"
+        await runOwned("standalone", records, (backend) =>
+          Effect.gen(function* () {
+            let target: PendingImplementStop | undefined
+            let confirmed = false
+            const turn = yield* backend
+              .startTurn({
+                cwd: current.cwd,
+                model: BLOCKED_MODEL,
+                thinkingLevel: null,
+                prompt: standalonePrompt,
+                trackImplementStop: {
+                  started: (pending) =>
+                    Effect.sync(() => {
+                      target = pending
+                    }),
+                  stopped: () =>
+                    Effect.sync(() => {
+                      confirmed = true
+                    }),
+                },
+              })
+              .pipe(Effect.forkChild)
+            while (
+              !current.providerRequests.some((body) =>
+                body.includes(standalonePrompt),
+              )
+            ) {
+              yield* Effect.sleep("25 millis")
+            }
+            expect(
+              target,
+              "record the private invocation before inference",
+            ).toBeDefined()
+            const pending = target
+            const verifyStopped = backend.verifyImplementStopped
+            if (
+              pending === undefined ||
+              !("invocation" in pending) ||
+              verifyStopped === undefined
+            ) {
+              throw new Error(
+                "Private Implement is missing its recovery target",
+              )
+            }
+            expect(confirmed).toBe(false)
+            yield* Fiber.interrupt(turn)
+            expect(confirmed).toBe(true)
+            yield* verifyStopped({ ...pending, cwd: current.cwd })
+            while (
+              !current.providerCancellations.some((body) =>
+                body.includes(standalonePrompt),
+              )
+            ) {
+              yield* Effect.sleep("25 millis")
+            }
+          }).pipe(Effect.timeout("12 seconds")),
+        )
+        const run = records.find((record) => record.args[0] === "run")
+        expect(run?.args).toContain("--standalone")
+        expect(run?.args).not.toContain("--server")
+        logCase("private plain prompt interrupt", records)
       })
     },
     CASE_TIMEOUT_MS,

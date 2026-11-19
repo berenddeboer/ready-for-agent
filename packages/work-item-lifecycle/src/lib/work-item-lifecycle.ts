@@ -18,6 +18,7 @@ import {
   ActiveAgentBackend,
   type AgentBackendId,
   type AgentBackendProvider,
+  type PendingImplementStop,
   agentBackendLabel,
   classifyProviderCredentialText,
   findAgentBackendExitError,
@@ -128,6 +129,7 @@ import {
   IssueNotBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
+  LifecycleStepFailedError,
   NeedsHumanHandoffNotEligibleError,
   NonTransactionalQueueError,
   NotAParentIssueError,
@@ -589,6 +591,7 @@ type WorkItemRow = {
   readonly publication_title: string | null
   readonly publication_body: string | null
   readonly session_id: string | null
+  readonly pending_implement_stop: string | null
   readonly failure_code: string | null
   readonly failure_message: string | null
   readonly check_start_anchor_at: number | null
@@ -599,6 +602,25 @@ type WorkItemRow = {
   readonly created_at: number
   readonly updated_at: number
 }
+
+const decodePendingImplementStop = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Union([
+      Schema.Struct({
+        sessionId: Schema.String,
+        invocation: Schema.Struct({
+          unit: Schema.String,
+          cgroupPath: Schema.String,
+        }),
+      }),
+      Schema.Struct({
+        sessionId: Schema.String,
+        serverKey: Schema.String,
+        localPid: Schema.optionalKey(Schema.Int),
+      }),
+    ]),
+  ),
+)
 
 type ExecutionProfileColumns = {
   readonly agent_backend: string
@@ -1092,7 +1114,7 @@ const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, origin, ci_repair_default_b
                    pending_autonomous_retry,
                    holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary,
-                   publication_title, publication_body, session_id,
+                    publication_title, publication_body, session_id, pending_implement_stop,
                    pull_request_number, failure_code,
                     failure_message, check_start_anchor_at, check_start_anchor_head_sha,
                     check_start_observed_head_sha, check_start_observed_head_at,
@@ -1954,6 +1976,32 @@ export const makeWorkItemLifecycleLive = (
         }
       >()
       const resettingWorkItems = new Set<string>()
+      const trackImplementStop = (workItemId: string) => ({
+        started: (target: PendingImplementStop) =>
+          sql
+            .unsafe(
+              `UPDATE work_item SET pending_implement_stop = ?
+             WHERE id = ? AND pending_implement_stop IS NULL RETURNING id`,
+              [JSON.stringify(target), workItemId],
+            )
+            .pipe(
+              Effect.flatMap((rows) =>
+                rows.length === 0
+                  ? Effect.fail(
+                      new Error("An earlier Implement stop is still pending."),
+                    )
+                  : Effect.void,
+              ),
+            ),
+        stopped: (target: PendingImplementStop) =>
+          sql
+            .unsafe(
+              `UPDATE work_item SET pending_implement_stop = NULL
+             WHERE id = ? AND pending_implement_stop = ?`,
+              [workItemId, JSON.stringify(target)],
+            )
+            .pipe(Effect.asVoid),
+      })
       /** Work Items being advanced to local cleanup because their PR merged. */
       const mergeSupersedingWorkItems = new Set<string>()
       /** Work Items being parked because Refresh observed a competing PR. */
@@ -3919,6 +3967,14 @@ export const makeWorkItemLifecycleLive = (
           case "install_dependencies":
             return steps.installDependencies(context).pipe(Effect.as({}))
           case "implement":
+            if (workItem.pending_implement_stop != null) {
+              return Effect.fail(
+                new LifecycleStepFailedError({
+                  message:
+                    "An earlier OpenCode Implement turn has not been confirmed stopped. Stop it in OpenCode, then use Reset.",
+                }),
+              )
+            }
             return steps.implement(context).pipe(
               Effect.map((result) => {
                 if (typeof result === "string") {
@@ -6763,6 +6819,9 @@ export const makeWorkItemLifecycleLive = (
                     : Boolean(workItem.auto_merge_override),
                 mergeMode: decodeMergeMode(workItem.merge_mode),
                 maxDuration,
+                ...(stepRun.step === "implement"
+                  ? { trackImplementStop: trackImplementStop(workItem.id) }
+                  : {}),
                 ...(mergeAssessmentResume === null
                   ? {}
                   : { mergeAssessmentResume }),
@@ -8798,7 +8857,19 @@ export const makeWorkItemLifecycleLive = (
           return yield* new WorkItemNotFoundError({ workItemId })
         }
 
-        yield* Effect.sync(() => resettingWorkItems.add(workItemId))
+        const acquired = yield* Effect.sync(() => {
+          if (resettingWorkItems.has(workItemId)) return false
+          resettingWorkItems.add(workItemId)
+          return true
+        })
+        if (!acquired) {
+          const message = "Reset is already in progress for this Work Item."
+          return yield* new ResetCleanupError({
+            workItemId,
+            message,
+            cause: message,
+          })
+        }
 
         return yield* Effect.gen(function* () {
           const activeExecutions = [...activeStepExecutions.values()].filter(
@@ -8821,6 +8892,54 @@ export const makeWorkItemLifecycleLive = (
           }
 
           const cleanupContext = toLifecycleStepContext(currentWorkItem)
+
+          if (currentWorkItem.pending_implement_stop != null) {
+            const target = yield* decodePendingImplementStop(
+              currentWorkItem.pending_implement_stop,
+            ).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ResetCleanupError({
+                    workItemId,
+                    message:
+                      "Cannot read the pending OpenCode stop record. Reset kept the worktree.",
+                    cause,
+                  }),
+              ),
+            )
+            const cwd = cleanupContext.worktreePath
+            const guidance =
+              "invocation" in target
+                ? `Check the Harness systemd user service and invocation ${target.invocation.unit}, then retry Reset.`
+                : "Check the original OpenCode server, stop that session if active, then retry Reset."
+            const cannotVerify = `Could not confirm that OpenCode session ${target.sessionId} stopped. ${guidance}`
+            const verify = activeAgentBackend.verifyImplementStopped
+            if (
+              // A handler we just cancelled had the chance to prove its own
+              // stop. Do not use an idle snapshot to override an unresolved
+              // submission/interrupt from this same attempt.
+              activeExecutions.length > 0 ||
+              cwd === null ||
+              verify === undefined ||
+              currentWorkItem.agent_backend !== "opencode"
+            ) {
+              return yield* new ResetCleanupError({
+                workItemId,
+                message: cannotVerify,
+                cause: cannotVerify,
+              })
+            }
+            yield* verify("opencode", { ...target, cwd }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ResetCleanupError({
+                    workItemId,
+                    message: cannotVerify,
+                    cause,
+                  }),
+              ),
+            )
+          }
 
           yield* steps.removeWorktree(cleanupContext).pipe(
             Effect.mapError((cause) =>

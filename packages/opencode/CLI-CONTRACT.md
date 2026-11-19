@@ -25,10 +25,12 @@ the test, does not satisfy this rule.
 
 Each case states its boundary in the spec. Operations that can finish
 without inference assert exit status and JSON or server side effects.
-Inference-triggering `run` and configured Agent Command turns stop at a
-validation boundary (`Model unavailable` JSON, or command acceptance plus
-the stored user message). They are not provider-semantic coverage and must
-not call a cloud model.
+Ordinary inference-triggering cases stop at a validation boundary (`Model
+unavailable` JSON, or command acceptance plus the stored user message).
+The Implement interruption case holds a real turn open with a streaming
+loopback provider, checks that the server reports it active before interrupt,
+then checks that only the target becomes inactive and its history remains.
+No case calls a cloud model.
 
 `--help`, an unreachable server, a generic nonzero exit, malformed
 output, or argv equality alone is not a pass. Mutations that remain
@@ -182,15 +184,21 @@ the parser misses fails the case instead of being treated as compatibility.
 | model catalog, Keymaxxer off | `Opencode.inspect` | `api --standalone get /api/model`, worktree cwd | default catalog | parsed models; CLI JSON `location.directory` is the cwd |
 | model catalog, owned server | `Opencode.inspect` with `dedicatedServer` | `api --server` after `api`, directory header, quoting-sensitive path | explicit catalog | CLI JSON location equals the worktree; header is honored |
 | `run` start | `AgentBackend.startTurn` | `--auto`, `--format json`, `model#thinking`, positional prompt tokens; default discovery and `--server` | start turn | exact `Model unavailable` JSON error; session stores the prompt once; no argument diagnostic. OpenCode 2.0.32 duplicates text after `--`, so production must not emit that separator. Exact prompt equality fails if it is reintroduced |
+| `run` Implement start/resume | tracked `AgentBackend.startTurn` / `continueTurn` | `--session` with a fresh, invocation-owned ID or the existing ID; `--server` pins the configured or discovered server | plain prompt interrupt | the CLI creates and uses the fresh ID even before emitting a JSON session ID; resume reuses the same ID and history |
+| `run` Implement with service disabled | tracked plain prompts without a shared service | `run --standalone` in the CLI invocation boundary | plain prompt interrupt | persist the exact boundary before inference; only confirm once cleanup is verified and the private provider request is cancelled; no shared service is contacted |
 | `run` resume | `AgentBackend.continueTurn` | `--session`, null thinking omits `#variant`; both connection modes | resume turn | same session; variant absent; exact model diagnostic |
 | prompt stdin | `AgentBackend.startTurn` when the prompt has a newline or exceeds the argv limit | stdin, not argv tokens | stdin prompt | stored message equals the prompt, including newlines |
 | oversized Agent Command | `AgentBackend.startTurn` with `command` | refusal before spawn | command argv refusal | config error, OpenCode was not started |
 | create session | `startTurn` command path, no session yet | `POST /api/session` JSON body, directory header, both modes | command turn | session location equals the worktree |
 | switch model | `continueTurn` command path | `POST /api/session/{id}/model` JSON body, both modes | command continuation | session model id, provider, and variant match the pin |
 | configured command | `startTurn` / `continueTurn` with `command` | `POST .../command` `--data`, quoting-sensitive text, both modes | command turn | stored user text is the template plus arguments |
-| wait | command result collection | `POST /api/experimental/session/{id}/wait`, both modes | command turn | production wait spawn exits 0; unexpected argument errors fail the case |
+| wait | command result collection and Implement stop confirmation | `POST /api/experimental/session/{id}/wait`, both modes | command turn; plain prompt interrupt | command wait exits 0; after an Implement interrupt, the target is no longer active |
 | session export | command result collection | `session export --server` after `export`, both modes | command turn | export JSON contains the session id |
 | interrupt | abort or timeout of a command turn | `POST /api/session/{id}/interrupt`, explicit server | interrupt | CLI JSON `interrupted` boolean; exact success, not a generic nonzero exit |
+| Implement prompt admission | `AgentBackend.startTurn` / `continueTurn` with stop confirmation | `GET /api/session/{id}/message?limit=20&order=desc&type=user`, both modes | plain prompt interrupt | filter to user messages before pagination so later assistant output cannot hide the submitted prompt; previous user messages do not count during resume |
+| Implement prompt interrupt | abort or timeout of an admitted Implement plain prompt | `POST /api/session/{id}/interrupt`, both modes | plain prompt interrupt | `interrupted: true` for the active target, then idle on the server with its history intact. Another session in the same worktree stays active. An acknowledged `false` is the idle no-op, not a substitute for proving prompt admission |
+| Implement server identity | tracked Implement start/resume and `verifyImplementStopped` | `api get /api/info` for shared discovery/startup, then `GET /api/info` with `--server` for the pinned server | plain prompt interrupt | persist the target before running; verify the same server process before accepting an idle read |
+| Verify pending Implement stop | `AgentBackend.verifyImplementStopped` | `GET /api/session/active` pinned to the original server, both modes | plain prompt interrupt | refuses an active target; accepts an idle target; recovery does not send an interrupt |
 | `serve` | `startOwnedOpenCodeServer` | `--hostname 127.0.0.1`, ephemeral `--port`, `OPENCODE_SERVER_PASSWORD`, no `--service` | owned server | authenticated config contains the Keymaxxer URL; missing auth is 401; process cmdline matches; operator service URL unchanged |
 | `service status` | `readOpenCodeServiceStatus` | isolated stopped service; isolated registration of the ephemeral server | service discovery | exact `stopped` text, then the ephemeral URL; does not print the operator URL |
 | jump model pin | `interactiveResumeCommand` + `startInteractiveResume` | `POST .../model` `--data`, directory header, quoting-sensitive path | `apps/ready-for-agent/src/interactive-resume-v2-contract.test.ts` jump pin | pin exits 0; session model matches. Same Nx target as this package |
@@ -200,6 +208,16 @@ the parser misses fails the case instead of being treated as compatibility.
 | `--server` before `export` | production command turn, spawner moves only `export` | explicit server | export placement | pin: exact `Unrecognized flag: --server in command opencode session`. 2.2.5, 2.2.6, and 2.2.7: `api` keeps production order; export uses the moved flag and the same stored-command/export proof |
 | removed `--dir`, `--variant`, `--command` | production `startTurn`, spawner inserts the flag | explicit server | obsolete flag mutations | exact unrecognized-flag diagnostic. Independent of placement, so one changed flag does not hide the others |
 | former `models --verbose` | production `inspect`, spawner replaces the catalog argv | explicit server | verbose mutation | exact `Unrecognized flag: --verbose in command opencode models` |
+
+The harness records the Implement session and server before the prompt is
+submitted. If the first stop cannot be confirmed, the record survives a
+harness restart and blocks another harness Implement turn for that Work Item.
+A later Reset checks the original attached server without sending another
+interrupt. For a standalone turn, it stops and verifies only the recorded
+process boundary before removing the worktree.
+If the session is still active, the operator can stop it in OpenCode and retry
+Reset. OpenCode v2 interrupts by session, so concurrent use of that same
+session by another OpenCode client during Implement or Reset is not covered.
 
 ## Not a harness invocation
 

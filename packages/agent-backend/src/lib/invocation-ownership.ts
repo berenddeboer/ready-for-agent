@@ -17,6 +17,7 @@ import { PlatformError, systemError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 const CONTROL_TIMEOUT_MS = 3_000
+const INVOCATION_UNIT = /^rfa-inv-[a-f0-9]{24}-(\d+)-(\d+)-[a-f0-9-]+\.service$/
 const active = new Set<string>()
 const failed = new Map<string, Map<string, () => Promise<void>>>()
 
@@ -156,6 +157,35 @@ const ownershipError = (method: string, cwd: string, cause: unknown) =>
     cause,
   })
 
+export interface InvocationReceipt {
+  readonly unit: string
+  readonly cgroupPath: string
+}
+
+export interface TrackOwnedInvocation {
+  readonly started: (receipt: InvocationReceipt) => Effect.Effect<void, unknown>
+  readonly stopped: (receipt: InvocationReceipt) => Effect.Effect<void, unknown>
+}
+
+/** Revoke the exact recorded launch boundary, including after a Harness restart. */
+export const stopRecordedInvocation = (receipt: InvocationReceipt) =>
+  Effect.tryPromise({
+    try: async () => {
+      requireInvocationContainment(process.platform)
+      const { unit, cgroupPath } = receipt
+      if (
+        !INVOCATION_UNIT.test(unit) ||
+        !cgroupPath.startsWith("/sys/fs/cgroup/") ||
+        resolve(cgroupPath) !== cgroupPath ||
+        !cgroupPath.endsWith(`/${unit}`)
+      ) {
+        throw new Error("Invalid recorded invocation boundary")
+      }
+      await stopUnit(unit, 2_000, cgroupPath)
+    },
+    catch: (cause) => ownershipError("recover", receipt.unit, cause),
+  })
+
 /** No PPID/group fallback: unsupported hosts fail before repository code runs. */
 export const requireInvocationContainment = (platform: NodeJS.Platform) => {
   if (platform !== "linux")
@@ -197,9 +227,7 @@ const acquireBoundary = async (cwd: string, graceMs: number) => {
   for (const line of units.split("\n")) {
     const unit = line.trim().split(/\s+/)[0]
     if (!unit || active.has(unit)) continue
-    const match = /^rfa-inv-[a-f0-9]{24}-(\d+)-(\d+)-[a-f0-9-]+\.service$/.exec(
-      unit,
-    )
+    const match = INVOCATION_UNIT.exec(unit)
     if (
       match &&
       ((match[1] === String(process.pid) && match[2] === identity) ||
@@ -262,6 +290,7 @@ const acquireBoundary = async (cwd: string, graceMs: number) => {
     await access(join(payload, "cgroup.procs"), constants.W_OK)
     return {
       unit,
+      cgroupPath: path,
       cwd: canonical,
       membership: join(payload, "cgroup.procs"),
       stop,
@@ -283,6 +312,7 @@ const acquireBoundary = async (cwd: string, graceMs: number) => {
 export const acquireInvocation = (input: {
   readonly cwd: string
   readonly forceKillAfter?: Duration.Input
+  readonly track?: TrackOwnedInvocation
 }) =>
   Effect.acquireRelease(
     Effect.tryPromise({
@@ -293,17 +323,37 @@ export const acquireInvocation = (input: {
         ),
       catch: (cause) => ownershipError("launch", input.cwd, cause),
     }),
-    releaseInvocation,
+    (boundary, exit) => releaseInvocation(boundary, exit, input.track),
+  ).pipe(
+    Effect.tap(
+      (boundary) =>
+        input.track?.started(boundary).pipe(
+          Effect.mapError((cause) =>
+            ownershipError("record", boundary.cwd, cause),
+          ),
+          Effect.uninterruptible,
+        ) ?? Effect.void,
+    ),
   )
 
 const releaseInvocation = (
   boundary: Awaited<ReturnType<typeof acquireBoundary>>,
   exit: Exit.Exit<unknown, unknown>,
+  track?: TrackOwnedInvocation,
 ) =>
   Effect.tryPromise({
     try: boundary.stop,
     catch: (cause) => ownershipError("cleanup", boundary.cwd, cause),
   }).pipe(
+    Effect.andThen(
+      track
+        ?.stopped(boundary)
+        .pipe(
+          Effect.mapError((cause) =>
+            ownershipError("record stop", boundary.cwd, cause),
+          ),
+        ) ?? Effect.void,
+    ),
     Effect.catch((error) =>
       Effect.logError("Invocation cleanup failed; worktree reuse is blocked", {
         unit: boundary.unit,
@@ -416,12 +466,14 @@ export const resolveInvocationExecutable = (
 export const spawnOwned = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   command: ChildProcess.StandardCommand,
+  track?: TrackOwnedInvocation,
 ) =>
   Effect.gen(function* () {
     const binary = yield* resolveInvocationExecutable(command)
     const boundary = yield* acquireInvocation({
       cwd: command.options.cwd ?? process.cwd(),
       forceKillAfter: command.options.forceKillAfter,
+      ...(track === undefined ? {} : { track }),
     })
     const wrapped = invocationCommand(boundary.membership, binary, command.args)
     const handle = yield* spawner.spawn(

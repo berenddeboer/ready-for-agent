@@ -5,12 +5,14 @@ import { BunServices } from "@effect/platform-bun"
 import { Cause, Effect, Exit, Fiber } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import {
+  type InvocationReceipt,
   acquireInvocation,
   invocationCommand,
   requireInvocationContainment,
   runCliTurn,
   sanitizeInheritedEnvironment,
   spawnOwned,
+  stopRecordedInvocation,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -155,79 +157,91 @@ it("rejects a revoked launch gate before executing repository code", async () =>
   }
 })
 
-it("reaps a crashed Harness invocation on replacement without touching a live peer", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "rfa-recovery-"))
-  const peerCwd = await mkdtemp(join(tmpdir(), "rfa-peer-"))
-  const fixture = join(import.meta.dir, "fixtures/ownership-host.ts")
-  const hosts: ReturnType<typeof Bun.spawn>[] = []
-  const workers: number[] = []
-  let unit = ""
-  try {
-    for (const directory of [cwd, peerCwd]) {
-      await writeFile(join(directory, "worker.py"), worker)
-      hosts.push(
-        Bun.spawn([process.execPath, fixture, directory], {
-          stdout: "ignore",
-          stderr: "inherit",
-        }),
+it.each(["next launch", "recorded recovery"] as const)(
+  "reaps a crashed Harness invocation on %s without touching a live peer",
+  async (mode) => {
+    const cwd = await mkdtemp(join(tmpdir(), "rfa-recovery-"))
+    const peerCwd = await mkdtemp(join(tmpdir(), "rfa-peer-"))
+    const fixture = join(import.meta.dir, "fixtures/ownership-host.ts")
+    const hosts: ReturnType<typeof Bun.spawn>[] = []
+    const workers: number[] = []
+    let unit = ""
+    try {
+      for (const directory of [cwd, peerCwd]) {
+        await writeFile(join(directory, "worker.py"), worker)
+        hosts.push(
+          Bun.spawn([process.execPath, fixture, directory], {
+            stdout: "ignore",
+            stderr: "inherit",
+          }),
+        )
+        const deadline = Date.now() + 5_000
+        while (
+          !(await Bun.file(join(directory, "worker.pid")).exists()) &&
+          Date.now() < deadline
+        )
+          await Bun.sleep(20)
+        workers.push(
+          Number(await readFile(join(directory, "worker.pid"), "utf8")),
+        )
+      }
+      const [orphan, peer] = workers
+      if (!orphan || !peer) throw new Error("fixture did not start")
+      const membership = await readFile(`/proc/${orphan}/cgroup`, "utf8")
+      unit =
+        membership
+          .split("/")
+          .find((segment) => segment.startsWith("rfa-inv-")) ?? ""
+      expect(unit.endsWith(".service")).toBe(true)
+      // Pause the watchdog so this specifically exercises restart recovery, not
+      // its automatic owner-death detection (covered by the next test).
+      const show = Bun.spawn(
+        ["systemctl", "--user", "show", unit, "--property=MainPID", "--value"],
+        { stdout: "pipe" },
       )
-      const deadline = Date.now() + 5_000
-      while (
-        !(await Bun.file(join(directory, "worker.pid")).exists()) &&
-        Date.now() < deadline
-      )
-        await Bun.sleep(20)
-      workers.push(
-        Number(await readFile(join(directory, "worker.pid"), "utf8")),
-      )
+      const anchor = Number(await new Response(show.stdout).text())
+      expect(anchor).toBeGreaterThan(1)
+      process.kill(anchor, "SIGSTOP")
+      hosts[0]?.kill("SIGKILL")
+      await hosts[0]?.exited
+      expect(await alive(orphan)).toBe(true)
+      if (mode === "recorded recovery") {
+        const path = membership.trim().split("::")[1]?.split(`/${unit}`)[0]
+        if (path === undefined) throw new Error("fixture has no cgroup path")
+        const receipt = { unit, cgroupPath: `/sys/fs/cgroup${path}/${unit}` }
+        await Effect.runPromise(stopRecordedInvocation(receipt))
+        await Effect.runPromise(stopRecordedInvocation(receipt))
+      } else
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const boundary = yield* acquireInvocation({
+                cwd,
+                forceKillAfter: "100 millis",
+              })
+              expect(boundary.unit).not.toBe(unit)
+            }),
+          ),
+        )
+      expect(await alive(orphan)).toBe(false)
+      expect(await alive(peer)).toBe(true)
+    } finally {
+      for (const host of hosts) {
+        host.kill("SIGKILL")
+        await host.exited
+      }
+      if (unit)
+        await Bun.spawn(["systemctl", "--user", "stop", unit], {
+          stderr: "ignore",
+        }).exited
+      for (const pid of workers)
+        if (await alive(pid)) process.kill(pid, "SIGKILL")
+      await rm(cwd, { recursive: true, force: true })
+      await rm(peerCwd, { recursive: true, force: true })
     }
-    const [orphan, peer] = workers
-    if (!orphan || !peer) throw new Error("fixture did not start")
-    const membership = await readFile(`/proc/${orphan}/cgroup`, "utf8")
-    unit =
-      membership.split("/").find((segment) => segment.startsWith("rfa-inv-")) ??
-      ""
-    expect(unit.endsWith(".service")).toBe(true)
-    // Pause the watchdog so this specifically exercises restart recovery, not
-    // its automatic owner-death detection (covered by the next test).
-    const show = Bun.spawn(
-      ["systemctl", "--user", "show", unit, "--property=MainPID", "--value"],
-      { stdout: "pipe" },
-    )
-    const anchor = Number(await new Response(show.stdout).text())
-    expect(anchor).toBeGreaterThan(1)
-    process.kill(anchor, "SIGSTOP")
-    hosts[0]?.kill("SIGKILL")
-    await hosts[0]?.exited
-    expect(await alive(orphan)).toBe(true)
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const boundary = yield* acquireInvocation({
-            cwd,
-            forceKillAfter: "100 millis",
-          })
-          expect(boundary.unit).not.toBe(unit)
-        }),
-      ),
-    )
-    expect(await alive(orphan)).toBe(false)
-    expect(await alive(peer)).toBe(true)
-  } finally {
-    for (const host of hosts) {
-      host.kill("SIGKILL")
-      await host.exited
-    }
-    if (unit)
-      await Bun.spawn(["systemctl", "--user", "stop", unit], {
-        stderr: "ignore",
-      }).exited
-    for (const pid of workers)
-      if (await alive(pid)) process.kill(pid, "SIGKILL")
-    await rm(cwd, { recursive: true, force: true })
-    await rm(peerCwd, { recursive: true, force: true })
-  }
-}, 15_000)
+  },
+  15_000,
+)
 
 it("automatically reaps an invocation after abrupt Harness death", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "rfa-owner-death-"))
@@ -269,12 +283,24 @@ for (const ending of ["timeout", "interrupt", "success"] as const) {
     const originalBus = process.env.DBUS_SESSION_BUS_ADDRESS
     const originalRuntime = process.env.XDG_RUNTIME_DIR
     let events = ""
+    let recorded: InvocationReceipt | undefined
+    let confirmed = false
     try {
       const attempt = Effect.scoped(
         Effect.gen(function* () {
           const boundary = yield* acquireInvocation({
             cwd,
             forceKillAfter: "100 millis",
+            track: {
+              started: (receipt) =>
+                Effect.sync(() => {
+                  recorded = receipt
+                }),
+              stopped: () =>
+                Effect.sync(() => {
+                  confirmed = true
+                }),
+            },
           })
           events = join(boundary.membership, "../../cgroup.events")
           // Real OS failure: deny observation of this invocation and disconnect
@@ -297,6 +323,16 @@ for (const ending of ["timeout", "interrupt", "success"] as const) {
           : attempt.pipe(Effect.timeout("300 millis"), Effect.exit),
       )
       expect(Exit.isFailure(result)).toBe(true)
+      const receipt = recorded
+      if (receipt === undefined) throw new Error("missing launch receipt")
+      expect(confirmed).toBe(false)
+      expect(
+        Exit.isFailure(
+          await Effect.runPromise(
+            stopRecordedInvocation(receipt).pipe(Effect.exit),
+          ),
+        ),
+      ).toBe(true)
       if (Exit.isFailure(result)) {
         if (ending === "interrupt")
           expect(Cause.hasInterruptsOnly(result.cause)).toBe(true)

@@ -56,10 +56,12 @@ const opencodeServiceRegistrationPath = (
   return join(root, "opencode", "service.json")
 }
 
-const readRegisteredEndpoint = (): OpencodeServiceEndpoint | null => {
+export const readRegisteredEndpoint = (
+  env?: NodeJS.ProcessEnv,
+): OpencodeServiceEndpoint | null => {
   try {
     const parsed: unknown = JSON.parse(
-      readFileSync(opencodeServiceRegistrationPath(), "utf8"),
+      readFileSync(opencodeServiceRegistrationPath(env), "utf8"),
     )
     if (!isRecord(parsed) || typeof parsed["url"] !== "string") {
       return null

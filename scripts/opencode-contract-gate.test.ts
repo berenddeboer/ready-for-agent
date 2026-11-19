@@ -212,7 +212,7 @@ describe("OpenCode contract version gate", () => {
     expect(redactContractText("token=supersecret", ["supersecret"])).toBe(
       "token=[redacted]",
     )
-    expect(EXPECTED_OPENCODE_CLI_CONTRACT_CASES).toBe(14)
+    expect(EXPECTED_OPENCODE_CLI_CONTRACT_CASES).toBe(15)
   })
 
   it("installs the baseline pin without calling the network", () => {

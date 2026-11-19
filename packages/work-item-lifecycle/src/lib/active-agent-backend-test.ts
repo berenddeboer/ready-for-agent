@@ -87,6 +87,9 @@ export const stubActiveAgentBackendLayer = (
       backendId: AgentBackendId,
       input: ContinueTurnInput,
     ) => Effect.Effect<AgentTurnResult, never>
+    readonly verifyImplementStopped: NonNullable<
+      ActiveAgentBackend["Service"]["verifyImplementStopped"]
+    >
   }> = {},
 ): Layer.Layer<ActiveAgentBackend> => {
   const registration = overrides.registration ?? opencode
@@ -211,6 +214,9 @@ export const stubActiveAgentBackendLayer = (
         overrides.continueTurn !== undefined
           ? overrides.continueTurn(backendId, input)
           : Effect.die("stub ActiveAgentBackend.continueTurn unused"),
+      ...(overrides.verifyImplementStopped === undefined
+        ? {}
+        : { verifyImplementStopped: overrides.verifyImplementStopped }),
       inspectBackend: () =>
         Effect.die("stub ActiveAgentBackend.inspectBackend unused"),
       getSessionTelemetry: (input) =>

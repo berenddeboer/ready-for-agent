@@ -430,6 +430,7 @@ export const workItem = snakeCase.table(
      */
     ciRepairRetry: text(),
     sessionId: text(),
+    pendingImplementStop: text(),
     failureCode: text(),
     failureMessage: text(),
     /**

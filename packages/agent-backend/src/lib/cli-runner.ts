@@ -20,7 +20,10 @@ import {
   AgentBackendTimeoutError,
   formatSilentAgentBackendExitMessage,
 } from "./errors.js"
-import { spawnOwned } from "./invocation-ownership.js"
+import {
+  type TrackOwnedInvocation,
+  spawnOwned,
+} from "./invocation-ownership.js"
 import { sanitizeAgentBackendStderrTail } from "./sanitize-exit-message.js"
 import type { AgentBackendDescriptor, OnSessionId } from "./types.js"
 
@@ -124,6 +127,7 @@ export type RunCliTurnInput = {
   readonly forceKillAfter?: Duration.Input
   readonly knownSessionId?: string
   readonly onSessionId?: OnSessionId
+  readonly trackInvocation?: TrackOwnedInvocation
   readonly parseLine: (line: string) => CliLineEvent
   readonly observerLabel?: string
   /** Agent Model for this turn, copied onto a failing exit when known. */
@@ -298,9 +302,11 @@ export const runCliTurn = (
 
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
-        const handle = yield* spawnOwned(spawner, command).pipe(
-          Effect.mapError((error) => mapSpawnError(error, input)),
-        )
+        const handle = yield* spawnOwned(
+          spawner,
+          command,
+          input.trackInvocation,
+        ).pipe(Effect.mapError((error) => mapSpawnError(error, input)))
 
         // Disarms the startup bound on the first stdout output rather than the
         // first parsed line, so a CLI that streams one large slow line still

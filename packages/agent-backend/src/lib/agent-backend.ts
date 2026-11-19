@@ -15,6 +15,7 @@ import type {
   ContinueTurnInput,
   InspectInput,
   InspectResult,
+  PendingImplementStop,
   StartTurnInput,
 } from "./types.js"
 
@@ -43,5 +44,9 @@ export class AgentBackend extends Context.Service<
     readonly continueTurn: (
       input: ContinueTurnInput,
     ) => Effect.Effect<AgentTurnResult, AgentBackendError>
+    /** Recover only the recorded invocation or verify the original attached session. */
+    readonly verifyImplementStopped?: (
+      input: PendingImplementStop & { readonly cwd: string },
+    ) => Effect.Effect<void, AgentBackendError>
   }
 >()("@ready-for-agent/agent-backend/AgentBackend") {}
