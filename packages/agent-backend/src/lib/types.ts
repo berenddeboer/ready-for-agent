@@ -1,4 +1,5 @@
 import type { Duration, Effect } from "effect"
+import type { InvocationReceipt } from "./invocation-ownership.js"
 
 /** Stable built-in Agent Backend identifiers. */
 export const AGENT_BACKEND_IDS = {
@@ -56,6 +57,29 @@ export type OnSessionId = (
   sessionId: string,
 ) => Effect.Effect<void, unknown, never>
 
+export interface AttachedImplementStop {
+  readonly sessionId: string
+  readonly serverKey: string
+  /** Only set for a locally owned/service-discovered server. */
+  readonly localPid?: number
+}
+
+export type PendingImplementStop =
+  | AttachedImplementStop
+  | {
+      readonly sessionId: string
+      readonly invocation: InvocationReceipt
+    }
+
+export interface TrackImplementStop {
+  readonly started: (
+    target: PendingImplementStop,
+  ) => Effect.Effect<void, unknown>
+  readonly stopped: (
+    target: PendingImplementStop,
+  ) => Effect.Effect<void, unknown>
+}
+
 export interface InspectInput {
   readonly cwd: string
   readonly timeout?: Duration.Input
@@ -90,6 +114,8 @@ export interface StartTurnInput {
   readonly thinkingLevel: string | null
   readonly timeout?: Duration.Input
   readonly onSessionId?: OnSessionId
+  /** Persist a stop obligation before submitting an Implement prompt. */
+  readonly trackImplementStop?: TrackImplementStop
   readonly command?: string
 }
 
@@ -101,6 +127,7 @@ export interface ContinueTurnInput {
   readonly thinkingLevel: string | null
   readonly timeout?: Duration.Input
   readonly onSessionId?: OnSessionId
+  readonly trackImplementStop?: TrackImplementStop
   readonly command?: string
 }
 

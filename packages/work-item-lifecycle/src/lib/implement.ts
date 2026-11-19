@@ -350,6 +350,10 @@ const runImplementTurn = (
         Effect.provideService(DbService, db),
       )
 
+    const stopObserver =
+      context.trackImplementStop === undefined
+        ? {}
+        : { trackImplementStop: context.trackImplementStop }
     const run =
       existingSessionId === null
         ? agentBackend.startTurn({
@@ -360,6 +364,7 @@ const runImplementTurn = (
             timeout:
               context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
             onSessionId,
+            ...stopObserver,
           })
         : agentBackend.continueTurn({
             sessionId: existingSessionId,
@@ -370,6 +375,7 @@ const runImplementTurn = (
             timeout:
               context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
             onSessionId,
+            ...stopObserver,
           })
 
     const result = yield* run.pipe(

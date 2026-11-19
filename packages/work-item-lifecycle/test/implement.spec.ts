@@ -11,7 +11,8 @@ import {
   AgentBackendExitError,
   AgentBackendSessionIdMissingError,
   AgentBackendTimeoutError,
-  type StartInput,
+  type ContinueTurnInput,
+  type StartTurnInput,
   runCliTurn,
   sanitizeInheritedEnvironment,
 } from "@ready-for-agent/agent-backend"
@@ -76,15 +77,11 @@ const baseContext = (
 
 const stubOpencode = (impl: {
   readonly startTurn?: (
-    input: StartInput,
+    input: StartTurnInput,
   ) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
-  readonly continueTurn?: (input: {
-    readonly sessionId: string
-    readonly prompt: string
-    readonly cwd: string
-    readonly model: string
-    readonly thinkingLevel: string
-  }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
+  readonly continueTurn?: (
+    input: ContinueTurnInput,
+  ) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
 }) =>
   Layer.succeed(
     AgentBackend,
@@ -799,14 +796,12 @@ describe("implement", () => {
   it("starts OpenCode with exact issue identity, worktree, model, and variant when no prior session", () =>
     withTemp(async (root) => {
       const workItemId = makeWorkItemId()
-      let started: {
-        prompt: string
-        cwd: string
-        model: string
-        variant: string
-        timeout?: Duration.Input
-      } | null = null
+      const started: StartTurnInput[] = []
       let continued = false
+      const trackImplementStop = {
+        started: () => Effect.void,
+        stopped: () => Effect.void,
+      }
 
       const sessionId = await run(
         Effect.gen(function* () {
@@ -824,12 +819,14 @@ describe("implement", () => {
               reviewThinkingLevel: "max",
               sessionId: null,
               maxDuration: Duration.minutes(90),
+              trackImplementStop,
             }),
           )
         }),
         stubOpencode({
           startTurn: (input) => {
-            started = input
+            expect(input.trackImplementStop).toBe(trackImplementStop)
+            started.push(input)
             return Effect.succeed({
               sessionId: "ses_fresh_implement",
               assistantText: "",
@@ -843,19 +840,20 @@ describe("implement", () => {
       )
 
       expect(sessionId).toBe("ses_fresh_implement")
-      expect(started).not.toBeNull()
-      expect(started!.cwd).toBe(root)
-      expect(started!.model).toBe("opencode/implement-model")
-      expect(started!.thinkingLevel).toBe("max")
-      expect(Duration.toMillis(started!.timeout!)).toBe(
+      const [turn] = started
+      if (turn?.timeout === undefined) throw new Error("Missing start turn")
+      expect(turn.cwd).toBe(root)
+      expect(turn.model).toBe("opencode/implement-model")
+      expect(turn.thinkingLevel).toBe("max")
+      expect(Duration.toMillis(turn.timeout)).toBe(
         Duration.toMillis(Duration.minutes(90)),
       )
-      expect(started!.prompt).toContain("acme/widgets#80")
-      expect(started!.prompt).toContain("Inspect the current GitHub Issue")
-      expect(started!.prompt).toContain("run appropriate verification")
-      expect(started!.prompt).toContain("Do not merely propose a plan")
-      expectImplementLeavesTrackerIssueOpen(started!.prompt, "github")
-      expectVisualEvidencePrompt(started!.prompt, workItemId)
+      expect(turn.prompt).toContain("acme/widgets#80")
+      expect(turn.prompt).toContain("Inspect the current GitHub Issue")
+      expect(turn.prompt).toContain("run appropriate verification")
+      expect(turn.prompt).toContain("Do not merely propose a plan")
+      expectImplementLeavesTrackerIssueOpen(turn.prompt, "github")
+      expectVisualEvidencePrompt(turn.prompt, workItemId)
       expect(continued).toBe(false)
     }))
 
@@ -1229,15 +1227,12 @@ describe("implement", () => {
   it("continues the prior OpenCode Session when session_id is set (retry after interrupt)", () =>
     withTemp(async (root) => {
       const workItemId = makeWorkItemId()
-      let continued: {
-        sessionId: string
-        prompt: string
-        cwd: string
-        model: string
-        variant: string
-        timeout?: Duration.Input
-      } | null = null
+      const continued: ContinueTurnInput[] = []
       let started = false
+      const trackImplementStop = {
+        started: () => Effect.void,
+        stopped: () => Effect.void,
+      }
 
       const sessionId = await run(
         Effect.gen(function* () {
@@ -1253,6 +1248,7 @@ describe("implement", () => {
               thinkingLevel: "max",
               sessionId: "ses_interrupted_build",
               maxDuration: Duration.minutes(90),
+              trackImplementStop,
             }),
           )
         }),
@@ -1265,7 +1261,8 @@ describe("implement", () => {
             })
           },
           continueTurn: (input) => {
-            continued = input
+            expect(input.trackImplementStop).toBe(trackImplementStop)
+            continued.push(input)
             return Effect.succeed({
               sessionId: input.sessionId,
               assistantText: "",
@@ -1276,20 +1273,21 @@ describe("implement", () => {
 
       expect(sessionId).toBe("ses_interrupted_build")
       expect(started).toBe(false)
-      expect(continued).not.toBeNull()
-      expect(continued!.sessionId).toBe("ses_interrupted_build")
-      expect(continued!.cwd).toBe(root)
-      expect(continued!.model).toBe("opencode/implement-model")
-      expect(continued!.thinkingLevel).toBe("max")
-      expect(Duration.toMillis(continued!.timeout!)).toBe(
+      const [turn] = continued
+      if (turn?.timeout === undefined) throw new Error("Missing resumed turn")
+      expect(turn.sessionId).toBe("ses_interrupted_build")
+      expect(turn.cwd).toBe(root)
+      expect(turn.model).toBe("opencode/implement-model")
+      expect(turn.thinkingLevel).toBe("max")
+      expect(Duration.toMillis(turn.timeout)).toBe(
         Duration.toMillis(Duration.minutes(90)),
       )
-      expect(continued!.prompt).toContain("Continue implementing")
-      expect(continued!.prompt).toContain("acme/widgets#80")
-      expect(continued!.prompt).toContain("interrupted or failed")
-      expect(continued!.prompt).toContain("partial work")
-      expectImplementLeavesTrackerIssueOpen(continued!.prompt, "github")
-      expectVisualEvidencePrompt(continued!.prompt, workItemId)
+      expect(turn.prompt).toContain("Continue implementing")
+      expect(turn.prompt).toContain("acme/widgets#80")
+      expect(turn.prompt).toContain("interrupted or failed")
+      expect(turn.prompt).toContain("partial work")
+      expectImplementLeavesTrackerIssueOpen(turn.prompt, "github")
+      expectVisualEvidencePrompt(turn.prompt, workItemId)
     }))
 
   it("continues a GitLab Implement turn without inviting Issue close", () =>

@@ -1,7 +1,10 @@
 import { Context, type Duration, type Effect } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import type { SqlError } from "effect/sql/SqlError"
-import type { AgentBackendNotInstalledError } from "@ready-for-agent/agent-backend"
+import type {
+  AgentBackendNotInstalledError,
+  TrackImplementStop,
+} from "@ready-for-agent/agent-backend"
 import type {
   AzureDevOpsNotImplementedError,
   AzureDevOpsProjectUnavailableError,
@@ -123,6 +126,7 @@ export interface LifecycleStepContext {
   readonly publicationTitle: string | null
   readonly publicationBody: string | null
   readonly sessionId: string | null
+  readonly trackImplementStop?: TrackImplementStop
   /**
    * Work Item Auto-merge override. Null/omitted follows Repository Auto-merge.
    */

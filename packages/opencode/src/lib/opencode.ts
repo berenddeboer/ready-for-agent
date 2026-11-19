@@ -7,12 +7,15 @@ import {
   type AgentBackendError,
   AgentBackendMalformedOutputError,
   type ContinueTurnInput,
+  DEFAULT_STARTUP_TIMEOUT,
   type InspectInput,
   PROMPT_ARGV_BYTE_LIMIT,
+  type PendingImplementStop,
   type StartTurnInput,
   retrySilentKnownSessionStartup,
   runCliCapture,
   runCliTurn,
+  stopRecordedInvocation,
 } from "@ready-for-agent/agent-backend"
 import {
   buildCommandApiArgs,
@@ -30,9 +33,16 @@ import {
 import { makeOpencodeEnvironment } from "./environment.js"
 import type { OpencodeConfigError } from "./errors.js"
 import {
+  identifyImplementTarget,
+  jsonRecord,
+  localImplementServerExited,
+  verifyImplementIdle,
+} from "./implement-stop-target.js"
+import {
   type OpencodePathEnv,
   resolveOpencodeDbPathFromRules,
 } from "./opencode-db-path.js"
+import { readRegisteredEndpoint } from "./opencode-v2-client.js"
 import type { OpencodeV2Reader } from "./opencode-v2-read.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseCommandTaskResultFromLine } from "./parse-command-task-result.js"
@@ -51,6 +61,7 @@ import {
   parseOpencodeModelCatalog,
 } from "./parse-model-catalog.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
+import { runStoppablePlainPrompt } from "./plain-prompt-stop.js"
 import { observeOpencodeSessionModel } from "./session-model.js"
 import {
   type OpencodeStartupProbe,
@@ -256,6 +267,103 @@ export const Opencode = {
             : { OPENCODE_PASSWORD: dedicated.password }),
         })
 
+        const captureAt =
+          (
+            cwd: string,
+            env: Record<string, string>,
+            serverUrl: string | undefined,
+            timeout: Duration.Input = "3 seconds",
+          ) =>
+          (args: ReadonlyArray<string>) =>
+            runCliCapture({
+              spawner,
+              backend: OPENCODE_BACKEND,
+              binary,
+              args: withOpenCodeServer(args, serverUrl),
+              cwd,
+              env,
+              timeout,
+            })
+
+        const implementConnection = (cwd: string, startShared: boolean) =>
+          Effect.gen(function* () {
+            yield* requireOwnedServer()
+            const env = turnEnvironment(cwd)
+            if (explicitServerUrl !== undefined) {
+              return {
+                kind: "attached" as const,
+                url: explicitServerUrl,
+                env,
+                local: dedicated !== undefined,
+              }
+            }
+            // Use normal CLI discovery/startup. Then pin this invocation and
+            // all its stop calls to the same registered server.
+            const bootstrap = startShared
+              ? yield* captureAt(
+                  cwd,
+                  env,
+                  undefined,
+                  options.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT,
+                )(["api", "get", "/api/info"])
+              : undefined
+            const registered = readRegisteredEndpoint(env)
+            if (registered === null) {
+              const pid =
+                bootstrap === undefined
+                  ? undefined
+                  : jsonRecord(bootstrap.stdout)?.pid
+              if (typeof pid === "number" && localImplementServerExited(pid)) {
+                // With service discovery disabled, a successful API call
+                // used its own private server. Keep the turn private too:
+                // its server is inside the verified CLI invocation boundary.
+                return { kind: "standalone" as const, env }
+              }
+              return yield* new AgentBackendConfigError({
+                message:
+                  "The original OpenCode shared server is not registered.",
+              })
+            }
+            return {
+              kind: "attached" as const,
+              url: registered.url,
+              env:
+                registered.auth === undefined
+                  ? env
+                  : { ...env, OPENCODE_PASSWORD: registered.auth.password },
+              local: true,
+            }
+          })
+
+        const verifyImplementStopped = (
+          input: PendingImplementStop & { readonly cwd: string },
+        ) =>
+          Effect.gen(function* () {
+            if ("invocation" in input) {
+              return yield* stopRecordedInvocation(input.invocation)
+            }
+            if (localImplementServerExited(input.localPid)) return
+            const connection = yield* implementConnection(input.cwd, false)
+            if (connection.kind !== "attached") {
+              return yield* new AgentBackendConfigError({
+                message: "The original OpenCode server is not available.",
+              })
+            }
+            const capture = captureAt(input.cwd, connection.env, connection.url)
+            const current = yield* identifyImplementTarget({
+              sessionId: input.sessionId,
+              serverUrl: connection.url,
+              local: connection.local,
+              capture,
+            })
+            if (current.serverKey !== input.serverKey) {
+              return yield* new AgentBackendConfigError({
+                message: `OpenCode session ${input.sessionId} belongs to a different server process.`,
+              })
+            }
+            yield* verifyImplementIdle(input.sessionId, capture)
+          })
+
         const runTurn = (input: {
           readonly prompt: string
           readonly cwd: string
@@ -265,6 +373,7 @@ export const Opencode = {
           readonly command?: string
           readonly timeout?: Duration.Input
           readonly onSessionId?: StartTurnInput["onSessionId"]
+          readonly trackImplementStop?: StartTurnInput["trackImplementStop"]
         }): Effect.Effect<
           { readonly sessionId: string; readonly assistantText: string },
           AgentBackendError
@@ -281,15 +390,6 @@ export const Opencode = {
           const promptOnStdin =
             input.command === undefined &&
             shouldUsePromptStdin({ prompt: input.prompt })
-          const args =
-            input.command === undefined
-              ? buildRunArgs({
-                  prompt: input.prompt,
-                  model: input.model,
-                  thinkingLevel: input.thinkingLevel,
-                  sessionId: input.sessionId,
-                })
-              : []
           const command = input.command
           const env = turnEnvironment(input.cwd)
           const timeout = input.timeout ?? defaultTimeout
@@ -464,8 +564,37 @@ export const Opencode = {
                 yield* offerSessionId(knownSessionId)
               }
 
-              let turnSessionId = knownSessionId
-              let turnArgs: ReadonlyArray<string> = serviceArgs(args)
+              const track =
+                command === undefined ? input.trackImplementStop : undefined
+              const connection =
+                track === undefined
+                  ? undefined
+                  : yield* implementConnection(input.cwd, true)
+              // `run --session` creates the session when absent. Reserve its
+              // ID here rather than trying to find it in a shared server.
+              let turnSessionId =
+                knownSessionId ??
+                (track === undefined ? undefined : `ses_${crypto.randomUUID()}`)
+              const turnEnv = connection?.env ?? env
+              const turnServerUrl =
+                connection?.kind === "attached"
+                  ? connection.url
+                  : explicitServerUrl
+              let turnArgs: ReadonlyArray<string> =
+                command === undefined
+                  ? withOpenCodeServer(
+                      buildRunArgs({
+                        prompt: input.prompt,
+                        model: input.model,
+                        thinkingLevel: input.thinkingLevel,
+                        sessionId: turnSessionId,
+                      }),
+                      turnServerUrl,
+                    )
+                  : []
+              if (connection?.kind === "standalone") {
+                turnArgs = ["run", "--standalone", ...turnArgs.slice(1)]
+              }
               const turnStdin: "ignore" | Stream.Stream<Uint8Array, never> =
                 promptOnStdin
                   ? Stream.fromIterable([
@@ -513,13 +642,14 @@ export const Opencode = {
                 Effect.forkScoped,
               )
 
+              const privateSessionId = turnSessionId
               const turn = runCliTurn({
                 spawner,
                 backend: OPENCODE_BACKEND,
                 binary,
                 args: turnArgs,
                 cwd: input.cwd,
-                env,
+                env: turnEnv,
                 timeout,
                 knownSessionId: turnSessionId,
                 onSessionId: (sessionId) =>
@@ -530,6 +660,24 @@ export const Opencode = {
                         : input.onSessionId(sessionId),
                     ),
                   ),
+                ...(track !== undefined &&
+                connection?.kind === "standalone" &&
+                privateSessionId !== undefined
+                  ? {
+                      trackInvocation: {
+                        started: (invocation) =>
+                          track.started({
+                            sessionId: privateSessionId,
+                            invocation,
+                          }),
+                        stopped: (invocation) =>
+                          track.stopped({
+                            sessionId: privateSessionId,
+                            invocation,
+                          }),
+                      },
+                    }
+                  : {}),
                 ...(options.startupTimeout !== undefined
                   ? { startupTimeout: options.startupTimeout }
                   : {}),
@@ -578,10 +726,46 @@ export const Opencode = {
                 },
                 stdin: turnStdin,
               })
-              const streamed = yield* turnSessionId === undefined ||
-              command === undefined
+              const tracked = (
+                sessionId: string,
+                targetConnection: Extract<
+                  typeof connection,
+                  { kind: "attached" }
+                >,
+                tracker: NonNullable<typeof track>,
+              ) =>
+                Effect.gen(function* () {
+                  const capture = captureAt(
+                    input.cwd,
+                    targetConnection.env,
+                    targetConnection.url,
+                  )
+                  const target = yield* identifyImplementTarget({
+                    sessionId,
+                    serverUrl: targetConnection.url,
+                    local: targetConnection.local,
+                    capture,
+                  })
+                  return yield* runStoppablePlainPrompt({
+                    target,
+                    prompt: input.prompt,
+                    resumed: knownSessionId !== undefined,
+                    run: turn,
+                    track: tracker,
+                    capture,
+                    verifyIdle: verifyImplementStopped({
+                      ...target,
+                      cwd: input.cwd,
+                    }),
+                  })
+                })
+              const streamed = yield* turnSessionId === undefined
                 ? turn
-                : stopSessionOnAbort(turnSessionId, turn)
+                : command !== undefined
+                  ? stopSessionOnAbort(turnSessionId, turn)
+                  : track === undefined || connection?.kind !== "attached"
+                    ? turn
+                    : tracked(turnSessionId, connection, track)
               if (
                 command !== undefined &&
                 streamed.assistantText.length === 0
@@ -602,6 +786,7 @@ export const Opencode = {
 
         return AgentBackend.of({
           inspect,
+          verifyImplementStopped,
           startTurn: Effect.fn("Opencode.startTurn")((input: StartTurnInput) =>
             runTurn(input),
           ),

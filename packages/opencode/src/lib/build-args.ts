@@ -275,6 +275,14 @@ export const buildSessionInterruptApiArgs = (
   `/api/session/${sessionId}/interrupt`,
 ]
 
+export const buildSessionRecentUserMessagesApiArgs = (
+  sessionId: string,
+): ReadonlyArray<string> => [
+  "api",
+  "get",
+  `/api/session/${encodeURIComponent(sessionId)}/message?limit=20&order=desc&type=user`,
+]
+
 export const joinOpenCodeMessageArgs = (
   messageArgs: ReadonlyArray<string>,
 ): string =>

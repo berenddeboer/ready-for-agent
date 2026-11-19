@@ -15,6 +15,10 @@ import {
 } from "effect"
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
+import {
+  AgentBackendConfigError,
+  type PendingImplementStop,
+} from "@ready-for-agent/agent-backend"
 import { DatabaseTest, makeFileDatabaseTest } from "@ready-for-agent/db/test"
 import {
   DbService,
@@ -195,9 +199,13 @@ describe("WorkItemLifecycle", () => {
       Layer.provideMerge(DatabaseTest),
     )
 
-  const makeRestartTestLayer = (steps: LifecycleStepsShape, filename: string) =>
+  const makeRestartTestLayer = (
+    steps: LifecycleStepsShape,
+    filename: string,
+    backend: Parameters<typeof stubActiveAgentBackendLayer>[0] = {},
+  ) =>
     WorkItemLifecycleLive.pipe(
-      Layer.provideMerge(stubActiveAgentBackendLayer()),
+      Layer.provideMerge(stubActiveAgentBackendLayer(backend)),
       Layer.provideMerge(stubGitHubServiceLayer()),
       Layer.provideMerge(stubGitLabServiceLayer()),
       Layer.provideMerge(stubAzureDevOpsServiceLayer()),
@@ -11880,6 +11888,162 @@ describe("WorkItemLifecycle", () => {
         }),
       )
     })
+
+    it.each(["attached", "standalone"] as const)(
+      "keeps the %s Implement worktree across restart until the exact turn is confirmed stopped",
+      async (kind) => {
+        let implementStarted: Deferred.Deferred<void>
+        let stopping: Deferred.Deferred<void>
+        let finishStopping: Deferred.Deferred<void>
+        let cleaned = false
+        let serverActive = true
+        let implementCalls = 0
+        const message =
+          "Could not confirm that OpenCode session ses_old stopped."
+        const target: PendingImplementStop =
+          kind === "attached"
+            ? { sessionId: "ses_old", serverKey: "original" }
+            : {
+                sessionId: "ses_old",
+                invocation: {
+                  unit: "test-unit.service",
+                  cgroupPath: "/sys/fs/cgroup/test-unit.service",
+                },
+              }
+        const recoveryHint =
+          "invocation" in target
+            ? target.invocation.unit
+            : "original OpenCode server"
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          implement: (context) =>
+            Effect.gen(function* () {
+              implementCalls += 1
+              if (context.trackImplementStop === undefined) {
+                return yield* Effect.die("Missing stop tracking")
+              }
+              yield* context.trackImplementStop
+                .started(target)
+                .pipe(Effect.orDie)
+              yield* Deferred.succeed(implementStarted, undefined)
+            }).pipe(
+              Effect.andThen(Effect.never),
+              Effect.onInterrupt(() =>
+                Deferred.succeed(stopping, undefined).pipe(
+                  Effect.andThen(Deferred.await(finishStopping)),
+                ),
+              ),
+            ),
+          removeWorktree: () =>
+            Effect.sync(() => {
+              cleaned = true
+            }),
+        }
+        const backend = {
+          verifyImplementStopped: (
+            _backendId: string,
+            input: PendingImplementStop,
+          ) =>
+            Effect.suspend(() => {
+              expect(input).toMatchObject(target)
+              return serverActive
+                ? Effect.fail(new AgentBackendConfigError({ message }))
+                : Effect.void
+            }),
+        }
+        const dir = await mkdtemp(join(tmpdir(), "rfa-implement-stop-"))
+        const dbPath = join(dir, "restart.db")
+        try {
+          const workItemId = await Effect.runPromise(
+            Effect.gen(function* () {
+              implementStarted = yield* Deferred.make<void>()
+              stopping = yield* Deferred.make<void>()
+              finishStopping = yield* Deferred.make<void>()
+              const lifecycle = yield* WorkItemLifecycle
+              const queue = yield* QueueService
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.nativeId,
+              )
+
+              for (const step of ["create_worktree", "install_dependencies"]) {
+                const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+                if (Option.isNone(job))
+                  return yield* Effect.die(`expected ${step}`)
+                yield* lifecycle.runStep(
+                  (job.value.payload as { stepRunId: string }).stepRunId,
+                )
+              }
+              const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+              if (Option.isNone(job))
+                return yield* Effect.die("expected Implement")
+              const running = yield* lifecycle
+                .runStep((job.value.payload as { stepRunId: string }).stepRunId)
+                .pipe(Effect.forkChild)
+              yield* Deferred.await(implementStarted).pipe(
+                Effect.timeout("3 seconds"),
+              )
+
+              const reset = Effect.flip(lifecycle.reset(created.id))
+              const resetting = yield* reset.pipe(Effect.forkChild)
+              yield* Deferred.await(stopping).pipe(Effect.timeout("3 seconds"))
+              const removedBeforeConfirmation = cleaned
+              yield* Deferred.succeed(finishStopping, undefined)
+              expect(removedBeforeConfirmation).toBe(false)
+
+              const failure = yield* Fiber.join(resetting)
+              expect(failure).toBeInstanceOf(ResetCleanupError)
+              expect(failure.message).toContain(message)
+              expect(failure.message).toContain(recoveryHint)
+              expect(cleaned).toBe(false)
+              yield* Fiber.join(running)
+              return created.id
+            }).pipe(
+              Effect.provide(makeRestartTestLayer(steps, dbPath, backend)),
+            ),
+          )
+          await Effect.runPromise(
+            Effect.gen(function* () {
+              const lifecycle = yield* WorkItemLifecycle
+              const queue = yield* QueueService
+              const failure = yield* Effect.flip(lifecycle.reset(workItemId))
+              expect(failure).toBeInstanceOf(ResetCleanupError)
+              expect(failure.message).toContain(message)
+              expect(cleaned).toBe(false)
+              expect((yield* lifecycle.getWorkItem(workItemId)).id).toBe(
+                workItemId,
+              )
+
+              yield* lifecycle.retry(workItemId)
+              const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+              if (Option.isNone(job))
+                return yield* Effect.die("expected retried Implement")
+              yield* lifecycle.runStep(
+                (job.value.payload as { stepRunId: string }).stepRunId,
+              )
+              expect(implementCalls).toBe(1)
+              expect(
+                (yield* lifecycle.getWorkItem(workItemId)).stepRuns.find(
+                  (step) =>
+                    step.status === "failed" && step.step === "implement",
+                )?.reasonMessage,
+              ).toContain(
+                "Use Reset and follow its recovery instructions if it cannot confirm the turn stopped.",
+              )
+
+              serverActive = false
+              expect(yield* lifecycle.reset(workItemId)).toBe(workItemId)
+              expect(cleaned).toBe(true)
+            }).pipe(
+              Effect.provide(makeRestartTestLayer(steps, dbPath, backend)),
+            ),
+          )
+        } finally {
+          await rm(dir, { recursive: true, force: true })
+        }
+      },
+    )
 
     it("deletes terminal Abandoned and Failed Work Items", () =>
       runTest(
