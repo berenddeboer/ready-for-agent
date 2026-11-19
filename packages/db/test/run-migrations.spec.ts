@@ -397,6 +397,7 @@ describe("runMigrations", () => {
           { name: "20261029140000_completed_timing_history_index" },
           { name: "20261030120000_step_run_agent_model" },
           { name: "20261104120000_ci_gate_historical_coverage" },
+          { name: "20261119120000_ci_repair_retry" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

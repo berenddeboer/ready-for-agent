@@ -423,6 +423,11 @@ export const workItem = snakeCase.table(
      * CI Repair Work Item. Null for Issue origin.
      */
     ciRepairFailingRuns: text(),
+    /**
+     * JSON CI Repair retry request retained across restarts. Null when no
+     * retry is in flight. Cleared when the observed attempt is green.
+     */
+    ciRepairRetry: text(),
     sessionId: text(),
     failureCode: text(),
     failureMessage: text(),

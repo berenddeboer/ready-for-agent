@@ -1,7 +1,9 @@
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/sql"
+import { TestClock } from "effect/testing"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
+import { GitHubThrottledError } from "@ready-for-agent/github-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   LifecycleSteps,
@@ -19,6 +21,7 @@ import {
   recordCiRepairMergeFloor,
   recordCiRepairNoChangeBaseline,
 } from "../src/lib/ci-repair-baseline.js"
+import { requestCiRepairRetry } from "../src/lib/ci-repair-retry.js"
 import { describe, expect, it, setDefaultTimeout } from "bun:test"
 
 setDefaultTimeout(30_000)
@@ -43,28 +46,28 @@ const idleSteps: LifecycleStepsShape = {
   removeWorktree: () => Effect.die("unused"),
 }
 
-const layer = WorkItemLifecycleLive.pipe(
-  Layer.provideMerge(
-    stubActiveAgentBackendLayer({
-      models: [
-        {
-          id: "opencode/deepseek-v4-flash-free",
-          thinkingLevels: ["low", "high"],
-        },
-      ],
-    }),
-  ),
-  Layer.provideMerge(stubGitHubServiceLayer()),
-  Layer.provideMerge(stubGitLabServiceLayer()),
-  Layer.provideMerge(stubAzureDevOpsServiceLayer()),
-  Layer.provideMerge(stubLinearServiceLayer()),
-  Layer.provideMerge(
-    Layer.succeed(LifecycleSteps, LifecycleSteps.of(idleSteps)),
-  ),
-  Layer.provideMerge(DbServiceLive),
-  Layer.provideMerge(SqliteQueueServiceLive),
-  Layer.provideMerge(DatabaseTest),
-)
+const makeLayer = (steps: LifecycleStepsShape = idleSteps) =>
+  WorkItemLifecycleLive.pipe(
+    Layer.provideMerge(
+      stubActiveAgentBackendLayer({
+        models: [
+          {
+            id: "opencode/deepseek-v4-flash-free",
+            thinkingLevels: ["low", "high"],
+          },
+        ],
+      }),
+    ),
+    Layer.provideMerge(stubGitHubServiceLayer()),
+    Layer.provideMerge(stubGitLabServiceLayer()),
+    Layer.provideMerge(stubAzureDevOpsServiceLayer()),
+    Layer.provideMerge(stubLinearServiceLayer()),
+    Layer.provideMerge(Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps))),
+    Layer.provideMerge(DbServiceLive),
+    Layer.provideMerge(SqliteQueueServiceLive),
+    Layer.provideMerge(DatabaseTest),
+  )
+const layer = makeLayer()
 
 const run = <A>(
   test: Effect.Effect<A, unknown, Layer.Layer.Success<typeof layer>>,
@@ -186,6 +189,169 @@ const seedRepository = (input: {
   })
 
 describe("CI Repair Work Item lifecycle", () => {
+  it.each([2, 8])(
+    "bounds a %i-hour GitHub cooldown by the CI retry deadline",
+    (cooldownHours) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* seedRepository({
+            localPath: "/repos/acme/throttled.git",
+            paused: false,
+            automaticCiRepair: false,
+            closed: true,
+          })
+          const started = yield* lifecycle.startCiRepair(repository.id)
+          const next = (step: string) =>
+            Effect.gen(function* () {
+              const [queued] = yield* sql.unsafe<{ id: string }>(
+                "SELECT id FROM step_run WHERE work_item_id = ? AND step = ? AND status = 'queued'",
+                [started.id, step],
+              )
+              if (queued === undefined)
+                throw new Error(`Expected queued ${step}`)
+              return yield* lifecycle.runStep(queued.id)
+            })
+          yield* next("create_worktree")
+          yield* next("install_dependencies")
+          yield* requestCiRepairRetry(started.id, "ses_ci_retry", {
+            runId: 10,
+            attempt: 1,
+          })
+          const result = yield* next("implement")
+          if (result._tag !== "processed")
+            throw new Error("Expected processed Implement")
+          const wakeAt = Math.min(cooldownHours, 6) * 60 * 60_000
+          expect(result.workItem.stepRuns.at(-1)).toMatchObject({
+            status: "postponed",
+            postponedUntil: new Date(wakeAt),
+            reasonMessage: expect.stringContaining(
+              new Date(cooldownHours * 60 * 60_000).toISOString(),
+            ),
+          })
+          const [wakeJob] = yield* sql.unsafe<{ available_at: number }>(
+            "SELECT available_at FROM job_queue",
+          )
+          expect(wakeJob?.available_at).toBe(wakeAt)
+        }).pipe(
+          Effect.provide(
+            makeLayer({
+              ...idleSteps,
+              createWorktree: () =>
+                Effect.succeed({
+                  worktreePath: "/test/retry",
+                  startingCommitOid: "a".repeat(40),
+                }),
+              installDependencies: () => Effect.void,
+              implement: () =>
+                Effect.fail(
+                  new GitHubThrottledError({
+                    retryAt: cooldownHours * 60 * 60_000,
+                    usedFallback: false,
+                  }),
+                ),
+            }).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      ),
+  )
+
+  it.each(["waiting", "submitted", "accepted", "observed"] as const)(
+    "requeues Implement after a restart with a persisted CI retry in %s phase",
+    (phase) =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* seedRepository({
+            localPath: "/repos/acme/retry.git",
+            paused: false,
+            automaticCiRepair: false,
+            closed: true,
+          })
+          const started = yield* lifecycle.startCiRepair(repository.id)
+          const next = (step: string) =>
+            Effect.gen(function* () {
+              const [queued] = yield* sql.unsafe<{ id: string }>(
+                "SELECT id FROM step_run WHERE work_item_id = ? AND step = ? AND status = 'queued'",
+                [started.id, step],
+              )
+              if (queued === undefined)
+                throw new Error(`Expected a queued ${step} step`)
+              return yield* lifecycle.runStep(queued.id)
+            })
+          yield* next("create_worktree")
+          yield* next("install_dependencies")
+          yield* next("implement")
+          const [poll] = yield* sql.unsafe<{ id: string; step: string }>(
+            "SELECT id, step FROM step_run WHERE work_item_id = ? AND status = 'queued'",
+            [started.id],
+          )
+          expect(poll?.step).toBe("implement")
+          if (poll === undefined)
+            throw new Error("Expected a queued retry poll")
+          yield* requestCiRepairRetry(started.id, "ses_ci_retry", {
+            runId: 10,
+            attempt: 1,
+          })
+          if (phase !== "waiting") {
+            yield* sql.unsafe(
+              "UPDATE work_item SET ci_repair_retry = ? WHERE id = ?",
+              [
+                JSON.stringify({
+                  runId: 10,
+                  attempt: 1,
+                  requestedAt: Date.now(),
+                  phase:
+                    phase === "observed"
+                      ? {
+                          kind: phase,
+                          message: "GitHub replacement attempt 2 failed.",
+                        }
+                      : { kind: phase },
+                }),
+                started.id,
+              ],
+            )
+          }
+          // Simulate termination before the poll or the continuation completes.
+          yield* sql.unsafe(
+            "UPDATE step_run SET status = 'running' WHERE id = ?",
+            [poll.id],
+          )
+          expect(yield* lifecycle.interruptRunningStepRunsFromPriorWorker).toBe(
+            1,
+          )
+          const [resumed] = yield* sql.unsafe<{ id: string; step: string }>(
+            "SELECT id, step FROM step_run WHERE work_item_id = ? AND status = 'queued'",
+            [started.id],
+          )
+          expect(resumed?.step).toBe("implement")
+          expect(resumed?.id).not.toBe(poll.id)
+        }).pipe(
+          Effect.provide(
+            makeLayer({
+              ...idleSteps,
+              createWorktree: () =>
+                Effect.succeed({
+                  worktreePath: "/test/retry",
+                  startingCommitOid: "a".repeat(40),
+                }),
+              installDependencies: () => Effect.void,
+              implement: () =>
+                Effect.succeed({
+                  _tag: "retry_pending",
+                  sessionId: "ses_ci_retry",
+                  note: "Waiting for sibling jobs",
+                  delayMs: 30_000,
+                }),
+            }),
+          ),
+        ),
+      ),
+  )
+
   it("starts one CI Repair Work Item from a Closed gate and ignores a second start", () =>
     run(
       Effect.gen(function* () {

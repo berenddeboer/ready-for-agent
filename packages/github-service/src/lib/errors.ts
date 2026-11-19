@@ -36,6 +36,8 @@ export class GitHubRequestError extends Schema.TaggedError<GitHubRequestError>()
     code: Schema.optional(Schema.String),
     /** Whether the transport failure may receive the bounded query retry. */
     retryable: Schema.optional(Schema.Boolean),
+    /** The adapter knows the request could not have reached GitHub. */
+    requestNotSent: Schema.optional(Schema.Literal(true)),
   },
 ) {}
 

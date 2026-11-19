@@ -1,4 +1,4 @@
-import { Context, type Effect } from "effect"
+import { Context, type Effect, Schema } from "effect"
 import type {
   CiGateCatalogEntry,
   CiGateObservation,
@@ -36,6 +36,22 @@ import type { GitHubRepository, UploadUserAttachmentInput } from "./types.js"
 export type GitHubOperationOrigin = ForgeOperationOrigin
 
 export type GitHubOperationOptions = ForgeOperationOptions
+
+export const GitHubCiRepairRun = Schema.Struct({
+  attempt: Schema.Number.pipe(
+    Schema.check(Schema.isInt(), Schema.isGreaterThan(0)),
+  ),
+  status: Schema.String,
+  conclusion: Schema.NullOr(Schema.String),
+  failedJobs: Schema.Array(
+    Schema.Struct({
+      id: Schema.Number,
+      name: Schema.String,
+      conclusion: Schema.String,
+    }),
+  ),
+})
+export type GitHubCiRepairRun = typeof GitHubCiRepairRun.Type
 
 export interface GitHubServiceShape
   extends ForgeIssueOperations<GitHubServiceError>,
@@ -155,6 +171,16 @@ export interface GitHubServiceShape
    * reviews after a durable rerun permit is reserved.
    */
   readonly rerunWorkflowRun: (
+    repository: GitHubRepository,
+    workflowRunId: number,
+  ) => Effect.Effect<void, GitHubServiceError>
+  /** CI Repair retry is intentionally separate from whole-run PR reruns. */
+  readonly readCiRepairRun?: (
+    repository: GitHubRepository,
+    workflowRunId: number,
+    originalAttempt: number,
+  ) => Effect.Effect<GitHubCiRepairRun, GitHubServiceError>
+  readonly rerunFailedJobs?: (
     repository: GitHubRepository,
     workflowRunId: number,
   ) => Effect.Effect<void, GitHubServiceError>

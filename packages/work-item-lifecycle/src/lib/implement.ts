@@ -4,6 +4,10 @@ import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { resolveForgeIssuePresentation } from "@ready-for-agent/forge-contract"
 import {
+  GitHubService,
+  isGitHubThrottledError,
+} from "@ready-for-agent/github-service"
+import {
   STEP_RUN_REASON,
   formatIssueDisplayId,
   workItemOriginPolicy,
@@ -17,6 +21,14 @@ import {
   forgeDisplayName,
   resolveAgentTurnForgeAuth,
 } from "./agent-turn-forge-auth.js"
+import {
+  CI_REPAIR_RETRY_POLL_MS,
+  loadCiRepairRetryRequest,
+  observeCiRepairRetry,
+  parseCiRepairRetryMarker,
+  requestCiRepairRetry,
+  resolveObservedRetryTarget,
+} from "./ci-repair-retry.js"
 import {
   type CiRepairTarget,
   buildCiRepairImplementPrompt,
@@ -270,6 +282,12 @@ export type ImplementTurnResult =
       readonly sessionId: string
       readonly request: string
     }
+  | {
+      readonly _tag: "retry_pending"
+      readonly sessionId: string | null
+      readonly delayMs: number
+      readonly note: string
+    }
 
 const loadOpenDecisionRequest = (workItemId: string) =>
   Effect.gen(function* () {
@@ -387,7 +405,11 @@ const runImplementTurn = (
       }
     }
 
-    return result.sessionId
+    return {
+      _tag: "implemented" as const,
+      sessionId: result.sessionId,
+      assistantText: result.assistantText ?? "",
+    }
   })
 
 const implementCiRepairOrigin = (
@@ -404,6 +426,57 @@ const implementCiRepairOrigin = (
       forge: repository.forge,
       forgeHost: repository.forgeHost,
       projectPath: repository.projectPath,
+    }
+    const target: CiRepairTarget = {
+      defaultBranch:
+        context.ciRepairDefaultBranch?.trim() || "the default branch",
+      headSha: context.ciRepairHeadSha ?? null,
+      failingRuns: context.ciRepairFailingRuns ?? [],
+    }
+    const failureMessage = `${agentBackendLabel(context.agentBackend)} failed to implement the CI Repair Work Item`
+    const retryError = (cause: Error) =>
+      new ImplementOpenCodeError({
+        message: cause.message,
+        worktreePath,
+        cause,
+      })
+    const canRetry =
+      repository.forge === "github" &&
+      target.failingRuns.some(
+        (run) =>
+          resolveObservedRetryTarget(run.runIdentity, target.failingRuns) !==
+          null,
+      )
+    const github = canRetry ? yield* GitHubService : null
+    const retryAvailable =
+      github?.readCiRepairRun !== undefined &&
+      github.rerunFailedJobs !== undefined
+    const stored = canRetry
+      ? yield* loadCiRepairRetryRequest(
+          yield* SqlClient.SqlClient,
+          context.workItemId,
+        ).pipe(Effect.mapError(retryError))
+      : null
+    let observation = ""
+    if (stored !== null) {
+      const retry = yield* observeCiRepairRetry(
+        context.workItemId,
+        gitRepository,
+        stored,
+      ).pipe(
+        Effect.mapError((error) =>
+          isGitHubThrottledError(error) ? error : retryError(error),
+        ),
+      )
+      if (retry.kind === "pending") {
+        return {
+          _tag: "retry_pending" as const,
+          sessionId: priorSessionId(context),
+          delayMs: CI_REPAIR_RETRY_POLL_MS,
+          note: retry.note,
+        }
+      }
+      observation = promptUserContentSection("diagnostics", retry.message)
     }
     const forgeAuth = yield* resolveAgentTurnForgeAuth(gitRepository).pipe(
       Effect.mapError((cause) => {
@@ -423,15 +496,10 @@ const implementCiRepairOrigin = (
         })
       }),
     )
-    const target: CiRepairTarget = {
-      defaultBranch:
-        context.ciRepairDefaultBranch?.trim() || "the default branch",
-      headSha: context.ciRepairHeadSha ?? null,
-      failingRuns: context.ciRepairFailingRuns ?? [],
-    }
     const promptBody = [
       buildCiRepairImplementPrompt({
         ...target,
+        canRequestRetry: retryAvailable && stored === null,
         mode: priorSessionId(context) === null ? "start" : "continue",
       }),
       agentTurnForgeCredentialGuidance(
@@ -439,13 +507,50 @@ const implementCiRepairOrigin = (
         forgeAuth,
         "read of CI logs",
       ),
+      ...(stored === null
+        ? []
+        : [
+            "The one retry request for this CI Repair has been used. Use the observation below to finish the investigation; do not request another retry.",
+            observation,
+          ]),
     ].join("\n")
-    return yield* runImplementTurn(
+    const outcome = yield* runImplementTurn(
       context,
       worktreePath,
       promptBody,
-      `${agentBackendLabel(context.agentBackend)} failed to implement the CI Repair Work Item`,
+      failureMessage,
     )
+    if (outcome._tag !== "implemented") return outcome
+    const marker = parseCiRepairRetryMarker(outcome.assistantText)
+    if (marker.kind === "absent") return outcome.sessionId
+    if (marker.kind === "invalid") {
+      return yield* new ImplementOpenCodeError({
+        message:
+          "A CI retry must name one observed failing run in the only final result line. No retry was sent.",
+        worktreePath,
+      })
+    }
+    const run = resolveObservedRetryTarget(marker.identity, target.failingRuns)
+    if (!retryAvailable || stored !== null || run === null) {
+      return yield* new ImplementOpenCodeError({
+        message:
+          stored !== null
+            ? "The bounded CI retry was already observed. No second retry was sent."
+            : "CI Repair can only retry a listed failing GitHub run. No retry was sent.",
+        worktreePath,
+      })
+    }
+    yield* requestCiRepairRetry(
+      context.workItemId,
+      outcome.sessionId,
+      run,
+    ).pipe(Effect.mapError(retryError))
+    return {
+      _tag: "retry_pending" as const,
+      sessionId: outcome.sessionId,
+      delayMs: 0,
+      note: `CI retry requested for ${run.runId}:${run.attempt}; checking current GitHub status before dispatch.`,
+    }
   })
 
 /**
@@ -541,7 +646,7 @@ export const implement = (context: LifecycleStepContext) =>
       `${implementationPrompt}\nBefore requesting a rebase for a merged prerequisite, run \`git merge-base --is-ancestor <landed-oid> HEAD\` in this worktree and inspect the changed paths at HEAD. If missing ancestry is the only blocker, write \`Missing prerequisite commit: <full landed OID>\` immediately before the decision marker.`,
       failureMessage,
     )
-    if (typeof outcome === "string") return outcome
+    if (outcome._tag === "implemented") return outcome.sessionId
     const oid =
       /^Missing prerequisite commit: ([0-9a-f]{40}(?:[0-9a-f]{24})?)$/i.exec(
         outcome.request.split("\n").at(-1) ?? "",
@@ -556,10 +661,11 @@ export const implement = (context: LifecycleStepContext) =>
 
     // One correction only: an ancestor may have been reverted. A decision
     // about the actual contents of HEAD must still reach the operator.
-    return yield* runImplementTurn(
+    const corrected = yield* runImplementTurn(
       { ...context, sessionId: outcome.sessionId },
       worktreePath,
       `Git confirms ${oid} is already an ancestor of HEAD in this worktree. Inspect that commit's changed paths at HEAD. Continue implementation and verification if the prerequisite is present; if it was reverted or a decision is still needed, report that evidence. This check does not authorize a rebase.`,
       failureMessage,
     )
+    return corrected._tag === "implemented" ? corrected.sessionId : corrected
   })

@@ -1,15 +1,34 @@
 import {
+  parseCiRepairRetryMarker,
+  resolveObservedRetryTarget,
+} from "../src/lib/ci-repair-retry.js"
+import {
   buildCiRepairImplementPrompt,
   buildCiRepairNoChangeConfirmationPrompt,
   ciRepairIssueTitle,
   observationQualifiesForAutomaticCiRepair,
   parseCiRepairFailingRuns,
-  parseCiRepairNoChangeResult,
   serializeCiRepairFailingRuns,
 } from "../src/lib/ci-repair-work-item.js"
 import { describe, expect, it } from "bun:test"
 
 describe("CI Repair Work Item helpers", () => {
+  it("only authorizes one captured failing run and its original attempt", () => {
+    const runs = [{ runIdentity: "10:2", htmlUrl: null, displayLabel: "CI" }]
+    expect(resolveObservedRetryTarget("10", runs)).toEqual({
+      runId: 10,
+      attempt: 2,
+    })
+    expect(resolveObservedRetryTarget("10:3", runs)).toBeNull()
+    expect(resolveObservedRetryTarget("20", runs)).toBeNull()
+    expect(resolveObservedRetryTarget("10", [])).toBeNull()
+    expect(
+      parseCiRepairRetryMarker(
+        "READY_FOR_AGENT_RESULT: RETRY_FAILED_JOBS: 10 20",
+      ),
+    ).toEqual({ kind: "invalid" })
+  })
+
   it("names the default branch without an Issue identity", () => {
     expect(ciRepairIssueTitle("main")).toBe("Repair CI on main")
   })
@@ -98,10 +117,15 @@ describe("CI Repair Work Item helpers", () => {
         },
       ],
       mode: "start",
+      canRequestRetry: true,
     })
     expect(prompt).toContain("commit abc123")
-    expect(prompt).toContain("https://ci.example/10")
+    expect(prompt).toContain("(10:1): https://ci.example/10")
     expect(prompt).toContain("read-only")
+    expect(prompt).toContain("RETRY_FAILED_JOBS")
+    expect(prompt).not.toContain(
+      "the harness reruns jobs only when you report a No-Change Outcome",
+    )
     expect(prompt).toContain("Do not create or close an Issue")
     expect(
       buildCiRepairImplementPrompt({
@@ -113,29 +137,23 @@ describe("CI Repair Work Item helpers", () => {
     ).toContain("last green run")
   })
 
-  it("parses CI-repair no-change outcomes and rejects a blank rerun", () => {
+  it("does not offer dispatch during no-change confirmation or on unsupported connections", () => {
+    expect(buildCiRepairNoChangeConfirmationPrompt()).not.toContain(
+      "RERUN_JOBS",
+    )
+    expect(buildCiRepairNoChangeConfirmationPrompt()).not.toContain(
+      "RETRY_FAILED_JOBS",
+    )
     expect(
-      parseCiRepairNoChangeResult("READY_FOR_AGENT_RESULT: CHANGES"),
-    ).toEqual({
-      _tag: "changes",
-    })
-    expect(
-      parseCiRepairNoChangeResult(
-        "Already green.\nREADY_FOR_AGENT_RESULT: NO_CHANGES",
-      ),
-    ).toEqual({ _tag: "no_changes", completionSummary: "Already green." })
-    expect(
-      parseCiRepairNoChangeResult(
-        "Rerun the red job.\nREADY_FOR_AGENT_RESULT: RERUN_JOBS: 10:1, 11:2",
-      ),
-    ).toEqual({
-      _tag: "rerun_jobs",
-      completionSummary: "Rerun the red job.",
-      runIdentities: ["10:1", "11:2"],
-    })
-    expect(
-      parseCiRepairNoChangeResult("READY_FOR_AGENT_RESULT: RERUN_JOBS:"),
-    ).toBeNull()
-    expect(buildCiRepairNoChangeConfirmationPrompt()).toContain("RERUN_JOBS")
+      buildCiRepairImplementPrompt({
+        defaultBranch: "main",
+        headSha: null,
+        failingRuns: [
+          { runIdentity: "10:1", displayLabel: "build", htmlUrl: null },
+        ],
+        mode: "start",
+        canRequestRetry: false,
+      }),
+    ).not.toContain("RETRY_FAILED_JOBS")
   })
 })

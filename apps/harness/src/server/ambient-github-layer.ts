@@ -3,6 +3,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { extractErrorCode } from "@ready-for-agent/forge-contract"
 import {
   type GitHubOperationOptions,
+  type GitHubRepository,
   GitHubRequestError,
   GitHubService,
   type GitHubServiceError,
@@ -18,6 +19,12 @@ import {
 
 /** Unit key for the process-wide ambient GitHub CLI token cache. */
 const TOKEN_CACHE_KEY = true as const
+
+const ciRepairUnavailable = Effect.fail(
+  new GitHubRequestError({
+    message: "GitHub failed-job retry is unavailable on this connection.",
+  }),
+)
 
 const isUnauthorizedRequest = (error: GitHubServiceError): boolean =>
   error._tag === "GitHubRequestError" && error.statusCode === 401
@@ -269,7 +276,7 @@ export const ambientGitHubLayer = (options: {
         return yield* Fiber.join(lookup).pipe(Effect.interruptible)
       })
 
-      return {
+      const service = {
         getAuthenticatedUserLogin,
         getOpenPullRequestNumber: Effect.fn(
           "AmbientGitHub.getOpenPullRequestNumber",
@@ -421,5 +428,27 @@ export const ambientGitHubLayer = (options: {
             ),
         ),
       } satisfies GitHubServiceShape
+      return Object.assign(service, {
+        readCiRepairRun: Effect.fn("AmbientGitHub.readCiRepairRun")(
+          (repository: GitHubRepository, runId: number, attempt: number) =>
+            authenticated(
+              "lifecycle",
+              repository,
+              (live) =>
+                live.readCiRepairRun?.(repository, runId, attempt) ??
+                ciRepairUnavailable,
+            ),
+        ),
+        rerunFailedJobs: Effect.fn("AmbientGitHub.rerunFailedJobs")(
+          (repository: GitHubRepository, runId: number) =>
+            authenticated(
+              "lifecycle",
+              repository,
+              (live) =>
+                live.rerunFailedJobs?.(repository, runId) ??
+                ciRepairUnavailable,
+            ),
+        ),
+      })
     }),
   )

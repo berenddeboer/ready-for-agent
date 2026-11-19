@@ -42,6 +42,7 @@ full loop.
 | Create PR | **Pull requests:** Read and write | `api` | **Code:** Read & write. **Work Items:** Read & write (Boards ArtifactLink) |
 | Mark PR Ready for Review | **Pull requests:** Read and write | `api` | **Code:** Read & write |
 | Watch / status checks | **Actions:** Read and write (job logs and workflow reruns). **Commit statuses:** Read-only | `read_api` | **Code:** Read. **Build:** Read (logs). **Policy:** Read (branch policy evaluations) |
+| CI Repair failed-job retry | **Actions:** Read and write (observe and retry failed jobs) | Not offered | Not offered |
 | Merge PR | **Pull requests:** Read and write | `api` | **Code:** Read & write (same REST floor as Create PR). **Work Items:** Read & write (`transitionWorkItems` on complete, plus harness close-out if the Boards item is still open) |
 | close-out | **Issues:** Read and write | `api` | **Work Items:** Read & write (comment + Completed-category state) |
 

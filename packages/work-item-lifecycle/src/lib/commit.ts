@@ -17,11 +17,7 @@ import {
   buildNoChangeConfirmationPrompt,
   parseAssessChangesResult,
 } from "./assess-changes.js"
-import { CiRepairRerunError, rerunCiRepairJobs } from "./ci-repair-rerun.js"
-import {
-  buildCiRepairNoChangeConfirmationPrompt,
-  parseCiRepairNoChangeResult,
-} from "./ci-repair-work-item.js"
+import { buildCiRepairNoChangeConfirmationPrompt } from "./ci-repair-work-item.js"
 import {
   type CommitError,
   CommitInvalidWorktreeContextError,
@@ -813,37 +809,6 @@ const confirmLateNoChange = (
         workItemId: context.workItemId,
         message: `${agentBackendLabel(context.agentBackend)} reported an invalid decision marker: ${decision.message}`,
       })
-    }
-
-    if (!workItemOriginPolicy(context.origin).noChangeConfirmsIssue) {
-      const parsed = parseCiRepairNoChangeResult(result.assistantText)
-      if (parsed === null || parsed._tag === "changes") {
-        return yield* new CommitNoChangeConfirmationError({
-          workItemId: context.workItemId,
-          message:
-            parsed === null
-              ? `${agentBackendLabel(context.agentBackend)} did not return a valid READY_FOR_AGENT_RESULT: CHANGES, NO_CHANGES, or RERUN_JOBS with a non-blank summary when required`
-              : `${agentBackendLabel(context.agentBackend)} did not confirm a No-Change Outcome`,
-        })
-      }
-      if (parsed._tag === "rerun_jobs") {
-        yield* rerunCiRepairJobs(context, parsed.runIdentities).pipe(
-          Effect.mapError(
-            (cause) =>
-              new CommitNoChangeConfirmationError({
-                workItemId: context.workItemId,
-                message:
-                  cause instanceof CiRepairRerunError
-                    ? cause.message
-                    : `Failed to rerun CI jobs: ${String(cause)}`,
-              }),
-          ),
-        )
-      }
-      return {
-        _tag: "no_changes" as const,
-        completionSummary: parsed.completionSummary,
-      }
     }
 
     const parsed = parseAssessChangesResult(result.assistantText)

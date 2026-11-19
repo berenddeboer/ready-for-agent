@@ -678,6 +678,7 @@ rfa:LocalCleanup
 rfa:CreateWorktreeSucceededTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:InstallDependencies ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
 rfa:InstallDependenciesSucceededTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:Implement ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
 rfa:ImplementSucceededTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:AssessChanges ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
+rfa:ImplementCiRepairRetryPendingTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:Implement ; rfa:guard "ci_repair_retry_pending" ; rfa:reasonCode rfa:NativeReason .
 rfa:AssessChangesDetectedTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:PreCommit ; rfa:guard "changes_detected" ; rfa:reasonCode rfa:NativeReason .
 rfa:AssessChangesNoChangeTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:CloseIssue ; rfa:guard "no_change_outcome" ; rfa:reasonCode rfa:NativeReason .
 rfa:AssessChangesCiRepairNoChangeTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:LocalCleanup ; rfa:guard "no_change_outcome" ; rfa:reasonCode rfa:NativeReason .

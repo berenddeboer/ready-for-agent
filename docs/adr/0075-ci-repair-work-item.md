@@ -44,10 +44,10 @@ using CI Gate Bypass to move ordinary work across a Closed gate.
 - Its prompt is short: default-branch CI has been red since the baseline (or
   last green run); inspect the failing runs and fix the causes. It carries
   links to the failing runs, and the agent reads logs itself with read access.
-- The agent may conclude that nothing needs changing (already fixed, just
-  wait) or that a rerun is needed. Both are No-Change Outcomes; a rerun request
-  names the jobs and the harness performs it, so the agent needs no CI write
-  access.
+- The agent may conclude that nothing needs changing. [ADR
+  0083](0083-ci-repair-observes-failed-job-retry.md) amends the original
+  rerun-as-No-Change design: GitHub retry is requested during Implement and
+  the replacement result returns to the same repair before it concludes.
 - It goes to the front of the Worker Slot queue. It does not preempt running
   work.
 - The pipeline shows it as a CI Repair card ("Repair CI on <default branch>"
@@ -73,8 +73,7 @@ Repository Paused no longer blocks that automatic start.
 - **Baseline.** After a CI Repair Work Item's PR merges, the baseline becomes
   the CI run on that merge commit; that run or a later one failing starts a new
   repair. After a No-Change Outcome the baseline becomes the newest run
-  observed at completion; a harness rerun is newer, so a repeat failure
-  triggers again. After Abandon or Reset the baseline does not move, but
+  observed at completion. After Abandon or Reset the baseline does not move, but
   automatic repair waits for a failure newer than the one that triggered the
   abandoned Work Item, so a human-closed PR does not loop.
 - **New failures while in flight** are not passed to the running repair; the
