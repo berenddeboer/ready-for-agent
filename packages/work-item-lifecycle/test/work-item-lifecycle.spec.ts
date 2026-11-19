@@ -12029,7 +12029,7 @@ describe("WorkItemLifecycle", () => {
                     step.status === "failed" && step.step === "implement",
                 )?.reasonMessage,
               ).toContain(
-                "An earlier OpenCode Implement turn has not been confirmed stopped",
+                "Use Reset and follow its recovery instructions if it cannot confirm the turn stopped.",
               )
 
               serverActive = false

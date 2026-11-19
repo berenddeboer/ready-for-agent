@@ -3971,7 +3971,7 @@ export const makeWorkItemLifecycleLive = (
               return Effect.fail(
                 new LifecycleStepFailedError({
                   message:
-                    "An earlier OpenCode Implement turn has not been confirmed stopped. Stop it in OpenCode, then use Reset.",
+                    "An earlier OpenCode Implement turn has not been confirmed stopped. Use Reset and follow its recovery instructions if it cannot confirm the turn stopped.",
                 }),
               )
             }
