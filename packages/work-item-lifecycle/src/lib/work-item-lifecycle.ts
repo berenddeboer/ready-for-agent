@@ -93,6 +93,10 @@ import {
   recordCiRepairMergeFloor,
   recordCiRepairNoChangeBaseline,
 } from "./ci-repair-baseline.js"
+import {
+  ciRepairRetryDeadline,
+  loadCiRepairRetryRequest,
+} from "./ci-repair-retry.js"
 import { parseCiRepairFailingRuns } from "./ci-repair-work-item.js"
 import {
   type CiRepairWorkItemCreationDeps,
@@ -3916,15 +3920,28 @@ export const makeWorkItemLifecycleLive = (
             return steps.installDependencies(context).pipe(Effect.as({}))
           case "implement":
             return steps.implement(context).pipe(
-              Effect.map((result) =>
-                typeof result === "string"
-                  ? { sessionId: result }
-                  : decisionNeededHandlerOutput({
-                      request: result.request,
-                      originatingStep: "implement",
-                      sessionId: result.sessionId,
-                    }),
-              ),
+              Effect.map((result) => {
+                if (typeof result === "string") {
+                  return { sessionId: result }
+                }
+                if (result._tag === "retry_pending") {
+                  return {
+                    ...(result.sessionId === null
+                      ? {}
+                      : { sessionId: result.sessionId }),
+                    stepRunNote: result.note,
+                    transition: {
+                      nextState: "implement" as const,
+                      delay: Duration.millis(result.delayMs),
+                    },
+                  }
+                }
+                return decisionNeededHandlerOutput({
+                  request: result.request,
+                  originatingStep: "implement",
+                  sessionId: result.sessionId,
+                })
+              }),
             )
           case "assess_changes":
             return Effect.gen(function* () {
@@ -5634,6 +5651,16 @@ export const makeWorkItemLifecycleLive = (
           return failed
         })
 
+      const loadCiRepairRetryForScheduling = (workItemId: string) =>
+        loadCiRepairRetryRequest(sql, workItemId).pipe(
+          Effect.catchTag("CiRepairRetryError", (error) =>
+            Effect.logWarning("Could not schedule from the stored CI retry", {
+              workItemId,
+              message: error.message,
+            }).pipe(Effect.as(null)),
+          ),
+        )
+
       /**
        * A GitHub throttle is a finished, non-failing lifecycle attempt. The
        * wake is deliberately a queue job rather than a queued Step Run so the
@@ -5648,13 +5675,25 @@ export const makeWorkItemLifecycleLive = (
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
           const { stepRun, workItem, retryAt } = input
-          const wakeDelay = Duration.millis(Math.max(0, retryAt - now))
+          const retry =
+            workItem.origin === "ci_repair" && stepRun.step === "implement"
+              ? yield* loadCiRepairRetryForScheduling(workItem.id).pipe(
+                  Effect.mapError(toDatabaseError),
+                )
+              : null
+          const wakeAt =
+            retry !== null && retry.phase.kind !== "observed"
+              ? Math.min(retryAt, ciRepairRetryDeadline(retry.requestedAt))
+              : retryAt
+          const wakeDelay = Duration.millis(Math.max(0, wakeAt - now))
+          const throttleMessage = `GitHub throttled until ${new Date(retryAt).toISOString()}`
 
           yield* Effect.logWarning("Postponing Lifecycle Step for GitHub", {
             workItemId: workItem.id,
             stepRunId: stepRun.id,
             step: stepRun.step,
             retryAt,
+            wakeAt,
           })
 
           yield* sql
@@ -5674,8 +5713,10 @@ export const makeWorkItemLifecycleLive = (
                     [
                       now,
                       STEP_RUN_REASON.githubThrottled,
-                      `GitHub throttled until ${new Date(retryAt).toISOString()}`,
-                      retryAt,
+                      wakeAt < retryAt
+                        ? `${throttleMessage}; CI retry deadline is ${new Date(wakeAt).toISOString()}`
+                        : throttleMessage,
+                      wakeAt,
                       now,
                       stepRun.id,
                     ],
@@ -5694,7 +5735,7 @@ export const makeWorkItemLifecycleLive = (
                   [now, workItem.id],
                 )
 
-                const wakePayload = yield* encodeWakeJob(workItem.id, retryAt)
+                const wakePayload = yield* encodeWakeJob(workItem.id, wakeAt)
                 yield* queue.enqueueWithDelay(
                   WORK_ITEM_LIFECYCLE_QUEUE,
                   wakePayload,
@@ -5736,6 +5777,28 @@ export const makeWorkItemLifecycleLive = (
           return postponed
         })
 
+      /** Resume polling or deliver a saved CI result to the existing session. */
+      const rescheduleInterruptedCiRetry = (
+        workItemId: string,
+        step: string,
+        now: number,
+      ) =>
+        Effect.gen(function* () {
+          if (step !== "implement") return false
+          const [candidate] = yield* sql.unsafe<{ id: string }>(
+            `SELECT id FROM work_item
+             WHERE id = ? AND origin = 'ci_repair'
+               AND state = 'implement' AND paused = 0
+               AND holds_worker_slot = 1 AND ci_repair_retry IS NOT NULL`,
+            [workItemId],
+          )
+          if (candidate === undefined) return false
+          const retry = yield* loadCiRepairRetryForScheduling(workItemId)
+          if (retry === null) return false
+          yield* enqueueStepRunForWorkItem(workItemId, "implement", now)
+          return true
+        })
+
       const completeInterruptedStep = (input: {
         readonly stepRun: StepRunRow
         readonly reasonCode?: StepRunReasonCode
@@ -5758,25 +5821,18 @@ export const makeWorkItemLifecycleLive = (
           yield* sql
             .withTransaction(
               Effect.gen(function* () {
-                yield* sql.unsafe(
+                const interrupted = yield* sql.unsafe<{ id: string }>(
                   `UPDATE step_run
                  SET status = 'interrupted',
                      finished_at = ?,
                      reason_code = ?,
                      reason_message = ?,
                      updated_at = ?
-                 WHERE id = ? AND status = 'running'`,
+                  WHERE id = ? AND status = 'running'
+                  RETURNING id`,
                   [now, reasonCode, reasonMessage, now, stepRun.id],
                 )
-
-                yield* sql.unsafe(
-                  `UPDATE work_item
-                   SET holds_worker_slot = 0,
-                       waiting_since = NULL,
-                       updated_at = ?
-                   WHERE id = ?`,
-                  [now, stepRun.work_item_id],
-                )
+                if (interrupted.length === 0) return
 
                 if (stepRun.queue_job_id !== null) {
                   yield* queue
@@ -5785,6 +5841,23 @@ export const makeWorkItemLifecycleLive = (
                       Effect.catchTag("JobNotFoundError", () => Effect.void),
                     )
                 }
+                if (
+                  reasonCode !== STEP_RUN_REASON.paused &&
+                  (yield* rescheduleInterruptedCiRetry(
+                    stepRun.work_item_id,
+                    stepRun.step,
+                    now,
+                  ))
+                )
+                  return
+                yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET holds_worker_slot = 0,
+                       waiting_since = NULL,
+                       updated_at = ?
+                   WHERE id = ?`,
+                  [now, stepRun.work_item_id],
+                )
               }),
             )
             .pipe(Effect.catch(catchTransactionError))
@@ -5846,29 +5919,19 @@ export const makeWorkItemLifecycleLive = (
             .withTransaction(
               Effect.gen(function* () {
                 for (const row of candidates) {
-                  const updated = (yield* sql.unsafe(
+                  const updated = yield* sql.unsafe<{ step: string }>(
                     `UPDATE step_run
                      SET status = 'interrupted',
                          finished_at = ?,
                          reason_code = ?,
                          reason_message = ?,
                          updated_at = ?
-                     WHERE id = ? AND status = 'running'
-                     RETURNING id`,
+                      WHERE id = ? AND status = 'running'
+                      RETURNING step`,
                     [now, input.reasonCode, input.reasonMessage, now, row.id],
-                  )) as readonly { readonly id: string }[]
-                  if (updated.length === 0) {
-                    continue
-                  }
-
-                  yield* sql.unsafe(
-                    `UPDATE work_item
-                     SET holds_worker_slot = 0,
-                         waiting_since = NULL,
-                         updated_at = ?
-                     WHERE id = ?`,
-                    [now, row.work_item_id],
                   )
+                  const [interruptedRun] = updated
+                  if (interruptedRun === undefined) continue
 
                   if (row.queue_job_id !== null) {
                     yield* queue
@@ -5876,6 +5939,23 @@ export const makeWorkItemLifecycleLive = (
                       .pipe(
                         Effect.catchTag("JobNotFoundError", () => Effect.void),
                       )
+                  }
+
+                  if (
+                    !(yield* rescheduleInterruptedCiRetry(
+                      row.work_item_id,
+                      interruptedRun.step,
+                      now,
+                    ))
+                  ) {
+                    yield* sql.unsafe(
+                      `UPDATE work_item
+                        SET holds_worker_slot = 0,
+                            waiting_since = NULL,
+                            updated_at = ?
+                        WHERE id = ?`,
+                      [now, row.work_item_id],
+                    )
                   }
 
                   interrupted.push({

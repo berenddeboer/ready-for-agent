@@ -719,6 +719,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "implement",
+    to: "implement",
+    guard: "ci_repair_retry_pending",
+    reasonCode: "native",
+  },
+  {
+    from: "implement",
     to: "local_cleanup",
     guard: "refresh_observed_issue_no_longer_relevant_without_owned_pr",
     reasonCode: "native",

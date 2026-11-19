@@ -13,6 +13,7 @@ import {
   GITHUB_HELPER_PERMISSION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
   GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
+  GitHubCiRepairRun,
   type GitHubHelperOperation,
   type GitHubOperationOptions,
   type GitHubRepository,
@@ -302,9 +303,27 @@ export const keymaxxerGitHubLayer = (options: {
             origin: input.origin ?? "lifecycle",
             operation: Effect.gen(function* () {
               input.onStart?.()
-              const tokenName = yield* ensureToken(input.repository)
+              const tokenName = yield* ensureToken(input.repository).pipe(
+                Effect.mapError(() =>
+                  input.operation === "rerun-failed-jobs"
+                    ? new GitHubRequestError({
+                        message: `Could not look up GitHub credentials for ${input.repository.projectPath}. Check that Keymaxxer is available.`,
+                        requestNotSent: true,
+                      })
+                    : requestError(input.repository, input.describe),
+                ),
+              )
               yield* observeCredential(input.repository, tokenName)
               if (tokenName === null) {
+                if (
+                  input.operation === "read-ci-repair-run" ||
+                  input.operation === "rerun-failed-jobs"
+                ) {
+                  return yield* new GitHubRequestError({
+                    message: `No GitHub credential is configured for ${input.repository.projectPath}. Configure a token with Actions read/write access.`,
+                    retryable: false,
+                  })
+                }
                 return yield* requestError(input.repository, input.describe)
               }
               const [forge, forgeHost, projectPath] =
@@ -335,6 +354,33 @@ export const keymaxxerGitHubLayer = (options: {
                   input.repository,
                   input.describe,
                 )
+              }
+              if (
+                result.exitCode !== 0 &&
+                (input.operation === "read-ci-repair-run" ||
+                  input.operation === "rerun-failed-jobs")
+              ) {
+                const control = parseGitHubHelperControl(result.stderr)
+                if (control?.kind === "github-ci-repair-rejection") {
+                  const scope =
+                    input.operation === "rerun-failed-jobs" ? "write" : "read"
+                  const detail =
+                    control.reason === "active"
+                      ? "GitHub reports that the workflow is still in progress."
+                      : control.reason === "expired"
+                        ? "GitHub reports that this run is too old to retry."
+                        : control.reason === "permission" ||
+                            control.statusCode === 403
+                          ? `Check Actions ${scope} permission and access to this repository.`
+                          : control.statusCode === 404
+                            ? `The workflow run was not found. Check whether it still exists and the token has Actions ${scope} access.`
+                            : "Check the workflow run in GitHub Actions for retry eligibility."
+                  return yield* new GitHubRequestError({
+                    message: `GitHub rejected ${input.describe} for ${input.repository.projectPath}. ${detail}`,
+                    statusCode: control.statusCode,
+                    retryable: control.statusCode >= 500,
+                  })
+                }
               }
               if (result.exitCode === GITHUB_HELPER_PERMISSION_EXIT_CODE) {
                 return yield* permissionError(input.repository, input.describe)
@@ -913,6 +959,34 @@ export const keymaxxerGitHubLayer = (options: {
         ),
       }
 
-      return service
+      return Object.assign(service, {
+        readCiRepairRun: Effect.fn("KeymaxxerGitHub.readCiRepairRun")(
+          (repository: GitHubRepository, runId: number, attempt: number) =>
+            callHelper({
+              operation: "read-ci-repair-run",
+              repository,
+              describe: "read CI repair run",
+              args: [
+                encodeArgument(String(runId)),
+                encodeArgument(String(attempt)),
+              ],
+              decode: decodeJson(
+                GitHubCiRepairRun,
+                repository,
+                "decode CI repair run",
+              ),
+            }),
+        ),
+        rerunFailedJobs: Effect.fn("KeymaxxerGitHub.rerunFailedJobs")(
+          (repository: GitHubRepository, runId: number) =>
+            callHelper({
+              operation: "rerun-failed-jobs",
+              repository,
+              describe: "retry failed CI jobs",
+              args: [encodeArgument(String(runId))],
+              decode: decodeVoid,
+            }),
+        ),
+      })
     }),
   )

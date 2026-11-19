@@ -20,12 +20,14 @@ import {
   type GitHubServiceShape,
   GitHubThrottledError,
   INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
+  githubHelperCiRepairRejection,
   githubHelperSuccess,
   githubHelperThrottled,
   isGitHubRequestError,
   serializeGitHubHelperControl,
 } from "@ready-for-agent/github-service"
 import {
+  KeymaxxerError,
   KeymaxxerService,
   type RunWithSecretsInput,
 } from "@ready-for-agent/keymaxxer-service"
@@ -69,6 +71,101 @@ const successfulHelperControl = serializeGitHubHelperControl(
 )
 
 describe("Keymaxxer-backed GitHub layer", () => {
+  it.effect(
+    "marks a failed credential lookup as not sent but leaves helper failures ambiguous",
+    () =>
+      Effect.gen(function* () {
+        let lookupFails = true
+        let helperCalls = 0
+        const unavailable = new KeymaxxerError({
+          operation: "fixture",
+          message: "Keymaxxer transport error: do not forward this detail",
+        })
+        const credentials = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () =>
+            lookupFails
+              ? Effect.fail(unavailable)
+              : Effect.succeed("TOKEN_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.sync(() => {
+              helperCalls += 1
+            }).pipe(Effect.andThen(Effect.fail(unavailable))),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(credentials))
+        const context = yield* Layer.buildWithScope(layer, yield* Effect.scope)
+        const github = Context.get(context, GitHubService)
+        if (github.rerunFailedJobs === undefined)
+          throw new Error("Missing failed-job retry")
+        const dispatch = github.rerunFailedJobs(acmeWidgets, 10)
+        const beforeLaunch = yield* dispatch.pipe(Effect.flip)
+        expect(beforeLaunch).toMatchObject({
+          requestNotSent: true,
+          message: expect.stringContaining("look up GitHub credentials"),
+        })
+        expect(beforeLaunch.message).not.toContain("do not forward")
+        expect(helperCalls).toBe(0)
+
+        lookupFails = false
+        const atLaunch = yield* dispatch.pipe(Effect.flip)
+        expect(atLaunch._tag).toBe("GitHubRequestError")
+        expect(atLaunch).not.toMatchObject({ requestNotSent: true })
+        expect(helperCalls).toBe(1)
+      }),
+  )
+
+  it.effect(
+    "surfaces GitHub Actions write rejection without forwarding remote text",
+    () =>
+      Effect.gen(function* () {
+        const runs: RunWithSecretsInput[] = []
+        const wire = serializeGitHubHelperControl(
+          githubHelperCiRepairRejection(
+            403,
+            "Resource not accessible by personal access token: never copy this text",
+          ),
+        )
+        const credentials = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("TOKEN_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) =>
+            Effect.sync(() => {
+              runs.push(input)
+              return {
+                exitCode: GITHUB_HELPER_PERMISSION_EXIT_CODE,
+                stdout: "",
+                stderr: wire,
+              }
+            }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(credentials))
+        const context = yield* Layer.buildWithScope(layer, yield* Effect.scope)
+        const github = Context.get(context, GitHubService)
+        if (github.rerunFailedJobs === undefined)
+          throw new Error("Missing failed-job retry")
+        const error = yield* github
+          .rerunFailedJobs(acmeWidgets, 10)
+          .pipe(Effect.flip)
+        expect(error).toMatchObject({
+          statusCode: 403,
+          message: expect.stringContaining("Actions write"),
+        })
+        expect(error.message).not.toContain("never copy this text")
+        expect(runs).toHaveLength(1)
+        expect(runs[0]?.command).toContain("rerun-failed-jobs")
+      }),
+  )
+
   it.effect(
     "caches one authenticated login per credential path and shares concurrent lookups",
     () =>

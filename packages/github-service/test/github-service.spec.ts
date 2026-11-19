@@ -2026,6 +2026,78 @@ describe("GitHubService live implementation", () => {
   )
 
   it.effect(
+    "keeps the GitHub status and message when a failed-job retry is rejected",
+    () =>
+      Effect.gen(function* () {
+        const service = makeGitHubServiceFromToken(
+          "token",
+          async (input, init) => {
+            if (
+              String(input).includes(
+                "/actions/runs/44464201725/rerun-failed-jobs",
+              ) &&
+              init?.method === "POST"
+            ) {
+              return new Response(
+                JSON.stringify({
+                  message: "Resource not accessible by personal access token",
+                }),
+                { status: 403, statusText: "Forbidden" },
+              )
+            }
+            return new Response("not found", { status: 404 })
+          },
+        )
+        const error = yield* service
+          .rerunFailedJobs(repository, 44464201725)
+          .pipe(Effect.flip)
+        if (!(error instanceof GitHubRequestError)) throw error
+        expect(error.statusCode).toBe(403)
+        expect(error.message).toContain("HTTP 403")
+        expect(error.message).toContain(
+          "Resource not accessible by personal access token",
+        )
+        expect(error.message).not.toBe(
+          "Failed to rerun workflow run 44464201725 for acme/widgets: Actions write required",
+        )
+      }),
+  )
+
+  it.effect("loads diagnostics from the exact replacement attempt", () =>
+    Effect.gen(function* () {
+      const calls: string[] = []
+      const service = makeGitHubServiceFromToken("token", async (input) => {
+        const url = new URL(String(input))
+        calls.push(url.pathname)
+        if (url.pathname.endsWith("/attempts/2/jobs")) {
+          return Response.json({
+            jobs: [
+              { id: 42, name: "Deploy demo", conclusion: "timed_out" },
+              { id: 43, name: "Build", conclusion: "success" },
+            ],
+          })
+        }
+        return Response.json({
+          id: 10,
+          run_attempt: 2,
+          status: "completed",
+          conclusion: "failure",
+        })
+      })
+      expect(yield* service.readCiRepairRun(repository, 10, 1)).toEqual({
+        attempt: 2,
+        status: "completed",
+        conclusion: "failure",
+        failedJobs: [{ id: 42, name: "Deploy demo", conclusion: "timed_out" }],
+      })
+      expect(calls).toEqual([
+        "/repos/acme/widgets/actions/runs/10",
+        "/repos/acme/widgets/actions/runs/10/attempts/2/jobs",
+      ])
+    }),
+  )
+
+  it.effect(
     "keeps a throttled 403 on workflow rerun as GitHub throttling",
     () =>
       Effect.gen(function* () {

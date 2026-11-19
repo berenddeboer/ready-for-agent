@@ -16,6 +16,8 @@ import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
 import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
 import { observeAutomatedReviewEvidenceProgram } from "../bin/observe-automated-review-evidence.js"
 import { observeCiGateProgram } from "../bin/observe-ci-gate.js"
+import { readCiRepairRunProgram } from "../bin/read-ci-repair-run.js"
+import { rerunFailedJobsProgram } from "../bin/rerun-failed-jobs.js"
 import { rerunWorkflowRunProgram } from "../bin/rerun-workflow-run.js"
 import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
 import { uploadUserAttachmentProgram } from "../bin/upload-user-attachment.js"
@@ -44,6 +46,8 @@ export const GITHUB_HELPER_OPERATIONS = [
   "mark-pr-ready-for-review",
   "merge-pull-request",
   "rerun-workflow-run",
+  "read-ci-repair-run",
+  "rerun-failed-jobs",
   "upload-user-attachment",
   "ensure-issue-completed-with-summary",
 ] as const
@@ -160,6 +164,8 @@ const programs: Record<
   "mark-pr-ready-for-review": markPrReadyForReviewProgram,
   "merge-pull-request": mergePullRequestProgram,
   "rerun-workflow-run": rerunWorkflowRunProgram,
+  "read-ci-repair-run": readCiRepairRunProgram,
+  "rerun-failed-jobs": rerunFailedJobsProgram,
   "upload-user-attachment": uploadUserAttachmentProgram,
   "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
 }
@@ -195,5 +201,8 @@ export const runGitHubHelperProcess = (
     void runCountOpenNonDraftPullRequestsProgram(args)
     return
   }
-  runGitHubCli(programs[operation](args))
+  runGitHubCli(programs[operation](args), {
+    ciRepair:
+      operation === "read-ci-repair-run" || operation === "rerun-failed-jobs",
+  })
 }

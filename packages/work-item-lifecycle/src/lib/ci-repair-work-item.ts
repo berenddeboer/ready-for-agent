@@ -119,7 +119,7 @@ const failingRunLines = (
   runs.map((run) =>
     run.htmlUrl === null
       ? `- ${run.displayLabel} (${run.runIdentity})`
-      : `- ${run.displayLabel}: ${run.htmlUrl}`,
+      : `- ${run.displayLabel} (${run.runIdentity}): ${run.htmlUrl}`,
   )
 
 /**
@@ -133,11 +133,12 @@ export interface CiRepairTarget {
 }
 
 /**
- * Implement prompt for a CI Repair Work Item. Read-only CI. No Issue.
+ * Implement prompt for a CI Repair Work Item. No Issue.
  */
 export const buildCiRepairImplementPrompt = (
   input: CiRepairTarget & {
     readonly mode: "start" | "continue"
+    readonly canRequestRetry?: boolean
   },
 ): string => {
   const since =
@@ -151,7 +152,13 @@ export const buildCiRepairImplementPrompt = (
     ...(input.failingRuns.length === 0
       ? ["- No failing-run link was captured. Inspect the Repository CI gate."]
       : failingRunLines(input.failingRuns)),
-    "Read CI logs yourself. You have read-only access to CI. Do not rerun, cancel, or otherwise mutate CI jobs; the harness reruns jobs only when you report a No-Change Outcome that names them.",
+    "Read CI logs yourself. You have read-only access to CI logs. Do not rerun, cancel, or otherwise mutate CI yourself, and do not replay migrations against shared databases.",
+    ...(input.canRequestRetry === true
+      ? [
+          "During investigation you may request one harness-mediated retry of an observed failing GitHub run, without a human or a code change. End this turn with exactly READY_FOR_AGENT_RESULT: RETRY_FAILED_JOBS: <runIdentity>, using one of the listed run identities.",
+          "The harness retries failed jobs, waits for active siblings, and returns the observed result to this session. Do not report completion before seeing that result.",
+        ]
+      : []),
     "Do not create or close an Issue. Keep the completion summary on this Work Item.",
     "Make the implementation in this worktree and run appropriate verification.",
     "Deliver the smallest change that fixes the failing CI. Existing upstream limitations and speculative hardening are follow-up observations, not new requirements. If a genuine operator decision is unresolved, write the request and end with READY_FOR_AGENT_RESULT: DECISION_NEEDED. Do not combine that marker with another result line.",
@@ -169,66 +176,10 @@ export const buildCiRepairNoChangeConfirmationPrompt = (): string =>
     "Confirm whether that absence of repository changes is intentional.",
     "Do not edit files, commit, push, open pull requests, rerun CI, or perform other repository work during this classification.",
     "If repository changes are still required or you believe changes exist, end with READY_FOR_AGENT_RESULT: CHANGES.",
-    "If CI is already fixed and this Work Item should wait, write a concise Markdown completion summary, then end with READY_FOR_AGENT_RESULT: NO_CHANGES.",
-    "If specific failing runs should be rerun and no repository change is required, write a concise Markdown completion summary, then end with READY_FOR_AGENT_RESULT: RERUN_JOBS: followed by one or more run identities separated by spaces.",
+    "If CI is verified healthy and this repair needs no repository changes, write a concise Markdown completion summary citing the observed CI result, then end with READY_FOR_AGENT_RESULT: NO_CHANGES.",
     "End your final response with exactly one machine-readable result line:",
     "READY_FOR_AGENT_RESULT: CHANGES",
     "or",
     "READY_FOR_AGENT_RESULT: NO_CHANGES",
-    "or",
-    "READY_FOR_AGENT_RESULT: RERUN_JOBS: <runIdentity> ...",
     "If a genuine operator decision is unresolved, write that request instead and end with READY_FOR_AGENT_RESULT: DECISION_NEEDED. Do not combine it with another result line.",
   ].join("\n")
-
-export type CiRepairNoChangeParse =
-  | { readonly _tag: "changes" }
-  | { readonly _tag: "no_changes"; readonly completionSummary: string }
-  | {
-      readonly _tag: "rerun_jobs"
-      readonly completionSummary: string
-      readonly runIdentities: readonly string[]
-    }
-
-/** Parse Assess Changes output, including the CI-repair-only rerun outcome. */
-export const parseCiRepairNoChangeResult = (
-  output: string,
-): CiRepairNoChangeParse | null => {
-  const lines = output.split("\n").map((line) => line.trim())
-  const nonEmptyLines = lines.filter((line) => line !== "")
-  const resultLines = lines.filter((line) =>
-    /^READY_FOR_AGENT_RESULT:/i.test(line),
-  )
-  const finalLine = nonEmptyLines.at(-1)
-  if (
-    resultLines.length !== 1 ||
-    finalLine === undefined ||
-    finalLine !== resultLines[0]
-  ) {
-    return null
-  }
-  if (/^READY_FOR_AGENT_RESULT:\s*CHANGES$/i.test(finalLine)) {
-    return { _tag: "changes" }
-  }
-  if (/^READY_FOR_AGENT_RESULT:\s*NO_CHANGES$/i.test(finalLine)) {
-    const completionSummary = nonEmptyLines.slice(0, -1).join("\n").trim()
-    if (completionSummary === "") {
-      return null
-    }
-    return { _tag: "no_changes", completionSummary }
-  }
-  const rerun = /^READY_FOR_AGENT_RESULT:\s*RERUN_JOBS:\s*(.+)$/i.exec(
-    finalLine,
-  )
-  if (rerun === null) {
-    return null
-  }
-  const runIdentities = (rerun[1] ?? "")
-    .split(/[\s,]+/)
-    .map((identity) => identity.trim())
-    .filter((identity) => identity !== "")
-  const completionSummary = nonEmptyLines.slice(0, -1).join("\n").trim()
-  if (runIdentities.length === 0 || completionSummary === "") {
-    return null
-  }
-  return { _tag: "rerun_jobs", completionSummary, runIdentities }
-}

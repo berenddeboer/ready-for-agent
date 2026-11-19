@@ -423,6 +423,12 @@ export const workItem = snakeCase.table(
      * CI Repair Work Item. Null for Issue origin.
      */
     ciRepairFailingRuns: text(),
+    /**
+     * JSON CI Repair retry request and its observed result, retained with the
+     * Work Item across restarts. Null until a retry is requested. Keeping the
+     * result lets Implement resume without authorizing a second retry.
+     */
+    ciRepairRetry: text(),
     sessionId: text(),
     failureCode: text(),
     failureMessage: text(),

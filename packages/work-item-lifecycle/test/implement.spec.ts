@@ -19,6 +19,15 @@ import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import { extractCauseChain } from "@ready-for-agent/forge-contract"
 import {
+  type GitHubCiRepairRun,
+  GitHubRequestError,
+  GitHubService,
+  type GitHubServiceShape,
+  GitHubThrottledError,
+  GitHubTlsTrustError,
+  makeGitHubServiceFromToken,
+} from "@ready-for-agent/github-service"
+import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
@@ -31,6 +40,7 @@ import {
   ImplementOpenCodeError,
   ImplementRepositoryNotFoundError,
   ImplementWorktreeContextMissingError,
+  assessChanges,
   implement,
   makeWorkItemId,
   stubActiveAgentBackendLayer,
@@ -124,6 +134,7 @@ const run = <A, E>(
     | ActiveAgentBackend
     | KeymaxxerService
     | LinearService
+    | GitHubService
   >,
   opencodeLayer: Layer.Layer<AgentBackend, never, never> = stubOpencode({}),
   forgeAuthLayer: Layer.Layer<
@@ -132,12 +143,19 @@ const run = <A, E>(
     never
   > = keymaxxerDisabled,
   linearLayer: Layer.Layer<LinearService> = stubLinearServiceLayer(),
+  ciRetry: Pick<GitHubServiceShape, "readCiRepairRun" | "rerunFailedJobs"> = {},
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(opencodeLayer),
       Effect.provide(forgeAuthLayer),
       Effect.provide(linearLayer),
+      Effect.provideService(GitHubService, {
+        ...makeGitHubServiceFromToken("fixture", () =>
+          Promise.reject(new Error("unexpected GitHub call")),
+        ),
+        ...ciRetry,
+      } satisfies GitHubServiceShape),
       Effect.provide(DbServiceLive),
       Effect.provide(DatabaseTest),
       Effect.provide(PlatformLayer),
@@ -239,6 +257,442 @@ const seedRepository = (
   })
 
 describe("implement", () => {
+  it("does not authorize or perform a GitLab CI retry", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root, {
+            forge: "gitlab",
+            forgeHost: "gitlab.com",
+            projectPath: "acme/widgets",
+          })
+          return yield* implement(
+            baseContext(root, {
+              repositoryId: repository.id,
+              origin: "ci_repair",
+              ciRepairFailingRuns: [
+                { runIdentity: "10:1", displayLabel: "CI", htmlUrl: null },
+              ],
+            }),
+          ).pipe(Effect.flip)
+        }),
+        stubOpencode({
+          startTurn: ({ prompt }) =>
+            Effect.sync(() => {
+              expect(prompt).not.toContain("RETRY_FAILED_JOBS")
+              return {
+                sessionId: "ses_ci_repair",
+                assistantText: "READY_FOR_AGENT_RESULT: RERUN_JOBS: 10",
+              }
+            }),
+        }),
+      )
+      expect(error.message).toContain("No retry was sent")
+    }))
+
+  it.each([
+    "dispatch_green",
+    "adopt_red",
+    "late_adopt_red",
+    "late_adopt_green",
+    "race_adopt",
+    "permission",
+    "tls_dispatch",
+    "credential_lookup_before_dispatch",
+    "transient_read_while_waiting",
+    "permission_read_while_waiting",
+    "expired_before_dispatch",
+    "expired_with_transient_read",
+    "expired_while_running",
+    "expired_while_throttled",
+    "interrupted_before_dispatch",
+    "lost_dispatch_ack",
+    "lost_dispatch_ack_with_transient_read",
+    "lost_dispatch_ack_no_replacement",
+    "accepted_no_replacement",
+  ] as const)("keeps a GitHub retry in the repair session: %s", (scenario) =>
+    withTemp(async (root) => {
+      const sessionId = "ses_ci_repair_existing"
+      const prompts: string[] = []
+      let snapshot: GitHubCiRepairRun = {
+        attempt: 1,
+        status: "in_progress",
+        conclusion: null,
+        failedJobs: [],
+      }
+      let dispatches = 0
+      let reads = 0
+      let throttleRead = false
+      let readFailure: GitHubRequestError | null = null
+      await Bun.$`git init -q`.cwd(root).quiet()
+      await Bun.$`git -c user.name=Fixture -c user.email=fixture@example.test -c commit.gpgsign=false commit --allow-empty -qm initial`
+        .cwd(root)
+        .quiet()
+      const startingCommitOid = (
+        await Bun.$`git rev-parse HEAD`.cwd(root).quiet().text()
+      ).trim()
+      await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          const context = baseContext(root, {
+            repositoryId: repository.id,
+            origin: "ci_repair",
+            ciRepairDefaultBranch: "main",
+            startingCommitOid,
+            ciRepairFailingRuns: [
+              { runIdentity: "10:1", displayLabel: "CI", htmlUrl: null },
+            ],
+          })
+          yield* seedWorkItem(context.workItemId, repository.id)
+          expect(yield* implement(context)).toMatchObject({
+            _tag: "retry_pending",
+            delayMs: 0,
+            sessionId,
+          })
+          expect(dispatches).toBe(0)
+          // New step invocations reconstruct their context from persisted state.
+          const resumed = {
+            ...context,
+            sessionId: yield* readSessionId(context.workItemId),
+          }
+          expect(resumed.sessionId).toBe(sessionId)
+          if (scenario === "permission_read_while_waiting") {
+            readFailure = new GitHubRequestError({
+              message: "Resource not accessible by integration",
+              statusCode: 403,
+              retryable: false,
+            })
+            const err = yield* implement(resumed).pipe(Effect.flip)
+            expect(err.message).toContain("HTTP 403")
+            expect(err.message).toContain("Actions read")
+            expect(dispatches).toBe(0)
+            expect(prompts).toEqual([])
+            return
+          }
+          expect(yield* implement(resumed)).toMatchObject({
+            _tag: "retry_pending",
+            note: expect.stringContaining("sibling jobs"),
+          })
+          if (scenario === "transient_read_while_waiting") {
+            readFailure = new GitHubRequestError({
+              message: "GitHub temporarily unavailable",
+              statusCode: 503,
+              retryable: true,
+            })
+            expect(yield* implement(resumed)).toMatchObject({
+              _tag: "retry_pending",
+              note: expect.stringContaining("HTTP 503"),
+            })
+            readFailure = null
+          }
+          expect(dispatches).toBe(0)
+          expect(prompts).toEqual([])
+          snapshot = { ...snapshot, status: "completed", conclusion: "failure" }
+          const sql = yield* SqlClient.SqlClient
+          const saveRetry = (
+            kind: "waiting" | "submitted",
+            requestedAt: number,
+          ) =>
+            sql.unsafe(
+              "UPDATE work_item SET ci_repair_retry = ? WHERE id = ?",
+              [
+                JSON.stringify({
+                  runId: 10,
+                  attempt: 1,
+                  requestedAt,
+                  phase: { kind },
+                }),
+                context.workItemId,
+              ],
+            )
+          if (
+            scenario === "interrupted_before_dispatch" ||
+            scenario === "expired_before_dispatch" ||
+            scenario === "expired_with_transient_read" ||
+            scenario === "expired_while_running" ||
+            scenario === "expired_while_throttled"
+          ) {
+            const claimed = scenario === "interrupted_before_dispatch"
+            if (claimed) {
+              // The process stopped after claiming the POST, but before sending it.
+              yield* saveRetry("submitted", Date.now())
+              expect(yield* implement(resumed)).toMatchObject({
+                _tag: "retry_pending",
+                note: expect.stringContaining(
+                  "Waiting for a replacement attempt",
+                ),
+              })
+            }
+            if (scenario === "expired_while_running") {
+              snapshot = {
+                ...snapshot,
+                attempt: 2,
+                status: "in_progress",
+                conclusion: null,
+              }
+            }
+            throttleRead = scenario === "expired_while_throttled"
+            if (scenario === "expired_with_transient_read") {
+              readFailure = new GitHubRequestError({
+                message: "GitHub temporarily unavailable",
+                statusCode: 503,
+                retryable: true,
+              })
+            }
+            yield* saveRetry(claimed ? "submitted" : "waiting", 0)
+            const readsBeforeExpiry = reads
+            const err = yield* implement(resumed).pipe(Effect.flip)
+            expect(err.message).toContain("within six hours")
+            if (scenario === "expired_with_transient_read") {
+              expect(err.message).toContain("HTTP 503")
+            }
+            if (claimed) {
+              expect(err.message).toContain("dispatch could not be confirmed")
+            } else {
+              expect(err.message).not.toContain(
+                "dispatch could not be confirmed",
+              )
+            }
+            expect(reads).toBe(readsBeforeExpiry + 1)
+            expect(dispatches).toBe(0)
+            expect(prompts).toEqual([])
+            return
+          }
+          if (scenario === "permission") {
+            const err = yield* implement(resumed).pipe(Effect.flip)
+            expect(err.message).toContain("HTTP 403")
+            expect(err.message).toContain("Actions write")
+            expect(dispatches).toBe(1)
+            expect(prompts).toEqual([])
+            return
+          }
+          if (scenario === "tls_dispatch") {
+            const err = yield* implement(resumed).pipe(Effect.flip)
+            expect(err.message).toContain("Configure the trusted GitHub CA")
+            expect(dispatches).toBe(1)
+            expect(prompts).toEqual([])
+          }
+          if (scenario === "credential_lookup_before_dispatch") {
+            expect(yield* implement(resumed)).toMatchObject({
+              _tag: "retry_pending",
+              note: expect.stringContaining(
+                "Could not look up GitHub credentials",
+              ),
+            })
+          }
+          const lateReplacement =
+            scenario === "late_adopt_red" || scenario === "late_adopt_green"
+          const red = scenario === "adopt_red" || scenario === "late_adopt_red"
+          if (lateReplacement) {
+            // The next poll runs after a long outage, after GitHub has finished.
+            yield* saveRetry(red ? "waiting" : "submitted", 0)
+          } else if (scenario === "adopt_red") {
+            snapshot = {
+              ...snapshot,
+              attempt: 2,
+              status: "in_progress",
+              conclusion: null,
+            }
+            expect(yield* implement(resumed)).toMatchObject({
+              _tag: "retry_pending",
+              note: expect.stringContaining("Adopted replacement attempt 2"),
+            })
+            expect(dispatches).toBe(0)
+          } else {
+            expect(yield* implement(resumed)).toMatchObject({
+              _tag: "retry_pending",
+            })
+            if (scenario === "lost_dispatch_ack_with_transient_read") {
+              readFailure = new GitHubRequestError({
+                message: "GitHub temporarily unavailable",
+                statusCode: 503,
+                retryable: true,
+              })
+            }
+            // A subsequent process sees stale attempt 1. It must not POST again,
+            // even if the first dispatch response was lost.
+            expect(yield* implement(resumed)).toMatchObject({
+              _tag: "retry_pending",
+              ...(readFailure === null
+                ? {}
+                : { note: expect.stringContaining("HTTP 503") }),
+            })
+            readFailure = null
+            expect(dispatches).toBe(
+              scenario === "tls_dispatch" ||
+                scenario === "credential_lookup_before_dispatch"
+                ? 2
+                : 1,
+            )
+          }
+          expect(prompts).toEqual([])
+          if (
+            scenario === "lost_dispatch_ack_no_replacement" ||
+            scenario === "accepted_no_replacement"
+          ) {
+            yield* sql.unsafe(
+              "UPDATE work_item SET ci_repair_retry = json_set(ci_repair_retry, '$.requestedAt', 0) WHERE id = ?",
+              [context.workItemId],
+            )
+            if (scenario === "lost_dispatch_ack_no_replacement") {
+              readFailure = new GitHubRequestError({
+                message: "Connection reset",
+                retryable: true,
+              })
+            }
+            const err = yield* implement(resumed).pipe(Effect.flip)
+            expect(err.message).toContain("within six hours")
+            expect(err.message).toContain(
+              scenario === "lost_dispatch_ack_no_replacement"
+                ? "dispatch could not be confirmed"
+                : "GitHub accepted the retry",
+            )
+            if (scenario === "accepted_no_replacement") {
+              expect(err.message).not.toContain(
+                "dispatch could not be confirmed",
+              )
+            } else {
+              expect(err.message).toContain("Last observation:")
+              expect(err.message).toContain("Connection reset")
+            }
+            expect(dispatches).toBe(1)
+            expect(prompts).toEqual([])
+            return
+          }
+          snapshot = {
+            ...snapshot,
+            attempt: 2,
+            status: "completed",
+            conclusion: red ? "failure" : "success",
+            failedJobs: red
+              ? [{ id: 17, name: "Deploy demo", conclusion: "timed_out" }]
+              : [],
+          }
+          expect(yield* implement(resumed)).toBe(sessionId)
+          expect(prompts).toHaveLength(1)
+          expect(prompts[0]).toContain(
+            `attempt 2 finished with conclusion ${snapshot.conclusion}`,
+          )
+          expect(prompts[0]).toContain("/actions/runs/10/attempts/2")
+          expect(prompts[0]).not.toContain("RETRY_FAILED_JOBS")
+          if (red) {
+            expect(prompts[0]).toContain("Deploy demo: timed_out")
+            const readsAfterObservation = reads
+            expect(yield* implement(resumed)).toBe(sessionId)
+            expect(prompts[1]).toContain("Deploy demo: timed_out")
+            expect(reads).toBe(readsAfterObservation)
+            expect(dispatches).toBe(0)
+          }
+          if (lateReplacement) expect(dispatches).toBe(0)
+          if (
+            scenario === "dispatch_green" ||
+            scenario === "late_adopt_green"
+          ) {
+            expect(yield* assessChanges(resumed)).toEqual({
+              _tag: "no_changes",
+              completionSummary: "GitHub attempt 2 recovered.",
+            })
+          }
+          expect(reads).toBeGreaterThan(lateReplacement ? 1 : 2)
+        }),
+        stubOpencode({
+          startTurn: ({ prompt }) =>
+            Effect.sync(() => {
+              expect(prompt).toContain("RETRY_FAILED_JOBS")
+              expect(prompt).toContain("do not replay migrations")
+              return {
+                sessionId,
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: RETRY_FAILED_JOBS: 10:1",
+              }
+            }),
+          continueTurn: (input) =>
+            Effect.sync(() => {
+              expect(input.sessionId).toBe(sessionId)
+              prompts.push(input.prompt)
+              return {
+                sessionId,
+                assistantText: input.prompt.includes("Confirm whether")
+                  ? "GitHub attempt 2 recovered.\nREADY_FOR_AGENT_RESULT: NO_CHANGES"
+                  : "",
+              }
+            }),
+        }),
+        undefined,
+        undefined,
+        {
+          readCiRepairRun: (_repository, runId, attempt) =>
+            Effect.suspend(() => {
+              expect(runId).toBe(10)
+              expect(attempt).toBe(1)
+              reads += 1
+              if (readFailure !== null) return Effect.fail(readFailure)
+              return throttleRead
+                ? Effect.fail(
+                    new GitHubThrottledError({
+                      retryAt: Date.now() + 1000,
+                      usedFallback: false,
+                    }),
+                  )
+                : Effect.succeed(snapshot)
+            }),
+          rerunFailedJobs: () =>
+            Effect.suspend(() => {
+              dispatches += 1
+              if (
+                scenario === "credential_lookup_before_dispatch" &&
+                dispatches === 1
+              ) {
+                return Effect.fail(
+                  new GitHubRequestError({
+                    message: "Could not look up GitHub credentials",
+                    requestNotSent: true,
+                  }),
+                )
+              }
+              if (scenario === "tls_dispatch" && dispatches === 1) {
+                return Effect.fail(
+                  new GitHubTlsTrustError({
+                    host: "api.github.com",
+                    code: "SELF_SIGNED_CERT_IN_CHAIN",
+                    message: "Configure the trusted GitHub CA",
+                  }),
+                )
+              }
+              if (scenario === "race_adopt") {
+                snapshot = {
+                  ...snapshot,
+                  attempt: 2,
+                  status: "queued",
+                  conclusion: null,
+                }
+                return Effect.fail(
+                  new GitHubRequestError({
+                    statusCode: 403,
+                    message: "This workflow run cannot be rerun",
+                  }),
+                )
+              }
+              if (scenario === "permission") {
+                return Effect.fail(
+                  new GitHubRequestError({
+                    statusCode: 403,
+                    message: "Actions write permission required",
+                  }),
+                )
+              }
+              return scenario === "lost_dispatch_ack" ||
+                scenario === "lost_dispatch_ack_no_replacement" ||
+                scenario === "lost_dispatch_ack_with_transient_read"
+                ? Effect.fail(
+                    new GitHubRequestError({ message: "Connection reset" }),
+                  )
+                : Effect.void
+            }),
+        },
+      )
+    }),
+  )
   it("rejects missing worktree context", async () => {
     const error = await run(implement(baseContext(null)).pipe(Effect.flip))
     expect(error).toBeInstanceOf(ImplementWorktreeContextMissingError)

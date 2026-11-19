@@ -66,7 +66,11 @@ import {
   formatGitHubRepositoryUnavailableMessage,
   isGitHubThrottledError,
 } from "./errors.js"
-import { GitHubService, type GitHubServiceShape } from "./github-service.js"
+import {
+  type GitHubCiRepairRun,
+  GitHubService,
+  type GitHubServiceShape,
+} from "./github-service.js"
 import {
   githubThrottleFromResponse,
   githubThrottleFromSuccessfulResponse,
@@ -208,6 +212,7 @@ type GitHubRequestFailure =
 const githubRequest = <A>(
   message: string,
   request: (signal: AbortSignal) => Promise<A>,
+  options?: { readonly includeHttpMessage: boolean },
 ): Effect.Effect<A, GitHubRequestFailure> =>
   Effect.tryPromise({
     try: request,
@@ -229,7 +234,11 @@ const githubRequest = <A>(
       }
       const code = extractErrorCode(cause)
       return new GitHubRequestError({
-        message,
+        message:
+          options?.includeHttpMessage === true &&
+          cause instanceof GitHubHttpError
+            ? cause.message
+            : message,
         cause,
         ...(code !== undefined ? { code } : {}),
         ...(cause instanceof GitHubHttpError
@@ -3294,6 +3303,189 @@ const makeRerunWorkflowRun =
     })
   }
 
+const githubApiMessage = (body: string, fallback: string): string => {
+  try {
+    const parsed = JSON.parse(body) as unknown
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "message" in parsed &&
+      typeof parsed.message === "string" &&
+      parsed.message.trim() !== ""
+    ) {
+      return parsed.message.trim()
+    }
+  } catch {
+    // An HTML/proxy body is not useful API diagnostics.
+  }
+  return fallback
+}
+
+const ciRepairHttpFailure = (
+  response: Response,
+  body: string,
+  action: string,
+  runId: number,
+): GitHubThrottledError | GitHubHttpError => {
+  const detail = githubApiMessage(body, response.statusText).slice(0, 500)
+  const message = `GitHub ${action} for workflow run ${runId} failed: HTTP ${response.status}. ${detail}`
+  const throttle = githubThrottleFromResponse({
+    statusCode: response.status,
+    headers: response.headers,
+    message,
+  })
+  if (throttle !== undefined) return throttle
+  return new GitHubHttpError({
+    statusCode: response.status,
+    headers: response.headers,
+    message,
+  })
+}
+
+/**
+ * Read the exact run, not the newest run on the branch. Load job evidence
+ * only for a terminal replacement, pinned to the attempt we just observed.
+ */
+const readGitHubCiRepairRun = (
+  token: string,
+  fetchImpl: GitHubFetch,
+  repository: GitHubRepository,
+  runId: number,
+  originalAttempt: number,
+) =>
+  githubRequest(
+    `Could not read GitHub workflow run ${runId}`,
+    async (signal): Promise<GitHubCiRepairRun> => {
+      const apiRepository = toGitHubApiRepository(repository)
+      const runResponse = await fetchImpl(
+        `${GITHUB_API_URL}/repos/${apiRepository.owner}/${apiRepository.name}/actions/runs/${runId}`,
+        { headers: githubRestHeaders(token), signal },
+      )
+      if (!runResponse.ok) {
+        throw ciRepairHttpFailure(
+          runResponse,
+          await runResponse.text(),
+          "read",
+          runId,
+        )
+      }
+      const run: unknown = await runResponse.json()
+      if (
+        !isRecord(run) ||
+        run.id !== runId ||
+        typeof run.run_attempt !== "number" ||
+        !Number.isSafeInteger(run.run_attempt) ||
+        run.run_attempt <= 0 ||
+        typeof run.status !== "string"
+      ) {
+        throw new GitHubHttpError({
+          statusCode: 502,
+          headers: new Headers(),
+          message: `GitHub returned invalid attempt data for workflow run ${runId}`,
+        })
+      }
+      const attempt = run.run_attempt
+      const status = run.status
+      const conclusion =
+        typeof run.conclusion === "string" ? run.conclusion : null
+      const failedJobs: GitHubCiRepairRun["failedJobs"][number][] = []
+      for (
+        let page = 1;
+        page <= 20 &&
+        attempt > originalAttempt &&
+        status === "completed" &&
+        conclusion !== null &&
+        conclusion !== "success";
+        page++
+      ) {
+        const url = new URL(
+          `${GITHUB_API_URL}/repos/${apiRepository.owner}/${apiRepository.name}/actions/runs/${runId}/attempts/${attempt}/jobs`,
+        )
+        url.searchParams.set("per_page", String(PAGE_SIZE))
+        url.searchParams.set("page", String(page))
+        const jobsResponse = await fetchImpl(url, {
+          headers: githubRestHeaders(token),
+          signal,
+        })
+        if (!jobsResponse.ok) {
+          throw ciRepairHttpFailure(
+            jobsResponse,
+            await jobsResponse.text(),
+            "read jobs",
+            runId,
+          )
+        }
+        const body: unknown = await jobsResponse.json()
+        const pageJobs: unknown[] =
+          isRecord(body) && Array.isArray(body.jobs) ? body.jobs : []
+        for (const job of pageJobs) {
+          if (
+            isRecord(job) &&
+            typeof job.id === "number" &&
+            typeof job.name === "string" &&
+            typeof job.conclusion === "string" &&
+            !["success", "skipped", "neutral"].includes(job.conclusion)
+          ) {
+            failedJobs.push({
+              id: job.id,
+              name: job.name,
+              conclusion: job.conclusion,
+            })
+          }
+        }
+        if (pageJobs.length < PAGE_SIZE) break
+      }
+      return { attempt, status, conclusion, failedJobs }
+    },
+    { includeHttpMessage: true },
+  ).pipe(
+    Effect.catchTag("GitHubApiRepositoryUnavailableError", () =>
+      Effect.fail(
+        new GitHubRequestError({
+          message: "GitHub workflow run is unavailable",
+        }),
+      ),
+    ),
+  )
+
+/** Retry failed jobs only. Successful deployments are not replayed. */
+const rerunGitHubFailedJobs = (
+  token: string,
+  fetchImpl: GitHubFetch,
+  repository: GitHubRepository,
+  runId: number,
+) =>
+  githubRequest(
+    `Could not retry failed jobs for GitHub run ${runId}`,
+    async (signal) => {
+      const apiRepository = toGitHubApiRepository(repository)
+      const response = await fetchImpl(
+        `${GITHUB_API_URL}/repos/${apiRepository.owner}/${apiRepository.name}/actions/runs/${runId}/rerun-failed-jobs`,
+        {
+          method: "POST",
+          headers: githubRestHeaders(token),
+          signal,
+        },
+      )
+      if (response.ok) return
+      throw ciRepairHttpFailure(
+        response,
+        await response.text(),
+        "failed-job retry",
+        runId,
+      )
+    },
+    { includeHttpMessage: true },
+  ).pipe(
+    Effect.catchTag("GitHubApiRepositoryUnavailableError", () =>
+      Effect.fail(
+        new GitHubRequestError({
+          message: "GitHub workflow run is unavailable",
+        }),
+      ),
+    ),
+  )
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
@@ -4562,7 +4754,7 @@ export const makeGitHubServiceFromToken = (
     }
     return response
   }
-  return makeGitHubService(
+  const service = makeGitHubService(
     makeGitHubGraphqlClient(token, observingFetch),
     makeListTerminalChecksForCommit(token, observingFetch),
     makeLoadPrStatusCheckDiagnostics(token, observingFetch, fs),
@@ -4572,6 +4764,22 @@ export const makeGitHubServiceFromToken = (
     makeListCiGateCatalog(token, observingFetch),
     makeObserveCiGate(token, observingFetch, observeThrottle),
   )
+  return Object.assign(service, {
+    readCiRepairRun: (
+      repository: GitHubRepository,
+      runId: number,
+      originalAttempt: number,
+    ) =>
+      readGitHubCiRepairRun(
+        token,
+        observingFetch,
+        repository,
+        runId,
+        originalAttempt,
+      ),
+    rerunFailedJobs: (repository: GitHubRepository, runId: number) =>
+      rerunGitHubFailedJobs(token, observingFetch, repository, runId),
+  })
 }
 
 /** Builds a live service and optionally observes successful final-quota use. */

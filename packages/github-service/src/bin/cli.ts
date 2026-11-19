@@ -13,6 +13,8 @@ import {
   GITHUB_HELPER_PERMISSION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
   GITHUB_HELPER_TLS_TRUST_EXIT_CODE,
+  type GitHubHelperControl,
+  githubHelperCiRepairRejection,
   githubHelperSuccess,
   githubHelperThrottled,
   githubHelperTlsTrust,
@@ -49,6 +51,7 @@ export const writeStandardOutput = (value: string): Effect.Effect<void> =>
 
 export const runGitHubCli = <A, E>(
   program: Effect.Effect<A, E, GitHubService>,
+  options?: { readonly ciRepair: boolean },
 ): void => {
   let observedThrottle: GitHubThrottledError | undefined
   const observeThrottle = (throttle: GitHubThrottledError): void => {
@@ -62,7 +65,7 @@ export const runGitHubCli = <A, E>(
   const githubServiceCliLive = makeGitHubServiceLive(observeThrottle).pipe(
     Layer.provide(BunFileSystem.layer),
   )
-  const writeControl = (control: ReturnType<typeof githubHelperSuccess>) =>
+  const writeControl = (control: GitHubHelperControl) =>
     process.stderr.write(`${serializeGitHubHelperControl(control)}\n`)
   const writeThrottle = (throttle: GitHubThrottledError) =>
     process.stderr.write(
@@ -109,7 +112,17 @@ export const runGitHubCli = <A, E>(
         // Child stderr crosses the Keymaxxer credential boundary. Errors from
         // remote APIs or Effect defects can contain arbitrary request data, so
         // keep the user-facing failure deliberately non-diagnostic here.
-        process.stderr.write("GitHub helper command failed\n")
+        if (
+          options?.ciRepair === true &&
+          error instanceof GitHubRequestError &&
+          error.statusCode !== undefined
+        ) {
+          writeControl(
+            githubHelperCiRepairRejection(error.statusCode, error.message),
+          )
+        } else {
+          process.stderr.write("GitHub helper command failed\n")
+        }
         // The Keymaxxer parent preserves this semantic exit code as a typed
         // authentication failure, so it can invalidate only affected
         // authenticated-identity cache entries.

@@ -48,10 +48,35 @@ export interface GitHubHelperTlsTrust {
   readonly code: string
 }
 
+export interface GitHubHelperCiRepairRejection {
+  readonly version: typeof GITHUB_HELPER_PROTOCOL_VERSION
+  readonly kind: "github-ci-repair-rejection"
+  readonly statusCode: number
+  readonly reason: "permission" | "active" | "expired" | "rejected"
+}
+
+/** Do not pass remote prose through the credential boundary. */
+export const githubHelperCiRepairRejection = (
+  statusCode: number,
+  detail: string,
+): GitHubHelperCiRepairRejection => ({
+  version: GITHUB_HELPER_PROTOCOL_VERSION,
+  kind: "github-ci-repair-rejection",
+  statusCode,
+  reason: /resource not accessible|permission|bad credentials/i.test(detail)
+    ? "permission"
+    : /still (?:running|in progress)|not yet completed/i.test(detail)
+      ? "active"
+      : /too old|expired|older than|30 days/i.test(detail)
+        ? "expired"
+        : "rejected",
+})
+
 export type GitHubHelperControl =
   | GitHubHelperSuccess
   | GitHubHelperThrottled
   | GitHubHelperTlsTrust
+  | GitHubHelperCiRepairRejection
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null
@@ -114,6 +139,24 @@ export const parseGitHubHelperControl = (
       kind: "github-tls-trust",
       host: value.host.trim(),
       code: value.code.trim(),
+    }
+  }
+  if (
+    value.kind === "github-ci-repair-rejection" &&
+    typeof value.statusCode === "number" &&
+    Number.isInteger(value.statusCode) &&
+    value.statusCode >= 400 &&
+    value.statusCode <= 599 &&
+    (value.reason === "permission" ||
+      value.reason === "active" ||
+      value.reason === "expired" ||
+      value.reason === "rejected")
+  ) {
+    return {
+      version: GITHUB_HELPER_PROTOCOL_VERSION,
+      kind: "github-ci-repair-rejection",
+      statusCode: value.statusCode,
+      reason: value.reason,
     }
   }
   return undefined
