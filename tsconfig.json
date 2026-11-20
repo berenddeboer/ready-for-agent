@@ -89,6 +89,9 @@
     },
     {
       "path": "./packages/linear-service"
+    },
+    {
+      "path": "./packages/fp-service"
     }
   ]
 }
