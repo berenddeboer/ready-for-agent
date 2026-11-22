@@ -41,9 +41,9 @@ const randomReturning = (nextDouble: number): Random.Random => ({
 })
 
 describe("issue-polling", () => {
-  test("healthy scheduled delay is 45s plus integer jitter in [0, 30]", async () => {
-    expect(ISSUE_POLLING_BASE_SECONDS).toBe(45)
-    expect(ISSUE_POLLING_JITTER_SECONDS).toBe(30)
+  test("healthy scheduled delay is 30s plus integer jitter in [0, 15]", async () => {
+    expect(ISSUE_POLLING_BASE_SECONDS).toBe(30)
+    expect(ISSUE_POLLING_JITTER_SECONDS).toBe(15)
 
     const atFloor = await Effect.runPromise(
       sampleIssuePollingDelay.pipe(
@@ -56,8 +56,8 @@ describe("issue-polling", () => {
       ),
     )
 
-    expect(Duration.toSeconds(atFloor)).toBe(45)
-    expect(Duration.toSeconds(atCeiling)).toBe(75)
+    expect(Duration.toSeconds(atFloor)).toBe(30)
+    expect(Duration.toSeconds(atCeiling)).toBe(45)
     expect(Number.isInteger(Duration.toSeconds(atFloor))).toBe(true)
     expect(Number.isInteger(Duration.toSeconds(atCeiling))).toBe(true)
   })

@@ -1,20 +1,21 @@
 /**
  * Client-side freshness for a Repository's Issue projection.
  *
- * Scheduled Issue polls run about every 45–75s
- * (`ISSUE_POLLING_BASE_SECONDS` + jitter in `@ready-for-agent/graphql-api`).
+ * Scheduled Issue polls become eligible 30–45s after the previous successful
+ * scheduled poll finishes (`ISSUE_POLLING_BASE_SECONDS` + jitter in
+ * `@ready-for-agent/graphql-api`).
  * Only successful reconciliation advances `issuesReconciledAt`. A non-null
  * timestamp that is older than a small multiple of that cadence means the
- * Issues on screen must not be trusted as current — whether the Harness is
- * failing polls, paused, or not running.
+ * Issues on screen must not be trusted as current, whether polls are delayed
+ * or failing, or the Harness is not running.
  *
  * No server schema change: the client already receives `issuesReconciledAt`.
  */
 
-/** Upper bound of one healthy poll quiet period (base 45s + jitter 30s). */
-const ISSUE_POLL_CADENCE_UPPER_MS = 75_000
+/** Upper bound of one healthy poll quiet period (base 30s + up to 15s jitter). */
+const ISSUE_POLL_CADENCE_UPPER_MS = 45_000
 
-/** How many cadence upper bounds without a successful refresh before stale. */
+/** Keep five healthy cadence ceilings (3 min 45 sec) before marking stale. */
 const ISSUE_PROJECTION_STALE_MULTIPLE = 5
 
 /** Age after which a non-null `issuesReconciledAt` is treated as stale. */
