@@ -17,11 +17,12 @@ describe("isIssueProjectionStale", () => {
     expect(isIssueProjectionStale(recent, nowMs)).toBe(false)
   })
 
-  test("a timestamp just under the threshold is not stale", () => {
-    const almost = new Date(
+  test("a timestamp at the 3 min 45 sec threshold is not stale", () => {
+    expect(ISSUE_PROJECTION_STALE_AFTER_MS).toBe(225_000)
+    const atThreshold = new Date(
       nowMs - ISSUE_PROJECTION_STALE_AFTER_MS,
     ).toISOString()
-    expect(isIssueProjectionStale(almost, nowMs)).toBe(false)
+    expect(isIssueProjectionStale(atThreshold, nowMs)).toBe(false)
   })
 
   test("a timestamp older than the threshold is stale", () => {
