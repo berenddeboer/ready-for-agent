@@ -357,6 +357,7 @@ export const Opencode = {
               serverUrl: connection.url,
               local: connection.local,
               capture,
+              ownedServer: dedicated,
             })
             if (current.serverKey !== input.serverKey) {
               return yield* new AgentBackendConfigError({
@@ -752,6 +753,7 @@ export const Opencode = {
                     serverUrl: targetConnection.url,
                     local: targetConnection.local,
                     capture,
+                    ownedServer: dedicated,
                   })
                   return yield* runStoppablePlainPrompt({
                     target,

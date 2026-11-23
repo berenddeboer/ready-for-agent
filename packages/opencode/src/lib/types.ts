@@ -1,5 +1,6 @@
 import type { Duration } from "effect"
 import type { OpencodeExplicitServer } from "./opencode-v2-client.js"
+import type { OwnedOpenCodeServer } from "./owned-server.js"
 import type { OpencodeStartupProbe } from "./startup-activity.js"
 
 export interface OpencodeLayerOptions {
@@ -19,13 +20,7 @@ export interface OpencodeLayerOptions {
    * Every operation, including model discovery, uses this server. There is
    * no fallback to the shared service.
    */
-  readonly dedicatedServer?: {
-    readonly baseUrl: string
-    readonly password: string
-    readonly headers: Readonly<Record<string, string>>
-    /** Undefined when the owned server can still accept work. */
-    readonly assertAvailable: () => string | undefined
-  }
+  readonly dedicatedServer?: Omit<OwnedOpenCodeServer, "dispose">
   /**
    * Keymaxxer is enabled but the owned server is not usable. Operations fail
    * with this message and do not contact the shared service.

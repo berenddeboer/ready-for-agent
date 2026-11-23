@@ -143,6 +143,7 @@ describe("Opencode dedicated server routing", () => {
                 baseUrl: "http://127.0.0.1:43111",
                 password: "owned-password",
                 headers: { authorization: "Basic eHh4" },
+                pid: process.pid,
                 assertAvailable: () => undefined,
               },
             }).pipe(Layer.provide(BunServices.layer)),

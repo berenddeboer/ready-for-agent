@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto"
+import { OpenCode } from "@opencode/client"
 import { Effect } from "effect"
 import {
   AgentBackendConfigError,
   type AgentBackendError,
   type AttachedImplementStop,
 } from "@ready-for-agent/agent-backend"
+import {
+  OWNED_OPENCODE_SERVER_UNAVAILABLE_MESSAGE,
+  type OwnedOpenCodeServer,
+} from "./owned-server.js"
 
 export type StopCapture = (
   args: ReadonlyArray<string>,
@@ -24,18 +29,57 @@ export const jsonRecord = (
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
+type OwnedIdentityEndpoint = Pick<
+  OwnedOpenCodeServer,
+  "baseUrl" | "headers" | "pid"
+>
+
+const fetchWithoutRedirects = Object.assign(
+  (...[url, init]: Parameters<typeof fetch>) =>
+    fetch(url, { ...init, redirect: "error" }),
+  { preconnect: fetch.preconnect },
+)
+
+const readOwnedImplementServerInfo = (server: OwnedIdentityEndpoint) =>
+  Effect.tryPromise({
+    try: (signal) =>
+      OpenCode.make({
+        baseUrl: server.baseUrl,
+        headers: server.headers,
+        fetch: fetchWithoutRedirects,
+      }).server.info({
+        signal: AbortSignal.any([signal, AbortSignal.timeout(3_000)]),
+      }),
+    // Do not forward client errors: they can include raw request/response data.
+    catch: () =>
+      new AgentBackendConfigError({
+        message: OWNED_OPENCODE_SERVER_UNAVAILABLE_MESSAGE,
+      }),
+  })
+
 export const identifyImplementTarget = (input: {
   readonly sessionId: string
   readonly serverUrl: string
   readonly local: boolean
   readonly capture: StopCapture
+  readonly ownedServer: OwnedIdentityEndpoint | undefined
 }): Effect.Effect<AttachedImplementStop, AgentBackendError> =>
   Effect.gen(function* () {
-    const { stdout } = yield* input.capture(["api", "get", "/api/info"])
-    const pid = jsonRecord(stdout)?.pid
+    const owned = input.ownedServer
+    const info: unknown =
+      owned === undefined
+        ? jsonRecord((yield* input.capture(["api", "get", "/api/info"])).stdout)
+        : yield* readOwnedImplementServerInfo(owned)
+    const pid = isRecord(info) ? info.pid : undefined
     if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) {
       return yield* new AgentBackendConfigError({
         message: "OpenCode did not identify the server process for Implement.",
+      })
+    }
+    if (owned !== undefined && pid !== owned.pid) {
+      return yield* new AgentBackendConfigError({
+        message:
+          "The owned OpenCode endpoint belongs to a different server process.",
       })
     }
     return {

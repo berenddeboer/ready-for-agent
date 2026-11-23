@@ -6,6 +6,7 @@
  * a loopback provider to prove interruption and prompt-scoped replies.
  * No cloud model is called.
  */
+import { createHash } from "node:crypto"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -30,7 +31,9 @@ import {
 } from "../../../scripts/opencode-server-placement.ts"
 import { Opencode } from "../src/index.js"
 import {
+  OWNED_OPENCODE_SERVER_UNAVAILABLE_MESSAGE,
   type OwnedOpenCodeServer,
+  openCodeBasicAuthHeaders,
   startOwnedOpenCodeServer,
 } from "../src/lib/owned-server.js"
 import { parseCommandTranscript } from "../src/lib/parse-command-transcript.js"
@@ -610,7 +613,11 @@ const requireFixture = (): Fixture => {
 }
 
 const runOwned = <A>(
-  mode: "default" | "explicit" | "standalone",
+  mode:
+    | "default"
+    | "explicit"
+    | "standalone"
+    | { readonly dedicatedServer: OwnedOpenCodeServer },
   records: LaunchRecord[],
   use: (backend: OpenCodeBackend) => Effect.Effect<A, unknown>,
   mutate?: (cliArgs: ReadonlyArray<string>) => ReadonlyArray<string>,
@@ -633,15 +640,10 @@ const runOwned = <A>(
                   ? current.standaloneEnv
                   : current.env,
             ...(mode === "explicit"
-              ? {
-                  dedicatedServer: {
-                    baseUrl: current.owned.baseUrl,
-                    password: current.owned.password,
-                    headers: current.owned.headers,
-                    assertAvailable: current.owned.assertAvailable,
-                  },
-                }
-              : {}),
+              ? { dedicatedServer: current.owned }
+              : typeof mode === "object"
+                ? mode
+                : {}),
             defaultTimeout: "20 seconds",
             startupTimeout: "8 seconds",
           }).pipe(
@@ -654,6 +656,11 @@ const runOwned = <A>(
     }).pipe(Effect.provide(BunServices.layer)),
   )
 }
+
+const expectedServerKey = (url: string, pid: number): string =>
+  createHash("sha256")
+    .update(JSON.stringify([url, pid]))
+    .digest("hex")
 
 const sessionBody = async (
   owned: OwnedOpenCodeServer,
@@ -1481,12 +1488,7 @@ describe("installed OpenCode V2 production CLI contract", () => {
                   Opencode.layer({
                     keymaxxerMcpUrl: KEYMAXXER_URL,
                     environment: current.explicitEnv,
-                    dedicatedServer: {
-                      baseUrl: current.owned.baseUrl,
-                      password: current.owned.password,
-                      headers: current.owned.headers,
-                      assertAvailable: current.owned.assertAvailable,
-                    },
+                    dedicatedServer: current.owned,
                     defaultTimeout: "20 seconds",
                     startupTimeout: "8 seconds",
                   }).pipe(
@@ -1598,8 +1600,12 @@ describe("installed OpenCode V2 production CLI contract", () => {
                 if (target === undefined)
                   throw new Error("Missing active target session")
                 const obligation = pending.get(target)
-                if (obligation === undefined)
-                  throw new Error("Missing durable stop target")
+                if (obligation === undefined || "invocation" in obligation)
+                  throw new Error("Missing attached stop target")
+                expect(obligation.localPid).toBe(current.owned.pid)
+                expect(obligation.serverKey).toBe(
+                  expectedServerKey(current.owned.baseUrl, current.owned.pid),
+                )
                 const recoveryInput = { ...obligation, cwd: current.cwd }
                 const verification = yield* verify(recoveryInput).pipe(
                   Effect.exit,
@@ -1624,6 +1630,25 @@ describe("installed OpenCode V2 production CLI contract", () => {
                   yield* Effect.promise(() => activeSessions(current.owned)),
                 ).toEqual([decoyId])
                 const launched = records.slice(firstRecord)
+                const identityReads = launched.filter((record) =>
+                  record.args.includes("/api/info"),
+                )
+                if (mode === "explicit") {
+                  expect(identityReads.length).toBe(0)
+                } else {
+                  expect(identityReads[0]?.args).toEqual([
+                    "api",
+                    "get",
+                    "/api/info",
+                  ])
+                  expect(
+                    identityReads
+                      .slice(1)
+                      .some((record) =>
+                        record.args.includes(current.owned.baseUrl),
+                      ),
+                  ).toBe(true)
+                }
                 const userMessages = launched.filter((record) =>
                   record.args.some((arg) => arg.includes("/message?")),
                 )
@@ -1725,6 +1750,116 @@ describe("installed OpenCode V2 production CLI contract", () => {
         expect(run?.args).toContain("--standalone")
         expect(run?.args).not.toContain("--server")
         logCase("private plain prompt interrupt", records)
+      })
+    },
+    CASE_TIMEOUT_MS,
+  )
+
+  test(
+    "owned Implement identity verifies the original process without a CLI identity read or fallback",
+    async () => {
+      await exclusive(async () => {
+        const current = requireFixture()
+        const wrongPassword = crypto.randomUUID()
+        const wrongHeaders = openCodeBasicAuthHeaders(wrongPassword)
+        const closed = Bun.serve({
+          hostname: "127.0.0.1",
+          port: 0,
+          fetch: () => new Response(null, { status: 500 }),
+        })
+        const unreachableUrl = closed.url.origin
+        await closed.stop(true)
+        const records: LaunchRecord[] = []
+        const cases = [
+          { ...current.owned, headers: wrongHeaders },
+          { ...current.owned, baseUrl: unreachableUrl },
+        ]
+        for (const dedicatedServer of cases) {
+          // A working shared registration is present in this mode, but
+          // neither the start nor recovery identity path may fall back to it.
+          await runOwned({ dedicatedServer }, records, (backend) =>
+            Effect.gen(function* () {
+              const verify = backend.verifyImplementStopped
+              if (verify === undefined)
+                throw new Error("Missing Implement recovery")
+              const errors = [
+                yield* backend
+                  .startTurn({
+                    cwd: current.cwd,
+                    prompt: "must not launch",
+                    model: UNKNOWN_MODEL,
+                    thinkingLevel: null,
+                    trackImplementStop: {
+                      started: () => Effect.die("must not record a target"),
+                      stopped: () => Effect.die("must not stop a target"),
+                    },
+                  })
+                  .pipe(Effect.flip),
+                yield* verify({
+                  cwd: current.cwd,
+                  sessionId: "ses_owned_identity_contract",
+                  serverKey: expectedServerKey(
+                    dedicatedServer.baseUrl,
+                    current.owned.pid,
+                  ),
+                  localPid: current.owned.pid,
+                }).pipe(Effect.flip),
+              ]
+              for (const error of errors) {
+                const serialized = `${error.message}\n${JSON.stringify(error)}`
+                for (const secret of [
+                  current.owned.password,
+                  ...Object.values(current.owned.headers),
+                  wrongPassword,
+                  ...Object.values(wrongHeaders),
+                ]) {
+                  expect(serialized.includes(secret)).toBe(false)
+                }
+                expect(error).toBeInstanceOf(AgentBackendConfigError)
+                expect(error.message).toBe(
+                  OWNED_OPENCODE_SERVER_UNAVAILABLE_MESSAGE,
+                )
+              }
+            }),
+          )
+        }
+        await runOwned("explicit", records, (backend) =>
+          Effect.gen(function* () {
+            const verify = backend.verifyImplementStopped
+            if (verify === undefined)
+              throw new Error("Missing Implement recovery")
+            // The saved PID must still be live to exercise the comparison,
+            // not the separate "original process has exited" shortcut.
+            const error = yield* verify({
+              cwd: current.cwd,
+              sessionId: "ses_owned_identity_contract",
+              serverKey: expectedServerKey(current.owned.baseUrl, process.pid),
+              localPid: process.pid,
+            }).pipe(Effect.flip)
+            expect(error.message).toContain(
+              "belongs to a different server process",
+            )
+            expect(records.length).toBe(0)
+            yield* verify({
+              cwd: current.cwd,
+              sessionId: "ses_owned_identity_contract",
+              serverKey: expectedServerKey(
+                current.owned.baseUrl,
+                current.owned.pid,
+              ),
+              localPid: current.owned.pid,
+            })
+          }),
+        )
+        expect(records.map((record) => record.args)).toEqual([
+          [
+            "api",
+            "--server",
+            current.owned.baseUrl,
+            "get",
+            "/api/session/active",
+          ],
+        ])
       })
     },
     CASE_TIMEOUT_MS,

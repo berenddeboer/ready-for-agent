@@ -109,12 +109,7 @@ type PlatformServices =
 type OpenCodeRuntimeConnection =
   | {
       readonly kind: "dedicated"
-      readonly server: {
-        readonly baseUrl: string
-        readonly password: string
-        readonly headers: Readonly<Record<string, string>>
-        readonly assertAvailable: () => string | undefined
-      }
+      readonly server: Omit<OwnedOpenCodeServer, "dispose">
     }
   | { readonly kind: "blocked"; readonly message: string }
   | {
@@ -141,6 +136,7 @@ const toOpenCodeRuntimeConnection = (
       baseUrl: owned.baseUrl,
       password: owned.password,
       headers: owned.headers,
+      pid: owned.pid,
       assertAvailable: owned.assertAvailable,
     },
   }
