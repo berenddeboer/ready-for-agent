@@ -2,8 +2,9 @@
 
 Real-CLI coverage for every production OpenCode subprocess the harness
 launches. The suite is `bunx nx run opencode:cli-contract`. It runs the
-installed OpenCode V2 binary through production launch paths. It does not
-copy argv templates.
+installed OpenCode V2 binary through production launch paths. It also checks
+the owned Implement identity API against that server. It does not copy argv
+templates.
 
 Argv unit tests in `test/build-args.spec.ts` stay useful. They are not
 acceptance coverage: they missed the owned-server `--server` placement bug.
@@ -200,7 +201,7 @@ the parser misses fails the case instead of being treated as compatibility.
 | interrupt | abort or timeout of a command turn | `POST /api/session/{id}/interrupt`, explicit server | interrupt | CLI JSON `interrupted` boolean; exact success, not a generic nonzero exit |
 | Implement prompt admission | `AgentBackend.startTurn` / `continueTurn` with stop confirmation | `GET /api/session/{id}/message?limit=20&order=desc&type=user`, both modes | plain prompt interrupt | filter to user messages before pagination so later assistant output cannot hide the submitted prompt; previous user messages do not count during resume |
 | Implement prompt interrupt | abort or timeout of an admitted Implement plain prompt | `POST /api/session/{id}/interrupt`, both modes | plain prompt interrupt | `interrupted: true` for the active target, then idle on the server with its history intact. Another session in the same worktree stays active. An acknowledged `false` is the idle no-op, not a substitute for proving prompt admission |
-| Implement server identity | tracked Implement start/resume and `verifyImplementStopped` | `api get /api/info` for shared discovery/startup, then `GET /api/info` with `--server` for the pinned server | plain prompt interrupt | persist the target before running; verify the same server process before accepting an idle read |
+| Implement server identity, non-owned | tracked Implement start/resume and `verifyImplementStopped` | `api get /api/info` for shared discovery/startup; `api get /api/info` with `--server` for shared or non-owned explicit identity | plain prompt interrupt | discovery still launches the CLI; persist the pinned target before running and verify the same process before accepting an idle read |
 | Verify pending Implement stop | `AgentBackend.verifyImplementStopped` | `GET /api/session/active` pinned to the original server, both modes | plain prompt interrupt | refuses an active target; accepts an idle target; recovery does not send an interrupt |
 | `serve` | `startOwnedOpenCodeServer` | `--hostname 127.0.0.1`, ephemeral `--port`, `OPENCODE_SERVER_PASSWORD`, no `--service` | owned server | authenticated config contains the Keymaxxer URL; missing auth is 401; process cmdline matches; operator service URL unchanged |
 | `service status` | `readOpenCodeServiceStatus` | isolated stopped service; isolated registration of the ephemeral server | service discovery | exact `stopped` text, then the ephemeral URL; does not print the operator URL |
@@ -215,6 +216,14 @@ the parser misses fails the case instead of being treated as compatibility.
 The harness records the Implement session and server before the prompt is
 submitted. If the first stop cannot be confirmed, the record survives a
 harness restart and blocks another harness Implement turn for that Work Item.
+For an owned server (BER-58), tracked start/resume and stop verification use
+the official V2 client to send authenticated `GET /api/info` only to the
+existing endpoint. The CLI is not launched for this read. The PID must match
+the owned process, and the persisted URL/PID identity is unchanged. The same
+required baseline and scheduled drift target checks the real endpoint,
+including rejection of invalid auth, an unreachable endpoint, and a saved
+identity for another process at the same address.
+
 A later Reset checks the original attached server without sending another
 interrupt. For a standalone turn, it stops and verifies only the recorded
 process boundary before removing the worktree.
