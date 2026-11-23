@@ -27,7 +27,9 @@ Each case states its boundary in the spec. Operations that can finish
 without inference assert exit status and JSON or server side effects.
 Ordinary inference-triggering cases stop at a validation boundary (`Model
 unavailable` JSON, or command acceptance plus the stored user message).
-The Implement interruption case holds a real turn open with a streaming
+The PR Status Check Handoff case completes a real turn with a scripted
+loopback provider and a background shell job. The Implement interruption
+case holds a real turn open with a streaming
 loopback provider, checks that the server reports it active before interrupt,
 then checks that only the target becomes inactive and its history remains.
 No case calls a cloud model.
@@ -188,6 +190,7 @@ the parser misses fails the case instead of being treated as compatibility.
 | `run` Implement with service disabled | tracked plain prompts without a shared service | `run --standalone` in the CLI invocation boundary | plain prompt interrupt | persist the exact boundary before inference; only confirm once cleanup is verified and the private provider request is cancelled; no shared service is contacted |
 | `run` resume | `AgentBackend.continueTurn` | `--session`, null thinking omits `#variant`; both connection modes | resume turn | same session; variant absent; exact model diagnostic |
 | prompt stdin | `AgentBackend.startTurn` when the prompt has a newline or exceeds the argv limit | stdin, not argv tokens | stdin prompt | stored message equals the prompt, including newlines |
+| PR Status Check Handoff | `AgentBackend.continueTurn` with `replyToPromptOnly` | `run` on stdin with a unique prompt reference, then `session export` in the same connection mode (default discovery, explicit `--server` after `export`, or service disabled) | prompt-scoped continuation | the durably stored user prompt identifies the terminal answer and earlier assistant steps, including an output-limit continuation; earlier turns and subsequent background replies cannot supply the outcome |
 | oversized Agent Command | `AgentBackend.startTurn` with `command` | refusal before spawn | command argv refusal | config error, OpenCode was not started |
 | create session | `startTurn` command path, no session yet | `POST /api/session` JSON body, directory header, both modes | command turn | session location equals the worktree |
 | switch model | `continueTurn` command path | `POST /api/session/{id}/model` JSON body, both modes | command continuation | session model id, provider, and variant match the pin |
@@ -218,6 +221,18 @@ process boundary before removing the worktree.
 If the session is still active, the operator can stop it in OpenCode and retry
 Reset. OpenCode v2 interrupts by session, so concurrent use of that same
 session by another OpenCode client during Implement or Reset is not covered.
+
+For BER-57, OpenCode 2.0.32, 2.2.7, and 2.3.2 preserve user, assistant, and
+synthetic messages in projection order in `session export`. Assistant
+messages carry a `finish` reason; tool steps precede the terminal answer.
+A synthetic background notice can start another reply before an `idle`
+message is recorded, so idle alone is not sufficient. CLI stdout exposes
+assistant message IDs but not the submitting user message ID. The pin can
+reconcile the terminal text without emitting its `step_finish`; newer
+OpenCode can wait for a job and emit both the requested and background
+replies. Read the first settled answer after the exact stored prompt, not
+the latest reply or a timestamp window. Export is read-only; the harness
+does not stop the CLI early or cancel jobs to collect an outcome.
 
 ## Not a harness invocation
 

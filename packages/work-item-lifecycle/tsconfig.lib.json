@@ -14,10 +14,10 @@
       "path": "../queue-service/tsconfig.lib.json"
     },
     {
-      "path": "../lifecycle-model/tsconfig.lib.json"
+      "path": "../linear-service/tsconfig.lib.json"
     },
     {
-      "path": "../linear-service/tsconfig.lib.json"
+      "path": "../lifecycle-model/tsconfig.lib.json"
     },
     {
       "path": "../keymaxxer-service/tsconfig.lib.json"
@@ -26,10 +26,10 @@
       "path": "../gitlab-service/tsconfig.lib.json"
     },
     {
-      "path": "../forge-contract/tsconfig.lib.json"
+      "path": "../github-service/tsconfig.lib.json"
     },
     {
-      "path": "../github-service/tsconfig.lib.json"
+      "path": "../forge-contract/tsconfig.lib.json"
     },
     {
       "path": "../db-service/tsconfig.lib.json"
@@ -42,6 +42,9 @@
     },
     {
       "path": "../sqlite-queue-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../opencode/tsconfig.lib.json"
     },
     {
       "path": "../db/tsconfig.lib.json"

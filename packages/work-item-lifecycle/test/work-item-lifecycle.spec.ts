@@ -16,6 +16,7 @@ import {
 import { SqlClient } from "effect/sql"
 import { TestClock } from "effect/testing"
 import {
+  type ActiveAgentBackend,
   AgentBackendConfigError,
   type PendingImplementStop,
 } from "@ready-for-agent/agent-backend"
@@ -25,7 +26,11 @@ import {
   DbServiceLive,
   RepositoryHasRunningStepError,
 } from "@ready-for-agent/db-service"
-import { GitHubThrottledError } from "@ready-for-agent/github-service"
+import {
+  type GitHubService,
+  GitHubThrottledError,
+} from "@ready-for-agent/github-service"
+import { disabledKeymaxxerLayer } from "@ready-for-agent/keymaxxer-service"
 import {
   EnqueueError,
   type JobId,
@@ -79,6 +84,7 @@ import {
   formatIssueClosedPrMergedMessage,
   formatIssueClosedPrStatusIndeterminateMessage,
   formatIssueClosedWhilePrOpenMessage,
+  investigatePrStatusChecks,
   isTerminalWorkItemState,
   makeWorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
@@ -87,6 +93,7 @@ import {
   stubGitLabServiceLayer,
   stubLinearServiceLayer,
 } from "../src/index.js"
+import { withOpenCodeHandoffReplay } from "./open-code-handoff-replay.js"
 import { describe, expect, it, setDefaultTimeout } from "bun:test"
 
 // File-backed bun:sqlite under nx parallel CI load can be slow (restart tests
@@ -180,20 +187,28 @@ describe("WorkItemLifecycle", () => {
   ): Promise<A> => Effect.runPromise(Effect.provide(test, TestLayer))
 
   const makeTestLayer = (
-    steps: LifecycleStepsShape,
+    steps:
+      | LifecycleStepsShape
+      | Layer.Layer<
+          LifecycleSteps,
+          never,
+          DbService | SqlClient.SqlClient | ActiveAgentBackend | GitHubService
+        >,
     github: Parameters<typeof stubGitHubServiceLayer>[0] = {},
     gitlab: Parameters<typeof stubGitLabServiceLayer>[0] = {},
     azureDevOps: Parameters<typeof stubAzureDevOpsServiceLayer>[0] = {},
   ) =>
     WorkItemLifecycleLive.pipe(
+      Layer.provideMerge(
+        Layer.isLayer(steps)
+          ? steps
+          : Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
+      ),
       Layer.provideMerge(stubActiveAgentBackendLayer()),
       Layer.provideMerge(stubGitHubServiceLayer(github)),
       Layer.provideMerge(stubGitLabServiceLayer(gitlab)),
       Layer.provideMerge(stubAzureDevOpsServiceLayer(azureDevOps)),
       Layer.provideMerge(stubLinearServiceLayer()),
-      Layer.provideMerge(
-        Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
-      ),
       Layer.provideMerge(DbServiceLive),
       Layer.provideMerge(SqliteQueueServiceLive),
       Layer.provideMerge(DatabaseTest),
@@ -6029,102 +6044,134 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("records a fresh Check-Start Anchor and delayed Watch after CHECKS_TRIGGERED", () => {
-      const checkId = "psc-checks-triggered"
-      const priorAnchorAt = 1_000
-      const investigateAt = 50_000
-      const steps: LifecycleStepsShape = {
-        ...successfulSteps,
-        watchPrStatusChecks: () =>
-          Effect.succeed(watchResult("handoff_needed")),
-        investigatePrStatusChecks: () =>
-          Effect.succeed({
-            _tag: "checks_triggered",
-            handledCheckIds: [checkId],
-            checkStartAnchorRecorded: false,
-          }),
-      }
-
-      return Effect.runPromise(
-        Effect.scoped(
-          Effect.provide(
+    it("returns to delayed Watch after CHECKS_TRIGGERED followed by an OpenCode background reply", () =>
+      withOpenCodeHandoffReplay(
+        {
+          sessionId: "ses_test_implement_session",
+          reply: [
+            "Queued a replacement execution.\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
+          ],
+          backgroundReply: "Twenty local scenarios passed.",
+        },
+        async (replay) => {
+          const checkId = "psc-checks-triggered"
+          const priorAnchorAt = 1_000
+          const investigateAt = 50_000
+          const steps = Layer.effect(
+            LifecycleSteps,
             Effect.gen(function* () {
-              yield* TestClock.setTime(0)
-              const lifecycle = yield* WorkItemLifecycle
-              const sql = yield* SqlClient.SqlClient
-              const { repository, issue } = yield* seedActionableIssue
-              const created = yield* lifecycle.implementNow(
-                repository.id,
-                issue.nativeId,
-              )
+              const services = yield* Effect.context<
+                | DbService
+                | SqlClient.SqlClient
+                | ActiveAgentBackend
+                | GitHubService
+              >()
+              return LifecycleSteps.of({
+                ...successfulSteps,
+                createWorktree: () =>
+                  Effect.succeed({
+                    worktreePath: replay.cwd,
+                    startingCommitOid: "abc123",
+                  }),
+                watchPrStatusChecks: () =>
+                  Effect.succeed(watchResult("handoff_needed")),
+                investigatePrStatusChecks: (context) =>
+                  investigatePrStatusChecks(context).pipe(
+                    Effect.provideContext(services),
+                    Effect.provide(
+                      Layer.merge(replay.layer, disabledKeymaxxerLayer),
+                    ),
+                  ),
+              })
+            }),
+          )
 
-              for (let index = 0; index < 8; index += 1) {
-                yield* claimAndRunPending
-              }
-              yield* forgetCreatePrDraftProvenance(created.id)
+          await Effect.runPromise(
+            Effect.scoped(
+              Effect.provide(
+                Effect.gen(function* () {
+                  yield* TestClock.setTime(0)
+                  const lifecycle = yield* WorkItemLifecycle
+                  const sql = yield* SqlClient.SqlClient
+                  const { repository, issue } = yield* seedActionableIssue
+                  const created = yield* lifecycle.implementNow(
+                    repository.id,
+                    issue.nativeId,
+                  )
 
-              const watched = yield* claimAndRunPending
-              expect(watched._tag).toBe("processed")
-              if (watched._tag === "processed") {
-                expect(watched.workItem.state).toBe(
-                  "investigate_pr_status_checks",
-                )
-              }
+                  for (let index = 0; index < 8; index += 1) {
+                    yield* claimAndRunPending
+                  }
+                  yield* forgetCreatePrDraftProvenance(created.id)
 
-              yield* TestClock.setTime(investigateAt)
-              yield* sql.unsafe(
-                `UPDATE work_item
+                  const watched = yield* claimAndRunPending
+                  expect(watched._tag).toBe("processed")
+                  if (watched._tag === "processed") {
+                    expect(watched.workItem.state).toBe(
+                      "investigate_pr_status_checks",
+                    )
+                  }
+
+                  yield* TestClock.setTime(investigateAt)
+                  yield* sql.unsafe(
+                    `UPDATE work_item
                  SET check_start_anchor_at = ?, updated_at = ?
                  WHERE id = ?`,
-                [priorAnchorAt, investigateAt, created.id],
-              )
-              yield* sql.unsafe(
-                `INSERT INTO pr_status_check (
+                    [priorAnchorAt, investigateAt, created.id],
+                  )
+                  yield* sql.unsafe(
+                    `INSERT INTO pr_status_check (
                    id, work_item_id, external_id, name, outcome,
                    handled_at, observed_at, created_at, updated_at
                  ) VALUES (?, ?, 'checkrun:triggered', 'lint', 'red', NULL, ?, ?, ?)`,
-                [
-                  checkId,
-                  created.id,
-                  investigateAt,
-                  investigateAt,
-                  investigateAt,
-                ],
-              )
+                    [
+                      checkId,
+                      created.id,
+                      investigateAt,
+                      investigateAt,
+                      investigateAt,
+                    ],
+                  )
 
-              const investigated = yield* claimAndRunPending
-              expect(investigated._tag).toBe("processed")
-              if (investigated._tag === "processed") {
-                expect(investigated.workItem.state).toBe(
-                  "watch_pr_status_checks",
-                )
-              }
+                  const investigated = yield* claimAndRunPending
+                  expect(investigated._tag).toBe("processed")
+                  if (investigated._tag === "processed") {
+                    expect(investigated.workItem.state).toBe(
+                      "watch_pr_status_checks",
+                    )
+                  }
 
-              const checks = (yield* sql.unsafe(
-                `SELECT handled_at FROM pr_status_check WHERE id = ?`,
-                [checkId],
-              )) as readonly { readonly handled_at: number | null }[]
-              expect(checks[0]?.handled_at).not.toBeNull()
+                  const checks = (yield* sql.unsafe(
+                    `SELECT handled_at FROM pr_status_check WHERE id = ?`,
+                    [checkId],
+                  )) as readonly { readonly handled_at: number | null }[]
+                  expect(checks[0]?.handled_at).not.toBeNull()
 
-              const delayed = (yield* sql.unsafe(
-                `SELECT available_at, created_at FROM job_queue`,
-              )) as readonly { available_at: number; created_at: number }[]
-              expect(delayed).toHaveLength(1)
-              expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(
-                30_000,
-              )
+                  const delayed = (yield* sql.unsafe(
+                    `SELECT available_at, created_at FROM job_queue`,
+                  )) as readonly { available_at: number; created_at: number }[]
+                  expect(delayed).toHaveLength(1)
+                  expect(
+                    delayed[0]!.available_at - delayed[0]!.created_at,
+                  ).toBe(30_000)
 
-              const anchors = (yield* sql.unsafe(
-                `SELECT check_start_anchor_at FROM work_item WHERE id = ?`,
-                [created.id],
-              )) as readonly { readonly check_start_anchor_at: number | null }[]
-              expect(anchors[0]?.check_start_anchor_at).toBe(investigateAt)
-            }),
-            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
-          ),
-        ),
-      )
-    })
+                  const anchors = (yield* sql.unsafe(
+                    `SELECT check_start_anchor_at FROM work_item WHERE id = ?`,
+                    [created.id],
+                  )) as readonly {
+                    readonly check_start_anchor_at: number | null
+                  }[]
+                  expect(anchors[0]?.check_start_anchor_at).toBe(investigateAt)
+                }),
+                makeTestLayer(steps).pipe(
+                  Layer.provideMerge(TestClock.layer()),
+                ),
+              ),
+            ),
+          )
+          expect(await replay.prompts()).toHaveLength(1)
+        },
+      ))
 
     it("retires completed checks atomically when conflict resolution is queued and returns to delayed Watch", () => {
       const checkId = "psc-conflict-retired"

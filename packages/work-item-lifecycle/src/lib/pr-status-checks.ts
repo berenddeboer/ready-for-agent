@@ -1,7 +1,11 @@
 import { Clock, Effect, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import { ulid } from "ulidx"
-import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import {
+  AgentBackend,
+  type AgentTurnResult,
+  agentBackendLabel,
+} from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import type {
   PrStatusCheckDiagnostic,
@@ -394,14 +398,16 @@ type ParsedInvestigationResult =
       readonly workflowName: string | null
     }
 
+// The marker prefix identifies an attempt, even if the delimiter is malformed.
+const isInvestigationResultLine = (line: string): boolean =>
+  /^READY_FOR_AGENT_RESULT/i.test(line.trim())
+
 export const parseInvestigationResult = (
   output: string,
 ): ParsedInvestigationResult | null => {
   const lines = output.split("\n").map((line) => line.trim())
   const nonEmptyLines = lines.filter((line) => line !== "")
-  const resultLines = lines.filter((line) =>
-    /^READY_FOR_AGENT_RESULT:/i.test(line),
-  )
+  const resultLines = lines.filter(isInvestigationResultLine)
   const finalLine = nonEmptyLines.at(-1)
   if (
     resultLines.length !== 1 ||
@@ -464,9 +470,7 @@ export const parseInvestigationResult = (
 
 /** True when any READY_FOR_AGENT_RESULT line is present (valid or not). */
 const hasInvestigationResultLine = (output: string): boolean =>
-  output
-    .split("\n")
-    .some((line) => /^READY_FOR_AGENT_RESULT:/i.test(line.trim()))
+  output.split("\n").some(isInvestigationResultLine)
 
 /**
  * Count durable review-rerun permits for a budget lane.
@@ -1084,10 +1088,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
     const continueInvestigationTurn = (
       prompt: string,
       phase: string,
-    ): Effect.Effect<
-      { readonly assistantText: string },
-      PrStatusChecksOpenCodeError
-    > =>
+    ): Effect.Effect<AgentTurnResult, PrStatusChecksOpenCodeError> =>
       agentBackend
         .continueTurn({
           sessionId,
@@ -1096,6 +1097,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
           model: context.model,
           thinkingLevel: context.thinkingLevel,
           timeout,
+          replyToPromptOnly: true,
         })
         .pipe(
           Effect.mapError(
@@ -1107,29 +1109,39 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
           ),
         )
 
+    const parseReply = (reply: AgentTurnResult) => {
+      if (hasInvestigationResultLine(reply.precedingAssistantText ?? "")) {
+        return { outcome: null, hasMarker: true }
+      }
+      return {
+        outcome: parseInvestigationResult(reply.assistantText),
+        hasMarker: hasInvestigationResultLine(reply.assistantText),
+      }
+    }
+
     /**
      * Parse an Agent-reported Outcome from a work turn. Missing markers get one
      * classification-only fallback; malformed or non-final markers fail strictly.
      */
     const parseWithMissingOutcomeFallback = (
-      assistantText: string,
+      reply: AgentTurnResult,
       fallbackPhase: string,
     ): Effect.Effect<ParsedInvestigationResult, PrStatusChecksOpenCodeError> =>
       Effect.gen(function* () {
-        let result = parseInvestigationResult(assistantText)
-        if (result === null && !hasInvestigationResultLine(assistantText)) {
+        let { outcome, hasMarker } = parseReply(reply)
+        if (outcome === null && !hasMarker) {
           const fallback = yield* continueInvestigationTurn(
             buildInvestigationOutcomeFallbackPrompt(repository.forge),
             fallbackPhase,
           )
-          result = parseInvestigationResult(fallback.assistantText)
+          outcome = parseReply(fallback).outcome
         }
-        if (result === null) {
+        if (outcome === null) {
           return yield* new PrStatusChecksOpenCodeError({
             message: missingOutcomeMessage,
           })
         }
-        return result
+        return outcome
       })
 
     const work = yield* continueInvestigationTurn(
@@ -1159,7 +1171,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       "work",
     )
     let investigation = yield* parseWithMissingOutcomeFallback(
-      work.assistantText,
+      work,
       "outcome fallback",
     )
     if (typeof investigation !== "string" && investigation._tag === "failed") {
@@ -1171,7 +1183,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         "recovery",
       )
       investigation = yield* parseWithMissingOutcomeFallback(
-        recovery.assistantText,
+        recovery,
         "recovery outcome fallback",
       )
     }
