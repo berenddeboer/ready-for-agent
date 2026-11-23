@@ -142,6 +142,74 @@ export const parseCreatedSessionId = (stdout: string): string | undefined => {
 }
 
 /**
+ * The export lists messages in projection order (not by message ID or time).
+ * `run` does not expose the submitted user message ID, so identify the exact
+ * user message by the unique prompt we sent on stdin. Tool steps can precede
+ * the final answer; OpenCode also continues steps cut short by an output
+ * limit. Keep these earlier steps separate so even an empty final answer
+ * cannot make an earlier line look final. A separate background reply can
+ * follow the terminal step even without an idle boundary in between.
+ */
+export const parsePromptReply = (input: {
+  readonly transcript: string
+  readonly sessionId: string
+  readonly submittedPrompt: string
+}):
+  | { readonly assistantText: string; readonly precedingAssistantText: string }
+  | undefined => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(input.transcript)
+  } catch {
+    return undefined
+  }
+  if (
+    !isRecord(parsed) ||
+    !isRecord(parsed.info) ||
+    parsed.info.id !== input.sessionId ||
+    !Array.isArray(parsed.messages)
+  ) {
+    return undefined
+  }
+  const messages = parsed.messages.filter(isRecord)
+  const isSubmission = (message: Record<string, unknown>) =>
+    message.type === "user" && message.text === input.submittedPrompt
+  const start = messages.findIndex(isSubmission)
+  if (
+    start < 0 ||
+    messages.some((message, index) => index > start && isSubmission(message))
+  ) {
+    return undefined
+  }
+  const preceding: string[] = []
+  for (const message of messages.slice(start + 1)) {
+    if (message.type === "user" || message.type === "idle") break
+    if (message.type !== "assistant") continue
+    if (!isRecord(message.time) || typeof message.time.completed !== "number") {
+      return undefined
+    }
+    if (!Array.isArray(message.content)) return undefined
+    const text = textFromContent(message.content)
+    // Some providers report "stop" even on steps with local tool calls.
+    if (
+      message.finish === "tool-calls" ||
+      message.finish === "length" ||
+      (message.finish === "stop" &&
+        message.content.some(
+          (part: unknown) =>
+            isRecord(part) && part.type === "tool" && part.executed !== true,
+        ))
+    ) {
+      preceding.push(text)
+      continue
+    }
+    if (message.finish !== "stop") return undefined
+    return { assistantText: text, precedingAssistantText: preceding.join("\n") }
+  }
+  return undefined
+}
+
+/**
  * Result of a V2 Agent Command from a session export.
  *
  * Only messages created after the command was submitted count, so a continued

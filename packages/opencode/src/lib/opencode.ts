@@ -6,6 +6,7 @@ import {
   AgentBackendConfigError,
   type AgentBackendError,
   AgentBackendMalformedOutputError,
+  type AgentTurnResult,
   type ContinueTurnInput,
   DEFAULT_STARTUP_TIMEOUT,
   type InspectInput,
@@ -49,6 +50,7 @@ import { parseCommandTaskResultFromLine } from "./parse-command-task-result.js"
 import {
   parseCommandTranscript,
   parseCreatedSessionId,
+  parsePromptReply,
 } from "./parse-command-transcript.js"
 import {
   parseErrorClassificationFromLine,
@@ -374,10 +376,8 @@ export const Opencode = {
           readonly timeout?: Duration.Input
           readonly onSessionId?: StartTurnInput["onSessionId"]
           readonly trackImplementStop?: StartTurnInput["trackImplementStop"]
-        }): Effect.Effect<
-          { readonly sessionId: string; readonly assistantText: string },
-          AgentBackendError
-        > => {
+          readonly replyToPromptOnly?: ContinueTurnInput["replyToPromptOnly"]
+        }): Effect.Effect<AgentTurnResult, AgentBackendError> => {
           const unavailable =
             blockedReason !== undefined && blockedReason.length > 0
               ? blockedReason
@@ -387,17 +387,24 @@ export const Opencode = {
               new AgentBackendConfigError({ message: unavailable }),
             )
           }
-          const promptOnStdin =
-            input.command === undefined &&
-            shouldUsePromptStdin({ prompt: input.prompt })
           const command = input.command
+          const scopedReply =
+            command === undefined && input.replyToPromptOnly === true
+          // The CLI generates its own user message ID, which it doesn't print.
+          // A unique reference in the submitted user message makes the
+          // transcript lookup unambiguous, including on identical retries.
+          const prompt = scopedReply
+            ? `[Ready for Agent turn ${crypto.randomUUID()}]\n\n${input.prompt.trim()}`
+            : input.prompt
+          const promptOnStdin =
+            command === undefined && shouldUsePromptStdin({ prompt })
           const env = turnEnvironment(input.cwd)
           const timeout = input.timeout ?? defaultTimeout
           if (
             command !== undefined &&
             commandBodyExceedsArgvLimit({
               command,
-              prompt: input.prompt,
+              prompt,
             })
           ) {
             return Effect.fail(
@@ -584,7 +591,7 @@ export const Opencode = {
                 command === undefined
                   ? withOpenCodeServer(
                       buildRunArgs({
-                        prompt: input.prompt,
+                        prompt,
                         model: input.model,
                         thinkingLevel: input.thinkingLevel,
                         sessionId: turnSessionId,
@@ -597,9 +604,7 @@ export const Opencode = {
               }
               const turnStdin: "ignore" | Stream.Stream<Uint8Array, never> =
                 promptOnStdin
-                  ? Stream.fromIterable([
-                      new TextEncoder().encode(input.prompt),
-                    ])
+                  ? Stream.fromIterable([new TextEncoder().encode(prompt)])
                   : "ignore"
               if (command !== undefined) {
                 turnSessionId = yield* ensureCommandSession()
@@ -614,7 +619,7 @@ export const Opencode = {
                   buildCommandApiArgs({
                     sessionId: turnSessionId,
                     command,
-                    prompt: input.prompt,
+                    prompt,
                     directory: input.cwd,
                   }),
                 )
@@ -721,7 +726,9 @@ export const Opencode = {
                   }
                   return {
                     ...parsed,
-                    text: parseAssistantTextFromLine(line),
+                    ...(scopedReply
+                      ? {}
+                      : { text: parseAssistantTextFromLine(line) }),
                   }
                 },
                 stdin: turnStdin,
@@ -748,7 +755,7 @@ export const Opencode = {
                   })
                   return yield* runStoppablePlainPrompt({
                     target,
-                    prompt: input.prompt,
+                    prompt,
                     resumed: knownSessionId !== undefined,
                     run: turn,
                     track: tracker,
@@ -766,6 +773,32 @@ export const Opencode = {
                   : track === undefined || connection?.kind !== "attached"
                     ? turn
                     : tracked(turnSessionId, connection, track)
+              if (scopedReply) {
+                const exported = yield* runCliCapture({
+                  spawner,
+                  backend: OPENCODE_BACKEND,
+                  binary,
+                  args: withOpenCodeServer(
+                    buildSessionExportArgs(streamed.sessionId),
+                    turnServerUrl,
+                  ),
+                  cwd: input.cwd,
+                  env: turnEnv,
+                  timeout,
+                })
+                const reply = parsePromptReply({
+                  transcript: exported.stdout,
+                  sessionId: streamed.sessionId,
+                  submittedPrompt: prompt,
+                })
+                if (reply === undefined) {
+                  return yield* new AgentBackendMalformedOutputError({
+                    cwd: input.cwd,
+                    byteLength: Buffer.byteLength(exported.stdout, "utf8"),
+                  })
+                }
+                return { sessionId: streamed.sessionId, ...reply }
+              }
               if (
                 command !== undefined &&
                 streamed.assistantText.length === 0

@@ -509,6 +509,7 @@
       "devDependencies": {
         "@effect/platform-bun": "4.0.6",
         "@ready-for-agent/db": "workspace:*",
+        "@ready-for-agent/opencode": "workspace:*",
         "@ready-for-agent/sqlite-queue-service": "workspace:*",
         "@types/bun": "^1.4.4",
       },

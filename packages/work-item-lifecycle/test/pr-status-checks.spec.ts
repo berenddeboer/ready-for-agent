@@ -45,6 +45,7 @@ import {
   stubGrokActiveAgentBackendLayer,
   watchPrStatusChecks,
 } from "../src/index.js"
+import { withOpenCodeHandoffReplay } from "./open-code-handoff-replay.js"
 import { describe, expect, it } from "bun:test"
 
 /** Spec-derived operator copy for Actions-write 403 (issue #1237), not recomputed from production. */
@@ -301,7 +302,130 @@ const opencodeWith = (
   )
 }
 
+const replayOpenCodeHandoff = async (input: {
+  readonly reply: readonly string[]
+  readonly backgroundReply: string
+  readonly toolStepText?: string
+}) =>
+  withOpenCodeHandoffReplay(
+    { ...input, sessionId: "ses_implement" },
+    async (replay) => {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* seedWorkItem
+          yield* seedStatusCheck({
+            id: "psc-replay",
+            externalId: "checkrun:1",
+            name: "lint",
+            outcome: "red",
+          })
+          return yield* Effect.result(
+            investigatePrStatusChecks({ ...context, worktreePath: replay.cwd }),
+          )
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              db,
+              githubWith({ _tag: "failed", ...mergeable, terminalChecks: [] }),
+              keymaxxer,
+              replay.layer,
+              DatabaseTest,
+            ),
+          ),
+        ),
+      )
+      return { result, prompts: await replay.prompts() }
+    },
+  )
+
 describe("PR status check steps", () => {
+  it("uses classification when only an earlier turn and background reply contain markers", async () => {
+    const { result, prompts } = await replayOpenCodeHandoff({
+      reply: ["Queued a replacement execution."],
+      backgroundReply: "READY_FOR_AGENT_RESULT: PROCESSED",
+    })
+    expect(result).toMatchObject({
+      _tag: "Success",
+      success: { _tag: "checks_triggered" },
+    })
+    expect(prompts).toHaveLength(2)
+    expect(prompts[1]).toContain(
+      "Based only on the PR status-check work you just did",
+    )
+  })
+
+  it.each([
+    [
+      "duplicate",
+      [
+        "READY_FOR_AGENT_RESULT: PROCESSED",
+        "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
+      ],
+    ],
+    ["malformed", ["READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED extra"]],
+    ["missing-colon", ["READY_FOR_AGENT_RESULT CHECKS_TRIGGERED"]],
+    [
+      "missing-colon followed by a valid",
+      [
+        "READY_FOR_AGENT_RESULT CHECKS_TRIGGERED",
+        "READY_FOR_AGENT_RESULT: PROCESSED",
+      ],
+    ],
+    ["underscore-separated", ["READY_FOR_AGENT_RESULT_CHECKS_TRIGGERED"]],
+    [
+      "underscore-separated followed by a valid",
+      [
+        "READY_FOR_AGENT_RESULT_CHECKS_TRIGGERED",
+        "READY_FOR_AGENT_RESULT: PROCESSED",
+      ],
+    ],
+    [
+      "non-final",
+      ["READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED", "More work remains."],
+    ],
+  ])(
+    "rejects a %s marker in the intended reply without classification",
+    async (_kind, reply) => {
+      const { result, prompts } = await replayOpenCodeHandoff({
+        reply,
+        backgroundReply: "READY_FOR_AGENT_RESULT: PROCESSED",
+      })
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: {
+          message: expect.stringContaining(
+            "OpenCode did not report CHECKS_TRIGGERED",
+          ),
+        },
+      })
+      expect(prompts).toHaveLength(1)
+    },
+  )
+
+  it.each([
+    [["READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"]],
+    [["Queued a replacement execution."]],
+    [[]],
+  ])(
+    "rejects a marker before tools even when the final answer is %j",
+    async (reply) => {
+      const { result, prompts } = await replayOpenCodeHandoff({
+        toolStepText: "READY_FOR_AGENT_RESULT: PROCESSED",
+        reply,
+        backgroundReply: "Twenty local scenarios passed.",
+      })
+      expect(result).toMatchObject({
+        _tag: "Failure",
+        failure: {
+          message: expect.stringContaining(
+            "OpenCode did not report CHECKS_TRIGGERED",
+          ),
+        },
+      })
+      expect(prompts).toHaveLength(1)
+    },
+  )
+
   it("checks the deterministic Work Item branch", async () => {
     let requestedBranch = ""
     const github = Layer.succeed(GitHubService, {

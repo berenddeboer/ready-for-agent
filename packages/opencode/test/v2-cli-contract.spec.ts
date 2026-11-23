@@ -3,8 +3,8 @@
  * entry point and the installed binary. See packages/opencode/CLI-CONTRACT.md.
  *
  * Inference-triggering turns stop at the model-unavailable boundary or use
- * a blocked loopback provider to prove server-side interruption. No cloud
- * model is called.
+ * a loopback provider to prove interruption and prompt-scoped replies.
+ * No cloud model is called.
  */
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -41,6 +41,14 @@ const KEYMAXXER_URL = "http://127.0.0.1:9/ber35-cli-contract/mcp"
 const UNKNOWN_MODEL = "ready-for-agent-contract/no-such-model"
 const MODEL_UNAVAILABLE = `Model unavailable: ${UNKNOWN_MODEL}`
 const BLOCKED_MODEL = "contract-loopback/blocked"
+const REPLY_MODEL = "contract-loopback/reply"
+const PREVIOUS_HANDOFF = "BER-57 previous handoff"
+const CURRENT_HANDOFF = "BER-57 current handoff\nInvestigate the status checks."
+const BACKGROUND_OUTPUT = "ber57-background-job-finished"
+const BACKGROUND_REPLY = "Twenty local scenarios passed."
+const TRUNCATED_REPLY = "I investigated the failure and began to"
+const HANDOFF_REPLY =
+  "Replacement execution queued.\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"
 const UNRECOGNIZED_SERVER_RUN =
   "Unrecognized flag: --server in command opencode run"
 const UNRECOGNIZED_SERVER_API =
@@ -441,6 +449,58 @@ const openFixture = async (): Promise<Fixture> => {
     async fetch(request) {
       const body = await request.text()
       providerRequests.push(body)
+      const parsed = jsonObject(body)
+      if (parsed?.model === "reply") {
+        const last: unknown = Array.isArray(parsed.messages)
+          ? parsed.messages.at(-1)
+          : undefined
+        const content = isRecord(last) ? JSON.stringify(last.content) : ""
+        if (
+          content?.includes("<shell") &&
+          content.includes(BACKGROUND_OUTPUT)
+        ) {
+          return chatReply({ content: BACKGROUND_REPLY })
+        }
+        if (
+          Array.isArray(parsed.messages) &&
+          parsed.messages.some(
+            (message: unknown) =>
+              isRecord(message) &&
+              message.role === "assistant" &&
+              JSON.stringify(message.content)?.includes(TRUNCATED_REPLY),
+          )
+        ) {
+          return chatReply({ content: HANDOFF_REPLY })
+        }
+        if (isRecord(last) && last.role === "tool") {
+          return chatReply({ content: TRUNCATED_REPLY }, "length")
+        }
+        if (content?.includes("BER-57 current handoff")) {
+          return chatReply(
+            {
+              content: "Investigating.",
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_ber57",
+                  type: "function",
+                  function: {
+                    name: "shell",
+                    arguments: JSON.stringify({
+                      command: `sleep 1 && echo ${BACKGROUND_OUTPUT}`,
+                      description: "Run local tests in the background",
+                      workdir: cwd,
+                      background: true,
+                    }),
+                  },
+                },
+              ],
+            },
+            "tool_calls",
+          )
+        }
+        return chatReply({ content: "READY_FOR_AGENT_RESULT: PROCESSED" })
+      }
       // Once inference starts, the only way for the turn to leave this
       // streaming response is for OpenCode to cancel it.
       return new Response(
@@ -470,7 +530,10 @@ const openFixture = async (): Promise<Fixture> => {
         "contract-loopback": {
           package: "@opencode/ai/providers/openai-compatible",
           settings: { baseURL: `${provider.url.origin}/v1`, apiKey: "fixture" },
-          models: { blocked: { name: "Blocked contract model" } },
+          models: {
+            blocked: { name: "Blocked contract model" },
+            reply: { name: "Reply contract model" },
+          },
         },
       },
       commands: {
@@ -517,6 +580,26 @@ const openFixture = async (): Promise<Fixture> => {
       await rm(root, { recursive: true, force: true })
     },
   }
+}
+
+const chatReply = (
+  delta: Record<string, unknown>,
+  finish = "stop",
+): Response => {
+  const frame = (choice: Record<string, unknown>) =>
+    `data: ${JSON.stringify({
+      id: "chatcmpl-ber57",
+      object: "chat.completion.chunk",
+      model: "reply",
+      created: 1,
+      choices: [{ index: 0, ...choice }],
+    })}\n\n`
+  return new Response(
+    frame({ delta: { role: "assistant", ...delta }, finish_reason: null }) +
+      frame({ delta: {}, finish_reason: finish }) +
+      "data: [DONE]\n\n",
+    { headers: { "content-type": "text/event-stream" } },
+  )
 }
 
 const requireFixture = (): Fixture => {
@@ -932,6 +1015,111 @@ describe("installed OpenCode V2 production CLI contract", () => {
         ).trim()
         expect(discovered).toBe(current.owned.baseUrl)
         expect(discovered).not.toBe(operatorServiceUrl)
+      })
+    },
+    CASE_TIMEOUT_MS,
+  )
+
+  test(
+    "prompt-scoped continuation exports only the submitted handoff reply, retaining background history",
+    async () => {
+      await exclusive(async () => {
+        const current = requireFixture()
+        for (const mode of ["default", "explicit", "standalone"] as const) {
+          const records: LaunchRecord[] = []
+          const options = {
+            cwd: current.cwd,
+            model: REPLY_MODEL,
+            thinkingLevel: null,
+          }
+          const { started, continued } = await runOwned(
+            mode,
+            records,
+            (backend) =>
+              Effect.gen(function* () {
+                const started = yield* backend.startTurn({
+                  ...options,
+                  prompt: PREVIOUS_HANDOFF,
+                })
+                const continued = yield* backend.continueTurn({
+                  ...options,
+                  sessionId: started.sessionId,
+                  prompt: CURRENT_HANDOFF,
+                  replyToPromptOnly: true,
+                })
+                return { started, continued }
+              }),
+          )
+          const detail = diagnostic(records, current.secrets)
+          expect(continued, detail).toEqual({
+            sessionId: started.sessionId,
+            assistantText: HANDOFF_REPLY,
+            precedingAssistantText: `Investigating.\n${TRUNCATED_REPLY}`,
+          })
+          const exported = records.find(
+            (record) => record.args[0] === "session",
+          )
+          expect(exported?.args, detail).toEqual(
+            mode === "explicit"
+              ? [
+                  "session",
+                  "export",
+                  "--server",
+                  current.owned.baseUrl,
+                  started.sessionId,
+                ]
+              : ["session", "export", started.sessionId],
+          )
+          if (exported === undefined) throw new Error(detail)
+          const transcript = parsedExport(exported.stdout)
+          expect(transcript.id).toBe(started.sessionId)
+          expect(transcript.directory).toBe(current.cwd)
+          expect(
+            isRecord(transcript.body) &&
+              Array.isArray(transcript.body.messages) &&
+              transcript.body.messages.some(
+                (message: unknown) =>
+                  isRecord(message) &&
+                  message.type === "assistant" &&
+                  message.finish === "length" &&
+                  textParts(message.content).includes(TRUNCATED_REPLY),
+              ),
+            detail,
+          ).toBe(true)
+          expect(
+            isRecord(transcript.body) &&
+              Array.isArray(transcript.body.messages) &&
+              transcript.body.messages
+                .filter(isRecord)
+                .filter(
+                  (message) =>
+                    message.type === "user" &&
+                    typeof message.text === "string" &&
+                    message.text.endsWith(`\n\n${CURRENT_HANDOFF}`),
+                ),
+            detail,
+          ).toHaveLength(1)
+          if (mode !== "standalone") {
+            // The pin can return before the background job finishes. Newer
+            // OpenCode waits and replays both replies. In either case, the
+            // background job must run and its reply remains in history.
+            const deadline = performance.now() + 5_000
+            const readTexts = async () =>
+              (await sessionMessages(current.owned, started.sessionId)).flatMap(
+                (message) => textParts(message.content),
+              )
+            let texts = await readTexts()
+            while (
+              !texts.includes(BACKGROUND_REPLY) &&
+              performance.now() < deadline
+            ) {
+              await Bun.sleep(50)
+              texts = await readTexts()
+            }
+            expect(texts).toContain(BACKGROUND_REPLY)
+          }
+          logCase(`prompt-scoped reply (${mode})`, records)
+        }
       })
     },
     CASE_TIMEOUT_MS,

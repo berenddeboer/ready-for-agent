@@ -104,6 +104,8 @@ export interface InspectResult {
 export interface AgentTurnResult {
   readonly sessionId: string
   readonly assistantText: string
+  /** Earlier assistant steps of the same prompt, when the reply is collected separately. */
+  readonly precedingAssistantText?: string
 }
 
 export interface StartTurnInput {
@@ -129,6 +131,8 @@ export interface ContinueTurnInput {
   readonly onSessionId?: OnSessionId
   readonly trackImplementStop?: TrackImplementStop
   readonly command?: string
+  /** For a plain prompt, collect its reply rather than session-wide CLI output. */
+  readonly replyToPromptOnly?: boolean
 }
 
 /** Optional capability declarations for later Work Item-keyed routing. */
