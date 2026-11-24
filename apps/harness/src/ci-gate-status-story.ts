@@ -1,9 +1,9 @@
+import { isResolvedCiFailureIncidentWithinHistoryWindow } from "@ready-for-agent/forge-contract/ci-gate-incident-history"
 import {
   type CiGateObservedRun,
   classifyCiGateObservedRun,
   compareCiGateRunOrder,
-  isResolvedCiFailureIncidentWithinHistoryWindow,
-} from "@ready-for-agent/forge-contract"
+} from "@ready-for-agent/forge-contract/ci-gate-run"
 
 type CiGateStoryRun = {
   readonly runIdentity: string
