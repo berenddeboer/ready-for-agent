@@ -216,6 +216,7 @@ describe("Repository CI Gate observation", () => {
     listCiGateCatalog: () => Effect.succeed([...catalog]),
     observeCiGate: (repository, input, options) =>
       observe(repository, input, options),
+    observeSpecs: () => Effect.succeed([]),
     listReadyIssues: (repository, options) =>
       listReadyIssues(repository, options),
   } satisfies GitHubServiceShape)

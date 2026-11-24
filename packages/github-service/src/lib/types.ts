@@ -1,8 +1,21 @@
+import { Schema } from "effect"
 import type { ForgeRepository } from "@ready-for-agent/forge-contract"
 
 export type GitHubRepository = ForgeRepository
 
 export const GITHUB_CI_GATE_KIND = "workflow"
+
+export const GitHubSpecObservation = Schema.Struct({
+  nativeId: Schema.String,
+  displayId: Schema.String,
+  url: Schema.String,
+  readiness: Schema.Literals([
+    "waiting",
+    "all-descendants-closed",
+    "hierarchy-unavailable",
+  ]),
+})
+export type GitHubSpecObservation = typeof GitHubSpecObservation.Type
 
 /** Local file the harness uploads as a GitHub user attachment. */
 export interface UploadUserAttachmentInput {

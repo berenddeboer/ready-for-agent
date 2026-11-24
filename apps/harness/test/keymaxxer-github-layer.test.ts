@@ -821,6 +821,49 @@ describe("Keymaxxer-backed GitHub layer", () => {
       }),
   )
 
+  it.effect("observes Specs through the configured repository token", () =>
+    Effect.gen(function* () {
+      const observations = [
+        {
+          nativeId: "42",
+          displayId: "42",
+          url: "https://github.com/acme/widgets/issues/42",
+          readiness: "all-descendants-closed",
+        },
+      ]
+      const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+        initialize: Effect.void,
+        findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+        findSecrets: () => Effect.die("not used"),
+        hasSecret: () => Effect.die("not used"),
+        addSecret: () => Effect.die("not used"),
+        runWithSecrets: ({ command, secrets }) => {
+          expect(command).toContain("observe-specs.ts")
+          expect(secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
+          return Effect.succeed({
+            exitCode: 0,
+            stdout: JSON.stringify(observations),
+            stderr: successfulHelperControl,
+          })
+        },
+      })
+      const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+        Layer.provide(keymaxxerLayer),
+      )
+
+      const result = yield* Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github.observeSpecs({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+        })
+      }).pipe(Effect.provide(layer))
+
+      expect(result).toEqual(observations)
+    }),
+  )
+
   it.effect("checks a PR branch through the configured repository token", () =>
     Effect.gen(function* () {
       const runs: RunWithSecretsInput[] = []
@@ -1964,6 +2007,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
             }),
         })
         const ambientService = {
+          observeSpecs: () => Effect.die("not used"),
           listReadyIssues: () =>
             Effect.sync(() => {
               ambientOperations += 1
@@ -2072,6 +2116,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
         })
         const ambientService = {
           listReadyIssues: () => Effect.die("not used"),
+          observeSpecs: () => Effect.die("not used"),
           getAuthenticatedUserLogin: () => Effect.die("not used"),
           getOpenPullRequestNumber: () => Effect.die("not used"),
           findOpenPullRequestNumber: () => Effect.die("not used"),

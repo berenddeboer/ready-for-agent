@@ -198,6 +198,7 @@ describe("Azure DevOps Repository CI Gate", () => {
     observeCiGate: () =>
       Effect.succeed({ defaultBranch: "main", observations: [] }),
     listReadyIssues: () => Effect.succeed([]),
+    observeSpecs: () => Effect.succeed([]),
   } satisfies GitHubServiceShape)
 
   const runtimeLayer = Layer.mergeAll(

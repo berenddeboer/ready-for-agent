@@ -21,6 +21,7 @@ import {
   type GitHubRepositoryUnavailableError,
   type GitHubRequestError,
   GitHubService,
+  GitHubSpecObservation,
   type GitHubThrottledError,
   type GitHubTlsTrustError,
 } from "@ready-for-agent/github-service"
@@ -69,6 +70,9 @@ export const ReconciliationSummary = Schema.Struct({
     CompetingIssueClosingPullRequestObservation,
   ),
   // Absent when not applicable or the Spec listing could not be read.
+  githubSpecObservations: Schema.optionalKey(
+    Schema.Array(GitHubSpecObservation),
+  ),
   linearSpecObservations: Schema.optionalKey(
     Schema.Array(LinearSpecObservation),
   ),
@@ -440,6 +444,29 @@ export const IssueReconcilerLive = Layer.effect(
           Effect.mapError((cause) => mutationError("record-success", cause)),
         )
 
+      if (issueTracker === "github") {
+        return yield* github
+          .observeSpecs(
+            {
+              forge: issueTracker,
+              forgeHost: repository.forgeHost,
+              projectPath: repository.projectPath,
+            },
+            options?.githubOperation,
+          )
+          .pipe(
+            Effect.map((githubSpecObservations) => ({
+              ...progress,
+              githubSpecObservations,
+            })),
+            Effect.catch((error) =>
+              Effect.logWarning("Could not observe GitHub Specs", {
+                repositoryId: repository.id,
+                error,
+              }).pipe(Effect.as(progress)),
+            ),
+          )
+      }
       if (issueTracker !== "linear") {
         return progress
       }

@@ -79,6 +79,7 @@ export const makeGitHubServiceTest = (
     listCiGateCatalog: () => Effect.succeed([]),
     observeCiGate: () =>
       Effect.succeed({ defaultBranch: "main", observations: [] }),
+    observeSpecs: () => Effect.succeed([]),
     listReadyIssues: (repository) => {
       const fixture = fixturesByRepository.get(repositoryKey(repository))
       if (fixture === undefined) {

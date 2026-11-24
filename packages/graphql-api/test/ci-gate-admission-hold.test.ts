@@ -172,6 +172,7 @@ describe("Hold ordinary remote admission during CI failure", () => {
     observeCiGate: (repository, input, options) =>
       observe(repository, input, options),
     listReadyIssues: () => Effect.succeed([]),
+    observeSpecs: () => Effect.succeed([]),
   } satisfies GitHubServiceShape)
 
   const runtimeLayer = Layer.mergeAll(

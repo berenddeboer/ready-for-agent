@@ -195,6 +195,7 @@ describe("GitLab Repository CI Gate", () => {
       return Effect.die("GitHub CI Gate must not observe a GitLab Repository")
     },
     listReadyIssues: () => Effect.succeed([]),
+    observeSpecs: () => Effect.succeed([]),
   } satisfies GitHubServiceShape)
 
   const runtimeLayer = Layer.mergeAll(

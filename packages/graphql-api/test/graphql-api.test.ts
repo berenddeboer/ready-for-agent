@@ -229,6 +229,7 @@ const workItem = {
 } as WorkItemRecord
 
 const defaultGithub: GitHubServiceShape = {
+  observeSpecs: () => Effect.succeed([]),
   getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   getOpenPullRequestNumber: () => Effect.succeed(1),
   findOpenPullRequestNumber: () => Effect.succeed(1),

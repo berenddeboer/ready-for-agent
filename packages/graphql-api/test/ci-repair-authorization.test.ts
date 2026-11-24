@@ -214,6 +214,7 @@ describe("Authorize incident-scoped CI Repair", () => {
     observeCiGate: (repository, input, options) =>
       observe(repository, input, options),
     listReadyIssues: () => Effect.succeed([]),
+    observeSpecs: () => Effect.succeed([]),
   } satisfies GitHubServiceShape)
 
   const makeRuntimeLayer = (database = DatabaseTest) =>
