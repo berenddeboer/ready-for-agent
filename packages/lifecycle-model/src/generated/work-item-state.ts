@@ -115,7 +115,7 @@ export const STEP_RUN_REASON = {
   commitRepair: "commit_repair",
   /** Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt. */
   copyGeneration: "copy_generation",
-  /** The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry. Distinct from a Decide PR Merge handoff, whose Resume re-enters Decide PR Merge. */
+  /** The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human and Attention shows Decision needed. Explicit Resume continues Validate Spec for Spec Validation or Implement for implementation, in the same session. Not a failure and not Retry. Distinct from a Decide PR Merge handoff, whose Resume re-enters Decide PR Merge. */
   decisionNeeded: "decision_needed",
   /** The Step Run ended because the Forge rejected credentials or permission with HTTP 401 or 403. Deterministic; not retryable and does not consume Autonomous Retry Budget. */
   forgeAuthRejected: "forge_auth_rejected",
@@ -193,7 +193,7 @@ export const STEP_RUN_REASON_DEFINITIONS = {
   commit_hooks: "Mid-run: Commit is running the native git commit attempt, including repository hooks.",
   commit_repair: "Mid-run: Commit is repairing a failed native commit via Agent Repair Fallback.",
   copy_generation: "Mid-run: Commit is generating shared publication copy via an Agent Turn before the native git commit attempt.",
-  decision_needed: "The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry. Distinct from a Decide PR Merge handoff, whose Resume re-enters Decide PR Merge.",
+  decision_needed: "The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human and Attention shows Decision needed. Explicit Resume continues Validate Spec for Spec Validation or Implement for implementation, in the same session. Not a failure and not Retry. Distinct from a Decide PR Merge handoff, whose Resume re-enters Decide PR Merge.",
   forge_auth_rejected: "The Step Run ended because the Forge rejected credentials or permission with HTTP 401 or 403. Deterministic; not retryable and does not consume Autonomous Retry Budget.",
   github_throttled: "Watch PR Status Checks stopped cleanly at GitHub's explicit retry time.",
   "green-no-review-evidence": "A green-only Status Check Handoff completed without an Agent Turn because harness-owned GitHub observation found no positive automated-review evidence.",
@@ -1133,6 +1133,12 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "needs_human",
+    to: "validate_spec",
+    guard: "operator_resumes_spec_validation_decision_needed",
+    reasonCode: "decision_needed",
+  },
+  {
+    from: "needs_human",
     to: "watch_pr_status_checks",
     guard: "refresh_observed_merge_conflict_cleared",
     reasonCode: "native",
@@ -1340,6 +1346,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "failed",
     guard: "validation_cannot_continue",
     reasonCode: "handler_failed",
+  },
+  {
+    from: "validate_spec",
+    to: "needs_human",
+    guard: "material_spec_uncertainty_requires_operator_decision",
+    reasonCode: "decision_needed",
   },
   {
     from: "watch_pr_status_checks",

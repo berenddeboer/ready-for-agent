@@ -400,6 +400,23 @@ export const ambientGitHubLayer = (options: {
             ),
           ),
         ),
+        ensureIssueComment: (repository, issueNumber, marker, markdown) =>
+          authenticated(
+            "lifecycle",
+            repository,
+            (service) =>
+              service.ensureIssueComment?.(
+                repository,
+                issueNumber,
+                marker,
+                markdown,
+              ) ??
+              Effect.fail(
+                new GitHubRequestError({
+                  message: "GitHub Issue comment publication is not configured",
+                }),
+              ),
+          ),
         listReadyIssues: Effect.fn("AmbientGitHub.listReadyIssues")(
           (repository, operationOptions?: GitHubOperationOptions) =>
             authenticated(

@@ -218,6 +218,13 @@ export interface GitHubServiceShape
     workItemId: string,
     summaryMarkdown: string,
   ) => Effect.Effect<void, GitHubServiceError>
+  /** Post a marked comment once, without changing the Issue state. */
+  readonly ensureIssueComment?: (
+    repository: GitHubRepository,
+    issueNumber: number,
+    marker: string,
+    markdown: string,
+  ) => Effect.Effect<void, GitHubServiceError>
   /**
    * Close every currently-open pull request for the exact head branch, then
    * remove that remote branch. The operation re-lists open pull requests on

@@ -77,8 +77,9 @@ export const decisionNeededPromptSection = (): string =>
  * runs fresh verification and review.
  */
 export const decisionResumeTarget = (
-  _originatingStep: OperationalLifecycleStep,
-): "implement" => "implement"
+  originatingStep: OperationalLifecycleStep,
+): "implement" | "validate_spec" =>
+  originatingStep === "validate_spec" ? "validate_spec" : "implement"
 
 export type DecisionNeededHandoff = {
   readonly _tag: "decision_needed"
@@ -90,6 +91,7 @@ export const decisionNeededHandlerOutput = (input: {
   readonly request: string
   readonly originatingStep: OperationalLifecycleStep
   readonly sessionId?: string
+  readonly findingsAtDecision?: string
 }): {
   readonly sessionId?: string
   readonly stepRunReasonCode: StepRunReasonCode
@@ -108,6 +110,7 @@ export const decisionNeededHandlerOutput = (input: {
     kind: "decision_needed",
     originatingStep: input.originatingStep,
     resumeTarget: decisionResumeTarget(input.originatingStep),
+    findingsAtDecision: input.findingsAtDecision,
   }),
   transition: {
     nextState: "needs_human",

@@ -913,6 +913,18 @@ export const keymaxxerGitHubLayer = (options: {
             decode: decodeVoid,
           }),
         ),
+        ensureIssueComment: (repository, issueNumber, marker, markdown) =>
+          callHelper({
+            operation: "ensure-issue-comment",
+            repository,
+            describe: "post marked Issue comment",
+            args: [
+              encodeArgument(String(issueNumber)),
+              encodeArgument(marker),
+              encodeArgument(markdown),
+            ],
+            decode: decodeVoid,
+          }),
         listReadyIssues: Effect.fn("KeymaxxerGitHub.listReadyIssues")(
           (repository, operationOptions?: GitHubOperationOptions) =>
             callHelper({

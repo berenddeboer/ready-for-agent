@@ -319,6 +319,23 @@ export const resolveSpecBaseline = (
     }
   }
 
+  const [checklistUrl] = citedChecklists
+  const checklistComment =
+    citedChecklists.size === 1
+      ? comments.find(({ url }) => url === checklistUrl)
+      : undefined
+  // Keep the checklist binding even when approval itself needs a decision.
+  // A checklist does not choose between conflicting snapshots.
+  for (const [index, candidate] of candidates.entries()) {
+    const checklist =
+      checklistComment &&
+      isCited(candidate) &&
+      !hasConflictingRevisions(candidate.designRevisions) &&
+      readSpecRequirementChecklist(checklistComment, candidate.source.url)
+    if (checklist) {
+      candidates[index] = { ...candidate, requirementChecklist: checklist }
+    }
+  }
   const published = candidates.find(isCited)
   if (published !== undefined) {
     // Historical comments never replace a publication snapshot.
@@ -345,20 +362,7 @@ export const resolveSpecBaseline = (
             published.designRevisions.join("\n"),
       )
     ) {
-      const [checklistUrl] = citedChecklists
-      const comment =
-        citedChecklists.size === 1
-          ? comments.find(({ url }) => url === checklistUrl)
-          : undefined
-      const checklist =
-        comment && readSpecRequirementChecklist(comment, published.source.url)
-      return {
-        kind: "baseline",
-        baseline:
-          checklist === undefined
-            ? published
-            : { ...published, requirementChecklist: checklist },
-      }
+      return { kind: "baseline", baseline: published }
     }
     return {
       kind: "review",

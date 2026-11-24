@@ -1568,7 +1568,11 @@ const hasSpecLabel = Effect.fn("GitHubService.hasSpecLabel")(function* (
   }
 })
 
-type GitHubApiServiceShape = {
+type IssueCommentOutcome =
+  | { readonly kind: "complete"; readonly workItemId: string }
+  | { readonly kind: "comment"; readonly marker: string }
+
+type AdaptedGitHubServiceShape = {
   [K in keyof GitHubServiceShape]: GitHubServiceShape[K] extends (
     repository: GitHubRepository,
     ...args: infer Args
@@ -1585,6 +1589,18 @@ type GitHubApiServiceShape = {
         >
       : never
     : never
+}
+
+type GitHubApiServiceShape = Omit<
+  AdaptedGitHubServiceShape,
+  "ensureIssueCompletedWithSummary" | "ensureIssueComment"
+> & {
+  readonly ensureIssueCommentOutcome: (
+    repository: GitHubApiRepository,
+    issueNumber: number,
+    outcome: IssueCommentOutcome,
+    markdown: string,
+  ) => Effect.Effect<void, GitHubRequestFailure>
 }
 
 const makeGitHubApiService = (
@@ -2682,26 +2698,36 @@ const makeGitHubApiService = (
       return yield* error
     },
   ),
-  ensureIssueCompletedWithSummary: Effect.fn(
-    "GitHubService.ensureIssueCompletedWithSummary",
-  )(function* (repository, issueNumber, workItemId, summaryMarkdown) {
+  ensureIssueCommentOutcome: Effect.fn(
+    "GitHubService.ensureIssueCommentOutcome",
+  )(function* (
+    repository: GitHubApiRepository,
+    issueNumber: number,
+    outcome: IssueCommentOutcome,
+    markdown: string,
+  ) {
     if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
       return yield* new GitHubRequestError({
         message: `Invalid Issue number for ${repository.owner}/${repository.name}: ${String(issueNumber)}`,
       })
     }
-    if (typeof workItemId !== "string" || workItemId.trim() === "") {
+    const marker =
+      outcome.kind === "complete"
+        ? workItemCompletionMarker(outcome.workItemId)
+        : outcome.marker
+    const key =
+      outcome.kind === "complete" ? outcome.workItemId : outcome.marker
+    if (typeof key !== "string" || key.trim() === "") {
       return yield* new GitHubRequestError({
-        message: `Invalid Work Item id for ${repository.owner}/${repository.name}#${issueNumber}`,
+        message: `Invalid comment key for ${repository.owner}/${repository.name}#${issueNumber}`,
       })
     }
-    if (typeof summaryMarkdown !== "string" || summaryMarkdown.trim() === "") {
+    if (typeof markdown !== "string" || markdown.trim() === "") {
       return yield* new GitHubRequestError({
-        message: `Empty completion summary for ${repository.owner}/${repository.name}#${issueNumber}`,
+        message: `Empty Issue comment for ${repository.owner}/${repository.name}#${issueNumber}`,
       })
     }
 
-    const marker = workItemCompletionMarker(workItemId)
     const issueRef = `${repository.owner}/${repository.name}#${issueNumber}`
 
     const issueResult = yield* githubQuery(
@@ -2811,9 +2837,9 @@ const makeGitHubApiService = (
         })
       }
       const mutate = client.mutation
-      const body = `${summaryMarkdown.trimEnd()}\n\n${marker}`
+      const body = `${markdown.trimEnd()}\n\n${marker}`
       const addResult = yield* githubRequest(
-        `Failed to post completion summary on Issue ${issueRef}`,
+        `Failed to post marked comment on Issue ${issueRef}`,
         (signal) =>
           mutate(
             {
@@ -2837,12 +2863,12 @@ const makeGitHubApiService = (
       const postedBody = addResult.addComment?.commentEdge?.node?.body
       if (typeof postedBody !== "string" || !postedBody.includes(marker)) {
         return yield* new GitHubRequestError({
-          message: `GitHub did not return a marked completion comment for ${issueRef}`,
+          message: `GitHub did not return the marked comment for ${issueRef}`,
         })
       }
     }
 
-    if (issue.state === "CLOSED") {
+    if (outcome.kind === "comment" || issue.state === "CLOSED") {
       return
     }
 
@@ -3528,9 +3554,25 @@ export const makeGitHubService = (
     uploadUserAttachment: adapt(service.uploadUserAttachment),
     listCiGateCatalog: adapt(service.listCiGateCatalog),
     observeCiGate: adapt(service.observeCiGate),
-    ensureIssueCompletedWithSummary: adapt(
-      service.ensureIssueCompletedWithSummary,
-    ),
+    ensureIssueCompletedWithSummary: (
+      repository,
+      issueNumber,
+      workItemId,
+      markdown,
+    ) =>
+      adapt(service.ensureIssueCommentOutcome)(
+        repository,
+        issueNumber,
+        { kind: "complete", workItemId },
+        markdown,
+      ),
+    ensureIssueComment: (repository, issueNumber, marker, markdown) =>
+      adapt(service.ensureIssueCommentOutcome)(
+        repository,
+        issueNumber,
+        { kind: "comment", marker },
+        markdown,
+      ),
   }
 }
 
