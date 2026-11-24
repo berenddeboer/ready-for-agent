@@ -27,6 +27,8 @@ import {
 import {
   LinearNotConfiguredError,
   LinearService,
+  defaultLinearServiceShape,
+  makeLinearServiceFromToken,
 } from "@ready-for-agent/linear-service"
 import {
   IssueReconciler,
@@ -344,14 +346,10 @@ const defaultAzureDevOpsLayer = Layer.succeed(
   defaultAzureDevOpsShape,
 )
 
-const defaultLinearLayer = Layer.succeed(LinearService, {
-  getAuthenticatedUserLogin: () => Effect.succeed("linear-user"),
-  listReadyIssues: () => Effect.succeed([]),
-  listProjects: () => Effect.succeed([]),
-  listProjectWorkflow: () => Effect.succeed([]),
-  hasCredentials: () => Effect.succeed(true),
-  hasAmbientCredentials: () => Effect.succeed(true),
-})
+const defaultLinearLayer = Layer.succeed(
+  LinearService,
+  defaultLinearServiceShape,
+)
 
 const runReconciliation = <A, E>(
   effect: Effect.Effect<A, E, IssueReconciler>,
@@ -1533,7 +1531,7 @@ describe("IssueReconciler", () => {
     const db = makeDbFixture({ issues: [] })
     const github = makeGitHubLayer([remoteIssue(1)], db.actions)
     const linear = Layer.succeed(LinearService, {
-      getAuthenticatedUserLogin: () => Effect.succeed("linear-user"),
+      ...defaultLinearServiceShape,
       listReadyIssues: () =>
         Effect.succeed([
           remoteIssue(123, {
@@ -1543,10 +1541,6 @@ describe("IssueReconciler", () => {
             author: "linear-user",
           }),
         ]),
-      listProjects: () => Effect.succeed([]),
-      listProjectWorkflow: () => Effect.succeed([]),
-      hasCredentials: () => Effect.succeed(true),
-      hasAmbientCredentials: () => Effect.succeed(true),
     })
 
     return runReconciliation(
@@ -1583,7 +1577,7 @@ describe("IssueReconciler", () => {
     const db = makeDbFixture({ issues: [] })
     const github = makeGitHubLayer([], db.actions)
     const linear = Layer.succeed(LinearService, {
-      getAuthenticatedUserLogin: () => Effect.succeed("linear-user"),
+      ...defaultLinearServiceShape,
       listReadyIssues: () =>
         Effect.succeed([
           remoteIssue(1, {
@@ -1599,10 +1593,6 @@ describe("IssueReconciler", () => {
             author: "someone-else",
           }),
         ]),
-      listProjects: () => Effect.succeed([]),
-      listProjectWorkflow: () => Effect.succeed([]),
-      hasCredentials: () => Effect.succeed(true),
-      hasAmbientCredentials: () => Effect.succeed(true),
     })
 
     return runReconciliation(
@@ -1630,7 +1620,7 @@ describe("IssueReconciler", () => {
     const db = makeDbFixture({ issues: [] })
     const github = makeGitHubLayer([], db.actions)
     const linear = Layer.succeed(LinearService, {
-      getAuthenticatedUserLogin: () => Effect.succeed("linear-user"),
+      ...defaultLinearServiceShape,
       listReadyIssues: () =>
         Effect.succeed([
           remoteIssue(10, {
@@ -1648,10 +1638,6 @@ describe("IssueReconciler", () => {
             ],
           }),
         ]),
-      listProjects: () => Effect.succeed([]),
-      listProjectWorkflow: () => Effect.succeed([]),
-      hasCredentials: () => Effect.succeed(true),
-      hasAmbientCredentials: () => Effect.succeed(true),
     })
 
     return runReconciliation(
@@ -1672,6 +1658,125 @@ describe("IssueReconciler", () => {
       defaultGitLabLayer,
       defaultAzureDevOpsLayer,
       linear,
+    )
+  })
+
+  it("observes last-descendant closure and reopening without changing Linear intake", () => {
+    const linearTracked = makeRepositoryRecord({
+      id: "repo-1",
+      forge: "github",
+      issueTracker: "linear",
+      linearProjectId: "proj-1",
+      includeAllIssueAuthors: false,
+    })
+    const db = makeDbFixture({ issues: [] })
+    let lastDescendantState = "started"
+    let discoveryUnavailable = false
+    const markedSpec = {
+      id: "spec-1",
+      identifier: "ENG-1",
+      url: "https://linear.app/acme/issue/ENG-1",
+      state: { type: "started" },
+    }
+    const node = (id: string, type: string, firstChildId?: string) => ({
+      id,
+      state: { type },
+      children: {
+        nodes: firstChildId === undefined ? [] : [{ id: firstChildId }],
+        pageInfo: { hasNextPage: false },
+      },
+    })
+    const fetchLinear: typeof fetch = Object.assign(
+      async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const { query, variables } = JSON.parse(String(init?.body))
+        if (query.includes("query Viewer")) {
+          return Response.json({ data: { viewer: { id: "operator" } } })
+        }
+        const pageInfo = { hasNextPage: false, endCursor: null }
+        if (query.includes("query ReadyIssues")) {
+          return Response.json({
+            data: {
+              issues: {
+                pageInfo,
+                nodes: [
+                  {
+                    id: "ordinary",
+                    identifier: "ENG-9",
+                    number: 9,
+                    title: "Ordinary ticket",
+                    url: "https://linear.app/acme/issue/ENG-9",
+                    createdAt: "2026-07-01T00:00:00Z",
+                    creator: { id: "operator" },
+                  },
+                ],
+              },
+            },
+          })
+        }
+        if (query.includes("query OpenSpecs")) {
+          expect(variables.projectId).toBe("proj-1")
+          expect(query).toContain('name: { eq: "spec" }')
+          if (discoveryUnavailable) {
+            return new Response(null, { status: 503 })
+          }
+          return Response.json({
+            data: { issues: { nodes: [markedSpec], pageInfo } },
+          })
+        }
+        expect(query).toContain("query SpecChildren")
+        const id = variables.id
+        const nodes =
+          id === markedSpec.id
+            ? [node("intermediate", "completed", "last-ticket")]
+            : id === "intermediate"
+              ? [
+                  {
+                    ...node("last-ticket", lastDescendantState),
+                    creator: { id: "human" },
+                    labels: { nodes: [] },
+                  },
+                ]
+              : []
+        return Response.json({
+          data: { issue: { id, children: { nodes, pageInfo } } },
+        })
+      },
+      { preconnect: fetch.preconnect },
+    )
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const waiting = yield* reconciler.reconcile(linearTracked)
+        expect(waiting.linearSpecObservations?.[0]?.readiness).toBe("waiting")
+        expect(waiting.inserted).toBe(1)
+        lastDescendantState = "canceled"
+        const ready = yield* reconciler.reconcile(linearTracked)
+        expect(ready.linearSpecObservations).toEqual([
+          {
+            nativeId: markedSpec.id,
+            displayId: markedSpec.identifier,
+            url: markedSpec.url,
+            readiness: "all-descendants-closed",
+          },
+        ])
+        lastDescendantState = "unstarted"
+        const reopened = yield* reconciler.reconcile(linearTracked)
+        expect(reopened.linearSpecObservations?.[0]?.readiness).toBe("waiting")
+        discoveryUnavailable = true
+        const unavailable = yield* reconciler.reconcile(linearTracked)
+        expect(unavailable.linearSpecObservations).toBeUndefined()
+        expect(unavailable.unchanged).toBe(1)
+        expect(db.stored.map((issue) => issue.nativeId)).toEqual(["ordinary"])
+      }),
+      db.layer,
+      makeGitHubLayer([], db.actions),
+      defaultGitLabLayer,
+      defaultAzureDevOpsLayer,
+      Layer.succeed(
+        LinearService,
+        makeLinearServiceFromToken("test-token", fetchLinear),
+      ),
     )
   })
 

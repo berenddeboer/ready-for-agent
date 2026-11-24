@@ -63,6 +63,331 @@ describe("Linear workflow defaults", () => {
   })
 })
 
+describe("Linear Spec observation", () => {
+  const node = (id: string, type: string, firstChildId?: string) => ({
+    id,
+    state: { type },
+    children: page(firstChildId === undefined ? [] : [{ id: firstChildId }]),
+  })
+  const spec = (id: string, type = "started") => ({
+    ...node(id, type),
+    identifier: `ENG-${id}`,
+    url: `https://linear.app/acme/issue/${id}`,
+  })
+  const page = (nodes: readonly unknown[], next: string | null = null) => ({
+    nodes,
+    pageInfo: { hasNextPage: next !== null, endCursor: next },
+  })
+
+  test("observes 600 closed leaves without a separate request per leaf", async () => {
+    let childRequests = 0
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch(({ query, variables }) => {
+        if (query.includes("query OpenSpecs")) {
+          return jsonResponse(200, { data: { issues: page([spec("root")]) } })
+        }
+        childRequests += 1
+        const id = variables?.id
+        const after = Number(variables?.after)
+        const nodes =
+          id === "root"
+            ? Array.from({ length: 50 }, (_, index) =>
+                node(`child-${after + index}`, "completed"),
+              )
+            : []
+        const next = id === "root" && after < 550 ? String(after + 50) : null
+        return jsonResponse(200, {
+          data: { issue: { id, children: page(nodes, next) } },
+        })
+      }),
+    )
+    const observations = await Effect.runPromise(
+      service.observeSpecs(PROJECT_ID),
+    )
+    expect(observations[0]?.readiness).toBe("all-descendants-closed")
+    expect(childRequests).toBe(12)
+  })
+
+  test("batches reads for 600 intermediate issues without skipping a branch page", async () => {
+    let childRequests = 0
+    let lastLeafState = "completed"
+    let lastBranchReadable = true
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch(({ query, variables }) => {
+        if (query.includes("query OpenSpecs")) {
+          return jsonResponse(200, { data: { issues: page([spec("root")]) } })
+        }
+        childRequests += 1
+        const issues = Object.entries(variables ?? {}).flatMap(([key, id]) => {
+          if (!key.startsWith("id")) return []
+          const suffix = key.slice(2)
+          const after = variables?.[`after${suffix}`]
+          if (id === "root") {
+            const offset = Number(after)
+            const branches = Array.from({ length: 50 }, (_, index) => {
+              const number = offset + index
+              return node(`branch-${number}`, "completed", `leaf-${number}`)
+            })
+            const next = offset < 550 ? String(offset + 50) : null
+            return [[`issue${suffix}`, { id, children: page(branches, next) }]]
+          }
+          if (typeof id !== "string" || !id.startsWith("branch-")) {
+            throw new Error(`Unexpected issue: ${id}`)
+          }
+          if (id === "branch-599" && after !== null && !lastBranchReadable) {
+            return [[`issue${suffix}`, null]]
+          }
+          const children =
+            after !== null
+              ? page([node("last-leaf", lastLeafState)])
+              : page(
+                  [node(`leaf-${id.slice(7)}`, "completed")],
+                  id === "branch-599" ? "last-page" : null,
+                )
+          return [[`issue${suffix}`, { id, children }]]
+        })
+        return jsonResponse(200, { data: Object.fromEntries(issues) })
+      }),
+    )
+    const observe = () => Effect.runPromise(service.observeSpecs(PROJECT_ID))
+    expect((await observe())[0]?.readiness).toBe("all-descendants-closed")
+    expect(childRequests).toBeLessThan(100)
+    lastLeafState = "started"
+    expect((await observe())[0]?.readiness).toBe("waiting")
+    lastBranchReadable = false
+    expect((await observe())[0]?.readiness).toBe("hierarchy-unavailable")
+  })
+
+  test("observes an archived Spec whose workflow state is still open", async () => {
+    const archivedSpec = {
+      ...spec("archived"),
+      archivedAt: "2026-07-01T00:00:00Z",
+    }
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch(({ query, variables }) => {
+        if (query.includes("query OpenSpecs")) {
+          // Linear omits archived issues unless the connection opts in.
+          const nodes = query.includes("includeArchived: true")
+            ? [archivedSpec]
+            : []
+          return jsonResponse(200, { data: { issues: page(nodes) } })
+        }
+        const id = variables?.id
+        const nodes =
+          id === archivedSpec.id ? [node("closed-child", "completed")] : []
+        return jsonResponse(200, {
+          data: { issue: { id, children: page(nodes) } },
+        })
+      }),
+    )
+    const observations = await Effect.runPromise(
+      service.observeSpecs(PROJECT_ID),
+    )
+    expect(observations).toEqual([
+      {
+        nativeId: archivedSpec.id,
+        displayId: archivedSpec.identifier,
+        url: archivedSpec.url,
+        readiness: "all-descendants-closed",
+      },
+    ])
+  })
+
+  test("identifies ready Specs on the first observation, through pages at each depth", async () => {
+    let openOnLaterPage: string | undefined
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch(({ query, variables }) => {
+        const after = variables?.after
+        if (query.includes("query OpenSpecs")) {
+          expect(query).toContain('labels: { name: { eq: "spec" } }')
+          expect(query).toContain('type: { nin: ["completed", "canceled"] }')
+          // An unmarked parent is not returned by the marker filter.
+          return jsonResponse(200, {
+            data: {
+              issues:
+                after === null
+                  ? page(
+                      [spec("childless"), spec("closed", "completed")],
+                      "next-spec",
+                    )
+                  : page([spec("ready")]),
+            },
+          })
+        }
+        expect(query).toContain("includeArchived: true")
+        const id = variables?.id
+        const children =
+          id === "ready"
+            ? after === null
+              ? page([node("first-child", "completed")], "next-child")
+              : page([
+                  node(
+                    "second-child",
+                    openOnLaterPage === "child" ? "started" : "completed",
+                    "first-grandchild",
+                  ),
+                ])
+            : id === "second-child"
+              ? after === null
+                ? page(
+                    [node("first-grandchild", "completed")],
+                    "next-grandchild",
+                  )
+                : page([
+                    node(
+                      "second-grandchild",
+                      openOnLaterPage === "grandchild" ? "started" : "canceled",
+                    ),
+                  ])
+              : page([])
+        expect(id).not.toBe("closed")
+        return jsonResponse(200, { data: { issue: { id, children } } })
+      }),
+    )
+    const observations = await Effect.runPromise(
+      service.observeSpecs(PROJECT_ID),
+    )
+    expect(
+      observations.map(({ nativeId, readiness }) => [nativeId, readiness]),
+    ).toEqual([
+      ["childless", "waiting"],
+      ["ready", "all-descendants-closed"],
+    ])
+    for (const depth of ["child", "grandchild"]) {
+      openOnLaterPage = depth
+      const updated = await Effect.runPromise(service.observeSpecs(PROJECT_ID))
+      expect(
+        updated.find(({ nativeId }) => nativeId === "ready")?.readiness,
+      ).toBe("waiting")
+    }
+  })
+
+  test.each([
+    ["a missing connection", { data: { issue: { id: "child" } } }],
+    ["an unreadable intermediate", { data: { issue: null } }],
+    [
+      "missing pagination",
+      { data: { issue: { id: "child", children: { nodes: [] } } } },
+    ],
+    [
+      "a missing continuation cursor",
+      {
+        data: {
+          issue: {
+            id: "child",
+            children: {
+              nodes: [node("grandchild", "completed")],
+              pageInfo: { hasNextPage: true, endCursor: null },
+            },
+          },
+        },
+      },
+    ],
+    [
+      "a nested GraphQL error with usable-looking data",
+      {
+        data: { issue: { id: "child", children: page([]) } },
+        errors: [
+          {
+            message: "Permission denied",
+            path: ["issue", "children", "nodes", 0],
+          },
+        ],
+      },
+    ],
+    [
+      "a descendant with unknown state data",
+      {
+        data: {
+          issue: {
+            id: "child",
+            children: page([{ id: "grandchild", state: null }]),
+          },
+        },
+      },
+    ],
+  ])("does not report readiness with %s", async (_description, response) => {
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch(({ query, variables }) => {
+        if (query.includes("query OpenSpecs")) {
+          return jsonResponse(200, { data: { issues: page([spec("root")]) } })
+        }
+        if (variables?.id === "root") {
+          return jsonResponse(200, {
+            data: {
+              issue: {
+                id: "root",
+                children: page([node("child", "completed", "grandchild")]),
+              },
+            },
+          })
+        }
+        return jsonResponse(200, response)
+      }),
+    )
+    const observations = await Effect.runPromise(
+      service.observeSpecs(PROJECT_ID),
+    )
+    expect(observations[0]?.readiness).toBe("hierarchy-unavailable")
+  })
+
+  test("a failed later descendant page invalidates earlier closed results", async () => {
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch(({ query, variables }) =>
+        query.includes("query OpenSpecs")
+          ? jsonResponse(200, { data: { issues: page([spec("root")]) } })
+          : variables?.after === null
+            ? jsonResponse(200, {
+                data: {
+                  issue: {
+                    id: "root",
+                    children: page([node("child", "completed")], "next"),
+                  },
+                },
+              })
+            : jsonResponse(503, {}),
+      ),
+    )
+    const observations = await Effect.runPromise(
+      service.observeSpecs(PROJECT_ID),
+    )
+    expect(observations[0]?.readiness).toBe("hierarchy-unavailable")
+  })
+
+  test.each([null, page([], "next")])(
+    "does not mistake incomplete leaf data for a leaf: %j",
+    async (children) => {
+      const service = makeLinearServiceFromToken(
+        TOKEN,
+        makeFetch(({ query }) =>
+          query.includes("query OpenSpecs")
+            ? jsonResponse(200, { data: { issues: page([spec("root")]) } })
+            : jsonResponse(200, {
+                data: {
+                  issue: {
+                    id: "root",
+                    children: page([
+                      { ...node("child", "completed"), children },
+                    ]),
+                  },
+                },
+              }),
+        ),
+      )
+      const observations = await Effect.runPromise(
+        service.observeSpecs(PROJECT_ID),
+      )
+      expect(observations[0]?.readiness).toBe("hierarchy-unavailable")
+    },
+  )
+})
+
 describe("Linear identity and listing", () => {
   test("uses viewer id as the authenticated Linear user", async () => {
     const service = makeLinearServiceFromToken(

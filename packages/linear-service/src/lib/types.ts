@@ -1,3 +1,4 @@
+import { Schema } from "effect"
 import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
 
 export const LINEAR_API_URL = "https://api.linear.app/graphql"
@@ -10,6 +11,18 @@ export const LINEAR_API_KEY_CREATION_URL =
 export const LINEAR_READY_LABEL = "ready-for-agent"
 
 export type LinearReadyLabeledIssue = ReadyLabeledIssue
+
+export const LinearSpecObservation = Schema.Struct({
+  nativeId: Schema.String,
+  displayId: Schema.String,
+  url: Schema.String,
+  readiness: Schema.Literals([
+    "waiting",
+    "all-descendants-closed",
+    "hierarchy-unavailable",
+  ]),
+})
+export type LinearSpecObservation = typeof LinearSpecObservation.Type
 
 export interface LinearProject {
   readonly id: string
