@@ -348,7 +348,7 @@ rfa:DecisionNeededReason
   a rfa:StepRunReason ;
   skos:notation "decision_needed" ;
   skos:definition
-    "The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human, Attention shows Decision needed, and explicit Resume continues Implement in the same session. Not a failure and not Retry. Distinct from a Decide PR Merge handoff, whose Resume re-enters Decide PR Merge."@en .
+    "The Step Run stopped because the agent reported an unresolved scope or operator decision. The Work Item parks as Needs Human and Attention shows Decision needed. Explicit Resume continues Validate Spec for Spec Validation or Implement for implementation, in the same session. Not a failure and not Retry. Distinct from a Decide PR Merge handoff, whose Resume re-enters Decide PR Merge."@en .
 
 rfa:MergeAssessmentResumeReason
   a rfa:StepRunReason ;
@@ -834,7 +834,9 @@ rfa:AssessChangesDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:As
 rfa:PreCommitDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:PreCommit ; rfa:toStep rfa:NeedsHuman ; rfa:guard "decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
 rfa:ReviewDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:NeedsHuman ; rfa:guard "decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
 rfa:CommitDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:NeedsHuman ; rfa:guard "decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
+rfa:ValidateSpecDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:ValidateSpec ; rfa:toStep rfa:NeedsHuman ; rfa:guard "material_spec_uncertainty_requires_operator_decision" ; rfa:reasonCode rfa:DecisionNeededReason .
 rfa:NeedsHumanResumeDecisionNeededTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:Implement ; rfa:guard "resume_decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
+rfa:NeedsHumanResumeSpecValidationTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:ValidateSpec ; rfa:guard "operator_resumes_spec_validation_decision_needed" ; rfa:reasonCode rfa:DecisionNeededReason .
 rfa:NeedsHumanResumeMergeAssessmentTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:DecidePrMerge ; rfa:guard "resume_merge_assessment" ; rfa:reasonCode rfa:MergeAssessmentResumeReason .
 rfa:NeedsHumanRetryInvestigationTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:InvestigatePrStatusChecks ; rfa:guard "retry_status_check_handoff" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:NeedsHumanRetryReviewTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:Review ; rfa:guard "retry_review_fix_limit" ; rfa:reasonCode rfa:HandlerFailedReason .

@@ -3,6 +3,7 @@ import { runGitHubCli } from "../bin/cli.js"
 import { closeOpenPullRequestsAndDeleteBranchProgram } from "../bin/close-open-pull-requests-and-delete-branch.js"
 import { runCountOpenNonDraftPullRequestsProgram } from "../bin/count-open-non-draft-pull-requests.js"
 import { createDraftPullRequestProgram } from "../bin/create-draft-pull-request.js"
+import { ensureIssueCommentProgram } from "../bin/ensure-issue-comment.js"
 import { ensureIssueCompletedWithSummaryProgram } from "../bin/ensure-issue-completed-with-summary.js"
 import { findOpenPullRequestNumberProgram } from "../bin/find-open-pr-number.js"
 import { getAuthenticatedUserLoginProgram } from "../bin/get-authenticated-user-login.js"
@@ -54,6 +55,7 @@ export const GITHUB_HELPER_OPERATIONS = [
   "rerun-failed-jobs",
   "upload-user-attachment",
   "ensure-issue-completed-with-summary",
+  "ensure-issue-comment",
 ] as const
 
 export type GitHubHelperOperation = (typeof GITHUB_HELPER_OPERATIONS)[number]
@@ -174,6 +176,7 @@ const programs: Record<
   "rerun-failed-jobs": rerunFailedJobsProgram,
   "upload-user-attachment": uploadUserAttachmentProgram,
   "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
+  "ensure-issue-comment": ensureIssueCommentProgram,
 }
 
 /**

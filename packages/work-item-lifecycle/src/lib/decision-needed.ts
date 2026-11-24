@@ -72,13 +72,14 @@ export const decisionNeededPromptSection = (): string =>
   ].join("\n")
 
 /**
- * Classification-only discoveries route back to Implement so late Commit is
- * not retried against unfinished work. After Implement, the ordinary pipeline
- * runs fresh verification and review.
+ * Spec decisions resume validation in the existing session. Implementation
+ * decisions route back to Implement, so fresh verification and review run
+ * before a late Commit is attempted again.
  */
 export const decisionResumeTarget = (
-  _originatingStep: OperationalLifecycleStep,
-): "implement" => "implement"
+  originatingStep: OperationalLifecycleStep,
+): "implement" | "validate_spec" =>
+  originatingStep === "validate_spec" ? "validate_spec" : "implement"
 
 export type DecisionNeededHandoff = {
   readonly _tag: "decision_needed"
@@ -90,6 +91,7 @@ export const decisionNeededHandlerOutput = (input: {
   readonly request: string
   readonly originatingStep: OperationalLifecycleStep
   readonly sessionId?: string
+  readonly findingsAtDecision?: string
 }): {
   readonly sessionId?: string
   readonly stepRunReasonCode: StepRunReasonCode
@@ -108,6 +110,7 @@ export const decisionNeededHandlerOutput = (input: {
     kind: "decision_needed",
     originatingStep: input.originatingStep,
     resumeTarget: decisionResumeTarget(input.originatingStep),
+    findingsAtDecision: input.findingsAtDecision,
   }),
   transition: {
     nextState: "needs_human",

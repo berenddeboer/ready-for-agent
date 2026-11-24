@@ -4,11 +4,11 @@ status: accepted
 
 # Validate spec delivery after all children close
 
-Accepted design. GitHub Issues and Linear support the first independent
-validation and record findings on the Work Item. Tracker close-out, follow-up
-tickets, and decision resumption are separate slices. Use the original Issue
-Tracker for child relationships, closure reasons, comments, follow-ups, and
-parent closure.
+Accepted design. GitHub Issues and Linear support independent validation,
+record findings, and route unresolved decisions through the validation Work
+Item. Tracker close-out and follow-up tickets are separate slices. Use the
+original Issue Tracker for child relationships, closure reasons, comments,
+follow-ups, and parent closure.
 This extends [ADR 0070](0070-independent-issue-tracker.md), which left automatic
 parent completion outside the initial Linear integration.
 
@@ -76,8 +76,10 @@ If one requirement is demonstrably unmet and another needs interpretation,
 file the known gap immediately and put the validation Work Item in the existing
 [Decision needed](../../GLOSSARY.md#decision-needed) handoff under Needs Human.
 Report both on the parent. For this Work Item, explicit Resume continues
-validation rather than returning to Implement. Retain an answer received while
-a descendant is open and wait for all descendants to close before validating again.
+validation rather than returning to Implement. Answer in the existing validator
+session, then choose Resume on that Work Item; a reply by itself doesn't start
+validation. Retain an answer received while a descendant is open and wait for
+all descendants to close before validating again.
 
 When all children close again, validate the whole spec, reusing evidence where
 it still applies. Read follow-up comments and the reason for closure before

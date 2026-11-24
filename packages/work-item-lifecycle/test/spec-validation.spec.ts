@@ -12,7 +12,10 @@ import type {
   SpecBaselineResult,
   SpecObservation,
 } from "@ready-for-agent/forge-contract"
-import { GitHubService } from "@ready-for-agent/github-service"
+import {
+  GitHubRequestError,
+  GitHubService,
+} from "@ready-for-agent/github-service"
 import {
   LinearRequestError,
   LinearService,
@@ -71,7 +74,7 @@ const approvedChecklist = (
 })
 const no = () =>
   Effect.die(
-    "Spec Validation must not execute an implementation step or write to the tracker",
+    "Spec Validation must not run an implementation step, open a follow-up, or close the parent",
   )
 
 const runNext = (workItemId: string, step: string) =>
@@ -135,9 +138,38 @@ it.each([
     omit: true,
     initialSource: "historical-approval-comment",
   },
+  {
+    tracker: "linear",
+    deployedStatus: 404,
+    expected: "UNMET",
+    omit: false,
+    initialSource: "publication-comment",
+    decision: "authorship",
+  },
+  {
+    tracker: "github",
+    deployedStatus: 404,
+    expected: "UNMET",
+    omit: false,
+    initialSource: "publication-comment",
+    decision: "baseline",
+  },
+  {
+    tracker: "linear",
+    deployedStatus: 404,
+    expected: "UNMET",
+    omit: false,
+    initialSource: "publication-comment",
+    decision: "changed-baseline",
+  },
 ] as const)(
-  "$tracker: records $expected for deployed HTTP $deployedStatus (omitted: $omit, baseline: $initialSource)",
-  async ({ tracker, deployedStatus, expected, omit, initialSource }) => {
+  "$tracker: records $expected for deployed HTTP $deployedStatus (omitted: $omit, baseline: $initialSource, decision: $decision)",
+  async (scenario) => {
+    const { tracker, deployedStatus, expected, omit, initialSource } = scenario
+    const decision = "decision" in scenario ? scenario.decision : undefined
+    const baselineDecision =
+      decision === "baseline" || decision === "changed-baseline"
+    const waitForChecklist = omit || decision === "changed-baseline"
     const root = await mkdtemp(join(tmpdir(), "spec-validation-"))
     const sessionId = "spec-validator-own-session"
     const specUrl =
@@ -182,23 +214,37 @@ it.each([
       kind: "baseline",
       baseline: { ...withoutChecklist, requirementChecklist: checklist },
     }
-    let latestBaseline: SpecBaselineResult = omit
-      ? {
-          kind: "baseline",
-          baseline: {
-            ...withoutChecklist,
-            source: {
-              kind: initialSource,
-              url:
-                initialSource === "marked-parent"
-                  ? specUrl
-                  : initialSource === "historical-approval-comment"
-                    ? `${specUrl}#historical-approval`
-                    : baselineUrl,
-            },
-          },
-        }
-      : approved
+    const otherBaseline = `${specUrl}#local-only-revision`
+    const narrowed = {
+      ...withoutChecklist,
+      body: "Only local MCP must accept initialize.",
+      source: { kind: "publication-comment", url: otherBaseline },
+    } as const
+    const conflict: SpecBaselineResult = {
+      kind: "review",
+      candidates: [approved.baseline, narrowed],
+      unreadableSnapshots: [],
+    }
+    let latestBaseline: SpecBaselineResult =
+      decision === "baseline"
+        ? conflict
+        : waitForChecklist
+          ? {
+              kind: "baseline",
+              baseline: {
+                ...withoutChecklist,
+                source: {
+                  kind: initialSource,
+                  url:
+                    initialSource === "marked-parent"
+                      ? specUrl
+                      : initialSource === "historical-approval-comment"
+                        ? `${specUrl}#historical-approval`
+                        : baselineUrl,
+                },
+              },
+            }
+          : approved
     const readBaseline = () => Effect.sync(() => latestBaseline)
     const observed = {
       tracker,
@@ -212,6 +258,17 @@ it.each([
     let hierarchy: readonly SpecObservation[] = [observed]
     let failRead = false
     let turns = 0
+    let continuations = 0
+    let operatorAnswer: string | undefined
+    const parentComments = new Map<string, string>()
+    let commentAttempts = 0
+    const recordComment = <E>(marker: string, body: string, error: E) =>
+      Effect.suspend(() => {
+        commentAttempts += 1
+        if (commentAttempts === 1) return Effect.fail(error)
+        parentComments.set(marker, body)
+        return Effect.void
+      })
     const origin = join(root, "origin")
     const repositoryPath = join(root, "repository")
     let initialCommit: string
@@ -223,6 +280,49 @@ it.each([
       git(checkout, "rev-parse", "HEAD") === integratedCommit
         ? [reopened]
         : hierarchy
+    const probe = (environment: "local" | "deployed") =>
+      Effect.promise(async () => {
+        const url = new URL(`${environment}/mcp`, mcp.url)
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
+        })
+        const body = await response.text()
+        const status =
+          response.ok && body.includes("protocolVersion")
+            ? "met"
+            : response.status === 404
+              ? "unmet"
+              : "unverified"
+        return {
+          requirementId: `mcp-${environment}`,
+          status,
+          evidence: [
+            {
+              kind: status === "unverified" ? "human-verification" : "delivery",
+              environment,
+              detail: `POST ${url} → HTTP ${response.status}${body ? ` ${body}` : ""}`,
+            },
+          ],
+        }
+      })
+    const question =
+      decision === "baseline"
+        ? "Which exact Spec snapshot and design revisions govern validation?"
+        : baselineDecision
+          ? "Which approved revision governs: local only, or local and deployed?"
+          : "Did you personally waive deployed MCP, or was that an agent deferral?"
+    const evidence =
+      decision === "baseline"
+        ? "mcp-local (reported met; not yet assessed against an approved checklist)"
+        : baselineDecision
+          ? `The versions ${baselineUrl} and ${otherBaseline} disagree on deployed MCP.`
+          : `The same tracker account posted a purported waiver and the agent's deferral at ${specUrl}#deferral.`
+    const report = (payload: unknown) => ({
+      sessionId,
+      assistantText: `READY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify(payload)}`,
+    })
     const agent = Layer.succeed(AgentBackend, {
       // Controlled adapter runs real HTTP probes; a model is not needed to
       // make the lifecycle, persistence, and evidence-boundary checks repeatable.
@@ -247,47 +347,69 @@ it.each([
           )
           expect(turn.prompt).toContain("cancelled-child")
           expect(turn.prompt).toContain(checklist.sourceUrl)
+          if (baselineDecision) expect(turn.prompt).toContain(narrowed.body)
           yield* turn.onSessionId?.(sessionId) ?? Effect.void
-          const probe = (environment: "local" | "deployed") =>
-            Effect.promise(async () => {
-              const url = new URL(`${environment}/mcp`, mcp.url)
-              const response = await fetch(url, {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({
-                  jsonrpc: "2.0",
-                  id: 1,
-                  method: "initialize",
-                }),
-              })
-              const body = await response.text()
-              const status =
-                response.ok && body.includes("protocolVersion")
-                  ? "met"
-                  : response.status === 404
-                    ? "unmet"
-                    : "unverified"
-              return {
-                requirementId: `mcp-${environment}`,
-                status,
-                evidence: [
-                  {
-                    kind: status === "unverified" ? "unavailable" : "delivery",
-                    environment,
-                    detail: `POST ${url} → HTTP ${response.status}${body ? ` ${body}` : ""}`,
-                  },
-                ],
-              }
+          if (decision === "baseline") {
+            // Both versions require local MCP. That observation remains useful
+            // even though the selected snapshot lacks an approved checklist.
+            return report({
+              kind: "baseline_selected",
+              baselineUrl: otherBaseline,
+              basis: "same_verdict",
+              findings: [yield* probe("local")],
             })
+          }
+          if (decision !== undefined) {
+            return report({
+              kind: "decision_needed",
+              question,
+              evidence: [evidence],
+              findings:
+                decision === "authorship" ? [yield* probe("local")] : [],
+            })
+          }
           const findings = yield* Effect.all(
             omit ? [probe("local")] : [probe("local"), probe("deployed")],
           )
-          return {
-            sessionId,
-            assistantText: `I checked both endpoints.\nREADY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify(findings)}`,
-          }
+          return report(findings)
         }),
-      continueTurn: no,
+      continueTurn:
+        decision === undefined
+          ? no
+          : (turn) =>
+              Effect.gen(function* () {
+                continuations += 1
+                expect(turn.sessionId).toBe(sessionId)
+                expect(turn.replyToPromptOnly).toBe(true)
+                expect(turn.cwd).toBe(checkout)
+                expect(git(turn.cwd, "rev-parse", "HEAD")).toBe(
+                  integratedCommit,
+                )
+                expect(turn.prompt).toContain(question)
+                expect(turn.prompt).toContain(evidence)
+                if (decision === "authorship") {
+                  expect(turn.prompt).toContain(
+                    "MET — local MCP accepts initialize",
+                  )
+                }
+                expect(operatorAnswer).toBe(
+                  "Keep the approved local and deployed requirements.",
+                )
+                const findings = yield* Effect.all([
+                  probe("local"),
+                  probe("deployed"),
+                ])
+                return report(
+                  baselineDecision
+                    ? {
+                        kind: "baseline_selected",
+                        baselineUrl,
+                        basis: "operator_answer",
+                        findings,
+                      }
+                    : findings,
+                )
+              }),
       inspect: no,
     })
     const layers = () =>
@@ -353,6 +475,20 @@ it.each([
             observeSpecs:
               tracker === "github" ? () => Effect.sync(() => hierarchy) : no,
             createDraftPullRequest: no,
+            ensureIssueCompletedWithSummary: no,
+            ensureIssueComment:
+              tracker === "github" && decision !== undefined
+                ? (_repository, issueNumber, marker, body) => {
+                    expect(issueNumber).toBe(7)
+                    return recordComment(
+                      marker,
+                      body,
+                      new GitHubRequestError({
+                        message: "Temporary tracker outage",
+                      }),
+                    )
+                  }
+                : no,
           }),
         ),
         Layer.provideMerge(stubGitLabServiceLayer()),
@@ -376,7 +512,19 @@ it.each([
                     })
                 : no,
             updateIssueState: no,
-            ensureMilestoneComment: no,
+            ensureMilestoneComment:
+              tracker === "linear" && decision !== undefined
+                ? (nativeId, marker, body) => {
+                    expect(nativeId).toBe(observed.nativeId)
+                    return recordComment(
+                      marker,
+                      body,
+                      new LinearRequestError({
+                        message: "Temporary tracker outage",
+                      }),
+                    )
+                  }
+                : no,
           }),
         ),
         Layer.provideMerge(agent),
@@ -506,7 +654,7 @@ it.each([
       // Only the persisted wait reason is available after restart.
       failRead = false
       hierarchy = [observed]
-      if (omit) {
+      if (waitForChecklist) {
         await Effect.runPromise(
           Effect.gen(function* () {
             const lifecycle = yield* WorkItemLifecycle
@@ -547,28 +695,26 @@ it.each([
                 (yield* lifecycle.getWorkItem(saved.id)).stepRuns,
               ).toHaveLength(3)
             } else {
-              for (const change of [
-                { body: "Only local MCP must accept initialize." },
-                { title: "Different approved title" },
-                { designRevisions: [] },
-              ]) {
-                latestBaseline = {
-                  kind: "baseline",
-                  baseline: { ...approved.baseline, ...change },
-                }
-                yield* lifecycle.considerSpecValidation(
-                  saved.repository,
-                  observed,
-                )
-                expect(
-                  (yield* lifecycle.getWorkItem(saved.id)).stepRuns,
-                ).toHaveLength(3)
+              // Editing the live draft is not a competing approved snapshot.
+              latestBaseline = {
+                kind: "baseline",
+                baseline: {
+                  ...narrowed,
+                  source: { kind: "marked-parent", url: specUrl },
+                },
               }
+              yield* lifecycle.considerSpecValidation(
+                saved.repository,
+                observed,
+              )
+              expect(
+                (yield* lifecycle.getWorkItem(saved.id)).stepRuns,
+              ).toHaveLength(3)
             }
             expect(turns).toBe(0)
           }).pipe(Effect.provide(layers())),
         )
-        if (initialSource === "publication-comment") {
+        if (omit && initialSource === "publication-comment") {
           await Bun.write(
             join(origin, "delivery.txt"),
             "merged during checklist wait\n",
@@ -603,6 +749,131 @@ it.each([
         )
         reopenAfterRefresh = false
       }
+      if (decision !== undefined) {
+        latestBaseline =
+          decision === "changed-baseline"
+            ? {
+                kind: "baseline",
+                baseline: {
+                  ...narrowed,
+                  requirementChecklist: {
+                    ...approvedChecklist(otherBaseline),
+                    requirements: [checklist.requirements[0]],
+                  },
+                },
+              }
+            : baselineDecision
+              ? conflict
+              : approved
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const lifecycle = yield* WorkItemLifecycle
+            yield* lifecycle.considerSpecValidation(saved.repository, observed)
+            yield* runNext(saved.id, "validate_spec")
+            const parked = yield* lifecycle.getWorkItem(saved.id)
+            expect(parked).toMatchObject({
+              state: "needs_human",
+              failureCode: "decision_needed",
+              sessionId,
+              holdsWorkerSlot: false,
+            })
+            expect(parked.failureMessage).toContain(question)
+            expect(parked.failureMessage).toContain(evidence)
+            expect(parked.stepRuns.at(-1)).toMatchObject({
+              step: "validate_spec",
+              status: "succeeded",
+              reasonCode: "decision_needed",
+            })
+            if (decision === "authorship") {
+              expect(parked.completionSummary).toContain(
+                "MET — local MCP accepts initialize",
+              )
+              expect(parked.completionSummary).toContain(
+                "UNVERIFIED — deployed MCP accepts initialize",
+              )
+            } else if (decision === "baseline") {
+              expect(parked.failureMessage).toContain("HTTP 200")
+              expect(parked.completionSummary).toBeNull()
+            }
+            expect(commentAttempts).toBe(1)
+            expect(parentComments.size).toBe(0)
+            expect(
+              (yield* lifecycle.getWorkItem(saved.id)).stepRuns,
+            ).toHaveLength(waitForChecklist ? 4 : 3)
+          }).pipe(Effect.provide(layers())),
+        )
+        // The answer is entered in the existing agent session, independent of
+        // the Harness DB connection. Polling or answering is not Resume.
+        operatorAnswer = "Keep the approved local and deployed requirements."
+        hierarchy = [reopened]
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const lifecycle = yield* WorkItemLifecycle
+            expect((yield* lifecycle.getWorkItem(saved.id)).state).toBe(
+              "needs_human",
+            )
+            const resumed = yield* lifecycle.resume(saved.id)
+            expect(resumed.state).toBe("validate_spec")
+            yield* runNext(saved.id, "validate_spec")
+            const held = yield* lifecycle.resume(saved.id)
+            expect(held).toMatchObject({
+              state: "validate_spec",
+              sessionId,
+              holdsWorkerSlot: false,
+            })
+            expect(held.stepRuns.at(-1)?.reasonCode).toBe(
+              "waiting_for_spec_hierarchy",
+            )
+            expect(held.stepRuns).toHaveLength(waitForChecklist ? 5 : 4)
+            expect(parentComments.size).toBe(0)
+            expect(continuations).toBe(0)
+          }).pipe(Effect.provide(layers())),
+        )
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const lifecycle = yield* WorkItemLifecycle
+            yield* lifecycle.considerSpecValidation(saved.repository, reopened)
+            expect([...parentComments.values()]).toEqual([
+              expect.stringContaining(question),
+            ])
+            if (decision === "baseline") {
+              expect([...parentComments.values()][0]).toContain(evidence)
+              expect([...parentComments.values()][0]).toContain("HTTP 200")
+            }
+            if (decision === "authorship") {
+              expect([...parentComments.values()][0]).toContain(
+                "MET — local MCP accepts initialize",
+              )
+            }
+            const held = yield* lifecycle.getWorkItem(saved.id)
+            expect(held.state).toBe("validate_spec")
+            expect(held.stepRuns).toHaveLength(waitForChecklist ? 5 : 4)
+            expect(continuations).toBe(0)
+          }).pipe(Effect.provide(layers())),
+        )
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const lifecycle = yield* WorkItemLifecycle
+            yield* lifecycle.considerSpecValidation(saved.repository, reopened)
+            expect(commentAttempts).toBe(2)
+            expect(parentComments.size).toBe(1)
+          }).pipe(Effect.provide(layers())),
+        )
+        await Bun.write(
+          join(origin, "follow-up.txt"),
+          "integrated while waiting\n",
+        )
+        git(origin, "add", "follow-up.txt")
+        git(origin, "commit", "--no-verify", "-m", "Close reopened descendant")
+        integratedCommit = git(origin, "rev-parse", "HEAD")
+        if (decision === "changed-baseline") latestBaseline = approved
+        if (decision === "baseline") {
+          // The current parent no longer cites the original approved
+          // snapshot. The operator still chooses that saved snapshot.
+          latestBaseline = { kind: "baseline", baseline: narrowed }
+        }
+        hierarchy = [observed]
+      }
       await Effect.runPromise(
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
@@ -614,7 +885,7 @@ it.each([
             ],
             { concurrency: "unbounded" },
           )
-          latestBaseline = { kind: "not-spec" }
+          if (decision === undefined) latestBaseline = { kind: "not-spec" }
           yield* runNext(saved.id, "validate_spec")
           yield* lifecycle.considerSpecValidation(saved.repository, observed)
           const items = yield* lifecycle.listWorkItemsForRepository(
@@ -634,10 +905,16 @@ it.each([
             "create_worktree",
             "validate_spec",
             "validate_spec",
-            ...(omit ? ["validate_spec"] : []),
-            ...(integratedCommit !== initialCommit ? ["validate_spec"] : []),
+            ...(waitForChecklist ? ["validate_spec"] : []),
+            ...(decision === undefined && integratedCommit !== initialCommit
+              ? ["validate_spec"]
+              : []),
+            ...(decision !== undefined
+              ? ["validate_spec", "validate_spec"]
+              : []),
           ])
           expect(turns).toBe(1)
+          expect(continuations).toBe(decision === undefined ? 0 : 1)
           expect(git(repositoryPath, "rev-parse", "HEAD")).toBe(initialCommit)
           expect(item.completionSummary).toContain(baselineUrl)
           expect(item.completionSummary).toContain(
@@ -650,6 +927,12 @@ it.each([
           expect(item.completionSummary).toContain(
             `${expected} — deployed MCP accepts initialize`,
           )
+          if (deployedStatus === 403) {
+            expect(item.completionSummary).toContain(
+              "human-verification (deployed)",
+            )
+            expect(parentComments.size).toBe(0)
+          }
           expect(item.completionSummary).toContain(
             omit
               ? "The validator omitted this approved requirement"
@@ -674,7 +957,13 @@ it.each([
 )
 
 it("requires applicable delivery evidence for a positive deployed verdict", async () => {
-  const kinds = ["closure", "disclaimer", "unshipped-experiment", "delivery"]
+  const kinds = [
+    "closure",
+    "disclaimer",
+    "unshipped-experiment",
+    "human-verification",
+    "delivery",
+  ]
   for (const kind of kinds) {
     const findings = await Effect.runPromise(
       decodeSpecFindings(

@@ -83,6 +83,34 @@ test("only one explicitly cited, unedited checklist for the selected publication
       }),
     }),
   ).toBeUndefined()
+  const competingSource = `${parent.url}#issuecomment-other-snapshot`
+  const conflict = resolveSpecBaseline(
+    {
+      ...parent,
+      body: `${cite(parent.body, source, competingSource)}\n\n${citation}`,
+    },
+    [
+      snapshot,
+      {
+        url: competingSource,
+        edited: false,
+        body: renderSpecBaseline({
+          title: parent.title,
+          body: localSlice,
+          designRevisions: [],
+        }),
+      },
+      checklist,
+    ],
+  )
+  expect(conflict.kind).toBe("review")
+  if (conflict.kind !== "review")
+    throw new Error("Expected a baseline conflict")
+  expect(
+    conflict.candidates.map(
+      ({ requirementChecklist }) => requirementChecklist?.baselineUrl,
+    ),
+  ).toEqual([source, undefined])
   expect(() =>
     renderSpecRequirementChecklist({ baselineUrl: source, requirements: [] }),
   ).toThrow()

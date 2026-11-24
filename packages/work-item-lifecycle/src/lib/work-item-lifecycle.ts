@@ -36,6 +36,7 @@ import {
 } from "@ready-for-agent/db-service"
 import {
   type PullRequestLifecycleStatus,
+  type SpecBaselineResult,
   type SpecObservation,
   type StepRunReasonDetail,
   buildReasonDetail,
@@ -110,6 +111,7 @@ import { CloseIssueEligibilityError } from "./close-issue-errors.js"
 import {
   DECISION_NEEDED_FAILURE_CODE,
   decisionNeededHandlerOutput,
+  decisionResumeTarget,
   isDecisionNeededReason,
 } from "./decision-needed.js"
 import {
@@ -267,7 +269,10 @@ import {
   isUnfinishedCiRepairUniqueViolation,
   isUnfinishedIssueWorkItemUniqueViolation,
 } from "./unfinished-work-item-unique-violation.js"
-import { SpecValidationInput } from "./validate-spec.js"
+import {
+  SpecValidationInput,
+  notifySpecValidationDecision,
+} from "./validate-spec.js"
 import { workItemBranchName } from "./worktree-names.js"
 
 export type { ExecutionProfileUpdatePatch } from "./execution-profile.js"
@@ -4014,6 +4019,16 @@ export const makeWorkItemLifecycleLive = (
                   return { holdForSpec: "hierarchy" as const }
                 case "waiting_for_checklist":
                   return { holdForSpec: "checklist" as const }
+                case "decision_needed":
+                  return {
+                    ...result,
+                    ...decisionNeededHandlerOutput({
+                      request: result.request,
+                      originatingStep: "validate_spec",
+                      sessionId: result.sessionId,
+                      findingsAtDecision: result.completionSummary,
+                    }),
+                  }
                 case "recorded":
                   return {
                     ...result,
@@ -4918,6 +4933,78 @@ export const makeWorkItemLifecycleLive = (
           }
         })
 
+      const specDecisionPublications = new Set<string>()
+      const publishPendingSpecDecisions = (workItemId: string) =>
+        Effect.suspend(() => {
+          if (specDecisionPublications.has(workItemId)) return Effect.void
+          specDecisionPublications.add(workItemId)
+          return Effect.gen(function* () {
+            // The decision run, not the current Work Item state, owns the
+            // pending comment. Resume may advance before the tracker recovers.
+            const pending = yield* sql.unsafe<{
+              repository_id: string
+              spec_validation_input: string
+              findings_at_decision: string | null
+              step_run_id: string
+              request: string
+            }>(
+              `SELECT w.repository_id, w.spec_validation_input,
+                      json_extract(s.reason_detail, '$.findingsAtDecision') AS findings_at_decision,
+                      s.id AS step_run_id, s.reason_message AS request
+                 FROM work_item w JOIN step_run s ON s.work_item_id = w.id
+                 WHERE w.id = ? AND w.origin = 'spec_validation'
+                   AND s.step = 'validate_spec' AND s.status = 'succeeded'
+                   AND s.reason_code = ? AND s.reason_message IS NOT NULL
+                   AND json_extract(s.reason_detail, '$.parentCommentPublished') IS NULL
+                 ORDER BY s.queued_at, s.rowid`,
+              [workItemId, STEP_RUN_REASON.decisionNeeded],
+            )
+            const first = pending[0]
+            if (first === undefined) return
+            const { spec } = yield* Schema.decodeUnknownEffect(
+              SpecValidationInput,
+            )(first.spec_validation_input)
+            for (const decision of pending) {
+              const published = yield* notifySpecValidationDecision({
+                repositoryId: decision.repository_id,
+                spec,
+                workItemId,
+                stepRunId: decision.step_run_id,
+                request: decision.request,
+                ...(decision.findings_at_decision === null
+                  ? {}
+                  : { findings: decision.findings_at_decision }),
+              }).pipe(
+                Effect.provideService(DbService, db),
+                Effect.provideService(GitHubService, github),
+                Effect.provideService(LinearService, linear),
+              )
+              if (!published) return
+              yield* sql.unsafe(
+                `UPDATE step_run
+                  SET reason_detail = json_set(reason_detail, '$.parentCommentPublished', 1)
+                WHERE id = ?`,
+                [decision.step_run_id],
+              )
+            }
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(
+                "Could not publish Spec validation decision on the parent",
+                {
+                  workItemId,
+                  error,
+                },
+              ),
+            ),
+            Effect.ensuring(
+              Effect.sync(() => {
+                specDecisionPublications.delete(workItemId)
+              }),
+            ),
+          )
+        })
+
       const completeSuccessfulStep = (input: {
         readonly stepRun: StepRunRow
         readonly workItem: WorkItemRow
@@ -5027,7 +5114,7 @@ export const makeWorkItemLifecycleLive = (
             ? (transition?.reason ??
               `${agentBackendLabel(workItem.agent_backend)} requested human intervention`)
             : null
-          if (attentionReason !== null) {
+          if (attentionReason !== null && stepRun.step !== "validate_spec") {
             const attentionOrigin = yield* storedOrigin(workItem.origin)
             yield* notifyLinearHumanAttention({
               issueSource: storedIssueSource(workItem, attentionOrigin),
@@ -5274,8 +5361,9 @@ export const makeWorkItemLifecycleLive = (
                        failure_message = ?,
                         worktree_path = ?,
                         starting_commit_oid = ?,
-                        completion_summary = ?,
-                        publication_title = ?,
+                         completion_summary = ?,
+                         spec_validation_findings = COALESCE(?, spec_validation_findings),
+                         publication_title = ?,
                         publication_body = ?,
                         session_id = ?,
                         pull_request_number = ?,
@@ -5292,6 +5380,7 @@ export const makeWorkItemLifecycleLive = (
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
+                      output.specValidationFindings ?? null,
                       publicationTitle,
                       publicationBody,
                       sessionId,
@@ -5530,6 +5619,9 @@ export const makeWorkItemLifecycleLive = (
                 ),
               ),
             )
+          }
+          if (stepRun.step === "validate_spec" && parkingNeedsHuman) {
+            yield* publishPendingSpecDecisions(workItem.id)
           }
           return completed
         })
@@ -9675,7 +9767,7 @@ export const makeWorkItemLifecycleLive = (
 
       const resumeInto = (
         workItemId: string,
-        step: "implement" | "decide_pr_merge",
+        step: "implement" | "decide_pr_merge" | "validate_spec",
       ) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
@@ -9718,9 +9810,20 @@ export const makeWorkItemLifecycleLive = (
                          failure_message = NULL,
                          paused = 0,
                          updated_at = ?
-                     WHERE id = ? AND state = 'needs_human'
-                     RETURNING id`,
-                    [step, now, now, workItemId],
+                      WHERE id = ? AND state = 'needs_human'
+                        AND (? != 'validate_spec' OR (
+                          origin = 'spec_validation' AND failure_code = ?
+                          AND session_id IS NOT NULL
+                        ))
+                      RETURNING id`,
+                    [
+                      step,
+                      now,
+                      now,
+                      workItemId,
+                      step,
+                      DECISION_NEEDED_FAILURE_CODE,
+                    ],
                   )) as readonly { readonly id: string }[]
                   if (updated.length === 0) {
                     return false
@@ -9808,11 +9911,13 @@ export const makeWorkItemLifecycleLive = (
               stepRun.status === "succeeded" &&
               isDecisionNeededReason(stepRun.reasonCode),
           )
+        const decisionTarget =
+          decisionRun && decisionResumeTarget(decisionRun.step)
         const decisionApplied =
           decisionRun !== undefined &&
           current.stepRuns.some(
             (stepRun) =>
-              stepRun.step === "implement" &&
+              stepRun.step === decisionTarget &&
               stepRun.status === "succeeded" &&
               !isDecisionNeededReason(stepRun.reasonCode) &&
               stepRun.finishedAt !== null &&
@@ -9854,8 +9959,9 @@ export const makeWorkItemLifecycleLive = (
             current.waitingForCiRepair)
         const resumeInProgress =
           openDecision &&
-          current.state === "implement" &&
-          (active !== undefined ||
+          current.state === decisionTarget &&
+          (decisionTarget === "validate_spec" ||
+            active !== undefined ||
             current.waitingSince !== null ||
             current.holdsWorkerSlot)
         if ((mergeHandoff && active !== undefined) || mergeResumeInProgress) {
@@ -9867,13 +9973,17 @@ export const makeWorkItemLifecycleLive = (
         if (mergeHandoff) {
           return yield* resumeInto(workItemId, "decide_pr_merge")
         }
-        if (!parkedForDecision) {
+        if (
+          !parkedForDecision ||
+          (current.origin === "spec_validation" &&
+            (decisionTarget !== "validate_spec" || current.sessionId === null))
+        ) {
           return yield* new ResumeNotEligibleError({
             workItemId,
             reason: "not_decision_needed",
           })
         }
-        return yield* resumeInto(workItemId, "implement")
+        return yield* resumeInto(workItemId, decisionTarget ?? "implement")
       })
 
       const createWorkItem = (
@@ -10337,19 +10447,15 @@ export const makeWorkItemLifecycleLive = (
       const considerSpecValidation: WorkItemLifecycleShape["considerSpecValidation"] =
         Effect.fn("WorkItemLifecycle.considerSpecValidation")(
           function* (repository, observed) {
-            if (
-              observed.readiness !== "all-descendants-closed" ||
-              repository.paused
-            ) {
-              return
-            }
+            if (repository.paused) return
             const key = `${observed.tracker}:${observed.nativeId}`
             const [existing] = yield* sql.unsafe<{
               id: string
+              state: WorkItemState
               awaiting_checklist: number
               spec_validation_input: string
             }>(
-              `SELECT id, spec_validation_input,
+              `SELECT id, state, spec_validation_input,
                  (state = 'validate_spec' AND paused = 0
                    AND holds_worker_slot = 0 AND waiting_since IS NULL
                    AND (SELECT reason_code FROM step_run WHERE work_item_id = work_item.id
@@ -10361,6 +10467,11 @@ export const makeWorkItemLifecycleLive = (
                 key,
               ],
             )
+            if (existing !== undefined) {
+              yield* publishPendingSpecDecisions(existing.id)
+              if (existing.state === "needs_human") return
+            }
+            if (observed.readiness !== "all-descendants-closed") return
             if (existing !== undefined && !existing.awaiting_checklist) {
               if (yield* wakeSpecValidation(existing.id)) {
                 yield* notifyWorkItemsChanged(repository.id)
@@ -10379,20 +10490,42 @@ export const makeWorkItemLifecycleLive = (
                     },
                     Number(observed.nativeId),
                   )
-            if (approved.kind === "review") {
-              yield* Effect.logWarning(
-                "Spec Validation awaits an unambiguous approved baseline",
-                {
-                  spec: observed.url,
-                  candidates: approved.candidates.map(
-                    ({ source }) => source.url,
-                  ),
-                  unreadableSnapshots: approved.unreadableSnapshots,
-                },
-              )
-            }
-            if (approved.kind !== "baseline") return
+            if (approved.kind === "not-spec") return
             if (existing !== undefined) {
+              const frozen = yield* Schema.decodeUnknownEffect(
+                SpecValidationInput,
+              )(existing.spec_validation_input)
+              const wakeForApprovalReview = Effect.fnUntraced(function* (
+                baselineReview: Extract<SpecBaselineResult, { kind: "review" }>,
+              ) {
+                const approvedInput = yield* Schema.encodeEffect(
+                  SpecValidationInput,
+                )({
+                  spec: frozen.spec,
+                  descendants: frozen.descendants,
+                  baselineReview,
+                })
+                if (yield* wakeSpecValidation(existing.id, approvedInput)) {
+                  yield* notifyWorkItemsChanged(repository.id)
+                }
+              })
+              if (approved.kind === "review") {
+                yield* wakeForApprovalReview({
+                  ...approved,
+                  candidates:
+                    "baseline" in frozen
+                      ? [
+                          frozen.baseline,
+                          ...approved.candidates.filter(
+                            ({ source }) =>
+                              source.url !== frozen.baseline.source.url,
+                          ),
+                        ]
+                      : approved.candidates,
+                })
+                return
+              }
+              if (!("baseline" in frozen)) return
               const {
                 requirementChecklist,
                 source,
@@ -10400,20 +10533,7 @@ export const makeWorkItemLifecycleLive = (
                 body,
                 designRevisions,
               } = approved.baseline
-              if (
-                requirementChecklist === undefined ||
-                source.kind !== "publication-comment" ||
-                requirementChecklist.baselineUrl !== source.url
-              )
-                return
-              const frozen = yield* Schema.decodeUnknownEffect(
-                SpecValidationInput,
-              )(existing.spec_validation_input)
-              // A legacy baseline may gain a publication citation, but the
-              // newly cited snapshot must preserve the entire frozen promise.
-              if (
-                (frozen.baseline.source.kind === "publication-comment" &&
-                  frozen.baseline.source.url !== source.url) ||
+              const promiseChanged =
                 frozen.baseline.title !== title ||
                 frozen.baseline.body !== body ||
                 frozen.baseline.designRevisions.length !==
@@ -10421,6 +10541,27 @@ export const makeWorkItemLifecycleLive = (
                 !frozen.baseline.designRevisions.every(
                   (revision, index) => revision === designRevisions[index],
                 )
+              // The tracker may now cite only a replacement snapshot. Keep
+              // both versions so the validator can establish materiality.
+              if (promiseChanged && source.kind !== "marked-parent") {
+                yield* wakeForApprovalReview({
+                  kind: "review",
+                  candidates: [frozen.baseline, approved.baseline],
+                  unreadableSnapshots: [],
+                })
+                return
+              }
+              if (
+                requirementChecklist === undefined ||
+                source.kind !== "publication-comment" ||
+                requirementChecklist.baselineUrl !== source.url
+              )
+                return
+              // A legacy baseline may gain a publication citation, but the
+              // newly cited snapshot must preserve the entire frozen promise.
+              if (
+                frozen.baseline.source.kind === "publication-comment" &&
+                frozen.baseline.source.url !== source.url
               ) {
                 yield* Effect.logWarning(
                   "Spec Validation is waiting: the checklist's baseline does not match the frozen approval",
@@ -10449,11 +10590,17 @@ export const makeWorkItemLifecycleLive = (
             const frozenInput = yield* Schema.encodeEffect(SpecValidationInput)(
               {
                 spec: { tracker, nativeId, displayId, url },
-                baseline: approved.baseline,
                 descendants: observed.descendants,
+                ...(approved.kind === "baseline"
+                  ? { baseline: approved.baseline }
+                  : { baselineReview: approved }),
               },
             )
-            const title = `Spec Validation — ${formatIssueDisplayId(displayId)}: ${approved.baseline.title}`
+            const specTitle =
+              approved.kind === "baseline"
+                ? approved.baseline.title
+                : approved.candidates[0]?.title
+            const title = `Spec Validation — ${formatIssueDisplayId(displayId)}${specTitle ? `: ${specTitle}` : ""}`
             const workItemId = makeWorkItemId()
             const firstStep = "create_worktree"
             const created = yield* activeAgentBackend.withConfigCoordination(
