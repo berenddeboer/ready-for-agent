@@ -13,6 +13,18 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./ci-gate-incident-history": {
+      "@ready-for-agent/source": "./src/lib/ci-gate-incident-history.ts",
+      "types": "./dist/lib/ci-gate-incident-history.d.ts",
+      "import": "./dist/lib/ci-gate-incident-history.js",
+      "default": "./dist/lib/ci-gate-incident-history.js"
+    },
+    "./ci-gate-run": {
+      "@ready-for-agent/source": "./src/lib/ci-gate-run.ts",
+      "types": "./dist/lib/ci-gate-run.d.ts",
+      "import": "./dist/lib/ci-gate-run.js",
+      "default": "./dist/lib/ci-gate-run.js"
     }
   },
   "dependencies": {

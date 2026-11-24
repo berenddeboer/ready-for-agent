@@ -1,5 +1,7 @@
 import type { CiGateObservedRun } from "./types.js"
 
+export type { CiGateObservedRun }
+
 const FAILURE_CONCLUSIONS = new Set([
   "failure",
   "timed_out",
