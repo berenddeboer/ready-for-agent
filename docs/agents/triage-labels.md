@@ -13,3 +13,10 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
 Edit the right-hand column to match whatever vocabulary you actually use.
+
+## Spec label
+
+`spec` identifies the issue that states what the combined work must deliver.
+The spec-publishing workflow applies it to the parent. It can coexist with a
+triage label such as `ready-for-agent`: `spec` identifies **what to validate**;
+it does not authorize implementing the parent. See [ADR 0085](../adr/0085-validate-spec-delivery-after-all-children-close.md).
