@@ -29,12 +29,14 @@ import {
   type PrStatusCheckDiagnosticsRequest,
   type PullRequestCheckStatus,
   type ReadyLabeledIssue,
+  SPEC_LABEL,
   type TerminalPrStatusCheck,
   ciGateRunOrderKey,
   classifyCiGateObservedRun,
   compareCiGateRunOrder,
   extractErrorCode,
   isDecisiveCiGateObservedRun,
+  resolveSpecBaseline,
 } from "@ready-for-agent/forge-contract"
 import {
   type FieldsSelection,
@@ -100,7 +102,6 @@ class GitHubApiRepositoryUnavailableError extends Schema.TaggedError<GitHubApiRe
   },
 ) {}
 const READY_FOR_AGENT_LABEL = "ready-for-agent"
-const SPEC_LABEL = "spec"
 const PAGE_SIZE = 100
 const REQUEST_TIMEOUT = "30 seconds"
 const DEFAULT_MAX_EXCERPT_CHARS = 12_000
@@ -1486,6 +1487,74 @@ const makeObserveSpecs = (client: GitHubGraphqlClient) => {
   })
 }
 
+const issueLabelsSelection = (after: string | null) => ({
+  __args: { first: PAGE_SIZE, after },
+  nodes: { name: true },
+  pageInfo: { endCursor: true, hasNextPage: true },
+})
+
+interface IssueLabelPage {
+  readonly nodes: readonly ({ readonly name: string } | null)[] | null
+  readonly pageInfo: {
+    readonly endCursor: string | null
+    readonly hasNextPage: boolean
+  }
+}
+
+const hasSpecLabel = Effect.fn("GitHubService.hasSpecLabel")(function* (
+  client: GitHubGraphqlClient,
+  repository: GitHubApiRepository,
+  issueNumber: number,
+  initial: IssueLabelPage,
+) {
+  const issueRef = `${repository.owner}/${repository.name}#${issueNumber}`
+  let labels = initial
+  const seen = new Set<string>()
+  for (;;) {
+    if (
+      labels.nodes?.some((label) => label?.name.toLowerCase() === SPEC_LABEL)
+    ) {
+      return true
+    }
+    if (labels.nodes === null || labels.nodes.some((label) => label === null)) {
+      return yield* new GitHubRequestError({
+        message: `GitHub returned incomplete labels for Issue ${issueRef}`,
+      })
+    }
+    if (!labels.pageInfo.hasNextPage) return false
+    const after = labels.pageInfo.endCursor
+    if (!after || seen.has(after)) {
+      return yield* new GitHubRequestError({
+        message: `GitHub returned an invalid labels page cursor for Issue ${issueRef}`,
+      })
+    }
+    seen.add(after)
+    const result = yield* githubQuery(
+      `Failed to list labels for Issue ${issueRef}`,
+      (signal) =>
+        client.query(
+          {
+            repository: {
+              __args: repository,
+              issue: {
+                __args: { number: issueNumber },
+                labels: issueLabelsSelection(after),
+              },
+            },
+          },
+          signal,
+        ),
+    )
+    const next = result.repository?.issue?.labels
+    if (!next) {
+      return yield* new GitHubRequestError({
+        message: `GitHub returned incomplete labels for Issue ${issueRef}`,
+      })
+    }
+    labels = next
+  }
+})
+
 type GitHubApiServiceShape = {
   [K in keyof GitHubServiceShape]: GitHubServiceShape[K] extends (
     repository: GitHubRepository,
@@ -2802,6 +2871,98 @@ const makeGitHubApiService = (
       })
     }
   }),
+  readSpecBaseline: Effect.fn("GitHubService.readSpecBaseline")(
+    function* (repository, issueNumber) {
+      const issueRef = `${repository.owner}/${repository.name}#${issueNumber}`
+      const result = yield* githubQuery(
+        `Failed to read Spec ${issueRef}`,
+        (signal) =>
+          client.query(
+            {
+              repository: {
+                __args: repository,
+                issue: {
+                  __args: { number: issueNumber },
+                  title: true,
+                  body: true,
+                  url: true,
+                  labels: issueLabelsSelection(null),
+                },
+              },
+            },
+            signal,
+          ),
+      )
+      if (result.repository === null) {
+        return yield* new GitHubApiRepositoryUnavailableError(repository)
+      }
+      const issue = result.repository.issue
+      if (!issue?.labels) {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned no Issue or labels for ${issueRef}`,
+        })
+      }
+      if (
+        !(yield* hasSpecLabel(client, repository, issueNumber, issue.labels))
+      ) {
+        return { kind: "not-spec" }
+      }
+
+      const comments: { body: string; url: string; edited: boolean }[] = []
+      let after: string | null = null
+      const seen = new Set<string>()
+      for (;;) {
+        const page = yield* githubQuery(
+          `Failed to read Spec comments for ${issueRef}`,
+          (signal) =>
+            client.query(
+              {
+                repository: {
+                  __args: repository,
+                  issue: {
+                    __args: { number: issueNumber },
+                    comments: {
+                      __args: { first: PAGE_SIZE, after },
+                      nodes: { body: true, url: true, lastEditedAt: true },
+                      pageInfo: { endCursor: true, hasNextPage: true },
+                    },
+                  },
+                },
+              },
+              signal,
+            ),
+        )
+        const connection = page.repository?.issue?.comments
+        if (!connection?.nodes) {
+          return yield* new GitHubRequestError({
+            message: `GitHub returned incomplete Spec comments for ${issueRef}`,
+          })
+        }
+        for (const comment of connection.nodes) {
+          if (comment === null) {
+            return yield* new GitHubRequestError({
+              message: `GitHub returned an unreadable Spec comment for ${issueRef}`,
+            })
+          }
+          comments.push({
+            url: comment.url,
+            body: comment.body,
+            edited: comment.lastEditedAt != null,
+          })
+        }
+        if (!connection.pageInfo.hasNextPage) {
+          return resolveSpecBaseline({ ...issue, marked: true }, comments)
+        }
+        after = connection.pageInfo.endCursor
+        if (!after || seen.has(after)) {
+          return yield* new GitHubRequestError({
+            message: `GitHub returned an invalid Spec comments page cursor for ${issueRef}`,
+          })
+        }
+        seen.add(after)
+      }
+    },
+  ),
   listReadyIssues: Effect.fn("GitHubService.listReadyIssues")(
     function* (repository) {
       const issues: InternalReadyLabeledIssue[] = []
@@ -2830,6 +2991,7 @@ const makeGitHubApiService = (
                       url: true,
                       createdAt: true,
                       state: true,
+                      labels: issueLabelsSelection(null),
                       author: {
                         login: true,
                       },
@@ -2892,8 +3054,7 @@ const makeGitHubApiService = (
           return yield* new GitHubApiRepositoryUnavailableError(repository)
         }
 
-        const issueNodes = (result.repository.issues.nodes ??
-          []) as readonly (GitHubApiIssue | null)[]
+        const issueNodes = result.repository.issues.nodes ?? []
         for (const issueNode of issueNodes) {
           if (issueNode === null) continue
 
@@ -2905,6 +3066,20 @@ const makeGitHubApiService = (
                 cause,
               }),
           })
+          // Keep marked parents as hierarchy context, but never offer a Spec
+          // without children as a standalone implementation Issue.
+          if (
+            !mappedIssue.hasChildren &&
+            issueNode.labels &&
+            (yield* hasSpecLabel(
+              client,
+              repository,
+              mappedIssue.number,
+              issueNode.labels,
+            ))
+          ) {
+            continue
+          }
           const blockedBy = [...mappedIssue.blockedBy]
           const closingPullRequests = [...mappedIssue.closingPullRequests]
           let blockedByPage = issueNode.blockedBy.pageInfo
@@ -3317,6 +3492,7 @@ export const makeGitHubService = (
     getAuthenticatedUserLogin: adapt(service.getAuthenticatedUserLogin),
     listReadyIssues: adapt(service.listReadyIssues),
     observeSpecs: adapt(service.observeSpecs),
+    readSpecBaseline: adapt(service.readSpecBaseline),
     getPullRequestCheckStatus: adapt(service.getPullRequestCheckStatus),
     getPrStatusCheckDiagnostics: adapt(service.getPrStatusCheckDiagnostics),
     observeAutomatedReviewEvidence: adapt(

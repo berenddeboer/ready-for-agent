@@ -18,6 +18,7 @@ import type {
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
   ReadyLabeledIssue,
+  SpecBaselineResult,
   UpdateDraftPullRequestCopyInput,
 } from "@ready-for-agent/forge-contract"
 import type {
@@ -79,6 +80,10 @@ export interface GitHubServiceShape
     repository: GitHubRepository,
     options?: GitHubOperationOptions,
   ) => Effect.Effect<readonly GitHubSpecObservation[], GitHubServiceError>
+  readonly readSpecBaseline: (
+    repository: GitHubRepository,
+    issueNumber: number,
+  ) => Effect.Effect<SpecBaselineResult, GitHubServiceError>
   /**
    * Live catalog of active GitHub Actions workflows as CI Gate Definitions.
    * Disabled, deleted, and inactive workflows are omitted.

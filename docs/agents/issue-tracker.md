@@ -23,8 +23,11 @@ missing access or destination. Do not create GitHub issues as a fallback.
 
 ## Conventions
 
-- **Create a spec or ticket:** create a Linear issue in the resolved team and
-  project. Follow the invoking skill's content template.
+- **Create a ticket:** create a Linear issue in the resolved team and project.
+  Follow the invoking skill's content template.
+- **Publish a Spec:** use the resolved Linear team and project and follow
+  [Spec publication](spec-publication.md) to preserve the approved baseline and
+  apply `spec` separately from triage.
 - **Read a ticket:** resolve its Linear identifier or URL and read its full
   description, comments, labels, status, parent, and blocking relationships.
 - **List tickets:** query Linear, scoped to the team/project and relevant

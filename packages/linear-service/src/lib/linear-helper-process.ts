@@ -7,6 +7,7 @@ import { listProjectWorkflowProgram } from "../bin/list-project-workflow.js"
 import { listProjectsProgram } from "../bin/list-projects.js"
 import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
 import { observeSpecsProgram } from "../bin/observe-specs.js"
+import { readSpecBaselineProgram } from "../bin/read-spec-baseline.js"
 import { updateIssueStateProgram } from "../bin/update-issue-state.js"
 import { linearServiceBinScriptPath } from "../bin-script-path.js"
 import type { LinearService } from "./linear-service.js"
@@ -19,6 +20,7 @@ export const LINEAR_HELPER_OPERATIONS = [
   "get-authenticated-user-login",
   "list-ready-issues",
   "observe-specs",
+  "read-spec-baseline",
   "list-projects",
   "list-project-workflow",
   "get-issue",
@@ -113,6 +115,7 @@ const programs: Record<
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
   "list-ready-issues": listReadyIssuesProgram,
   "observe-specs": observeSpecsProgram,
+  "read-spec-baseline": readSpecBaselineProgram,
   "list-projects": listProjectsProgram,
   "list-project-workflow": listProjectWorkflowProgram,
   "get-issue": getIssueProgram,

@@ -18,6 +18,7 @@ import { observeAutomatedReviewEvidenceProgram } from "../bin/observe-automated-
 import { observeCiGateProgram } from "../bin/observe-ci-gate.js"
 import { observeSpecsProgram } from "../bin/observe-specs.js"
 import { readCiRepairRunProgram } from "../bin/read-ci-repair-run.js"
+import { readSpecBaselineProgram } from "../bin/read-spec-baseline.js"
 import { rerunFailedJobsProgram } from "../bin/rerun-failed-jobs.js"
 import { rerunWorkflowRunProgram } from "../bin/rerun-workflow-run.js"
 import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
@@ -32,6 +33,7 @@ export const INTERNAL_GITHUB_HELPER_ARG =
 export const GITHUB_HELPER_OPERATIONS = [
   "list-ready-issues",
   "observe-specs",
+  "read-spec-baseline",
   "list-ci-gate-catalog",
   "observe-ci-gate",
   "get-authenticated-user-login",
@@ -151,6 +153,7 @@ const programs: Record<
 > = {
   "list-ready-issues": listReadyIssuesProgram,
   "observe-specs": observeSpecsProgram,
+  "read-spec-baseline": readSpecBaselineProgram,
   "list-ci-gate-catalog": listCiGateCatalogProgram,
   "observe-ci-gate": observeCiGateProgram,
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,

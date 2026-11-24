@@ -4350,6 +4350,11 @@ describe("GitHubService live implementation", () => {
       url: true,
       createdAt: true,
       state: true,
+      labels: {
+        __args: { first: 100, after: null },
+        nodes: { name: true },
+        pageInfo: { endCursor: true, hasNextPage: true },
+      },
       author: {
         login: true,
       },

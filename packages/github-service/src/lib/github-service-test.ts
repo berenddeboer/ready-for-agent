@@ -45,6 +45,7 @@ export const makeGitHubServiceTest = (
 
   return Layer.succeed(GitHubService, {
     getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+    readSpecBaseline: () => Effect.succeed({ kind: "not-spec" }),
     getOpenPullRequestNumber: () => Effect.succeed(1),
     findOpenPullRequestNumber: () => Effect.succeed(1),
     closeOpenPullRequestsAndDeleteBranch: () => Effect.void,

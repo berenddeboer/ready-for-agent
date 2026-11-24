@@ -1781,7 +1781,7 @@ describe("IssueReconciler", () => {
         }
         if (query.includes("query OpenSpecs")) {
           expect(variables.projectId).toBe("proj-1")
-          expect(query).toContain('name: { eq: "spec" }')
+          expect(query).toContain('name: { eqIgnoreCase: "spec" }')
           if (discoveryUnavailable) {
             return new Response(null, { status: 503 })
           }

@@ -2029,6 +2029,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           rerunWorkflowRun: () => Effect.die("not used"),
           uploadUserAttachment: () => Effect.die("not used"),
           ensureIssueCompletedWithSummary: () => Effect.die("not used"),
+          readSpecBaseline: () => Effect.die("not used"),
           listCiGateCatalog: () => Effect.succeed([]),
           observeCiGate: () =>
             Effect.succeed({ defaultBranch: "main", observations: [] }),
@@ -2137,6 +2138,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           rerunWorkflowRun: () => Effect.die("not used"),
           uploadUserAttachment: () => Effect.die("not used"),
           ensureIssueCompletedWithSummary: () => Effect.die("not used"),
+          readSpecBaseline: () => Effect.die("not used"),
           listCiGateCatalog: () => Effect.succeed([]),
           observeCiGate: () =>
             Effect.succeed({ defaultBranch: "main", observations: [] }),

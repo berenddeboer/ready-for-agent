@@ -18,6 +18,7 @@ export const stubGitHubServiceLayer = (
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       observeSpecs: () => Effect.succeed([]),
+      readSpecBaseline: () => Effect.succeed({ kind: "not-spec" }),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       findOpenPullRequestNumber: () => Effect.succeed(1),
       closeOpenPullRequestsAndDeleteBranch: () => Effect.void,
