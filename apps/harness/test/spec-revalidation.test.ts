@@ -6,7 +6,6 @@ import { Effect, Layer } from "effect"
 import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { makeFileDatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
-import { renderSpecBaseline } from "@ready-for-agent/forge-contract"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import { disabledKeymaxxerLayer } from "@ready-for-agent/keymaxxer-service"
@@ -77,32 +76,9 @@ it.each(
       tracker === "linear"
         ? "https://linear.app/acme/issue/ENG-7"
         : "https://github.com/acme/widgets/issues/7"
-    const baselineUrl = `${specUrl}#approved`
-    const checklist = {
-      baselineUrl,
-      sourceUrl: `${specUrl}#checklist`,
-      requirements: (["local", "deployed"] as const).map((environment) => ({
-        id: `mcp-${environment}`,
-        environment,
-        requirement: `${environment} MCP accepts initialize`,
-      })),
-    }
-    const baseline = {
-      title: "MCP delivery",
-      body: "Local and deployed MCP must accept initialize.",
-      source: { kind: "publication-comment", url: baselineUrl },
-      designRevisions: [],
-    } as const
     const native = specCloseOutTracker(specUrl, {
-      ...baseline,
-      description: `${baseline.body}\n\n[Approved Spec baseline](<${baselineUrl}>)\n\n[Approved requirement checklist](<${checklist.sourceUrl}>)`,
-      comments: [
-        { url: baselineUrl, body: renderSpecBaseline(baseline) },
-        {
-          url: checklist.sourceUrl,
-          body: `ready-for-agent:spec-requirement-checklist:v1\n\n\`\`\`json\n${JSON.stringify(checklist)}\n\`\`\``,
-        },
-      ],
+      title: "MCP delivery",
+      description: "Local and deployed MCP must accept initialize.",
     })
     let localWorks = true
     let deployedWorks = false
@@ -133,6 +109,8 @@ it.each(
         const met = (await response.text()).includes("protocolVersion")
         return {
           requirementId: `mcp-${environment}`,
+          requirement: `${environment} MCP accepts initialize`,
+          environment,
           status: met ? "met" : "unmet",
           evidence: [
             {

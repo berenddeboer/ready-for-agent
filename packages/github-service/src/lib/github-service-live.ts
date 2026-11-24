@@ -44,7 +44,6 @@ import {
   extractErrorCode,
   formatSpecFollowUpComment,
   isDecisiveCiGateObservedRun,
-  resolveSpecBaseline,
   specFindingsMarker,
   specFollowUpMarker,
 } from "@ready-for-agent/forge-contract"
@@ -1655,7 +1654,11 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
     if (links.length === 0 && failure !== undefined) return yield* failure
 
     const comments = yield* readSpecIssuePages(
-      Schema.Struct({ id: Schema.NonEmptyString, body: Schema.String }),
+      Schema.Struct({
+        id: Schema.NonEmptyString,
+        body: Schema.String,
+        url: Schema.optionalKey(Schema.NonEmptyString),
+      }),
       `reading findings comments on ${describe}`,
       (after) =>
         githubQuery(`Listing comments on GitHub Spec ${describe}`, (signal) =>
@@ -1667,7 +1670,7 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
                   __args: { number: issueNumber },
                   comments: {
                     __args: { first: PAGE_SIZE, after },
-                    nodes: { id: true, body: true },
+                    nodes: { id: true, body: true, url: true },
                     ...SpecIssuePageFields,
                   },
                 },
@@ -1681,6 +1684,7 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
       body.split(/\r?\n/u).includes(specFindingsMarker(input.workItemId)),
     )
     const body = formatSpecFollowUpComment(input, links)
+    let reportCommentUrl = marked?.url
     if (marked === undefined) {
       const posted = yield* githubRequest(
         `Posting findings on GitHub Spec ${describe}`,
@@ -1694,7 +1698,7 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
                     body,
                   },
                 },
-                commentEdge: { node: { id: true } },
+                commentEdge: { node: { id: true, url: true } },
               },
             },
             signal,
@@ -1702,6 +1706,10 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
       )
       if (!posted.addComment?.commentEdge?.node?.id)
         return yield* invalid("GitHub did not return the findings comment")
+      const postedUrl = posted.addComment.commentEdge.node.url
+      if (typeof postedUrl === "string" && postedUrl.length > 0) {
+        reportCommentUrl = postedUrl
+      }
     } else if (marked.body !== body) {
       const updated = yield* githubRequest(
         `Updating findings on GitHub Spec ${describe}`,
@@ -1710,7 +1718,7 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
             {
               updateIssueComment: {
                 __args: { input: { id: marked.id, body } },
-                issueComment: { id: true, body: true },
+                issueComment: { id: true, body: true, url: true },
               },
             },
             signal,
@@ -1722,9 +1730,15 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
       ) {
         return yield* invalid("GitHub did not update the findings comment")
       }
+      const updatedUrl = updated.updateIssueComment.issueComment.url
+      if (typeof updatedUrl === "string" && updatedUrl.length > 0) {
+        reportCommentUrl = updatedUrl
+      }
     }
     if (failure !== undefined) return yield* failure
-    return links
+    return reportCommentUrl === undefined
+      ? links
+      : links.map((link) => ({ ...link, reportCommentUrl }))
   })
 
 const makeObserveSpecDescendants = (client: GitHubGraphqlClient) => {
@@ -3584,65 +3598,14 @@ const makeGitHubApiService = (
           message: `GitHub returned incomplete reopening history for ${issueRef}`,
         })
       }
-
-      const comments: { body: string; url: string; edited: boolean }[] = []
-      let after: string | null = null
-      const seen = new Set<string>()
-      for (;;) {
-        const page = yield* githubQuery(
-          `Failed to read Spec comments for ${issueRef}`,
-          (signal) =>
-            client.query(
-              {
-                repository: {
-                  __args: repository,
-                  issue: {
-                    __args: { number: issueNumber },
-                    comments: {
-                      __args: { first: PAGE_SIZE, after },
-                      nodes: { body: true, url: true, lastEditedAt: true },
-                      pageInfo: { endCursor: true, hasNextPage: true },
-                    },
-                  },
-                },
-              },
-              signal,
-            ),
-        )
-        const connection = page.repository?.issue?.comments
-        if (!connection?.nodes) {
-          return yield* new GitHubRequestError({
-            message: `GitHub returned incomplete Spec comments for ${issueRef}`,
-          })
-        }
-        for (const comment of connection.nodes) {
-          if (comment === null) {
-            return yield* new GitHubRequestError({
-              message: `GitHub returned an unreadable Spec comment for ${issueRef}`,
-            })
-          }
-          comments.push({
-            url: comment.url,
-            body: comment.body,
-            edited: comment.lastEditedAt != null,
-          })
-        }
-        if (!connection.pageInfo.hasNextPage) {
-          const approved = resolveSpecBaseline(
-            { ...issue, marked: true },
-            comments,
-          )
-          return approved.kind !== "not-spec" && reopening !== undefined
-            ? { ...approved, reopening }
-            : approved
-        }
-        after = connection.pageInfo.endCursor
-        if (!after || seen.has(after)) {
-          return yield* new GitHubRequestError({
-            message: `GitHub returned an invalid Spec comments page cursor for ${issueRef}`,
-          })
-        }
-        seen.add(after)
+      return {
+        kind: "baseline" as const,
+        baseline: {
+          title: issue.title,
+          body: issue.body,
+          url: issue.url,
+        },
+        ...(reopening !== undefined ? { reopening } : {}),
       }
     },
   ),

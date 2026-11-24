@@ -115,4 +115,60 @@ describe("WorkItemOutcomePresentation", () => {
     expect(html).not.toContain("Open pull request")
     expect(html).not.toContain('href="https://github.com')
   })
+
+  test("renders a compact rollup and tracker link for Spec Validation findings", () => {
+    const html = renderToStaticMarkup(
+      <WorkItemOutcomePresentation
+        state="NEEDS_HUMAN"
+        statusLabel="Decision needed"
+        statusBadgeClassName={statusBadgeClassNameForStatus("NEEDS_HUMAN")}
+        pullRequestNumber={null}
+        pullRequestUrl={null}
+        isSpecValidation
+        completionSummary={[
+          "Spec: https://linear.app/berenddeboer/issue/BER-59/validate",
+          "Integrated checkout: `db0a0e2`",
+          "### MET — Local MCP works",
+          "- delivery (local): ok",
+          "### UNMET — Deployed MCP works",
+          "- defect (deployed): 404",
+          "### UNVERIFIED — Live check",
+          "- unavailable (other): no access",
+          "Follow-up tickets:\n- [mcp-deployed: route](<https://linear.app/berenddeboer/issue/BER-69/fix>)",
+        ].join("\n\n")}
+        issueUrl={null}
+      />,
+    )
+
+    expect(html).toContain("1 met · 1 unmet · 1 unverified · 1 follow-up")
+    expect(html).toContain("View full report on Linear ↗")
+    expect(html).toContain(
+      'href="https://linear.app/berenddeboer/issue/BER-59/validate"',
+    )
+    expect(html).not.toContain("### MET")
+    expect(html).not.toContain("Integrated checkout")
+
+    const withCommentPermalink = renderToStaticMarkup(
+      <WorkItemOutcomePresentation
+        state="NEEDS_HUMAN"
+        statusLabel="Decision needed"
+        statusBadgeClassName={statusBadgeClassNameForStatus("NEEDS_HUMAN")}
+        pullRequestNumber={null}
+        pullRequestUrl={null}
+        isSpecValidation
+        completionSummary={[
+          "Report: https://linear.app/berenddeboer/issue/BER-59/validate#comment-abc123",
+          "Spec: https://linear.app/berenddeboer/issue/BER-59/validate",
+          "### MET — Local MCP works",
+          "- delivery (local): ok",
+        ].join("\n\n")}
+        issueUrl={null}
+      />,
+    )
+
+    expect(withCommentPermalink).toContain(
+      'href="https://linear.app/berenddeboer/issue/BER-59/validate#comment-abc123"',
+    )
+    expect(withCommentPermalink).toContain("View full report on Linear ↗")
+  })
 })

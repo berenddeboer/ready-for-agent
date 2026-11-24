@@ -8,12 +8,10 @@ import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { makeFileDatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import type {
-  ApprovedSpecRequirementChecklist,
   SpecBaselineResult,
   SpecFollowUpPublication,
   SpecObservation,
 } from "@ready-for-agent/forge-contract"
-import { renderSpecBaseline } from "@ready-for-agent/forge-contract"
 import {
   GitHubRequestError,
   GitHubService,
@@ -38,8 +36,6 @@ import { specCloseOutTracker } from "../src/lib/spec-close-out-tracker-test.js"
 import { decodeSpecFindings, validateSpec } from "../src/lib/validate-spec.js"
 import { expect, it } from "bun:test"
 
-const commit = "a".repeat(40)
-const revision = `https://github.com/acme/widgets/blob/${commit}/design.md`
 const git = (cwd: string, ...args: string[]) => {
   const result = Bun.spawnSync(
     [
@@ -57,24 +53,6 @@ const git = (cwd: string, ...args: string[]) => {
   if (result.exitCode !== 0) throw new Error(result.stderr.toString())
   return result.stdout.toString().trim()
 }
-const approvedChecklist = (
-  baselineUrl: string,
-): ApprovedSpecRequirementChecklist => ({
-  baselineUrl,
-  sourceUrl: `${baselineUrl.split("#")[0]}#approved-checklist`,
-  requirements: [
-    {
-      id: "mcp-local",
-      environment: "local",
-      requirement: "local MCP accepts initialize",
-    },
-    {
-      id: "mcp-deployed",
-      environment: "deployed",
-      requirement: "deployed MCP accepts initialize",
-    },
-  ],
-})
 const no = () =>
   Effect.die(
     "Spec Validation must not run an implementation step, open a follow-up, or close the parent",
@@ -96,83 +74,35 @@ it.each([
     tracker: "linear",
     deployedStatus: 404,
     expected: "UNMET",
-    omit: false,
-    initialSource: "publication-comment",
   },
   {
     tracker: "linear",
     deployedStatus: 403,
     expected: "UNVERIFIED",
-    omit: false,
     humanCheck: true,
-    initialSource: "publication-comment",
+    updateSpecWhileWaiting: true,
   },
   {
     tracker: "github",
     deployedStatus: 404,
     expected: "UNMET",
-    omit: false,
-    initialSource: "publication-comment",
   },
   {
     tracker: "github",
     deployedStatus: 403,
     expected: "UNVERIFIED",
-    omit: false,
-    initialSource: "publication-comment",
   },
   {
     tracker: "github",
     deployedStatus: 403,
     expected: "UNVERIFIED",
-    omit: false,
     humanCheck: true,
-    initialSource: "publication-comment",
-  },
-  {
-    tracker: "linear",
-    deployedStatus: 404,
-    expected: "UNVERIFIED",
-    omit: true,
-    initialSource: "publication-comment",
-  },
-  {
-    tracker: "linear",
-    deployedStatus: 404,
-    expected: "UNVERIFIED",
-    omit: true,
-    initialSource: "marked-parent",
-  },
-  {
-    tracker: "linear",
-    deployedStatus: 404,
-    expected: "UNVERIFIED",
-    omit: true,
-    initialSource: "historical-approval-comment",
   },
   {
     tracker: "linear",
     deployedStatus: 404,
     expected: "UNMET",
-    omit: false,
-    initialSource: "publication-comment",
     decision: "authorship",
-  },
-  {
-    tracker: "github",
-    deployedStatus: 404,
-    expected: "UNMET",
-    omit: false,
-    initialSource: "publication-comment",
-    decision: "baseline",
-  },
-  {
-    tracker: "linear",
-    deployedStatus: 404,
-    expected: "UNMET",
-    omit: false,
-    initialSource: "publication-comment",
-    decision: "changed-baseline",
   },
   ...(["github", "linear"] as const).flatMap((tracker) =>
     (
@@ -197,27 +127,20 @@ it.each([
             closeOut === "manual-reopen" || closeOut === "abandon-then-reopen"
               ? "UNMET"
               : "MET",
-          omit: false,
-          initialSource: "publication-comment",
           closeOut,
         }) as const,
     ),
   ),
 ] as const)(
-  "$tracker: records $expected for deployed HTTP $deployedStatus (omitted: $omit, baseline: $initialSource, decision: $decision, close-out: $closeOut)",
+  "$tracker: records $expected for deployed HTTP $deployedStatus (decision: $decision, close-out: $closeOut)",
   async (scenario) => {
-    const { tracker, deployedStatus, expected, omit, initialSource } = scenario
+    const { tracker, deployedStatus, expected } = scenario
     const closeOut = "closeOut" in scenario ? scenario.closeOut : undefined
     const decision = "decision" in scenario ? scenario.decision : undefined
-    const baselineDecision =
-      decision === "baseline" || decision === "changed-baseline"
-    const waitForChecklist = omit || decision === "changed-baseline"
     const humanCheck = "humanCheck" in scenario
+    const updateSpecWhileWaiting = "updateSpecWhileWaiting" in scenario
     const retryPublication =
-      closeOut === undefined &&
-      decision === undefined &&
-      !omit &&
-      deployedStatus === 404
+      closeOut === undefined && decision === undefined && deployedStatus === 404
     const mixedEvidence = tracker === "github" && retryPublication
     const deployedVerdict = mixedEvidence ? "UNVERIFIED" : expected
     const expectChild =
@@ -232,7 +155,6 @@ it.each([
       tracker === "linear"
         ? "https://linear.app/acme/issue/ENG-7"
         : "https://github.com/acme/widgets/issues/7"
-    const baselineUrl = `${specUrl}#approved-revision`
     const mcp = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -266,77 +188,29 @@ it.each([
       },
     })
     const database = makeFileDatabaseTest(join(root, "db.sqlite"))
-    const withoutChecklist = {
+    const initialBody = `Local and deployed MCP must both accept initialize.${retryPublication ? " The deployed promise includes the public and regional routes. The deployed health and readiness endpoints must report ready." : ""}`
+    const updatedBody = `${initialBody} Include the updated production note.`
+    const currentSpecDoc = {
       title: "MCP delivery",
-      body: `Local and deployed MCP must both accept initialize.${retryPublication ? " The deployed promise includes the public and regional routes. The deployed health and readiness endpoints must report ready." : ""}`,
-      source: { kind: "publication-comment", url: baselineUrl },
-      designRevisions: [revision],
+      body: initialBody,
+      url: specUrl,
     } as const
-    const baseChecklist = approvedChecklist(baselineUrl)
     const incompleteRequirement = {
       id: "deployment-health",
       environment: "deployed",
       requirement: "deployed health and readiness endpoints report ready",
     } as const
-    const checklist: ApprovedSpecRequirementChecklist = retryPublication
-      ? {
-          ...baseChecklist,
-          requirements: [...baseChecklist.requirements, incompleteRequirement],
-        }
-      : baseChecklist
-    const approved: SpecBaselineResult = {
+    let latestSpec: SpecBaselineResult = {
       kind: "baseline",
-      baseline: { ...withoutChecklist, requirementChecklist: checklist },
+      baseline: currentSpecDoc,
     }
-    const otherBaseline = `${specUrl}#local-only-revision`
-    const narrowed = {
-      ...withoutChecklist,
-      body: "Only local MCP must accept initialize.",
-      source: { kind: "publication-comment", url: otherBaseline },
-    } as const
-    const conflict: SpecBaselineResult = {
-      kind: "review",
-      candidates: [approved.baseline, narrowed],
-      unreadableSnapshots: [],
-    }
-    let latestBaseline: SpecBaselineResult =
-      decision === "baseline"
-        ? conflict
-        : waitForChecklist
-          ? {
-              kind: "baseline",
-              baseline: {
-                ...withoutChecklist,
-                source: {
-                  kind: initialSource,
-                  url:
-                    initialSource === "marked-parent"
-                      ? specUrl
-                      : initialSource === "historical-approval-comment"
-                        ? `${specUrl}#historical-approval`
-                        : baselineUrl,
-                },
-              },
-            }
-          : approved
-    const readBaseline = () => Effect.sync(() => latestBaseline)
+    const readBaseline = () => Effect.sync(() => latestSpec)
     const native =
       closeOut === undefined
         ? undefined
         : specCloseOutTracker(specUrl, {
-            title: withoutChecklist.title,
-            description: [
-              withoutChecklist.body,
-              `[Approved Spec baseline](<${baselineUrl}>)`,
-              `[Approved requirement checklist](<${checklist.sourceUrl}>)`,
-            ].join("\n\n"),
-            comments: [
-              { url: baselineUrl, body: renderSpecBaseline(withoutChecklist) },
-              {
-                url: checklist.sourceUrl,
-                body: `ready-for-agent:spec-requirement-checklist:v1\n\n\`\`\`json\n${JSON.stringify(checklist)}\n\`\`\``,
-              },
-            ],
+            title: currentSpecDoc.title,
+            description: currentSpecDoc.body,
           })
     const reconcile = (
       repository: Parameters<
@@ -440,6 +314,8 @@ it.each([
               : "unverified"
         return {
           requirementId: `mcp-${environment}`,
+          requirement: `${environment} MCP accepts initialize`,
+          environment,
           status,
           evidence: [
             {
@@ -472,17 +348,8 @@ it.each([
         }
       })
     const question =
-      decision === "baseline"
-        ? "Which exact Spec snapshot and design revisions govern validation?"
-        : baselineDecision
-          ? "Which approved revision governs: local only, or local and deployed?"
-          : "Did you personally waive deployed MCP, or was that an agent deferral?"
-    const evidence =
-      decision === "baseline"
-        ? "mcp-local (reported met; not yet assessed against an approved checklist)"
-        : baselineDecision
-          ? `The versions ${baselineUrl} and ${otherBaseline} disagree on deployed MCP.`
-          : `The same tracker account posted a purported waiver and the agent's deferral at ${specUrl}#deferral.`
+      "Did you personally waive deployed MCP, or was that an agent deferral?"
+    const evidence = `The same tracker account posted a purported waiver and the agent's deferral at ${specUrl}#deferral.`
     const report = (payload: unknown) => ({
       sessionId,
       assistantText: `READY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify(payload)}`,
@@ -501,38 +368,22 @@ it.each([
               yield* Effect.promise(() =>
                 Bun.file(join(turn.cwd, "delivery.txt")).text(),
               ),
-            ).toBe("merged during checklist wait\n")
+            ).toBe("merged during hierarchy wait\n")
           }
           expect(turn.prompt).toContain(
-            "Local and deployed MCP must both accept initialize.",
+            updateSpecWhileWaiting ? updatedBody : initialBody,
           )
-          expect(turn.prompt).toContain(revision)
           expect(turn.prompt).toContain(
             `integrated default-branch commit ${integratedCommit}.`,
           )
           expect(turn.prompt).toContain("cancelled-child")
-          expect(turn.prompt).toContain(checklist.sourceUrl)
-          if (baselineDecision) expect(turn.prompt).toContain(narrowed.body)
           yield* turn.onSessionId?.(sessionId) ?? Effect.void
-          if (decision === "baseline") {
-            // Both versions require local MCP. That observation remains useful
-            // even though the selected snapshot lacks an approved checklist.
-            return report({
-              kind: "baseline_selected",
-              baselineUrl: otherBaseline,
-              basis: "same_verdict",
-              findings: [yield* probe("local")],
-            })
-          }
           if (decision !== undefined) {
             return report({
               kind: "decision_needed",
               question,
               evidence: [evidence],
-              findings:
-                decision === "authorship"
-                  ? [yield* probe("local"), yield* probe("deployed")]
-                  : [],
+              findings: [yield* probe("local"), yield* probe("deployed")],
             })
           }
           const probeFollowUps = (environment: "local" | "deployed") =>
@@ -573,6 +424,8 @@ it.each([
                     : "unverified"
               return {
                 requirementId: `mcp-${environment}`,
+                requirement: `${environment} MCP accepts initialize`,
+                environment,
                 status:
                   inconsistentVerdict && environment === "deployed"
                     ? "unmet"
@@ -675,11 +528,10 @@ it.each([
                     : {}),
               }
             })
-          const findings = yield* Effect.all(
-            omit
-              ? [probeFollowUps("local")]
-              : [probeFollowUps("local"), probeFollowUps("deployed")],
-          )
+          const findings = yield* Effect.all([
+            probeFollowUps("local"),
+            probeFollowUps("deployed"),
+          ])
           const incomplete = retryPublication
             ? yield* Effect.promise(async () => {
                 const evidence = await Promise.all(
@@ -699,6 +551,8 @@ it.each([
                 return [
                   {
                     requirementId: incompleteRequirement.id,
+                    requirement: incompleteRequirement.requirement,
+                    environment: incompleteRequirement.environment,
                     status: "unmet",
                     evidence,
                     ...(tracker === "github"
@@ -758,11 +612,9 @@ it.each([
               expect(git(turn.cwd, "rev-parse", "HEAD")).toBe(integratedCommit)
               expect(turn.prompt).toContain(question)
               expect(turn.prompt).toContain(evidence)
-              if (decision === "authorship") {
-                expect(turn.prompt).toContain(
-                  "MET — local MCP accepts initialize",
-                )
-              }
+              expect(turn.prompt).toContain(
+                "MET — local MCP accepts initialize",
+              )
               expect(operatorAnswer).toBe(
                 "Keep the approved local and deployed requirements.",
               )
@@ -770,16 +622,7 @@ it.each([
                 probe("local"),
                 probe("deployed"),
               ])
-              return report(
-                baselineDecision
-                  ? {
-                      kind: "baseline_selected",
-                      baselineUrl,
-                      basis: "operator_answer",
-                      findings,
-                    }
-                  : findings,
-              )
+              return report(findings)
             }),
       inspect: no,
     }
@@ -1329,8 +1172,7 @@ it.each([
         expect(comment).toContain("## Spec validation: passed")
         expect(comment).toContain("MET — local MCP accepts initialize")
         expect(comment).toContain("MET — deployed MCP accepts initialize")
-        expect(comment).toContain(baselineUrl)
-        expect(comment).toContain(checklist.sourceUrl)
+        expect(comment).toContain(specUrl)
 
         fake.childOpen = true
         await boot(reconcile(saved.repository))
@@ -1346,9 +1188,6 @@ it.each([
         return
       }
 
-      // A new lifecycle/DB connection sees the original frozen baseline, not
-      // a more recent tracker response or an implementation session.
-      latestBaseline = { kind: "not-spec" }
       await Effect.runPromise(
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
@@ -1393,88 +1232,30 @@ it.each([
         }).pipe(Effect.provide(layers())),
       )
 
-      // Only the persisted wait reason is available after restart.
       failRead = false
       hierarchy = [observed]
-      if (waitForChecklist) {
-        await Effect.runPromise(
-          Effect.gen(function* () {
-            const lifecycle = yield* WorkItemLifecycle
-            yield* lifecycle.considerSpecValidation(saved.repository, observed)
-            yield* runNext(saved.id, "validate_spec")
-            const parked = yield* lifecycle.getWorkItem(saved.id)
-            expect(parked).toMatchObject({
-              state: "validate_spec",
-              holdsWorkerSlot: false,
-              sessionId: null,
-              completionSummary: null,
-            })
-            expect(parked.stepRuns.at(-1)?.reasonCode).toBe(
-              "waiting_for_approved_spec_checklist",
-            )
-            yield* lifecycle.considerSpecValidation(saved.repository, observed)
-            expect(
-              (yield* lifecycle.getWorkItem(saved.id)).stepRuns,
-            ).toHaveLength(3)
-            if (initialSource === "publication-comment") {
-              const differentRevision = `${specUrl}#different-baseline`
-              latestBaseline = {
-                kind: "baseline",
-                baseline: {
-                  ...withoutChecklist,
-                  source: {
-                    kind: "publication-comment",
-                    url: differentRevision,
-                  },
-                  requirementChecklist: approvedChecklist(differentRevision),
-                },
-              }
-              yield* lifecycle.considerSpecValidation(
-                saved.repository,
-                observed,
-              )
-              expect(
-                (yield* lifecycle.getWorkItem(saved.id)).stepRuns,
-              ).toHaveLength(3)
-            } else {
-              // Editing the live draft is not a competing approved snapshot.
-              latestBaseline = {
-                kind: "baseline",
-                baseline: {
-                  ...narrowed,
-                  source: { kind: "marked-parent", url: specUrl },
-                },
-              }
-              yield* lifecycle.considerSpecValidation(
-                saved.repository,
-                observed,
-              )
-              expect(
-                (yield* lifecycle.getWorkItem(saved.id)).stepRuns,
-              ).toHaveLength(3)
-            }
-            expect(turns).toBe(0)
-          }).pipe(Effect.provide(layers())),
-        )
-        if (omit && initialSource === "publication-comment") {
-          await Bun.write(
-            join(origin, "delivery.txt"),
-            "merged during checklist wait\n",
-          )
-          git(origin, "add", "delivery.txt")
-          git(
-            origin,
-            "commit",
-            "--no-verify",
-            "-m",
-            "Integrate delivery while waiting",
-          )
-          integratedCommit = git(origin, "rev-parse", "HEAD")
-          expect(git(checkout, "rev-parse", "HEAD")).toBe(initialCommit)
+      if (updateSpecWhileWaiting) {
+        // An update to the parent Spec before validation runs is read live,
+        // and new commits merged while waiting are picked up before the turn.
+        latestSpec = {
+          kind: "baseline",
+          baseline: { ...currentSpecDoc, body: updatedBody },
         }
-        latestBaseline = approved
-      }
-      if (integratedCommit !== initialCommit) {
+        await Bun.write(
+          join(origin, "delivery.txt"),
+          "merged during hierarchy wait\n",
+        )
+        git(origin, "add", "delivery.txt")
+        git(
+          origin,
+          "commit",
+          "--no-verify",
+          "-m",
+          "Integrate delivery while waiting",
+        )
+        integratedCommit = git(origin, "rev-parse", "HEAD")
+        expect(git(checkout, "rev-parse", "HEAD")).toBe(initialCommit)
+
         reopenAfterRefresh = true
         await Effect.runPromise(
           Effect.gen(function* () {
@@ -1492,21 +1273,6 @@ it.each([
         reopenAfterRefresh = false
       }
       if (decision !== undefined) {
-        latestBaseline =
-          decision === "changed-baseline"
-            ? {
-                kind: "baseline",
-                baseline: {
-                  ...narrowed,
-                  requirementChecklist: {
-                    ...approvedChecklist(otherBaseline),
-                    requirements: [checklist.requirements[0]],
-                  },
-                },
-              }
-            : baselineDecision
-              ? conflict
-              : approved
         await Effect.runPromise(
           Effect.gen(function* () {
             const lifecycle = yield* WorkItemLifecycle
@@ -1526,24 +1292,19 @@ it.each([
               status: "succeeded",
               reasonCode: "decision_needed",
             })
-            if (decision === "authorship") {
-              expect(parked.completionSummary).toContain(
-                "MET — local MCP accepts initialize",
-              )
-              expect(parked.completionSummary).toContain(
-                "UNMET — deployed MCP accepts initialize",
-              )
-              expect(parked.completionSummary).toContain(gapUrl("public-route"))
-              expect(children.size).toBe(1)
-            } else if (decision === "baseline") {
-              expect(parked.failureMessage).toContain("HTTP 200")
-              expect(parked.completionSummary).toBeNull()
-            }
+            expect(parked.completionSummary).toContain(
+              "MET — local MCP accepts initialize",
+            )
+            expect(parked.completionSummary).toContain(
+              "UNMET — deployed MCP accepts initialize",
+            )
+            expect(parked.completionSummary).toContain(gapUrl("public-route"))
+            expect(children.size).toBe(1)
             expect(commentAttempts).toBe(1)
             expect(parentComments.size).toBe(0)
             expect(
               (yield* lifecycle.getWorkItem(saved.id)).stepRuns,
-            ).toHaveLength(waitForChecklist ? 4 : 3)
+            ).toHaveLength(3)
           }).pipe(Effect.provide(layers())),
         )
         // The answer is entered in the existing agent session, independent of
@@ -1568,7 +1329,7 @@ it.each([
             expect(held.stepRuns.at(-1)?.reasonCode).toBe(
               "waiting_for_spec_hierarchy",
             )
-            expect(held.stepRuns).toHaveLength(waitForChecklist ? 5 : 4)
+            expect(held.stepRuns).toHaveLength(4)
             expect(parentComments.size).toBe(0)
             expect(continuations).toBe(0)
           }).pipe(Effect.provide(layers())),
@@ -1580,18 +1341,12 @@ it.each([
             expect([...parentComments.values()]).toEqual([
               expect.stringContaining(question),
             ])
-            if (decision === "baseline") {
-              expect([...parentComments.values()][0]).toContain(evidence)
-              expect([...parentComments.values()][0]).toContain("HTTP 200")
-            }
-            if (decision === "authorship") {
-              expect([...parentComments.values()][0]).toContain(
-                "MET — local MCP accepts initialize",
-              )
-            }
+            expect([...parentComments.values()][0]).toContain(
+              "MET — local MCP accepts initialize",
+            )
             const held = yield* lifecycle.getWorkItem(saved.id)
             expect(held.state).toBe("validate_spec")
-            expect(held.stepRuns).toHaveLength(waitForChecklist ? 5 : 4)
+            expect(held.stepRuns).toHaveLength(4)
             expect(continuations).toBe(0)
           }).pipe(Effect.provide(layers())),
         )
@@ -1610,12 +1365,6 @@ it.each([
         git(origin, "add", "follow-up.txt")
         git(origin, "commit", "--no-verify", "-m", "Close reopened descendant")
         integratedCommit = git(origin, "rev-parse", "HEAD")
-        if (decision === "changed-baseline") latestBaseline = approved
-        if (decision === "baseline") {
-          // The current parent no longer cites the original approved
-          // snapshot. The operator still chooses that saved snapshot.
-          latestBaseline = { kind: "baseline", baseline: narrowed }
-        }
         hierarchy = [observed]
       }
       await Effect.runPromise(
@@ -1628,7 +1377,6 @@ it.each([
             ],
             { concurrency: "unbounded" },
           )
-          if (decision === undefined) latestBaseline = { kind: "not-spec" }
           yield* runNext(saved.id, "validate_spec")
           if (retryPublication) {
             expect(children.size).toBe(1)
@@ -1695,10 +1443,7 @@ it.each([
             "create_worktree",
             "validate_spec",
             "validate_spec",
-            ...(waitForChecklist ? ["validate_spec"] : []),
-            ...(decision === undefined && integratedCommit !== initialCommit
-              ? ["validate_spec"]
-              : []),
+            ...(updateSpecWhileWaiting ? ["validate_spec"] : []),
             ...(decision !== undefined
               ? ["validate_spec", "validate_spec"]
               : []),
@@ -1708,11 +1453,10 @@ it.each([
           expect(continuations).toBe(decision === undefined ? 0 : 1)
           expect(draftingTurns).toBe(retryPublication ? 2 : 0)
           expect(git(repositoryPath, "rev-parse", "HEAD")).toBe(initialCommit)
-          expect(item.completionSummary).toContain(baselineUrl)
+          expect(item.completionSummary).toContain(specUrl)
           expect(item.completionSummary).toContain(
             `Integrated checkout: \`${integratedCommit}\``,
           )
-          expect(item.completionSummary).toContain(checklist.sourceUrl)
           expect(item.completionSummary).toContain(
             "MET — local MCP accepts initialize",
           )
@@ -1725,11 +1469,7 @@ it.each([
             )
             expect(parentComments.size).toBe(0)
           }
-          expect(item.completionSummary).toContain(
-            omit
-              ? "The validator omitted this approved requirement"
-              : `HTTP ${deployedStatus}`,
-          )
+          expect(item.completionSummary).toContain(`HTTP ${deployedStatus}`)
           const [row] = yield* sql.unsafe<{ spec_validation_findings: string }>(
             "SELECT spec_validation_findings FROM work_item WHERE id = ?",
             [saved.id],
@@ -1824,6 +1564,8 @@ it("requires applicable delivery evidence for a positive deployed verdict", asyn
         `READY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify([
           {
             requirementId: "mcp-deployed",
+            requirement: "deployed MCP accepts initialize",
+            environment: "deployed",
             status: "met",
             evidence: [
               {
@@ -1834,7 +1576,7 @@ it("requires applicable delivery evidence for a positive deployed verdict", asyn
             ],
           },
         ])}`,
-        approvedChecklist("https://example.com/baseline"),
+        "https://example.com/spec/1",
       ),
     )
     expect(findings.find(({ id }) => id === "mcp-deployed")?.status).toBe(
@@ -1849,6 +1591,8 @@ it("keeps an explicit human-access check recoverable without an ID or a drafted 
       `READY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify([
         {
           requirementId: "mcp-deployed",
+          requirement: "deployed MCP accepts initialize",
+          environment: "deployed",
           status: "unverified",
           evidence: [
             {
@@ -1865,7 +1609,7 @@ it("keeps an explicit human-access check recoverable without an ID or a drafted 
           ],
         },
       ])}`,
-      approvedChecklist("https://example.com/baseline"),
+      "https://example.com/spec/1",
     ),
   )
   expect(findings.find(({ id }) => id === "mcp-deployed")).toMatchObject({
@@ -1887,6 +1631,8 @@ it("does not convert unavailable evidence into a defect even if a fix is propose
       `READY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify([
         {
           requirementId: "mcp-deployed",
+          requirement: "deployed MCP accepts initialize",
+          environment: "deployed",
           status: "unmet",
           evidence: [
             {
@@ -1908,7 +1654,7 @@ it("does not convert unavailable evidence into a defect even if a fix is propose
           ],
         },
       ])}`,
-      approvedChecklist("https://example.com/baseline"),
+      "https://example.com/spec/1",
     ),
   )
   expect(findings.find(({ id }) => id === "mcp-deployed")).toMatchObject({
@@ -1919,10 +1665,11 @@ it("does not convert unavailable evidence into a defect even if a fix is propose
   )
 })
 
-it("records only approved IDs and treats duplicate or missing evidence as unverified", async () => {
-  const checklist = approvedChecklist("https://example.com/baseline")
+it("treats duplicate requirement IDs as unverified", async () => {
   const entry = {
     requirementId: "mcp-local",
+    requirement: "local MCP accepts initialize",
+    environment: "local",
     status: "met",
     evidence: [
       {
@@ -1934,19 +1681,12 @@ it("records only approved IDs and treats duplicate or missing evidence as unveri
   }
   const findings = await Effect.runPromise(
     decodeSpecFindings(
-      `READY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify([entry, entry, { ...entry, requirementId: "invented" }])}`,
-      checklist,
+      `READY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify([entry, entry])}`,
+      "https://example.com/spec/1",
     ),
   )
   expect(findings.map(({ id, status }) => [id, status])).toEqual([
     ["mcp-local", "unverified"],
-    ["mcp-deployed", "unverified"],
   ])
   expect(findings[0]?.evidence[0]?.detail).toContain("more than once")
-  expect(findings[1]?.evidence[0]?.detail).toContain("omitted")
-  expect(
-    await Effect.runPromise(
-      decodeSpecFindings("READY_FOR_AGENT_SPEC_FINDINGS:\n[]", checklist),
-    ),
-  ).toHaveLength(2)
 })

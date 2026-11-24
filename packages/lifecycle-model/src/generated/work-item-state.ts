@@ -88,7 +88,6 @@ export const STEP_RUN_REASONS = [
   "timeout",
   "transient_provider_error",
   "waiting_for_agent_turn",
-  "waiting_for_approved_spec_checklist",
   "waiting_for_spec_hierarchy",
   "worker_restarted",
 ] as const
@@ -173,8 +172,6 @@ export const STEP_RUN_REASON = {
   transientProviderError: "transient_provider_error",
   /** Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns. */
   waitingForAgentTurn: "waiting_for_agent_turn",
-  /** Validate Spec did not start an Agent Turn because no approved checklist was bound to the Spec baseline. Release the Worker Slot and retain the Work Item for a later all-closed observation with an approved checklist. */
-  waitingForApprovedSpecChecklist: "waiting_for_approved_spec_checklist",
   /** Validate Spec did not start an Agent Turn because the original Issue Tracker did not confirm a complete, nonempty, closed hierarchy. Release the Worker Slot and wait for a new all-closed observation. */
   waitingForSpecHierarchy: "waiting_for_spec_hierarchy",
   /** The prior harness or job-worker process ended while the Step Run was still Running. */
@@ -222,7 +219,6 @@ export const STEP_RUN_REASON_DEFINITIONS = {
   timeout: "The Step Run ended because the Lifecycle Step exceeded its configured timeout budget: an aggregate maximum duration, or for Review a no-progress interval without a completed checkpoint.",
   transient_provider_error: "The Step Run ended because the Agent Backend classified a temporary provider capacity, rate-limit, or server error. Provider Recovery may schedule another attempt of the same Lifecycle Step; this does not consume Autonomous Retry Budget.",
   waiting_for_agent_turn: "Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns.",
-  waiting_for_approved_spec_checklist: "Validate Spec did not start an Agent Turn because no approved checklist was bound to the Spec baseline. Release the Worker Slot and retain the Work Item for a later all-closed observation with an approved checklist.",
   waiting_for_spec_hierarchy: "Validate Spec did not start an Agent Turn because the original Issue Tracker did not confirm a complete, nonempty, closed hierarchy. Release the Worker Slot and wait for a new all-closed observation.",
   worker_restarted: "The prior harness or job-worker process ended while the Step Run was still Running.",
 } as const satisfies Record<StepRunReason, string>

@@ -1,6 +1,5 @@
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { renderSpecBaseline } from "@ready-for-agent/forge-contract"
 import { makeGitHubServiceFromToken } from "../src/lib/github-service-live.js"
 
 const repository = {
@@ -15,59 +14,28 @@ const page = <A>(nodes: readonly A[], endCursor: string | null = null) => ({
 })
 const issueResponse = (issue: object) =>
   Response.json({ data: { repository: { issue } } })
-const original = {
+const current = {
   title: "Hosted MCP",
   body: "Expose MCP both locally and when deployed.",
-  designRevisions: [
-    `https://github.com/acme/widgets/blob/${"a".repeat(40)}/design.md`,
-  ],
+  url: issueUrl,
 }
 
-it.live("finds a published GitHub Spec baseline on a later comment page", () =>
-  Effect.gen(function* () {
-    const snapshotUrl = `${issueUrl}#issuecomment-10`
-    const service = makeGitHubServiceFromToken("token", async (_, init) => {
-      const request = String(init?.body)
-      if (!request.includes("comments")) {
+it.live(
+  "reads a marked GitHub Spec directly as written without reading comments",
+  () =>
+    Effect.gen(function* () {
+      const service = makeGitHubServiceFromToken("token", async (_, init) => {
+        expect(String(init?.body)).not.toContain("comments")
         return issueResponse({
-          title: "Local MCP",
-          body: `Expose MCP locally.\n\n[Approved Spec baseline](<${snapshotUrl}>)`,
-          url: issueUrl,
+          ...current,
           labels: page([{ name: "Spec" }, { name: "ready-for-agent" }]),
         })
-      }
-      expect(request).toContain("lastEditedAt")
-      return request.includes("next-comments")
-        ? issueResponse({
-            comments: page([
-              {
-                body: renderSpecBaseline(original),
-                url: snapshotUrl,
-                lastEditedAt: null,
-              },
-            ]),
-          })
-        : issueResponse({
-            comments: page(
-              [
-                {
-                  body: "Agent: deployment is outside this slice.",
-                  url: `${issueUrl}#issuecomment-9`,
-                  lastEditedAt: null,
-                },
-              ],
-              "next-comments",
-            ),
-          })
-    })
-    expect(yield* service.readSpecBaseline(repository, 1)).toEqual({
-      kind: "baseline",
-      baseline: {
-        ...original,
-        source: { kind: "publication-comment", url: snapshotUrl },
-      },
-    })
-  }),
+      })
+      expect(yield* service.readSpecBaseline(repository, 1)).toEqual({
+        kind: "baseline",
+        baseline: current,
+      })
+    }),
 )
 
 it.live(
@@ -122,9 +90,7 @@ it.live("does not infer a GitHub Spec from planning text", () =>
     const service = makeGitHubServiceFromToken("token", async (_, init) => {
       expect(String(init?.body)).not.toContain("comments")
       return issueResponse({
-        title: original.title,
-        body: original.body,
-        url: issueUrl,
+        ...current,
         labels: page([{ name: "ready-for-agent" }]),
       })
     })

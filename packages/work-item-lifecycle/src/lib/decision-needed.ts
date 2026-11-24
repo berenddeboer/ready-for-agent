@@ -91,7 +91,6 @@ export type DecisionNeededHandoff = {
 export const SpecWaiverOption = Schema.Struct({
   requirementId: Schema.NonEmptyString,
   requirement: Schema.NonEmptyString,
-  baselineUrl: Schema.NonEmptyString,
   trackerComment: Schema.optionalKey(
     Schema.Struct({ url: Schema.NonEmptyString, quote: Schema.NonEmptyString }),
   ),

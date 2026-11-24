@@ -4,7 +4,7 @@ import { makeLinearServiceFromToken } from "@ready-for-agent/linear-service"
 interface Approval {
   readonly title: string
   readonly description: string
-  readonly comments: readonly { readonly url: string; readonly body: string }[]
+  readonly comments?: readonly { readonly url: string; readonly body: string }[]
 }
 
 interface NativeChild {
@@ -59,10 +59,11 @@ export const specCloseOutTracker = (specUrl: string, approval: Approval) => {
       : []),
     ...tracker.followUps.values(),
   ]
+  const approvalComments = approval.comments ?? []
   const ok = (data: unknown) => Response.json({ data })
   const comments = () =>
     [
-      ...approval.comments,
+      ...approvalComments,
       ...tracker.comments.map((body, index) => ({
         url: `${specUrl}#verdict-${index + 1}`,
         body,
@@ -119,7 +120,7 @@ export const specCloseOutTracker = (specUrl: string, approval: Approval) => {
             addComment: {
               commentEdge: {
                 node: {
-                  id: `comment-${approval.comments.length + tracker.comments.length}`,
+                  id: `comment-${approvalComments.length + tracker.comments.length}`,
                   body,
                 },
               },
@@ -294,7 +295,7 @@ export const specCloseOutTracker = (specUrl: string, approval: Approval) => {
           commentCreate: {
             success: true,
             comment: {
-              id: `comment-${approval.comments.length + tracker.comments.length}`,
+              id: `comment-${approvalComments.length + tracker.comments.length}`,
               body,
             },
           },
@@ -304,7 +305,7 @@ export const specCloseOutTracker = (specUrl: string, approval: Approval) => {
     if (query.includes("mutation CommentUpdate")) {
       const index =
         Number(String(variables.id).replace("comment-", "")) -
-        approval.comments.length -
+        approvalComments.length -
         1
       if (tracker.comments[index] === undefined)
         throw new Error("Wrong verdict comment target")

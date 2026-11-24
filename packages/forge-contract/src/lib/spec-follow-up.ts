@@ -29,6 +29,7 @@ export const PublishedSpecFollowUps = Schema.Array(
     ...GapIdentity,
     nativeId: Schema.optionalKey(Schema.NonEmptyString),
     url: Schema.NonEmptyString,
+    reportCommentUrl: Schema.optionalKey(Schema.NonEmptyString),
   }),
 )
 export type PublishedSpecFollowUps = typeof PublishedSpecFollowUps.Type
