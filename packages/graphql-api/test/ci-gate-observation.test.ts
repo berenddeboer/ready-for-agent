@@ -217,6 +217,7 @@ describe("Repository CI Gate observation", () => {
     observeCiGate: (repository, input, options) =>
       observe(repository, input, options),
     observeSpecs: () => Effect.succeed([]),
+    publishSpecFollowUps: () => Effect.die("not used"),
     listReadyIssues: (repository, options) =>
       listReadyIssues(repository, options),
   } satisfies GitHubServiceShape)

@@ -35,6 +35,7 @@ const serviceWithList = (
 ): GitHubServiceShape => ({
   listReadyIssues,
   observeSpecs: () => Effect.succeed([]),
+  publishSpecFollowUps: () => Effect.die("not used"),
   readSpecBaseline: () => Effect.die("not used"),
   getAuthenticatedUserLogin: () => Effect.die("not used"),
   getOpenPullRequestNumber: () => Effect.die("not used"),

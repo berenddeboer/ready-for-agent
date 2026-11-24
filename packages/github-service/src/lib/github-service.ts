@@ -15,10 +15,12 @@ import type {
   PrStatusCheckDiagnostic,
   PrStatusCheckDiagnosticsOptions,
   PrStatusCheckDiagnosticsRequest,
+  PublishedSpecFollowUps,
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
   ReadyLabeledIssue,
   SpecBaselineResult,
+  SpecFollowUpPublication,
   UpdateDraftPullRequestCopyInput,
 } from "@ready-for-agent/forge-contract"
 import type {
@@ -84,6 +86,10 @@ export interface GitHubServiceShape
     repository: GitHubRepository,
     issueNumber: number,
   ) => Effect.Effect<SpecBaselineResult, GitHubServiceError>
+  readonly publishSpecFollowUps: (
+    repository: GitHubRepository,
+    input: SpecFollowUpPublication,
+  ) => Effect.Effect<PublishedSpecFollowUps, GitHubServiceError>
   /**
    * Live catalog of active GitHub Actions workflows as CI Gate Definitions.
    * Disabled, deleted, and inactive workflows are omitted.

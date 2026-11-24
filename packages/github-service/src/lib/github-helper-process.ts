@@ -18,6 +18,7 @@ import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
 import { observeAutomatedReviewEvidenceProgram } from "../bin/observe-automated-review-evidence.js"
 import { observeCiGateProgram } from "../bin/observe-ci-gate.js"
 import { observeSpecsProgram } from "../bin/observe-specs.js"
+import { publishSpecFollowUpsProgram } from "../bin/publish-spec-follow-ups.js"
 import { readCiRepairRunProgram } from "../bin/read-ci-repair-run.js"
 import { readSpecBaselineProgram } from "../bin/read-spec-baseline.js"
 import { rerunFailedJobsProgram } from "../bin/rerun-failed-jobs.js"
@@ -34,6 +35,7 @@ export const INTERNAL_GITHUB_HELPER_ARG =
 export const GITHUB_HELPER_OPERATIONS = [
   "list-ready-issues",
   "observe-specs",
+  "publish-spec-follow-ups",
   "read-spec-baseline",
   "list-ci-gate-catalog",
   "observe-ci-gate",
@@ -155,6 +157,7 @@ const programs: Record<
 > = {
   "list-ready-issues": listReadyIssuesProgram,
   "observe-specs": observeSpecsProgram,
+  "publish-spec-follow-ups": publishSpecFollowUpsProgram,
   "read-spec-baseline": readSpecBaselineProgram,
   "list-ci-gate-catalog": listCiGateCatalogProgram,
   "observe-ci-gate": observeCiGateProgram,

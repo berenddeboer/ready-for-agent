@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Fiber, Result } from "effect"
 import { TestClock } from "effect/testing"
+import type { SpecFollowUpPublication } from "@ready-for-agent/forge-contract"
 import { decodeArgument } from "../src/bin/cli.js"
 import {
   GitHubRepositoryUnavailableError,
@@ -69,6 +70,198 @@ const jsonGraphqlResponse = (body: unknown): Response =>
   new Response(JSON.stringify(body), {
     headers: { "content-type": "application/json" },
   })
+
+it("reuses a partially written GitHub follow-up and links the open Spec to it", async () => {
+  const url = "https://github.com/acme/widgets/issues/8"
+  const regionalUrl = "https://github.com/acme/widgets/issues/9"
+  const payload: SpecFollowUpPublication = {
+    parentId: "7",
+    parentUrl: "https://github.com/acme/widgets/issues/7",
+    workItemId: "wi-test",
+    findings: "Deployed MCP was unmet: HTTP 404",
+    children: [
+      {
+        requirementId: "deployed-mcp",
+        gapId: "public-route",
+        title: "Deliver the deployed MCP endpoint",
+        body: "Approved requirement: deployed initialize. Observed: HTTP 404. Acceptance: initialize succeeds.",
+        label: "ready-for-human",
+      },
+      {
+        requirementId: "deployed-mcp",
+        gapId: "regional-route",
+        title: "Deliver the regional MCP endpoint",
+        body: "Observed: regional MCP returns HTTP 404.",
+        label: "ready-for-agent",
+      },
+    ],
+  }
+  const parent = { id: "parent", state: "OPEN", url: payload.parentUrl }
+  const comments: Array<{ id: string; body: string }> = []
+  const child: {
+    id: string
+    number: number
+    url: string
+    body: string
+    parent: { id: string } | null
+    labels: { nodes: Array<{ id: string }>; pageInfo: { hasNextPage: boolean } }
+  } = {
+    id: "child",
+    number: 8,
+    url,
+    body: "",
+    parent: null,
+    labels: { nodes: [], pageInfo: { hasNextPage: false } },
+  }
+  const page = (
+    nodes: readonly unknown[],
+    endCursor: string | null = null,
+    totalCount = nodes.length,
+  ) => ({
+    nodes,
+    totalCount,
+    pageInfo: { hasNextPage: endCursor !== null, endCursor },
+  })
+  let creates = 0
+  let humanLabelAvailable = false
+  let loseCommentUpdate = true
+  const regional = { ...child, id: "regional", number: 9, url: regionalUrl }
+  const service = makeGitHubServiceFromToken("token", async (_url, init) => {
+    const { query, variables } = JSON.parse(String(init?.body))
+    const arg = (key: string) =>
+      variables[query.match(new RegExp(`\\b${key}:\\$(v\\d+)`))?.[1]]
+    const data = (result: unknown) => jsonGraphqlResponse({ data: result })
+    const repo = (result: unknown) => data({ repository: result })
+    if (query.includes("createIssue(")) {
+      creates += 1
+      const isRegional = arg("input").title === payload.children[1].title
+      expect(arg("input")).toMatchObject({
+        repositoryId: "repo",
+        parentIssueId: parent.id,
+        labelIds: [isRegional ? "agent-label" : "human-label"],
+        title: payload.children[isRegional ? 1 : 0].title,
+      })
+      if (isRegional) {
+        regional.body = arg("input").body
+        regional.parent = { id: parent.id }
+        regional.labels = {
+          nodes: [{ id: "agent-label" }],
+          pageInfo: { hasNextPage: false },
+        }
+        return data({ createIssue: { issue: regional } })
+      }
+      child.body = arg("input").body
+      throw new Error(
+        "Lost response after creating the issue without its parent or label",
+      )
+    }
+    if (query.includes("addSubIssue(")) {
+      expect(arg("input")).toEqual({ issueId: parent.id, subIssueId: child.id })
+      child.parent = { id: parent.id }
+      return data({ addSubIssue: { subIssue: child } })
+    }
+    if (query.includes("addLabelsToLabelable(")) {
+      expect(child.parent?.id).toBe(parent.id)
+      expect(arg("input")).toEqual({
+        labelableId: child.id,
+        labelIds: ["human-label"],
+      })
+      child.labels.nodes = [{ id: "human-label" }]
+      return data({
+        addLabelsToLabelable: {
+          labelable: { __typename: "Issue", labels: child.labels },
+        },
+      })
+    }
+    if (query.includes("addComment(")) {
+      const { subjectId, body } = arg("input")
+      expect(subjectId).toBe(parent.id)
+      comments.push({ id: "comment", body })
+      return data({ addComment: { commentEdge: { node: { id: "comment" } } } })
+    }
+    if (query.includes("updateIssueComment(")) {
+      const { id, body } = arg("input")
+      expect(id).toBe(comments[0]?.id)
+      const updated = { id, body }
+      comments[0] = updated
+      if (loseCommentUpdate) {
+        loseCommentUpdate = false
+        throw new Error("Lost response after updating findings")
+      }
+      return data({ updateIssueComment: { issueComment: updated } })
+    }
+    if (query.includes("comments("))
+      return repo({ issue: { comments: page(comments) } })
+    if (query.includes("issues(")) {
+      // A completed, unrelated issue is on the first page; the orphan is
+      // found only on the continuation of the unfiltered repository listing.
+      const other = { id: "other", number: 6, body: "Unrelated" }
+      const owned = [child, regional].filter(({ body }) => body !== "")
+      return repo({
+        issues:
+          arg("after") === "next"
+            ? page(owned, null, owned.length + 1)
+            : page(
+                [other],
+                owned.length === 0 ? null : "next",
+                owned.length + 1,
+              ),
+      })
+    }
+    if (query.includes("label(")) {
+      const label = variables[query.match(/\blabel\(name:\$(v\d+)\)/u)?.[1]]
+      if (label === "ready-for-human")
+        return repo({
+          label: humanLabelAvailable ? { id: "human-label" } : null,
+        })
+      expect(label).toBe("ready-for-agent")
+      return repo({ label: { id: "agent-label" } })
+    }
+    if (arg("number") === 8) return repo({ issue: child })
+    if (arg("number") === 9) return repo({ issue: regional })
+    return repo({ id: "repo", issue: parent })
+  })
+  const publish = () =>
+    Effect.runPromise(service.publishSpecFollowUps(repository, payload))
+  await expect(publish()).rejects.toThrow(
+    "Missing GitHub Issue label ready-for-human",
+  )
+  expect(creates).toBe(1)
+  expect(regional.parent?.id).toBe(parent.id)
+  expect(comments[0]?.body).toContain(regionalUrl)
+  expect(comments[0]?.body).toContain("Follow-ups not yet published")
+  humanLabelAvailable = true
+  await expect(publish()).rejects.toThrow("Creating a GitHub follow-up")
+  await expect(publish()).rejects.toThrow("Updating findings")
+  await expect(publish()).resolves.toEqual([
+    { requirementId: "deployed-mcp", gapId: "public-route", url },
+    {
+      requirementId: "deployed-mcp",
+      gapId: "regional-route",
+      url: regionalUrl,
+    },
+  ])
+  expect(creates).toBe(2)
+  expect(child.parent?.id).toBe(parent.id)
+  expect(child.labels.nodes).toEqual([{ id: "human-label" }])
+  expect(child.body).toContain("Acceptance: initialize succeeds.")
+  expect(comments.map(({ body }) => body)).toEqual([
+    expect.stringContaining(url),
+  ])
+  expect(comments[0]?.body).toContain("HTTP 404")
+  expect(comments[0]?.body).toContain(regionalUrl)
+  expect(comments[0]?.body).not.toContain("Follow-ups not yet published")
+  await Effect.runPromise(
+    service.publishSpecFollowUps(repository, {
+      ...payload,
+      findings: "Follow-up drafts corrected",
+    }),
+  )
+  expect(comments.map(({ body }) => body)).toEqual([
+    expect.stringContaining("Follow-up drafts corrected"),
+  ])
+  expect(parent.state).toBe("OPEN")
+})
 
 const issue = (
   number: number,

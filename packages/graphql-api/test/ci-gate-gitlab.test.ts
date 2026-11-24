@@ -196,6 +196,7 @@ describe("GitLab Repository CI Gate", () => {
     },
     listReadyIssues: () => Effect.succeed([]),
     observeSpecs: () => Effect.succeed([]),
+    publishSpecFollowUps: () => Effect.die("not used"),
   } satisfies GitHubServiceShape)
 
   const runtimeLayer = Layer.mergeAll(

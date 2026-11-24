@@ -81,6 +81,8 @@ export const makeGitHubServiceTest = (
     observeCiGate: () =>
       Effect.succeed({ defaultBranch: "main", observations: [] }),
     observeSpecs: () => Effect.succeed([]),
+    publishSpecFollowUps: () =>
+      Effect.die("Unexpected GitHub Spec publication"),
     listReadyIssues: (repository) => {
       const fixture = fixturesByRepository.get(repositoryKey(repository))
       if (fixture === undefined) {

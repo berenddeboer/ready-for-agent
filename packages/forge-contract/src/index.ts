@@ -7,6 +7,7 @@ export * from "./lib/issue-presentation.js"
 export * from "./lib/mutation.js"
 export * from "./lib/observation.js"
 export * from "./lib/spec-baseline.js"
+export * from "./lib/spec-follow-up.js"
 export * from "./lib/spec-observation.js"
 export {
   type ApprovedSpecRequirementChecklist,

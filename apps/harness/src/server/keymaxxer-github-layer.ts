@@ -8,7 +8,10 @@ import {
   Option,
   Schema,
 } from "effect"
-import { SpecBaselineResult } from "@ready-for-agent/forge-contract"
+import {
+  PublishedSpecFollowUps,
+  SpecBaselineResult,
+} from "@ready-for-agent/forge-contract"
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GITHUB_HELPER_PERMISSION_EXIT_CODE,
@@ -963,6 +966,18 @@ export const keymaxxerGitHubLayer = (options: {
               ),
             }),
         ),
+        publishSpecFollowUps: (repository, input) =>
+          callHelper({
+            operation: "publish-spec-follow-ups",
+            repository,
+            describe: "publish GitHub Spec follow-ups",
+            args: [encodeArgument(JSON.stringify(input))],
+            decode: decodeJson(
+              PublishedSpecFollowUps,
+              repository,
+              "decode GitHub Spec follow-up links",
+            ),
+          }),
         listCiGateCatalog: Effect.fn("KeymaxxerGitHub.listCiGateCatalog")(
           (repository, operationOptions?: GitHubOperationOptions) =>
             callHelper({

@@ -10,6 +10,7 @@ import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import type {
   ApprovedSpecRequirementChecklist,
   SpecBaselineResult,
+  SpecFollowUpPublication,
   SpecObservation,
 } from "@ready-for-agent/forge-contract"
 import {
@@ -101,6 +102,7 @@ it.each([
     deployedStatus: 403,
     expected: "UNVERIFIED",
     omit: false,
+    humanCheck: true,
     initialSource: "publication-comment",
   },
   {
@@ -115,6 +117,14 @@ it.each([
     deployedStatus: 403,
     expected: "UNVERIFIED",
     omit: false,
+    initialSource: "publication-comment",
+  },
+  {
+    tracker: "github",
+    deployedStatus: 403,
+    expected: "UNVERIFIED",
+    omit: false,
+    humanCheck: true,
     initialSource: "publication-comment",
   },
   {
@@ -170,6 +180,13 @@ it.each([
     const baselineDecision =
       decision === "baseline" || decision === "changed-baseline"
     const waitForChecklist = omit || decision === "changed-baseline"
+    const humanCheck = "humanCheck" in scenario
+    const retryPublication =
+      decision === undefined && !omit && deployedStatus === 404
+    const mixedEvidence = tracker === "github" && retryPublication
+    const deployedVerdict = mixedEvidence ? "UNVERIFIED" : expected
+    const expectChild = retryPublication || humanCheck || decision !== undefined
+    const inconsistentVerdict = deployedStatus === 403 && !humanCheck
     const root = await mkdtemp(join(tmpdir(), "spec-validation-"))
     const sessionId = "spec-validator-own-session"
     const specUrl =
@@ -184,6 +201,10 @@ it.each([
         const path = new URL(request.url).pathname
         if (path === "/deployed/mcp")
           return new Response(null, { status: deployedStatus })
+        if (path === "/deployed/gateway")
+          return new Response(null, { status: 200 })
+        if (path === "/deployed/region/mcp" && mixedEvidence)
+          return new Response(null, { status: 403 })
         if (path === "/local/mcp" && request.method === "POST") {
           const body: unknown = await request.json()
           if (
@@ -205,11 +226,22 @@ it.each([
     const database = makeFileDatabaseTest(join(root, "db.sqlite"))
     const withoutChecklist = {
       title: "MCP delivery",
-      body: "Local and deployed MCP must both accept initialize.",
+      body: `Local and deployed MCP must both accept initialize.${retryPublication ? " The deployed promise includes the public and regional routes. The deployed health and readiness endpoints must report ready." : ""}`,
       source: { kind: "publication-comment", url: baselineUrl },
       designRevisions: [revision],
     } as const
-    const checklist = approvedChecklist(baselineUrl)
+    const baseChecklist = approvedChecklist(baselineUrl)
+    const incompleteRequirement = {
+      id: "deployment-health",
+      environment: "deployed",
+      requirement: "deployed health and readiness endpoints report ready",
+    } as const
+    const checklist: ApprovedSpecRequirementChecklist = retryPublication
+      ? {
+          ...baseChecklist,
+          requirements: [...baseChecklist.requirements, incompleteRequirement],
+        }
+      : baseChecklist
     const approved: SpecBaselineResult = {
       kind: "baseline",
       baseline: { ...withoutChecklist, requirementChecklist: checklist },
@@ -269,6 +301,34 @@ it.each([
         parentComments.set(marker, body)
         return Effect.void
       })
+    let draftingTurns = 0
+    const followUpUrl = `${specUrl}/follow-up`
+    const gapUrl = (gapId: string) => `${followUpUrl}/${gapId}`
+    const children = new Map<
+      string,
+      SpecFollowUpPublication["children"][number]
+    >()
+    let parentFindings: string | undefined
+    const publishTest = (publication: SpecFollowUpPublication) =>
+      Effect.sync(() => {
+        expect(expectChild).toBeTrue()
+        expect(publication.parentId).toBe(observed.nativeId)
+        const partialWrite = retryPublication && children.size === 0
+        for (const child of partialWrite
+          ? publication.children.slice(0, 1)
+          : publication.children)
+          children.set(child.gapId, child)
+        hierarchy = [reopened]
+        if (partialWrite) return false
+        parentFindings = `${publication.findings}\n${publication.children.map(({ gapId }) => gapUrl(gapId)).join("\n")}`
+        return true
+      })
+    const followUpResult = (publication: SpecFollowUpPublication) =>
+      publication.children.map(({ requirementId, gapId }) => ({
+        requirementId,
+        gapId,
+        url: gapUrl(gapId),
+      }))
     const origin = join(root, "origin")
     const repositoryPath = join(root, "repository")
     let initialCommit: string
@@ -300,11 +360,32 @@ it.each([
           status,
           evidence: [
             {
-              kind: status === "unverified" ? "human-verification" : "delivery",
+              kind:
+                status === "unmet"
+                  ? "defect"
+                  : status === "unverified"
+                    ? "unavailable"
+                    : "delivery",
+              ...(status === "unmet" ? { gapId: "public-route" } : {}),
               environment,
               detail: `POST ${url} → HTTP ${response.status}${body ? ` ${body}` : ""}`,
             },
           ],
+          ...(status === "unmet"
+            ? {
+                followUps: [
+                  {
+                    gapId: "public-route",
+                    kind: "fix",
+                    owner: "agent",
+                    title: "Deliver deployed MCP",
+                    task: "Expose the deployed /mcp route",
+                    acceptanceCheck:
+                      "POST initialize to deployed /mcp and receive a protocolVersion.",
+                  },
+                ],
+              }
+            : {}),
         }
       })
     const question =
@@ -365,51 +446,254 @@ it.each([
               question,
               evidence: [evidence],
               findings:
-                decision === "authorship" ? [yield* probe("local")] : [],
+                decision === "authorship"
+                  ? [yield* probe("local"), yield* probe("deployed")]
+                  : [],
             })
           }
-          const findings = yield* Effect.all(
-            omit ? [probe("local")] : [probe("local"), probe("deployed")],
-          )
-          return report(findings)
-        }),
-      continueTurn:
-        decision === undefined
-          ? no
-          : (turn) =>
-              Effect.gen(function* () {
-                continuations += 1
-                expect(turn.sessionId).toBe(sessionId)
-                expect(turn.replyToPromptOnly).toBe(true)
-                expect(turn.cwd).toBe(checkout)
-                expect(git(turn.cwd, "rev-parse", "HEAD")).toBe(
-                  integratedCommit,
-                )
-                expect(turn.prompt).toContain(question)
-                expect(turn.prompt).toContain(evidence)
-                if (decision === "authorship") {
-                  expect(turn.prompt).toContain(
-                    "MET — local MCP accepts initialize",
-                  )
-                }
-                expect(operatorAnswer).toBe(
-                  "Keep the approved local and deployed requirements.",
-                )
-                const findings = yield* Effect.all([
-                  probe("local"),
-                  probe("deployed"),
-                ])
-                return report(
-                  baselineDecision
+          const probeFollowUps = (environment: "local" | "deployed") =>
+            Effect.promise(async () => {
+              const url = new URL(`${environment}/mcp`, mcp.url)
+              const response = await fetch(url, {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: 1,
+                  method: "initialize",
+                }),
+              })
+              const body = await response.text()
+              const gateway =
+                inconsistentVerdict && environment === "deployed"
+                  ? await fetch(new URL("deployed/gateway", mcp.url))
+                  : undefined
+              const regionalUrl = new URL("deployed/region/mcp", mcp.url)
+              const regional =
+                environment === "deployed" && retryPublication
+                  ? await fetch(regionalUrl, {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({
+                        jsonrpc: "2.0",
+                        id: 1,
+                        method: "initialize",
+                      }),
+                    })
+                  : undefined
+              const status =
+                response.ok && body.includes("protocolVersion")
+                  ? "met"
+                  : response.status === 404
+                    ? "unmet"
+                    : "unverified"
+              return {
+                requirementId: `mcp-${environment}`,
+                status:
+                  inconsistentVerdict && environment === "deployed"
+                    ? "unmet"
+                    : regional?.status === 403
+                      ? "unverified"
+                      : status,
+                evidence: [
+                  ...(gateway !== undefined
+                    ? [
+                        {
+                          kind: "delivery",
+                          environment,
+                          detail: `GET ${gateway.url} → HTTP ${gateway.status}`,
+                          gapId: "gateway",
+                        },
+                      ]
+                    : []),
+                  {
+                    kind:
+                      status === "unmet"
+                        ? "defect"
+                        : status === "unverified"
+                          ? humanCheck
+                            ? "human-access"
+                            : "unavailable"
+                          : "delivery",
+                    ...(status === "unmet" ||
+                    (status === "unverified" && tracker === "github")
+                      ? { gapId: "public-route" }
+                      : {}),
+                    environment,
+                    detail: `POST ${url} → HTTP ${response.status}${body ? ` ${body}` : ""}`,
+                  },
+                  ...(regional === undefined
+                    ? []
+                    : [
+                        {
+                          kind:
+                            regional.status === 403 ? "human-access" : "defect",
+                          gapId: "regional-route",
+                          environment,
+                          detail: `POST ${regionalUrl} → HTTP ${regional.status}`,
+                        },
+                      ]),
+                ],
+                ...(status === "unmet"
+                  ? {
+                      followUps: [
+                        {
+                          gapId: "public-route",
+                          kind: "fix",
+                          owner: "agent",
+                          title: "Deliver deployed MCP",
+                          task: "Expose the deployed /mcp route",
+                          acceptanceCheck:
+                            "POST initialize to deployed /mcp and receive a protocolVersion.",
+                        },
+                        {
+                          gapId: "regional-route",
+                          ...(mixedEvidence
+                            ? { kind: "human-verification" }
+                            : { kind: "fix", owner: "human" }),
+                          title: "Deliver regional deployed MCP",
+                          task: mixedEvidence
+                            ? "Have the operator check /region/mcp with production access."
+                            : "Have the operator expose /region/mcp through the human-managed regional gateway.",
+                          acceptanceCheck:
+                            "POST initialize to deployed /region/mcp and receive a protocolVersion.",
+                        },
+                      ],
+                    }
+                  : status === "unverified"
                     ? {
-                        kind: "baseline_selected",
-                        baselineUrl,
-                        basis: "operator_answer",
-                        findings,
+                        followUps: [
+                          {
+                            gapId: "public-route",
+                            kind: "human-verification",
+                            title: "Verify deployed MCP",
+                            task: humanCheck
+                              ? "Have the deployment operator run initialize using their production access."
+                              : "Try the same request again after the transient failure.",
+                            acceptanceCheck:
+                              "POST initialize to deployed /mcp and receive a protocolVersion.",
+                          },
+                          ...(inconsistentVerdict
+                            ? [
+                                {
+                                  gapId: "gateway",
+                                  kind: "fix",
+                                  owner: "agent",
+                                  title: "Replace the deployed gateway",
+                                  task: "Replace the gateway.",
+                                  acceptanceCheck:
+                                    "The gateway responds HTTP 200.",
+                                },
+                              ]
+                            : []),
+                        ],
                       }
-                    : findings,
+                    : {}),
+              }
+            })
+          const findings = yield* Effect.all(
+            omit
+              ? [probeFollowUps("local")]
+              : [probeFollowUps("local"), probeFollowUps("deployed")],
+          )
+          const incomplete = retryPublication
+            ? yield* Effect.promise(async () => {
+                const evidence = await Promise.all(
+                  ["health", "readiness"].map(async (route) => {
+                    const url = new URL(`deployed/${route}`, mcp.url)
+                    const response = await fetch(url)
+                    return {
+                      kind: "defect",
+                      ...(route === "health"
+                        ? {}
+                        : { gapId: "not a valid id" }),
+                      environment: "deployed",
+                      detail: `GET ${url} → HTTP ${response.status}`,
+                    }
+                  }),
                 )
-              }),
+                return [
+                  {
+                    requirementId: incompleteRequirement.id,
+                    status: "unmet",
+                    evidence,
+                    ...(tracker === "github"
+                      ? {
+                          followUps: [
+                            { gapId: "health", kind: "fix", owner: "agent" },
+                          ],
+                        }
+                      : {}),
+                  },
+                ]
+              })
+            : []
+          return report([...findings, ...incomplete])
+        }),
+      continueTurn: (turn) =>
+        turn.prompt.includes("<saved_gap_evidence>")
+          ? Effect.sync(() => {
+              expect(retryPublication).toBeTrue()
+              expect(turn.sessionId).toBe(sessionId)
+              expect(turn.prompt).toContain("Do not repeat validation")
+              expect(turn.prompt).not.toContain("public-route")
+              draftingTurns += 1
+              const first = draftingTurns === 1
+              const route = first ? "health" : "readiness"
+              expect(turn.prompt).toContain(`deployed/${route}`)
+              if (!first) expect(turn.prompt).not.toContain("deployed/health")
+              return {
+                sessionId,
+                assistantText: JSON.stringify([
+                  {
+                    requirementId: incompleteRequirement.id,
+                    followUps: [
+                      {
+                        gapId: first ? "recovered-gap-1" : "recovered-gap-2",
+                        kind: "fix",
+                        owner: "agent",
+                        title: `Expose deployed ${route} endpoint`,
+                        task: `Serve readiness on the deployed ${route} route.`,
+                        acceptanceCheck: `GET /${route} on the deployment returns HTTP 200 and the ready status.`,
+                      },
+                    ],
+                  },
+                  ...(first ? [{ followUps: [] }] : []),
+                ]),
+              }
+            })
+          : Effect.gen(function* () {
+              expect(decision).toBeDefined()
+              continuations += 1
+              expect(turn.sessionId).toBe(sessionId)
+              expect(turn.replyToPromptOnly).toBe(true)
+              expect(turn.cwd).toBe(checkout)
+              expect(git(turn.cwd, "rev-parse", "HEAD")).toBe(integratedCommit)
+              expect(turn.prompt).toContain(question)
+              expect(turn.prompt).toContain(evidence)
+              if (decision === "authorship") {
+                expect(turn.prompt).toContain(
+                  "MET — local MCP accepts initialize",
+                )
+              }
+              expect(operatorAnswer).toBe(
+                "Keep the approved local and deployed requirements.",
+              )
+              const findings = yield* Effect.all([
+                probe("local"),
+                probe("deployed"),
+              ])
+              return report(
+                baselineDecision
+                  ? {
+                      kind: "baseline_selected",
+                      baselineUrl,
+                      basis: "operator_answer",
+                      findings,
+                    }
+                  : findings,
+              )
+            }),
       inspect: no,
     })
     const layers = () =>
@@ -472,6 +756,19 @@ it.each([
         Layer.provideMerge(
           stubGitHubServiceLayer({
             readSpecBaseline: tracker === "github" ? readBaseline : no,
+            publishSpecFollowUps:
+              tracker === "github"
+                ? (repository, publication) =>
+                    Effect.gen(function* () {
+                      expect(repository.projectPath).toBe("acme/widgets")
+                      if (!(yield* publishTest(publication))) {
+                        return yield* new GitHubRequestError({
+                          message: "Lost response after creating a follow-up",
+                        })
+                      }
+                      return followUpResult(publication)
+                    })
+                : no,
             observeSpecs:
               tracker === "github" ? () => Effect.sync(() => hierarchy) : no,
             createDraftPullRequest: no,
@@ -497,6 +794,19 @@ it.each([
           Layer.succeed(LinearService, {
             ...defaultLinearServiceShape,
             readSpecBaseline: tracker === "linear" ? readBaseline : no,
+            publishSpecFollowUps:
+              tracker === "linear"
+                ? (projectId, publication) =>
+                    Effect.gen(function* () {
+                      expect(projectId).toBe("validation-project")
+                      if (!(yield* publishTest(publication))) {
+                        return yield* new LinearRequestError({
+                          message: "Lost response after creating a follow-up",
+                        })
+                      }
+                      return followUpResult(publication)
+                    })
+                : no,
             observeSpecs:
               tracker === "linear"
                 ? (projectId) =>
@@ -789,8 +1099,10 @@ it.each([
                 "MET — local MCP accepts initialize",
               )
               expect(parked.completionSummary).toContain(
-                "UNVERIFIED — deployed MCP accepts initialize",
+                "UNMET — deployed MCP accepts initialize",
               )
+              expect(parked.completionSummary).toContain(gapUrl("public-route"))
+              expect(children.size).toBe(1)
             } else if (decision === "baseline") {
               expect(parked.failureMessage).toContain("HTTP 200")
               expect(parked.completionSummary).toBeNull()
@@ -877,7 +1189,6 @@ it.each([
       await Effect.runPromise(
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
-          const sql = yield* SqlClient.SqlClient
           yield* Effect.all(
             [
               lifecycle.considerSpecValidation(saved.repository, observed),
@@ -887,7 +1198,48 @@ it.each([
           )
           if (decision === undefined) latestBaseline = { kind: "not-spec" }
           yield* runNext(saved.id, "validate_spec")
-          yield* lifecycle.considerSpecValidation(saved.repository, observed)
+          if (retryPublication) {
+            expect(children.size).toBe(1)
+            expect(parentFindings).toBeUndefined()
+            expect(
+              (yield* lifecycle.getWorkItem(saved.id)).stepRuns.at(-1)?.status,
+            ).toBe("failed")
+          }
+        }).pipe(Effect.provide(layers())),
+      )
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          if (retryPublication) {
+            // A failed draft retry must still publish valid gaps without
+            // running another validation with an open child in the hierarchy.
+            yield* lifecycle.considerSpecValidation(saved.repository, reopened)
+            yield* lifecycle.retry(saved.id)
+            yield* runNext(saved.id, "validate_spec")
+            const waiting = yield* lifecycle.getWorkItem(saved.id)
+            expect(waiting.state).toBe("validate_spec")
+            expect(waiting.stepRuns.at(-1)).toMatchObject({
+              status: "failed",
+              reasonMessage: expect.stringContaining(
+                "deployment-health/recovered-gap-2",
+              ),
+            })
+            expect(children.size).toBe(3)
+            expect(children.get("recovered-gap-1")?.body).toContain(
+              "deployed/health",
+            )
+            expect(children.has("recovered-gap-2")).toBeFalse()
+            expect(parentFindings).toContain(
+              "Follow-up not yet specified: recovered-gap-2",
+            )
+            yield* lifecycle.retry(saved.id)
+            yield* runNext(saved.id, "validate_spec")
+          }
+          yield* lifecycle.considerSpecValidation(
+            saved.repository,
+            expectChild ? reopened : observed,
+          )
           const items = yield* lifecycle.listWorkItemsForRepository(
             saved.repository.id,
           )
@@ -912,9 +1264,11 @@ it.each([
             ...(decision !== undefined
               ? ["validate_spec", "validate_spec"]
               : []),
+            ...(retryPublication ? ["validate_spec", "validate_spec"] : []),
           ])
           expect(turns).toBe(1)
           expect(continuations).toBe(decision === undefined ? 0 : 1)
+          expect(draftingTurns).toBe(retryPublication ? 2 : 0)
           expect(git(repositoryPath, "rev-parse", "HEAD")).toBe(initialCommit)
           expect(item.completionSummary).toContain(baselineUrl)
           expect(item.completionSummary).toContain(
@@ -925,11 +1279,11 @@ it.each([
             "MET — local MCP accepts initialize",
           )
           expect(item.completionSummary).toContain(
-            `${expected} — deployed MCP accepts initialize`,
+            `${deployedVerdict} — deployed MCP accepts initialize`,
           )
           if (deployedStatus === 403) {
             expect(item.completionSummary).toContain(
-              "human-verification (deployed)",
+              humanCheck ? "human-access (deployed)" : "unavailable (deployed)",
             )
             expect(parentComments.size).toBe(0)
           }
@@ -946,7 +1300,66 @@ it.each([
             JSON.parse(row!.spec_validation_findings).map(
               (finding: { status: string }) => finding.status,
             ),
-          ).toEqual(["met", expected.toLowerCase()])
+          ).toEqual([
+            "met",
+            deployedVerdict.toLowerCase(),
+            ...(retryPublication ? ["unmet"] : []),
+          ])
+          expect(children.size).toBe(retryPublication ? 4 : expectChild ? 1 : 0)
+          if (inconsistentVerdict) {
+            expect(item.completionSummary).toContain("delivery (deployed)")
+            expect(item.completionSummary).toContain("HTTP 200")
+            expect(item.completionSummary).not.toContain("defect (deployed)")
+          }
+          if (expectChild) {
+            const child = children.get("public-route")
+            expect(child?.label).toBe(
+              humanCheck ? "ready-for-human" : "ready-for-agent",
+            )
+            expect(child?.body).toContain("deployed MCP accepts initialize")
+            expect(child?.body).toContain(`HTTP ${deployedStatus}`)
+            expect(child?.body).toContain("## Acceptance check")
+            expect(child?.body).toContain("receive a protocolVersion")
+            if (humanCheck) {
+              expect(child?.body).toContain(
+                "not a confirmed implementation defect",
+              )
+              expect(child?.body).not.toContain("Missing work")
+            }
+            expect(parentFindings).toContain(gapUrl("public-route"))
+            expect(item.completionSummary).toContain(gapUrl("public-route"))
+          }
+          if (retryPublication) {
+            expect(children.get("regional-route")).toMatchObject({
+              requirementId: "mcp-deployed",
+              label: "ready-for-human",
+            })
+            expect(parentFindings).toContain(gapUrl("regional-route"))
+            expect(parentFindings).toContain(gapUrl("recovered-gap-1"))
+            expect(parentFindings).toContain(gapUrl("recovered-gap-2"))
+            expect(parentFindings).not.toContain("Follow-up not yet specified")
+            expect(children.get("recovered-gap-1")?.body).toContain(
+              "GET /health on the deployment returns HTTP 200",
+            )
+            expect(children.get("recovered-gap-2")?.body).toContain(
+              "GET /readiness on the deployment returns HTTP 200",
+            )
+            expect(children.get("public-route")?.body).not.toContain(
+              "region/mcp",
+            )
+            if (mixedEvidence) {
+              expect(children.get("regional-route")?.body).toContain(
+                "not a confirmed implementation defect",
+              )
+              expect(children.get("regional-route")?.body).toContain("HTTP 403")
+            }
+            expect(
+              JSON.parse(row!.spec_validation_findings)[1].followUpLinks,
+            ).toEqual([
+              { gapId: "public-route", url: gapUrl("public-route") },
+              { gapId: "regional-route", url: gapUrl("regional-route") },
+            ])
+          }
         }).pipe(Effect.provide(layers())),
       )
     } finally {
@@ -987,6 +1400,82 @@ it("requires applicable delivery evidence for a positive deployed verdict", asyn
       "unverified",
     )
   }
+})
+
+it("keeps an explicit human-access check recoverable without an ID or a drafted task", async () => {
+  const findings = await Effect.runPromise(
+    decodeSpecFindings(
+      `READY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify([
+        {
+          requirementId: "mcp-deployed",
+          status: "unverified",
+          evidence: [
+            {
+              kind: "human-access",
+              environment: "deployed",
+              detail:
+                "Only the operator can run initialize with their production credentials.",
+            },
+            {
+              kind: "unavailable",
+              environment: "deployed",
+              detail: "The public version could not be identified.",
+            },
+          ],
+        },
+      ])}`,
+      approvedChecklist("https://example.com/baseline"),
+    ),
+  )
+  expect(findings.find(({ id }) => id === "mcp-deployed")).toMatchObject({
+    status: "unverified",
+    followUps: [],
+    evidence: [
+      { kind: "human-access", gapId: "recovered-gap-1" },
+      { kind: "unavailable" },
+    ],
+  })
+  expect(
+    findings.find(({ id }) => id === "mcp-deployed")?.evidence[1],
+  ).not.toHaveProperty("gapId")
+})
+
+it("does not convert unavailable evidence into a defect even if a fix is proposed", async () => {
+  const findings = await Effect.runPromise(
+    decodeSpecFindings(
+      `READY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify([
+        {
+          requirementId: "mcp-deployed",
+          status: "unmet",
+          evidence: [
+            {
+              kind: "unavailable",
+              environment: "deployed",
+              detail: "Operator access required",
+              gapId: "public-route",
+            },
+          ],
+          followUps: [
+            {
+              gapId: "public-route",
+              kind: "fix",
+              owner: "agent",
+              title: "Replace endpoint",
+              task: "Replace endpoint",
+              acceptanceCheck: "Initialize successfully",
+            },
+          ],
+        },
+      ])}`,
+      approvedChecklist("https://example.com/baseline"),
+    ),
+  )
+  expect(findings.find(({ id }) => id === "mcp-deployed")).toMatchObject({
+    status: "unverified",
+  })
+  expect(findings.find(({ id }) => id === "mcp-deployed")?.followUps).toEqual(
+    [],
+  )
 })
 
 it("records only approved IDs and treats duplicate or missing evidence as unverified", async () => {

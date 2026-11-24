@@ -1,5 +1,8 @@
 import { Effect, Result } from "effect"
-import { renderSpecBaseline } from "@ready-for-agent/forge-contract"
+import {
+  type SpecFollowUpPublication,
+  renderSpecBaseline,
+} from "@ready-for-agent/forge-contract"
 import { LinearRequestError } from "../src/lib/errors.js"
 import { makeLinearServiceFromToken } from "../src/lib/linear-service-live.js"
 import {
@@ -33,6 +36,205 @@ const makeFetch = (handler: (body: GraphqlBody) => Response): typeof fetch =>
     const parsed = JSON.parse(String(init?.body ?? "{}")) as GraphqlBody
     return handler(parsed)
   }) as typeof fetch
+
+test("recovers a partial Linear native follow-up and posts the findings only once", async () => {
+  const url = "https://linear.app/acme/issue/ENG-8"
+  const regionalUrl = "https://linear.app/acme/issue/ENG-9"
+  const payload: SpecFollowUpPublication = {
+    parentId: PARENT_UUID,
+    parentUrl: "https://linear.app/acme/issue/ENG-7",
+    workItemId: "wi-test",
+    findings: "Deployed MCP is unverified: production access required",
+    children: [
+      {
+        requirementId: "deployed-mcp",
+        gapId: "public-route",
+        title: "Verify deployed MCP",
+        body: "Approved requirement: deployed initialize. Access unavailable. The operator should check for a successful initialize.",
+        label: "ready-for-human",
+      },
+      {
+        requirementId: "deployed-mcp",
+        gapId: "regional-route",
+        title: "Restore regional deployed MCP",
+        body: "Regional endpoint returns HTTP 404.",
+        label: "ready-for-agent",
+      },
+    ],
+  }
+  const parent = {
+    id: PARENT_UUID,
+    project: { id: PROJECT_ID },
+    team: { id: "spec-team" },
+    state: { type: "started" },
+  }
+  const pageInfo = { hasNextPage: false, endCursor: null }
+  const comments: Array<{ id: string; body: string }> = []
+  const child: {
+    id: unknown
+    url: string
+    parent: { id: string } | null
+    project: { id: string } | null
+    labels: { nodes: Array<{ id: string }>; pageInfo: typeof pageInfo }
+    state: { type: string }
+  } = {
+    id: null,
+    url,
+    parent: null,
+    project: null,
+    labels: { nodes: [], pageInfo },
+    state: { type: "unstarted" },
+  }
+  let creates = 0
+  let humanLabelAvailable = false
+  let loseCommentUpdate = true
+  const regional = { ...child, url: regionalUrl }
+  let issueDescription: unknown
+  const service = makeLinearServiceFromToken(
+    TOKEN,
+    makeFetch(({ query, variables }) => {
+      const data = (result: unknown) => jsonResponse(200, { data: result })
+      if (query.includes("FollowUpParent")) return data({ issue: parent })
+      if (query.includes("FollowUpLabels")) {
+        const human = variables?.label === "ready-for-human"
+        return data({
+          issueLabels: {
+            nodes:
+              human && !humanLabelAvailable
+                ? []
+                : [
+                    { id: "other-team-label", team: { id: "another-team" } },
+                    { id: "workspace-label", team: null },
+                    {
+                      id: human ? "human-label" : "agent-label",
+                      team: parent.team,
+                    },
+                  ],
+            pageInfo,
+          },
+        })
+      }
+      if (query.includes("FindSpecFollowUp")) {
+        const found = [child, regional].filter(
+          ({ id }) => id !== null && id === variables?.id,
+        )
+        return data({
+          issues: { nodes: found, pageInfo },
+        })
+      }
+      if (query.includes("CreateSpecFollowUp")) {
+        creates += 1
+        const input = variables?.input
+        const isRegional = creates === 1
+        expect(input).toMatchObject({
+          parentId: parent.id,
+          projectId: PROJECT_ID,
+          teamId: parent.team.id,
+          labelIds: [isRegional ? "agent-label" : "human-label"],
+          title: payload.children[isRegional ? 1 : 0].title,
+        })
+        if (
+          typeof input !== "object" ||
+          input === null ||
+          !("id" in input) ||
+          !("description" in input)
+        ) {
+          throw new Error("Missing stable Linear child ID or description")
+        }
+        expect(input.id).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        )
+        if (isRegional) {
+          regional.id = input.id
+          regional.parent = { id: parent.id }
+          regional.project = parent.project
+          regional.labels = { nodes: [{ id: "agent-label" }], pageInfo }
+          return data({ issueCreate: { success: true, issue: regional } })
+        }
+        expect(input.id).not.toBe(regional.id)
+        child.id = input.id
+        issueDescription = input.description
+        return jsonResponse(500, {})
+      }
+      if (query.includes("RepairSpecFollowUp")) {
+        expect(variables?.id).toBe(child.id)
+        expect(variables?.input).toEqual({
+          parentId: parent.id,
+          projectId: PROJECT_ID,
+          addedLabelIds: ["human-label"],
+        })
+        child.parent = { id: parent.id }
+        child.project = parent.project
+        child.labels.nodes = [{ id: "human-label" }]
+        return data({ issueUpdate: { success: true, issue: child } })
+      }
+      if (query.includes("IssueComments"))
+        return data({
+          issue: { id: parent.id, comments: { nodes: comments, pageInfo } },
+        })
+      if (query.includes("CommentCreate")) {
+        expect(variables?.issueId).toBe(parent.id)
+        comments.push({ id: "comment", body: String(variables?.body) })
+        return data({ commentCreate: { success: true, comment: comments[0] } })
+      }
+      if (query.includes("CommentUpdate")) {
+        expect(variables?.id).toBe(comments[0]?.id)
+        const updated = {
+          id: String(variables?.id),
+          body: String(variables?.body),
+        }
+        comments[0] = updated
+        if (loseCommentUpdate) {
+          loseCommentUpdate = false
+          return jsonResponse(500, {})
+        }
+        return data({ commentUpdate: { success: true, comment: updated } })
+      }
+      throw new Error(`Unexpected Linear API operation: ${query}`)
+    }),
+  )
+  const publish = () =>
+    Effect.runPromise(service.publishSpecFollowUps(PROJECT_ID, payload))
+  await expect(publish()).rejects.toThrow(
+    "resolve Linear Issue label ready-for-human",
+  )
+  expect(creates).toBe(1)
+  expect(regional.parent?.id).toBe(parent.id)
+  expect(comments[0]?.body).toContain(regionalUrl)
+  expect(comments[0]?.body).toContain("Follow-ups not yet published")
+  humanLabelAvailable = true
+  await expect(publish()).rejects.toThrow("creating Linear follow-up")
+  await expect(publish()).rejects.toThrow("updating a Linear milestone comment")
+  await expect(publish()).resolves.toEqual([
+    { requirementId: "deployed-mcp", gapId: "public-route", url },
+    {
+      requirementId: "deployed-mcp",
+      gapId: "regional-route",
+      url: regionalUrl,
+    },
+  ])
+  expect(creates).toBe(2)
+  expect(child.parent?.id).toBe(parent.id)
+  expect(child.project?.id).toBe(PROJECT_ID)
+  expect(child.labels.nodes).toEqual([{ id: "human-label" }])
+  expect(issueDescription).toContain("Access unavailable")
+  expect(comments.map(({ body }) => body)).toEqual([
+    expect.stringContaining(url),
+  ])
+  expect(comments[0]?.body).toContain("unverified")
+  expect(comments[0]?.body).toContain(regionalUrl)
+  expect(comments[0]?.body).not.toContain("Follow-ups not yet published")
+  await Effect.runPromise(
+    service.publishSpecFollowUps(PROJECT_ID, {
+      ...payload,
+      findings: "Follow-up drafts corrected",
+    }),
+  )
+  expect(comments.map(({ body }) => body)).toEqual([
+    expect.stringContaining("Follow-up drafts corrected"),
+  ])
+  expect(parent.state.type).toBe("started")
+})
 
 describe("Linear Spec baseline", () => {
   const url = "https://linear.app/acme/issue/ENG-1/hosted-mcp"

@@ -23,7 +23,47 @@ type Mutation {
   updatePullRequest(input: UpdatePullRequestInput!): UpdatePullRequestPayload
   deleteRef(input: DeleteRefInput!): DeleteRefPayload
   addComment(input: AddCommentInput!): AddCommentPayload
+  updateIssueComment(input: UpdateIssueCommentInput!): UpdateIssueCommentPayload
   closeIssue(input: CloseIssueInput!): CloseIssuePayload
+  createIssue(input: CreateIssueInput!): CreateIssuePayload
+  addSubIssue(input: AddSubIssueInput!): AddSubIssuePayload
+  addLabelsToLabelable(
+    input: AddLabelsToLabelableInput!
+  ): AddLabelsToLabelablePayload
+}
+
+input CreateIssueInput {
+  repositoryId: ID!
+  parentIssueId: ID
+  labelIds: [ID!]
+  title: String!
+  body: String
+}
+
+type CreateIssuePayload {
+  issue: Issue
+}
+
+input AddSubIssueInput {
+  issueId: ID!
+  subIssueId: ID
+}
+
+type AddSubIssuePayload {
+  subIssue: Issue
+}
+
+input AddLabelsToLabelableInput {
+  labelableId: ID!
+  labelIds: [ID!]
+}
+
+type AddLabelsToLabelablePayload {
+  labelable: Labelable
+}
+
+interface Labelable {
+  id: ID!
 }
 
 input CreatePullRequestInput {
@@ -81,6 +121,15 @@ type AddCommentPayload {
 
 type IssueCommentEdge {
   node: IssueComment
+}
+
+input UpdateIssueCommentInput {
+  id: ID!
+  body: String!
+}
+
+type UpdateIssueCommentPayload {
+  issueComment: IssueComment
 }
 
 input CloseIssueInput {
@@ -146,6 +195,7 @@ type Repository {
     states: [IssueState!]
   ): IssueConnection!
   issue(number: Int!): Issue
+  label(name: String!): Label
   pullRequests(
     first: Int
     after: String
@@ -284,7 +334,7 @@ interface Node {
   id: ID!
 }
 
-type Issue implements Node {
+type Issue implements Node & Labelable {
   id: ID!
   number: Int!
   title: String!
@@ -321,12 +371,14 @@ type LabelConnection {
 }
 
 type Label {
+  id: ID!
   name: String!
 }
 
 type IssueCommentConnection {
   nodes: [IssueComment]
   pageInfo: PageInfo!
+  totalCount: Int!
 }
 
 type IssueComment {

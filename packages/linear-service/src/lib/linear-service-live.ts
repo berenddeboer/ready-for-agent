@@ -1,8 +1,21 @@
-import { Config, Duration, Effect, Layer, Redacted, Schema } from "effect"
+import { createHash } from "node:crypto"
+import {
+  Config,
+  Duration,
+  Effect,
+  Layer,
+  Redacted,
+  Result,
+  Schema,
+} from "effect"
 import {
   SPEC_LABEL,
+  type SpecFollowUpPublication,
   extractErrorCode,
+  formatSpecFollowUpComment,
   resolveSpecBaseline,
+  specFindingsMarker,
+  specFollowUpMarker,
 } from "@ready-for-agent/forge-contract"
 import { LinearRequestError } from "./errors.js"
 import {
@@ -168,6 +181,61 @@ const StrictPageInfoSchema = Schema.Struct({
   hasNextPage: Schema.Boolean,
   endCursor: Schema.NullOr(RequiredString),
 })
+const NativeId = Schema.Struct({ id: RequiredString })
+const FollowUpParent = Schema.Struct({
+  issue: Schema.NullOr(
+    Schema.Struct({
+      id: RequiredString,
+      team: NativeId,
+      project: Schema.NullOr(NativeId),
+      state: IssueStateSchema,
+    }),
+  ),
+})
+const FollowUpLabels = Schema.Struct({
+  issueLabels: Schema.Struct({
+    nodes: Schema.Array(
+      Schema.Struct({ id: RequiredString, team: Schema.NullOr(NativeId) }),
+    ),
+    pageInfo: StrictPageInfoSchema,
+  }),
+})
+const FollowUpIssue = Schema.Struct({
+  id: RequiredString,
+  url: RequiredString,
+  parent: Schema.NullOr(NativeId),
+  project: Schema.NullOr(NativeId),
+  state: IssueStateSchema,
+  labels: Schema.Struct({
+    nodes: Schema.Array(NativeId),
+    pageInfo: Schema.Struct({ hasNextPage: Schema.Literal(false) }),
+  }),
+})
+const followUpFields =
+  "id url parent { id } project { id } state { type } labels(first: 100) { nodes { id } pageInfo { hasNextPage } }"
+const FollowUpLookup = Schema.Struct({
+  issues: Schema.Struct({
+    nodes: Schema.Array(FollowUpIssue),
+    pageInfo: Schema.Struct({ hasNextPage: Schema.Literal(false) }),
+  }),
+})
+const FollowUpResult = Schema.Struct({
+  success: Schema.Literal(true),
+  issue: FollowUpIssue,
+})
+
+// RFC 9562 name-based UUID in the URL namespace. Linear accepts the ID on
+// creation, so even replay after an ambiguous response cannot allocate twice.
+const followUpId = (parentId: string, requirementId: string, gapId: string) => {
+  const hash = createHash("sha1")
+    .update(Buffer.from("6ba7b8119dad11d180b400c04fd430c8", "hex"))
+    .update(
+      `https://ready-for-agent/spec-follow-up/${parentId}/${requirementId}/${gapId}`,
+    )
+    .digest("hex")
+  const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 3) | 8).toString(16)
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`
+}
 const HierarchyNodeSchema = Schema.Struct({
   id: RequiredString,
   state: IssueStateSchema,
@@ -898,7 +966,7 @@ export const makeLinearService = (options: {
     },
   )
 
-  return {
+  const service: LinearServiceShape = {
     getAuthenticatedUserLogin: Effect.fn(
       "LinearService.getAuthenticatedUserLogin",
     )(function* () {
@@ -1145,6 +1213,171 @@ export const makeLinearService = (options: {
         )
       }
     }),
+    publishSpecFollowUps: Effect.fn("LinearService.publishSpecFollowUps")(
+      function* (projectId, input) {
+        const { parentId } = input
+        const { issue: parent } = yield* graphql({
+          query:
+            "query FollowUpParent($id: String!) { issue(id: $id) { id team { id } project { id } state { type } } }",
+          variables: { id: parentId },
+          schema: FollowUpParent,
+          describe: `reading Linear Spec ${parentId}`,
+          requireCompleteData: true,
+        })
+        if (
+          parent?.id !== parentId ||
+          parent.project?.id !== projectId ||
+          !isLinearOpenStateType(parent.state.type)
+        ) {
+          return yield* requestError(
+            `Linear Spec ${parentId} is not open in the configured project`,
+          )
+        }
+        const links = []
+        const publishChild = ({
+          requirementId,
+          gapId,
+          label,
+          title,
+          body,
+        }: SpecFollowUpPublication["children"][number]) =>
+          Effect.gen(function* () {
+            const labels = yield* readHierarchyPages(
+              `resolving Linear label ${label}`,
+              (after) =>
+                graphql({
+                  query: `query FollowUpLabels($label: String!, $after: String) {
+              issueLabels(filter: {name: {eq: $label}}, first: ${PAGE_SIZE}, after: $after) {
+                nodes { id team { id } }
+                pageInfo { hasNextPage endCursor }
+              }
+            }`,
+                  variables: { label, after },
+                  schema: FollowUpLabels,
+                  describe: `resolving Linear label ${label}`,
+                  requireCompleteData: true,
+                }).pipe(Effect.map(({ issueLabels }) => issueLabels)),
+            )
+            const teamLabels = labels.filter(
+              ({ team }) => team?.id === parent.team.id,
+            )
+            const candidates =
+              teamLabels.length === 0
+                ? labels.filter(({ team }) => team === null)
+                : teamLabels
+            const [resolved] = candidates
+            if (candidates.length !== 1 || !resolved) {
+              return yield* requestError(
+                `Cannot unambiguously resolve Linear Issue label ${label} for Spec ${parentId}`,
+              )
+            }
+            const id = followUpId(parentId, requirementId, gapId)
+            const { issues } = yield* graphql({
+              query: `query FindSpecFollowUp($id: ID!) {
+            issues(filter: {id: {eq: $id}}, includeArchived: true, first: 2) {
+              nodes { ${followUpFields} }
+              pageInfo { hasNextPage }
+            }
+          }`,
+              variables: { id },
+              schema: FollowUpLookup,
+              describe: `finding Linear follow-up ${id}`,
+              requireCompleteData: true,
+            })
+            let issue = issues.nodes[0]
+            if (
+              issues.nodes.length > 1 ||
+              (issue !== undefined && issue.id !== id)
+            ) {
+              return yield* requestError(
+                `Linear returned inconsistent identity for follow-up ${id}`,
+              )
+            }
+            if (issue === undefined) {
+              const created = yield* graphql({
+                query: `mutation CreateSpecFollowUp($input: IssueCreateInput!) {
+              issueCreate(input: $input) { success issue { ${followUpFields} } }
+            }`,
+                variables: {
+                  input: {
+                    id,
+                    parentId,
+                    projectId,
+                    teamId: parent.team.id,
+                    labelIds: [resolved.id],
+                    title,
+                    description: `${body}\n\n${specFollowUpMarker(parentId, requirementId, gapId)}`,
+                    useDefaultTemplate: false,
+                  },
+                },
+                schema: Schema.Struct({ issueCreate: FollowUpResult }),
+                describe: `creating Linear follow-up for Spec ${parentId}`,
+                requireCompleteData: true,
+              })
+              issue = created.issueCreate.issue
+              if (issue.id !== id || !isLinearOpenStateType(issue.state.type)) {
+                return yield* requestError(
+                  `Linear did not create the expected open follow-up ${id}`,
+                )
+              }
+            }
+            const hasLabel = (candidate: typeof FollowUpIssue.Type) =>
+              candidate.labels.nodes.some(({ id }) => id === resolved.id)
+            if (
+              issue.parent?.id !== parentId ||
+              issue.project?.id !== projectId ||
+              !hasLabel(issue)
+            ) {
+              if (issue.parent !== null && issue.parent.id !== parentId) {
+                return yield* requestError(
+                  `Linear follow-up ${id} belongs to another parent`,
+                )
+              }
+              const updated = yield* graphql({
+                query: `mutation RepairSpecFollowUp($id: String!, $input: IssueUpdateInput!) {
+              issueUpdate(id: $id, input: $input) { success issue { ${followUpFields} } }
+            }`,
+                variables: {
+                  id,
+                  input: { parentId, projectId, addedLabelIds: [resolved.id] },
+                },
+                schema: Schema.Struct({ issueUpdate: FollowUpResult }),
+                describe: `repairing Linear follow-up ${id}`,
+                requireCompleteData: true,
+              })
+              issue = updated.issueUpdate.issue
+              if (
+                issue.id !== id ||
+                issue.parent?.id !== parentId ||
+                issue.project?.id !== projectId ||
+                !hasLabel(issue)
+              ) {
+                return yield* requestError(
+                  `Linear did not finish linking and labelling follow-up ${id}`,
+                )
+              }
+            }
+            return { requirementId, gapId, url: issue.url }
+          })
+        let failure: LinearServiceError | undefined
+        for (const child of input.children) {
+          const result = yield* Effect.result(publishChild(child))
+          if (Result.isSuccess(result)) {
+            links.push(result.success)
+          } else {
+            failure ??= result.failure
+          }
+        }
+        if (links.length === 0 && failure !== undefined) return yield* failure
+        yield* service.ensureMilestoneComment(
+          parentId,
+          specFindingsMarker(input.workItemId),
+          formatSpecFollowUpComment(input, links),
+        )
+        if (failure !== undefined) return yield* failure
+        return links
+      },
+    ),
     ensureMilestoneComment: Effect.fn("LinearService.ensureMilestoneComment")(
       function* (nativeId: string, marker: string, body: string) {
         if (marker.trim() === "" || body.trim() === "") {
@@ -1228,7 +1461,8 @@ export const makeLinearService = (options: {
     ),
     hasCredentials: () => Effect.succeed(configured),
     hasAmbientCredentials: () => Effect.succeed(configured),
-  } satisfies LinearServiceShape
+  }
+  return service
 }
 
 export const makeLinearServiceFromToken = (

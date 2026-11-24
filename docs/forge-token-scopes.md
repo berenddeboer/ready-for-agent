@@ -34,6 +34,11 @@ in other repositories, its credential must be able to read Issues in those
 repositories too. An unreadable or incomplete hierarchy does not count as
 ready for validation.
 
+Publishing native Spec follow-ups and findings uses **Issues: Read and write**
+on GitHub. On Linear, the credential must be able to create and update issues
+and post comments in the Spec's project and team. Configure `ready-for-agent`
+and `ready-for-human` labels on the original tracker.
+
 ## Per step
 
 Each cell is the **minimum for that step alone**. Union the cells for
