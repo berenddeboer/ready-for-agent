@@ -879,8 +879,7 @@ type CiRepairFailingRun {
 Whether a Work Item was created from an Issue or as a CI Repair Work Item.
 """
 enum WorkItemOrigin {
-  ISSUE
-  CI_REPAIR
+  WORK_ITEM_ORIGIN_VALUES
 }
 
 """
@@ -1373,6 +1372,7 @@ enum LifecyclePhase {
   CREATE_WORKTREE
   INSTALL_DEPENDENCIES
   IMPLEMENT
+  VALIDATE_SPEC
   ASSESS_CHANGES
   PRE_COMMIT
   REVIEW

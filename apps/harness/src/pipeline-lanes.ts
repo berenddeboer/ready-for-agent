@@ -50,7 +50,7 @@ const BUILD_LIFECYCLE_STATES = [
 ] as const
 
 /** Work Item states that place a ticket in Review. */
-const REVIEW_LIFECYCLE_STATES = ["REVIEW"] as const
+const REVIEW_LIFECYCLE_STATES = ["REVIEW", "VALIDATE_SPEC"] as const
 
 /**
  * Work Item states that place a ticket in PR (Commit through local cleanup).

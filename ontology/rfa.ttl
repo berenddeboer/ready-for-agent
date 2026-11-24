@@ -494,6 +494,18 @@ rfa:WaitingForAgentTurnReason
   skos:definition
     "Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns."@en .
 
+rfa:WaitingForSpecHierarchyReason
+  a rfa:StepRunReason ;
+  skos:notation "waiting_for_spec_hierarchy" ;
+  skos:definition
+    "Validate Spec did not start an Agent Turn because the original Issue Tracker did not confirm a complete, nonempty, closed hierarchy. Release the Worker Slot and wait for a new all-closed observation."@en .
+
+rfa:WaitingForApprovedSpecChecklistReason
+  a rfa:StepRunReason ;
+  skos:notation "waiting_for_approved_spec_checklist" ;
+  skos:definition
+    "Validate Spec did not start an Agent Turn because no approved checklist was bound to the Spec baseline. Release the Worker Slot and retain the Work Item for a later all-closed observation with an approved checklist."@en .
+
 rfa:WorkerRestartedReason
   a rfa:StepRunReason ;
   skos:notation "worker_restarted" ;
@@ -532,6 +544,18 @@ rfa:Implement
   rfa:agentFree false ;
   rfa:maximumDuration "PT2H"^^xsd:dayTimeDuration ;
   rfa:retryable true .
+
+rfa:ValidateSpec
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "validate_spec" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT2H"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
+  skos:prefLabel "Validate Spec"@en ;
+  skos:definition
+    "The independent Agent Turn that tests integrated delivery against a frozen approved Spec baseline and records requirement-level evidence without changing the original Issue Tracker or shipping changes."@en .
 
 rfa:AssessChanges
   a owl:Class, owl:NamedIndividual, skos:Concept,
@@ -676,6 +700,10 @@ rfa:LocalCleanup
 
 # Handler-selected and happy-path transitions.
 rfa:CreateWorktreeSucceededTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:InstallDependencies ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
+rfa:CreateWorktreeForSpecValidationTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:ValidateSpec ; rfa:guard "spec_validation_checkout_ready" ; rfa:reasonCode rfa:NativeReason .
+rfa:ValidateSpecSucceededTransition a rfa:Transition ; rfa:fromStep rfa:ValidateSpec ; rfa:toStep rfa:Complete ; rfa:guard "spec_findings_recorded" ; rfa:reasonCode rfa:NativeReason .
+rfa:ValidateSpecAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:ValidateSpec ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:ValidateSpecFailedTransition a rfa:Transition ; rfa:fromStep rfa:ValidateSpec ; rfa:toStep rfa:Failed ; rfa:guard "validation_cannot_continue" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:InstallDependenciesSucceededTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:Implement ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
 rfa:ImplementSucceededTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:AssessChanges ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
 rfa:ImplementCiRepairRetryPendingTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:Implement ; rfa:guard "ci_repair_retry_pending" ; rfa:reasonCode rfa:NativeReason .
@@ -1010,7 +1038,7 @@ rfa:Linear
 # issue is an ordinary Issue Work Item. ci_repair is a CI Repair Work Item.
 rfa:WorkItemOrigin
   owl:equivalentClass [
-    owl:oneOf ( rfa:IssueOrigin rfa:CiRepairOrigin )
+    owl:oneOf ( rfa:IssueOrigin rfa:CiRepairOrigin rfa:SpecValidationOrigin )
   ] .
 
 rfa:IssueOrigin
@@ -1025,16 +1053,22 @@ rfa:CiRepairOrigin
   skos:definition
     "A CI Repair Work Item whose input is the Repository CI Gate observation instead of an Issue. It never creates an Issue, skips Close Issue, and keeps its completion summary on the Work Item. Runtime spelling ci_repair."@en .
 
+rfa:SpecValidationOrigin
+  a rfa:WorkItemOrigin ;
+  skos:notation "spec_validation" ;
+  skos:definition
+    "A Harness-initiated Spec Validation Work Item keyed by Repository and original Spec identity. A complete, nonempty, all-descendants-closed observation admits the first evaluation once. It is not an Issue Work Item and completion means findings were recorded, not that the Spec passed."@en .
+
 rfa:workItemOrigin
   a owl:ObjectProperty ;
   rdfs:domain rfa:WorkItem ;
   rdfs:range rfa:WorkItemOrigin ;
   rdfs:label "Work Item origin"@en ;
   skos:definition
-    "Whether the Work Item was created from an Issue or as a CI Repair Work Item."@en .
+    "Whether the Work Item was created from an Issue, to repair CI, or to validate a Spec."@en .
 
 [] a owl:AllDifferent ;
-  owl:distinctMembers ( rfa:IssueOrigin rfa:CiRepairOrigin ) .
+  owl:distinctMembers ( rfa:IssueOrigin rfa:CiRepairOrigin rfa:SpecValidationOrigin ) .
 
 rfa:OriginalIssueSource
   a owl:Class .
@@ -1171,6 +1205,7 @@ rfa:AgentTurnResult
     rfa:CreateWorktree
     rfa:InstallDependencies
     rfa:Implement
+    rfa:ValidateSpec
     rfa:AssessChanges
     rfa:PreCommit
     rfa:Review

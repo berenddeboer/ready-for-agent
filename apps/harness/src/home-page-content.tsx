@@ -322,7 +322,7 @@ type WorkItemStatus =
 export type WorkItem = {
   id: string
   repositoryId: string
-  origin: "ISSUE" | "CI_REPAIR"
+  origin: "ISSUE" | "CI_REPAIR" | "SPEC_VALIDATION"
   issueNumber: number | null
   ciRepairDefaultBranch: string | null
   ciRepairHeadSha: string | null
@@ -3941,7 +3941,7 @@ function RepositoryIssueRow({
   const query = workItemsQuery(issue.repositoryId)
   const issueWorkItems = workItems.filter(
     (workItem) =>
-      workItem.origin !== "CI_REPAIR" &&
+      workItem.origin === "ISSUE" &&
       workItem.issueSource !== null &&
       workItem.issueSource.tracker === issue.issueTracker &&
       workItem.issueSource.nativeId === issue.nativeId,
@@ -4605,6 +4605,7 @@ export function WorkItemLifecycleStatus({
   const openPullRequestLabel =
     prNumber === null ? null : `Open pull request #${prNumber}`
   const isNoChangeComplete =
+    workItem.origin !== "SPEC_VALIDATION" &&
     workItem.state === "COMPLETE" &&
     prNumber === null &&
     workItem.completionSummary !== null &&
@@ -4801,6 +4802,7 @@ export function WorkItemLifecycleStatus({
           pullRequestNumber={workItem.pullRequestNumber}
           pullRequestUrl={pullRequestUrl}
           completionSummary={workItem.completionSummary}
+          isSpecValidation={workItem.origin === "SPEC_VALIDATION"}
           issueUrl={issueUrl}
           showPullRequestBadge={showPullRequestBadge}
         />

@@ -2,7 +2,10 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { WORK_ITEM_STATES } from "@ready-for-agent/lifecycle-model"
+import {
+  WORK_ITEM_ORIGINS,
+  WORK_ITEM_STATES,
+} from "@ready-for-agent/lifecycle-model"
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const schemaTemplatePath = join(packageRoot, "schema.template.graphql")
@@ -32,7 +35,12 @@ ${workItemStateValues}
 const schema = `# This file is generated from schema.template.graphql and lifecycle-model.
 # Run \`bunx nx run graphql-schema:generate\` to update it.
 
-${schemaTemplate.replace(workItemStateEnumPlaceholder, workItemStateEnum)}`
+${schemaTemplate
+  .replace(workItemStateEnumPlaceholder, workItemStateEnum)
+  .replace(
+    "  WORK_ITEM_ORIGIN_VALUES",
+    WORK_ITEM_ORIGINS.map((origin) => `  ${origin.toUpperCase()}`).join("\n"),
+  )}`
 
 writeFileSync(schemaPath, schema)
 writeFileSync(

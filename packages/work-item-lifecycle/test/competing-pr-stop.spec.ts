@@ -334,7 +334,7 @@ describe("competing Issue-closing PR stop", () => {
     ))
 
   for (const state of OPERATIONAL_LIFECYCLE_STEPS.filter(
-    (step) => step !== "local_cleanup",
+    (step) => step !== "local_cleanup" && step !== "validate_spec",
   )) {
     it(`transitions ${state} to Needs Human`, () =>
       runTest(

@@ -147,6 +147,7 @@ const expectedOperationalTerms = {
   CreateWorktree: ["create_worktree", "Create Worktree"],
   InstallDependencies: ["install_dependencies", "Install Dependencies"],
   Implement: ["implement", "Implement"],
+  ValidateSpec: ["validate_spec", "Validate Spec"],
   AssessChanges: ["assess_changes", "Assess Changes"],
   PreCommit: ["pre_commit", "Pre-Commit"],
   Review: ["review", "Review"],

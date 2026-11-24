@@ -116,6 +116,25 @@ const issueScopeLine = (input: {
 }): string =>
   `Issue: ${input.issueUrl ?? `${input.repositoryId}#${input.issueNumber}`}`
 
+const INTERNAL_ORIGIN_POLICY = {
+  nextStateAfterConfirmedMerge: (): ConfirmedMergeNextState => "local_cleanup",
+  noChangeNextState: "local_cleanup",
+  pauseTargetAfterNoChange: pauseBeforeSkippedCommit("local_cleanup"),
+  skipsIssueRevalidation: true,
+  completesWhenIssueNoLongerRelevant: false,
+  heldForClosedCiGate: false,
+  closesIssue: false,
+  implementsFromIssue: false,
+  omitsIssueClosingReference: true,
+  noChangeConfirmsIssue: false,
+  associatesPullRequestWithIssue: false,
+  recordsCiRepairAbandonSuppress: false,
+  recordsCiRepairMergeFloor: false,
+  canAuthorizeCiGateBypass: false,
+  retriesWhenIssueClosedOrMissing: false,
+  tracksCiRepairBaseline: false,
+} as const
+
 const ORIGIN_POLICIES = {
   issue: {
     nextStateAfterConfirmedMerge: (source) =>
@@ -142,26 +161,22 @@ const ORIGIN_POLICIES = {
     scopeIssueLine: issueScopeLine,
   },
   ci_repair: {
-    nextStateAfterConfirmedMerge: () => "local_cleanup",
-    noChangeNextState: "local_cleanup",
-    pauseTargetAfterNoChange: pauseBeforeSkippedCommit("local_cleanup"),
-    skipsIssueRevalidation: true,
-    completesWhenIssueNoLongerRelevant: false,
-    heldForClosedCiGate: false,
-    closesIssue: false,
-    implementsFromIssue: false,
-    omitsIssueClosingReference: true,
-    noChangeConfirmsIssue: false,
-    associatesPullRequestWithIssue: false,
+    ...INTERNAL_ORIGIN_POLICY,
     recordsCiRepairAbandonSuppress: true,
     recordsCiRepairMergeFloor: true,
-    canAuthorizeCiGateBypass: false,
-    retriesWhenIssueClosedOrMissing: false,
     tracksCiRepairBaseline: true,
     branchName: ({ slug, workItemId }) => `rfa/${slug}/ci-repair/${workItemId}`,
     worktreeDirectoryName: ({ workItemId }) => `ci-repair-${workItemId}`,
     scopeIssueLine: () =>
       "Issue: none. This is a CI Repair Work Item. Do not create or close an Issue.",
+  },
+  spec_validation: {
+    ...INTERNAL_ORIGIN_POLICY,
+    branchName: ({ slug, workItemId }) =>
+      `rfa/${slug}/spec-validation/${workItemId}`,
+    worktreeDirectoryName: ({ workItemId }) => `spec-validation-${workItemId}`,
+    scopeIssueLine: () =>
+      "This is a Spec Validation Work Item. Do not create or close an Issue.",
   },
 } as const satisfies Record<WorkItemOrigin, WorkItemOriginPolicy>
 

@@ -19,6 +19,7 @@ export const OPERATIONAL_LIFECYCLE_STEPS = [
   "pre_commit",
   "resolve_pr_merge_conflict",
   "review",
+  "validate_spec",
   "watch_pr_status_checks",
 ] as const
 
@@ -87,6 +88,8 @@ export const STEP_RUN_REASONS = [
   "timeout",
   "transient_provider_error",
   "waiting_for_agent_turn",
+  "waiting_for_approved_spec_checklist",
+  "waiting_for_spec_hierarchy",
   "worker_restarted",
 ] as const
 
@@ -170,6 +173,10 @@ export const STEP_RUN_REASON = {
   transientProviderError: "transient_provider_error",
   /** Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns. */
   waitingForAgentTurn: "waiting_for_agent_turn",
+  /** Validate Spec did not start an Agent Turn because no approved checklist was bound to the Spec baseline. Release the Worker Slot and retain the Work Item for a later all-closed observation with an approved checklist. */
+  waitingForApprovedSpecChecklist: "waiting_for_approved_spec_checklist",
+  /** Validate Spec did not start an Agent Turn because the original Issue Tracker did not confirm a complete, nonempty, closed hierarchy. Release the Worker Slot and wait for a new all-closed observation. */
+  waitingForSpecHierarchy: "waiting_for_spec_hierarchy",
   /** The prior harness or job-worker process ended while the Step Run was still Running. */
   workerRestarted: "worker_restarted",
 } as const satisfies Record<string, StepRunReason>
@@ -215,6 +222,8 @@ export const STEP_RUN_REASON_DEFINITIONS = {
   timeout: "The Step Run ended because the Lifecycle Step exceeded its configured timeout budget: an aggregate maximum duration, or for Review a no-progress interval without a completed checkpoint.",
   transient_provider_error: "The Step Run ended because the Agent Backend classified a temporary provider capacity, rate-limit, or server error. Provider Recovery may schedule another attempt of the same Lifecycle Step; this does not consume Autonomous Retry Budget.",
   waiting_for_agent_turn: "Mid-run: the Step Run is Running but blocked on maxConcurrentAgentTurns.",
+  waiting_for_approved_spec_checklist: "Validate Spec did not start an Agent Turn because no approved checklist was bound to the Spec baseline. Release the Worker Slot and retain the Work Item for a later all-closed observation with an approved checklist.",
+  waiting_for_spec_hierarchy: "Validate Spec did not start an Agent Turn because the original Issue Tracker did not confirm a complete, nonempty, closed hierarchy. Release the Worker Slot and wait for a new all-closed observation.",
   worker_restarted: "The prior harness or job-worker process ended while the Step Run was still Running.",
 } as const satisfies Record<StepRunReason, string>
 
@@ -238,6 +247,7 @@ export const LIFECYCLE_STEP_AGENT_FREE = {
   pre_commit: false,
   resolve_pr_merge_conflict: false,
   review: false,
+  validate_spec: false,
   watch_pr_status_checks: true,
 } as const satisfies LifecycleStepPropertyMap<boolean>
 
@@ -260,6 +270,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS = {
   pre_commit: Duration.millis(7200000),
   resolve_pr_merge_conflict: Duration.millis(7200000),
   review: Duration.millis(3600000),
+  validate_spec: Duration.millis(7200000),
   watch_pr_status_checks: Duration.millis(300000),
 } satisfies LifecycleMaxDurations
 
@@ -279,6 +290,7 @@ export const LIFECYCLE_STEP_RETRYABLE = {
   pre_commit: true,
   resolve_pr_merge_conflict: true,
   review: true,
+  validate_spec: true,
   watch_pr_status_checks: true,
 } as const satisfies LifecycleStepPropertyMap<boolean>
 
@@ -565,6 +577,12 @@ export const LIFECYCLE_TRANSITIONS = [
     from: "create_worktree",
     to: "needs_human",
     guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
+  },
+  {
+    from: "create_worktree",
+    to: "validate_spec",
+    guard: "spec_validation_checkout_ready",
     reasonCode: "native",
   },
   {
@@ -1303,6 +1321,24 @@ export const LIFECYCLE_TRANSITIONS = [
     from: "review",
     to: "needs_human",
     guard: "review_needs_human",
+    reasonCode: "handler_failed",
+  },
+  {
+    from: "validate_spec",
+    to: "abandoned",
+    guard: "operator_abandon",
+    reasonCode: "abandoned",
+  },
+  {
+    from: "validate_spec",
+    to: "complete",
+    guard: "spec_findings_recorded",
+    reasonCode: "native",
+  },
+  {
+    from: "validate_spec",
+    to: "failed",
+    guard: "validation_cannot_continue",
     reasonCode: "handler_failed",
   },
   {

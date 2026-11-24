@@ -5,6 +5,6 @@
  * of lifecycle state, gate state, or a stale canAuthorize flag.
  */
 export const ciGateBypassActionsOffered = (workItem: {
-  readonly origin: "ISSUE" | "CI_REPAIR"
+  readonly origin: "ISSUE" | "CI_REPAIR" | "SPEC_VALIDATION"
   readonly ciRepair: { readonly canAuthorize: boolean }
-}): boolean => workItem.origin !== "CI_REPAIR" && workItem.ciRepair.canAuthorize
+}): boolean => workItem.origin === "ISSUE" && workItem.ciRepair.canAuthorize

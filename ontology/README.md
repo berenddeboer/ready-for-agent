@@ -84,8 +84,9 @@ emits `packages/lifecycle-model/src/generated/work-item-state.ts` and
   kinds (`github`, `gitlab`, `azure-devops`, `linear`) from
   `rfa:IssueTracker` `owl:oneOf`. Linear is an Issue Tracker only, not a
   Forge. `DEFAULT_ISSUE_TRACKER_BY_FORGE` maps each Forge to itself.
-- `WORK_ITEM_ORIGINS` / `WorkItemOrigin` / `isWorkItemOrigin` — `issue` and
-  `ci_repair` from `rfa:WorkItemOrigin` `owl:oneOf`, in declared order.
+- `WORK_ITEM_ORIGINS` / `WorkItemOrigin` / `isWorkItemOrigin` — `issue`,
+  `ci_repair`, and `spec_validation` from `rfa:WorkItemOrigin` `owl:oneOf`,
+  in declared order.
 - `LIFECYCLE_TRANSITIONS` — every declared `rfa:Transition` as queryable data
   (`from`, `to`, `guard`, `reasonCode`).
 - `isDeclaredLifecycleTransition(from, to)` — membership in the declared
@@ -160,7 +161,7 @@ Notes on the modelling:
   as a SKOS concept it carries the label, definition, and `skos:notation`
   that becomes the runtime string.
 - **Disjointness as guardrails.** The four terminal states are pairwise
-  disjoint, all twenty lifecycle values are pairwise disjoint, operational
+  disjoint, all lifecycle values are pairwise disjoint, operational
   steps are disjoint from terminal states, and prose-fought distinctions are
   encoded as axioms: Repository `rfa:Paused` vs `rfa:PauseWorkItem`,
   `rfa:WaitingForBlockers` vs `rfa:AdmittedWorkItem`, and the three Merge
@@ -176,7 +177,7 @@ Notes on the modelling:
 
 ## The lifecycle state space
 
-16 operational Lifecycle Steps, 4 terminal Work Item states, and 189 declared
+17 operational Lifecycle Steps, 4 terminal Work Item states, and declared
 transitions, each carrying a named guard and one Step Run reason code from the
 generated vocabulary.
 The happy path:
@@ -185,6 +186,8 @@ The happy path:
 stateDiagram-v2
   [*] --> create_worktree
   create_worktree --> install_dependencies
+  create_worktree --> validate_spec : Spec Validation
+  validate_spec --> complete : findings recorded
   install_dependencies --> implement
   implement --> assess_changes
   assess_changes --> pre_commit : changes_detected

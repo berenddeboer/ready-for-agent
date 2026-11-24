@@ -50,6 +50,7 @@ describe("automatic repair worker context", () => {
           maxDurations: {
             create_worktree: Duration.minutes(5),
             install_dependencies: Duration.minutes(15),
+            validate_spec: Duration.hours(2),
             implement: Duration.hours(2),
             assess_changes: Duration.minutes(5),
             pre_commit: Duration.hours(2),
@@ -72,6 +73,7 @@ describe("automatic repair worker context", () => {
           startCiRepair: () => Effect.die("unused"),
           considerAutomaticCiRepair: (repositoryId: string) =>
             Deferred.succeed(seen, repositoryId).pipe(Effect.as(null)),
+          considerSpecValidation: () => Effect.void,
         } as never)
         const reconciler = Layer.succeed(IssueReconciler, {
           reconcile: (repository) =>

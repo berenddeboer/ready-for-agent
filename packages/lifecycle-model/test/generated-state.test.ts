@@ -47,6 +47,7 @@ describe("generated lifecycle state", () => {
       pre_commit: false,
       resolve_pr_merge_conflict: false,
       review: false,
+      validate_spec: false,
       watch_pr_status_checks: true,
     })
   })
@@ -74,6 +75,7 @@ describe("generated lifecycle state", () => {
       pre_commit: 7_200_000,
       resolve_pr_merge_conflict: 7_200_000,
       review: 3_600_000,
+      validate_spec: 7_200_000,
       watch_pr_status_checks: 300_000,
     })
   })

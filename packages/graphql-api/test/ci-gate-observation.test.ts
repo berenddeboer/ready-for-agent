@@ -294,6 +294,7 @@ describe("Repository CI Gate observation", () => {
       maxDurations: {
         create_worktree: Duration.minutes(5),
         install_dependencies: Duration.minutes(15),
+        validate_spec: Duration.hours(2),
         implement: Duration.hours(2),
         assess_changes: Duration.minutes(5),
         pre_commit: Duration.hours(2),
@@ -313,6 +314,7 @@ describe("Repository CI Gate observation", () => {
       implementCiRepair: unused,
       unfinishedCiRepairWorkItem: () => Effect.succeed(null),
       startCiRepair: unused,
+      considerSpecValidation: () => Effect.void,
       considerAutomaticCiRepair: (repositoryId: string) => {
         consideredRepositories.push(repositoryId)
         return Effect.succeed(null)

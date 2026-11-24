@@ -9,6 +9,7 @@
 # Declaring them here records that they are also GLOSSARY.md glossary terms.
 rfa:CreateWorktree a rfa:ContextTerm .
 rfa:InstallDependencies a rfa:ContextTerm .
+rfa:ValidateSpec a rfa:ContextTerm .
 rfa:CreatePr a rfa:ContextTerm .
 rfa:WatchPrStatusChecks a rfa:ContextTerm .
 rfa:ResolvePrMergeConflict a rfa:ContextTerm .

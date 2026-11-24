@@ -6,6 +6,7 @@ import {
   renderSpecBaseline,
   resolveSpecBaseline,
 } from "../src/lib/spec-baseline.js"
+import { renderSpecRequirementChecklist } from "../src/lib/spec-requirement-checklist.js"
 import { expect, test } from "bun:test"
 
 const approved = "Expose MCP in both local and deployed environments."
@@ -23,6 +24,75 @@ const source = `${parent.url}#issuecomment-1`
 const approvalLink = (url: string) => `[Approved Spec baseline](<${url}>)`
 const cite = (body: string, ...urls: string[]) =>
   [body, ...urls.map(approvalLink)].join("\n\n")
+
+test("only one explicitly cited, unedited checklist for the selected publication is authoritative", () => {
+  const checklistUrl = `${parent.url}#issuecomment-checklist`
+  const citation = `[Approved requirement checklist](<${checklistUrl}>)`
+  const requirements = [
+    { id: "mcp-local", requirement: "Local MCP works", environment: "local" },
+    {
+      id: "mcp-deployed",
+      requirement: "Deployed MCP works",
+      environment: "deployed",
+    },
+  ]
+  const snapshot = {
+    url: source,
+    edited: false,
+    body: renderSpecBaseline({
+      title: parent.title,
+      body: approved,
+      designRevisions: [],
+    }),
+  }
+  const checklist = {
+    url: checklistUrl,
+    edited: false,
+    body: renderSpecRequirementChecklist({ baselineUrl: source, requirements }),
+  }
+  const resolve = (extra: string, comment = checklist) => {
+    const result = resolveSpecBaseline(
+      { ...parent, body: `${cite(parent.body, source)}\n\n${extra}` },
+      [snapshot, comment],
+    )
+    expect(result.kind).toBe("baseline")
+    return result.kind === "baseline"
+      ? result.baseline.requirementChecklist
+      : undefined
+  }
+  expect(resolve(citation)).toEqual({
+    baselineUrl: source,
+    sourceUrl: checklistUrl,
+    requirements,
+  })
+  expect(resolve("")).toBeUndefined()
+  expect(resolve(`> ${citation}`)).toBeUndefined()
+  expect(resolve(`\`\`\`\n${citation}\n\`\`\``)).toBeUndefined()
+  expect(
+    resolve(
+      `${citation}\n[Approved requirement checklist](<${parent.url}#other>)`,
+    ),
+  ).toBeUndefined()
+  expect(resolve(citation, { ...checklist, edited: true })).toBeUndefined()
+  expect(
+    resolve(citation, {
+      ...checklist,
+      body: renderSpecRequirementChecklist({
+        baselineUrl: `${parent.url}#other-baseline`,
+        requirements,
+      }),
+    }),
+  ).toBeUndefined()
+  expect(() =>
+    renderSpecRequirementChecklist({ baselineUrl: source, requirements: [] }),
+  ).toThrow()
+  expect(() =>
+    renderSpecRequirementChecklist({
+      baselineUrl: source,
+      requirements: [...requirements, requirements[0]],
+    }),
+  ).toThrow()
+})
 
 test("the approved parent and exact design survive a local-only child edit", () => {
   const cwd = mkdtempSync(join(tmpdir(), "rfa-spec-"))

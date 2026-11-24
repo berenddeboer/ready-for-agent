@@ -307,18 +307,17 @@ export const workItem = snakeCase.table(
       .notNull()
       .references(() => repository.id, { onDelete: "cascade" }),
     /**
-     * `issue` is an ordinary Issue Work Item. `ci_repair` is a CI Repair
-     * Work Item with no Issue. Issue identity columns are null for CI Repair.
+     * Only an ordinary Issue Work Item has Issue identity columns. Internal
+     * CI Repair and Spec Validation use their own inputs.
      */
     origin: text({ enum: WORK_ITEM_ORIGINS }).notNull().default("issue"),
     /**
-     * Positive Issue number for an Issue-origin Work Item. Null when this row
-     * is a CI Repair Work Item.
+     * Positive Issue number for an Issue-origin Work Item. Null otherwise.
      */
     issueNumber: integer(),
     /**
      * Original Issue Source captured at creation. Survives later Repository
-     * Issue Tracker changes. Null for a CI Repair Work Item.
+     * Issue Tracker changes. Null for internal Work Items.
      */
     issueTracker: text({ enum: ISSUE_TRACKERS }),
     issueNativeId: text(),
@@ -396,7 +395,7 @@ export const workItem = snakeCase.table(
      */
     startingCommitOid: text(),
     /**
-     * Durable No-Change Outcome completion summary (Markdown); null until confirmed.
+     * Durable No-Change Outcome summary or Spec Validation findings (Markdown).
      */
     completionSummary: text(),
     /**
@@ -429,6 +428,12 @@ export const workItem = snakeCase.table(
      * result lets Implement resume without authorizing a second retry.
      */
     ciRepairRetry: text(),
+    /** Original tracker and native Spec identity, separate from Issue intake. */
+    specValidationKey: text(),
+    /** Frozen approved Spec and original tracker reference. */
+    specValidationInput: text(),
+    /** Requirement-level findings, written atomically with completion. */
+    specValidationFindings: text(),
     sessionId: text(),
     pendingImplementStop: text(),
     failureCode: text(),
@@ -478,6 +483,10 @@ export const workItem = snakeCase.table(
       .where(
         sql`${t.origin} = 'ci_repair' AND ${t.state} NOT IN ('complete', 'failed', 'abandoned')`,
       ),
+    uniqueIndex("work_item_spec_validation_uidx").on(
+      t.repositoryId,
+      t.specValidationKey,
+    ),
     index("work_item_repository_issue_created_idx")
       .on(t.repositoryId, t.issueNumber, t.createdAt)
       .where(sql`${t.origin} = 'issue'`),

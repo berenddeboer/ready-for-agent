@@ -423,6 +423,7 @@ describe("production GraphQL SSE idle timeout", () => {
         maxDurations: {
           create_worktree: Duration.minutes(5),
           install_dependencies: Duration.minutes(15),
+          validate_spec: Duration.hours(2),
           implement: Duration.hours(2),
           assess_changes: Duration.minutes(5),
           pre_commit: Duration.hours(2),
@@ -443,6 +444,7 @@ describe("production GraphQL SSE idle timeout", () => {
         unfinishedCiRepairWorkItem: unused,
         startCiRepair: unused,
         considerAutomaticCiRepair: () => Effect.succeed(null),
+        considerSpecValidation: () => Effect.void,
         authorizeAsCiRepair: unused,
         implementWith: unused,
         updateWorkItemExecutionProfile: unused,

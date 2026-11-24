@@ -38,6 +38,7 @@ import { preCommit } from "./pre-commit.js"
 import { localCleanup, removeWorktree } from "./remove-worktree.js"
 import { resolvePrMergeConflict } from "./resolve-pr-merge-conflict.js"
 import { review } from "./review.js"
+import { validateSpec } from "./validate-spec.js"
 
 type StepServices =
   | DbService
@@ -152,6 +153,17 @@ export const LifecycleStepsLive = Layer.effect(
 
     return LifecycleSteps.of({
       createWorktree: (context) => withServices(createWorktree(context)),
+      // Recheck after acquiring an Agent Turn permit, not before another
+      // potentially long wait. Use the routed backend without double admission.
+      validateSpec: (context, input) =>
+        admission.withPermit(
+          context.repositoryId,
+          withServices(
+            validateSpec(context, input).pipe(
+              Effect.provideService(AgentBackend, routedAgentBackend),
+            ),
+          ),
+        ),
       installDependencies: (context) =>
         withServices(installDependencies(context)),
       implement: (context) => withServices(implement(context)),

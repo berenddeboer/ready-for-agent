@@ -829,6 +829,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           displayId: "42",
           url: "https://github.com/acme/widgets/issues/42",
           readiness: "all-descendants-closed",
+          descendants: [{ nativeId: "child", closureReason: null }],
         },
       ]
       const keymaxxerLayer = Layer.succeed(KeymaxxerService, {

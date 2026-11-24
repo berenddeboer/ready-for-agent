@@ -277,6 +277,7 @@ rfa:WorkItemShape
       rfa:CreateWorktree
       rfa:InstallDependencies
       rfa:Implement
+      rfa:ValidateSpec
       rfa:AssessChanges
       rfa:PreCommit
       rfa:Review

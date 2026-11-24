@@ -292,6 +292,7 @@ type Issue implements Node {
   url: URI!
   createdAt: DateTime!
   state: IssueState!
+  stateReason: IssueStateReason
   author: Actor
   labels(first: Int, after: String): LabelConnection
   repository: Repository!
@@ -305,6 +306,13 @@ type Issue implements Node {
     after: String
     includeClosedPrs: Boolean
   ): PullRequestConnection!
+}
+
+enum IssueStateReason {
+  COMPLETED
+  NOT_PLANNED
+  DUPLICATE
+  REOPENED
 }
 
 type LabelConnection {

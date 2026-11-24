@@ -116,9 +116,9 @@ const compareRetryTargets = (
   left: WorkItemRecord,
   right: WorkItemRecord,
 ): number => {
-  if (left.origin !== right.origin) {
-    return left.origin === "ci_repair" ? -1 : 1
-  }
+  const priority = { ci_repair: 0, spec_validation: 1, issue: 2 }
+  const byOrigin = priority[left.origin] - priority[right.origin]
+  if (byOrigin !== 0) return byOrigin
   if (left.origin === "issue" && right.origin === "issue") {
     return (
       left.issueNumber - right.issueNumber || left.id.localeCompare(right.id)

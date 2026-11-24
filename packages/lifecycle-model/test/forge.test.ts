@@ -25,7 +25,11 @@ describe("generated Forge vocabulary", () => {
   })
 
   it("exports Work Item origins in declared order", () => {
-    expect([...WORK_ITEM_ORIGINS]).toEqual(["issue", "ci_repair"])
+    expect([...WORK_ITEM_ORIGINS]).toEqual([
+      "issue",
+      "ci_repair",
+      "spec_validation",
+    ])
     expect(isWorkItemOrigin("issue")).toBe(true)
     expect(isWorkItemOrigin("ci_repair")).toBe(true)
     expect(isWorkItemOrigin("repair")).toBe(false)

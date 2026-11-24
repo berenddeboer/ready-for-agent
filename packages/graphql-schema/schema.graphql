@@ -884,6 +884,7 @@ Whether a Work Item was created from an Issue or as a CI Repair Work Item.
 enum WorkItemOrigin {
   ISSUE
   CI_REPAIR
+  SPEC_VALIDATION
 }
 
 """
@@ -1343,6 +1344,7 @@ enum WorkItemState {
   PRE_COMMIT
   RESOLVE_PR_MERGE_CONFLICT
   REVIEW
+  VALIDATE_SPEC
   WATCH_PR_STATUS_CHECKS
   ABANDONED
   COMPLETE
@@ -1395,6 +1397,7 @@ enum LifecyclePhase {
   CREATE_WORKTREE
   INSTALL_DEPENDENCIES
   IMPLEMENT
+  VALIDATE_SPEC
   ASSESS_CHANGES
   PRE_COMMIT
   REVIEW

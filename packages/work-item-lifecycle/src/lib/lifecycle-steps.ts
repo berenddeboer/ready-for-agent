@@ -77,6 +77,7 @@ import type {
   WorkItemId,
   WorkItemOrigin,
 } from "./types.js"
+import type { SpecValidationInput, validateSpec } from "./validate-spec.js"
 
 /**
  * Context supplied to every Lifecycle Step handler.
@@ -86,8 +87,7 @@ export interface LifecycleStepContext {
   readonly workItemId: WorkItemId
   readonly repositoryId: string
   /**
-   * Positive Issue number for an Issue Work Item. Null for a CI Repair
-   * Work Item, which has no Issue.
+   * Positive Issue number for an Issue Work Item. Null for internal Work Items.
    */
   readonly issueNumber: number | null
   /** Absent on legacy step-handler tests; production always sets it. */
@@ -210,6 +210,14 @@ export interface LifecycleStepsShape {
   readonly createWorktree: (
     context: LifecycleStepContext,
   ) => Effect.Effect<CreateWorktreeResult, LifecycleStepError>
+  /** Production provides this; narrow lifecycle test adapters may omit it. */
+  readonly validateSpec?: (
+    context: LifecycleStepContext,
+    input: SpecValidationInput,
+  ) => Effect.Effect<
+    Effect.Success<ReturnType<typeof validateSpec>>,
+    LifecycleStepError
+  >
   readonly installDependencies: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, LifecycleStepError>

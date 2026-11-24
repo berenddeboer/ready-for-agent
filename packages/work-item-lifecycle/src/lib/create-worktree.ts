@@ -36,23 +36,33 @@ const parseDefaultBranchName = (lsRemoteOutput: string): string | null => {
   return name === undefined || name === "" ? null : name
 }
 
-const resolveStartPoint = (repository: GitRepository) =>
+const resolveStartPoint = (repository: GitRepository, requireRemote: boolean) =>
   Effect.gen(function* () {
-    const remoteHead = yield* runGit(repository, [
+    const remoteHeadRead = runGit(repository, [
       "ls-remote",
       "--symref",
       "origin",
       "HEAD",
-    ]).pipe(Effect.catchTag("GitCommandError", () => Effect.succeed("")))
+    ])
+    const remoteHead = yield* requireRemote
+      ? remoteHeadRead
+      : remoteHeadRead.pipe(
+          Effect.catchTag("GitCommandError", () => Effect.succeed("")),
+        )
 
     const defaultBranchName = parseDefaultBranchName(remoteHead)
     if (defaultBranchName !== null) {
       const defaultBranchRef = `refs/remotes/origin/${defaultBranchName}`
-      yield* runGit(repository, [
+      const fetchDefault = runGit(repository, [
         "fetch",
         "origin",
         `+refs/heads/${defaultBranchName}:${defaultBranchRef}`,
-      ]).pipe(Effect.catchTag("GitCommandError", () => Effect.void))
+      ])
+      yield* requireRemote
+        ? fetchDefault
+        : fetchDefault.pipe(
+            Effect.catchTag("GitCommandError", () => Effect.void),
+          )
 
       const remoteRefCode = yield* gitExitCode(repository, [
         "show-ref",
@@ -62,6 +72,17 @@ const resolveStartPoint = (repository: GitRepository) =>
       if (remoteRefCode === 0) {
         return defaultBranchRef
       }
+    }
+
+    if (requireRemote) {
+      return yield* new GitCommandError({
+        message:
+          "Spec Validation could not resolve the integrated origin default branch",
+        command: "git",
+        args: ["ls-remote", "--symref", "origin", "HEAD"],
+        exitCode: 1,
+        stderr: "No origin default branch was fetched",
+      })
     }
 
     const headCode = yield* gitExitCode(repository, [
@@ -173,6 +194,37 @@ const resolveStartingCommitOid = (worktreePath: string) =>
     }),
   )
 
+/** Fast-forward a validator's checkout without discarding local work. */
+export const refreshSpecValidationCheckout = (worktreePath: string) =>
+  Effect.gen(function* () {
+    const repository = { localPath: worktreePath, isBare: false }
+    const startPoint = yield* resolveStartPoint(repository, true)
+    const target = (yield* runGit(repository, ["rev-parse", startPoint])).trim()
+    const before = yield* resolveStartingCommitOid(worktreePath)
+    if (before === target) return target
+
+    yield* runGit(repository, [
+      "merge",
+      "--ff-only",
+      "--no-autostash",
+      "--no-overwrite-ignore",
+      target,
+    ])
+    // `merge --ff-only` also succeeds when HEAD is ahead of the target.
+    if ((yield* resolveStartingCommitOid(worktreePath)) !== target) {
+      return yield* new WorktreeConflictError({
+        message:
+          "Spec Validation checkout does not match the integrated origin default branch",
+        branchName: (yield* runGit(repository, [
+          "branch",
+          "--show-current",
+        ])).trim(),
+        worktreePath,
+      })
+    }
+    return target
+  })
+
 export const createWorktree = (
   context: LifecycleStepContext,
   options: { readonly tmpDir?: string } = {},
@@ -266,7 +318,10 @@ export const createWorktree = (
 
     yield* ensureParentDirectory(parentPath)
 
-    const startPoint = yield* resolveStartPoint(gitRepository)
+    const startPoint = yield* resolveStartPoint(
+      gitRepository,
+      context.origin === "spec_validation",
+    )
     yield* runGit(gitRepository, [
       "worktree",
       "add",
