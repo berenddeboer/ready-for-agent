@@ -13,6 +13,7 @@ import {
   LinearService,
   type LinearServiceError,
   type LinearServiceShape,
+  LinearSpecObservation,
   type LinearTeamWorkflow,
   formatLinearHelperShellCommand,
   resolveLinearHelperChildSpawn,
@@ -213,6 +214,25 @@ export const keymaxxerLinearLayer = (options: {
                     LinearServiceError
                   >,
                 describe: `listing Ready-labeled Linear Issues in project ${projectId}`,
+              }),
+          ),
+        observeSpecs: (projectId) =>
+          withToken(
+            () => ambient.observeSpecs(projectId),
+            (tokenName) =>
+              callHelper({
+                operation: "observe-specs",
+                args: [encodeArgument(projectId)],
+                tokenName,
+                decode: (stdout) =>
+                  Schema.decodeUnknownEffect(
+                    Schema.fromJsonString(Schema.Array(LinearSpecObservation)),
+                  )(stdout).pipe(
+                    Effect.mapError(() =>
+                      requestError("Linear returned invalid Spec observations"),
+                    ),
+                  ),
+                describe: `observing Linear Specs in project ${projectId}`,
               }),
           ),
         listProjects: () =>

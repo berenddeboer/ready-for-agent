@@ -6,6 +6,7 @@ import { getIssueProgram } from "../bin/get-issue.js"
 import { listProjectWorkflowProgram } from "../bin/list-project-workflow.js"
 import { listProjectsProgram } from "../bin/list-projects.js"
 import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
+import { observeSpecsProgram } from "../bin/observe-specs.js"
 import { updateIssueStateProgram } from "../bin/update-issue-state.js"
 import { linearServiceBinScriptPath } from "../bin-script-path.js"
 import type { LinearService } from "./linear-service.js"
@@ -17,6 +18,7 @@ export const INTERNAL_LINEAR_HELPER_ARG =
 export const LINEAR_HELPER_OPERATIONS = [
   "get-authenticated-user-login",
   "list-ready-issues",
+  "observe-specs",
   "list-projects",
   "list-project-workflow",
   "get-issue",
@@ -110,6 +112,7 @@ const programs: Record<
 > = {
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
   "list-ready-issues": listReadyIssuesProgram,
+  "observe-specs": observeSpecsProgram,
   "list-projects": listProjectsProgram,
   "list-project-workflow": listProjectWorkflowProgram,
   "get-issue": getIssueProgram,

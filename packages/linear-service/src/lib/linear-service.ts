@@ -4,6 +4,7 @@ import type {
   LinearIssueSnapshot,
   LinearProject,
   LinearReadyLabeledIssue,
+  LinearSpecObservation,
   LinearTeamWorkflow,
 } from "./types.js"
 
@@ -24,6 +25,18 @@ export interface LinearServiceShape {
   readonly listReadyIssues: (
     projectId: string,
   ) => Effect.Effect<readonly LinearReadyLabeledIssue[], LinearServiceError>
+  /**
+   * Scheduling observations for open issues marked `spec` in the project.
+   * Descendant closure is read from Linear, not inferred from agent intake.
+   * Supported for single-team hierarchies fully visible to the configured
+   * credential. Linear can omit issues the credential cannot see; this read
+   * does not verify access beyond the returned hierarchy. Read errors and
+   * incomplete pagination cannot establish readiness.
+   * Closure (including cancellation) does not establish delivery.
+   */
+  readonly observeSpecs: (
+    projectId: string,
+  ) => Effect.Effect<readonly LinearSpecObservation[], LinearServiceError>
   readonly listProjects: () => Effect.Effect<
     readonly LinearProject[],
     LinearServiceError

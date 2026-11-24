@@ -13,6 +13,7 @@ import {
   type LinearIssueSnapshot,
   type LinearProject,
   type LinearReadyLabeledIssue,
+  type LinearSpecObservation,
   type LinearTeamWorkflow,
   type LinearWorkflowState,
   isLinearOpenStateType,
@@ -24,6 +25,7 @@ import {
 
 const REQUEST_TIMEOUT = Duration.seconds(30)
 const PAGE_SIZE = 50
+const SPEC_CHILDREN_BATCH_SIZE = 8
 
 type LinearFetch = typeof fetch
 
@@ -156,6 +158,46 @@ const IssuesSchema = Schema.Struct({
     pageInfo: Schema.optional(PageInfoSchema),
   }),
 })
+const StrictPageInfoSchema = Schema.Struct({
+  hasNextPage: Schema.Boolean,
+  endCursor: Schema.NullOr(RequiredString),
+})
+const HierarchyNodeSchema = Schema.Struct({
+  id: RequiredString,
+  state: IssueStateSchema,
+})
+const SpecIssuesSchema = Schema.Struct({
+  issues: Schema.Struct({
+    nodes: Schema.Array(
+      Schema.Struct({
+        ...HierarchyNodeSchema.fields,
+        identifier: RequiredString,
+        url: RequiredString,
+      }),
+    ),
+    pageInfo: StrictPageInfoSchema,
+  }),
+})
+const SpecChildrenSchema = Schema.Record(
+  Schema.String,
+  Schema.NullOr(
+    Schema.Struct({
+      id: RequiredString,
+      children: Schema.Struct({
+        nodes: Schema.Array(
+          Schema.Struct({
+            ...HierarchyNodeSchema.fields,
+            children: Schema.Struct({
+              nodes: Schema.Array(Schema.Struct({ id: RequiredString })),
+              pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
+            }),
+          }),
+        ),
+        pageInfo: StrictPageInfoSchema,
+      }),
+    }),
+  ),
+)
 const GraphqlErrorSchema = Schema.Struct({
   message: Schema.optional(Schema.String),
   path: Schema.optional(
@@ -248,6 +290,37 @@ const READY_ISSUES_QUERY = `query ReadyIssues($projectId: ID!, $after: String) {
     }
     pageInfo { hasNextPage endCursor }
   }
+}`
+
+const OPEN_SPECS_QUERY = `query OpenSpecs($projectId: ID!, $after: String) {
+  issues(
+    first: ${PAGE_SIZE}
+    after: $after
+    includeArchived: true
+    filter: {
+      project: { id: { eq: $projectId } }
+      labels: { name: { eq: "spec" } }
+      state: { type: { nin: ["completed", "canceled"] } }
+    }
+  ) {
+    nodes { id identifier url state { type } }
+    pageInfo { hasNextPage endCursor }
+  }
+}`
+
+const specChildrenSelection = (afterVariable: string) => `{
+    id
+    children(first: ${PAGE_SIZE}, after: $${afterVariable}, includeArchived: true) {
+      nodes {
+        id
+        state { type }
+        children(first: 1, includeArchived: true) {
+          nodes { id }
+          pageInfo { hasNextPage }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
 }`
 
 const ISSUE_QUERY = `query Issue($id: String!) {
@@ -391,6 +464,75 @@ const requestError = (
       : { code: extractErrorCode(cause) }),
   })
 
+interface HierarchyPage<A> {
+  readonly nodes: readonly A[]
+  readonly pageInfo: typeof StrictPageInfoSchema.Type
+}
+
+interface SpecChildPageRequest {
+  readonly id: string
+  readonly after: string | null
+  readonly seenCursors: Set<string>
+}
+
+const nextHierarchyCursor = (input: {
+  readonly page: HierarchyPage<unknown>
+  readonly after: string | null
+  readonly seenCursors: Set<string>
+  readonly describe: string
+}): Effect.Effect<string | null, LinearServiceError> => {
+  const { page, after, seenCursors, describe } = input
+  const { hasNextPage, endCursor } = page.pageInfo
+  if (page.nodes.length === 0 && (after !== null || hasNextPage)) {
+    return Effect.fail(
+      requestError(`Linear returned an empty continuation while ${describe}`),
+    )
+  }
+  if (!hasNextPage) return Effect.succeed(null)
+  if (endCursor === null || seenCursors.has(endCursor)) {
+    return Effect.fail(
+      requestError(`Linear returned incomplete pagination while ${describe}`),
+    )
+  }
+  seenCursors.add(endCursor)
+  return Effect.succeed(endCursor)
+}
+
+// Unlike intake, absence of pagination metadata cannot mean end of data.
+const readHierarchyPages = Effect.fn("LinearService.readHierarchyPages")(
+  function* <A extends { readonly id: string }>(
+    describe: string,
+    load: (
+      after: string | null,
+    ) => Effect.Effect<HierarchyPage<A>, LinearServiceError>,
+  ) {
+    const nodes = new Map<string, A>()
+    const cursors = new Set<string>()
+    let after: string | null = null
+    for (;;) {
+      const page: HierarchyPage<A> = yield* load(after)
+      for (const node of page.nodes) {
+        if (nodes.has(node.id)) {
+          return yield* requestError(
+            `Linear returned a duplicate Issue while ${describe}`,
+          )
+        }
+        nodes.set(node.id, node)
+      }
+      const next: string | null = yield* nextHierarchyCursor({
+        page,
+        after,
+        seenCursors: cursors,
+        describe,
+      })
+      if (next === null) {
+        return [...nodes.values()]
+      }
+      after = next
+    }
+  },
+)
+
 const hasUsableGraphqlData = (data: unknown): boolean =>
   data !== null && data !== undefined && typeof data === "object"
 
@@ -517,6 +659,7 @@ export const makeLinearService = (options: {
     readonly variables?: Record<string, unknown>
     readonly schema: S & Parameters<typeof Schema.decodeUnknownSync>[0]
     readonly describe: string
+    readonly requireCompleteData?: boolean
   }): Effect.Effect<S["Type"], LinearServiceError> =>
     Effect.gen(function* () {
       if (!configured) {
@@ -587,7 +730,10 @@ export const makeLinearService = (options: {
         hasUsableGraphqlData(envelope.data) &&
         graphqlErrors.length > 0 &&
         graphqlErrors.every(isNestedGraphqlFieldError)
-      if (graphqlError !== undefined && !nestedFieldErrorsOnly) {
+      if (
+        graphqlError !== undefined &&
+        (input.requireCompleteData || !nestedFieldErrorsOnly)
+      ) {
         return yield* requestError(
           graphqlError.message?.trim() ||
             `Linear GraphQL error while ${input.describe}`,
@@ -603,6 +749,90 @@ export const makeLinearService = (options: {
           ),
       })
     })
+
+  const observeDescendants = Effect.fn("LinearService.observeSpecDescendants")(
+    function* (specId: string) {
+      const seen = new Set([specId])
+      const firstPage = (id: string): SpecChildPageRequest => ({
+        id,
+        after: null,
+        seenCursors: new Set<string>(),
+      })
+      const pending = [firstPage(specId)]
+      let hasOpenDescendant = false
+      for (let offset = 0; offset < pending.length; ) {
+        // Each alias keeps its own cursor; bounding the batch also bounds
+        // the number of child pages requested in one GraphQL operation.
+        const batch = pending.slice(offset, offset + SPEC_CHILDREN_BATCH_SIZE)
+        offset += batch.length
+        const variables: Record<string, unknown> = {}
+        const declarations: string[] = []
+        const fields = batch.map((request, index) => {
+          const suffix = index === 0 ? "" : String(index)
+          const idVariable = `id${suffix}`
+          const afterVariable = `after${suffix}`
+          variables[idVariable] = request.id
+          variables[afterVariable] = request.after
+          declarations.push(
+            `$${idVariable}: String!, $${afterVariable}: String`,
+          )
+          const key = `issue${suffix}`
+          return {
+            ...request,
+            key,
+            selection: `${key}: issue(id: $${idVariable}) ${specChildrenSelection(afterVariable)}`,
+          }
+        })
+        const data = yield* graphql({
+          query: `query SpecChildren(${declarations.join(", ")}) {
+            ${fields.map(({ selection }) => selection).join("\n")}
+          }`,
+          variables,
+          schema: SpecChildrenSchema,
+          describe: `reading descendants of Linear Spec ${specId}`,
+          requireCompleteData: true,
+        })
+        for (const { id, after, seenCursors, key } of fields) {
+          const issue = data[key]
+          if (issue?.id !== id) {
+            return yield* requestError(`Linear Issue ${id} could not be read`)
+          }
+          const next = yield* nextHierarchyCursor({
+            page: issue.children,
+            after,
+            seenCursors,
+            describe: `reading children of Linear Issue ${id}`,
+          })
+          if (next !== null) {
+            pending.push({ id, after: next, seenCursors })
+          }
+          for (const child of issue.children.nodes) {
+            if (seen.has(child.id)) {
+              return yield* requestError(
+                `Linear returned a duplicate descendant of Spec ${specId}`,
+              )
+            }
+            seen.add(child.id)
+            // Prove leaves with the nested connection instead of querying each
+            // one separately. Branches still get a complete paginated read.
+            if (child.children.nodes.length > 0) {
+              pending.push(firstPage(child.id))
+            } else if (child.children.pageInfo.hasNextPage) {
+              return yield* requestError(
+                `Linear returned incomplete child data for Issue ${child.id}`,
+              )
+            }
+            if (isLinearOpenStateType(child.state.type)) {
+              hasOpenDescendant = true
+            }
+          }
+        }
+      }
+      return hasOpenDescendant || seen.size === 1
+        ? "waiting"
+        : "all-descendants-closed"
+    },
+  )
 
   return {
     getAuthenticatedUserLogin: Effect.fn(
@@ -690,6 +920,36 @@ export const makeLinearService = (options: {
           numeric: true,
         }),
       )
+    }),
+    observeSpecs: Effect.fn("LinearService.observeSpecs")(function* (
+      projectId: string,
+    ) {
+      const describe = `listing open Linear Specs in project ${projectId}`
+      const specs = yield* readHierarchyPages(describe, (after) =>
+        graphql({
+          query: OPEN_SPECS_QUERY,
+          variables: { projectId, after },
+          schema: SpecIssuesSchema,
+          describe,
+          requireCompleteData: true,
+        }).pipe(Effect.map(({ issues }) => issues)),
+      )
+      const observations: LinearSpecObservation[] = []
+      for (const spec of specs) {
+        if (!isLinearOpenStateType(spec.state.type)) {
+          continue
+        }
+        const readiness = yield* observeDescendants(spec.id).pipe(
+          Effect.catch(() => Effect.succeed("hierarchy-unavailable" as const)),
+        )
+        observations.push({
+          nativeId: spec.id,
+          displayId: spec.identifier,
+          url: spec.url,
+          readiness,
+        })
+      }
+      return observations
     }),
     getIssue: Effect.fn("LinearService.getIssue")(function* (nativeId: string) {
       const data = yield* graphql({

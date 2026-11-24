@@ -42,6 +42,7 @@ import {
   LinearNotConfiguredError,
   type LinearRequestError,
   LinearService,
+  LinearSpecObservation,
 } from "@ready-for-agent/linear-service"
 
 export const CompetingPullRequestIdentity = Schema.Struct({
@@ -66,6 +67,10 @@ export const ReconciliationSummary = Schema.Struct({
   unchanged: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
   competingObservations: Schema.Array(
     CompetingIssueClosingPullRequestObservation,
+  ),
+  // Absent when not applicable or the Spec listing could not be read.
+  linearSpecObservations: Schema.optionalKey(
+    Schema.Array(LinearSpecObservation),
   ),
 })
 export type ReconciliationSummary = typeof ReconciliationSummary.Type
@@ -188,12 +193,12 @@ export const IssueReconcilerLive = Layer.effect(
       options?: ReconciliationOptions,
     ) {
       const issueTracker = repository.issueTracker
+      const linearProjectId = repository.linearProjectId?.trim() ?? ""
       const localIssues = yield* db.listIssues(repository.id)
       const { authorScope, remoteIssues } = yield* (() => {
         if (issueTracker === "linear") {
           return Effect.gen(function* () {
-            const projectId = repository.linearProjectId?.trim() ?? ""
-            if (projectId === "") {
+            if (linearProjectId === "") {
               return yield* new LinearNotConfiguredError({
                 repositoryId: repository.id,
                 message:
@@ -201,14 +206,14 @@ export const IssueReconcilerLive = Layer.effect(
               })
             }
             if (repository.includeAllIssueAuthors) {
-              const issues = yield* linear.listReadyIssues(projectId)
+              const issues = yield* linear.listReadyIssues(linearProjectId)
               return {
                 remoteIssues: issues,
                 authorScope: { includeAll: true as const },
               }
             }
             const operatorLogin = yield* linear.getAuthenticatedUserLogin()
-            const issues = yield* linear.listReadyIssues(projectId)
+            const issues = yield* linear.listReadyIssues(linearProjectId)
             return {
               remoteIssues: issues,
               authorScope: {
@@ -435,7 +440,22 @@ export const IssueReconcilerLive = Layer.effect(
           Effect.mapError((cause) => mutationError("record-success", cause)),
         )
 
-      return progress
+      if (issueTracker !== "linear") {
+        return progress
+      }
+      return yield* linear.observeSpecs(linearProjectId).pipe(
+        Effect.map((linearSpecObservations) => ({
+          ...progress,
+          linearSpecObservations,
+        })),
+        Effect.catch((error) =>
+          Effect.logWarning("Could not observe Linear Specs", {
+            repositoryId: repository.id,
+            projectId: linearProjectId,
+            error,
+          }).pipe(Effect.as(progress)),
+        ),
+      )
     })
 
     return IssueReconciler.of({ reconcile })

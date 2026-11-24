@@ -56,6 +56,7 @@ export const makeLinearServiceTest = (
       failOr(() => Effect.succeed(fixture.operatorLogin ?? "linear-user")),
     listReadyIssues: () =>
       failOr(() => Effect.succeed([...(fixture.issues ?? [])])),
+    observeSpecs: () => failOr(() => Effect.succeed([])),
     listProjects: () =>
       failOr(() => Effect.succeed([...(fixture.projects ?? [])])),
     listProjectWorkflow: (projectId) =>
@@ -82,6 +83,7 @@ export const makeLinearServiceTest = (
 export const defaultLinearServiceShape = {
   getAuthenticatedUserLogin: () => Effect.succeed("linear-user"),
   listReadyIssues: () => Effect.succeed([]),
+  observeSpecs: () => Effect.succeed([]),
   listProjects: () => Effect.succeed([]),
   listProjectWorkflow: () => Effect.succeed([]),
   getIssue: () => Effect.succeed(defaultLinearIssueSnapshot),
