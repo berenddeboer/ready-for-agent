@@ -13,12 +13,12 @@ rfa:ContextTermShape
   sh:property [
     sh:path rdf:type ;
     sh:hasValue owl:Class ;
-    sh:message "Every CONTEXT.md term must be declared as an OWL class."@en ;
+    sh:message "Every GLOSSARY.md term must be declared as an OWL class."@en ;
   ] ;
   sh:property [
     sh:path rdf:type ;
     sh:hasValue skos:Concept ;
-    sh:message "Every CONTEXT.md term must be declared as a SKOS concept."@en ;
+    sh:message "Every GLOSSARY.md term must be declared as a SKOS concept."@en ;
   ] ;
   sh:property [
     sh:path skos:prefLabel ;
@@ -26,7 +26,7 @@ rfa:ContextTermShape
     sh:maxCount 1 ;
     sh:languageIn ("en") ;
     sh:uniqueLang true ;
-    sh:message "Every CONTEXT.md term must have one English preferred label."@en ;
+    sh:message "Every GLOSSARY.md term must have one English preferred label."@en ;
   ] ;
   sh:property [
     sh:path skos:definition ;
@@ -34,7 +34,7 @@ rfa:ContextTermShape
     sh:maxCount 1 ;
     sh:languageIn ("en") ;
     sh:uniqueLang true ;
-    sh:message "Every CONTEXT.md term must have one English definition."@en ;
+    sh:message "Every GLOSSARY.md term must have one English definition."@en ;
   ] .
 
 rfa:LifecycleVocabularyShape

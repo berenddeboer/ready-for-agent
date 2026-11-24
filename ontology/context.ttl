@@ -1,4 +1,4 @@
-# CONTEXT.md glossary terms, definitions, and avoided-language annotations.
+# GLOSSARY.md glossary terms, definitions, and avoided-language annotations.
 # The lifecycle-model parity test keeps this graph synchronized with the glossary.
 
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -6,7 +6,7 @@
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 
 # Lifecycle values retain their SKOS labels and definitions in rfa.ttl.
-# Declaring them here records that they are also CONTEXT.md glossary terms.
+# Declaring them here records that they are also GLOSSARY.md glossary terms.
 rfa:CreateWorktree a rfa:ContextTerm .
 rfa:InstallDependencies a rfa:ContextTerm .
 rfa:CreatePr a rfa:ContextTerm .
@@ -49,7 +49,7 @@ rfa:Forge
   owl:annotatedSource rfa:Forge ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "platform"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Forge for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Forge for this concept."@en ;
 ] .
 
 rfa:ForgeHost
@@ -63,7 +63,7 @@ rfa:ForgeHost
   owl:annotatedSource rfa:ForgeHost ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Instance URL"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Forge Host for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Forge Host for this concept."@en ;
 ] .
 
 [
@@ -71,7 +71,7 @@ rfa:ForgeHost
   owl:annotatedSource rfa:ForgeHost ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "server"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Forge Host for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Forge Host for this concept."@en ;
 ] .
 
 [
@@ -79,7 +79,7 @@ rfa:ForgeHost
   owl:annotatedSource rfa:ForgeHost ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "domain"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Forge Host for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Forge Host for this concept."@en ;
 ] .
 
 rfa:ProjectPath
@@ -123,7 +123,7 @@ rfa:Repository
   owl:annotatedSource rfa:Repository ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "target"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Repository for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Repository for this concept."@en ;
 ] .
 
 [
@@ -131,7 +131,7 @@ rfa:Repository
   owl:annotatedSource rfa:Repository ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "project"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Repository for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Repository for this concept."@en ;
 ] .
 
 [
@@ -139,7 +139,7 @@ rfa:Repository
   owl:annotatedSource rfa:Repository ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "checkout"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Repository for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Repository for this concept."@en ;
 ] .
 
 rfa:EndToEndFixtureRepository
@@ -153,7 +153,7 @@ rfa:EndToEndFixtureRepository
   owl:annotatedSource rfa:EndToEndFixtureRepository ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Test repo"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers End-to-End Fixture Repository for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers End-to-End Fixture Repository for this concept."@en ;
 ] .
 
 [
@@ -161,7 +161,7 @@ rfa:EndToEndFixtureRepository
   owl:annotatedSource rfa:EndToEndFixtureRepository ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "sandbox Repository"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers End-to-End Fixture Repository for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers End-to-End Fixture Repository for this concept."@en ;
 ] .
 
 [
@@ -169,7 +169,7 @@ rfa:EndToEndFixtureRepository
   owl:annotatedSource rfa:EndToEndFixtureRepository ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "mutable fixture"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers End-to-End Fixture Repository for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers End-to-End Fixture Repository for this concept."@en ;
 ] .
 
 rfa:Paused
@@ -183,7 +183,7 @@ rfa:Paused
   owl:annotatedSource rfa:Paused ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Disabled"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Paused for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Paused for this concept."@en ;
 ] .
 
 [
@@ -191,7 +191,7 @@ rfa:Paused
   owl:annotatedSource rfa:Paused ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "inactive"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Paused for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Paused for this concept."@en ;
 ] .
 
 [
@@ -199,7 +199,7 @@ rfa:Paused
   owl:annotatedSource rfa:Paused ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "enabled=false"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Paused for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Paused for this concept."@en ;
 ] .
 
 [
@@ -207,7 +207,7 @@ rfa:Paused
   owl:annotatedSource rfa:Paused ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Pause Work Item"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Paused for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Paused for this concept."@en ;
 ] .
 
 rfa:RepositorySettings
@@ -221,7 +221,7 @@ rfa:RepositorySettings
   owl:annotatedSource rfa:RepositorySettings ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Project config"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Repository settings for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Repository settings for this concept."@en ;
 ] .
 
 [
@@ -229,7 +229,7 @@ rfa:RepositorySettings
   owl:annotatedSource rfa:RepositorySettings ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "repo config file"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Repository settings for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Repository settings for this concept."@en ;
 ] .
 
 rfa:CiGateDefinition
@@ -473,7 +473,7 @@ rfa:HarnessConfig
   owl:annotatedSource rfa:HarnessConfig ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Default model seed"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Harness Config for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Harness Config for this concept."@en ;
 ] .
 
 [
@@ -481,7 +481,7 @@ rfa:HarnessConfig
   owl:annotatedSource rfa:HarnessConfig ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "product default model"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Harness Config for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Harness Config for this concept."@en ;
 ] .
 
 rfa:MergePolicy
@@ -495,7 +495,7 @@ rfa:MergePolicy
   owl:annotatedSource rfa:MergePolicy ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Repository Auto-merge"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Merge Policy for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Merge Policy for this concept."@en ;
 ] .
 
 [
@@ -525,7 +525,7 @@ rfa:WorkItemMergePolicy
   owl:annotatedSource rfa:WorkItemMergePolicy ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Work Item Auto-merge override"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Work Item Merge Policy for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Work Item Merge Policy for this concept."@en ;
 ] .
 
 [
@@ -533,7 +533,7 @@ rfa:WorkItemMergePolicy
   owl:annotatedSource rfa:WorkItemMergePolicy ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "per-Issue Auto-merge"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Work Item Merge Policy for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Work Item Merge Policy for this concept."@en ;
 ] .
 
 [
@@ -563,7 +563,7 @@ rfa:AutoMerge
   owl:annotatedSource rfa:AutoMerge ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "auto-approve"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Auto-merge for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Auto-merge for this concept."@en ;
 ] .
 
 rfa:MergeMode
@@ -585,7 +585,7 @@ rfa:MergeMode
   owl:annotatedSource rfa:MergeMode ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "force merge"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Merge Mode for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Merge Mode for this concept."@en ;
 ] .
 
 [
@@ -593,7 +593,7 @@ rfa:MergeMode
   owl:annotatedSource rfa:MergeMode ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "skip checks"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Merge Mode for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Merge Mode for this concept."@en ;
 ] .
 
 rfa:IncludeAllIssueAuthors
@@ -607,7 +607,7 @@ rfa:IncludeAllIssueAuthors
   owl:annotatedSource rfa:IncludeAllIssueAuthors ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Show all authors"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Include all Issue Authors for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Include all Issue Authors for this concept."@en ;
 ] .
 
 [
@@ -629,7 +629,7 @@ rfa:IssueAuthor
   owl:annotatedSource rfa:IssueAuthor ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Assignee"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Issue Author for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Issue Author for this concept."@en ;
 ] .
 
 [
@@ -651,7 +651,7 @@ rfa:OperatorForgeUser
   owl:annotatedSource rfa:OperatorForgeUser ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Harness user"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Operator Forge User for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Operator Forge User for this concept."@en ;
 ] .
 
 [
@@ -659,7 +659,7 @@ rfa:OperatorForgeUser
   owl:annotatedSource rfa:OperatorForgeUser ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "local operator account"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Operator Forge User for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Operator Forge User for this concept."@en ;
 ] .
 
 rfa:HarnessGitHubOperation
@@ -747,7 +747,7 @@ rfa:IssueTracker
   owl:annotatedSource rfa:IssueTracker ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Linear as a Forge"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Issue Tracker for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Issue Tracker for this concept."@en ;
 ] .
 
 [
@@ -755,7 +755,7 @@ rfa:IssueTracker
   owl:annotatedSource rfa:IssueTracker ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "provider"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Issue Tracker for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Issue Tracker for this concept."@en ;
 ] .
 
 rfa:IssueNativeIdentity
@@ -791,7 +791,7 @@ rfa:IssueDisplayIdentifier
   owl:annotatedSource rfa:IssueDisplayIdentifier ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Issue Native Identity"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Issue Display Identifier for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Issue Display Identifier for this concept."@en ;
 ] .
 
 [
@@ -799,7 +799,7 @@ rfa:IssueDisplayIdentifier
   owl:annotatedSource rfa:IssueDisplayIdentifier ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "URL"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Issue Display Identifier for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Issue Display Identifier for this concept."@en ;
 ] .
 
 rfa:OriginalIssueSource
@@ -813,7 +813,7 @@ rfa:OriginalIssueSource
   owl:annotatedSource rfa:OriginalIssueSource ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "current tracker setting"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Original Issue Source for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Original Issue Source for this concept."@en ;
 ] .
 
 [
@@ -821,7 +821,7 @@ rfa:OriginalIssueSource
   owl:annotatedSource rfa:OriginalIssueSource ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "issue snapshot"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Original Issue Source for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Original Issue Source for this concept."@en ;
 ] .
 
 rfa:Issue
@@ -835,7 +835,7 @@ rfa:Issue
   owl:annotatedSource rfa:Issue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Ticket"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Issue for this concept."@en ;
 ] .
 
 [
@@ -892,7 +892,7 @@ rfa:RefreshJob
   owl:annotatedSource rfa:RefreshJob ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "sync job"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Refresh Job for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Refresh Job for this concept."@en ;
 ] .
 
 rfa:IssuePolling
@@ -950,7 +950,7 @@ rfa:KeymaxxerService
   owl:annotatedSource rfa:KeymaxxerService ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Secret store"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Service for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Keymaxxer Service for this concept."@en ;
 ] .
 
 [
@@ -958,7 +958,7 @@ rfa:KeymaxxerService
   owl:annotatedSource rfa:KeymaxxerService ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "credential cache"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Service for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Keymaxxer Service for this concept."@en ;
 ] .
 
 rfa:KeymaxxerSidecar
@@ -972,7 +972,7 @@ rfa:KeymaxxerSidecar
   owl:annotatedSource rfa:KeymaxxerSidecar ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Credential daemon"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Sidecar for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Keymaxxer Sidecar for this concept."@en ;
 ] .
 
 [
@@ -980,7 +980,7 @@ rfa:KeymaxxerSidecar
   owl:annotatedSource rfa:KeymaxxerSidecar ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "token cache"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Sidecar for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Keymaxxer Sidecar for this concept."@en ;
 ] .
 
 [
@@ -988,7 +988,7 @@ rfa:KeymaxxerSidecar
   owl:annotatedSource rfa:KeymaxxerSidecar ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "development-only sidecar"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Sidecar for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Keymaxxer Sidecar for this concept."@en ;
 ] .
 
 rfa:HarnessOwnedOpenCodeServer
@@ -1002,7 +1002,7 @@ rfa:HarnessOwnedOpenCodeServer
   owl:annotatedSource rfa:HarnessOwnedOpenCodeServer ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "OpenCode service"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Harness-owned OpenCode server for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Harness-owned OpenCode server for this concept."@en ;
 ] .
 
 [
@@ -1010,7 +1010,7 @@ rfa:HarnessOwnedOpenCodeServer
   owl:annotatedSource rfa:HarnessOwnedOpenCodeServer ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "shared OpenCode server"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Harness-owned OpenCode server for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Harness-owned OpenCode server for this concept."@en ;
 ] .
 
 [
@@ -1018,7 +1018,7 @@ rfa:HarnessOwnedOpenCodeServer
   owl:annotatedSource rfa:HarnessOwnedOpenCodeServer ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "standalone OpenCode"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Harness-owned OpenCode server for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Harness-owned OpenCode server for this concept."@en ;
 ] .
 
 rfa:AgentBackend
@@ -1040,7 +1040,7 @@ rfa:AgentBackend
   owl:annotatedSource rfa:AgentBackend ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "model"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Backend for this concept."@en ;
 ] .
 
 [
@@ -1048,7 +1048,7 @@ rfa:AgentBackend
   owl:annotatedSource rfa:AgentBackend ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "provider"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Backend for this concept."@en ;
 ] .
 
 [
@@ -1078,7 +1078,7 @@ rfa:EffectiveAgentBackend
   owl:annotatedSource rfa:EffectiveAgentBackend ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "preferred backend without capture"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Effective Agent Backend for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Effective Agent Backend for this concept."@en ;
 ] .
 
 rfa:ActiveAgentBackend
@@ -1092,7 +1092,7 @@ rfa:ActiveAgentBackend
   owl:annotatedSource rfa:ActiveAgentBackend ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Single instance-wide backend only"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Active Agent Backend for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Active Agent Backend for this concept."@en ;
 ] .
 
 [
@@ -1100,7 +1100,7 @@ rfa:ActiveAgentBackend
   owl:annotatedSource rfa:ActiveAgentBackend ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Selected vs Active limbo"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Active Agent Backend for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Active Agent Backend for this concept."@en ;
 ] .
 
 [
@@ -1108,7 +1108,7 @@ rfa:ActiveAgentBackend
   owl:annotatedSource rfa:ActiveAgentBackend ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "dual backends on one Work Item mid-ship"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Active Agent Backend for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Active Agent Backend for this concept."@en ;
 ] .
 
 rfa:GrokBuild
@@ -1188,7 +1188,7 @@ rfa:AgentBackendUnavailable
   owl:annotatedSource rfa:AgentBackendUnavailable ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Startup failure"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Unavailable for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Backend Unavailable for this concept."@en ;
 ] .
 
 [
@@ -1196,7 +1196,7 @@ rfa:AgentBackendUnavailable
   owl:annotatedSource rfa:AgentBackendUnavailable ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "automatic fallback"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Unavailable for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Backend Unavailable for this concept."@en ;
 ] .
 
 [
@@ -1204,7 +1204,7 @@ rfa:AgentBackendUnavailable
   owl:annotatedSource rfa:AgentBackendUnavailable ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "harness-wide block when another backend is healthy"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Unavailable for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Backend Unavailable for this concept."@en ;
 ] .
 
 [
@@ -1212,7 +1212,7 @@ rfa:AgentBackendUnavailable
   owl:annotatedSource rfa:AgentBackendUnavailable ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Paused Repository"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Unavailable for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Backend Unavailable for this concept."@en ;
 ] .
 
 [
@@ -1220,7 +1220,7 @@ rfa:AgentBackendUnavailable
   owl:annotatedSource rfa:AgentBackendUnavailable ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "restart required"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Unavailable for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Backend Unavailable for this concept."@en ;
 ] .
 
 rfa:AgentBackendPreview
@@ -1234,7 +1234,7 @@ rfa:AgentBackendPreview
   owl:annotatedSource rfa:AgentBackendPreview ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Hot activate"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Preview for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Backend Preview for this concept."@en ;
 ] .
 
 [
@@ -1242,7 +1242,7 @@ rfa:AgentBackendPreview
   owl:annotatedSource rfa:AgentBackendPreview ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Recheck Agent Backend"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Preview for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Backend Preview for this concept."@en ;
 ] .
 
 [
@@ -1250,7 +1250,7 @@ rfa:AgentBackendPreview
   owl:annotatedSource rfa:AgentBackendPreview ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Settings-local catalog cache"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Preview for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Backend Preview for this concept."@en ;
 ] .
 
 rfa:RecheckAgentBackend
@@ -1264,7 +1264,7 @@ rfa:RecheckAgentBackend
   owl:annotatedSource rfa:RecheckAgentBackend ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Automatic health poll"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Recheck Agent Backend for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Recheck Agent Backend for this concept."@en ;
 ] .
 
 [
@@ -1272,7 +1272,7 @@ rfa:RecheckAgentBackend
   owl:annotatedSource rfa:RecheckAgentBackend ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "model-cache refresh only"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Recheck Agent Backend for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Recheck Agent Backend for this concept."@en ;
 ] .
 
 [
@@ -1280,7 +1280,7 @@ rfa:RecheckAgentBackend
   owl:annotatedSource rfa:RecheckAgentBackend ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Harness restart"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Recheck Agent Backend for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Recheck Agent Backend for this concept."@en ;
 ] .
 
 [
@@ -1288,7 +1288,7 @@ rfa:RecheckAgentBackend
   owl:annotatedSource rfa:RecheckAgentBackend ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Agent Backend Preview"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Recheck Agent Backend for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Recheck Agent Backend for this concept."@en ;
 ] .
 
 rfa:AgentModel
@@ -1302,7 +1302,7 @@ rfa:AgentModel
   owl:annotatedSource rfa:AgentModel ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Provider"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Model for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Model for this concept."@en ;
 ] .
 
 [
@@ -1310,7 +1310,7 @@ rfa:AgentModel
   owl:annotatedSource rfa:AgentModel ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Agent Backend"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Model for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Model for this concept."@en ;
 ] .
 
 [
@@ -1318,7 +1318,7 @@ rfa:AgentModel
   owl:annotatedSource rfa:AgentModel ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "model profile"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Model for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Model for this concept."@en ;
 ] .
 
 rfa:ThinkingLevel
@@ -1332,7 +1332,7 @@ rfa:ThinkingLevel
   owl:annotatedSource rfa:ThinkingLevel ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Variant"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Thinking Level for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Thinking Level for this concept."@en ;
 ] .
 
 [
@@ -1340,7 +1340,7 @@ rfa:ThinkingLevel
   owl:annotatedSource rfa:ThinkingLevel ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "required reasoning effort"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Thinking Level for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Thinking Level for this concept."@en ;
 ] .
 
 rfa:Session
@@ -1354,7 +1354,7 @@ rfa:Session
   owl:annotatedSource rfa:Session ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "chat"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Session for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Session for this concept."@en ;
 ] .
 
 [
@@ -1362,7 +1362,7 @@ rfa:Session
   owl:annotatedSource rfa:Session ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "thread"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Session for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Session for this concept."@en ;
 ] .
 
 [
@@ -1384,7 +1384,7 @@ rfa:SessionTelemetry
   owl:annotatedSource rfa:SessionTelemetry ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Agent Turn Result"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Session Telemetry for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Session Telemetry for this concept."@en ;
 ] .
 
 [
@@ -1392,7 +1392,7 @@ rfa:SessionTelemetry
   owl:annotatedSource rfa:SessionTelemetry ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "required backend capability"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Session Telemetry for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Session Telemetry for this concept."@en ;
 ] .
 
 rfa:AgentTurn
@@ -1406,7 +1406,7 @@ rfa:AgentTurn
   owl:annotatedSource rfa:AgentTurn ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Agent run"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Turn for this concept."@en ;
 ] .
 
 [
@@ -1414,7 +1414,7 @@ rfa:AgentTurn
   owl:annotatedSource rfa:AgentTurn ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "prompt run"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Turn for this concept."@en ;
 ] .
 
 [
@@ -1422,7 +1422,7 @@ rfa:AgentTurn
   owl:annotatedSource rfa:AgentTurn ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "OpenCode process"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Turn for this concept."@en ;
 ] .
 
 [
@@ -1430,7 +1430,7 @@ rfa:AgentTurn
   owl:annotatedSource rfa:AgentTurn ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "ACP request"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Turn for this concept."@en ;
 ] .
 
 rfa:AgentTurnTail
@@ -1460,7 +1460,7 @@ rfa:AgentTurnTail
   owl:annotatedSource rfa:AgentTurnTail ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "conversation"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn Tail for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Turn Tail for this concept."@en ;
 ] .
 
 [
@@ -1512,7 +1512,7 @@ rfa:AgentTurnResult
   owl:annotatedSource rfa:AgentTurnResult ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "CLI stdout"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn Result for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Turn Result for this concept."@en ;
 ] .
 
 [
@@ -1520,7 +1520,7 @@ rfa:AgentTurnResult
   owl:annotatedSource rfa:AgentTurnResult ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "transcript"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn Result for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Turn Result for this concept."@en ;
 ] .
 
 [
@@ -1528,7 +1528,7 @@ rfa:AgentTurnResult
   owl:annotatedSource rfa:AgentTurnResult ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "tool-event stream"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn Result for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Turn Result for this concept."@en ;
 ] .
 
 rfa:AgentReportedOutcome
@@ -1542,7 +1542,7 @@ rfa:AgentReportedOutcome
   owl:annotatedSource rfa:AgentReportedOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Ruling"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent-reported Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent-reported Outcome for this concept."@en ;
 ] .
 
 [
@@ -1550,7 +1550,7 @@ rfa:AgentReportedOutcome
   owl:annotatedSource rfa:AgentReportedOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "verdict"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent-reported Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent-reported Outcome for this concept."@en ;
 ] .
 
 [
@@ -1558,7 +1558,7 @@ rfa:AgentReportedOutcome
   owl:annotatedSource rfa:AgentReportedOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Agent Turn Result"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent-reported Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent-reported Outcome for this concept."@en ;
 ] .
 
 rfa:AgentFreeLifecycleStep
@@ -1572,7 +1572,7 @@ rfa:AgentFreeLifecycleStep
   owl:annotatedSource rfa:AgentFreeLifecycleStep ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Step that usually avoids the agent"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent-free Lifecycle Step for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent-free Lifecycle Step for this concept."@en ;
 ] .
 
 [
@@ -1580,7 +1580,7 @@ rfa:AgentFreeLifecycleStep
   owl:annotatedSource rfa:AgentFreeLifecycleStep ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "non-OpenCode step"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent-free Lifecycle Step for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent-free Lifecycle Step for this concept."@en ;
 ] .
 
 rfa:AgentCommand
@@ -1594,7 +1594,7 @@ rfa:AgentCommand
   owl:annotatedSource rfa:AgentCommand ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Backend-specific prompt template"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Command for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Command for this concept."@en ;
 ] .
 
 [
@@ -1602,7 +1602,7 @@ rfa:AgentCommand
   owl:annotatedSource rfa:AgentCommand ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "readiness capability"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Command for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Command for this concept."@en ;
 ] .
 
 rfa:AgentForgeAccess
@@ -1616,7 +1616,7 @@ rfa:AgentForgeAccess
   owl:annotatedSource rfa:AgentForgeAccess ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Required Keymaxxer support"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Forge Access for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Forge Access for this concept."@en ;
 ] .
 
 [
@@ -1624,7 +1624,7 @@ rfa:AgentForgeAccess
   owl:annotatedSource rfa:AgentForgeAccess ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "injected Forge token"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Agent Forge Access for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Agent Forge Access for this concept."@en ;
 ] .
 
 rfa:ReadyLabeledIssue
@@ -1652,7 +1652,7 @@ rfa:PullRequest
   owl:annotatedSource rfa:PullRequest ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Merge request"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Pull Request for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Pull Request for this concept."@en ;
 ] .
 
 [
@@ -1674,7 +1674,7 @@ rfa:IssueClosingPr
   owl:annotatedSource rfa:IssueClosingPr ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Related PR"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Issue-closing PR for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Issue-closing PR for this concept."@en ;
 ] .
 
 [
@@ -1696,7 +1696,7 @@ rfa:WorkItemPr
   owl:annotatedSource rfa:WorkItemPr ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Our PR"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Work Item PR for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Work Item PR for this concept."@en ;
 ] .
 
 [
@@ -1704,7 +1704,7 @@ rfa:WorkItemPr
   owl:annotatedSource rfa:WorkItemPr ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "harness PR"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Work Item PR for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Work Item PR for this concept."@en ;
 ] .
 
 [
@@ -1712,7 +1712,7 @@ rfa:WorkItemPr
   owl:annotatedSource rfa:WorkItemPr ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "associated PR"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Work Item PR for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Work Item PR for this concept."@en ;
 ] .
 
 rfa:LastPrChange
@@ -1734,7 +1734,7 @@ rfa:LastPrChange
   owl:annotatedSource rfa:LastPrChange ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Watch start time"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Last PR Change for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Last PR Change for this concept."@en ;
 ] .
 
 rfa:SupportedIssueHierarchy
@@ -1756,7 +1756,7 @@ rfa:SupportedIssueHierarchy
   owl:annotatedSource rfa:SupportedIssueHierarchy ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "nested Issues"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Supported Issue Hierarchy for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Supported Issue Hierarchy for this concept."@en ;
 ] .
 
 rfa:ListedBlockers
@@ -1805,7 +1805,7 @@ rfa:ParentIssue
   owl:annotatedSource rfa:ParentIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "epic"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Parent Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Parent Issue for this concept."@en ;
 ] .
 
 rfa:ImplementAllWithAutoMerge
@@ -1819,7 +1819,7 @@ rfa:ImplementAllWithAutoMerge
   owl:annotatedSource rfa:ImplementAllWithAutoMerge ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Queue Parent Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement All with Auto-merge for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement All with Auto-merge for this concept."@en ;
 ] .
 
 [
@@ -1827,7 +1827,7 @@ rfa:ImplementAllWithAutoMerge
   owl:annotatedSource rfa:ImplementAllWithAutoMerge ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Parent Work Item"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement All with Auto-merge for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement All with Auto-merge for this concept."@en ;
 ] .
 
 [
@@ -1835,7 +1835,7 @@ rfa:ImplementAllWithAutoMerge
   owl:annotatedSource rfa:ImplementAllWithAutoMerge ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Implement Now with Auto-merge"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement All with Auto-merge for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement All with Auto-merge for this concept."@en ;
 ] .
 
 rfa:ChildIssue
@@ -1849,7 +1849,7 @@ rfa:ChildIssue
   owl:annotatedSource rfa:ChildIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Subtask"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Child Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Child Issue for this concept."@en ;
 ] .
 
 [
@@ -1857,7 +1857,7 @@ rfa:ChildIssue
   owl:annotatedSource rfa:ChildIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "nested Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Child Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Child Issue for this concept."@en ;
 ] .
 
 rfa:StandaloneIssue
@@ -1871,7 +1871,7 @@ rfa:StandaloneIssue
   owl:annotatedSource rfa:StandaloneIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Unparented Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Standalone Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Standalone Issue for this concept."@en ;
 ] .
 
 [
@@ -1879,7 +1879,7 @@ rfa:StandaloneIssue
   owl:annotatedSource rfa:StandaloneIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "top-level Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Standalone Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Standalone Issue for this concept."@en ;
 ] .
 
 rfa:LeafIssue
@@ -1917,7 +1917,7 @@ rfa:WorkItem
   owl:annotatedSource rfa:WorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Issue lifecycle"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Work Item for this concept."@en ;
 ] .
 
 rfa:ExplicitWorkItemExecutionProfile
@@ -1955,7 +1955,7 @@ rfa:ExplicitWorkItemExecutionProfile
   owl:annotatedSource rfa:WorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "implementation job"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Work Item for this concept."@en ;
 ] .
 
 [
@@ -1963,7 +1963,7 @@ rfa:ExplicitWorkItemExecutionProfile
   owl:annotatedSource rfa:WorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "attempt"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Work Item for this concept."@en ;
 ] .
 
 rfa:Implement
@@ -1977,7 +1977,7 @@ rfa:Implement
   owl:annotatedSource rfa:Implement ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Edit code"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement for this concept."@en ;
 ] .
 
 [
@@ -1985,7 +1985,7 @@ rfa:Implement
   owl:annotatedSource rfa:Implement ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "generate code"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement for this concept."@en ;
 ] .
 
 rfa:NoChangeOutcome
@@ -1999,7 +1999,7 @@ rfa:NoChangeOutcome
   owl:annotatedSource rfa:NoChangeOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "No-code outcome"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers No-Change Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers No-Change Outcome for this concept."@en ;
 ] .
 
 [
@@ -2007,7 +2007,7 @@ rfa:NoChangeOutcome
   owl:annotatedSource rfa:NoChangeOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "empty change"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers No-Change Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers No-Change Outcome for this concept."@en ;
 ] .
 
 [
@@ -2015,7 +2015,7 @@ rfa:NoChangeOutcome
   owl:annotatedSource rfa:NoChangeOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "no-op"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers No-Change Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers No-Change Outcome for this concept."@en ;
 ] .
 
 rfa:AssessChanges
@@ -2029,7 +2029,7 @@ rfa:AssessChanges
   owl:annotatedSource rfa:AssessChanges ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Review changes"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Assess Changes for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Assess Changes for this concept."@en ;
 ] .
 
 [
@@ -2037,7 +2037,7 @@ rfa:AssessChanges
   owl:annotatedSource rfa:AssessChanges ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "empty-commit check"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Assess Changes for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Assess Changes for this concept."@en ;
 ] .
 
 rfa:PreCommit
@@ -2051,7 +2051,7 @@ rfa:PreCommit
   owl:annotatedSource rfa:PreCommit ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Pre-push"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Pre-Commit for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Pre-Commit for this concept."@en ;
 ] .
 
 [
@@ -2059,7 +2059,7 @@ rfa:PreCommit
   owl:annotatedSource rfa:PreCommit ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "CI gate"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Pre-Commit for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Pre-Commit for this concept."@en ;
 ] .
 
 [
@@ -2067,7 +2067,7 @@ rfa:PreCommit
   owl:annotatedSource rfa:PreCommit ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "local lint only"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Pre-Commit for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Pre-Commit for this concept."@en ;
 ] .
 
 rfa:Review
@@ -2081,7 +2081,7 @@ rfa:Review
   owl:annotatedSource rfa:Review ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Code review PR check"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review for this concept."@en ;
 ] .
 
 [
@@ -2089,7 +2089,7 @@ rfa:Review
   owl:annotatedSource rfa:Review ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Mark PR Ready for Review"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review for this concept."@en ;
 ] .
 
 [
@@ -2097,7 +2097,7 @@ rfa:Review
   owl:annotatedSource rfa:Review ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "advisory-only review"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review for this concept."@en ;
 ] .
 
 rfa:ReviewFinding
@@ -2111,7 +2111,7 @@ rfa:ReviewFinding
   owl:annotatedSource rfa:ReviewFinding ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Lint error"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Finding for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Finding for this concept."@en ;
 ] .
 
 [
@@ -2119,7 +2119,7 @@ rfa:ReviewFinding
   owl:annotatedSource rfa:ReviewFinding ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "CI failure"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Finding for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Finding for this concept."@en ;
 ] .
 
 [
@@ -2127,7 +2127,7 @@ rfa:ReviewFinding
   owl:annotatedSource rfa:ReviewFinding ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "comment thread"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Finding for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Finding for this concept."@en ;
 ] .
 
 rfa:ReviewSeverity
@@ -2141,7 +2141,7 @@ rfa:ReviewSeverity
   owl:annotatedSource rfa:ReviewSeverity ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Finding list"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Severity for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Severity for this concept."@en ;
 ] .
 
 [
@@ -2149,7 +2149,7 @@ rfa:ReviewSeverity
   owl:annotatedSource rfa:ReviewSeverity ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "risk score"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Severity for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Severity for this concept."@en ;
 ] .
 
 [
@@ -2157,7 +2157,7 @@ rfa:ReviewSeverity
   owl:annotatedSource rfa:ReviewSeverity ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "priority"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Severity for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Severity for this concept."@en ;
 ] .
 
 rfa:UnresolvedReviewSeverity
@@ -2171,7 +2171,7 @@ rfa:UnresolvedReviewSeverity
   owl:annotatedSource rfa:UnresolvedReviewSeverity ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Original severity"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Unresolved Review Severity for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Unresolved Review Severity for this concept."@en ;
 ] .
 
 [
@@ -2179,7 +2179,7 @@ rfa:UnresolvedReviewSeverity
   owl:annotatedSource rfa:UnresolvedReviewSeverity ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "finding count"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Unresolved Review Severity for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Unresolved Review Severity for this concept."@en ;
 ] .
 
 [
@@ -2187,7 +2187,7 @@ rfa:UnresolvedReviewSeverity
   owl:annotatedSource rfa:UnresolvedReviewSeverity ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "per-finding status"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Unresolved Review Severity for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Unresolved Review Severity for this concept."@en ;
 ] .
 
 rfa:ReviewRerunAssessment
@@ -2201,7 +2201,7 @@ rfa:ReviewRerunAssessment
   owl:annotatedSource rfa:ReviewRerunAssessment ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Re-review"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Rerun Assessment for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Rerun Assessment for this concept."@en ;
 ] .
 
 [
@@ -2209,7 +2209,7 @@ rfa:ReviewRerunAssessment
   owl:annotatedSource rfa:ReviewRerunAssessment ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "self-review"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Rerun Assessment for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Rerun Assessment for this concept."@en ;
 ] .
 
 [
@@ -2217,7 +2217,7 @@ rfa:ReviewRerunAssessment
   owl:annotatedSource rfa:ReviewRerunAssessment ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "diff check"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Rerun Assessment for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Rerun Assessment for this concept."@en ;
 ] .
 
 rfa:AcceptedReviewOutcome
@@ -2231,7 +2231,7 @@ rfa:AcceptedReviewOutcome
   owl:annotatedSource rfa:AcceptedReviewOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Clean review"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Accepted Review Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Accepted Review Outcome for this concept."@en ;
 ] .
 
 [
@@ -2239,7 +2239,7 @@ rfa:AcceptedReviewOutcome
   owl:annotatedSource rfa:AcceptedReviewOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "skipped review"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Accepted Review Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Accepted Review Outcome for this concept."@en ;
 ] .
 
 [
@@ -2247,7 +2247,7 @@ rfa:AcceptedReviewOutcome
   owl:annotatedSource rfa:AcceptedReviewOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "deferred finding"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Accepted Review Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Accepted Review Outcome for this concept."@en ;
 ] .
 
 rfa:ClearedReviewOutcome
@@ -2261,7 +2261,7 @@ rfa:ClearedReviewOutcome
   owl:annotatedSource rfa:ClearedReviewOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Clean review"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Cleared Review Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Cleared Review Outcome for this concept."@en ;
 ] .
 
 [
@@ -2269,7 +2269,7 @@ rfa:ClearedReviewOutcome
   owl:annotatedSource rfa:ClearedReviewOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "deferred finding"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Cleared Review Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Cleared Review Outcome for this concept."@en ;
 ] .
 
 [
@@ -2277,7 +2277,7 @@ rfa:ClearedReviewOutcome
   owl:annotatedSource rfa:ClearedReviewOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "fixed finding"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Cleared Review Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Cleared Review Outcome for this concept."@en ;
 ] .
 
 rfa:ReviewFixRound
@@ -2291,7 +2291,7 @@ rfa:ReviewFixRound
   owl:annotatedSource rfa:ReviewFixRound ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Implement redo"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Fix Round for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Fix Round for this concept."@en ;
 ] .
 
 [
@@ -2299,7 +2299,7 @@ rfa:ReviewFixRound
   owl:annotatedSource rfa:ReviewFixRound ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "unbounded fix loop"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Fix Round for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Fix Round for this concept."@en ;
 ] .
 
 rfa:ReviewProgressCheckpoint
@@ -2313,7 +2313,7 @@ rfa:ReviewProgressCheckpoint
   owl:annotatedSource rfa:ReviewProgressCheckpoint ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "activity heartbeat"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Progress Checkpoint for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Progress Checkpoint for this concept."@en ;
 ] .
 
 [
@@ -2321,7 +2321,7 @@ rfa:ReviewProgressCheckpoint
   owl:annotatedSource rfa:ReviewProgressCheckpoint ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "phase marker"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Progress Checkpoint for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Progress Checkpoint for this concept."@en ;
 ] .
 
 [
@@ -2329,7 +2329,7 @@ rfa:ReviewProgressCheckpoint
   owl:annotatedSource rfa:ReviewProgressCheckpoint ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Session progress"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Review Progress Checkpoint for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Review Progress Checkpoint for this concept."@en ;
 ] .
 
 rfa:RepairFallback
@@ -2351,7 +2351,7 @@ rfa:RepairFallback
   owl:annotatedSource rfa:RepairFallback ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "recovery loop"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Repair Fallback for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Repair Fallback for this concept."@en ;
 ] .
 
 [
@@ -2359,7 +2359,7 @@ rfa:RepairFallback
   owl:annotatedSource rfa:RepairFallback ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Retry"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Repair Fallback for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Repair Fallback for this concept."@en ;
 ] .
 
 rfa:Commit
@@ -2373,7 +2373,7 @@ rfa:Commit
   owl:annotatedSource rfa:Commit ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Create PR"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Commit for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Commit for this concept."@en ;
 ] .
 
 [
@@ -2381,7 +2381,7 @@ rfa:Commit
   owl:annotatedSource rfa:Commit ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "git commit hook"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Commit for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Commit for this concept."@en ;
 ] .
 
 [
@@ -2389,7 +2389,7 @@ rfa:Commit
   owl:annotatedSource rfa:Commit ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Pre-Commit"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Commit for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Commit for this concept."@en ;
 ] .
 
 rfa:CloseIssue
@@ -2403,7 +2403,7 @@ rfa:CloseIssue
   owl:annotatedSource rfa:CloseIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Complete Work Item"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Close Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Close Issue for this concept."@en ;
 ] .
 
 [
@@ -2411,7 +2411,7 @@ rfa:CloseIssue
   owl:annotatedSource rfa:CloseIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "local cleanup"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Close Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Close Issue for this concept."@en ;
 ] .
 
 rfa:WorkerSlot
@@ -2425,7 +2425,7 @@ rfa:WorkerSlot
   owl:annotatedSource rfa:WorkerSlot ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "OpenCode session limit"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Worker Slot for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Worker Slot for this concept."@en ;
 ] .
 
 [
@@ -2433,7 +2433,7 @@ rfa:WorkerSlot
   owl:annotatedSource rfa:WorkerSlot ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "fiber budget"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Worker Slot for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Worker Slot for this concept."@en ;
 ] .
 
 [
@@ -2441,7 +2441,7 @@ rfa:WorkerSlot
   owl:annotatedSource rfa:WorkerSlot ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "queue concurrency"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Worker Slot for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Worker Slot for this concept."@en ;
 ] .
 
 [
@@ -2449,7 +2449,7 @@ rfa:WorkerSlot
   owl:annotatedSource rfa:WorkerSlot ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "concurrent Step Runs"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Worker Slot for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Worker Slot for this concept."@en ;
 ] .
 
 rfa:AdmittedWorkItem
@@ -2471,7 +2471,7 @@ rfa:AdmittedWorkItem
   owl:annotatedSource rfa:AdmittedWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "active Work Item"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Admitted Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Admitted Work Item for this concept."@en ;
 ] .
 
 rfa:WaitingForBlockers
@@ -2493,7 +2493,7 @@ rfa:WaitingForBlockers
   owl:annotatedSource rfa:WaitingForBlockers ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Waiting for Worker Slot"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for blockers for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Waiting for blockers for this concept."@en ;
 ] .
 
 [
@@ -2515,7 +2515,7 @@ rfa:WaitingForWorkerSlot
   owl:annotatedSource rfa:WaitingForWorkerSlot ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Queued Step Run"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for Worker Slot for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Waiting for Worker Slot for this concept."@en ;
 ] .
 
 [
@@ -2523,7 +2523,7 @@ rfa:WaitingForWorkerSlot
   owl:annotatedSource rfa:WaitingForWorkerSlot ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "paused"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for Worker Slot for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Waiting for Worker Slot for this concept."@en ;
 ] .
 
 [
@@ -2531,7 +2531,7 @@ rfa:WaitingForWorkerSlot
   owl:annotatedSource rfa:WaitingForWorkerSlot ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Not Implemented"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for Worker Slot for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Waiting for Worker Slot for this concept."@en ;
 ] .
 
 [
@@ -2539,7 +2539,7 @@ rfa:WaitingForWorkerSlot
   owl:annotatedSource rfa:WaitingForWorkerSlot ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Waiting for blockers"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for Worker Slot for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Waiting for Worker Slot for this concept."@en ;
 ] .
 
 rfa:WaitingForGitHub
@@ -2553,7 +2553,7 @@ rfa:WaitingForGitHub
   owl:annotatedSource rfa:WaitingForGitHub ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Queue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for GitHub for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Waiting for GitHub for this concept."@en ;
 ] .
 
 [
@@ -2591,7 +2591,7 @@ rfa:ImplementNow
   owl:annotatedSource rfa:ImplementNow ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Auto-implement"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement Now for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement Now for this concept."@en ;
 ] .
 
 rfa:ImplementWith
@@ -2629,7 +2629,7 @@ rfa:ImplementWith
   owl:annotatedSource rfa:ImplementNow ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "enqueue Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement Now for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement Now for this concept."@en ;
 ] .
 
 [
@@ -2637,7 +2637,7 @@ rfa:ImplementWith
   owl:annotatedSource rfa:ImplementNow ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Queue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement Now for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement Now for this concept."@en ;
 ] .
 
 rfa:Queue
@@ -2651,7 +2651,7 @@ rfa:Queue
   owl:annotatedSource rfa:Queue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Implement Now"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Queue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Queue for this concept."@en ;
 ] .
 
 [
@@ -2659,7 +2659,7 @@ rfa:Queue
   owl:annotatedSource rfa:Queue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "enqueue Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Queue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Queue for this concept."@en ;
 ] .
 
 [
@@ -2667,7 +2667,7 @@ rfa:Queue
   owl:annotatedSource rfa:Queue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "schedule"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Queue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Queue for this concept."@en ;
 ] .
 
 [
@@ -2675,7 +2675,7 @@ rfa:Queue
   owl:annotatedSource rfa:Queue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "defer"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Queue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Queue for this concept."@en ;
 ] .
 
 rfa:RepositoryIntake
@@ -2727,7 +2727,7 @@ rfa:IntakeCandidate
   owl:annotatedSource rfa:IntakeCandidate ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Intake Plan"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Intake Candidate for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Intake Candidate for this concept."@en ;
 ] .
 
 [
@@ -2735,7 +2735,7 @@ rfa:IntakeCandidate
   owl:annotatedSource rfa:IntakeCandidate ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Intake member"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Intake Candidate for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Intake Candidate for this concept."@en ;
 ] .
 
 rfa:ImplementLocally
@@ -2749,7 +2749,7 @@ rfa:ImplementLocally
   owl:annotatedSource rfa:ImplementLocally ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Local-only mode"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement Locally for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement Locally for this concept."@en ;
 ] .
 
 [
@@ -2757,7 +2757,7 @@ rfa:ImplementLocally
   owl:annotatedSource rfa:ImplementLocally ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "dry run"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement Locally for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement Locally for this concept."@en ;
 ] .
 
 [
@@ -2765,7 +2765,7 @@ rfa:ImplementLocally
   owl:annotatedSource rfa:ImplementLocally ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Implement Now without PR"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement Locally for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement Locally for this concept."@en ;
 ] .
 
 [
@@ -2773,7 +2773,7 @@ rfa:ImplementLocally
   owl:annotatedSource rfa:ImplementLocally ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Queue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implement Locally for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implement Locally for this concept."@en ;
 ] .
 
 rfa:NotImplemented
@@ -2787,7 +2787,7 @@ rfa:NotImplemented
   owl:annotatedSource rfa:NotImplemented ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Pending"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Not Implemented for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Not Implemented for this concept."@en ;
 ] .
 
 [
@@ -2795,7 +2795,7 @@ rfa:NotImplemented
   owl:annotatedSource rfa:NotImplemented ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "queued"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Not Implemented for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Not Implemented for this concept."@en ;
 ] .
 
 rfa:ImplementableIssue
@@ -2809,7 +2809,7 @@ rfa:ImplementableIssue
   owl:annotatedSource rfa:ImplementableIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Ready-labeled Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implementable Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implementable Issue for this concept."@en ;
 ] .
 
 [
@@ -2817,7 +2817,7 @@ rfa:ImplementableIssue
   owl:annotatedSource rfa:ImplementableIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Relevant Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implementable Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implementable Issue for this concept."@en ;
 ] .
 
 [
@@ -2825,7 +2825,7 @@ rfa:ImplementableIssue
   owl:annotatedSource rfa:ImplementableIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Leaf Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Implementable Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Implementable Issue for this concept."@en ;
 ] .
 
 rfa:ActionableIssue
@@ -2839,7 +2839,7 @@ rfa:ActionableIssue
   owl:annotatedSource rfa:ActionableIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Not Implemented Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Actionable Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Actionable Issue for this concept."@en ;
 ] .
 
 [
@@ -2847,7 +2847,7 @@ rfa:ActionableIssue
   owl:annotatedSource rfa:ActionableIssue ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Ready-labeled Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Actionable Issue for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Actionable Issue for this concept."@en ;
 ] .
 
 rfa:LifecycleStep
@@ -2861,7 +2861,7 @@ rfa:LifecycleStep
   owl:annotatedSource rfa:LifecycleStep ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Last completed step"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Lifecycle Step for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Lifecycle Step for this concept."@en ;
 ] .
 
 [
@@ -2869,7 +2869,7 @@ rfa:LifecycleStep
   owl:annotatedSource rfa:LifecycleStep ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "phase"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Lifecycle Step for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Lifecycle Step for this concept."@en ;
 ] .
 
 rfa:MergeRevalidationOutcome
@@ -2883,7 +2883,7 @@ rfa:MergeRevalidationOutcome
   owl:annotatedSource rfa:MergeRevalidationOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Merge failure"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Merge Revalidation Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Merge Revalidation Outcome for this concept."@en ;
 ] .
 
 [
@@ -2891,7 +2891,7 @@ rfa:MergeRevalidationOutcome
   owl:annotatedSource rfa:MergeRevalidationOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "automatic Retry"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Merge Revalidation Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Merge Revalidation Outcome for this concept."@en ;
 ] .
 
 rfa:PrStatusCheck
@@ -2905,7 +2905,7 @@ rfa:PrStatusCheck
   owl:annotatedSource rfa:PrStatusCheck ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Aggregate status-check rollup"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers PR Status Check for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers PR Status Check for this concept."@en ;
 ] .
 
 [
@@ -2913,7 +2913,7 @@ rfa:PrStatusCheck
   owl:annotatedSource rfa:PrStatusCheck ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "workflow run"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers PR Status Check for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers PR Status Check for this concept."@en ;
 ] .
 
 [
@@ -2935,7 +2935,7 @@ rfa:ExpectedPrStatusCheck
   owl:annotatedSource rfa:ExpectedPrStatusCheck ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Pending PR Status Check"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Expected PR Status Check for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Expected PR Status Check for this concept."@en ;
 ] .
 
 [
@@ -2943,7 +2943,7 @@ rfa:ExpectedPrStatusCheck
   owl:annotatedSource rfa:ExpectedPrStatusCheck ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "queued check"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Expected PR Status Check for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Expected PR Status Check for this concept."@en ;
 ] .
 
 [
@@ -2951,7 +2951,7 @@ rfa:ExpectedPrStatusCheck
   owl:annotatedSource rfa:ExpectedPrStatusCheck ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "running check"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Expected PR Status Check for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Expected PR Status Check for this concept."@en ;
 ] .
 
 rfa:CheckStartAnchor
@@ -2973,7 +2973,7 @@ rfa:CheckStartAnchor
   owl:annotatedSource rfa:CheckStartAnchor ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Watch start time"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Check-Start Anchor for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Check-Start Anchor for this concept."@en ;
 ] .
 
 rfa:CheckStartDeadline
@@ -2987,7 +2987,7 @@ rfa:CheckStartDeadline
   owl:annotatedSource rfa:CheckStartDeadline ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "No-check grace"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Check-Start Deadline for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Check-Start Deadline for this concept."@en ;
 ] .
 
 [
@@ -2995,7 +2995,7 @@ rfa:CheckStartDeadline
   owl:annotatedSource rfa:CheckStartDeadline ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Watch residence time"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Check-Start Deadline for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Check-Start Deadline for this concept."@en ;
 ] .
 
 [
@@ -3003,7 +3003,7 @@ rfa:CheckStartDeadline
   owl:annotatedSource rfa:CheckStartDeadline ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "check completion timeout"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Check-Start Deadline for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Check-Start Deadline for this concept."@en ;
 ] .
 
 rfa:ReadyPhaseStatusCheckRound
@@ -3017,7 +3017,7 @@ rfa:ReadyPhaseStatusCheckRound
   owl:annotatedSource rfa:ReadyPhaseStatusCheckRound ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Second CI run"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Ready-Phase Status Check Round for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Ready-Phase Status Check Round for this concept."@en ;
 ] .
 
 [
@@ -3025,7 +3025,7 @@ rfa:ReadyPhaseStatusCheckRound
   owl:annotatedSource rfa:ReadyPhaseStatusCheckRound ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "duplicate checks"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Ready-Phase Status Check Round for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Ready-Phase Status Check Round for this concept."@en ;
 ] .
 
 [
@@ -3033,7 +3033,7 @@ rfa:ReadyPhaseStatusCheckRound
   owl:annotatedSource rfa:ReadyPhaseStatusCheckRound ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "post-draft delay"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Ready-Phase Status Check Round for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Ready-Phase Status Check Round for this concept."@en ;
 ] .
 
 rfa:AutomatedReviewOutput
@@ -3047,7 +3047,7 @@ rfa:AutomatedReviewOutput
   owl:annotatedSource rfa:AutomatedReviewOutput ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Eventually consistent review comment"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Automated Review Output for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Automated Review Output for this concept."@en ;
 ] .
 
 [
@@ -3055,7 +3055,7 @@ rfa:AutomatedReviewOutput
   owl:annotatedSource rfa:AutomatedReviewOutput ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "pending comment"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Automated Review Output for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Automated Review Output for this concept."@en ;
 ] .
 
 rfa:StatusCheckHandoff
@@ -3069,7 +3069,7 @@ rfa:StatusCheckHandoff
   owl:annotatedSource rfa:StatusCheckHandoff ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Check classification"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Status Check Handoff for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Status Check Handoff for this concept."@en ;
 ] .
 
 [
@@ -3077,7 +3077,7 @@ rfa:StatusCheckHandoff
   owl:annotatedSource rfa:StatusCheckHandoff ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "one prompt per check"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Status Check Handoff for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Status Check Handoff for this concept."@en ;
 ] .
 
 rfa:ChecksTriggeredOutcome
@@ -3091,7 +3091,7 @@ rfa:ChecksTriggeredOutcome
   owl:annotatedSource rfa:ChecksTriggeredOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Waiting"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Checks Triggered Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Checks Triggered Outcome for this concept."@en ;
 ] .
 
 [
@@ -3099,7 +3099,7 @@ rfa:ChecksTriggeredOutcome
   owl:annotatedSource rfa:ChecksTriggeredOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "processed no-op"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Checks Triggered Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Checks Triggered Outcome for this concept."@en ;
 ] .
 
 [
@@ -3107,7 +3107,7 @@ rfa:ChecksTriggeredOutcome
   owl:annotatedSource rfa:ChecksTriggeredOutcome ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "observed replacement check"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Checks Triggered Outcome for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Checks Triggered Outcome for this concept."@en ;
 ] .
 
 rfa:MergeConflictHandoff
@@ -3121,7 +3121,7 @@ rfa:MergeConflictHandoff
   owl:annotatedSource rfa:MergeConflictHandoff ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "PR Status Check"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Merge Conflict Handoff for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Merge Conflict Handoff for this concept."@en ;
 ] .
 
 [
@@ -3129,7 +3129,7 @@ rfa:MergeConflictHandoff
   owl:annotatedSource rfa:MergeConflictHandoff ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "conflict status check"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Merge Conflict Handoff for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Merge Conflict Handoff for this concept."@en ;
 ] .
 
 rfa:StepRun
@@ -3143,7 +3143,7 @@ rfa:StepRun
   owl:annotatedSource rfa:StepRun ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Step duration"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Step Run for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Step Run for this concept."@en ;
 ] .
 
 [
@@ -3151,7 +3151,7 @@ rfa:StepRun
   owl:annotatedSource rfa:StepRun ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "job attempt"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Step Run for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Step Run for this concept."@en ;
 ] .
 
 rfa:PostponedStepRun
@@ -3203,7 +3203,7 @@ rfa:Retry
   owl:annotatedSource rfa:Retry ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Queue redelivery"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Retry for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Retry for this concept."@en ;
 ] .
 
 [
@@ -3211,7 +3211,7 @@ rfa:Retry
   owl:annotatedSource rfa:Retry ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "resume"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Retry for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Retry for this concept."@en ;
 ] .
 
 rfa:AutonomousRetry
@@ -3233,7 +3233,7 @@ rfa:AutonomousRetry
   owl:annotatedSource rfa:AutonomousRetry ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "unattended Retry"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Autonomous Retry for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Autonomous Retry for this concept."@en ;
 ] .
 
 rfa:AutonomousRetryBudget
@@ -3425,7 +3425,7 @@ rfa:PauseWorkItem
   owl:annotatedSource rfa:PauseWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Suspend"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Pause Work Item for this concept."@en ;
 ] .
 
 [
@@ -3433,7 +3433,7 @@ rfa:PauseWorkItem
   owl:annotatedSource rfa:PauseWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "hold"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Pause Work Item for this concept."@en ;
 ] .
 
 [
@@ -3441,7 +3441,7 @@ rfa:PauseWorkItem
   owl:annotatedSource rfa:PauseWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Abandon"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Pause Work Item for this concept."@en ;
 ] .
 
 [
@@ -3449,7 +3449,7 @@ rfa:PauseWorkItem
   owl:annotatedSource rfa:PauseWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Repository Paused"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Pause Work Item for this concept."@en ;
 ] .
 
 [
@@ -3457,7 +3457,7 @@ rfa:PauseWorkItem
   owl:annotatedSource rfa:PauseWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Waiting for blockers"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Pause Work Item for this concept."@en ;
 ] .
 
 [
@@ -3465,7 +3465,7 @@ rfa:PauseWorkItem
   owl:annotatedSource rfa:PauseWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "silent park"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Pause Work Item for this concept."@en ;
 ] .
 
 [
@@ -3503,7 +3503,7 @@ rfa:InterruptWorkItem
   owl:annotatedSource rfa:InterruptWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Stop"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Interrupt Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Interrupt Work Item for this concept."@en ;
 ] .
 
 [
@@ -3511,7 +3511,7 @@ rfa:InterruptWorkItem
   owl:annotatedSource rfa:InterruptWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "terminate"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Interrupt Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Interrupt Work Item for this concept."@en ;
 ] .
 
 [
@@ -3519,7 +3519,7 @@ rfa:InterruptWorkItem
   owl:annotatedSource rfa:InterruptWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "cancel"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Interrupt Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Interrupt Work Item for this concept."@en ;
 ] .
 
 [
@@ -3541,7 +3541,7 @@ rfa:StartWorkItem
   owl:annotatedSource rfa:StartWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Resume"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Start Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Start Work Item for this concept."@en ;
 ] .
 
 [
@@ -3549,7 +3549,7 @@ rfa:StartWorkItem
   owl:annotatedSource rfa:StartWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "unpause"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Start Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Start Work Item for this concept."@en ;
 ] .
 
 [
@@ -3557,7 +3557,7 @@ rfa:StartWorkItem
   owl:annotatedSource rfa:StartWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Retry"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Start Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Start Work Item for this concept."@en ;
 ] .
 
 rfa:Abandon
@@ -3571,7 +3571,7 @@ rfa:Abandon
   owl:annotatedSource rfa:Abandon ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Delete"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Abandon for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Abandon for this concept."@en ;
 ] .
 
 [
@@ -3579,7 +3579,7 @@ rfa:Abandon
   owl:annotatedSource rfa:Abandon ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "cancel"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Abandon for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Abandon for this concept."@en ;
 ] .
 
 rfa:Reset
@@ -3593,7 +3593,7 @@ rfa:Reset
   owl:annotatedSource rfa:Reset ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Abandon"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Reset for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Reset for this concept."@en ;
 ] .
 
 [
@@ -3601,7 +3601,7 @@ rfa:Reset
   owl:annotatedSource rfa:Reset ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Retry"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Reset for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Reset for this concept."@en ;
 ] .
 
 [
@@ -3609,7 +3609,7 @@ rfa:Reset
   owl:annotatedSource rfa:Reset ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "cancel"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Reset for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Reset for this concept."@en ;
 ] .
 
 [
@@ -3631,7 +3631,7 @@ rfa:FailedWorkItem
   owl:annotatedSource rfa:FailedWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Failed Step Run"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Failed Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Failed Work Item for this concept."@en ;
 ] .
 
 [
@@ -3639,7 +3639,7 @@ rfa:FailedWorkItem
   owl:annotatedSource rfa:FailedWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Abandoned"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Failed Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Failed Work Item for this concept."@en ;
 ] .
 
 [
@@ -3647,7 +3647,7 @@ rfa:FailedWorkItem
   owl:annotatedSource rfa:FailedWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Pause Work Item for closed Issue with owned PR"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Failed Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Failed Work Item for this concept."@en ;
 ] .
 
 rfa:DecisionNeeded
@@ -3661,7 +3661,7 @@ rfa:DecisionNeeded
   owl:annotatedSource rfa:DecisionNeeded ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Failed Work Item"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Decision needed for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Decision needed for this concept."@en ;
 ] .
 
 [
@@ -3669,7 +3669,7 @@ rfa:DecisionNeeded
   owl:annotatedSource rfa:DecisionNeeded ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "answer form"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Decision needed for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Decision needed for this concept."@en ;
 ] .
 
 [
@@ -3677,7 +3677,7 @@ rfa:DecisionNeeded
   owl:annotatedSource rfa:DecisionNeeded ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "embedded chat"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Decision needed for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Decision needed for this concept."@en ;
 ] .
 
 rfa:NeedsHumanWorkItem
@@ -3691,7 +3691,7 @@ rfa:NeedsHumanWorkItem
   owl:annotatedSource rfa:NeedsHumanWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Failed Work Item"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Needs Human Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Needs Human Work Item for this concept."@en ;
 ] .
 
 [
@@ -3699,7 +3699,7 @@ rfa:NeedsHumanWorkItem
   owl:annotatedSource rfa:NeedsHumanWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Failed Step Run"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Needs Human Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Needs Human Work Item for this concept."@en ;
 ] .
 
 rfa:CompleteWorkItem
@@ -3713,7 +3713,7 @@ rfa:CompleteWorkItem
   owl:annotatedSource rfa:CompleteWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "Approved"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Complete Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Complete Work Item for this concept."@en ;
 ] .
 
 [
@@ -3721,7 +3721,7 @@ rfa:CompleteWorkItem
   owl:annotatedSource rfa:CompleteWorkItem ;
   owl:annotatedProperty skos:hiddenLabel ;
   owl:annotatedTarget "done Issue"@en ;
-  rfa:avoidanceRationale "CONTEXT.md prefers Complete Work Item for this concept."@en ;
+  rfa:avoidanceRationale "GLOSSARY.md prefers Complete Work Item for this concept."@en ;
 ] .
 
 rfa:RelevantIssue

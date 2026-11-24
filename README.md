@@ -584,7 +584,7 @@ with finding work, they are not explorer work or creating work.
 - **Metaharness** — a harness that steers agent harnesses; see
   [metaharness.tools](https://metaharness.tools/).
 
-The full domain language lives in [CONTEXT.md](CONTEXT.md), derived
+The full domain language lives in [GLOSSARY.md](GLOSSARY.md), derived
 from a versioned ontology under [`ontology/`](ontology/README.md).
 
 ## Architecture
@@ -594,7 +594,7 @@ database is book-keeping. The backend serves a GraphQL API at
 `http://127.0.0.1:6056/graphql`, and the Work Item lifecycle is
 driven by a machine-readable ontology rather than ad-hoc enums.
 Details in [ARCHITECTURE.md](ARCHITECTURE.md),
-[CONTEXT.md](CONTEXT.md), [ontology/README.md](ontology/README.md),
+[GLOSSARY.md](GLOSSARY.md), [ontology/README.md](ontology/README.md),
 [Forge token scopes](docs/forge-token-scopes.md), and
 [docs/why-agentic-systems-need-ontologies.md](docs/why-agentic-systems-need-ontologies.md).
 

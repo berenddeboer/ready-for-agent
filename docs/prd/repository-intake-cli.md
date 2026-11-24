@@ -1,7 +1,7 @@
 # Repository Intake and Kanban CLI
 
 > Accepted implementation design derived from review of PR #934.
-> Domain: `CONTEXT.md`; architecture: ADR 0051.
+> Domain: `GLOSSARY.md`; architecture: ADR 0051.
 
 ## Problem Statement
 

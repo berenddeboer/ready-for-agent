@@ -13,7 +13,7 @@ clobbering your manual edit or corrupting its own. Stopping in-progress work
 takes a second, separate action: Interrupt Work Item.
 
 Terms below (Work Item, Step Run, Pause Work Item, Interrupt Work Item,
-Retry, Start Work Item) are defined in the [`CONTEXT.md`](../CONTEXT.md)
+Retry, Start Work Item) are defined in the [`GLOSSARY.md`](../GLOSSARY.md)
 glossary — use them exactly as defined there.
 
 ## Procedure

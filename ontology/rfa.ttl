@@ -13,7 +13,7 @@
   dcterms:description
     "The Ready for Agent domain vocabulary and Work Item lifecycle model."@en ;
   dcterms:source
-    <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
+    <https://github.com/berenddeboer/ready-for-agent/blob/main/GLOSSARY.md> ;
   owl:versionInfo "0.9.0" .
 
 rfa:ContextTerm

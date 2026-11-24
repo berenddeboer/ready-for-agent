@@ -1,7 +1,7 @@
 # Interactive Session Jump
 
 > Draft product design from an operator grilling session.
-> Domain: `CONTEXT.md`.
+> Domain: `GLOSSARY.md`.
 
 ## Problem Statement
 
