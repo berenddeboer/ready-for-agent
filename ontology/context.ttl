@@ -1781,6 +1781,11 @@ rfa:ListedBlockers
   rfa:avoidanceRationale "GitLab relates-to links are informational and do not block"@en ;
 ] .
 
+rfa:Spec
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Spec"@en ;
+  skos:definition "An Issue explicitly marked as the delivery promise against which the combined result of its descendant tickets is judged. Its approved text, incorporated design revisions, and explicit human amendments define that promise; merely having children does not make an Issue a Spec."@en .
+
 rfa:ParentIssue
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Parent Issue"@en ;
@@ -1891,10 +1896,15 @@ rfa:LeafIssue
   rfa:avoidanceRationale "actionability also depends on workflow constraints"@en ;
 ] .
 
+rfa:SpecValidationWorkItem
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Spec Validation Work Item"@en ;
+  skos:definition "A Harness-initiated Work Item that checks the integrated result against an open Spec after the Issue Tracker confirms it has at least one descendant and all descendants are closed. It is independent of the implementation tickets and is not itself a tracker ticket. Closure triggers validation; evidence or an explicit human amendment must account for every requirement before the Harness closes the Spec."@en .
+
 rfa:WorkItem
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Work Item"@en ;
-  skos:definition "A durable record of one operator-requested attempt to complete a Leaf Issue's objective, or of one CI Repair Work Item, through the work lifecycle, capturing an Agent Backend as provenance and routing authority, an optional Explicit Work Item Execution Profile, and an optional Work Item Merge Policy pin (`null` inherits the live Repository Merge Policy). Without an explicit profile, each Agent Turn resolves build and review selections from current backend-scoped Repository settings falling back to Harness Config. With one, the profile's build selection is used for Implement, Review Fix Rounds, Commit, and related steps, while its review selection is used only for reviewing passes inside Review. It captures the Original Issue Source and the Issue title for identification after the Issue leaves the Issue store, retains the positive integer issue number for existing Forge-hosted Issues, records canonical publication title and body after Commit generates them (agent-authored when valid, with in-directory image links rewritten to GitHub user-attachment URLs before persist, otherwise harness fallback copy from the Issue identity; shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time."@en ;
+  skos:definition "A durable record of an attempt to complete a Leaf Issue's objective, repair CI, or validate a Spec, through the work lifecycle, capturing an Agent Backend as provenance and routing authority, an optional Explicit Work Item Execution Profile, and an optional Work Item Merge Policy pin (`null` inherits the live Repository Merge Policy). Without an explicit profile, each Agent Turn resolves build and review selections from current backend-scoped Repository settings falling back to Harness Config. With one, the profile's build selection is used for Implement, Review Fix Rounds, Commit, and related steps, while its review selection is used only for reviewing passes inside Review. For a Leaf Issue, the operator requests the attempt; it captures the Original Issue Source and the Issue title for identification after the Issue leaves the Issue store, retains the positive integer issue number for existing Forge-hosted Issues, records canonical publication title and body after Commit generates them (agent-authored when valid, with in-directory image links rewritten to GitHub user-attachment URLs before persist, otherwise harness fallback copy from the Issue identity; shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Leaf Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time."@en ;
   skos:hiddenLabel "Issue lifecycle"@en, "implementation job"@en, "attempt"@en .
 
 [
