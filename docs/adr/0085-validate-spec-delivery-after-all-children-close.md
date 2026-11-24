@@ -68,7 +68,7 @@ applies. The parent stays open while work or a decision is outstanding.
 
 If one requirement is demonstrably unmet and another needs interpretation,
 file the known gap immediately and put the validation Work Item in the existing
-[Decision needed](../../CONTEXT.md#decision-needed) handoff under Needs Human.
+[Decision needed](../../GLOSSARY.md#decision-needed) handoff under Needs Human.
 Report both on the parent. For this Work Item, explicit Resume continues
 validation rather than returning to Implement. Retain an answer received while
 a descendant is open and wait for all descendants to close before validating again.

@@ -7,7 +7,7 @@ import { describe, expect, it } from "bun:test"
 
 const ontologyRoot = resolve(import.meta.dir, "../../../ontology")
 const fixturesRoot = resolve(ontologyRoot, "fixtures")
-const contextPath = resolve(ontologyRoot, "../CONTEXT.md")
+const glossaryPath = resolve(ontologyRoot, "../GLOSSARY.md")
 
 const namespace = {
   owl: "http://www.w3.org/2002/07/owl#",
@@ -214,7 +214,7 @@ const parseTurtle = (path: string) => {
   return new Store(quads)
 }
 
-const contextTerms = parseContextTerms(readFileSync(contextPath, "utf8"))
+const contextTerms = parseContextTerms(readFileSync(glossaryPath, "utf8"))
 const ontology = new Store(
   readdirSync(ontologyRoot)
     .filter((file) => file.endsWith(".ttl") && file !== "shapes.ttl")
@@ -446,7 +446,9 @@ const getContextTerm = (label: string) => {
   expect(subjects).toHaveLength(1)
   const subject = subjects[0]
   if (subject === undefined) {
-    throw new Error(`Missing ontology counterpart for CONTEXT.md term ${label}`)
+    throw new Error(
+      `Missing ontology counterpart for GLOSSARY.md term ${label}`,
+    )
   }
 
   return subject
@@ -481,7 +483,7 @@ const expectSomeValuesFrom = (
   expect(restrictions).toHaveLength(1)
 }
 
-describe("CONTEXT.md vocabulary parity", () => {
+describe("GLOSSARY.md vocabulary parity", () => {
   it("declares exactly one ontology context term for every glossary heading", () => {
     const expectedLabels = contextTerms.map(({ label }) => label).sort()
     const actualContextTerms = ontology.getSubjects(
@@ -828,7 +830,7 @@ describe("full vocabulary semantic distinctions", () => {
 })
 
 describe("rfa lifecycle ontology", () => {
-  it("declares exactly the operational Lifecycle Steps from CONTEXT.md", () => {
+  it("declares exactly the operational Lifecycle Steps from GLOSSARY.md", () => {
     const actualTerms = ontology.getSubjects(rdfType, operationalClass, null)
     const expectedIris = Object.keys(expectedOperationalTerms).map(
       (localName) => `${namespace.rfa}${localName}`,
@@ -848,7 +850,7 @@ describe("rfa lifecycle ontology", () => {
     }
   })
 
-  it("declares exactly the terminal Work Item states from CONTEXT.md", () => {
+  it("declares exactly the terminal Work Item states from GLOSSARY.md", () => {
     const actualTerms = ontology.getSubjects(rdfType, terminalClass, null)
     const expectedIris = Object.keys(expectedTerminalTerms).map(
       (localName) => `${namespace.rfa}${localName}`,

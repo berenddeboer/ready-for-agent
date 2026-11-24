@@ -1,7 +1,7 @@
 # Ready for Agent ontology
 
 This directory is the machine-readable domain model of Ready for Agent: the
-Work Item lifecycle vocabulary, the CONTEXT.md glossary as a SKOS/OWL graph,
+Work Item lifecycle vocabulary, the GLOSSARY.md glossary as a SKOS/OWL graph,
 and the SHACL contracts that validate data against both. It implements the
 neurosymbolic approach described in
 [docs/why-agentic-systems-need-ontologies.md](../docs/why-agentic-systems-need-ontologies.md):
@@ -19,7 +19,7 @@ files. Changing the lifecycle means changing `rfa.ttl` first.
 | File | Role |
 | --- | --- |
 | `rfa.ttl` | The `rfa:` vocabulary (OWL + SKOS): lifecycle states, the full declared transition relation with guards and Step Run reason codes, disjointness axioms, and PROV-O alignment of execution concepts. |
-| `context.ttl` | Every CONTEXT.md glossary term as an `rfa:ContextTerm` (an OWL class and SKOS concept) with its preferred label, definition, avoided labels (`skos:hiddenLabel`), and per-label `rfa:avoidanceRationale` annotations. |
+| `context.ttl` | Every GLOSSARY.md glossary term as an `rfa:ContextTerm` (an OWL class and SKOS concept) with its preferred label, definition, avoided labels (`skos:hiddenLabel`), and per-label `rfa:avoidanceRationale` annotations. |
 | `shapes.ttl` | SHACL node shapes: closed-world contracts for context terms, lifecycle vocabulary, transitions, Work Items, and PROV-aligned execution records. |
 | `fixtures/` | A validation corpus with an asserted verdict per fixture in `manifest.json`: valid, invalid, missing-fact, and contradictory data graphs. |
 
@@ -32,7 +32,7 @@ Core (ontology metadata).
 
 ```mermaid
 flowchart LR
-  contextmd["CONTEXT.md<br/>(glossary prose)"]
+  contextmd["GLOSSARY.md<br/>(glossary prose)"]
 
   subgraph ont["ontology/ — source of truth"]
     rfa["rfa.ttl<br/>lifecycle vocabulary +<br/>transition relation"]
@@ -44,7 +44,7 @@ flowchart LR
   subgraph lm["packages/lifecycle-model"]
     gen["scripts/generate-lifecycle-state.ts<br/>(n3 Turtle parser)"]
     generated["src/generated/work-item-state.ts<br/>+ forge.ts<br/>Effect Schema literals +<br/>STEP_RUN_REASON +<br/>FORGES +<br/>LIFECYCLE_TRANSITIONS"]
-    tests["test/ontology.test.ts<br/>SHACL validation, OWL consistency,<br/>CONTEXT.md parity"]
+    tests["test/ontology.test.ts<br/>SHACL validation, OWL consistency,<br/>GLOSSARY.md parity"]
   end
 
   subgraph consumers["Downstream consumers"]
@@ -243,7 +243,7 @@ formalism and is tested in `packages/lifecycle-model/test/ontology.test.ts`:
    `rfa:currentState` from the enumerated state list per Work Item, complete
    transitions (one from-step, to-step, guard, and reason code each), labeled
    and defined vocabulary terms, and PROV attribution on execution records.
-4. **Vocabulary parity** — the CONTEXT.md glossary and `context.ttl` are kept
+4. **Vocabulary parity** — the GLOSSARY.md glossary and `context.ttl` are kept
    in exact bidirectional parity (headings, definitions, and avoided labels),
    so the prose glossary and the graph cannot diverge.
 5. **Runtime relation check** — `checkAppliedLifecycleTransition` in
@@ -277,7 +277,7 @@ When adding a lifecycle state, transition, or Step Run reason:
    `skos:notation`, or an `rfa:Transition` with `fromStep`, `toStep`,
    `guard`, and `reasonCode`, or an `rfa:StepRunReason` with `skos:notation`
    and `skos:definition`).
-2. If it is a CONTEXT.md glossary term, add the glossary entry and mirror it
+2. If it is a GLOSSARY.md glossary term, add the glossary entry and mirror it
    in `context.ttl` — the parity test fails on any mismatch.
 3. Regenerate `lifecycle-model` and `graphql-schema`, and update fixtures if
    the change affects what counts as valid or contradictory data.

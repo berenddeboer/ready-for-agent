@@ -1,6 +1,6 @@
 ---
 name: ontology-change
-description: Change the Ready for Agent domain model — lifecycle states, transitions, guards, every Step Run reason code (transition and operational), or CONTEXT.md glossary terms. Use whenever a task adds, renames, or removes a Work Item state, transition, or Step Run reason, touches ontology/*.ttl, edits the CONTEXT.md glossary, or fails the lifecycle-model parity or check-generated targets. The ontology owns the complete reason vocabulary; TypeScript, GraphQL, and DB enums are generated from it.
+description: Change the Ready for Agent domain model — lifecycle states, transitions, guards, every Step Run reason code (transition and operational), or GLOSSARY.md glossary terms. Use whenever a task adds, renames, or removes a Work Item state, transition, or Step Run reason, touches ontology/*.ttl, edits the GLOSSARY.md glossary, or fails the lifecycle-model parity or check-generated targets. The ontology owns the complete reason vocabulary; TypeScript, GraphQL, and DB enums are generated from it.
 ---
 
 # Changing the domain ontology
@@ -46,8 +46,8 @@ Read `ontology/README.md` for the full model and diagrams before editing.
      and `owl:AllDifferent` in exact parity with those individuals. Do not
      add Repository selection properties. `FORGES` is generated from the
      `owl:oneOf` list order. GraphQL `forge` stays a string.
-2. **Keep the glossary in parity.** If the term is (or becomes) a CONTEXT.md
-   glossary entry, update the glossary in `CONTEXT.md` and mirror it in
+2. **Keep the glossary in parity.** If the term is (or becomes) a GLOSSARY.md
+   glossary entry, update the glossary in `GLOSSARY.md` and mirror it in
    `ontology/context.ttl` (`rfa:ContextTerm` with matching
    `skos:prefLabel`/`skos:definition`; each `_Avoid_:` entry a
    `skos:hiddenLabel` with an `rfa:avoidanceRationale` annotation axiom).

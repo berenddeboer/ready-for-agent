@@ -220,7 +220,7 @@ how to deal with this.
 
 Architecture notes are in
 [ARCHITECTURE.md](ARCHITECTURE.md) and domain language in
-[CONTEXT.md](CONTEXT.md).
+[GLOSSARY.md](GLOSSARY.md).
 
 ## Repo map
 

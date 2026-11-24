@@ -38,7 +38,7 @@
       "inputs": [
         "default",
         "^production",
-        "{workspaceRoot}/CONTEXT.md",
+        "{workspaceRoot}/GLOSSARY.md",
         "{workspaceRoot}/ontology/**/*.ttl",
         "{workspaceRoot}/ontology/fixtures/manifest.json"
       ],

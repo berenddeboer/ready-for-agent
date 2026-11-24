@@ -79,7 +79,7 @@ a separate command decision with its own atomicity questions.
   class expressions are unchanged; `isInSupportedIssueHierarchy` keeps its
   meaning and is simply true more often.
 - The glossary entries Supported Issue Hierarchy, Parent Issue, and Child
-  Issue are amended ontology-first with CONTEXT.md parity, and the sentence
+  Issue are amended ontology-first with GLOSSARY.md parity, and the sentence
   in ADR 0005 that omits "deeper-than-one-level hierarchies" is superseded by
   this ADR.
 - Tests that pin the exclusion of a grandchild flip to pin its inclusion under

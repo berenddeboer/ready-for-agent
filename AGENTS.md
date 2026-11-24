@@ -17,11 +17,12 @@ code and commit messages, not the conversation.
 
 ## Agent skills
 
-Skill content lives under `.agents/skills/<name>/SKILL.md` — the shared,
-multi-agent source of truth. Claude Code only discovers skills under
-`.claude/skills/`, so every skill directory there is a symlink back into
-`.agents/skills/` (e.g. `.claude/skills/tdd -> ../../.agents/skills/tdd`).
-When adding a new skill under `.agents/skills/`, add the matching symlink:
+Use the globally installed Matt Pocock skills for shared workflows. Keep
+Ready for Agent rules in the repo instructions below rather than copying
+global skill definitions here.
+
+Repo-local skill content lives under `.agents/skills/<name>/SKILL.md`.
+When adding a repo-local skill, add the matching symlink for Claude Code:
 `ln -s ../../.agents/skills/<name> .claude/skills/<name>`.
 
 ### Issue tracker
@@ -51,7 +52,7 @@ Default labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wont
 
 ### Domain docs
 
-Single-context layout (root CONTEXT.md + docs/adr/). See `docs/agents/domain.md`.
+Single-context layout (root `GLOSSARY.md` + `docs/adr/`). See `docs/agents/domain.md`.
 
 ### OpenCode CLI contract
 
@@ -62,15 +63,14 @@ substitute. Required CI runs that same target and does not skip it.
 
 ### Domain ontology
 
-The Work Item lifecycle, every Step Run reason code, and the CONTEXT.md
-glossary are derived from a versioned ontology under `ontology/` (see
-`ontology/README.md`, `docs/adr/0044-ontology-derived-lifecycle-model.md`,
-and `docs/adr/0058-ontology-owns-step-run-reason-codes.md`). Domain changes
-start with an ontology edit and flow through codegen — never edit
-`packages/lifecycle-model/src/generated/work-item-state.ts`,
-`packages/lifecycle-model/src/generated/forge.ts`, or the state
-enums directly. Use the `ontology-change` skill when adding or changing
-lifecycle states, transitions, Step Run reason codes, Forge kinds, or glossary terms.
+Use the `ontology-change` skill when changing lifecycle states, transitions,
+Step Run reason codes, Forge kinds, or glossary terms. Keep edits to
+`GLOSSARY.md` in parity with `ontology/context.ttl`, including when
+`domain-modeling` records a term. See `ontology/README.md`.
+
+Domain model changes start in the ontology. Regenerate runtime artifacts
+rather than editing `packages/lifecycle-model/src/generated/work-item-state.ts`,
+`packages/lifecycle-model/src/generated/forge.ts`, or the state enums directly.
 
 <!-- effect-solutions:start -->
 
