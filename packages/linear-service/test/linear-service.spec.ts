@@ -39,7 +39,7 @@ describe("Linear Spec baseline", () => {
   const design = `https://github.com/acme/widgets/blob/${"a".repeat(40)}/design.md`
   const title = "Hosted MCP"
   const approvedBody = `Expose MCP both locally and when deployed.\n\n[Approved design baseline: ADR](<${design}>)`
-  const specLabels = { nodes: [{ name: "spec" }] }
+  const specLabels = { nodes: [{ name: "Spec" }] }
   const commentUrl = `${url}#comment-1`
 
   test("recovers published and late-marked approval evidence on the original Issue", async () => {
@@ -112,7 +112,7 @@ describe("Linear Spec baseline", () => {
       TOKEN,
       makeFetch(({ query }) => {
         expect(query).toContain('labels: { name: { eq: "ready-for-agent" } }')
-        expect(query).toContain('filter: { name: { eq: "spec" } }')
+        expect(query).toContain('filter: { name: { eqIgnoreCase: "spec" } }')
         return jsonResponse(200, {
           data: {
             issues: {
@@ -307,7 +307,7 @@ describe("Linear Spec observation", () => {
       makeFetch(({ query, variables }) => {
         const after = variables?.after
         if (query.includes("query OpenSpecs")) {
-          expect(query).toContain('labels: { name: { eq: "spec" } }')
+          expect(query).toContain('labels: { name: { eqIgnoreCase: "spec" } }')
           expect(query).toContain('type: { nin: ["completed", "canceled"] }')
           // An unmarked parent is not returned by the marker filter.
           return jsonResponse(200, {

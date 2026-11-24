@@ -264,8 +264,12 @@ Then(
           false),
     )
     await clickAutoMerge(page)
-    expect(await (await repeated).json()).toMatchObject({
-      data: expect.anything(),
+    const response = await repeated
+    expect(response.ok()).toBe(true)
+    const payload: unknown = await response.json()
+    // This mutation can share an HTTP request with background queries.
+    expect(Array.isArray(payload) ? payload : [payload]).toContainEqual({
+      data: { implementAllWithAutoMerge: expect.any(Array) },
     })
     expect(await enrolledWorkItems(page)).toEqual(covered)
   },

@@ -252,7 +252,8 @@ const PROJECT_WORKFLOW_QUERY = `query ProjectWorkflow($id: String!) {
   }
 }`
 
-const SPEC_LABELS_SELECTION = `specLabels: labels(first: 1, filter: { name: { eq: "${SPEC_LABEL}" } }) {
+const SPEC_LABEL_FILTER = `{ name: { eqIgnoreCase: "${SPEC_LABEL}" } }`
+const SPEC_LABELS_SELECTION = `specLabels: labels(first: 1, filter: ${SPEC_LABEL_FILTER}) {
   nodes { name }
 }`
 
@@ -310,7 +311,7 @@ const OPEN_SPECS_QUERY = `query OpenSpecs($projectId: ID!, $after: String) {
     includeArchived: true
     filter: {
       project: { id: { eq: $projectId } }
-      labels: { name: { eq: "spec" } }
+      labels: ${SPEC_LABEL_FILTER}
       state: { type: { nin: ["completed", "canceled"] } }
     }
   ) {
@@ -615,7 +616,8 @@ const isReadyLabeled = (
   )
 
 const isSpecLabeled = (labels: typeof SpecLabelsSchema.Type | undefined) =>
-  labels?.nodes.some((label) => label.name === SPEC_LABEL) ?? false
+  labels?.nodes.some((label) => label.name.toLowerCase() === SPEC_LABEL) ??
+  false
 
 const toReadyLabeledIssue = (
   node: typeof IssueNodeSchema.Type,

@@ -58,6 +58,10 @@ hosts the code.
      `addedLabelIds` (or the integration's equivalent that preserves existing
      labels).
 
+The `spec` marker is case-insensitive on both trackers. A marked Spec without
+children is excluded from standalone implementation intake, even if it also
+has `ready-for-agent`.
+
 ## Existing Specs
 
 To mark an existing parent, read it and its comments before changing anything.
@@ -92,5 +96,7 @@ If a cited snapshot or archive supplies the approved text, retain additional
 design links found only in the live parent for review rather than adding them
 to the baseline.
 Keep conflicting approvals or unreadable snapshots for review with their
-sources and the fallback parent. A comment does not amend a publication
-snapshot. A mutable link or a child PR's local-only scope is not approval.
+sources and the fallback parent. An edited snapshot is unreadable for this
+purpose because the current comment cannot establish the original approved
+text. A comment does not amend a publication snapshot. A mutable link or a
+child PR's local-only scope is not approval.
