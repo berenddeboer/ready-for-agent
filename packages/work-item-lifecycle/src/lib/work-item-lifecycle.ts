@@ -10421,8 +10421,19 @@ export const makeWorkItemLifecycleLive = (
                 !frozen.baseline.designRevisions.every(
                   (revision, index) => revision === designRevisions[index],
                 )
-              )
+              ) {
+                yield* Effect.logWarning(
+                  "Spec Validation is waiting: the checklist's baseline does not match the frozen approval",
+                  {
+                    workItemId: existing.id,
+                    spec: observed.url,
+                    frozenBaseline: frozen.baseline.source.url,
+                    checklistBaseline: source.url,
+                    checklist: requirementChecklist.sourceUrl,
+                  },
+                )
                 return
+              }
               const approvedInput = yield* Schema.encodeEffect(
                 SpecValidationInput,
               )({
