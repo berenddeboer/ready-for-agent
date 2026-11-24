@@ -5,6 +5,7 @@ import type {
   SpecBaselineResult,
   SpecCloseGuard,
   SpecCloseResult,
+  SpecConversation,
   SpecFollowUpPublication,
 } from "@ready-for-agent/forge-contract"
 import type { LinearRequestError } from "./errors.js"
@@ -49,6 +50,9 @@ export interface LinearServiceShape {
     nativeId: string,
     options?: SpecBaselineReadOptions,
   ) => Effect.Effect<SpecBaselineResult, LinearServiceError>
+  readonly readSpecConversation?: (
+    nativeId: string,
+  ) => Effect.Effect<SpecConversation, LinearServiceError>
   readonly publishSpecFollowUps: (
     projectId: string,
     input: SpecFollowUpPublication,

@@ -206,10 +206,16 @@ test("recovers a partial Linear native follow-up and posts the findings only onc
   await expect(publish()).rejects.toThrow("creating Linear follow-up")
   await expect(publish()).rejects.toThrow("updating a Linear milestone comment")
   await expect(publish()).resolves.toEqual([
-    { requirementId: "deployed-mcp", gapId: "public-route", url },
+    {
+      requirementId: "deployed-mcp",
+      gapId: "public-route",
+      nativeId: child.id,
+      url,
+    },
     {
       requirementId: "deployed-mcp",
       gapId: "regional-route",
+      nativeId: regional.id,
       url: regionalUrl,
     },
   ])

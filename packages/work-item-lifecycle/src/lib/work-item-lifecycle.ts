@@ -111,9 +111,11 @@ import { CloseIssueEligibilityError } from "./close-issue-errors.js"
 import { closePassingSpec } from "./close-passing-spec.js"
 import {
   DECISION_NEEDED_FAILURE_CODE,
+  type SpecWaiverConfirmation,
   decisionNeededHandlerOutput,
   decisionResumeTarget,
   isDecisionNeededReason,
+  readSpecWaiverOptions,
 } from "./decision-needed.js"
 import {
   AbandonCleanupError,
@@ -273,8 +275,10 @@ import {
 } from "./unfinished-work-item-unique-violation.js"
 import {
   SpecValidationInput,
+  hasNewlyClosedSpecFollowUp,
   notifySpecValidationDecision,
   observeSpecBeforeTurn,
+  savedSpecFollowUps,
 } from "./validate-spec.js"
 import { workItemBranchName } from "./worktree-names.js"
 
@@ -1647,13 +1651,14 @@ export interface WorkItemLifecycleShape {
   ) => Effect.Effect<WorkItemRecord, RetryError>
   /**
    * Continue an eligible Needs Human handoff in the existing session. A
-   * Decision needed handoff returns to Implement. A Decide PR Merge handoff
-   * returns to Decide PR Merge. Does not accept an answer or a chat marker as
-   * merge authorization. Idempotent while a resumed Step Run is already
-   * queued, running, or waiting for a Worker Slot.
+   * Decision needed handoff returns to Implement or Validate Spec. A Decide
+   * PR Merge handoff returns to Decide PR Merge. Only a Spec Validation
+   * handoff accepts explicit requirement waiver confirmations. Plain Resume
+   * is idempotent while a resumed Step Run is in progress.
    */
   readonly resume: (
     workItemId: string,
+    specWaiver?: SpecWaiverConfirmation,
   ) => Effect.Effect<WorkItemRecord, ResumeError>
   readonly pause: (
     workItemId: string,
@@ -4019,6 +4024,21 @@ export const makeWorkItemLifecycleLive = (
                 ),
               )
               const result = yield* steps.validateSpec(context, input)
+              const persistedInput =
+                "evidenceInput" in result
+                  ? yield* Schema.encodeEffect(SpecValidationInput)(
+                      result.evidenceInput,
+                    ).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new LifecycleStepFailedError({
+                            message:
+                              "Could not save the Spec validation evidence input.",
+                            cause,
+                          }),
+                      ),
+                    )
+                  : undefined
               switch (result.kind) {
                 case "waiting":
                   return { holdForSpec: "hierarchy" as const }
@@ -4027,11 +4047,18 @@ export const makeWorkItemLifecycleLive = (
                 case "decision_needed":
                   return {
                     ...result,
+                    ...(persistedInput === undefined
+                      ? {}
+                      : { specValidationInput: persistedInput }),
                     ...decisionNeededHandlerOutput({
                       request: result.request,
                       originatingStep: "validate_spec",
                       sessionId: result.sessionId,
-                      findingsAtDecision: result.completionSummary,
+                      ...("completionSummary" in result &&
+                      typeof result.completionSummary === "string"
+                        ? { findingsAtDecision: result.completionSummary }
+                        : {}),
+                      specWaiverOptions: result.specWaiverOptions,
                     }),
                   }
                 case "recorded":
@@ -4040,22 +4067,13 @@ export const makeWorkItemLifecycleLive = (
                     startingCommitOid: result.startingCommitOid,
                     completionSummary: result.completionSummary,
                     specValidationFindings: result.specValidationFindings,
+                    ...(persistedInput === undefined
+                      ? {}
+                      : { specValidationInput: persistedInput }),
                     stepRunReasonCode: STEP_RUN_REASON.native,
-                    ...(!("passingInput" in result)
+                    ...(!("passing" in result)
                       ? {}
                       : {
-                          specValidationInput: yield* Schema.encodeEffect(
-                            SpecValidationInput,
-                          )(result.passingInput).pipe(
-                            Effect.mapError(
-                              (cause) =>
-                                new LifecycleStepFailedError({
-                                  message:
-                                    "Could not save the passing Spec hierarchy for close-out.",
-                                  cause,
-                                }),
-                            ),
-                          ),
                           transition: { nextState: "close_issue" as const },
                         }),
                   }
@@ -9907,6 +9925,7 @@ export const makeWorkItemLifecycleLive = (
       const resumeInto = (
         workItemId: string,
         step: "implement" | "decide_pr_merge" | "validate_spec",
+        specWaiver?: SpecWaiverConfirmation,
       ) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
@@ -9941,6 +9960,62 @@ export const makeWorkItemLifecycleLive = (
                     return false
                   }
                   const recordedReason = parked[0]?.failure_message ?? null
+                  let confirmedSpecInput: string | undefined
+                  if (specWaiver !== undefined) {
+                    const [handoff] = yield* sql.unsafe<{
+                      id: string
+                      reason_detail: string | null
+                      spec_validation_input: string
+                    }>(
+                      `SELECT s.id, s.reason_detail, w.spec_validation_input
+                        FROM step_run s JOIN work_item w ON w.id = s.work_item_id
+                        WHERE w.id = ? AND s.step = 'validate_spec'
+                          AND s.status = 'succeeded' AND s.reason_code = ?
+                        ORDER BY s.finished_at DESC, s.rowid DESC LIMIT 1`,
+                      [workItemId, STEP_RUN_REASON.decisionNeeded],
+                    )
+                    const invalid = new ResumeNotEligibleError({
+                      workItemId,
+                      reason: "invalid_spec_waiver_confirmation",
+                    })
+                    if (
+                      step !== "validate_spec" ||
+                      handoff?.id !== specWaiver.stepRunId
+                    )
+                      return yield* invalid
+                    const input = yield* Schema.decodeUnknownEffect(
+                      SpecValidationInput,
+                    )(handoff.spec_validation_input)
+                    const options = readSpecWaiverOptions(handoff.reason_detail)
+                    const ids = new Set(specWaiver.requirementIds)
+                    const selected = options.filter(({ requirementId }) =>
+                      ids.has(requirementId),
+                    )
+                    const baseline =
+                      "baseline" in input ? input.baseline : undefined
+                    if (
+                      !baseline ||
+                      ids.size === 0 ||
+                      selected.length !== ids.size ||
+                      selected.some(
+                        ({ baselineUrl }) =>
+                          baselineUrl !== baseline.source.url,
+                      )
+                    )
+                      return yield* invalid
+                    confirmedSpecInput = yield* Schema.encodeEffect(
+                      SpecValidationInput,
+                    )({
+                      ...input,
+                      confirmedWaivers: [
+                        ...(input.confirmedWaivers ?? []),
+                        ...selected.map((option) => ({
+                          ...option,
+                          stepRunId: handoff.id,
+                        })),
+                      ],
+                    })
+                  }
                   const updated = (yield* sql.unsafe(
                     `UPDATE work_item
                      SET state = ?,
@@ -9966,6 +10041,12 @@ export const makeWorkItemLifecycleLive = (
                   )) as readonly { readonly id: string }[]
                   if (updated.length === 0) {
                     return false
+                  }
+                  if (confirmedSpecInput !== undefined) {
+                    yield* sql.unsafe(
+                      "UPDATE work_item SET spec_validation_input = ? WHERE id = ?",
+                      [confirmedSpecInput, workItemId],
+                    )
                   }
                   if (
                     step === "decide_pr_merge" &&
@@ -10010,6 +10091,9 @@ export const makeWorkItemLifecycleLive = (
                 if (error instanceof WorkItemLifecycleDatabaseError) {
                   return Effect.fail(error)
                 }
+                if (error instanceof ResumeNotEligibleError) {
+                  return Effect.fail(error)
+                }
                 if (error instanceof EnqueueError) {
                   return Effect.fail(error)
                 }
@@ -10041,6 +10125,7 @@ export const makeWorkItemLifecycleLive = (
 
       const resume = Effect.fn("WorkItemLifecycle.resume")(function* (
         workItemId: string,
+        specWaiver?: SpecWaiverConfirmation,
       ) {
         const current = yield* getWorkItem(workItemId)
         const decisionRun = [...current.stepRuns]
@@ -10071,6 +10156,19 @@ export const makeWorkItemLifecycleLive = (
         const parkedForDecision =
           current.state === "needs_human" &&
           (current.failureCode === DECISION_NEEDED_FAILURE_CODE || openDecision)
+        if (
+          specWaiver !== undefined &&
+          (!parkedForDecision ||
+            current.origin !== "spec_validation" ||
+            decisionTarget !== "validate_spec" ||
+            decisionRun?.id !== specWaiver.stepRunId ||
+            active !== undefined)
+        ) {
+          return yield* new ResumeNotEligibleError({
+            workItemId,
+            reason: "invalid_spec_waiver_confirmation",
+          })
+        }
         const mergeHandoff = isMergeAssessmentResumeHandoff(current)
         const latestSucceeded = current.stepRuns.reduce<
           (typeof current.stepRuns)[number] | undefined
@@ -10122,7 +10220,11 @@ export const makeWorkItemLifecycleLive = (
             reason: "not_decision_needed",
           })
         }
-        return yield* resumeInto(workItemId, decisionTarget ?? "implement")
+        return yield* resumeInto(
+          workItemId,
+          decisionTarget ?? "implement",
+          specWaiver,
+        )
       })
 
       const createWorkItem = (
@@ -10597,8 +10699,10 @@ export const makeWorkItemLifecycleLive = (
               state_ready_at: number
               close_out_finished: number
               spec_validation_input: string
+              spec_validation_findings: string | null
+              completion_summary: string | null
             }>(
-              `SELECT id, state, state_ready_at, spec_validation_input,
+              `SELECT id, state, state_ready_at, spec_validation_input, spec_validation_findings, completion_summary,
                  (state = 'validate_spec' AND paused = 0
                    AND holds_worker_slot = 0 AND waiting_since IS NULL
                    AND (SELECT reason_code FROM step_run WHERE work_item_id = work_item.id
@@ -10748,6 +10852,10 @@ export const makeWorkItemLifecycleLive = (
               }
               return
             }
+            let followUpPass: SpecValidationInput | undefined
+            const published = savedSpecFollowUps(
+              existing?.spec_validation_findings ?? null,
+            )
             if (existing !== undefined && !existing.close_out_finished) {
               // A non-passing or abandoned validation owns this open episode,
               // not future reopenings. An edit or descendant closure is not
@@ -10760,14 +10868,35 @@ export const makeWorkItemLifecycleLive = (
                 existing.state === "abandoned"
                   ? prior.abandonedWithReopenEventId
                   : prior.parentReopenEventId
-              if (
+              const parentReopened = !(
                 reopening == null ||
                 prior.parentReopenEventId === reopening.id ||
                 reopeningAnchor === reopening.id ||
                 (reopeningAnchor === undefined &&
                   Date.parse(reopening.createdAt) <= existing.state_ready_at)
               )
-                return
+              if (!parentReopened) {
+                if (existing.state !== "complete" || !("baseline" in prior))
+                  return
+                // Only a newly closed native follow-up can start a new pass
+                // in the same open episode. An arbitrary edit or closure is
+                // not a request to repeat a non-passing verdict.
+                if (
+                  !hasNewlyClosedSpecFollowUp(
+                    prior.descendants,
+                    observed.descendants,
+                    published,
+                  )
+                )
+                  return
+                followUpPass = {
+                  ...prior,
+                  priorFollowUps: prior.priorFollowUps ?? published,
+                  ...(existing.completion_summary === null
+                    ? {}
+                    : { previousEvidence: existing.completion_summary }),
+                }
+              }
             }
             const { tracker, nativeId, displayId, url } = observed
             // A poll might have seen this parent open before the previous
@@ -10781,19 +10910,30 @@ export const makeWorkItemLifecycleLive = (
                     Effect.provideService(LinearService, linear),
                   )
             if (descendants === undefined) return
-            const frozenInput = yield* Schema.encodeEffect(SpecValidationInput)(
-              {
-                spec: { tracker, nativeId, displayId, url },
+            if (
+              followUpPass &&
+              !hasNewlyClosedSpecFollowUp(
+                followUpPass.descendants,
                 descendants,
-                ...(approved.kind === "baseline"
-                  ? { baseline: approved.baseline }
-                  : { baselineReview: approved }),
-                ...(approved.reopening === undefined
-                  ? {}
-                  : {
-                      parentReopenEventId: approved.reopening?.id ?? null,
-                    }),
-              },
+                published,
+              )
+            )
+              return
+            const frozenInput = yield* Schema.encodeEffect(SpecValidationInput)(
+              followUpPass
+                ? { ...followUpPass, descendants }
+                : {
+                    spec: { tracker, nativeId, displayId, url },
+                    descendants,
+                    ...(approved.kind === "baseline"
+                      ? { baseline: approved.baseline }
+                      : { baselineReview: approved }),
+                    ...(approved.reopening === undefined
+                      ? {}
+                      : {
+                          parentReopenEventId: approved.reopening?.id ?? null,
+                        }),
+                  },
             )
             const specTitle =
               approved.kind === "baseline"

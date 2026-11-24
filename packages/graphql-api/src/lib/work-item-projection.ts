@@ -25,6 +25,7 @@ import {
   isMergeAssessmentResumeHandoff,
   isRetryableFailedWorkItem,
   isRetryableNeedsHumanWorkItem,
+  readSpecWaiverOptions,
 } from "@ready-for-agent/work-item-lifecycle"
 
 const childIssueCategory = (issue: IssueRecord): number => {
@@ -257,6 +258,30 @@ export const workItemDecisionRequest = (
     return null
   }
   return workItem.failureMessage
+}
+
+export const projectSpecWaiverDecision = (workItem: WorkItemRecord) => {
+  if (workItem.origin !== "spec_validation" || !workItemCanResume(workItem))
+    return null
+  const step = latestStepRun(workItem)
+  if (
+    step?.step !== "validate_spec" ||
+    step.reasonCode !== STEP_RUN_REASON.decisionNeeded
+  )
+    return null
+  const options = readSpecWaiverOptions(step.reasonDetail)
+  return options.length === 0
+    ? null
+    : {
+        stepRunId: step.id,
+        requirements: options.map(
+          ({ requirementId, requirement, trackerComment }) => ({
+            requirementId,
+            requirement,
+            trackerQuote: trackerComment?.quote ?? null,
+          }),
+        ),
+      }
 }
 
 const decisionNeededLabel = (workItem: WorkItemRecord): string | null =>

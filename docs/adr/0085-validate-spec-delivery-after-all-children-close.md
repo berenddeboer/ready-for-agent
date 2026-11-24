@@ -95,7 +95,12 @@ context: rejecting one proposed implementation does not drop the requirement
 if it could be met another way. No special wording is required. An agent's
 deferral is not a human amendment, even if both post under the same tracker
 account. If a pass depends on an ambiguous decision or its authorship, request
-a decision. If nothing remains outstanding, publish the evidence and
+a decision. The Harness does not infer human authorship from a tracker account
+or from the validator quoting its session. When a waiver cannot be independently
+attributed, the operator explicitly selects the exact requirement to waive
+when resuming in the Harness. Preserve the tracker comment as supporting
+context, not as the authorization. The confirmation waits for open descendants
+just like any other decision. If nothing remains outstanding, publish the evidence and
 dispositions on the parent and close it. If a known
 gap persists without an explanation that resolves it, request a decision
 rather than repeatedly filing the same ticket.

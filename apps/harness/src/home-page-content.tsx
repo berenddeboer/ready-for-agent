@@ -371,6 +371,14 @@ export type WorkItem = {
   canRetry: boolean
   canResume?: boolean
   decisionRequest?: string | null
+  specWaiverDecision?: {
+    stepRunId: string
+    requirements: readonly {
+      requirementId: string
+      requirement: string
+      trackerQuote: string | null
+    }[]
+  } | null
   isTerminal: boolean
   failureCode: string | null
   sessionId: string | null
@@ -472,6 +480,14 @@ const workItemFields = {
   canRetry: true,
   canResume: true,
   decisionRequest: true,
+  specWaiverDecision: {
+    stepRunId: true,
+    requirements: {
+      requirementId: true,
+      requirement: true,
+      trackerQuote: true,
+    },
+  },
   isTerminal: true,
   failureCode: true,
   sessionId: true,
@@ -4541,10 +4557,16 @@ export function WorkItemLifecycleStatus({
     onSuccess: patchWorkItem,
   })
   const resumeDecision = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (specWaiver?: {
+      stepRunId: string
+      requirementIds: string[]
+    }) => {
       const result = await graphql.mutation({
         resumeWorkItem: {
-          __args: { workItemId: workItem.id },
+          __args: {
+            workItemId: workItem.id,
+            ...(specWaiver ? { specWaiver } : {}),
+          },
           ...workItemFields,
         },
       })
@@ -4946,16 +4968,65 @@ export function WorkItemLifecycleStatus({
               onReset={() => reset.mutate()}
             />
           )}
-          {canResume && (
-            <button
-              type="button"
-              className={ui.plateMini}
-              disabled={actionsPending || resumeDecision.isPending}
-              onClick={() => resumeDecision.mutate()}
-            >
-              {resumeDecision.isPending ? "Resuming..." : "Resume"}
-            </button>
-          )}
+          {canResume &&
+            (workItem.specWaiverDecision ? (
+              <form
+                key={workItem.specWaiverDecision.stepRunId}
+                className="basis-full"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const stepRunId = workItem.specWaiverDecision?.stepRunId
+                  if (!stepRunId) return
+                  const ids = new FormData(event.currentTarget)
+                    .getAll("waive")
+                    .map(String)
+                  resumeDecision.mutate(
+                    ids.length ? { stepRunId, requirementIds: ids } : undefined,
+                  )
+                }}
+              >
+                <fieldset disabled={actionsPending || resumeDecision.isPending}>
+                  <legend>
+                    Confirm only the requirements that are no longer required
+                  </legend>
+                  <p className={ui.jobTicketRuntimeLine}>
+                    A waiver changes what the Spec requires; it does not mark
+                    the requirement delivered.
+                  </p>
+                  {workItem.specWaiverDecision.requirements.map((option) => (
+                    <div key={option.requirementId}>
+                      <label className="inline-flex min-h-11 items-center gap-2">
+                        <input
+                          type="checkbox"
+                          name="waive"
+                          value={option.requirementId}
+                        />
+                        <span>Waive: {option.requirement}</span>
+                      </label>
+                      {option.trackerQuote && (
+                        <p className={ui.jobTicketRuntimeLine}>
+                          Tracker comment: “{option.trackerQuote}”
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                  <button type="submit" className={ui.plateMini}>
+                    {resumeDecision.isPending
+                      ? "Resuming..."
+                      : "Resume with selected decisions"}
+                  </button>
+                </fieldset>
+              </form>
+            ) : (
+              <button
+                type="button"
+                className={ui.plateMini}
+                disabled={actionsPending || resumeDecision.isPending}
+                onClick={() => resumeDecision.mutate()}
+              >
+                {resumeDecision.isPending ? "Resuming..." : "Resume"}
+              </button>
+            ))}
           {canRetry && (
             <button
               type="button"

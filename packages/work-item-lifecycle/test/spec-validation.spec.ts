@@ -34,8 +34,8 @@ import {
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
 } from "../src/index.js"
+import { specCloseOutTracker } from "../src/lib/spec-close-out-tracker-test.js"
 import { decodeSpecFindings, validateSpec } from "../src/lib/validate-spec.js"
-import { specCloseOutTracker } from "./spec-close-out-tracker.js"
 import { expect, it } from "bun:test"
 
 const commit = "a".repeat(40)
@@ -1679,12 +1679,18 @@ it.each([
           const item = items[0]!
           expect(item).toMatchObject({
             id: saved.id,
-            state: "complete",
+            state: decision === "authorship" ? "needs_human" : "complete",
             sessionId,
             startingCommitOid: integratedCommit,
             holdsWorkerSlot: false,
             pullRequestNumber: null,
           })
+          if (decision === "authorship") {
+            // The operator kept the requirement, but integration still fails
+            // the same check. Do not file the already-owned gap again.
+            expect(item.failureMessage).toContain("still lacks a resolution")
+            expect(item.failureMessage).toContain(gapUrl("public-route"))
+          }
           expect(item.stepRuns.map(({ step }) => step)).toEqual([
             "create_worktree",
             "validate_spec",

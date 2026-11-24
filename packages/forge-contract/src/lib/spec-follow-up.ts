@@ -27,6 +27,7 @@ export type SpecFollowUpPublication = typeof SpecFollowUpPublication.Type
 export const PublishedSpecFollowUps = Schema.Array(
   Schema.Struct({
     ...GapIdentity,
+    nativeId: Schema.optionalKey(Schema.NonEmptyString),
     url: Schema.NonEmptyString,
   }),
 )

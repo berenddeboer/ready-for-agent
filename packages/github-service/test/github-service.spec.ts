@@ -254,10 +254,16 @@ it("reuses a partially written GitHub follow-up without adopting a copied marker
   await expect(publish()).rejects.toThrow("Creating a GitHub follow-up")
   await expect(publish()).rejects.toThrow("Updating findings")
   await expect(publish()).resolves.toEqual([
-    { requirementId: "deployed-mcp", gapId: "public-route", url },
+    {
+      requirementId: "deployed-mcp",
+      gapId: "public-route",
+      nativeId: child.id,
+      url,
+    },
     {
       requirementId: "deployed-mcp",
       gapId: "regional-route",
+      nativeId: regional.id,
       url: regionalUrl,
     },
   ])

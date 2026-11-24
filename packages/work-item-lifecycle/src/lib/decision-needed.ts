@@ -1,3 +1,4 @@
+import { Schema } from "effect"
 import {
   type OperationalLifecycleStep,
   STEP_RUN_REASON,
@@ -87,11 +88,36 @@ export type DecisionNeededHandoff = {
   readonly sessionId?: string
 }
 
+export const SpecWaiverOption = Schema.Struct({
+  requirementId: Schema.NonEmptyString,
+  requirement: Schema.NonEmptyString,
+  baselineUrl: Schema.NonEmptyString,
+  trackerComment: Schema.optionalKey(
+    Schema.Struct({ url: Schema.NonEmptyString, quote: Schema.NonEmptyString }),
+  ),
+})
+export type SpecWaiverOption = typeof SpecWaiverOption.Type
+
+export const readSpecWaiverOptions = (reasonDetail: string | null) => {
+  const result = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({ specWaiverOptions: Schema.Array(SpecWaiverOption) }),
+    ),
+  )(reasonDetail)
+  return result._tag === "Some" ? result.value.specWaiverOptions : []
+}
+
+export type SpecWaiverConfirmation = {
+  readonly stepRunId: string
+  readonly requirementIds: readonly string[]
+}
+
 export const decisionNeededHandlerOutput = (input: {
   readonly request: string
   readonly originatingStep: OperationalLifecycleStep
   readonly sessionId?: string
   readonly findingsAtDecision?: string
+  readonly specWaiverOptions?: readonly SpecWaiverOption[]
 }): {
   readonly sessionId?: string
   readonly stepRunReasonCode: StepRunReasonCode
@@ -111,6 +137,7 @@ export const decisionNeededHandlerOutput = (input: {
     originatingStep: input.originatingStep,
     resumeTarget: decisionResumeTarget(input.originatingStep),
     findingsAtDecision: input.findingsAtDecision,
+    specWaiverOptions: input.specWaiverOptions,
   }),
   transition: {
     nextState: "needs_human",

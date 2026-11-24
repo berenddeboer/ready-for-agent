@@ -4,6 +4,7 @@ import { Schema } from "effect"
 export const ClosedSpecDescendants = Schema.NonEmptyArray(
   Schema.Struct({
     nativeId: Schema.NonEmptyString,
+    url: Schema.optionalKey(Schema.NonEmptyString),
     // Preserve the original tracker value; null means it was not supplied.
     closureReason: Schema.NullOr(Schema.String),
     // Older frozen inputs lack a closure timestamp. Live reads include it so
@@ -13,6 +14,17 @@ export const ClosedSpecDescendants = Schema.NonEmptyArray(
   }),
 )
 export type ClosedSpecDescendants = typeof ClosedSpecDescendants.Type
+
+export const SpecConversation = Schema.Array(
+  Schema.Struct({
+    url: Schema.NonEmptyString,
+    body: Schema.String,
+    author: Schema.NullOr(Schema.String),
+    // A user account is not proof that a human wrote the comment.
+    authorKind: Schema.Literals(["user-account", "automation", "unknown"]),
+  }),
+)
+export type SpecConversation = typeof SpecConversation.Type
 
 const identity = {
   nativeId: Schema.NonEmptyString,

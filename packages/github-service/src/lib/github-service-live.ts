@@ -34,6 +34,7 @@ import {
   SPEC_LABEL,
   type SpecCloseGuard,
   type SpecCloseResult,
+  type SpecConversation,
   type SpecFollowUpPublication,
   type TerminalPrStatusCheck,
   checkSpecHierarchy,
@@ -1296,6 +1297,7 @@ const SpecIssue = Schema.Struct({
 const SpecChildCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const SpecChild = Schema.Struct({
   ...SpecIssueIdentity.fields,
+  url: Schema.optionalKey(Schema.NonEmptyString),
   stateReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
   closedAt: Schema.NullOr(Schema.String),
   timelineItems: Schema.Struct({
@@ -1637,7 +1639,7 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
             return yield* invalid(`GitHub did not label follow-up ${issue.url}`)
           }
         }
-        return { requirementId, gapId, url: issue.url }
+        return { requirementId, gapId, nativeId: issue.id, url: issue.url }
       })
     let failure: GitHubRequestFailure | undefined
     for (const child of input.children) {
@@ -1758,6 +1760,7 @@ const makeObserveSpecDescendants = (client: GitHubGraphqlClient) => {
                             __args: { first: PAGE_SIZE, after },
                             nodes: {
                               id: true,
+                              url: true,
                               state: true,
                               stateReason: true,
                               closedAt: true,
@@ -1814,6 +1817,7 @@ const makeObserveSpecDescendants = (client: GitHubGraphqlClient) => {
             }
             descendants.push({
               nativeId: child.id,
+              ...(child.url === undefined ? {} : { url: child.url }),
               closureReason: child.stateReason ?? null,
               closedAt: child.closedAt,
               reopenEventId: reopening?.id ?? null,
@@ -2046,7 +2050,12 @@ type GitHubApiServiceShape = Omit<
   | "ensureIssueComment"
   | "closePassingSpec"
   | "readSpecReopenEventId"
+  | "readSpecConversation"
 > & {
+  readonly readSpecConversation: (
+    repository: GitHubApiRepository,
+    issue: number | string,
+  ) => Effect.Effect<SpecConversation, GitHubRequestFailure>
   readonly ensureIssueCommentOutcome: (
     repository: GitHubApiRepository,
     issueNumber: number,
@@ -3462,6 +3471,72 @@ const makeGitHubApiService = (
     }
     return "closed"
   }),
+  readSpecConversation: Effect.fn("GitHubService.readSpecConversation")(
+    function* (repository, issue) {
+      const describe = `reading GitHub Issue ${issue} conversation`
+      return yield* readSpecIssuePages(
+        Schema.Struct({
+          id: Schema.NonEmptyString,
+          body: Schema.String,
+          url: Schema.NonEmptyString,
+          author: Schema.NullOr(
+            Schema.Struct({ login: Schema.String, __typename: Schema.String }),
+          ),
+        }),
+        describe,
+        (after) => {
+          const selection = {
+            id: true,
+            comments: {
+              __args: { first: PAGE_SIZE, after },
+              nodes: {
+                id: true,
+                body: true,
+                url: true,
+                author: { login: true, __typename: true },
+              },
+              ...SpecIssuePageFields,
+            },
+          } as const
+          return githubQuery(`Failed while ${describe}`, async (signal) => {
+            if (typeof issue === "number") {
+              const result = await client.query(
+                {
+                  repository: {
+                    __args: repository,
+                    issue: { __args: { number: issue }, ...selection },
+                  },
+                },
+                signal,
+              )
+              return result.repository?.issue?.comments
+            }
+            const { node } = await client.query(
+              { node: { __args: { id: issue }, on_Issue: selection } },
+              signal,
+            )
+            return node?.id === issue && "comments" in node
+              ? node.comments
+              : undefined
+          })
+        },
+      ).pipe(
+        Effect.map((comments) =>
+          comments.map(({ url, body, author }) => ({
+            url,
+            body,
+            author: author?.login ?? null,
+            authorKind:
+              author?.__typename === "User"
+                ? ("user-account" as const)
+                : author?.__typename === "Bot"
+                  ? ("automation" as const)
+                  : ("unknown" as const),
+          })),
+        ),
+      )
+    },
+  ),
   readSpecBaseline: Effect.fn("GitHubService.readSpecBaseline")(
     function* (repository, issueNumber, options) {
       const issueRef = `${repository.owner}/${repository.name}#${issueNumber}`
@@ -4102,6 +4177,7 @@ export const makeGitHubService = (
     listReadyIssues: adapt(service.listReadyIssues),
     observeSpecs: adapt(service.observeSpecs),
     readSpecBaseline: adapt(service.readSpecBaseline),
+    readSpecConversation: adapt(service.readSpecConversation),
     publishSpecFollowUps: adapt(service.publishSpecFollowUps),
     readSpecReopenEventId: adapt(makeReadSpecReopenEventId(client)),
     getPullRequestCheckStatus: adapt(service.getPullRequestCheckStatus),
