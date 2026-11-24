@@ -15,6 +15,7 @@ export const timingLaneColors = {
 const stepLabels: Record<string, string> = {
   create_worktree: "Create worktree",
   install_dependencies: "Install dependencies",
+  validate_spec: "Validate spec",
   implement: "Implement",
   assess_changes: "Assess changes",
   pre_commit: "Pre-Commit",

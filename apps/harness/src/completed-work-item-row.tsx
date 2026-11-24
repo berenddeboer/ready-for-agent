@@ -57,7 +57,8 @@ export function CompletedWorkItemRow({
 }) {
   const nowMs = useNowMs(true)
   const abandoned = isArchiveAbandoned(workItem)
-  const noChange = isArchiveNoChangeComplete(workItem)
+  const isSpecValidation = workItem.origin === "SPEC_VALIDATION"
+  const noChange = !isSpecValidation && isArchiveNoChangeComplete(workItem)
   const repositoryLabel =
     repository === undefined ? workItem.repositoryId : repository.projectPath
   const isCiRepair = workItem.origin === "CI_REPAIR"
@@ -213,7 +214,14 @@ export function CompletedWorkItemRow({
         {` · ${terminalAgo} · ${elapsedLabel}`}
       </p>
 
-      {noChange && summary !== "" ? (
+      {isSpecValidation && summary !== "" ? (
+        <section
+          className={ui.completionSummary}
+          aria-label="Spec validation findings"
+        >
+          <p className={ui.completionSummaryP}>{summary}</p>
+        </section>
+      ) : noChange && summary !== "" ? (
         <p className={ui.archiveSummary}>“{summary}”</p>
       ) : null}
 

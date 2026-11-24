@@ -5,5 +5,10 @@ example:valid-work-item
   a rfa:WorkItem ;
   rfa:currentState rfa:Implement .
 
+example:valid-spec-validation
+  a rfa:WorkItem ;
+  rfa:workItemOrigin rfa:SpecValidationOrigin ;
+  rfa:currentState rfa:ValidateSpec .
+
 example:effective-always
   a rfa:MergeModeAlways, rfa:MergePolicyAlways .

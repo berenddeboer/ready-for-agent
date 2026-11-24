@@ -399,6 +399,7 @@ describe("runMigrations", () => {
           { name: "20261104120000_ci_gate_historical_coverage" },
           { name: "20261119120000_ci_repair_retry" },
           { name: "20261119120000_pending_implement_stop" },
+          { name: "20261124170000_spec_validation" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

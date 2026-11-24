@@ -32,9 +32,11 @@ import {
   DbService,
   type IssueRecord,
   RepositoryNotFoundError,
+  type RepositoryRecord,
 } from "@ready-for-agent/db-service"
 import {
   type PullRequestLifecycleStatus,
+  type SpecObservation,
   type StepRunReasonDetail,
   buildReasonDetail,
   formatUserFacingError,
@@ -265,6 +267,7 @@ import {
   isUnfinishedCiRepairUniqueViolation,
   isUnfinishedIssueWorkItemUniqueViolation,
 } from "./unfinished-work-item-unique-violation.js"
+import { SpecValidationInput } from "./validate-spec.js"
 import { workItemBranchName } from "./worktree-names.js"
 
 export type { ExecutionProfileUpdatePatch } from "./execution-profile.js"
@@ -560,6 +563,7 @@ type WorkItemRow = {
   readonly ci_repair_default_branch?: string | null
   readonly ci_repair_head_sha?: string | null
   readonly ci_repair_failing_runs?: string | null
+  readonly spec_validation_input?: string | null
   readonly issue_number: number | null
   readonly issue_tracker: string | null
   readonly issue_native_id: string | null
@@ -1093,7 +1097,7 @@ const toWorkItemRecord = (
       stateResidenceMs: Math.max(0, nowMs - row.state_ready_at),
       stepRuns,
     }
-    if (origin === "ci_repair") {
+    if (origin !== "issue") {
       return { ...shared, origin }
     }
     const issue = yield* requireStoredIssueIdentity(row)
@@ -1106,7 +1110,7 @@ const toWorkItemRecord = (
   })
 
 const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, origin, ci_repair_default_branch,
-                   ci_repair_head_sha, ci_repair_failing_runs,
+                   ci_repair_head_sha, ci_repair_failing_runs, spec_validation_input,
                    issue_number, issue_tracker, issue_native_id,
                    issue_display_id, issue_url, issue_title, agent_backend,
                    execution_profile_present, execution_profile_build_model,
@@ -1232,6 +1236,8 @@ const nextOperationalStep = (
       return "install_dependencies"
     case "install_dependencies":
       return "implement"
+    case "validate_spec":
+      return "complete"
     case "implement":
       return "assess_changes"
     case "assess_changes":
@@ -1552,6 +1558,11 @@ export interface WorkItemLifecycleShape {
   readonly considerAutomaticCiRepair: (
     repositoryId: string,
   ) => Effect.Effect<WorkItemRecord | null, never>
+  /** Consume only a complete, nonempty, all-closed Spec observation. */
+  readonly considerSpecValidation: (
+    repository: RepositoryRecord,
+    observed: SpecObservation & { readonly tracker: "github" | "linear" },
+  ) => Effect.Effect<void>
   /**
    * Implement With: persist an Explicit Work Item Execution Profile and
    * optional Merge Policy pin. On an Actionable Issue, returns a one-element
@@ -3934,6 +3945,8 @@ export const makeWorkItemLifecycleLive = (
           readonly worktreePath?: string | null
           readonly startingCommitOid?: string | null
           readonly completionSummary?: string | null
+          readonly specValidationFindings?: string
+          readonly holdForSpec?: "hierarchy" | "checklist"
           readonly publicationTitle?: string | null
           readonly publicationBody?: string | null
           readonly pauseBeforeStep?: OperationalLifecycleStep | null
@@ -3964,8 +3977,50 @@ export const makeWorkItemLifecycleLive = (
               Effect.map((result) => ({
                 worktreePath: result.worktreePath,
                 startingCommitOid: result.startingCommitOid,
+                ...(context.origin === "spec_validation"
+                  ? {
+                      transition: { nextState: "validate_spec" as const },
+                      stepRunReasonCode: STEP_RUN_REASON.native,
+                    }
+                  : {}),
               })),
             )
+          case "validate_spec":
+            return Effect.gen(function* () {
+              if (
+                context.origin !== "spec_validation" ||
+                steps.validateSpec === undefined
+              ) {
+                return yield* new LifecycleStepFailedError({
+                  message:
+                    "Validate Spec requires a Spec Validation Work Item and validator.",
+                })
+              }
+              const input = yield* Schema.decodeUnknownEffect(
+                SpecValidationInput,
+              )(workItem.spec_validation_input).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new LifecycleStepFailedError({
+                      message:
+                        "This Work Item does not have a readable approved Spec baseline.",
+                      cause,
+                    }),
+                ),
+              )
+              const result = yield* steps.validateSpec(context, input)
+              switch (result.kind) {
+                case "waiting":
+                  return { holdForSpec: "hierarchy" as const }
+                case "waiting_for_checklist":
+                  return { holdForSpec: "checklist" as const }
+                case "recorded":
+                  return {
+                    ...result,
+                    stepRunReasonCode: STEP_RUN_REASON.native,
+                  }
+              }
+            })
           case "install_dependencies":
             return steps.installDependencies(context).pipe(Effect.as({}))
           case "implement":
@@ -4870,6 +4925,7 @@ export const makeWorkItemLifecycleLive = (
           readonly worktreePath?: string | null
           readonly startingCommitOid?: string | null
           readonly completionSummary?: string | null
+          readonly specValidationFindings?: string
           readonly publicationTitle?: string | null
           readonly publicationBody?: string | null
           readonly pauseBeforeStep?: OperationalLifecycleStep | null
@@ -5185,6 +5241,7 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         starting_commit_oid = ?,
                         completion_summary = ?,
+                         spec_validation_findings = COALESCE(?, spec_validation_findings),
                         publication_title = ?,
                         publication_body = ?,
                         session_id = ?,
@@ -5199,6 +5256,7 @@ export const makeWorkItemLifecycleLive = (
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
+                      output.specValidationFindings ?? null,
                       publicationTitle,
                       publicationBody,
                       sessionId,
@@ -7013,6 +7071,22 @@ export const makeWorkItemLifecycleLive = (
                     return { _tag: "processed" as const, workItem: failed }
                   }
 
+                  if (handlerExit.value.holdForSpec !== undefined) {
+                    const awaitingChecklist =
+                      handlerExit.value.holdForSpec === "checklist"
+                    yield* completeInterruptedStep({
+                      stepRun: afterStart,
+                      reasonCode: awaitingChecklist
+                        ? STEP_RUN_REASON.waitingForApprovedSpecChecklist
+                        : STEP_RUN_REASON.waitingForSpecHierarchy,
+                      reasonMessage: awaitingChecklist
+                        ? "Waiting for an approved requirement checklist linked to the Spec baseline"
+                        : "Waiting for the original Issue Tracker to confirm all Spec descendants are closed",
+                    })
+                    const held = yield* getWorkItem(workItem.id)
+                    return { _tag: "processed" as const, workItem: held }
+                  }
+
                   if (handlerExit.value.holdForCiRepair === true) {
                     const holdAt = yield* Clock.currentTimeMillis
                     yield* sql
@@ -7711,10 +7785,13 @@ export const makeWorkItemLifecycleLive = (
       ): LifecycleStepContext => ({
         workItemId: row.id as WorkItemId,
         repositoryId: row.repository_id,
-        origin: row.origin === "ci_repair" ? "ci_repair" : "issue",
-        issueNumber: row.origin === "ci_repair" ? null : row.issue_number,
+        origin:
+          row.origin === "spec_validation" || row.origin === "ci_repair"
+            ? row.origin
+            : "issue",
+        issueNumber: row.origin === "issue" ? row.issue_number : null,
         issueSource:
-          row.origin === "ci_repair" || row.issue_number === null
+          row.origin !== "issue" || row.issue_number === null
             ? undefined
             : toIssueSource(row, row.issue_number),
         issueTitle: row.issue_title,
@@ -10225,6 +10302,208 @@ export const makeWorkItemLifecycleLive = (
         )
       })
 
+      const wakeSpecValidation = (workItemId: string, approvedInput?: string) =>
+        sql.withTransaction(
+          Effect.gen(function* () {
+            const parked = yield* sql.unsafe(
+              `SELECT id FROM work_item
+             WHERE id = ? AND state = 'validate_spec' AND paused = 0
+               AND holds_worker_slot = 0 AND waiting_since IS NULL
+               AND (SELECT reason_code FROM step_run
+                    WHERE work_item_id = work_item.id
+                    ORDER BY queued_at DESC, rowid DESC LIMIT 1) = ?`,
+              [
+                workItemId,
+                approvedInput === undefined
+                  ? STEP_RUN_REASON.waitingForSpecHierarchy
+                  : STEP_RUN_REASON.waitingForApprovedSpecChecklist,
+              ],
+            )
+            if (parked.length === 0) return false
+            if (approvedInput !== undefined) {
+              yield* sql.unsafe(
+                "UPDATE work_item SET spec_validation_input = ? WHERE id = ?",
+                [approvedInput, workItemId],
+              )
+            }
+            const now = yield* Clock.currentTimeMillis
+            if (yield* tryAcquireWorkerSlot(workItemId, now)) {
+              yield* enqueueStepRunForWorkItem(workItemId, "validate_spec", now)
+            }
+            return true
+          }),
+        )
+
+      const considerSpecValidation: WorkItemLifecycleShape["considerSpecValidation"] =
+        Effect.fn("WorkItemLifecycle.considerSpecValidation")(
+          function* (repository, observed) {
+            if (
+              observed.readiness !== "all-descendants-closed" ||
+              repository.paused
+            ) {
+              return
+            }
+            const key = `${observed.tracker}:${observed.nativeId}`
+            const [existing] = yield* sql.unsafe<{
+              id: string
+              awaiting_checklist: number
+              spec_validation_input: string
+            }>(
+              `SELECT id, spec_validation_input,
+                 (state = 'validate_spec' AND paused = 0
+                   AND holds_worker_slot = 0 AND waiting_since IS NULL
+                   AND (SELECT reason_code FROM step_run WHERE work_item_id = work_item.id
+                        ORDER BY queued_at DESC, rowid DESC LIMIT 1) = ?) AS awaiting_checklist
+               FROM work_item WHERE repository_id = ? AND spec_validation_key = ?`,
+              [
+                STEP_RUN_REASON.waitingForApprovedSpecChecklist,
+                repository.id,
+                key,
+              ],
+            )
+            if (existing !== undefined && !existing.awaiting_checklist) {
+              if (yield* wakeSpecValidation(existing.id)) {
+                yield* notifyWorkItemsChanged(repository.id)
+              }
+              return
+            }
+
+            const approved =
+              observed.tracker === "linear"
+                ? yield* linear.readSpecBaseline(observed.nativeId)
+                : yield* github.readSpecBaseline(
+                    {
+                      forge: "github",
+                      forgeHost: repository.forgeHost,
+                      projectPath: repository.projectPath,
+                    },
+                    Number(observed.nativeId),
+                  )
+            if (approved.kind === "review") {
+              yield* Effect.logWarning(
+                "Spec Validation awaits an unambiguous approved baseline",
+                {
+                  spec: observed.url,
+                  candidates: approved.candidates.map(
+                    ({ source }) => source.url,
+                  ),
+                  unreadableSnapshots: approved.unreadableSnapshots,
+                },
+              )
+            }
+            if (approved.kind !== "baseline") return
+            if (existing !== undefined) {
+              const {
+                requirementChecklist,
+                source,
+                title,
+                body,
+                designRevisions,
+              } = approved.baseline
+              if (
+                requirementChecklist === undefined ||
+                source.kind !== "publication-comment" ||
+                requirementChecklist.baselineUrl !== source.url
+              )
+                return
+              const frozen = yield* Schema.decodeUnknownEffect(
+                SpecValidationInput,
+              )(existing.spec_validation_input)
+              // A legacy baseline may gain a publication citation, but the
+              // newly cited snapshot must preserve the entire frozen promise.
+              if (
+                (frozen.baseline.source.kind === "publication-comment" &&
+                  frozen.baseline.source.url !== source.url) ||
+                frozen.baseline.title !== title ||
+                frozen.baseline.body !== body ||
+                frozen.baseline.designRevisions.length !==
+                  designRevisions.length ||
+                !frozen.baseline.designRevisions.every(
+                  (revision, index) => revision === designRevisions[index],
+                )
+              )
+                return
+              const approvedInput = yield* Schema.encodeEffect(
+                SpecValidationInput,
+              )({
+                ...frozen,
+                baseline: { ...frozen.baseline, source, requirementChecklist },
+              })
+              if (yield* wakeSpecValidation(existing.id, approvedInput)) {
+                yield* notifyWorkItemsChanged(repository.id)
+              }
+              return
+            }
+            const { tracker, nativeId, displayId, url } = observed
+            const frozenInput = yield* Schema.encodeEffect(SpecValidationInput)(
+              {
+                spec: { tracker, nativeId, displayId, url },
+                baseline: approved.baseline,
+                descendants: observed.descendants,
+              },
+            )
+            const title = `Spec Validation — ${formatIssueDisplayId(displayId)}: ${approved.baseline.title}`
+            const workItemId = makeWorkItemId()
+            const firstStep = "create_worktree"
+            const created = yield* activeAgentBackend.withConfigCoordination(
+              Effect.gen(function* () {
+                const { agentBackendId } = yield* captureEffectiveAgentBackend({
+                  repositoryId: repository.id,
+                  db,
+                  activeAgentBackend,
+                  resolveModelsForBackend,
+                  whenRepositoryMissing: "not-found",
+                })
+                const now = yield* Clock.currentTimeMillis
+                return yield* sql.withTransaction(
+                  Effect.gen(function* () {
+                    const inserted = yield* sql.unsafe(
+                      `INSERT INTO work_item (
+                       id, repository_id, origin, spec_validation_key, spec_validation_input,
+                       issue_number, issue_tracker, issue_native_id, issue_display_id, issue_url,
+                       issue_title, agent_backend, state, state_ready_at, created_at, updated_at
+                     ) VALUES (?, ?, 'spec_validation', ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?)
+                     ON CONFLICT(repository_id, spec_validation_key) DO NOTHING RETURNING id`,
+                      [
+                        workItemId,
+                        repository.id,
+                        key,
+                        frozenInput,
+                        title,
+                        agentBackendId,
+                        firstStep,
+                        now,
+                        now,
+                        now,
+                      ],
+                    )
+                    if (inserted.length === 0) return false
+                    if (yield* tryAcquireWorkerSlot(workItemId, now)) {
+                      yield* enqueueStepRunForWorkItem(
+                        workItemId,
+                        firstStep,
+                        now,
+                      )
+                    }
+                    return true
+                  }),
+                )
+              }),
+            )
+            if (created) yield* notifyWorkItemsChanged(repository.id)
+          },
+          (effect, repository, observed) =>
+            effect.pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("Could not admit Spec Validation Work Item", {
+                  repositoryId: repository.id,
+                  spec: observed.url,
+                  error,
+                }),
+              ),
+            ),
+        )
+
       const implementNow = Effect.fn("WorkItemLifecycle.implementNow")(
         function* (repositoryId: string, nativeId: string) {
           return yield* createWorkItem(repositoryId, nativeId, {
@@ -11361,6 +11640,7 @@ export const makeWorkItemLifecycleLive = (
         unfinishedCiRepairWorkItem,
         startCiRepair,
         considerAutomaticCiRepair,
+        considerSpecValidation,
         implementWith,
         updateWorkItemExecutionProfile,
         implementLocally,

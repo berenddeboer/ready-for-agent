@@ -31,7 +31,7 @@ The board has six ordered lanes:
 | --- | --- | --- |
 | Queue | Work cannot begin yet: waiting for blockers, a worker slot, or pre-admission CI repair. | `WAITING_FOR_BLOCKERS`, `WAITING_FOR_WORKER_SLOT`, pre-admission `WAITING_FOR_CI_REPAIR` |
 | Build | Startup and implementation work (including queued later Build steps). | `CREATE_WORKTREE`, `INSTALL_DEPENDENCIES`, `IMPLEMENT`, `ASSESS_CHANGES`, `PRE_COMMIT` |
-| Review | Local review is in progress (including a queued Review step). | `REVIEW` |
+| Review | Local review or independent Spec Validation is in progress or queued. | `REVIEW`, `VALIDATE_SPEC` |
 | PR | Commit through cleanup on the pull-request path (including queued Watch and later PR steps). | `COMMIT`, `CREATE_PR`, `WATCH_PR_STATUS_CHECKS`, `RESOLVE_PR_MERGE_CONFLICT`, `INVESTIGATE_PR_STATUS_CHECKS`, `MARK_PR_READY_FOR_REVIEW`, `DECIDE_PR_MERGE`, `MERGE_PR`, `CLOSE_ISSUE`, `LOCAL_CLEANUP` |
 | Attention | An operator or remediation decision is needed. | Failed, interrupted, needs-human statuses or states |
 | Merged | The Work Item has reached a terminal successful or abandoned state. | Complete, succeeded, or abandoned statuses or states |

@@ -213,6 +213,10 @@ the parser misses fails the case instead of being treated as compatibility.
 | removed `--dir`, `--variant`, `--command` | production `startTurn`, spawner inserts the flag | explicit server | obsolete flag mutations | exact unrecognized-flag diagnostic. Independent of placement, so one changed flag does not hide the others |
 | former `models --verbose` | production `inspect`, spawner replaces the catalog argv | explicit server | verbose mutation | exact `Unrecognized flag: --verbose in command opencode models` |
 
+Validate Spec uses the existing plain prompt stdin start contract in its own
+checkout, and the prompt-scoped continuation contract on retry. It does not
+change the CLI argv or reuse an implementation session.
+
 The harness records the Implement session and server before the prompt is
 submitted. If the first stop cannot be confirmed, the record survives a
 harness restart and blocks another harness Implement turn for that Work Item.

@@ -1286,6 +1286,7 @@ const SpecIssue = Schema.Struct({
 const SpecChildCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const SpecChild = Schema.Struct({
   ...SpecIssueIdentity.fields,
+  stateReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
   subIssuesSummary: Schema.Struct({ total: SpecChildCount }),
 })
 const SpecIssuePageFields = {
@@ -1355,6 +1356,8 @@ const makeObserveSpecs = (client: GitHubGraphqlClient) => {
       const branches: (typeof SpecIssueIdentity.Type & {
         readonly childCount?: number
       })[] = [root]
+      const descendants: { nativeId: string; closureReason: string | null }[] =
+        []
       let hasOpenDescendant = false
       for (const branch of branches) {
         const describe = `reading sub-issues of GitHub Issue ${branch.id}`
@@ -1381,6 +1384,7 @@ const makeObserveSpecs = (client: GitHubGraphqlClient) => {
                             nodes: {
                               id: true,
                               state: true,
+                              stateReason: true,
                               subIssuesSummary: { total: true },
                             },
                             ...SpecIssuePageFields,
@@ -1424,11 +1428,20 @@ const makeObserveSpecs = (client: GitHubGraphqlClient) => {
           // CLOSED is enough for scheduling, including "not planned". It is
           // not a claim about delivery, nor is GitHub's completed count used.
           if (child.state === "OPEN") hasOpenDescendant = true
+          else
+            descendants.push({
+              nativeId: child.id,
+              closureReason: child.stateReason ?? null,
+            })
         }
       }
-      return hasOpenDescendant || seen.size === 1
-        ? "waiting"
-        : "all-descendants-closed"
+      const [first, ...rest] = descendants
+      return hasOpenDescendant || first === undefined
+        ? { readiness: "waiting" as const }
+        : {
+            readiness: "all-descendants-closed" as const,
+            descendants: [first, ...rest] as const,
+          }
     },
   )
 
@@ -1469,18 +1482,18 @@ const makeObserveSpecs = (client: GitHubGraphqlClient) => {
     const observations: GitHubSpecObservation[] = []
     for (const spec of specs) {
       if (spec.state !== "OPEN") continue
-      const readiness = yield* observeDescendants(spec).pipe(
+      const hierarchy = yield* observeDescendants(spec).pipe(
         Effect.catchIf(
           (error) =>
             error._tag === "GitHubRequestError" && error.statusCode !== 401,
-          () => Effect.succeed("hierarchy-unavailable" as const),
+          () => Effect.succeed({ readiness: "hierarchy-unavailable" as const }),
         ),
       )
       observations.push({
         nativeId: String(spec.number),
         displayId: String(spec.number),
         url: spec.url,
-        readiness,
+        ...hierarchy,
       })
     }
     return observations

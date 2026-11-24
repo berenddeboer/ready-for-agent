@@ -581,12 +581,14 @@ type StartRepositoryCiRepairArgs = {
 
 const toGraphqlWorkItemOrigin = (
   origin: WorkItemRecord["origin"],
-): "ISSUE" | "CI_REPAIR" => {
+): "ISSUE" | "CI_REPAIR" | "SPEC_VALIDATION" => {
   switch (origin) {
     case "issue":
       return "ISSUE"
     case "ci_repair":
       return "CI_REPAIR"
+    case "spec_validation":
+      return "SPEC_VALIDATION"
     default: {
       const _exhaustive: never = origin
       return _exhaustive

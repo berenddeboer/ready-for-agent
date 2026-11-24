@@ -1690,6 +1690,7 @@ describe("IssueReconciler", () => {
                 displayId: spec.displayId,
                 url: spec.url,
                 readiness: "all-descendants-closed",
+                descendants: [{ nativeId: "child", closureReason: null }],
               },
             ])
       },
@@ -1709,6 +1710,7 @@ describe("IssueReconciler", () => {
             displayId: spec.displayId,
             url: spec.url,
             readiness: "all-descendants-closed",
+            descendants: [{ nativeId: "child", closureReason: null }],
           },
         ])
         expect(observed.linearSpecObservations).toBeUndefined()
@@ -1824,6 +1826,10 @@ describe("IssueReconciler", () => {
             displayId: markedSpec.identifier,
             url: markedSpec.url,
             readiness: "all-descendants-closed",
+            descendants: [
+              { nativeId: "intermediate", closureReason: "completed" },
+              { nativeId: "last-ticket", closureReason: "canceled" },
+            ],
           },
         ])
         lastDescendantState = "unstarted"

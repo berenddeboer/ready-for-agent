@@ -169,71 +169,80 @@ describe("createWorktree", () => {
     }
   })
 
-  it("starts from origin's default branch tip when that branch is not main", async () => {
-    const root = await mkdtemp(join(tmpdir(), "rfa-wt-trunk-"))
-    try {
-      const source = join(root, "source")
-      const bare = join(root, "widgets.git")
-      await mkdir(source, { recursive: true })
-      await git(source, ["init", "-b", "trunk"])
-      await git(source, ["config", "user.email", "test@example.com"])
-      await git(source, ["config", "user.name", "Test"])
-      await writeFile(join(source, "README.md"), "# stale-local\n")
-      await git(source, ["add", "README.md"])
-      await git(source, ["commit", "--no-verify", "-m", "initial on trunk"])
-      await git(root, ["clone", "--bare", source, bare])
+  it.each(["issue", "spec_validation"] as const)(
+    "%s starts from origin's default branch tip when that branch is not main",
+    async (origin) => {
+      const root = await mkdtemp(join(tmpdir(), "rfa-wt-trunk-"))
+      try {
+        const source = join(root, "source")
+        const bare = join(root, "widgets.git")
+        await mkdir(source, { recursive: true })
+        await git(source, ["init", "-b", "trunk"])
+        await git(source, ["config", "user.email", "test@example.com"])
+        await git(source, ["config", "user.name", "Test"])
+        await writeFile(join(source, "README.md"), "# stale-local\n")
+        await git(source, ["add", "README.md"])
+        await git(source, ["commit", "--no-verify", "-m", "initial on trunk"])
+        await git(root, ["clone", "--bare", source, bare])
 
-      await writeFile(join(source, "README.md"), "# trunk-default\n")
-      await git(source, ["add", "README.md"])
-      await git(source, ["commit", "--no-verify", "-m", "remote tip on trunk"])
+        await writeFile(join(source, "README.md"), "# trunk-default\n")
+        await git(source, ["add", "README.md"])
+        await git(source, [
+          "commit",
+          "--no-verify",
+          "-m",
+          "remote tip on trunk",
+        ])
 
-      const workItemId = makeWorkItemId()
-      const path = await run(
-        Effect.gen(function* () {
-          const db = yield* DbService
-          const repository = yield* db.addRepository({
-            forge: "github",
-            forgeHost: "github.com",
-            projectPath: "acme/widgets",
-            localPath: bare,
-            isBare: true,
-          })
+        const workItemId = makeWorkItemId()
+        const path = await run(
+          Effect.gen(function* () {
+            const db = yield* DbService
+            const repository = yield* db.addRepository({
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "acme/widgets",
+              localPath: bare,
+              isBare: true,
+            })
 
-          return (yield* createWorktree({
-            workItemId,
-            repositoryId: repository.id,
-            issueNumber: 99,
-            issueTitle: null,
-            agentBackend: "opencode",
-            model: "opencode/test",
-            thinkingLevel: "low",
-            reviewModel: "opencode/test",
-            reviewThinkingLevel: "low",
-            worktreePath: null,
-            startingCommitOid: null,
-            completionSummary: null,
+            return (yield* createWorktree({
+              workItemId,
+              repositoryId: repository.id,
+              origin,
+              issueNumber: origin === "issue" ? 99 : null,
+              issueTitle: null,
+              agentBackend: "opencode",
+              model: "opencode/test",
+              thinkingLevel: "low",
+              reviewModel: "opencode/test",
+              reviewThinkingLevel: "low",
+              worktreePath: null,
+              startingCommitOid: null,
+              completionSummary: null,
 
-            publicationTitle: null,
+              publicationTitle: null,
 
-            publicationBody: null,
-            sessionId: null,
-          })).worktreePath
-        }),
-      )
+              publicationBody: null,
+              sessionId: null,
+            })).worktreePath
+          }),
+        )
 
-      expect(await Bun.file(join(path, "README.md")).text()).toContain(
-        "trunk-default",
-      )
-      const tip = await git(path, ["rev-parse", "HEAD"])
-      const originTrunk = await git(bare, [
-        "rev-parse",
-        "refs/remotes/origin/trunk",
-      ])
-      expect(tip).toBe(originTrunk)
-    } finally {
-      await rm(root, { recursive: true, force: true })
-    }
-  })
+        expect(await Bun.file(join(path, "README.md")).text()).toContain(
+          "trunk-default",
+        )
+        const tip = await git(path, ["rev-parse", "HEAD"])
+        const originTrunk = await git(bare, [
+          "rev-parse",
+          "refs/remotes/origin/trunk",
+        ])
+        expect(tip).toBe(originTrunk)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    },
+  )
 
   it("places dot-bare worktrees in the project root", async () => {
     const root = await mkdtemp(join(tmpdir(), "rfa-wt-dotbare-"))

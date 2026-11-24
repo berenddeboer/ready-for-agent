@@ -1,4 +1,8 @@
 import { Schema } from "effect"
+import {
+  ApprovedSpecRequirementChecklist,
+  readSpecRequirementChecklist,
+} from "./spec-requirement-checklist.js"
 
 export const SPEC_LABEL = "spec"
 
@@ -16,7 +20,7 @@ const SpecText = Schema.Struct({
 })
 const Snapshot = Schema.fromJsonString(SpecText)
 
-const SpecBaseline = Schema.Struct({
+export const SpecBaseline = Schema.Struct({
   ...SpecText.fields,
   source: Schema.Struct({
     kind: Schema.Literals([
@@ -26,13 +30,14 @@ const SpecBaseline = Schema.Struct({
     ]),
     url: Schema.String,
   }),
+  requirementChecklist: Schema.optionalKey(ApprovedSpecRequirementChecklist),
   designRevisionSources: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({ revision: DesignRevision, commentUrl: Schema.String }),
     ),
   ),
 })
-type SpecBaseline = typeof SpecBaseline.Type
+export type SpecBaseline = typeof SpecBaseline.Type
 
 export const SpecBaselineResult = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("not-spec") }),
@@ -224,12 +229,19 @@ export const resolveSpecBaseline = (
 
   // Comment formatting identifies an evidence format, not who approved it.
   const citedApprovals = new Set<string>()
+  const citedChecklists = new Set<string>()
   for (const [, line] of proseLines(parent.body.split(/\r?\n/u))) {
-    for (const [, bracketedUrl, bareUrl] of line.matchAll(
-      /(?<![!\\])\[Approved Spec baseline\]\((?:<(https:\/\/[^\s<>()]+)>|(https:\/\/[^\s<>()]+))\)/giu,
+    for (const [, label, bracketedUrl, bareUrl] of line.matchAll(
+      /(?<![!\\])\[(Approved Spec baseline|Approved requirement checklist)\]\((?:<(https:\/\/[^\s<>()]+)>|(https:\/\/[^\s<>()]+))\)/giu,
     )) {
       const url = bracketedUrl ?? bareUrl
-      if (url !== undefined) citedApprovals.add(url)
+      if (url !== undefined) {
+        const citations =
+          label?.toLowerCase() === "approved spec baseline"
+            ? citedApprovals
+            : citedChecklists
+        citations.add(url)
+      }
     }
   }
   const isCited = (candidate: SpecBaseline) =>
@@ -333,7 +345,20 @@ export const resolveSpecBaseline = (
             published.designRevisions.join("\n"),
       )
     ) {
-      return { kind: "baseline", baseline: published }
+      const [checklistUrl] = citedChecklists
+      const comment =
+        citedChecklists.size === 1
+          ? comments.find(({ url }) => url === checklistUrl)
+          : undefined
+      const checklist =
+        comment && readSpecRequirementChecklist(comment, published.source.url)
+      return {
+        kind: "baseline",
+        baseline:
+          checklist === undefined
+            ? published
+            : { ...published, requirementChecklist: checklist },
+      }
     }
     return {
       kind: "review",

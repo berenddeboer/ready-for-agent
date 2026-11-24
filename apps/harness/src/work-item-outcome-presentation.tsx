@@ -16,6 +16,7 @@ export function WorkItemOutcomePresentation({
   pullRequestNumber,
   pullRequestUrl,
   completionSummary,
+  isSpecValidation = false,
   issueUrl,
   showPullRequestBadge = true,
 }: {
@@ -25,10 +26,12 @@ export function WorkItemOutcomePresentation({
   pullRequestNumber: number | null
   pullRequestUrl: string | null
   completionSummary: string | null
+  isSpecValidation?: boolean
   issueUrl: string | null
   showPullRequestBadge?: boolean
 }) {
   const isNoChangeComplete =
+    !isSpecValidation &&
     state === "COMPLETE" &&
     pullRequestNumber === null &&
     completionSummary !== null &&
@@ -71,6 +74,14 @@ export function WorkItemOutcomePresentation({
           <span className={statusBadgeClassName}>{statusLabel}</span>
         )}
       </span>
+      {isSpecValidation && summary !== "" && (
+        <section
+          className={`w-full ${ui.completionSummary}`}
+          aria-label="Spec validation findings"
+        >
+          <p className={ui.completionSummaryP}>{summary}</p>
+        </section>
+      )}
       {isNoChangeComplete && (
         <div className="mt-1.5 w-full basis-full">
           {issueUrl !== null && issueUrl !== "" ? (

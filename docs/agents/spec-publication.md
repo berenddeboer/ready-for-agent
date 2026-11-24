@@ -62,6 +62,43 @@ The `spec` marker is case-insensitive on both trackers. A marked Spec without
 children is excluded from standalone implementation intake, even if it also
 has `ready-for-agent`.
 
+## Approve the validation checklist
+
+Before validation can finish, the Spec owner approves a checklist covering all
+requirements in the frozen Spec and its incorporated design revisions. List
+each separately testable claim, including separate local and deployed entries
+when both are promised. Use unique lowercase IDs, plain requirement text, and
+an environment of `local`, `deployed`, or `other`. For example:
+
+```json
+[
+  {"id":"mcp-local","requirement":"Local MCP accepts initialize","environment":"local"},
+  {"id":"mcp-deployed","requirement":"Deployed MCP accepts initialize","environment":"deployed"}
+]
+```
+
+Render the approved JSON with the exact URL of the cited publication snapshot:
+
+```bash
+bun scripts/render-spec-requirement-checklist.ts "$snapshot_url" "$checklist_json"
+```
+
+The Spec owner posts the rendered comment on the same parent and adds one
+`[Approved requirement checklist](<CHECKLIST_COMMENT_URL>)` citation to its
+description. Keep the existing baseline citation and do not edit either
+comment. For an older Spec without a publication snapshot, first capture the
+already approved text and revisions using [Existing Specs](#existing-specs).
+Do not use the checklist to silently narrow an approved requirement.
+
+The Harness does not post or approve the checklist. A missing, unreadable,
+edited, multiply cited, or mismatched checklist leaves the validation Work
+Item waiting. Once there is a valid checklist and the hierarchy is still
+all closed, the same Work Item can continue. If that Work Item already pinned
+a publication snapshot, cite that snapshot in the checklist. If it pinned a
+legacy baseline, the new snapshot must preserve the exact frozen title, body,
+and design revisions. Findings omitted by the validator are recorded as
+**unverified**.
+
 ## Existing Specs
 
 To mark an existing parent, read it and its comments before changing anything.

@@ -9900,6 +9900,7 @@ describe("WorkItemLifecycle", () => {
         maxDurations: {
           create_worktree: Duration.millis(20),
           install_dependencies: Duration.minutes(15),
+          validate_spec: Duration.hours(2),
           implement: Duration.hours(2),
           assess_changes: Duration.minutes(5),
           pre_commit: Duration.hours(2),
@@ -11198,6 +11199,7 @@ describe("WorkItemLifecycle", () => {
         maxDurations: {
           create_worktree: Duration.millis(20),
           install_dependencies: Duration.minutes(15),
+          validate_spec: Duration.hours(2),
           implement: Duration.hours(2),
           assess_changes: Duration.minutes(5),
           pre_commit: Duration.hours(2),
@@ -11300,6 +11302,7 @@ describe("WorkItemLifecycle", () => {
         maxDurations: {
           create_worktree: Duration.millis(30),
           install_dependencies: Duration.minutes(15),
+          validate_spec: Duration.hours(2),
           implement: Duration.hours(2),
           assess_changes: Duration.minutes(5),
           pre_commit: Duration.hours(2),

@@ -188,7 +188,7 @@ interface WorkItemRecordBase {
   readonly worktreePath: string | null
   /** Exact commit OID recorded by Create Worktree for Assess Changes. */
   readonly startingCommitOid: string | null
-  /** Durable No-Change Outcome completion summary (Markdown). */
+  /** Durable No-Change Outcome summary or Spec Validation findings (Markdown). */
   readonly completionSummary: string | null
   /**
    * Canonical publication title for Commit subject and PR title.
@@ -222,7 +222,14 @@ export interface CiRepairWorkItemRecord extends WorkItemRecordBase {
   readonly origin: "ci_repair"
 }
 
-export type WorkItemRecord = IssueWorkItemRecord | CiRepairWorkItemRecord
+export interface SpecValidationWorkItemRecord extends WorkItemRecordBase {
+  readonly origin: "spec_validation"
+}
+
+export type WorkItemRecord =
+  | IssueWorkItemRecord
+  | CiRepairWorkItemRecord
+  | SpecValidationWorkItemRecord
 
 export const isIssueWorkItem = (
   workItem: WorkItemRecord,

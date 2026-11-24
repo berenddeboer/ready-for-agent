@@ -63,6 +63,7 @@ describe("refreshLoadedRepository", () => {
               maxDurations: {
                 create_worktree: Duration.minutes(5),
                 install_dependencies: Duration.minutes(15),
+                validate_spec: Duration.hours(2),
                 implement: Duration.hours(2),
                 assess_changes: Duration.minutes(5),
                 pre_commit: Duration.hours(2),
@@ -83,6 +84,7 @@ describe("refreshLoadedRepository", () => {
               unfinishedCiRepairWorkItem: unused,
               startCiRepair: unused,
               considerAutomaticCiRepair: () => Effect.succeed(null),
+              considerSpecValidation: unused,
               authorizeAsCiRepair: unused,
               implementWith: unused,
               updateWorkItemExecutionProfile: unused,
@@ -152,6 +154,7 @@ describe("refreshLoadedRepository", () => {
     maxDurations: {
       create_worktree: Duration.minutes(5),
       install_dependencies: Duration.minutes(15),
+      validate_spec: Duration.hours(2),
       implement: Duration.hours(2),
       assess_changes: Duration.minutes(5),
       pre_commit: Duration.hours(2),
@@ -172,6 +175,7 @@ describe("refreshLoadedRepository", () => {
     unfinishedCiRepairWorkItem: unused,
     startCiRepair: unused,
     considerAutomaticCiRepair: () => Effect.succeed(null),
+    considerSpecValidation: unused,
     authorizeAsCiRepair: unused,
     implementWith: unused,
     updateWorkItemExecutionProfile: unused,
@@ -205,6 +209,56 @@ describe("refreshLoadedRepository", () => {
     releaseWaitingForBlockers: () => Effect.succeed(0),
     releaseWaitingForCiRepair: () => Effect.succeed(0),
   }
+
+  it("passes observed Specs and their original tracker to validation admission", () =>
+    Effect.gen(function* () {
+      const repository = makeRepositoryRecord()
+      const spec = {
+        nativeId: "42",
+        displayId: "42",
+        url: "https://github.com/acme/widgets/issues/42",
+        readiness: "all-descendants-closed" as const,
+        descendants: [{ nativeId: "child", closureReason: null }] as const,
+      }
+      const candidates: unknown[] = []
+      yield* refreshLoadedRepository({
+        repository,
+        githubOperationOrigin: "polling",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            stubDbServiceLayer({
+              listRepositories: Effect.succeed([repository]),
+            }),
+            stubGitHubServiceLayer(),
+            stubGitLabServiceLayer(),
+            stubAzureDevOpsServiceLayer(),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () =>
+                Effect.succeed({
+                  fetched: 0,
+                  inserted: 0,
+                  updated: 0,
+                  deleted: 0,
+                  unchanged: 0,
+                  competingObservations: [],
+                  githubSpecObservations: [spec],
+                }),
+            }),
+            Layer.succeed(WorkItemLifecycle, {
+              ...idleLifecycle,
+              considerSpecValidation: (loaded, observation) =>
+                Effect.sync(() => {
+                  candidates.push([loaded.id, observation])
+                }),
+            }),
+          ),
+        ),
+      )
+      expect(candidates).toEqual([
+        [repository.id, { ...spec, tracker: "github" }],
+      ])
+    }).pipe(Effect.runPromise))
 
   it("observes CI even when Issue reconciliation fails", () =>
     Effect.gen(function* () {

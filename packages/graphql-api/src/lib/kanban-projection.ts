@@ -26,7 +26,7 @@ export const includeWorkItemOnIssueBoard = (
   workItem: WorkItemRecord,
   relevantNativeIds: ReadonlySet<string>,
 ): boolean =>
-  workItem.origin === "ci_repair" ||
+  workItem.origin !== "issue" ||
   isJobsCompletedWorkItemState(workItem.state) ||
   isJobsWorkingWorkItem(workItem) ||
   relevantNativeIds.has(workItem.issueSource.nativeId)
@@ -68,7 +68,7 @@ const BUILD_LIFECYCLE_STATES = new Set([
   "PRE_COMMIT",
 ])
 
-const REVIEW_LIFECYCLE_STATES = new Set(["REVIEW"])
+const REVIEW_LIFECYCLE_STATES = new Set(["REVIEW", "VALIDATE_SPEC"])
 
 const PR_LIFECYCLE_STATES = new Set([
   "COMMIT",

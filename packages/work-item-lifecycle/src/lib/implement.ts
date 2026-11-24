@@ -53,41 +53,11 @@ import {
   isLinearIssueSource,
   notifyLinearWorkStarted,
 } from "./linear-milestones.js"
+import { persistSessionIdMidRun } from "./persist-agent-session.js"
 import { promptUserContentSection } from "./sanitize-prompt-user-content.js"
 import { loadScopeHandoff } from "./scope-handoff.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { workItemAttachmentDirectory } from "./work-item-attachment-directory.js"
-
-const persistSessionIdMidRun = (
-  workItemId: string,
-  sessionId: string,
-  repositoryId: string,
-): Effect.Effect<void, never, SqlClient.SqlClient | DbService> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const db = yield* DbService
-    const now = Date.now()
-    const rows = (yield* sql.unsafe(
-      `UPDATE work_item
-       SET session_id = ?, updated_at = ?
-       WHERE id = ?
-         AND (session_id IS NULL OR session_id = '' OR session_id = ?)
-       RETURNING id`,
-      [sessionId, now, workItemId, sessionId],
-    )) as readonly { readonly id: string }[]
-    if (rows[0]) {
-      yield* db.notifyWorkItemsChanged(repositoryId)
-    }
-  }).pipe(
-    Effect.catch((error) =>
-      Effect.logWarning("Failed to persist Agent session id mid-implement", {
-        workItemId,
-        sessionId,
-        error,
-      }),
-    ),
-    Effect.asVoid,
-  )
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
   Effect.gen(function* () {

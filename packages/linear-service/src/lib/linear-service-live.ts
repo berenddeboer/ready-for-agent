@@ -813,6 +813,7 @@ export const makeLinearService = (options: {
         seenCursors: new Set<string>(),
       })
       const pending = [firstPage(specId)]
+      const descendants: { nativeId: string; closureReason: string }[] = []
       let hasOpenDescendant = false
       for (let offset = 0; offset < pending.length; ) {
         // Each alias keeps its own cursor; bounding the batch also bounds
@@ -878,13 +879,22 @@ export const makeLinearService = (options: {
             }
             if (isLinearOpenStateType(child.state.type)) {
               hasOpenDescendant = true
+            } else {
+              descendants.push({
+                nativeId: child.id,
+                closureReason: child.state.type,
+              })
             }
           }
         }
       }
-      return hasOpenDescendant || seen.size === 1
-        ? "waiting"
-        : "all-descendants-closed"
+      const [first, ...rest] = descendants
+      return hasOpenDescendant || first === undefined
+        ? { readiness: "waiting" as const }
+        : {
+            readiness: "all-descendants-closed" as const,
+            descendants: [first, ...rest] as const,
+          }
     },
   )
 
@@ -996,14 +1006,16 @@ export const makeLinearService = (options: {
         if (!isLinearOpenStateType(spec.state.type)) {
           continue
         }
-        const readiness = yield* observeDescendants(spec.id).pipe(
-          Effect.catch(() => Effect.succeed("hierarchy-unavailable" as const)),
+        const hierarchy = yield* observeDescendants(spec.id).pipe(
+          Effect.catch(() =>
+            Effect.succeed({ readiness: "hierarchy-unavailable" as const }),
+          ),
         )
         observations.push({
           nativeId: spec.id,
           displayId: spec.identifier,
           url: spec.url,
-          readiness,
+          ...hierarchy,
         })
       }
       return observations
@@ -1015,6 +1027,7 @@ export const makeLinearService = (options: {
           variables: { id: nativeId },
           schema: SpecSchema,
           describe: `reading Linear Spec ${nativeId}`,
+          requireCompleteData: true,
         })
         if (!issue)
           return yield* requestError(`Linear Issue ${nativeId} not found`)
@@ -1029,6 +1042,7 @@ export const makeLinearService = (options: {
             variables: { id: nativeId, after },
             schema: SpecCommentsSchema,
             describe: `reading comments for Linear Spec ${nativeId}`,
+            requireCompleteData: true,
           })
           if (!page.issue) {
             return yield* requestError(`Linear Issue ${nativeId} not found`)

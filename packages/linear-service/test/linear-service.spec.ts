@@ -296,6 +296,7 @@ describe("Linear Spec observation", () => {
         displayId: archivedSpec.identifier,
         url: archivedSpec.url,
         readiness: "all-descendants-closed",
+        descendants: [{ nativeId: "closed-child", closureReason: "completed" }],
       },
     ])
   })

@@ -59,7 +59,7 @@ const BUILD_PHASES = new Set([
   "PRE_COMMIT",
 ])
 
-const REVIEW_PHASES = new Set(["REVIEW"])
+const REVIEW_PHASES = new Set(["REVIEW", "VALIDATE_SPEC"])
 
 const CHECKS_PHASES = new Set([
   "GITHUB_STATUS_CHECKS",

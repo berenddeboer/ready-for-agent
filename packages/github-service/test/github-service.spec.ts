@@ -218,6 +218,11 @@ describe("GitHub Spec observation", () => {
           ["2", "waiting"],
           ["3", "all-descendants-closed"],
         ])
+        expect((yield* service.observeSpecs(repository))[2]).toMatchObject({
+          descendants: [
+            { nativeId: "abandoned", closureReason: "NOT_PLANNED" },
+          ],
+        })
         parents[4] = spec(5)
         expect(yield* observe()).toContainEqual(["5", "all-descendants-closed"])
       }),

@@ -40,6 +40,7 @@ export const defaultIssueTrackerForForge = (forge: Forge): IssueTracker =>
 export const WORK_ITEM_ORIGINS = [
   "issue",
   "ci_repair",
+  "spec_validation",
 ] as const
 
 export const WorkItemOrigin = Schema.Literals(WORK_ITEM_ORIGINS)

@@ -51,6 +51,18 @@ export const refreshLoadedRepository = Effect.fn("refreshLoadedRepository")(
         const summary = yield* reconciler.reconcile(repository, {
           githubOperation: { origin: githubOperationOrigin },
         })
+        for (const observation of summary.linearSpecObservations ?? []) {
+          yield* lifecycle.considerSpecValidation(repository, {
+            ...observation,
+            tracker: "linear",
+          })
+        }
+        for (const observation of summary.githubSpecObservations ?? []) {
+          yield* lifecycle.considerSpecValidation(repository, {
+            ...observation,
+            tracker: "github",
+          })
+        }
         yield* lifecycle.stopForCompetingIssueClosingPullRequests(
           repository.id,
           summary.competingObservations,
