@@ -16,9 +16,10 @@ approved design also promised a deployed endpoint. Nothing owned that promise
 once the last child closed. The final check belongs to the Harness, independently
 of who implemented the children or whether their individual PRs should merge.
 
-The spec-publishing workflow applies the `spec` label to the parent. The Harness initiates
-a separate **Spec Validation Work Item** for that spec, never a validation
-ticket. This preserves the [leaf-only implementation rule](0006-only-leaf-issues-are-work-units.md):
+The spec-publishing workflow applies the [`spec` label](../agents/triage-labels.md#spec-label)
+to the parent. The Harness initiates a separate **Spec Validation Work Item**
+for that spec, never a validation ticket. This preserves the
+[leaf-only implementation rule](0006-only-leaf-issues-are-work-units.md):
 the validator assesses the integrated result; it does not implement the parent.
 A [CI Repair Work Item](0075-ci-repair-work-item.md) is the existing precedent
 for Harness-initiated work without a tracker ticket.
@@ -35,9 +36,11 @@ closed intermediate ticket does not hide an open descendant. This is a tracker
 hierarchy read for validation, not a change to the depth of implementation
 intake. A partial or unreadable hierarchy cannot establish closure. A newly
 published spec with zero children does not qualify. The filtered list
-of Issues eligible for agent work cannot establish this. A cancellation counts
-as closure for scheduling, not as evidence of delivery: a cancelled duplicate
-may already be covered, while a cancelled requirement may still be missing.
+of Issues eligible for agent work cannot establish this. Pass each descendant's
+tracker-reported closure reason to the validator so it can distinguish completed
+work from a cancellation or “not planned” closure. An unavailable reason is
+unknown, not evidence of completion. A cancelled duplicate may already be
+covered elsewhere; cancelling the only ticket for a requirement does not waive it.
 Repeated observations of the same closure do not start more Work Items. If a
 child is added or reopened during validation, withhold the verdict until all
 children are closed again.
@@ -63,10 +66,11 @@ labelling a child does not itself initiate implementation; ordinary intake
 applies. The parent stays open while work or a decision is outstanding.
 
 If one requirement is demonstrably unmet and another needs interpretation,
-file the known gap immediately and request **Decision Needed** on the validation
-Work Item for the ambiguity. Report both on the parent. Resume returns to
-validation, not implementation. Retain an answer received while a descendant
-is open and wait for all descendants to close before validating again.
+file the known gap immediately and put the validation Work Item in the existing
+[Decision needed](../../CONTEXT.md#decision-needed) handoff under Needs Human.
+Report both on the parent. For this Work Item, explicit Resume continues
+validation rather than returning to Implement. Retain an answer received while
+a descendant is open and wait for all descendants to close before validating again.
 
 When all children close again, validate the whole spec, reusing evidence where
 it still applies. Read follow-up comments and the reason for closure before
@@ -91,7 +95,8 @@ rather than repeatedly filing the same ticket.
    poll or restart. The local endpoint works; the deployed endpoint returns
    `404`. The validator cites both observations, creates a native follow-up
    under the parent, and leaves the spec open.
-3. When that follow-up closes, the validator reads the closing conversation.
-   A working deployed endpoint is evidence of delivery; an explicit human
-   decision that hosted support is no longer needed is an amendment. Either
-   can resolve the gap, but the parent summary must say which happened.
+3. When that follow-up closes, the validator reads its closure reason and
+   closing conversation. A working deployed endpoint is evidence of delivery.
+   If the ticket was cancelled, a human comment saying hosted support is no
+   longer needed is an amendment; the cancellation alone is not. The parent
+   summary must say whether deployed behaviour was verified or waived.
