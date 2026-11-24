@@ -264,6 +264,7 @@ const makeGitHubLayer = (
     observeCiGate: () =>
       Effect.succeed({ defaultBranch: "main", observations: [] }),
     observeSpecs: options.observeSpecs ?? (() => Effect.succeed([])),
+    publishSpecFollowUps: () => Effect.die("not used"),
     listReadyIssues: ({ projectPath }) => {
       actions.push(`github:${projectPath}`)
       return options.error ? Effect.fail(options.error) : Effect.succeed(issues)

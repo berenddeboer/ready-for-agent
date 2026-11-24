@@ -18,6 +18,8 @@ export const stubGitHubServiceLayer = (
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       observeSpecs: () => Effect.succeed([]),
+      publishSpecFollowUps: () =>
+        Effect.die("Unexpected GitHub Spec publication"),
       readSpecBaseline: () => Effect.succeed({ kind: "not-spec" }),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       findOpenPullRequestNumber: () => Effect.succeed(1),

@@ -1,6 +1,7 @@
 import { Context, Duration, Effect, Layer, Schema } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 import {
+  PublishedSpecFollowUps,
   type ReadyLabeledIssue,
   SpecBaselineResult,
 } from "@ready-for-agent/forge-contract"
@@ -348,6 +349,30 @@ export const keymaxxerLinearLayer = (options: {
                 tokenName,
                 decode: () => Effect.void,
                 describe: `posting a Linear milestone comment on Issue ${nativeId}`,
+              }),
+          ),
+        publishSpecFollowUps: (projectId, input) =>
+          withToken(
+            () => ambient.publishSpecFollowUps(projectId, input),
+            (tokenName) =>
+              callHelper({
+                operation: "publish-spec-follow-ups",
+                args: [
+                  encodeArgument(projectId),
+                  encodeArgument(JSON.stringify(input)),
+                ],
+                tokenName,
+                describe: "publishing Linear Spec follow-ups",
+                decode: (stdout) =>
+                  Schema.decodeUnknownEffect(
+                    Schema.fromJsonString(PublishedSpecFollowUps),
+                  )(stdout).pipe(
+                    Effect.mapError(() =>
+                      requestError(
+                        "Linear returned invalid Spec follow-up links",
+                      ),
+                    ),
+                  ),
               }),
           ),
         hasCredentials: () =>

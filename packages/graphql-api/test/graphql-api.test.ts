@@ -230,6 +230,7 @@ const workItem = {
 
 const defaultGithub: GitHubServiceShape = {
   observeSpecs: () => Effect.succeed([]),
+  publishSpecFollowUps: () => Effect.die("not used"),
   getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   getOpenPullRequestNumber: () => Effect.succeed(1),
   findOpenPullRequestNumber: () => Effect.succeed(1),

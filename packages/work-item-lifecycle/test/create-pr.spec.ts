@@ -144,6 +144,7 @@ const stubGitHub = (
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       observeSpecs: () => Effect.die("not used"),
+      publishSpecFollowUps: () => Effect.die("not used"),
       ...overrides,
     }),
   )

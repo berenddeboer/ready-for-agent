@@ -5,11 +5,17 @@ import { DbService } from "@ready-for-agent/db-service"
 import {
   type ApprovedSpecRequirementChecklist,
   ClosedSpecDescendants,
+  type PublishedSpecFollowUps,
   SpecBaseline,
+  SpecGapId,
   type SpecObservation,
   SpecRequirementEnvironment,
+  formatSpecFollowUpLinks,
 } from "@ready-for-agent/forge-contract"
-import { GitHubService } from "@ready-for-agent/github-service"
+import {
+  GitHubService,
+  isGitHubThrottledError,
+} from "@ready-for-agent/github-service"
 import { STEP_RUN_REASON } from "@ready-for-agent/lifecycle-model"
 import { LinearService } from "@ready-for-agent/linear-service"
 import { refreshSpecValidationCheckout } from "./create-worktree.js"
@@ -49,20 +55,49 @@ const NonBlank = Schema.String.pipe(
 const Evidence = Schema.Struct({
   kind: Schema.Literals([
     "delivery",
+    "defect",
     "unavailable",
     "human-verification",
+    "human-access",
     "closure",
     "disclaimer",
     "unshipped-experiment",
   ]),
   environment: SpecRequirementEnvironment,
   detail: NonBlank,
+  gapId: Schema.optionalKey(SpecGapId),
 })
+const FollowUpTask = Schema.Struct({
+  gapId: SpecGapId,
+  title: NonBlank,
+  task: NonBlank,
+  acceptanceCheck: NonBlank,
+})
+const FollowUp = Schema.Union([
+  Schema.Struct({
+    ...FollowUpTask.fields,
+    kind: Schema.Literal("fix"),
+    owner: Schema.Literals(["agent", "human"]),
+  }),
+  Schema.Struct({
+    ...FollowUpTask.fields,
+    kind: Schema.Literal("human-verification"),
+  }),
+])
+const FindingStatus = Schema.Literals(["met", "unmet", "unverified"])
 const ReportedFindings = Schema.Array(
   Schema.Struct({
     requirementId: NonBlank,
-    status: Schema.Literals(["met", "unmet", "unverified"]),
-    evidence: Schema.NonEmptyArray(Evidence),
+    status: FindingStatus,
+    evidence: Schema.NonEmptyArray(
+      Schema.Struct({
+        ...Evidence.fields,
+        gapId: Schema.optionalKey(Schema.Unknown),
+      }),
+    ),
+    // Decode tasks individually so malformed task details cannot hide
+    // independently actionable work or invalidate the requirement evidence.
+    followUps: Schema.optionalKey(Schema.Unknown),
   }),
 )
 const ValidationReport = Schema.fromJsonString(
@@ -82,15 +117,132 @@ const ValidationReport = Schema.fromJsonString(
     }),
   ]),
 )
-type Finding = ApprovedSpecRequirementChecklist["requirements"][number] & {
-  readonly status: "met" | "unmet" | "unverified"
-  readonly evidence: readonly (typeof Evidence.Type)[]
-  readonly baselineReference: string
-}
+const DraftsJson = Schema.fromJsonString(Schema.Array(Schema.Unknown))
+const DraftRow = Schema.Struct({
+  requirementId: NonBlank,
+  followUps: Schema.Array(Schema.Unknown),
+})
+const DraftIdentity = Schema.Struct({
+  gapId: SpecGapId,
+  kind: Schema.Literals(["fix", "human-verification"]),
+})
+const SavedFindings = Schema.Array(
+  Schema.Struct({
+    id: NonBlank,
+    requirement: NonBlank,
+    environment: SpecRequirementEnvironment,
+    baselineReference: NonBlank,
+    status: FindingStatus,
+    evidence: Schema.NonEmptyArray(Evidence),
+    evidenceNote: Schema.optionalKey(NonBlank),
+    followUps: Schema.optionalKey(Schema.Array(FollowUp)),
+    followUpLinks: Schema.optionalKey(
+      Schema.Array(Schema.Struct({ gapId: SpecGapId, url: NonBlank })),
+    ),
+  }),
+)
+// Decision handoffs also store findings. Only an explicit pending publication
+// may bypass the hierarchy gate and resume tracker writes.
+const PendingPublication = Schema.fromJsonString(
+  Schema.Struct({
+    kind: Schema.Literal("pending_follow_ups"),
+    baseline: SpecBaseline,
+    findings: SavedFindings,
+    decisionRequest: Schema.optionalKey(NonBlank),
+  }),
+)
+type PendingPublication = typeof PendingPublication.Type
+type Finding = (typeof SavedFindings.Type)[number]
 const findingsMarker = "READY_FOR_AGENT_SPEC_FINDINGS:"
 
 const failed = (message: string, cause?: unknown) =>
   new LifecycleStepFailedError({ message, cause })
+
+const gapEvidence = ({ evidence, environment }: Finding) =>
+  evidence.filter(
+    (item) =>
+      item.environment === environment &&
+      item.gapId !== undefined &&
+      (item.kind === "defect" || item.kind === "human-access"),
+  )
+
+const missingDrafts = (finding: Finding) =>
+  gapEvidence(finding).filter(
+    ({ gapId }) => !finding.followUps?.some((task) => task.gapId === gapId),
+  )
+
+const usableDrafts = (finding: Finding, raw: unknown) => {
+  const observed = gapEvidence(finding)
+  const byGap = new Map<string, typeof FollowUp.Type | null>()
+  // Decode each draft independently so a malformed entry cannot block valid siblings.
+  for (const candidate of Array.isArray(raw) ? raw : []) {
+    const decoded = Schema.decodeUnknownOption(FollowUp)(candidate)
+    if (decoded._tag === "None") continue
+    const task = decoded.value
+    const matching = observed.filter(({ gapId }) => gapId === task.gapId)
+    if (
+      matching.length === 0 ||
+      matching.some(
+        ({ kind }) =>
+          kind !== (task.kind === "fix" ? "defect" : "human-access"),
+      )
+    )
+      continue
+    byGap.set(task.gapId, byGap.has(task.gapId) ? null : task)
+  }
+  return [...byGap.values()].filter((task) => task !== null)
+}
+
+const attachGapIds = (
+  [first, ...rest]: readonly [
+    typeof Evidence.Type,
+    ...(typeof Evidence.Type)[],
+  ],
+  environment: Finding["environment"],
+  rawDrafts: unknown,
+): Finding["evidence"] => {
+  const applicable = [first, ...rest].filter(
+    (item) => item.environment === environment,
+  )
+  const taken = new Set(
+    applicable.flatMap(({ gapId }) => (gapId === undefined ? [] : [gapId])),
+  )
+  const orphanedHumanTasks = new Set<string>()
+  for (const raw of Array.isArray(rawDrafts) ? rawDrafts : []) {
+    const task = Schema.decodeUnknownOption(DraftIdentity)(raw)
+    if (task._tag === "None") continue
+    const { kind, gapId } = task.value
+    if (
+      kind === "human-verification" &&
+      !applicable.some((item) => item.gapId === gapId)
+    ) {
+      orphanedHumanTasks.add(gapId)
+    }
+    taken.add(gapId)
+  }
+  const untaggedChecks = applicable.filter(
+    ({ kind, gapId }) => gapId === undefined && kind === "human-access",
+  )
+  // Only infer a missing link when there is exactly one possible match.
+  const [unmatchedCheck] = untaggedChecks.length === 1 ? untaggedChecks : []
+  const [unmatchedTask] =
+    orphanedHumanTasks.size === 1 ? orphanedHumanTasks : []
+  let serial = 0
+  const attach = (item: typeof Evidence.Type) => {
+    if (item.environment !== environment || item.gapId !== undefined)
+      return item
+    if (item === unmatchedCheck && unmatchedTask !== undefined)
+      return { ...item, gapId: unmatchedTask }
+    if (item.kind !== "defect" && item.kind !== "human-access") return item
+    let gapId: string
+    do {
+      gapId = `recovered-gap-${++serial}`
+    } while (taken.has(gapId))
+    taken.add(gapId)
+    return { ...item, gapId }
+  }
+  return [attach(first), ...rest.map(attach)]
+}
 
 const decodeReport = (assistantText: string) => {
   // Some adapters concatenate assistant progress messages with the final
@@ -144,16 +296,50 @@ const reconcileFindings = (
         ],
       }
     }
-    const hasDeliveryEvidence = finding.evidence.some(
-      (evidence) =>
-        evidence.kind === "delivery" &&
-        evidence.environment === entry.environment,
+    const normalizeEvidence = ({
+      gapId,
+      ...evidence
+    }: (typeof ReportedFindings.Type)[number]["evidence"][number]): typeof Evidence.Type => {
+      const id = Schema.decodeUnknownOption(SpecGapId)(gapId)
+      return id._tag === "Some" ? { ...evidence, gapId: id.value } : evidence
+    }
+    const [first, ...rest] = finding.evidence
+    const reportedEvidence = [
+      normalizeEvidence(first),
+      ...rest.map(normalizeEvidence),
+    ] as const
+    const applicable = reportedEvidence.filter(
+      ({ environment }) => environment === entry.environment,
     )
-    return {
+    const hasDefect = applicable.some(({ kind }) => kind === "defect")
+    const status =
+      finding.status === "unverified"
+        ? "unverified"
+        : hasDefect
+          ? "unmet"
+          : finding.status === "met" &&
+              applicable.some(({ kind }) => kind === "delivery")
+            ? "met"
+            : "unverified"
+    const normalized: Finding = {
       ...entry,
       baselineReference,
-      status: hasDeliveryEvidence ? finding.status : "unverified",
-      evidence: finding.evidence,
+      status,
+      ...(finding.status === "unmet" && !hasDefect
+        ? {
+            evidenceNote:
+              "The validator reported unmet, but did not record a directly observed defect in the required environment. No fix follow-up was filed on this evidence.",
+          }
+        : {}),
+      evidence: attachGapIds(
+        reportedEvidence,
+        entry.environment,
+        finding.followUps,
+      ),
+    }
+    return {
+      ...normalized,
+      followUps: usableDrafts(normalized, finding.followUps),
     }
   })
 }
@@ -183,9 +369,9 @@ const prompt = (
     "Read the exact incorporated design revisions. If any material evidence or approved revision is inaccessible, report the affected claims as unverified; do not substitute a newer revision.",
     "Choose and run appropriate non-destructive experiments. You may install dependencies and use isolated scratch changes for diagnosis, but do not implement, commit, push, deploy, or write to the tracker. Keep credentials out of findings.",
     "Cover every entry in the approved requirement checklist by its exact ID and stated environment. Use met for supported delivery, unmet for a directly demonstrated gap, and unverified when the result is not observable. A working local MCP handshake only supports local delivery; an expected deployed MCP endpoint returning 404 on the correct request is unmet; unavailable access is unverified.",
-    "Only evidence of the integrated version in the claimed environment is kind 'delivery' (which can support either met or unmet). Child closure, a merged scope disclaimer, and a successful experiment that needs an unshipped patch are not delivery evidence.",
+    "Use kind 'defect' for directly observed failures of the integrated version in the claimed environment and kind 'delivery' for other direct observations there. Child closure, a merged scope disclaimer, and a successful experiment that needs an unshipped patch are not delivery evidence.",
     "Read relevant parent and descendant conversations on the original tracker where available. A cancellation, a child PR's scope disclaimer, or an agent's deferral is not a human amendment, even if posted under the same account. Account identity alone is not authorship evidence. Never count those as approval or delivery.",
-    "Investigate differences in approved versions, unclear human intent, or uncertain authorship. If unresolved and the answer would change your verdict, request a concrete operator decision. Cite the versions, comments and observations that matter. Keep any independent findings. A concrete verification task a person can perform (for example, checking an endpoint you cannot access) is unverified with kind 'human-verification', not a decision. State the specific check and what result would settle it. Do not file tickets or amend the Spec.",
+    "Investigate differences in approved versions, unclear human intent, or uncertain authorship. If unresolved and the answer would change your verdict, request a concrete operator decision. Cite the versions, comments and observations that matter. Keep any independent findings. A concrete check requiring human-held access is unverified with evidence kind 'human-access', not a decision. Do not file tickets or amend the Spec.",
     ...(priorDecision === null
       ? []
       : [
@@ -199,7 +385,9 @@ const prompt = (
       : []),
     `End your reply with ${findingsMarker} on its own line and then one JSON payload. Do not use code fences or add text after the payload.`,
     'For Decision Needed use {"kind":"decision_needed","question":"concrete question with options","evidence":["supporting observation or citation"],"findings":[...independent findings]}. Include independent observations even if no approved checklist is available; they are supporting evidence, not an approved verdict.',
-    'Use one entry per approved requirement: {"requirementId":"exact approved ID","status":"met|unmet|unverified","evidence":[{"kind":"delivery|unavailable|human-verification|closure|disclaimer|unshipped-experiment","environment":"local|deployed|other","detail":"exact target, method, and observed result, or what is needed to verify it"}]}.',
+    'Use one entry per approved requirement: {"requirementId":"exact approved ID","status":"met|unmet|unverified","evidence":[{"kind":"delivery|defect|unavailable|human-access|closure|disclaimer|unshipped-experiment","environment":"local|deployed|other","detail":"exact target, method, and observed result, or what prevented observation"}]}. Use human-access only for a concrete check requiring human-held access and unavailable for other unobserved results. Give every defect and human-access observation a distinct descriptive "gapId" (lowercase kebab case); reuse that ID on its task. A known defect can coexist with an unverified overall requirement.',
+    'Put independently actionable gaps in a "followUps" array within the requirement entry. For each demonstrated defect include {"gapId":"unique-lowercase-kebab-case-id","kind":"fix","owner":"agent|human","title":"concise issue title","task":"specific missing work","acceptanceCheck":"exact check and expected pass result"}. Use a distinct, descriptive ID per gap within the requirement (not its position). Use human only when the work genuinely requires a person.',
+    'For a specific unverified check requiring human-held access, include a follow-up {"gapId":"unique-lowercase-kebab-case-id","kind":"human-verification","title":"concise verification title","task":"who has access and what they should check","acceptanceCheck":"exact check and expected pass result"}. Omit tasks for other unverified checks and met requirements. Never propose a fix based on unavailable evidence.',
     promptUserContentSection(
       "approved_spec",
       JSON.stringify(
@@ -233,18 +421,148 @@ const formatFindings = (
       (url) => `Approved design revision: ${url}`,
     ),
     `Integrated checkout: \`${commit}\``,
-    ...findings.map(
-      ({ requirement, baselineReference, environment, status, evidence }) =>
-        [
-          `### ${status.toUpperCase()} — ${requirement}`,
-          `Baseline: ${baselineReference} (${environment})`,
-          ...evidence.map(
-            ({ kind, environment, detail }) =>
-              `- ${kind} (${environment}): ${detail}`,
-          ),
-        ].join("\n\n"),
+    ...findings.map((finding) =>
+      [
+        `### ${finding.status.toUpperCase()} — ${finding.requirement}`,
+        `Baseline: ${finding.baselineReference} (${finding.environment})`,
+        ...finding.evidence.map(
+          ({ kind, environment, detail }) =>
+            `- ${kind} (${environment}): ${detail}`,
+        ),
+        ...(finding.evidenceNote === undefined ? [] : [finding.evidenceNote]),
+        ...missingDrafts(finding).map(
+          ({ gapId }) => `Follow-up not yet specified: ${gapId}`,
+        ),
+      ].join("\n\n"),
     ),
   ].join("\n\n")
+
+const recordFindings = Effect.fn("recordSpecFindings")(function* ({
+  repositoryId,
+  workItemId,
+  input,
+  commit,
+  sessionId,
+  findings,
+}: {
+  repositoryId: string
+  workItemId: string
+  input: Parameters<typeof formatFindings>[0]
+  commit: string
+  sessionId: string
+  findings: readonly Finding[]
+}) {
+  const summary = formatFindings(input, commit, findings)
+  const [first, ...rest] = findings.flatMap(
+    ({
+      id,
+      requirement,
+      baselineReference,
+      evidence,
+      environment,
+      followUps,
+    }) =>
+      (followUps ?? []).map((followUp) => {
+        const verification = followUp.kind === "human-verification"
+        const owner = followUp.kind === "fix" ? followUp.owner : "human"
+        return {
+          requirementId: id,
+          gapId: followUp.gapId,
+          title: followUp.title,
+          label:
+            owner === "agent"
+              ? ("ready-for-agent" as const)
+              : ("ready-for-human" as const),
+          body: [
+            `## Approved requirement\n${requirement}\n\nSpec: ${input.spec.url}\n\nBaseline: ${baselineReference}`,
+            verification
+              ? "## Evidence — unverified\nThe check could not be completed; this is not a confirmed implementation defect."
+              : "## Observed evidence — unmet",
+            ...evidence
+              .filter(
+                ({ gapId, environment: observedEnvironment }) =>
+                  gapId === followUp.gapId &&
+                  observedEnvironment === environment,
+              )
+              .map(
+                ({ detail, kind, environment }) =>
+                  `- ${kind} (${environment}): ${detail}`,
+              ),
+            `## ${verification ? "Verification task" : "Missing work"} (${owner})\n${followUp.task}`,
+            `## Acceptance check\n${followUp.acceptanceCheck}`,
+          ].join("\n\n"),
+        }
+      }),
+  )
+  let links: PublishedSpecFollowUps = []
+  if (first !== undefined) {
+    const db = yield* DbService
+    const repository = (yield* db.listRepositories).find(
+      ({ id }) => id === repositoryId,
+    )
+    const publication = {
+      parentId: input.spec.nativeId,
+      parentUrl: input.spec.url,
+      workItemId,
+      findings: summary,
+      children: [first, ...rest] as const,
+    }
+    if (repository?.issueTracker !== input.spec.tracker || repository.paused) {
+      return yield* failed(
+        "The original Spec Issue Tracker is not configured or the repository is paused.",
+      )
+    }
+    links = yield* Effect.gen(function* () {
+      if (input.spec.tracker === "linear") {
+        if (repository.linearProjectId === null) {
+          return yield* failed("The original Linear project is not configured.")
+        }
+        const linear = yield* LinearService
+        return yield* linear.publishSpecFollowUps(
+          repository.linearProjectId,
+          publication,
+        )
+      }
+      const github = yield* GitHubService
+      return yield* github.publishSpecFollowUps(
+        {
+          forge: "github",
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
+        },
+        publication,
+      )
+    }).pipe(
+      Effect.mapError((cause) =>
+        isGitHubThrottledError(cause)
+          ? cause
+          : failed(
+              `Could not publish the Spec follow-ups: ${cause.message}`,
+              cause,
+            ),
+      ),
+    )
+  }
+  return {
+    kind: "recorded" as const,
+    sessionId,
+    startingCommitOid: commit,
+    completionSummary:
+      links.length === 0
+        ? summary
+        : `${summary}\n\n${formatSpecFollowUpLinks(links)}`,
+    specValidationFindings: JSON.stringify(
+      findings.map((finding) => {
+        const followUpLinks = links
+          .filter(({ requirementId }) => requirementId === finding.id)
+          .map(({ gapId, url }) => ({ gapId, url }))
+        return followUpLinks.length === 0
+          ? finding
+          : { ...finding, followUpLinks }
+      }),
+    ),
+  }
+})
 
 const observeSpecBeforeTurn = Effect.fn("observeSpecBeforeTurn")(
   function* (repositoryId: string, spec: SpecValidationInput["spec"]) {
@@ -254,7 +572,8 @@ const observeSpecBeforeTurn = Effect.fn("observeSpecBeforeTurn")(
     const repository = (yield* db.listRepositories).find(
       ({ id }) => id === repositoryId,
     )
-    if (repository === undefined || repository.paused) return undefined
+    if (repository?.issueTracker !== spec.tracker || repository.paused)
+      return undefined
     let observations: readonly SpecObservation[]
     if (spec.tracker === "linear") {
       if (repository.linearProjectId === null) return undefined
@@ -270,7 +589,9 @@ const observeSpecBeforeTurn = Effect.fn("observeSpecBeforeTurn")(
       )
     }
     const observed = observations.find(
-      ({ nativeId }) => nativeId === spec.nativeId,
+      ({ nativeId, url }) =>
+        nativeId === spec.nativeId &&
+        (spec.tracker === "linear" || url === spec.url),
     )
     return observed?.readiness === "all-descendants-closed"
       ? observed.descendants
@@ -385,6 +706,151 @@ export const validateSpec = (
         "Spec Validation requires a checkout of the integrated version.",
       )
     }
+    const sql = yield* SqlClient.SqlClient
+    const checkpoint = (
+      pending: PendingPublication,
+      commit: string,
+      sessionId: string,
+    ) =>
+      sql
+        .unsafe(
+          "UPDATE work_item SET spec_validation_findings = ?, starting_commit_oid = ?, session_id = ? WHERE id = ? RETURNING id",
+          [JSON.stringify(pending), commit, sessionId, context.workItemId],
+        )
+        .pipe(
+          Effect.mapError((cause) =>
+            failed("Could not checkpoint Spec findings.", cause),
+          ),
+          Effect.flatMap((rows) =>
+            rows.length > 0
+              ? Effect.void
+              : Effect.fail(failed("Could not checkpoint Spec findings.")),
+          ),
+        )
+    const publish = (
+      pending: PendingPublication,
+      commit: string,
+      sessionId: string,
+    ) =>
+      Effect.gen(function* () {
+        const { baseline, findings, decisionRequest } = pending
+        const outcome = yield* recordFindings({
+          ...context,
+          input: { spec: input.spec, baseline },
+          commit,
+          sessionId,
+          findings,
+        })
+        const undrafted = findings.flatMap((finding) =>
+          missingDrafts(finding).map(({ gapId }) => `${finding.id}/${gapId}`),
+        )
+        if (undrafted.length > 0) {
+          return yield* failed(
+            `Missing valid follow-up drafts for ${undrafted.join(", ")}. Retry to draft them from the saved evidence.`,
+          )
+        }
+        return decisionRequest === undefined
+          ? outcome
+          : {
+              ...outcome,
+              kind: "decision_needed" as const,
+              request: decisionRequest,
+            }
+      })
+    const [saved] = yield* sql
+      .unsafe<{
+        spec_validation_findings: string | null
+        session_id: string | null
+      }>(
+        "SELECT spec_validation_findings, session_id FROM work_item WHERE id = ?",
+        [context.workItemId],
+      )
+      .pipe(
+        Effect.mapError((cause) =>
+          failed("Could not read saved Spec findings.", cause),
+        ),
+      )
+    const publication = Schema.decodeUnknownOption(PendingPublication)(
+      saved?.spec_validation_findings,
+    )
+    if (publication._tag === "Some" && saved?.session_id) {
+      // Resume publication, not the validator. Our own partially filed
+      // children may already be preventing another validation turn.
+      let { findings } = publication.value
+      const pending = findings.flatMap((finding) => {
+        const missing = missingDrafts(finding)
+        return missing.length === 0
+          ? []
+          : [
+              {
+                requirementId: finding.id,
+                requirement: finding.requirement,
+                evidence: missing,
+              },
+            ]
+      })
+      if (pending.length > 0) {
+        const backend = yield* AgentBackend
+        const drafts = yield* backend
+          .continueTurn({
+            sessionId: saved.session_id,
+            replyToPromptOnly: true,
+            cwd: worktreePath,
+            model: context.model,
+            thinkingLevel: context.thinkingLevel,
+            timeout:
+              context.maxDuration ??
+              DEFAULT_LIFECYCLE_MAX_DURATIONS.validate_spec,
+            prompt: [
+              "Draft only the missing follow-up tasks for the saved observations below. Do not repeat validation, run experiments, edit files, or write to the tracker.",
+              'Return only a JSON array of {"requirementId":"given ID","followUps":[{"gapId":"given gap ID","kind":"fix|human-verification","title":"concise title","task":"specific work","acceptanceCheck":"concrete check and expected result"}]}. For a defect use kind fix and include "owner":"agent|human". Only for a human-access observation use kind human-verification. Do not invent evidence or change the approved requirements.',
+              promptUserContentSection(
+                "saved_gap_evidence",
+                JSON.stringify(pending),
+              ),
+            ].join("\n\n"),
+          })
+          .pipe(
+            Effect.flatMap((result) =>
+              Schema.decodeUnknownEffect(DraftsJson)(
+                result.assistantText?.trim(),
+              ),
+            ),
+            // An incomplete or failed drafting turn must not prevent the
+            // already valid tasks from being reconciled.
+            Effect.catch((error) =>
+              Effect.logWarning("Could not recover Spec follow-up drafts", {
+                workItemId: context.workItemId,
+                error,
+              }).pipe(Effect.as([])),
+            ),
+          )
+        const validRows = drafts.flatMap((raw) => {
+          const row = Schema.decodeUnknownOption(DraftRow)(raw)
+          return row._tag === "Some" ? [row.value] : []
+        })
+        findings = findings.map((finding) => {
+          const known = finding.followUps ?? []
+          const additions = usableDrafts(
+            finding,
+            validRows.flatMap(({ requirementId, followUps }) =>
+              requirementId === finding.id ? followUps : [],
+            ),
+          ).filter(({ gapId }) => !known.some((task) => task.gapId === gapId))
+          return { ...finding, followUps: [...known, ...additions] }
+        })
+        yield* checkpoint(
+          { ...publication.value, findings },
+          startingCommitOid,
+          saved.session_id,
+        )
+      }
+      return yield* publish(
+        { ...publication.value, findings },
+        startingCommitOid,
+        saved.session_id,
+      )
+    }
     let descendants = yield* observeSpecBeforeTurn(
       context.repositoryId,
       input.spec,
@@ -397,7 +863,6 @@ export const validateSpec = (
     }
     const backend = yield* AgentBackend
     const db = yield* DbService
-    const sql = yield* SqlClient.SqlClient
     // The answer lives in the durable validator session; read the handoff
     // from the ledger, not from an in-memory Resume request or worker slot.
     const [handoff] = yield* sql.unsafe<{ reason_message: string | null }>(
@@ -570,8 +1035,56 @@ export const validateSpec = (
         ? recorded(baseline, reconcileFindings(findings, checklist))
         : {}),
     })
+    const sameClosure = Effect.gen(function* () {
+      const confirmed = yield* observeSpecBeforeTurn(
+        context.repositoryId,
+        input.spec,
+      )
+      return (
+        confirmed !== undefined &&
+        confirmed.length === descendants.length &&
+        confirmed.every((entry) =>
+          descendants.some(
+            ({ nativeId, closureReason }) =>
+              nativeId === entry.nativeId &&
+              closureReason === entry.closureReason,
+          ),
+        )
+      )
+    })
+    const publishReport = (
+      baseline: SpecBaseline,
+      findings: readonly Finding[],
+      decisionRequest?: string,
+    ) =>
+      Effect.gen(function* () {
+        const pending: PendingPublication = {
+          kind: "pending_follow_ups",
+          baseline,
+          findings,
+          ...(decisionRequest === undefined ? {} : { decisionRequest }),
+        }
+        if (findings.some((finding) => gapEvidence(finding).length > 0)) {
+          // Only tracker publication or missing drafts need a retry checkpoint.
+          // Other findings are stored by the normal Step Run outcome.
+          yield* checkpoint(pending, evaluatedCommit, result.sessionId)
+        }
+        return yield* publish(pending, evaluatedCommit, result.sessionId)
+      })
     if ("kind" in report && report.kind === "decision_needed") {
-      return decision(report.question, report.evidence, report.findings)
+      const handoff = decision(
+        report.question,
+        report.evidence,
+        report.findings,
+      )
+      if (baseline && checklist) {
+        const findings = reconcileFindings(report.findings, checklist)
+        if (findings.some((finding) => gapEvidence(finding).length > 0)) {
+          if (!(yield* sameClosure)) return { kind: "waiting" as const }
+          return yield* publishReport(baseline, findings, handoff.request)
+        }
+      }
+      return handoff
     }
     const selected =
       "kind" in report &&
@@ -604,26 +1117,6 @@ export const validateSpec = (
       "kind" in report ? report.findings : report,
       selectedChecklist,
     )
-    const confirmed = yield* observeSpecBeforeTurn(
-      context.repositoryId,
-      input.spec,
-    )
-    if (
-      confirmed === undefined ||
-      confirmed.length !== descendants.length ||
-      !confirmed.every((entry) =>
-        descendants.some(
-          ({ nativeId, closureReason }) =>
-            nativeId === entry.nativeId &&
-            closureReason === entry.closureReason,
-        ),
-      )
-    )
-      return { kind: "waiting" as const }
-    return {
-      kind: "recorded" as const,
-      sessionId: result.sessionId,
-      startingCommitOid: evaluatedCommit,
-      ...recorded(source, findings),
-    }
+    if (!(yield* sameClosure)) return { kind: "waiting" as const }
+    return yield* publishReport(source, findings)
   })

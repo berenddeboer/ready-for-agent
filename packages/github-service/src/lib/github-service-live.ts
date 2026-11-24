@@ -27,16 +27,21 @@ import {
   type PrStatusCheckDiagnosticSource,
   type PrStatusCheckDiagnosticsOptions,
   type PrStatusCheckDiagnosticsRequest,
+  type PublishedSpecFollowUps,
   type PullRequestCheckStatus,
   type ReadyLabeledIssue,
   SPEC_LABEL,
+  type SpecFollowUpPublication,
   type TerminalPrStatusCheck,
   ciGateRunOrderKey,
   classifyCiGateObservedRun,
   compareCiGateRunOrder,
   extractErrorCode,
+  formatSpecFollowUpComment,
   isDecisiveCiGateObservedRun,
   resolveSpecBaseline,
+  specFindingsMarker,
+  specFollowUpMarker,
 } from "@ready-for-agent/forge-contract"
 import {
   type FieldsSelection,
@@ -1349,6 +1354,363 @@ const readSpecIssuePages = Effect.fn("GitHubService.readSpecIssuePages")(
   },
 )
 
+const FollowUpIssue = Schema.Struct({
+  id: Schema.NonEmptyString,
+  url: Schema.NonEmptyString,
+  body: Schema.String,
+  parent: Schema.NullOr(Schema.Struct({ id: Schema.NonEmptyString })),
+  labels: Schema.Struct({
+    nodes: Schema.Array(Schema.Struct({ id: Schema.NonEmptyString })),
+    pageInfo: Schema.Struct({ hasNextPage: Schema.Literal(false) }),
+  }),
+})
+const followUpIssueFields = {
+  id: true,
+  url: true,
+  body: true,
+  parent: { id: true },
+  labels: {
+    __args: { first: PAGE_SIZE },
+    nodes: { id: true },
+    pageInfo: { hasNextPage: true },
+  },
+} as const
+
+const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
+  Effect.fn("GitHubService.publishSpecFollowUps")(function* (
+    repository: GitHubApiRepository,
+    input: SpecFollowUpPublication,
+  ) {
+    const issueNumber = Number(input.parentId)
+    const describe = `${repository.owner}/${repository.name}#${input.parentId}`
+    const invalid = (message: string, cause?: unknown) =>
+      new GitHubRequestError({ message: `${message} (${describe})`, cause })
+    const mutate = client.mutation
+    if (
+      mutate === undefined ||
+      !Number.isSafeInteger(issueNumber) ||
+      issueNumber <= 0
+    ) {
+      return yield* invalid("Cannot publish GitHub Spec follow-ups")
+    }
+    const parentResult = yield* githubQuery(
+      `Reading GitHub Spec ${describe}`,
+      (signal) =>
+        client.query(
+          {
+            viewer: { login: true },
+            repository: {
+              __args: repository,
+              id: true,
+              issue: {
+                __args: { number: issueNumber },
+                id: true,
+                state: true,
+                url: true,
+              },
+            },
+          },
+          signal,
+        ),
+    )
+    const repo = parentResult.repository
+    if (repo === null)
+      return yield* new GitHubApiRepositoryUnavailableError(repository)
+    const parent = repo.issue
+    const login = parentResult.viewer?.login?.trim()
+    if (!login)
+      return yield* invalid("Could not identify the authenticated GitHub user")
+    if (
+      !parent?.id ||
+      parent.state !== "OPEN" ||
+      parent.url !== input.parentUrl
+    ) {
+      return yield* invalid(
+        "The original GitHub Spec is not open in the configured repository",
+      )
+    }
+
+    // List only issues created by this credential's user. Searching or listing
+    // sub-issues alone can miss a newly created but still unattached follow-up.
+    const existing = yield* readSpecIssuePages(
+      Schema.Struct({
+        id: Schema.NonEmptyString,
+        number: Schema.Int,
+        body: Schema.String,
+        author: Schema.NullOr(Schema.Struct({ login: Schema.NonEmptyString })),
+      }),
+      `finding previously created follow-ups for ${describe}`,
+      (after) =>
+        githubQuery(`Listing Issues for ${describe}`, (signal) =>
+          client.query(
+            {
+              repository: {
+                __args: repository,
+                issues: {
+                  __args: {
+                    first: PAGE_SIZE,
+                    after,
+                    filterBy: { createdBy: login },
+                  },
+                  nodes: {
+                    id: true,
+                    number: true,
+                    body: true,
+                    author: { login: true },
+                  },
+                  ...SpecIssuePageFields,
+                },
+              },
+            },
+            signal,
+          ),
+        ).pipe(Effect.map((result) => result.repository?.issues)),
+    )
+    const links: Array<PublishedSpecFollowUps[number]> = []
+    const labelIds = new Map<string, string>()
+    const resolveLabelId = (label: string) =>
+      Effect.gen(function* () {
+        const cached = labelIds.get(label)
+        if (cached !== undefined) return cached
+        const labelResult = yield* githubQuery(
+          `Resolving GitHub label ${label}`,
+          (signal) =>
+            client.query(
+              {
+                repository: {
+                  __args: repository,
+                  label: { __args: { name: label }, id: true },
+                },
+              },
+              signal,
+            ),
+        )
+        const id = labelResult.repository?.label?.id
+        if (!id) return yield* invalid(`Missing GitHub Issue label ${label}`)
+        labelIds.set(label, id)
+        return id
+      })
+    const publishChild = (child: SpecFollowUpPublication["children"][number]) =>
+      Effect.gen(function* () {
+        const { requirementId, gapId, label, title, body } = child
+        const marker = specFollowUpMarker(input.parentId, requirementId, gapId)
+        // The hidden marker is not proof of ownership on a public repository.
+        const matches = existing.filter(
+          (issue) =>
+            issue.author?.login.toLowerCase() === login.toLowerCase() &&
+            issue.body.split(/\r?\n/u).includes(marker),
+        )
+        if (matches.length > 1)
+          return yield* invalid(
+            `Multiple GitHub follow-ups already exist for ${requirementId}: ${gapId}`,
+          )
+        const labelId = yield* resolveLabelId(label)
+        const found = matches[0]
+        let issue: typeof FollowUpIssue.Type
+        if (found === undefined) {
+          // Never retry the create request itself. A retry first re-reads markers.
+          const created = yield* githubRequest(
+            `Creating a GitHub follow-up for ${describe}`,
+            (signal) =>
+              mutate(
+                {
+                  createIssue: {
+                    __args: {
+                      input: {
+                        repositoryId: repo.id,
+                        parentIssueId: parent.id,
+                        labelIds: [labelId],
+                        title,
+                        body: `${body}\n\n${marker}`,
+                      },
+                    },
+                    issue: followUpIssueFields,
+                  },
+                },
+                signal,
+              ),
+          )
+          issue = yield* Schema.decodeUnknownEffect(FollowUpIssue)(
+            created.createIssue?.issue,
+          ).pipe(
+            Effect.mapError((cause) =>
+              invalid("GitHub did not return the created follow-up", cause),
+            ),
+          )
+        } else {
+          const loaded = yield* githubQuery(
+            `Reading GitHub follow-up #${found.number}`,
+            (signal) =>
+              client.query(
+                {
+                  repository: {
+                    __args: repository,
+                    issue: {
+                      __args: { number: found.number },
+                      ...followUpIssueFields,
+                    },
+                  },
+                },
+                signal,
+              ),
+          )
+          issue = yield* Schema.decodeUnknownEffect(FollowUpIssue)(
+            loaded.repository?.issue,
+          ).pipe(
+            Effect.mapError((cause) =>
+              invalid("GitHub did not return the existing follow-up", cause),
+            ),
+          )
+        }
+        if (
+          (found !== undefined && issue.id !== found.id) ||
+          !issue.body.split(/\r?\n/u).includes(marker)
+        ) {
+          return yield* invalid(
+            `Could not verify the identity of follow-up ${issue.url}`,
+          )
+        }
+        if (issue.parent?.id !== parent.id) {
+          if (issue.parent !== null)
+            return yield* invalid(
+              `Follow-up ${issue.url} belongs to another parent`,
+            )
+          const linked = yield* githubRequest(
+            `Linking GitHub follow-up ${issue.url}`,
+            (signal) =>
+              mutate(
+                {
+                  addSubIssue: {
+                    __args: {
+                      input: { issueId: parent.id, subIssueId: issue.id },
+                    },
+                    subIssue: { parent: { id: true } },
+                  },
+                },
+                signal,
+              ),
+          )
+          if (linked.addSubIssue?.subIssue?.parent?.id !== parent.id) {
+            return yield* invalid(`GitHub did not link follow-up ${issue.url}`)
+          }
+        }
+        if (!issue.labels.nodes.some(({ id }) => id === labelId)) {
+          const labeled = yield* githubRequest(
+            `Labelling GitHub follow-up ${issue.url}`,
+            (signal) =>
+              mutate(
+                {
+                  addLabelsToLabelable: {
+                    __args: {
+                      input: { labelableId: issue.id, labelIds: [labelId] },
+                    },
+                    labelable: {
+                      on_Issue: { labels: followUpIssueFields.labels },
+                    },
+                  },
+                },
+                signal,
+              ),
+          )
+          const labelable = labeled.addLabelsToLabelable?.labelable
+          const labels = Schema.decodeUnknownOption(
+            FollowUpIssue.fields.labels,
+          )(labelable && "labels" in labelable ? labelable.labels : undefined)
+          if (
+            labels._tag === "None" ||
+            !labels.value.nodes.some(({ id }) => id === labelId)
+          ) {
+            return yield* invalid(`GitHub did not label follow-up ${issue.url}`)
+          }
+        }
+        return { requirementId, gapId, url: issue.url }
+      })
+    let failure: GitHubRequestFailure | undefined
+    for (const child of input.children) {
+      const result = yield* Effect.result(publishChild(child))
+      if (Result.isSuccess(result)) {
+        links.push(result.success)
+      } else {
+        // Rate limiting applies to the credential, not just this child.
+        if (isGitHubThrottledError(result.failure)) return yield* result.failure
+        failure ??= result.failure
+      }
+    }
+    if (links.length === 0 && failure !== undefined) return yield* failure
+
+    const comments = yield* readSpecIssuePages(
+      Schema.Struct({ id: Schema.NonEmptyString, body: Schema.String }),
+      `reading findings comments on ${describe}`,
+      (after) =>
+        githubQuery(`Listing comments on GitHub Spec ${describe}`, (signal) =>
+          client.query(
+            {
+              repository: {
+                __args: repository,
+                issue: {
+                  __args: { number: issueNumber },
+                  comments: {
+                    __args: { first: PAGE_SIZE, after },
+                    nodes: { id: true, body: true },
+                    ...SpecIssuePageFields,
+                  },
+                },
+              },
+            },
+            signal,
+          ),
+        ).pipe(Effect.map((result) => result.repository?.issue?.comments)),
+    )
+    const marked = comments.find(({ body }) =>
+      body.split(/\r?\n/u).includes(specFindingsMarker(input.workItemId)),
+    )
+    const body = formatSpecFollowUpComment(input, links)
+    if (marked === undefined) {
+      const posted = yield* githubRequest(
+        `Posting findings on GitHub Spec ${describe}`,
+        (signal) =>
+          mutate(
+            {
+              addComment: {
+                __args: {
+                  input: {
+                    subjectId: parent.id,
+                    body,
+                  },
+                },
+                commentEdge: { node: { id: true } },
+              },
+            },
+            signal,
+          ),
+      )
+      if (!posted.addComment?.commentEdge?.node?.id)
+        return yield* invalid("GitHub did not return the findings comment")
+    } else if (marked.body !== body) {
+      const updated = yield* githubRequest(
+        `Updating findings on GitHub Spec ${describe}`,
+        (signal) =>
+          mutate(
+            {
+              updateIssueComment: {
+                __args: { input: { id: marked.id, body } },
+                issueComment: { id: true, body: true },
+              },
+            },
+            signal,
+          ),
+      )
+      if (
+        updated.updateIssueComment?.issueComment?.id !== marked.id ||
+        updated.updateIssueComment.issueComment.body !== body
+      ) {
+        return yield* invalid("GitHub did not update the findings comment")
+      }
+    }
+    if (failure !== undefined) return yield* failure
+    return links
+  })
+
 const makeObserveSpecs = (client: GitHubGraphqlClient) => {
   const observeDescendants = Effect.fn("GitHubService.observeSpecDescendants")(
     function* (root: typeof SpecIssueIdentity.Type) {
@@ -1614,6 +1976,7 @@ const makeGitHubApiService = (
   observeCiGateImpl?: ObserveCiGate,
 ): GitHubApiServiceShape => ({
   observeSpecs: makeObserveSpecs(client),
+  publishSpecFollowUps: makePublishSpecFollowUps(client),
   getAuthenticatedUserLogin: Effect.fn(
     "GitHubService.getAuthenticatedUserLogin",
   )(function* (_repository) {
@@ -3532,6 +3895,7 @@ export const makeGitHubService = (
     listReadyIssues: adapt(service.listReadyIssues),
     observeSpecs: adapt(service.observeSpecs),
     readSpecBaseline: adapt(service.readSpecBaseline),
+    publishSpecFollowUps: adapt(service.publishSpecFollowUps),
     getPullRequestCheckStatus: adapt(service.getPullRequestCheckStatus),
     getPrStatusCheckDiagnostics: adapt(service.getPrStatusCheckDiagnostics),
     observeAutomatedReviewEvidence: adapt(

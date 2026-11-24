@@ -1,5 +1,9 @@
 import { Context, type Effect } from "effect"
-import type { SpecBaselineResult } from "@ready-for-agent/forge-contract"
+import type {
+  PublishedSpecFollowUps,
+  SpecBaselineResult,
+  SpecFollowUpPublication,
+} from "@ready-for-agent/forge-contract"
 import type { LinearRequestError } from "./errors.js"
 import type {
   LinearIssueSnapshot,
@@ -41,6 +45,10 @@ export interface LinearServiceShape {
   readonly readSpecBaseline: (
     nativeId: string,
   ) => Effect.Effect<SpecBaselineResult, LinearServiceError>
+  readonly publishSpecFollowUps: (
+    projectId: string,
+    input: SpecFollowUpPublication,
+  ) => Effect.Effect<PublishedSpecFollowUps, LinearServiceError>
   readonly listProjects: () => Effect.Effect<
     readonly LinearProject[],
     LinearServiceError

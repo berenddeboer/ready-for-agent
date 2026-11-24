@@ -440,6 +440,10 @@ export const ambientGitHubLayer = (options: {
               service.readSpecBaseline(repository, issueNumber),
             ),
         ),
+        publishSpecFollowUps: (repository, input) =>
+          authenticated("lifecycle", repository, (service) =>
+            service.publishSpecFollowUps(repository, input),
+          ),
         listCiGateCatalog: Effect.fn("AmbientGitHub.listCiGateCatalog")(
           (repository, operationOptions?: GitHubOperationOptions) =>
             authenticated(

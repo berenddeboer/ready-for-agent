@@ -2009,6 +2009,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
         })
         const ambientService = {
           observeSpecs: () => Effect.die("not used"),
+          publishSpecFollowUps: () => Effect.die("not used"),
           listReadyIssues: () =>
             Effect.sync(() => {
               ambientOperations += 1
@@ -2119,6 +2120,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
         const ambientService = {
           listReadyIssues: () => Effect.die("not used"),
           observeSpecs: () => Effect.die("not used"),
+          publishSpecFollowUps: () => Effect.die("not used"),
           getAuthenticatedUserLogin: () => Effect.die("not used"),
           getOpenPullRequestNumber: () => Effect.die("not used"),
           findOpenPullRequestNumber: () => Effect.die("not used"),

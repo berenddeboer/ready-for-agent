@@ -57,6 +57,8 @@ export const makeLinearServiceTest = (
     listReadyIssues: () =>
       failOr(() => Effect.succeed([...(fixture.issues ?? [])])),
     observeSpecs: () => failOr(() => Effect.succeed([])),
+    publishSpecFollowUps: () =>
+      Effect.die("Unexpected Linear Spec publication"),
     readSpecBaseline: () =>
       failOr(() => Effect.succeed({ kind: "not-spec" as const })),
     listProjects: () =>
@@ -86,6 +88,7 @@ export const defaultLinearServiceShape = {
   getAuthenticatedUserLogin: () => Effect.succeed("linear-user"),
   listReadyIssues: () => Effect.succeed([]),
   observeSpecs: () => Effect.succeed([]),
+  publishSpecFollowUps: () => Effect.die("Unexpected Linear Spec publication"),
   readSpecBaseline: () => Effect.succeed({ kind: "not-spec" as const }),
   listProjects: () => Effect.succeed([]),
   listProjectWorkflow: () => Effect.succeed([]),

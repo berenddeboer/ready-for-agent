@@ -5,10 +5,10 @@ status: accepted
 # Validate spec delivery after all children close
 
 Accepted design. GitHub Issues and Linear support independent validation,
-record findings, and route unresolved decisions through the validation Work
-Item. Tracker close-out and follow-up tickets are separate slices. Use the
-original Issue Tracker for child relationships, closure reasons, comments,
-follow-ups, and parent closure.
+record findings, publish native follow-ups for actionable gaps, and route
+unresolved decisions through the validation Work Item. Tracker close-out is a
+separate slice. Use the original Issue Tracker for child relationships, closure
+reasons, comments, follow-ups, and parent closure.
 This extends [ADR 0070](0070-independent-issue-tracker.md), which left automatic
 parent completion outside the initial Linear integration.
 
