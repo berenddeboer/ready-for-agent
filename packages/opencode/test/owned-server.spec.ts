@@ -167,6 +167,68 @@ describe("Opencode dedicated server routing", () => {
     }
   })
 
+  it("retries model discovery on an owned server until the catalog settles", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "opencode-owned-settle-"))
+    const binary = join(directory, "opencode")
+    const counterFile = join(directory, "count")
+    const emptyCatalog = JSON.stringify({
+      location: { directory: "/work/repo" },
+      data: [],
+    })
+    try {
+      await writeFile(
+        binary,
+        [
+          "#!/bin/sh",
+          'case "$*" in',
+          '  *"/api/model"*)',
+          `    if [ ! -f ${JSON.stringify(counterFile)} ]; then`,
+          `      printf '1' > ${JSON.stringify(counterFile)}`,
+          `      printf '%s' ${JSON.stringify(emptyCatalog)}`,
+          "      exit 0",
+          "    fi",
+          `    printf '2' > ${JSON.stringify(counterFile)}`,
+          `    printf '%s' ${JSON.stringify(catalog)}`,
+          "    exit 0",
+          "    ;;",
+          "esac",
+          "exit 1",
+          "",
+        ].join("\n"),
+      )
+      await chmod(binary, 0o700)
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const backend = yield* AgentBackend
+          return yield* backend.inspect({
+            cwd: directory,
+            timeout: "3 seconds",
+          })
+        }).pipe(
+          Effect.provide(
+            Opencode.layer({
+              binary,
+              keymaxxerMcpUrl: "http://127.0.0.1:6057/cap/mcp",
+              dedicatedServer: {
+                baseUrl: "http://127.0.0.1:43111",
+                password: "owned-password",
+                headers: { authorization: "Basic eHh4" },
+                pid: process.pid,
+                assertAvailable: () => undefined,
+              },
+            }).pipe(Layer.provide(BunServices.layer)),
+          ),
+        ),
+      )
+      expect(await Bun.file(counterFile).text()).toBe("2")
+      expect(result.models).toEqual([
+        { id: "p/m", name: "M", thinkingLevels: [] },
+      ])
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it("does not spawn OpenCode when the owned server is blocked", async () => {
     const directory = await mkdtemp(join(tmpdir(), "opencode-owned-blocked-"))
     const binary = join(directory, "opencode")

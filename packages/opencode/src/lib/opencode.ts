@@ -204,6 +204,10 @@ export const Opencode = {
                 serverUrl,
               )
               for (;;) {
+                const remainingMs = Math.max(1_000, deadlineMs - Date.now())
+                const attemptTimeout = Duration.millis(
+                  Math.min(timeoutMs, remainingMs),
+                )
                 const result = yield* runCliCapture({
                   spawner,
                   backend: OPENCODE_BACKEND,
@@ -211,7 +215,7 @@ export const Opencode = {
                   args,
                   cwd: input.cwd,
                   env: serverEnv,
-                  timeout,
+                  timeout: attemptTimeout,
                 })
                 const parsed = parseOpencodeModelCatalog(result.stdout)
                 if (parsed.kind !== "empty" || Date.now() >= deadlineMs) {
@@ -269,7 +273,14 @@ export const Opencode = {
                   Date.now() + settleWindowMs,
                 )
               }),
-            ).pipe(Effect.orElseSucceed(() => undefined))
+            ).pipe(
+              Effect.tapError((error) =>
+                Effect.logDebug(
+                  `Temporary OpenCode server fallback failed during inspect: ${String(error)}`,
+                ),
+              ),
+              Effect.orElseSucceed(() => undefined),
+            )
             if (settled !== undefined) {
               parsed = settled
             }
