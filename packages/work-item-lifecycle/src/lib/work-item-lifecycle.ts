@@ -108,6 +108,7 @@ import {
   startCiRepairWorkItem,
 } from "./ci-repair-work-item-creation.js"
 import { CloseIssueEligibilityError } from "./close-issue-errors.js"
+import { closePassingSpec } from "./close-passing-spec.js"
 import {
   DECISION_NEEDED_FAILURE_CODE,
   decisionNeededHandlerOutput,
@@ -116,6 +117,7 @@ import {
 } from "./decision-needed.js"
 import {
   AbandonCleanupError,
+  AbandonSpecHistoryError,
   ActiveStepRunExistsError,
   AgentBackendUnavailableError,
   AutonomousRetryDeferredError,
@@ -272,6 +274,7 @@ import {
 import {
   SpecValidationInput,
   notifySpecValidationDecision,
+  observeSpecBeforeTurn,
 } from "./validate-spec.js"
 import { workItemBranchName } from "./worktree-names.js"
 
@@ -1429,6 +1432,7 @@ export type AbandonError =
   | WorkItemTerminalError
   | WorkItemHasRunningStepError
   | AbandonCleanupError
+  | AbandonSpecHistoryError
   | WorkItemLifecycleDatabaseError
   | AcknowledgeError
   | JobNotFoundError
@@ -3951,6 +3955,7 @@ export const makeWorkItemLifecycleLive = (
           readonly startingCommitOid?: string | null
           readonly completionSummary?: string | null
           readonly specValidationFindings?: string
+          readonly specValidationInput?: string
           readonly holdForSpec?: "hierarchy" | "checklist"
           readonly publicationTitle?: string | null
           readonly publicationBody?: string | null
@@ -4031,8 +4036,28 @@ export const makeWorkItemLifecycleLive = (
                   }
                 case "recorded":
                   return {
-                    ...result,
+                    sessionId: result.sessionId,
+                    startingCommitOid: result.startingCommitOid,
+                    completionSummary: result.completionSummary,
+                    specValidationFindings: result.specValidationFindings,
                     stepRunReasonCode: STEP_RUN_REASON.native,
+                    ...(!("passingInput" in result)
+                      ? {}
+                      : {
+                          specValidationInput: yield* Schema.encodeEffect(
+                            SpecValidationInput,
+                          )(result.passingInput).pipe(
+                            Effect.mapError(
+                              (cause) =>
+                                new LifecycleStepFailedError({
+                                  message:
+                                    "Could not save the passing Spec hierarchy for close-out.",
+                                  cause,
+                                }),
+                            ),
+                          ),
+                          transition: { nextState: "close_issue" as const },
+                        }),
                   }
               }
             })
@@ -4764,6 +4789,55 @@ export const makeWorkItemLifecycleLive = (
               }
             })
           case "close_issue":
+            if (context.origin === "spec_validation") {
+              return Effect.gen(function* () {
+                const specInput = yield* Schema.decodeUnknownEffect(
+                  SpecValidationInput,
+                )(workItem.spec_validation_input).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new LifecycleStepFailedError({
+                        message:
+                          "Could not read the passing Spec hierarchy for close-out.",
+                        cause,
+                      }),
+                  ),
+                )
+                if (!("baseline" in specInput)) {
+                  return yield* new LifecycleStepFailedError({
+                    message: "Spec close-out requires an approved baseline.",
+                  })
+                }
+                const result = yield* closePassingSpec(context, specInput).pipe(
+                  Effect.provideService(DbService, db),
+                  Effect.provideService(GitHubService, github),
+                  Effect.provideService(LinearService, linear),
+                )
+                switch (result) {
+                  case "waiting":
+                    return { holdForSpec: "hierarchy" as const }
+                  case "stale":
+                    return {
+                      stepRunReasonCode: STEP_RUN_REASON.native,
+                      stepRunNote:
+                        "The Spec hierarchy changed after validation; the verdict must be revalidated.",
+                      transition: { nextState: "validate_spec" as const },
+                    }
+                  case "closed":
+                    return {
+                      stepRunReasonCode: STEP_RUN_REASON.native,
+                      transition: { nextState: "complete" as const },
+                    }
+                  case "reopened":
+                    return {
+                      stepRunReasonCode: STEP_RUN_REASON.native,
+                      stepRunNote:
+                        "The parent Spec was reopened; its previous verdict cannot close the new opening.",
+                      transition: { nextState: "complete" as const },
+                    }
+                }
+              })
+            }
             return steps.closeIssue(context).pipe(Effect.as({}))
           case "local_cleanup":
             return steps.localCleanup(context).pipe(
@@ -5013,6 +5087,7 @@ export const makeWorkItemLifecycleLive = (
           readonly startingCommitOid?: string | null
           readonly completionSummary?: string | null
           readonly specValidationFindings?: string
+          readonly specValidationInput?: string
           readonly publicationTitle?: string | null
           readonly publicationBody?: string | null
           readonly pauseBeforeStep?: OperationalLifecycleStep | null
@@ -5156,6 +5231,17 @@ export const makeWorkItemLifecycleLive = (
                   queue,
                 )
 
+                if (output.specValidationFindings !== undefined) {
+                  yield* sql.unsafe(
+                    `UPDATE work_item SET spec_validation_findings = ?,
+                       spec_validation_input = COALESCE(?, spec_validation_input) WHERE id = ?`,
+                    [
+                      output.specValidationFindings,
+                      output.specValidationInput ?? null,
+                      workItem.id,
+                    ],
+                  )
+                }
                 for (const checkId of output.handledCheckIds ?? []) {
                   yield* sql.unsafe(
                     `UPDATE pr_status_check
@@ -5328,7 +5414,6 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         starting_commit_oid = ?,
                         completion_summary = ?,
-                         spec_validation_findings = COALESCE(?, spec_validation_findings),
                         publication_title = ?,
                         publication_body = ?,
                         session_id = ?,
@@ -5343,7 +5428,6 @@ export const makeWorkItemLifecycleLive = (
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
-                      output.specValidationFindings ?? null,
                       publicationTitle,
                       publicationBody,
                       sessionId,
@@ -7993,6 +8077,53 @@ export const makeWorkItemLifecycleLive = (
           ),
         )
 
+      const captureAbandonedSpecOpening = Effect.fn(
+        "captureAbandonedSpecOpening",
+      )(
+        function* (workItem: WorkItemRow) {
+          if (workItem.origin !== "spec_validation") return undefined
+          const input = yield* Schema.decodeUnknownEffect(SpecValidationInput)(
+            workItem.spec_validation_input,
+          )
+          // The GitHub history read is the cutoff, not the local commit.
+          // A new opening after the read can qualify even while abandonment
+          // is finishing. GitHub timestamps cannot order same-second events.
+          if (input.spec.tracker !== "github") return undefined
+          const repository = (yield* db.listRepositories).find(
+            ({ id }) => id === workItem.repository_id,
+          )
+          if (!repository || !github.readSpecReopenEventId) {
+            return yield* Effect.fail(
+              new Error("No GitHub Spec history connection"),
+            )
+          }
+          const eventId = yield* github.readSpecReopenEventId(
+            {
+              forge: "github",
+              forgeHost: repository.forgeHost,
+              projectPath: repository.projectPath,
+            },
+            Number(input.spec.nativeId),
+          )
+          return yield* Schema.encodeEffect(SpecValidationInput)({
+            ...input,
+            abandonedWithReopenEventId: eventId,
+          })
+        },
+        (effect, workItem) =>
+          effect.pipe(
+            Effect.mapError(
+              (cause) =>
+                new AbandonSpecHistoryError({
+                  workItemId: workItem.id,
+                  message:
+                    "Could not confirm GitHub Spec reopening history. No abandonment was recorded. Retry Abandon when GitHub is available.",
+                  cause,
+                }),
+            ),
+          ),
+      )
+
       const abandon = Effect.fn("WorkItemLifecycle.abandon")(function* (
         workItemId: string,
       ) {
@@ -8000,6 +8131,17 @@ export const makeWorkItemLifecycleLive = (
         if (!workItem) {
           return yield* new WorkItemNotFoundError({ workItemId })
         }
+
+        if (
+          workItem.state !== "needs_human" &&
+          isTerminalWorkItemState(workItem.state)
+        ) {
+          return yield* new WorkItemTerminalError({
+            workItemId,
+            state: workItem.state,
+          })
+        }
+        const abandonedSpecInput = yield* captureAbandonedSpecOpening(workItem)
 
         if (workItem.state === "needs_human") {
           const nowAcquire = yield* Clock.currentTimeMillis
@@ -8043,11 +8185,6 @@ export const makeWorkItemLifecycleLive = (
             return yield* new WorkItemNotFoundError({ workItemId })
           }
           yield* cleanupNeedsHumanWorktree(current)
-        } else if (isTerminalWorkItemState(workItem.state)) {
-          return yield* new WorkItemTerminalError({
-            workItemId,
-            state: workItem.state,
-          })
         }
 
         const now = yield* Clock.currentTimeMillis
@@ -8067,6 +8204,7 @@ export const makeWorkItemLifecycleLive = (
                       holds_worker_slot = 0,
                       waiting_since = NULL,
                       waiting_for_blockers = 0, waiting_for_ci_repair = 0,
+                      spec_validation_input = COALESCE(?, spec_validation_input),
                       updated_at = ?
                   WHERE id = ?
                     AND state = 'needs_human'
@@ -8082,6 +8220,7 @@ export const makeWorkItemLifecycleLive = (
                       holds_worker_slot = 0,
                       waiting_since = NULL,
                       waiting_for_blockers = 0, waiting_for_ci_repair = 0,
+                      spec_validation_input = COALESCE(?, spec_validation_input),
                       updated_at = ?
                   WHERE id = ?
                     AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
@@ -8091,7 +8230,7 @@ export const makeWorkItemLifecycleLive = (
                         AND step_run.status = 'running'
                     )
                   RETURNING id`,
-                [now, now, workItemId],
+                [now, abandonedSpecInput ?? null, now, workItemId],
               )) as readonly { readonly id: string }[]
 
               if (!abandonedRows[0]) {
@@ -10415,9 +10554,11 @@ export const makeWorkItemLifecycleLive = (
       const wakeSpecValidation = (workItemId: string, approvedInput?: string) =>
         sql.withTransaction(
           Effect.gen(function* () {
-            const parked = yield* sql.unsafe(
-              `SELECT id FROM work_item
-             WHERE id = ? AND state = 'validate_spec' AND paused = 0
+            const [parked] = yield* sql.unsafe<{
+              state: "validate_spec" | "close_issue"
+            }>(
+              `SELECT state FROM work_item
+             WHERE id = ? AND state IN ('validate_spec', 'close_issue') AND paused = 0
                AND holds_worker_slot = 0 AND waiting_since IS NULL
                AND (SELECT reason_code FROM step_run
                     WHERE work_item_id = work_item.id
@@ -10429,7 +10570,7 @@ export const makeWorkItemLifecycleLive = (
                   : STEP_RUN_REASON.waitingForApprovedSpecChecklist,
               ],
             )
-            if (parked.length === 0) return false
+            if (parked === undefined) return false
             if (approvedInput !== undefined) {
               yield* sql.unsafe(
                 "UPDATE work_item SET spec_validation_input = ? WHERE id = ?",
@@ -10438,7 +10579,7 @@ export const makeWorkItemLifecycleLive = (
             }
             const now = yield* Clock.currentTimeMillis
             if (yield* tryAcquireWorkerSlot(workItemId, now)) {
-              yield* enqueueStepRunForWorkItem(workItemId, "validate_spec", now)
+              yield* enqueueStepRunForWorkItem(workItemId, parked.state, now)
             }
             return true
           }),
@@ -10453,13 +10594,19 @@ export const makeWorkItemLifecycleLive = (
               id: string
               state: WorkItemState
               awaiting_checklist: number
+              state_ready_at: number
+              close_out_finished: number
               spec_validation_input: string
             }>(
-              `SELECT id, state, spec_validation_input,
+              `SELECT id, state, state_ready_at, spec_validation_input,
                  (state = 'validate_spec' AND paused = 0
                    AND holds_worker_slot = 0 AND waiting_since IS NULL
                    AND (SELECT reason_code FROM step_run WHERE work_item_id = work_item.id
-                        ORDER BY queued_at DESC, rowid DESC LIMIT 1) = ?) AS awaiting_checklist
+                         ORDER BY queued_at DESC, rowid DESC LIMIT 1) = ?) AS awaiting_checklist,
+                 (state = 'complete' AND
+                    (SELECT step = 'close_issue' AND status = 'succeeded'
+                       FROM step_run WHERE work_item_id = work_item.id
+                        ORDER BY queued_at DESC, rowid DESC LIMIT 1)) AS close_out_finished
                FROM work_item WHERE repository_id = ? AND spec_validation_key = ?`,
               [
                 STEP_RUN_REASON.waitingForApprovedSpecChecklist,
@@ -10472,16 +10619,27 @@ export const makeWorkItemLifecycleLive = (
               if (existing.state === "needs_human") return
             }
             if (observed.readiness !== "all-descendants-closed") return
-            if (existing !== undefined && !existing.awaiting_checklist) {
+            if (
+              existing !== undefined &&
+              existing.state !== "complete" &&
+              existing.state !== "abandoned" &&
+              !existing.awaiting_checklist
+            ) {
               if (yield* wakeSpecValidation(existing.id)) {
                 yield* notifyWorkItemsChanged(repository.id)
               }
               return
             }
 
+            const baselineOptions = {
+              includeReopening: !existing?.awaiting_checklist,
+            }
             const approved =
               observed.tracker === "linear"
-                ? yield* linear.readSpecBaseline(observed.nativeId)
+                ? yield* linear.readSpecBaseline(
+                    observed.nativeId,
+                    baselineOptions,
+                  )
                 : yield* github.readSpecBaseline(
                     {
                       forge: "github",
@@ -10489,9 +10647,10 @@ export const makeWorkItemLifecycleLive = (
                       projectPath: repository.projectPath,
                     },
                     Number(observed.nativeId),
+                    baselineOptions,
                   )
             if (approved.kind === "not-spec") return
-            if (existing !== undefined) {
+            if (existing?.awaiting_checklist) {
               const frozen = yield* Schema.decodeUnknownEffect(
                 SpecValidationInput,
               )(existing.spec_validation_input)
@@ -10504,6 +10663,9 @@ export const makeWorkItemLifecycleLive = (
                   spec: frozen.spec,
                   descendants: frozen.descendants,
                   baselineReview,
+                  ...(frozen.parentReopenEventId === undefined
+                    ? {}
+                    : { parentReopenEventId: frozen.parentReopenEventId }),
                 })
                 if (yield* wakeSpecValidation(existing.id, approvedInput)) {
                   yield* notifyWorkItemsChanged(repository.id)
@@ -10586,14 +10748,51 @@ export const makeWorkItemLifecycleLive = (
               }
               return
             }
+            if (existing !== undefined && !existing.close_out_finished) {
+              // A non-passing or abandoned validation owns this open episode,
+              // not future reopenings. An edit or descendant closure is not
+              // a native parent reopening event.
+              const prior = yield* Schema.decodeUnknownEffect(
+                SpecValidationInput,
+              )(existing.spec_validation_input)
+              const reopening = approved.reopening
+              const reopeningAnchor =
+                existing.state === "abandoned"
+                  ? prior.abandonedWithReopenEventId
+                  : prior.parentReopenEventId
+              if (
+                reopening == null ||
+                prior.parentReopenEventId === reopening.id ||
+                reopeningAnchor === reopening.id ||
+                (reopeningAnchor === undefined &&
+                  Date.parse(reopening.createdAt) <= existing.state_ready_at)
+              )
+                return
+            }
             const { tracker, nativeId, displayId, url } = observed
+            // A poll might have seen this parent open before the previous
+            // close-out. Confirm an actual reopening before admitting again.
+            const descendants =
+              existing === undefined
+                ? observed.descendants
+                : yield* observeSpecBeforeTurn(repository.id, observed).pipe(
+                    Effect.provideService(DbService, db),
+                    Effect.provideService(GitHubService, github),
+                    Effect.provideService(LinearService, linear),
+                  )
+            if (descendants === undefined) return
             const frozenInput = yield* Schema.encodeEffect(SpecValidationInput)(
               {
                 spec: { tracker, nativeId, displayId, url },
-                descendants: observed.descendants,
+                descendants,
                 ...(approved.kind === "baseline"
                   ? { baseline: approved.baseline }
                   : { baselineReview: approved }),
+                ...(approved.reopening === undefined
+                  ? {}
+                  : {
+                      parentReopenEventId: approved.reopening?.id ?? null,
+                    }),
               },
             )
             const specTitle =
@@ -10615,6 +10814,15 @@ export const makeWorkItemLifecycleLive = (
                 const now = yield* Clock.currentTimeMillis
                 return yield* sql.withTransaction(
                   Effect.gen(function* () {
+                    if (existing !== undefined) {
+                      // Transfer the admission key atomically; preserve the
+                      // previous Work Item and verdict as history.
+                      const released = yield* sql.unsafe(
+                        "UPDATE work_item SET spec_validation_key = NULL WHERE id = ? AND spec_validation_key = ? RETURNING id",
+                        [existing.id, key],
+                      )
+                      if (released.length === 0) return false
+                    }
                     const inserted = yield* sql.unsafe(
                       `INSERT INTO work_item (
                        id, repository_id, origin, spec_validation_key, spec_validation_input,

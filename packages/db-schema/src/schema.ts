@@ -428,11 +428,11 @@ export const workItem = snakeCase.table(
      * result lets Implement resume without authorizing a second retry.
      */
     ciRepairRetry: text(),
-    /** Original tracker and native Spec identity, separate from Issue intake. */
+    /** Spec admission key, reused only after a completed close-out and explicit reopening. */
     specValidationKey: text(),
     /** Frozen approved Spec and original tracker reference. */
     specValidationInput: text(),
-    /** Requirement-level findings, written atomically with completion. */
+    /** Requirement-level findings, persisted before any tracker close-out. */
     specValidationFindings: text(),
     sessionId: text(),
     pendingImplementStop: text(),

@@ -11,6 +11,7 @@ import {
 import {
   PublishedSpecFollowUps,
   SpecBaselineResult,
+  SpecCloseResult,
 } from "@ready-for-agent/forge-contract"
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
@@ -928,6 +929,25 @@ export const keymaxxerGitHubLayer = (options: {
             ],
             decode: decodeVoid,
           }),
+        closePassingSpec: Effect.fn("KeymaxxerGitHub.closePassingSpec")(
+          (repository, issueNumber, verdictId, summary, guard) =>
+            callHelper({
+              operation: "close-passing-spec",
+              repository,
+              describe: "publish and close passing Spec",
+              args: [
+                encodeArgument(String(issueNumber)),
+                encodeArgument(verdictId),
+                encodeArgument(summary),
+                encodeArgument(JSON.stringify(guard)),
+              ],
+              decode: decodeJson(
+                SpecCloseResult,
+                repository,
+                "decode Spec close-out",
+              ),
+            }),
+        ),
         listReadyIssues: Effect.fn("KeymaxxerGitHub.listReadyIssues")(
           (repository, operationOptions?: GitHubOperationOptions) =>
             callHelper({
@@ -953,12 +973,15 @@ export const keymaxxerGitHubLayer = (options: {
             }),
         ),
         readSpecBaseline: Effect.fn("KeymaxxerGitHub.readSpecBaseline")(
-          (repository, issueNumber) =>
+          (repository, issueNumber, options) =>
             callHelper({
               operation: "read-spec-baseline",
               repository,
               describe: "read Spec baseline",
-              args: [encodeArgument(String(issueNumber))],
+              args: [
+                encodeArgument(String(issueNumber)),
+                ...(options?.includeReopening ? [encodeArgument("true")] : []),
+              ],
               decode: decodeJson(
                 SpecBaselineResult,
                 repository,
@@ -976,6 +999,18 @@ export const keymaxxerGitHubLayer = (options: {
               PublishedSpecFollowUps,
               repository,
               "decode GitHub Spec follow-up links",
+            ),
+          }),
+        readSpecReopenEventId: (repository, issueNumber) =>
+          callHelper({
+            operation: "read-spec-reopen-event-id",
+            repository,
+            describe: "read Spec reopening history",
+            args: [encodeArgument(String(issueNumber))],
+            decode: decodeJson(
+              Schema.NullOr(Schema.NonEmptyString),
+              repository,
+              "decode Spec reopening event",
             ),
           }),
         listCiGateCatalog: Effect.fn("KeymaxxerGitHub.listCiGateCatalog")(

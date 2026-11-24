@@ -39,19 +39,35 @@ export const SpecBaseline = Schema.Struct({
 })
 export type SpecBaseline = typeof SpecBaseline.Type
 
+const reopening = Schema.optionalKey(
+  Schema.NullOr(
+    Schema.Struct({
+      id: Schema.NonEmptyString,
+      createdAt: Schema.NonEmptyString,
+    }),
+  ),
+)
+
 export const SpecBaselineResult = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("not-spec") }),
   Schema.Struct({
     kind: Schema.Literal("baseline"),
     baseline: SpecBaseline,
+    reopening,
   }),
   Schema.Struct({
     kind: Schema.Literal("review"),
     candidates: Schema.Array(SpecBaseline),
     unreadableSnapshots: Schema.Array(Schema.String),
+    reopening,
   }),
 ])
 export type SpecBaselineResult = typeof SpecBaselineResult.Type
+
+export interface SpecBaselineReadOptions {
+  /** Read the latest native parent reopening as well as the approved text. */
+  readonly includeReopening: boolean
+}
 
 interface BaselineComment {
   readonly url: string

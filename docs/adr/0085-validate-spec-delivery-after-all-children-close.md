@@ -6,9 +6,9 @@ status: accepted
 
 Accepted design. GitHub Issues and Linear support independent validation,
 record findings, publish native follow-ups for actionable gaps, and route
-unresolved decisions through the validation Work Item. Tracker close-out is a
-separate slice. Use the original Issue Tracker for child relationships, closure
-reasons, comments, follow-ups, and parent closure.
+unresolved decisions through the validation Work Item. A passing verdict is
+published before closing the parent. Use the original Issue Tracker for child
+relationships, closure reasons, comments, follow-ups, and parent closure.
 This extends [ADR 0070](0070-independent-issue-tracker.md), which left automatic
 parent completion outside the initial Linear integration.
 
@@ -47,6 +47,11 @@ At most one Spec Validation Work Item may be unfinished for a spec. Repeated
 observations of the same closure do not start another, even after a restart.
 If a child is added or reopened during validation, withhold the verdict until
 all children are closed again.
+
+Save the passing evidence before attempting close-out. Recheck the full
+hierarchy before publishing and again before closing; neither an incomplete
+read nor a changed hierarchy can close the parent. Retries recover the
+published verdict rather than posting it again.
 
 The validator works from the approved parent spec, the approved revisions of
 design documents it incorporates, and explicit amendments to the spec. Preserve

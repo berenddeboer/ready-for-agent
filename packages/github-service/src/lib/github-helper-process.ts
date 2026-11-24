@@ -1,6 +1,7 @@
 import type { Effect } from "effect"
 import { runGitHubCli } from "../bin/cli.js"
 import { closeOpenPullRequestsAndDeleteBranchProgram } from "../bin/close-open-pull-requests-and-delete-branch.js"
+import { closePassingSpecProgram } from "../bin/close-passing-spec.js"
 import { runCountOpenNonDraftPullRequestsProgram } from "../bin/count-open-non-draft-pull-requests.js"
 import { createDraftPullRequestProgram } from "../bin/create-draft-pull-request.js"
 import { ensureIssueCommentProgram } from "../bin/ensure-issue-comment.js"
@@ -21,6 +22,7 @@ import { observeSpecsProgram } from "../bin/observe-specs.js"
 import { publishSpecFollowUpsProgram } from "../bin/publish-spec-follow-ups.js"
 import { readCiRepairRunProgram } from "../bin/read-ci-repair-run.js"
 import { readSpecBaselineProgram } from "../bin/read-spec-baseline.js"
+import { readSpecReopenEventIdProgram } from "../bin/read-spec-reopen-event-id.js"
 import { rerunFailedJobsProgram } from "../bin/rerun-failed-jobs.js"
 import { rerunWorkflowRunProgram } from "../bin/rerun-workflow-run.js"
 import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
@@ -37,6 +39,7 @@ export const GITHUB_HELPER_OPERATIONS = [
   "observe-specs",
   "publish-spec-follow-ups",
   "read-spec-baseline",
+  "read-spec-reopen-event-id",
   "list-ci-gate-catalog",
   "observe-ci-gate",
   "get-authenticated-user-login",
@@ -58,6 +61,7 @@ export const GITHUB_HELPER_OPERATIONS = [
   "upload-user-attachment",
   "ensure-issue-completed-with-summary",
   "ensure-issue-comment",
+  "close-passing-spec",
 ] as const
 
 export type GitHubHelperOperation = (typeof GITHUB_HELPER_OPERATIONS)[number]
@@ -159,6 +163,7 @@ const programs: Record<
   "observe-specs": observeSpecsProgram,
   "publish-spec-follow-ups": publishSpecFollowUpsProgram,
   "read-spec-baseline": readSpecBaselineProgram,
+  "read-spec-reopen-event-id": readSpecReopenEventIdProgram,
   "list-ci-gate-catalog": listCiGateCatalogProgram,
   "observe-ci-gate": observeCiGateProgram,
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
@@ -180,6 +185,7 @@ const programs: Record<
   "upload-user-attachment": uploadUserAttachmentProgram,
   "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
   "ensure-issue-comment": ensureIssueCommentProgram,
+  "close-passing-spec": closePassingSpecProgram,
 }
 
 /**

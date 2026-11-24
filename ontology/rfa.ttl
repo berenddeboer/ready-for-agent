@@ -702,6 +702,10 @@ rfa:LocalCleanup
 rfa:CreateWorktreeSucceededTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:InstallDependencies ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
 rfa:CreateWorktreeForSpecValidationTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:ValidateSpec ; rfa:guard "spec_validation_checkout_ready" ; rfa:reasonCode rfa:NativeReason .
 rfa:ValidateSpecSucceededTransition a rfa:Transition ; rfa:fromStep rfa:ValidateSpec ; rfa:toStep rfa:Complete ; rfa:guard "spec_findings_recorded" ; rfa:reasonCode rfa:NativeReason .
+rfa:ValidateSpecPassingTransition a rfa:Transition ; rfa:fromStep rfa:ValidateSpec ; rfa:toStep rfa:CloseIssue ; rfa:guard "passing_spec_findings_recorded" ; rfa:reasonCode rfa:NativeReason .
+rfa:ClosePassingSpecTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:Complete ; rfa:guard "spec_parent_closed" ; rfa:reasonCode rfa:NativeReason .
+rfa:RetireReopenedSpecVerdictTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:Complete ; rfa:guard "spec_parent_reopened_since_validation" ; rfa:reasonCode rfa:NativeReason .
+rfa:RevalidateStalePassingSpecTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:ValidateSpec ; rfa:guard "spec_hierarchy_changed_since_validation" ; rfa:reasonCode rfa:NativeReason .
 rfa:ValidateSpecAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:ValidateSpec ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
 rfa:ValidateSpecFailedTransition a rfa:Transition ; rfa:fromStep rfa:ValidateSpec ; rfa:toStep rfa:Failed ; rfa:guard "validation_cannot_continue" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:InstallDependenciesSucceededTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:Implement ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .

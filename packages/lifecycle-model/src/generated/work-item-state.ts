@@ -377,6 +377,18 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "close_issue",
+    to: "complete",
+    guard: "spec_parent_closed",
+    reasonCode: "native",
+  },
+  {
+    from: "close_issue",
+    to: "complete",
+    guard: "spec_parent_reopened_since_validation",
+    reasonCode: "native",
+  },
+  {
+    from: "close_issue",
     to: "failed",
     guard: "close_issue_eligibility_failed",
     reasonCode: "handler_failed",
@@ -403,6 +415,12 @@ export const LIFECYCLE_TRANSITIONS = [
     from: "close_issue",
     to: "needs_human",
     guard: "refresh_observed_unowned_issue_closing_pull_request",
+    reasonCode: "native",
+  },
+  {
+    from: "close_issue",
+    to: "validate_spec",
+    guard: "spec_hierarchy_changed_since_validation",
     reasonCode: "native",
   },
   {
@@ -1334,6 +1352,12 @@ export const LIFECYCLE_TRANSITIONS = [
     to: "abandoned",
     guard: "operator_abandon",
     reasonCode: "abandoned",
+  },
+  {
+    from: "validate_spec",
+    to: "close_issue",
+    guard: "passing_spec_findings_recorded",
+    reasonCode: "native",
   },
   {
     from: "validate_spec",
