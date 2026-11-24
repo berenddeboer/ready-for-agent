@@ -417,6 +417,12 @@ export const ambientGitHubLayer = (options: {
               (service) => service.observeSpecs(repository, operationOptions),
             ),
         ),
+        readSpecBaseline: Effect.fn("AmbientGitHub.readSpecBaseline")(
+          (repository, issueNumber) =>
+            authenticated("lifecycle", repository, (service) =>
+              service.readSpecBaseline(repository, issueNumber),
+            ),
+        ),
         listCiGateCatalog: Effect.fn("AmbientGitHub.listCiGateCatalog")(
           (repository, operationOptions?: GitHubOperationOptions) =>
             authenticated(

@@ -82,6 +82,7 @@ const readyStatus = (): AgentBackendStatus =>
 
 const defaultGithub: GitHubServiceShape = {
   observeSpecs: () => Effect.succeed([]),
+  readSpecBaseline: () => Effect.die("not used"),
   getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   getOpenPullRequestNumber: () => Effect.succeed(1),
   findOpenPullRequestNumber: () => Effect.succeed(1),

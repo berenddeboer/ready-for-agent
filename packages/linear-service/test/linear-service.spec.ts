@@ -1,4 +1,5 @@
 import { Effect, Result } from "effect"
+import { renderSpecBaseline } from "@ready-for-agent/forge-contract"
 import { LinearRequestError } from "../src/lib/errors.js"
 import { makeLinearServiceFromToken } from "../src/lib/linear-service-live.js"
 import {
@@ -32,6 +33,109 @@ const makeFetch = (handler: (body: GraphqlBody) => Response): typeof fetch =>
     const parsed = JSON.parse(String(init?.body ?? "{}")) as GraphqlBody
     return handler(parsed)
   }) as typeof fetch
+
+describe("Linear Spec baseline", () => {
+  const url = "https://linear.app/acme/issue/ENG-1/hosted-mcp"
+  const design = `https://github.com/acme/widgets/blob/${"a".repeat(40)}/design.md`
+  const title = "Hosted MCP"
+  const approvedBody = `Expose MCP both locally and when deployed.\n\n[Approved design baseline: ADR](<${design}>)`
+  const specLabels = { nodes: [{ name: "spec" }] }
+  const commentUrl = `${url}#comment-1`
+
+  test("recovers published and late-marked approval evidence on the original Issue", async () => {
+    let published = true
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch(({ query, variables }) => {
+        expect(variables?.id).toBe(ISSUE_UUID)
+        const issue = query.startsWith("query Spec")
+          ? {
+              title,
+              description: published
+                ? `Expose MCP locally.\n\n[Approved Spec baseline](<${commentUrl}>)`
+                : approvedBody,
+              url,
+              specLabels,
+            }
+          : {
+              comments: {
+                nodes: published
+                  ? [
+                      {
+                        url: commentUrl,
+                        body: renderSpecBaseline({
+                          title,
+                          body: approvedBody,
+                          designRevisions: [design],
+                        }),
+                        editedAt: null,
+                      },
+                    ]
+                  : [],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            }
+        return jsonResponse(200, { data: { issue } })
+      }),
+    )
+    const expected = { title, body: approvedBody, designRevisions: [design] }
+    await expect(
+      Effect.runPromise(service.readSpecBaseline(ISSUE_UUID)),
+    ).resolves.toEqual({
+      kind: "baseline",
+      baseline: {
+        ...expected,
+        source: { kind: "publication-comment", url: commentUrl },
+      },
+    })
+    published = false
+    await expect(
+      Effect.runPromise(service.readSpecBaseline(ISSUE_UUID)),
+    ).resolves.toEqual({
+      kind: "baseline",
+      baseline: { ...expected, source: { kind: "marked-parent", url } },
+    })
+  })
+
+  test("does not offer a marked, Ready-labeled Linear Spec before it has children", async () => {
+    const issue = (number: number, marked: boolean, hasChildren: boolean) => ({
+      id: `id-${number}`,
+      identifier: `ENG-${number}`,
+      number,
+      title,
+      url,
+      createdAt: "2026-11-24T00:00:00Z",
+      specLabels: marked ? specLabels : { nodes: [] },
+      children: { nodes: hasChildren ? [{ id: "child" }] : [] },
+    })
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch(({ query }) => {
+        expect(query).toContain('labels: { name: { eq: "ready-for-agent" } }')
+        expect(query).toContain('filter: { name: { eq: "spec" } }')
+        return jsonResponse(200, {
+          data: {
+            issues: {
+              nodes: [
+                issue(1, true, false),
+                issue(2, false, true),
+                issue(3, false, false),
+              ],
+            },
+          },
+        })
+      }),
+    )
+    expect(
+      (await Effect.runPromise(service.listReadyIssues(PROJECT_ID))).map(
+        ({ number, hasChildren }) => ({ number, hasChildren }),
+      ),
+    ).toEqual([
+      { number: 2, hasChildren: true },
+      { number: 3, hasChildren: false },
+    ])
+  })
+})
 
 describe("Linear workflow defaults", () => {
   test("prefers In Progress among started states and Done among completed", () => {

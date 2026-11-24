@@ -8,6 +8,7 @@ import {
   Option,
   Schema,
 } from "effect"
+import { SpecBaselineResult } from "@ready-for-agent/forge-contract"
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GITHUB_HELPER_PERMISSION_EXIT_CODE,
@@ -933,6 +934,20 @@ export const keymaxxerGitHubLayer = (options: {
                 Schema.Array(GitHubSpecObservation),
                 repository,
                 "decode GitHub Spec observations",
+              ),
+            }),
+        ),
+        readSpecBaseline: Effect.fn("KeymaxxerGitHub.readSpecBaseline")(
+          (repository, issueNumber) =>
+            callHelper({
+              operation: "read-spec-baseline",
+              repository,
+              describe: "read Spec baseline",
+              args: [encodeArgument(String(issueNumber))],
+              decode: decodeJson(
+                SpecBaselineResult,
+                repository,
+                "decode Spec baseline",
               ),
             }),
         ),

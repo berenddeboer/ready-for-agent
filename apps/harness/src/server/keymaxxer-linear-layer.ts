@@ -1,6 +1,9 @@
 import { Context, Duration, Effect, Layer, Schema } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
-import type { ReadyLabeledIssue } from "@ready-for-agent/forge-contract"
+import {
+  type ReadyLabeledIssue,
+  SpecBaselineResult,
+} from "@ready-for-agent/forge-contract"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   LINEAR_API_KEY_ENV_VAR,
@@ -298,6 +301,25 @@ export const keymaxxerLinearLayer = (options: {
                     ),
                   ) as Effect.Effect<LinearIssueSnapshot, LinearServiceError>,
                 describe: `reading Linear Issue ${nativeId}`,
+              }),
+          ),
+        readSpecBaseline: (nativeId) =>
+          withToken(
+            () => ambient.readSpecBaseline(nativeId),
+            (tokenName) =>
+              callHelper({
+                operation: "read-spec-baseline",
+                args: [encodeArgument(nativeId)],
+                tokenName,
+                decode: (stdout) =>
+                  Schema.decodeUnknownEffect(
+                    Schema.fromJsonString(SpecBaselineResult),
+                  )(stdout).pipe(
+                    Effect.mapError(() =>
+                      requestError("Linear returned an invalid Spec baseline"),
+                    ),
+                  ),
+                describe: `reading baseline for Linear Spec ${nativeId}`,
               }),
           ),
         updateIssueState: (nativeId, stateId) =>

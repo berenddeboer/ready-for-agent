@@ -293,6 +293,7 @@ type Issue implements Node {
   createdAt: DateTime!
   state: IssueState!
   author: Actor
+  labels(first: Int, after: String): LabelConnection
   repository: Repository!
   parent: Issue
   comments(first: Int, after: String): IssueCommentConnection!
@@ -306,6 +307,15 @@ type Issue implements Node {
   ): PullRequestConnection!
 }
 
+type LabelConnection {
+  nodes: [Label]
+  pageInfo: PageInfo!
+}
+
+type Label {
+  name: String!
+}
+
 type IssueCommentConnection {
   nodes: [IssueComment]
   pageInfo: PageInfo!
@@ -314,6 +324,8 @@ type IssueCommentConnection {
 type IssueComment {
   id: ID!
   body: String!
+  url: URI!
+  lastEditedAt: DateTime
 }
 
 type SubIssuesSummary {

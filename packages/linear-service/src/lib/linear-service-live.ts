@@ -1,5 +1,9 @@
 import { Config, Duration, Effect, Layer, Redacted, Schema } from "effect"
-import { extractErrorCode } from "@ready-for-agent/forge-contract"
+import {
+  SPEC_LABEL,
+  extractErrorCode,
+  resolveSpecBaseline,
+} from "@ready-for-agent/forge-contract"
 import { LinearRequestError } from "./errors.js"
 import {
   LinearService,
@@ -98,6 +102,7 @@ const ProjectWorkflowSchema = Schema.Struct({
 const LabelNodeSchema = Schema.Struct({
   name: RequiredString,
 })
+const SpecLabelsSchema = Schema.Struct({ nodes: Schema.Array(LabelNodeSchema) })
 const IssueStateSchema = Schema.Struct({
   type: RequiredString,
 })
@@ -141,6 +146,7 @@ const IssueNodeSchema = Schema.Struct({
     ),
   ),
   parent: Schema.optional(Schema.NullOr(ParentIssueSchema)),
+  specLabels: Schema.optional(SpecLabelsSchema),
   children: Schema.optional(
     Schema.Struct({
       nodes: Schema.Array(Schema.Struct({ id: RequiredString })),
@@ -246,6 +252,10 @@ const PROJECT_WORKFLOW_QUERY = `query ProjectWorkflow($id: String!) {
   }
 }`
 
+const SPEC_LABELS_SELECTION = `specLabels: labels(first: 1, filter: { name: { eq: "${SPEC_LABEL}" } }) {
+  nodes { name }
+}`
+
 const READY_ISSUES_QUERY = `query ReadyIssues($projectId: ID!, $after: String) {
   issues(
     first: ${PAGE_SIZE}
@@ -265,6 +275,7 @@ const READY_ISSUES_QUERY = `query ReadyIssues($projectId: ID!, $after: String) {
       url
       createdAt
       creator { id }
+      ${SPEC_LABELS_SELECTION}
       parent {
         id
         identifier
@@ -321,6 +332,15 @@ const specChildrenSelection = (afterVariable: string) => `{
       }
       pageInfo { hasNextPage endCursor }
     }
+  }`
+
+const SPEC_QUERY = `query Spec($id: String!) {
+  issue(id: $id) {
+    title
+    description
+    url
+    ${SPEC_LABELS_SELECTION}
+  }
 }`
 
 const ISSUE_QUERY = `query Issue($id: String!) {
@@ -337,7 +357,7 @@ const ISSUE_COMMENTS_QUERY = `query IssueComments($id: String!, $after: String) 
   issue(id: $id) {
     id
     comments(first: ${PAGE_SIZE}, after: $after) {
-      nodes { id body }
+      nodes { id body url editedAt }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -403,6 +423,35 @@ const IssueCommentsSchema = Schema.Struct({
           pageInfo: Schema.optional(PageInfoSchema),
         }),
       ),
+    }),
+  ),
+})
+const SpecSchema = Schema.Struct({
+  issue: Schema.NullOr(
+    Schema.Struct({
+      title: RequiredString,
+      description: Schema.NullOr(Schema.String),
+      url: RequiredString,
+      specLabels: SpecLabelsSchema,
+    }),
+  ),
+})
+const SpecCommentsSchema = Schema.Struct({
+  issue: Schema.NullOr(
+    Schema.Struct({
+      comments: Schema.Struct({
+        nodes: Schema.Array(
+          Schema.Struct({
+            body: Schema.String,
+            url: RequiredString,
+            editedAt: Schema.NullOr(Schema.String),
+          }),
+        ),
+        pageInfo: Schema.Struct({
+          hasNextPage: Schema.Boolean,
+          endCursor: Schema.NullOr(Schema.String),
+        }),
+      }),
     }),
   ),
 })
@@ -564,6 +613,9 @@ const isReadyLabeled = (
   (labels ?? []).some(
     (label) => label.name.toLowerCase() === LINEAR_READY_LABEL,
   )
+
+const isSpecLabeled = (labels: typeof SpecLabelsSchema.Type | undefined) =>
+  labels?.nodes.some((label) => label.name === SPEC_LABEL) ?? false
 
 const toReadyLabeledIssue = (
   node: typeof IssueNodeSchema.Type,
@@ -904,7 +956,10 @@ export const makeLinearService = (options: {
           describe: `listing Ready-labeled Linear Issues in project ${projectId}`,
         })
         for (const node of data.issues.nodes) {
-          issues.push(toReadyLabeledIssue(node))
+          const issue = toReadyLabeledIssue(node)
+          if (issue.hasChildren || !isSpecLabeled(node.specLabels)) {
+            issues.push(issue)
+          }
         }
         if (
           data.issues.pageInfo?.hasNextPage !== true ||
@@ -951,6 +1006,55 @@ export const makeLinearService = (options: {
       }
       return observations
     }),
+    readSpecBaseline: Effect.fn("LinearService.readSpecBaseline")(
+      function* (nativeId) {
+        const { issue } = yield* graphql({
+          query: SPEC_QUERY,
+          variables: { id: nativeId },
+          schema: SpecSchema,
+          describe: `reading Linear Spec ${nativeId}`,
+        })
+        if (!issue)
+          return yield* requestError(`Linear Issue ${nativeId} not found`)
+        if (!isSpecLabeled(issue.specLabels)) return { kind: "not-spec" }
+
+        const comments: { body: string; url: string; edited: boolean }[] = []
+        let after: string | null = null
+        const seen = new Set<string>()
+        for (;;) {
+          const page: typeof SpecCommentsSchema.Type = yield* graphql({
+            query: ISSUE_COMMENTS_QUERY,
+            variables: { id: nativeId, after },
+            schema: SpecCommentsSchema,
+            describe: `reading comments for Linear Spec ${nativeId}`,
+          })
+          if (!page.issue) {
+            return yield* requestError(`Linear Issue ${nativeId} not found`)
+          }
+          const { nodes, pageInfo } = page.issue.comments
+          for (const comment of nodes) {
+            comments.push({
+              body: comment.body,
+              url: comment.url,
+              edited: comment.editedAt !== null,
+            })
+          }
+          if (!pageInfo.hasNextPage) {
+            return resolveSpecBaseline(
+              { ...issue, body: issue.description ?? "", marked: true },
+              comments,
+            )
+          }
+          after = pageInfo.endCursor
+          if (!after || seen.has(after)) {
+            return yield* requestError(
+              `Linear returned an invalid comments page cursor for Spec ${nativeId}`,
+            )
+          }
+          seen.add(after)
+        }
+      },
+    ),
     getIssue: Effect.fn("LinearService.getIssue")(function* (nativeId: string) {
       const data = yield* graphql({
         query: ISSUE_QUERY,

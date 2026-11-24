@@ -253,6 +253,7 @@ const defaultLinearLayer = Layer.succeed(
 
 const defaultGithubLayer = Layer.mergeAll(
   Layer.succeed(GitHubService, {
+    readSpecBaseline: () => Effect.die("not used"),
     getOpenPullRequestNumber: () => Effect.succeed(1),
     findOpenPullRequestNumber: () => Effect.succeed(1),
     closeOpenPullRequestsAndDeleteBranch: () => Effect.void,
@@ -860,6 +861,7 @@ describe("Job worker", () => {
       )
       const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
       const github = Layer.succeed(GitHubService, {
+        readSpecBaseline: () => Effect.die("not used"),
         getOpenPullRequestNumber: () => Effect.succeed(1),
         findOpenPullRequestNumber: () => Effect.succeed(1),
         closeOpenPullRequestsAndDeleteBranch: () => Effect.void,
