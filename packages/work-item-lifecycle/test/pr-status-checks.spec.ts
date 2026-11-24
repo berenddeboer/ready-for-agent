@@ -188,6 +188,7 @@ const githubWith = (
   overrides: Partial<GitHubServiceShape> = {},
 ) =>
   Layer.succeed(GitHubService, {
+    observeSpecs: () => Effect.die("not used"),
     getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
     listReadyIssues: () => Effect.succeed([]),
     getOpenPullRequestNumber: () => Effect.succeed(1),
@@ -429,6 +430,7 @@ describe("PR status check steps", () => {
   it("checks the deterministic Work Item branch", async () => {
     let requestedBranch = ""
     const github = Layer.succeed(GitHubService, {
+      observeSpecs: () => Effect.die("not used"),
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
@@ -621,6 +623,7 @@ describe("PR status check steps", () => {
     ]
     let index = 0
     const github = Layer.succeed(GitHubService, {
+      observeSpecs: () => Effect.die("not used"),
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
@@ -724,6 +727,7 @@ describe("PR status check steps", () => {
     ]
     let index = 0
     const github = Layer.succeed(GitHubService, {
+      observeSpecs: () => Effect.die("not used"),
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
@@ -890,6 +894,7 @@ describe("PR status check steps", () => {
     ]
     let index = 0
     const github = Layer.succeed(GitHubService, {
+      observeSpecs: () => Effect.die("not used"),
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
@@ -998,6 +1003,7 @@ describe("PR status check steps", () => {
     ]
     let index = 0
     const github = Layer.succeed(GitHubService, {
+      observeSpecs: () => Effect.die("not used"),
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
@@ -1065,6 +1071,7 @@ describe("PR status check steps", () => {
     ]
     let index = 0
     const github = Layer.succeed(GitHubService, {
+      observeSpecs: () => Effect.die("not used"),
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),

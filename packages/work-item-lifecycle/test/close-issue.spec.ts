@@ -116,6 +116,7 @@ const linearLeaf = {
 const unusedGithub = {
   getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   listReadyIssues: () => Effect.succeed([]),
+  observeSpecs: () => Effect.die("not used"),
   getOpenPullRequestNumber: () => Effect.succeed(1),
   findOpenPullRequestNumber: () => Effect.succeed(1),
   createDraftPullRequest: () => Effect.succeed(1),

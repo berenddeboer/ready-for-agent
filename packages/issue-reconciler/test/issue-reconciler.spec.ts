@@ -218,6 +218,7 @@ const makeGitHubLayer = (
     readonly error?: GitHubRequestError
     readonly operatorLogin?: string
     readonly identityError?: GitHubRequestError
+    readonly observeSpecs?: GitHubServiceShape["observeSpecs"]
   } = {},
 ) =>
   Layer.succeed(GitHubService, {
@@ -262,6 +263,7 @@ const makeGitHubLayer = (
     listCiGateCatalog: () => Effect.succeed([]),
     observeCiGate: () =>
       Effect.succeed({ defaultBranch: "main", observations: [] }),
+    observeSpecs: options.observeSpecs ?? (() => Effect.succeed([])),
     listReadyIssues: ({ projectPath }) => {
       actions.push(`github:${projectPath}`)
       return options.error ? Effect.fail(options.error) : Effect.succeed(issues)
@@ -622,6 +624,7 @@ describe("IssueReconciler", () => {
 
         expect(summary).toEqual({
           fetched: 3,
+          githubSpecObservations: [],
           inserted: 1,
           updated: 1,
           deleted: 1,
@@ -805,6 +808,7 @@ describe("IssueReconciler", () => {
         expect(summary).toEqual({
           fetched: 6,
           inserted: 2,
+          githubSpecObservations: [],
           updated: 0,
           deleted: 4,
           unchanged: 0,
@@ -920,6 +924,7 @@ describe("IssueReconciler", () => {
 
         expect(summary).toEqual({
           fetched: 7,
+          githubSpecObservations: [],
           inserted: 0,
           updated: 0,
           deleted: 2,
@@ -1007,6 +1012,7 @@ describe("IssueReconciler", () => {
         expect(summary).toEqual({
           fetched: 6,
           inserted: 1,
+          githubSpecObservations: [],
           updated: 3,
           deleted: 0,
           unchanged: 0,
@@ -1174,6 +1180,7 @@ describe("IssueReconciler", () => {
 
         expect(summary).toEqual({
           fetched: 6,
+          githubSpecObservations: [],
           inserted: 2,
           updated: 0,
           deleted: 1,
@@ -1236,6 +1243,7 @@ describe("IssueReconciler", () => {
         expect(summary).toEqual({
           fetched: 2,
           inserted: 2,
+          githubSpecObservations: [],
           updated: 0,
           deleted: 0,
           unchanged: 0,
@@ -1658,6 +1666,64 @@ describe("IssueReconciler", () => {
       defaultGitLabLayer,
       defaultAzureDevOpsLayer,
       linear,
+    )
+  })
+
+  it("reports GitHub Spec readiness independently from implementation intake", () => {
+    const db = makeDbFixture({ issues: [] })
+    const tracked = { ...repository, includeAllIssueAuthors: false }
+    const ordinary = remoteIssue(9, { author: "operator" })
+    const spec = remoteIssue(1, { author: "human", hasChildren: true })
+    const unavailable = new GitHubRequestError({
+      message: "Spec list unavailable",
+    })
+    let discoveryUnavailable = false
+    const github = makeGitHubLayer([ordinary], db.actions, {
+      observeSpecs: (remote, options) => {
+        expect(remote.projectPath).toBe(tracked.projectPath)
+        expect(options?.origin).toBe("operator")
+        return discoveryUnavailable
+          ? Effect.fail(unavailable)
+          : Effect.succeed([
+              {
+                nativeId: spec.nativeId,
+                displayId: spec.displayId,
+                url: spec.url,
+                readiness: "all-descendants-closed",
+              },
+            ])
+      },
+    })
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const refresh = () =>
+          reconciler.reconcile(tracked, {
+            githubOperation: { origin: "operator" },
+          })
+        const observed = yield* refresh()
+        expect(observed.githubSpecObservations).toEqual([
+          {
+            nativeId: spec.nativeId,
+            displayId: spec.displayId,
+            url: spec.url,
+            readiness: "all-descendants-closed",
+          },
+        ])
+        expect(observed.linearSpecObservations).toBeUndefined()
+        expect(observed.fetched).toBe(1)
+        expect(observed.inserted).toBe(1)
+        discoveryUnavailable = true
+        const failedObservation = yield* refresh()
+        expect(failedObservation.githubSpecObservations).toBeUndefined()
+        expect(failedObservation.unchanged).toBe(1)
+        expect(db.stored.map((issue) => issue.nativeId)).toEqual([
+          ordinary.nativeId,
+        ])
+      }),
+      db.layer,
+      github,
     )
   })
 

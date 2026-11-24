@@ -409,6 +409,14 @@ export const ambientGitHubLayer = (options: {
                 service.listReadyIssues(repository, operationOptions),
             ),
         ),
+        observeSpecs: Effect.fn("AmbientGitHub.observeSpecs")(
+          (repository, operationOptions?: GitHubOperationOptions) =>
+            authenticated(
+              operationOptions?.origin ?? "polling",
+              repository,
+              (service) => service.observeSpecs(repository, operationOptions),
+            ),
+        ),
         listCiGateCatalog: Effect.fn("AmbientGitHub.listCiGateCatalog")(
           (repository, operationOptions?: GitHubOperationOptions) =>
             authenticated(

@@ -25,7 +25,11 @@ import type {
   AutomatedReviewEvidenceObservation,
 } from "./automated-review-evidence.js"
 import type { GitHubServiceError } from "./errors.js"
-import type { GitHubRepository, UploadUserAttachmentInput } from "./types.js"
+import type {
+  GitHubRepository,
+  GitHubSpecObservation,
+  UploadUserAttachmentInput,
+} from "./types.js"
 
 /**
  * Semantic source used by the harness to order GitHub API operations.
@@ -70,6 +74,11 @@ export interface GitHubServiceShape
     repository: GitHubRepository,
     options?: GitHubOperationOptions,
   ) => Effect.Effect<readonly ReadyLabeledIssue[], GitHubServiceError>
+  /** Read the original Issue hierarchy for scheduling, not delivery evidence. */
+  readonly observeSpecs: (
+    repository: GitHubRepository,
+    options?: GitHubOperationOptions,
+  ) => Effect.Effect<readonly GitHubSpecObservation[], GitHubServiceError>
   /**
    * Live catalog of active GitHub Actions workflows as CI Gate Definitions.
    * Disabled, deleted, and inactive workflows are omitted.

@@ -291,6 +291,7 @@ const defaultGithubLayer = Layer.mergeAll(
       Effect.succeed({ defaultBranch: "main", observations: [] }),
     getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
     listReadyIssues: () => Effect.succeed([]),
+    observeSpecs: () => Effect.succeed([]),
   } satisfies GitHubServiceShape),
   defaultGitlabLayer,
   defaultAzureDevOpsLayer,
@@ -896,6 +897,7 @@ describe("Job worker", () => {
         observeCiGate: () =>
           Effect.succeed({ defaultBranch: "main", observations: [] }),
         getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+        observeSpecs: () => Effect.succeed([]),
         listReadyIssues: () =>
           Effect.succeed([
             {

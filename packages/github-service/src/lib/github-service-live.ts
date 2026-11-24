@@ -83,6 +83,7 @@ import {
 import {
   GITHUB_CI_GATE_KIND,
   type GitHubRepository,
+  type GitHubSpecObservation,
   isGitHubUserAttachmentUrl,
 } from "./types.js"
 
@@ -99,6 +100,7 @@ class GitHubApiRepositoryUnavailableError extends Schema.TaggedError<GitHubApiRe
   },
 ) {}
 const READY_FOR_AGENT_LABEL = "ready-for-agent"
+const SPEC_LABEL = "spec"
 const PAGE_SIZE = 100
 const REQUEST_TIMEOUT = "30 seconds"
 const DEFAULT_MAX_EXCERPT_CHARS = 12_000
@@ -1271,6 +1273,219 @@ type GitHubApiRepository = {
   readonly name: string
 }
 
+const SpecIssueIdentity = Schema.Struct({
+  id: Schema.NonEmptyString,
+  state: Schema.Literals(["OPEN", "CLOSED"]),
+})
+const SpecIssue = Schema.Struct({
+  ...SpecIssueIdentity.fields,
+  number: Schema.Int.check(Schema.isGreaterThan(0)),
+  url: Schema.NonEmptyString,
+})
+const SpecChildCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+const SpecChild = Schema.Struct({
+  ...SpecIssueIdentity.fields,
+  subIssuesSummary: Schema.Struct({ total: SpecChildCount }),
+})
+const SpecIssuePageFields = {
+  totalCount: true,
+  pageInfo: { hasNextPage: true, endCursor: true },
+} as const
+
+const readSpecIssuePages = Effect.fn("GitHubService.readSpecIssuePages")(
+  function* <A extends { readonly id: string }, E>(
+    schema: Schema.Codec<A, unknown>,
+    describe: string,
+    readPage: (after: string | null) => Effect.Effect<unknown, E>,
+    initialCount?: number,
+  ) {
+    const pageSchema = Schema.Struct({
+      totalCount: SpecChildCount,
+      nodes: Schema.Array(schema),
+      pageInfo: Schema.Struct({
+        hasNextPage: Schema.Boolean,
+        endCursor: Schema.NullOr(Schema.String),
+      }),
+    })
+    const invalid = (cause?: unknown) =>
+      new GitHubRequestError({
+        message: `GitHub returned incomplete data while ${describe}`,
+        cause,
+      })
+    const items = new Map<string, A>()
+    const cursors = new Set<string>()
+    let after: string | null = null
+    let expectedCount = initialCount
+    for (;;) {
+      const raw: unknown = yield* readPage(after)
+      const page = yield* Effect.try({
+        try: () => Schema.decodeUnknownSync(pageSchema)(raw),
+        catch: invalid,
+      })
+      expectedCount ??= page.totalCount
+      if (page.totalCount !== expectedCount) return yield* invalid()
+      for (const node of page.nodes) {
+        if (items.has(node.id)) return yield* invalid()
+        items.set(node.id, node)
+      }
+      const { endCursor, hasNextPage } = page.pageInfo
+      if (!hasNextPage) {
+        if (items.size !== expectedCount) return yield* invalid()
+        return [...items.values()]
+      }
+      if (
+        items.size >= expectedCount ||
+        page.nodes.length === 0 ||
+        !endCursor?.trim() ||
+        cursors.has(endCursor)
+      ) {
+        return yield* invalid()
+      }
+      cursors.add(endCursor)
+      after = endCursor
+    }
+  },
+)
+
+const makeObserveSpecs = (client: GitHubGraphqlClient) => {
+  const observeDescendants = Effect.fn("GitHubService.observeSpecDescendants")(
+    function* (root: typeof SpecIssueIdentity.Type) {
+      const seen = new Set([root.id])
+      const branches: (typeof SpecIssueIdentity.Type & {
+        readonly childCount?: number
+      })[] = [root]
+      let hasOpenDescendant = false
+      for (const branch of branches) {
+        const describe = `reading sub-issues of GitHub Issue ${branch.id}`
+        const children = yield* readSpecIssuePages(
+          SpecChild,
+          describe,
+          (after) =>
+            Effect.gen(function* () {
+              // Use the global Issue ID so traversal is not confined to the
+              // repository that contains the Spec.
+              const result = yield* githubQuery(
+                `Failed while ${describe}`,
+                (signal) =>
+                  client.query(
+                    {
+                      node: {
+                        __args: { id: branch.id },
+                        on_Issue: {
+                          id: true,
+                          state: true,
+                          subIssuesSummary: { total: true },
+                          subIssues: {
+                            __args: { first: PAGE_SIZE, after },
+                            nodes: {
+                              id: true,
+                              state: true,
+                              subIssuesSummary: { total: true },
+                            },
+                            ...SpecIssuePageFields,
+                          },
+                        },
+                      },
+                    },
+                    signal,
+                  ),
+              )
+              const node = result?.node
+              if (
+                typeof node !== "object" ||
+                node === null ||
+                !("subIssues" in node) ||
+                node.id !== branch.id ||
+                node.state !== branch.state ||
+                node.subIssues?.totalCount !== node.subIssuesSummary?.total
+              ) {
+                return yield* new GitHubRequestError({
+                  message: `GitHub returned an unreadable or incomplete hierarchy while ${describe}`,
+                })
+              }
+              return node.subIssues
+            }),
+          branch.childCount,
+        )
+        for (const child of children) {
+          if (seen.has(child.id)) {
+            return yield* new GitHubRequestError({
+              message: `GitHub returned a duplicate descendant of Spec ${root.id}`,
+            })
+          }
+          seen.add(child.id)
+          if (child.subIssuesSummary.total > 0) {
+            branches.push({
+              ...child,
+              childCount: child.subIssuesSummary.total,
+            })
+          }
+          // CLOSED is enough for scheduling, including "not planned". It is
+          // not a claim about delivery, nor is GitHub's completed count used.
+          if (child.state === "OPEN") hasOpenDescendant = true
+        }
+      }
+      return hasOpenDescendant || seen.size === 1
+        ? "waiting"
+        : "all-descendants-closed"
+    },
+  )
+
+  return Effect.fn("GitHubService.observeSpecs")(function* (
+    repository: GitHubApiRepository,
+  ) {
+    const describe = `listing open GitHub Specs for ${repository.owner}/${repository.name}`
+    const specs = yield* readSpecIssuePages(SpecIssue, describe, (after) =>
+      Effect.gen(function* () {
+        const result = yield* githubQuery(
+          `Failed while ${describe}`,
+          (signal) =>
+            client.query(
+              {
+                repository: {
+                  __args: repository,
+                  issues: {
+                    __args: {
+                      first: PAGE_SIZE,
+                      after,
+                      labels: [SPEC_LABEL],
+                      states: ["OPEN"],
+                    },
+                    nodes: { id: true, number: true, url: true, state: true },
+                    ...SpecIssuePageFields,
+                  },
+                },
+              },
+              signal,
+            ),
+        )
+        if (result?.repository === null) {
+          return yield* new GitHubApiRepositoryUnavailableError(repository)
+        }
+        return result?.repository?.issues
+      }),
+    )
+    const observations: GitHubSpecObservation[] = []
+    for (const spec of specs) {
+      if (spec.state !== "OPEN") continue
+      const readiness = yield* observeDescendants(spec).pipe(
+        Effect.catchIf(
+          (error) =>
+            error._tag === "GitHubRequestError" && error.statusCode !== 401,
+          () => Effect.succeed("hierarchy-unavailable" as const),
+        ),
+      )
+      observations.push({
+        nativeId: String(spec.number),
+        displayId: String(spec.number),
+        url: spec.url,
+        readiness,
+      })
+    }
+    return observations
+  })
+}
+
 type GitHubApiServiceShape = {
   [K in keyof GitHubServiceShape]: GitHubServiceShape[K] extends (
     repository: GitHubRepository,
@@ -1300,6 +1515,7 @@ const makeGitHubApiService = (
   listCiGateCatalogImpl?: ListCiGateCatalog,
   observeCiGateImpl?: ObserveCiGate,
 ): GitHubApiServiceShape => ({
+  observeSpecs: makeObserveSpecs(client),
   getAuthenticatedUserLogin: Effect.fn(
     "GitHubService.getAuthenticatedUserLogin",
   )(function* (_repository) {
@@ -3100,6 +3316,7 @@ export const makeGitHubService = (
   return {
     getAuthenticatedUserLogin: adapt(service.getAuthenticatedUserLogin),
     listReadyIssues: adapt(service.listReadyIssues),
+    observeSpecs: adapt(service.observeSpecs),
     getPullRequestCheckStatus: adapt(service.getPullRequestCheckStatus),
     getPrStatusCheckDiagnostics: adapt(service.getPrStatusCheckDiagnostics),
     observeAutomatedReviewEvidence: adapt(

@@ -29,6 +29,11 @@ Classic GitHub PATs (`repo` + `workflow`) also work. Fine-grained
 tokens cannot call the Checks API; the harness falls back to Actions
 jobs and that 403 is expected.
 
+Spec observation uses **Issues: Read**. If a GitHub Spec has native sub-issues
+in other repositories, its credential must be able to read Issues in those
+repositories too. An unreadable or incomplete hierarchy does not count as
+ready for validation.
+
 ## Per step
 
 Each cell is the **minimum for that step alone**. Union the cells for

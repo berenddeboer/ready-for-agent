@@ -9,6 +9,7 @@ scalar ID
 scalar GitObjectID
 
 type Query {
+  node(id: ID!): Node
   repository(owner: String!, name: String!): Repository
   viewer: User!
 }
@@ -138,7 +139,12 @@ type Repository {
   nameWithOwner: String!
   defaultBranchRef: Ref
   ref(qualifiedName: String!): Ref
-  issues(first: Int, after: String, labels: [String!]): IssueConnection!
+  issues(
+    first: Int
+    after: String
+    labels: [String!]
+    states: [IssueState!]
+  ): IssueConnection!
   issue(number: Int!): Issue
   pullRequests(
     first: Int
@@ -258,6 +264,7 @@ enum CheckConclusionState {
 type IssueConnection {
   nodes: [Issue]
   pageInfo: PageInfo!
+  totalCount: Int!
 }
 
 type PageInfo {
@@ -273,7 +280,11 @@ type User {
   login: String!
 }
 
-type Issue {
+interface Node {
+  id: ID!
+}
+
+type Issue implements Node {
   id: ID!
   number: Int!
   title: String!

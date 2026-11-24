@@ -143,6 +143,7 @@ const stubGitHub = (
   overrides: Partial<GitHubServiceShape> = {},
 ): Layer.Layer<GitHubService> =>
   Layer.succeed(GitHubService, {
+    observeSpecs: () => Effect.die("not used"),
     getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
     listReadyIssues: () => Effect.succeed([]),
     getOpenPullRequestNumber: () => Effect.succeed(1),

@@ -16,6 +16,7 @@ import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
 import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
 import { observeAutomatedReviewEvidenceProgram } from "../bin/observe-automated-review-evidence.js"
 import { observeCiGateProgram } from "../bin/observe-ci-gate.js"
+import { observeSpecsProgram } from "../bin/observe-specs.js"
 import { readCiRepairRunProgram } from "../bin/read-ci-repair-run.js"
 import { rerunFailedJobsProgram } from "../bin/rerun-failed-jobs.js"
 import { rerunWorkflowRunProgram } from "../bin/rerun-workflow-run.js"
@@ -30,6 +31,7 @@ export const INTERNAL_GITHUB_HELPER_ARG =
 
 export const GITHUB_HELPER_OPERATIONS = [
   "list-ready-issues",
+  "observe-specs",
   "list-ci-gate-catalog",
   "observe-ci-gate",
   "get-authenticated-user-login",
@@ -148,6 +150,7 @@ const programs: Record<
   (args: ReadonlyArray<string>) => Effect.Effect<void, unknown, GitHubService>
 > = {
   "list-ready-issues": listReadyIssuesProgram,
+  "observe-specs": observeSpecsProgram,
   "list-ci-gate-catalog": listCiGateCatalogProgram,
   "observe-ci-gate": observeCiGateProgram,
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,

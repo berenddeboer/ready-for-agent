@@ -91,6 +91,295 @@ const issue = (
   closingPullRequests: [],
 })
 
+describe("GitHub Spec observation", () => {
+  const spec = (number: number, state = "OPEN", labels = ["spec"]) => ({
+    id: `spec-${number}`,
+    number,
+    state,
+    url: issue(number).url,
+    labels,
+  })
+  const child = (id: string, state = "CLOSED", total = 0) => ({
+    id,
+    state,
+    subIssuesSummary: { total },
+  })
+  const page = (
+    nodes: readonly unknown[],
+    totalCount = nodes.length,
+    endCursor: string | null = null,
+  ) => ({
+    nodes,
+    totalCount,
+    pageInfo: { endCursor, hasNextPage: endCursor !== null },
+  })
+  const branch = (
+    id: string,
+    state: string,
+    subIssues: ReturnType<typeof page>,
+    total = subIssues.totalCount,
+  ) => ({
+    ...child(id, state, total),
+    subIssues,
+  })
+  const mockGitHub = (
+    list: (
+      query: string,
+      args: Record<string, unknown>,
+    ) => ReturnType<typeof page>,
+    read: (id: string, after: string | null) => Response,
+  ) =>
+    makeGitHubServiceFromToken("token", async (_url, init) => {
+      const { query, variables } = JSON.parse(String(init?.body))
+      const argument = (name: string) =>
+        variables[query.match(new RegExp(`\\b${name}:\\$(v\\d+)`))?.[1]]
+      if (query.includes("repository(")) {
+        return jsonGraphqlResponse({
+          data: {
+            repository: {
+              issues: list(query, {
+                labels: argument("labels"),
+                states: argument("states"),
+                after: argument("after"),
+              }),
+            },
+          },
+        })
+      }
+      expect(query).toContain("on Issue")
+      expect(query).toContain("subIssues(")
+      return read(argument("id"), argument("after"))
+    })
+  const node = (value: unknown) =>
+    jsonGraphqlResponse({ data: { node: value } })
+
+  it.effect(
+    "observes only open marked parents, including first-scan completion and explicit reopening",
+    () =>
+      Effect.gen(function* () {
+        const parents = [
+          spec(1),
+          spec(2),
+          spec(3),
+          spec(4, "OPEN", []),
+          spec(5, "CLOSED"),
+        ]
+        const service = mockGitHub(
+          (_query, args) => {
+            expect(args.labels).toEqual(["spec"])
+            expect(args.states).toEqual(["OPEN"])
+            const visible = parents.filter(
+              ({ state, labels }) =>
+                state === "OPEN" && labels.includes("spec"),
+            )
+            return args.after === null
+              ? page(visible.slice(0, 1), visible.length, "more-specs")
+              : page(visible.slice(1), visible.length)
+          },
+          (id) => {
+            switch (id) {
+              case "spec-1":
+                return node(branch(id, "OPEN", page([])))
+              case "spec-2":
+                return node(
+                  branch(id, "OPEN", page([child("open-ticket", "OPEN")])),
+                )
+              case "spec-3":
+                return node({
+                  ...branch(
+                    id,
+                    "OPEN",
+                    page([
+                      { ...child("abandoned"), stateReason: "NOT_PLANNED" },
+                    ]),
+                  ),
+                  subIssuesSummary: { total: 1, completed: 0 },
+                })
+              case "spec-5":
+                return node(branch(id, "OPEN", page([child("closed-ticket")])))
+              default:
+                throw new Error(`Unexpected hierarchy read for ${id}`)
+            }
+          },
+        )
+        const observe = () =>
+          service
+            .observeSpecs(repository)
+            .pipe(
+              Effect.map((observations) =>
+                observations.map(({ nativeId, readiness }) => [
+                  nativeId,
+                  readiness,
+                ]),
+              ),
+            )
+        expect(yield* observe()).toEqual([
+          ["1", "waiting"],
+          ["2", "waiting"],
+          ["3", "all-descendants-closed"],
+        ])
+        parents[4] = spec(5)
+        expect(yield* observe()).toContainEqual(["5", "all-descendants-closed"])
+      }),
+  )
+
+  it.effect(
+    "reads later pages beneath a closed intermediate and observes a descendant reopening",
+    () =>
+      Effect.gen(function* () {
+        let grandchildState = "OPEN"
+        const service = mockGitHub(
+          () => page([spec(1)]),
+          (id, after) => {
+            if (id === "spec-1") {
+              return node(
+                branch(
+                  id,
+                  "OPEN",
+                  page([child("other-repo/intermediate", "CLOSED", 2)]),
+                ),
+              )
+            }
+            expect(id).toBe("other-repo/intermediate")
+            if (after === null) {
+              return node(
+                branch(
+                  id,
+                  "CLOSED",
+                  page([child("closed-grandchild")], 2, "next"),
+                ),
+              )
+            }
+            expect(after).toBe("next")
+            return node(
+              branch(
+                id,
+                "CLOSED",
+                page(
+                  [
+                    {
+                      ...child("human-grandchild", grandchildState),
+                      author: { login: "human" },
+                      labels: { nodes: [] },
+                    },
+                  ],
+                  2,
+                ),
+              ),
+            )
+          },
+        )
+        const observe = () =>
+          service
+            .observeSpecs(repository)
+            .pipe(Effect.map((observations) => observations[0]?.readiness))
+        expect(yield* observe()).toBe("waiting")
+        grandchildState = "CLOSED"
+        expect(yield* observe()).toBe("all-descendants-closed")
+        grandchildState = "OPEN"
+        expect(yield* observe()).toBe("waiting")
+      }),
+  )
+
+  const incompleteContinuations = [
+    ["missing node", () => node(null)],
+    ["inaccessible subtree", () => new Response(null, { status: 403 })],
+    [
+      "missing child",
+      () => node(branch("intermediate", "CLOSED", page([], 3))),
+    ],
+    [
+      "count masked by access",
+      () => node(branch("intermediate", "CLOSED", page([child("two")], 2), 3)),
+    ],
+    [
+      "repeated cursor",
+      () =>
+        node(branch("intermediate", "CLOSED", page([child("two")], 3, "next"))),
+    ],
+    [
+      "missing cursor",
+      () =>
+        node(
+          branch("intermediate", "CLOSED", {
+            ...page([child("two")], 3),
+            pageInfo: { endCursor: null, hasNextPage: true },
+          }),
+        ),
+    ],
+    [
+      "null child",
+      () =>
+        node(branch("intermediate", "CLOSED", page([child("two"), null], 3))),
+    ],
+    [
+      "partial GraphQL data",
+      () =>
+        jsonGraphqlResponse({
+          data: {
+            node: branch(
+              "intermediate",
+              "CLOSED",
+              page([child("two"), child("three")], 3),
+            ),
+          },
+          errors: [
+            { message: "Resource not accessible", path: ["node", "subIssues"] },
+          ],
+        }),
+    ],
+  ] as const
+
+  for (const [reason, unreadable] of incompleteContinuations) {
+    it.effect(`withholds readiness for ${reason} on a later page`, () =>
+      Effect.gen(function* () {
+        const service = mockGitHub(
+          () => page([spec(1), spec(2)]),
+          (id, after) => {
+            if (id === "spec-1") {
+              return node(
+                branch(id, "OPEN", page([child("intermediate", "CLOSED", 3)])),
+              )
+            }
+            if (id === "spec-2") {
+              return node(
+                branch(id, "OPEN", page([child("unrelated-closed-ticket")])),
+              )
+            }
+            return after === null
+              ? node(branch(id, "CLOSED", page([child("one")], 3, "next")))
+              : unreadable()
+          },
+        )
+        const observations = yield* service.observeSpecs(repository)
+        expect(observations.map(({ readiness }) => readiness)).toEqual([
+          "hierarchy-unavailable",
+          "all-descendants-closed",
+        ])
+      }),
+    )
+  }
+
+  it.effect(
+    "does not report readiness from an incomplete list of marked parents",
+    () =>
+      Effect.gen(function* () {
+        const service = mockGitHub(
+          (_query, args) =>
+            args.after === null ? page([spec(1)], 2, "next") : page([], 2),
+          () => {
+            throw new Error(
+              "Expected the Spec list to fail before any hierarchy reads",
+            )
+          },
+        )
+        expect(
+          yield* Effect.flip(service.observeSpecs(repository)),
+        ).toBeInstanceOf(GitHubRequestError)
+      }),
+  )
+})
+
 describe("GitHubService live implementation", () => {
   it.effect("normalizes primary reset headers into GitHub Throttled", () =>
     Effect.gen(function* () {

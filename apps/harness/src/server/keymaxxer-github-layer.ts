@@ -22,6 +22,7 @@ import {
   GitHubService,
   type GitHubServiceError,
   type GitHubServiceShape,
+  GitHubSpecObservation,
   GitHubThrottledError,
   GitHubTlsTrustError,
   INCOMPLETE_AUTOMATED_REVIEW_SIGNATURE,
@@ -919,6 +920,20 @@ export const keymaxxerGitHubLayer = (options: {
               describe: "list Ready-labeled Issues",
               origin: operationOptions?.origin ?? "polling",
               decode: (stdout) => parseIssues(stdout, repository),
+            }),
+        ),
+        observeSpecs: Effect.fn("KeymaxxerGitHub.observeSpecs")(
+          (repository, operationOptions?: GitHubOperationOptions) =>
+            callHelper({
+              operation: "observe-specs",
+              repository,
+              describe: "observe GitHub Specs",
+              origin: operationOptions?.origin ?? "polling",
+              decode: decodeJson(
+                Schema.Array(GitHubSpecObservation),
+                repository,
+                "decode GitHub Spec observations",
+              ),
             }),
         ),
         listCiGateCatalog: Effect.fn("KeymaxxerGitHub.listCiGateCatalog")(
