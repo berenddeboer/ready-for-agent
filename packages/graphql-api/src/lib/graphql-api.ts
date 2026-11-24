@@ -56,7 +56,6 @@ import {
   LINEAR_API_KEY_SECRET_NAME,
   LINEAR_VAULT_ACCOUNT,
   LINEAR_VAULT_PROVIDER,
-  LinearExecutionNotSupportedError,
   LinearService,
 } from "@ready-for-agent/linear-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
@@ -806,22 +805,6 @@ export const createGraphqlApi = <R>(
     )
   }
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
-  const rejectLinearParentImplementAll = (repositoryId: string) =>
-    Effect.gen(function* () {
-      const db = yield* DbService
-      const repositories = yield* db.listRepositories
-      const repository = repositories.find(({ id }) => id === repositoryId)
-      if (repository === undefined) {
-        return yield* new RepositoryNotFoundError({ repositoryId })
-      }
-      if (repository.issueTracker === "linear") {
-        return yield* new LinearExecutionNotSupportedError({
-          repositoryId: repository.id,
-          message:
-            "Implement All is not available for Linear Issues in this release. Start eligible leaf Issues instead.",
-        })
-      }
-    })
 
   /**
    * Run a resolver Effect with the HTTP request's AbortSignal so client
@@ -2018,8 +2001,11 @@ export const createGraphqlApi = <R>(
                   workItem.origin === "issue"
                     ? issues.find(
                         (candidate) =>
+                          (candidate.issueTracker ??
+                            workItem.issueSource.tracker) ===
+                            workItem.issueSource.tracker &&
                           persistedIssueIdentity(candidate).nativeId ===
-                          workItem.issueSource.nativeId,
+                            workItem.issueSource.nativeId,
                       )
                     : undefined
                 const snapshot = workItem.waitingForCiRepair
@@ -3308,7 +3294,6 @@ export const createGraphqlApi = <R>(
           ) =>
             runGraphql(
               Effect.gen(function* () {
-                yield* rejectLinearParentImplementAll(args.repositoryId)
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementAllWithAutoMerge(
                   args.repositoryId,

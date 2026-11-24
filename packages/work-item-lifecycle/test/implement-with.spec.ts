@@ -10,8 +10,8 @@ import {
   DbService,
   DbServiceLive,
   type DbServiceShape,
+  type StoreIssueInput,
 } from "@ready-for-agent/db-service"
-import { LinearExecutionNotSupportedError } from "@ready-for-agent/linear-service"
 import {
   EnqueueError,
   type JobId,
@@ -1857,7 +1857,7 @@ describe("implementWith", () => {
     )
   })
 
-  it("rejects Linear parent Implement With", async () => {
+  it("enrolls Linear children by native identity and admits them after blocker reconciliation", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const db = yield* DbService
@@ -1898,7 +1898,7 @@ describe("implementWith", () => {
             },
           ],
         })
-        yield* db.storeIssue({
+        const parent = yield* db.storeIssue({
           repositoryId: repo.id,
           issueNumber: 10,
           issueTracker: "linear",
@@ -1915,14 +1915,89 @@ describe("implementWith", () => {
           hasChildren: true,
           blockedBy: [],
         })
-        const error = yield* lifecycle
-          .implementWith(
-            repo.id,
-            "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-            explicitReviewProfile,
-          )
-          .pipe(Effect.flip)
-        expect(error).toBeInstanceOf(LinearExecutionNotSupportedError)
+        const blocker = {
+          issueNumber: 11,
+          issueUrl: "https://linear.app/acme/issue/OPS-11",
+          nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567891",
+          displayId: "OPS-11",
+        }
+        const childInput = {
+          repositoryId: repo.id,
+          issueTracker: "linear",
+          issueNumber: 11,
+          nativeId: "a1b2c3d4-e5f6-7890-abcd-ef1234567892",
+          displayId: "ENG-11",
+          url: "https://linear.app/acme/issue/ENG-11",
+          title: "Linear child",
+          body: "",
+          state: "OPEN",
+          githubCreatedAt: new Date(),
+          issueAuthor: null,
+          parent: {
+            issueNumber: parent.issueNumber,
+            issueUrl: parent.url,
+            nativeId: parent.nativeId,
+            displayId: parent.displayId,
+          },
+          parentPosition: null,
+          hasChildren: false,
+          blockedBy: [blocker],
+        } satisfies StoreIssueInput
+        yield* storeOpenChildIssue(db, repo.id, 12, 10, { hasChildren: true })
+        yield* db.storeIssue({
+          ...childInput,
+          issueTracker: "github",
+          issueNumber: 9,
+          title: "Stale child from a different tracker",
+          hasChildren: true,
+        })
+        yield* db.storeIssue(childInput)
+        const covered = yield* lifecycle.implementWith(
+          repo.id,
+          parent.nativeId,
+          explicitReviewProfile,
+          { mergePolicy: "classify", implementLocally: false },
+        )
+        expect(covered).toHaveLength(1)
+        const [child] = covered
+        if (child === undefined) throw new Error("No child was enrolled")
+        expect(child.issueSource).toEqual({
+          tracker: "linear",
+          nativeId: childInput.nativeId,
+          displayId: "ENG-11",
+          url: childInput.url,
+        })
+        expect(child.executionProfile).toEqual(expectedExplicitReviewProfile)
+        expect(child.autoMergeOverride).toBe(true)
+        expect(child.waitingForBlockers).toBe(true)
+        expect(child.stepRuns).toHaveLength(0)
+        expect(yield* lifecycle.releaseWaitingForBlockers(repo.id)).toBe(0)
+
+        const adopted = yield* lifecycle.implementWith(
+          repo.id,
+          parent.nativeId,
+          sameAsBuildProfile,
+          { mergePolicy: "off", implementLocally: false },
+        )
+        expect(adopted.map((item) => item.id)).toEqual([child.id])
+        expect(adopted[0]?.autoMergeOverride).toBe(false)
+        expect(adopted[0]?.executionProfile).toEqual(child.executionProfile)
+
+        const repeat = yield* lifecycle.implementAllWithAutoMerge(
+          repo.id,
+          parent.nativeId,
+        )
+        expect(repeat.map((item) => item.id)).toEqual([child.id])
+        expect(repeat[0]?.mergeMode).toBe("always")
+        expect(repeat[0]?.executionProfile).toEqual(child.executionProfile)
+
+        // The Issue Reconciler removes closed native blockers from the store.
+        yield* db.storeIssue({ ...childInput, blockedBy: [] })
+        expect(yield* lifecycle.releaseWaitingForBlockers(repo.id)).toBe(1)
+        const released = yield* lifecycle.getWorkItem(child.id)
+        expect(released.waitingForBlockers).toBe(false)
+        expect(released.holdsWorkerSlot).toBe(true)
+        expect(released.stepRuns).toHaveLength(1)
       }).pipe(Effect.provide(lifecycleLayer(catalogLayer()))),
     )
   })

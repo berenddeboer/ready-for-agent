@@ -3638,15 +3638,19 @@ function RepositoryIssues({
     )
   }
 
+  const issueKey = (tracker: string, nativeId: string) =>
+    `${tracker}:${nativeId}`
   const childrenByParent = new Map<string, RepositoryIssue[]>()
   for (const issue of issues) {
     if (issue.parent === null) continue
-    const parentKey = issue.parent.nativeId
+    const parentKey = issueKey(issue.issueTracker, issue.parent.nativeId)
     const children = childrenByParent.get(parentKey) ?? []
     children.push(issue)
     childrenByParent.set(parentKey, children)
   }
-  const localIssueNativeIds = new Set(issues.map((issue) => issue.nativeId))
+  const localIssueKeys = new Set(
+    issues.map((issue) => issueKey(issue.issueTracker, issue.nativeId)),
+  )
 
   return (
     <ul className={ui.repoIssuesList}>
@@ -3655,7 +3659,9 @@ function RepositoryIssues({
         // it as a top-level row when that parent is not in the local list.
         if (
           issue.parent !== null &&
-          localIssueNativeIds.has(issue.parent.nativeId)
+          localIssueKeys.has(
+            issueKey(issue.issueTracker, issue.parent.nativeId),
+          )
         ) {
           return null
         }
@@ -3672,7 +3678,9 @@ function RepositoryIssues({
           )
         }
 
-        const children = childrenByParent.get(issue.nativeId) ?? []
+        const children =
+          childrenByParent.get(issueKey(issue.issueTracker, issue.nativeId)) ??
+          []
         const closedChildren = children.filter(
           (child) => child.state === "CLOSED",
         ).length
@@ -3714,7 +3722,7 @@ function ParentIssueGroup({
   const [implementWithOpen, setImplementWithOpen] = useState(false)
   const openChildren = childIssues.filter((child) => child.state === "OPEN")
   const canImplementAll =
-    repository.issueTracker !== "linear" &&
+    repository.issueTracker === parent.issueTracker &&
     isParentImplementAllWithAutoMergeEligible({
       openChildren,
       directChildren: childIssues,
@@ -3935,6 +3943,7 @@ function RepositoryIssueRow({
     (workItem) =>
       workItem.origin !== "CI_REPAIR" &&
       workItem.issueSource !== null &&
+      workItem.issueSource.tracker === issue.issueTracker &&
       workItem.issueSource.nativeId === issue.nativeId,
   )
   const latestWorkItem = issueWorkItems.at(-1)

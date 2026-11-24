@@ -39,8 +39,10 @@ describe("Repository settings Linear discovery", () => {
 
   test("shows mapped-project children whose parent is not in the local list", () => {
     const source = indexSource()
-    expect(source).toContain("localIssueNativeIds")
-    expect(source).toContain("localIssueNativeIds.has(issue.parent.nativeId)")
+    expect(source).toContain("localIssueKeys.has(")
+    expect(source).toContain(
+      "issueKey(issue.issueTracker, issue.parent.nativeId)",
+    )
   })
 
   test("maps one Linear project and suggested team In Progress/Done statuses", () => {
@@ -57,11 +59,10 @@ describe("Repository settings Linear discovery", () => {
     expect(source).toContain("linearWorkflowStatuses")
   })
 
-  test("starts Linear leaf Issues from Implement and Queue while hiding Implement All", () => {
+  test("starts Linear leaf Issues from Implement and Queue", () => {
     const source = indexSource()
     expect(source).toContain("const canImplementNow = canImplement")
     expect(source).toContain("const canQueueNow = canQueue")
     expect(source).not.toContain("canStartLinearExecution")
-    expect(source).toContain('repository.issueTracker !== "linear" &&')
   })
 })
