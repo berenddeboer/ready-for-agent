@@ -148,6 +148,26 @@ const pageErrorsOf = (page: Page): string[] => {
   return errors
 }
 
+/**
+ * React/TanStack Router error boundaries (`CatchBoundary`) catch route-level
+ * runtime errors — including Vite's externalized Node builtin errors — so they
+ * never fire `pageerror` or `vite-error-overlay`. Capture browser console
+ * errors and Vite externalization warnings too.
+ */
+const consoleErrorsOf = (page: Page): string[] => {
+  const errors: string[] = []
+  page.on("console", (message) => {
+    const text = message.text()
+    if (
+      message.type() === "error" ||
+      text.includes("has been externalized for browser compatibility")
+    ) {
+      errors.push(`[console.${message.type()}] ${text}`)
+    }
+  })
+  return errors
+}
+
 const clientStatus = (value: unknown): "ready" | "overlay" => {
   if (value === "ready" || value === "overlay") return value
   throw new Error(`Dev client returned an unexpected status: ${String(value)}`)
@@ -158,6 +178,7 @@ const assertDevPageLoads = async (baseUrl: string): Promise<void> => {
   try {
     const page = await browser.newPage()
     const pageErrors = pageErrorsOf(page)
+    const consoleErrors = consoleErrorsOf(page)
     page.setDefaultNavigationTimeout(60_000)
     await page.goto(`${baseUrl}/?theme=light`, {
       waitUntil: "domcontentloaded",
@@ -198,6 +219,20 @@ const assertDevPageLoads = async (baseUrl: string): Promise<void> => {
     await page.getByRole("navigation", { name: "Primary" }).waitFor({
       state: "visible",
     })
+    const errorBoundary = page.getByText("Something went wrong!", {
+      exact: false,
+    })
+    if ((await errorBoundary.count()) > 0) {
+      const text = await page.locator("body").innerText()
+      throw new Error(
+        `Dev page rendered an error boundary:\n${text.slice(0, 1000)}`,
+      )
+    }
+    if (consoleErrors.length > 0) {
+      throw new Error(
+        `Dev page logged browser console errors:\n${consoleErrors.join("\n\n")}`,
+      )
+    }
   } finally {
     await browser.close()
   }
