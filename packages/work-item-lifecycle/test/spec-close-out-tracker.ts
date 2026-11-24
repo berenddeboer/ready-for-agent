@@ -23,6 +23,7 @@ export const specCloseOutTracker = (specUrl: string, approval: Approval) => {
     childAdded: false,
     incomplete: false,
     historyUnavailable: false,
+    closeGuardUnauthorized: false,
     childReopenEventId: null as string | null,
     closedAt: "2026-11-24T00:00:00Z",
     afterPublication: (): Response | undefined => undefined,
@@ -170,6 +171,25 @@ export const specCloseOutTracker = (specUrl: string, approval: Approval) => {
             },
           })
         )
+      }
+      if (query.includes("mutation CommentUpdate")) {
+        const index =
+          Number(String(variables.id).replace("comment-", "")) -
+          approval.comments.length -
+          1
+        if (tracker.comments[index] === undefined)
+          throw new Error("Wrong verdict comment target")
+        const body: string = variables.body
+        tracker.comments[index] = body
+        return ok({
+          commentUpdate: { success: true, comment: { id: variables.id, body } },
+        })
+      }
+      if (
+        query.includes("query SpecToClose") &&
+        tracker.closeGuardUnauthorized
+      ) {
+        return Response.json({}, { status: 401 })
       }
       if (query.includes("mutation IssueUpdate")) {
         if (variables.id !== root.id || variables.stateId !== "done")

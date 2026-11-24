@@ -1043,6 +1043,7 @@ export const makeLinearService = (options: {
         if (!data.issue)
           return yield* requestError(`Linear Issue ${nativeId} not found`)
         const page = data.issue.history
+        // Linear's orderBy: createdAt returns newest entries first.
         for (const { id, createdAt, fromState, toState } of page.nodes) {
           if (
             fromState &&
@@ -1572,6 +1573,12 @@ export const makeLinearService = (options: {
 
         if (existingBody === body) return
         if (beforeWrite !== undefined) {
+          if (existingBody !== null) {
+            if (existingBody.trimEnd() === body) return
+            return yield* requestError(
+              `The pending Spec verdict on Linear Issue ${nativeId} was edited; restore the evidence summary before retrying close-out.`,
+            )
+          }
           const verdict = yield* beforeWrite
           if (verdict !== "current") return verdict
         }
@@ -1582,13 +1589,7 @@ export const makeLinearService = (options: {
             schema: CommentUpdateSchema,
             describe: `updating a Linear milestone comment on Issue ${nativeId}`,
           })
-          if (
-            updated.commentUpdate.success === false ||
-            (beforeWrite !== undefined &&
-              !updated.commentUpdate.comment?.body
-                ?.trimEnd()
-                .endsWith(`\n\n${marker}`))
-          ) {
+          if (updated.commentUpdate.success === false) {
             return yield* requestError(
               `Linear did not update the existing milestone comment on Issue ${nativeId}.`,
             )
@@ -1611,7 +1612,7 @@ export const makeLinearService = (options: {
         if (
           beforeWrite === undefined
             ? !posted.includes(marker)
-            : !posted.trimEnd().endsWith(`\n\n${marker}`)
+            : posted.trimEnd() !== body
         ) {
           return yield* requestError(
             `Linear did not return the marked milestone comment on Issue ${nativeId}.`,
@@ -1658,7 +1659,14 @@ export const makeLinearService = (options: {
           yield* observeDescendants(nativeId),
           specGuard.hierarchyFingerprint,
         )
-      }).pipe(Effect.catch(() => Effect.succeed("waiting" as const)))
+      }).pipe(
+        Effect.catchIf(
+          (error) =>
+            error.code !== "AUTHENTICATION_ERROR" &&
+            error.code !== "NOT_CONFIGURED",
+          () => Effect.succeed("waiting" as const),
+        ),
+      )
 
       const marker = `ready-for-agent:spec-passed:${verdictId}`
       const publication = yield* service.ensureMilestoneComment(

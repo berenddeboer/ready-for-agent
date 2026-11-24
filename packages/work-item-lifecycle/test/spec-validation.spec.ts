@@ -1246,6 +1246,39 @@ it.each([
           expect(fake.comments).toHaveLength(1)
 
           fake.afterPublication = () => undefined
+          if (closeOut === "retry") {
+            const original = fake.comments[0]
+            if (!original) throw new Error("Expected a published verdict")
+            const edited = original.replace(
+              "Spec validation: passed",
+              "Edited by a reviewer",
+            )
+            fake.comments[0] = edited
+            await boot(retryClose)
+            expect((await boot(item)).stepRuns.at(-1)).toMatchObject({
+              status: "failed",
+              reasonMessage: expect.stringContaining(
+                "restore the evidence summary",
+              ),
+            })
+            expect(fake.comments).toEqual([edited])
+            expect(fake.closed).toBe(false)
+            fake.comments[0] = original
+
+            if (tracker === "linear") {
+              fake.closeGuardUnauthorized = true
+              await boot(retryClose)
+              expect((await boot(item)).stepRuns.at(-1)).toMatchObject({
+                status: "failed",
+                reasonMessage: expect.stringContaining(
+                  "API key is invalid or expired",
+                ),
+              })
+              expect(fake.comments).toEqual([original])
+              expect(fake.closed).toBe(false)
+              fake.closeGuardUnauthorized = false
+            }
+          }
           fake.beforeClose = lostResponse
           await boot(retryClose)
           expect((await boot(item)).stepRuns.at(-1)?.status).toBe("failed")
