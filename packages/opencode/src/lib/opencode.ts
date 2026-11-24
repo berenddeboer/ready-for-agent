@@ -45,6 +45,7 @@ import {
 } from "./opencode-db-path.js"
 import { readRegisteredEndpoint } from "./opencode-v2-client.js"
 import type { OpencodeV2Reader } from "./opencode-v2-read.js"
+import { startTemporaryOpenCodeServer } from "./owned-server.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseCommandTaskResultFromLine } from "./parse-command-task-result.js"
 import {
@@ -75,6 +76,8 @@ import type { OpencodeLayerOptions } from "./types.js"
 
 const DEFAULT_TIMEOUT = Duration.minutes(30)
 const DEFAULT_BINARY = "opencode"
+const CATALOG_SETTLE_TIMEOUT_MS = 5_000
+const CATALOG_SETTLE_POLL_MS = 150
 
 const OPENCODE_V2_REQUIRED_MESSAGE =
   "OpenCode 2 is required. This CLI is not OpenCode 2. Install OpenCode 2, then Recheck Agent Backend."
@@ -184,27 +187,94 @@ export const Opencode = {
           input: InspectInput,
         ) {
           const timeout = input.timeout ?? defaultTimeout
+          const timeoutMs = Duration.toMillis(Duration.fromInputUnsafe(timeout))
+          const settleWindowMs = Math.min(CATALOG_SETTLE_TIMEOUT_MS, timeoutMs)
           yield* requireOwnedServer()
           yield* assertOpenCodeV2({ cwd: input.cwd, timeout })
-          // Disabled Keymaxxer keeps `--standalone`, which pins the catalog to
-          // this process cwd. A harness-owned server is queried with `--server`
-          // and the worktree directory header; that server already has the
-          // Keymaxxer override. Do not fall back to the shared service.
-          const catalogArgs =
-            dedicated === undefined
-              ? ["api", "--standalone", "get", "/api/model"]
-              : serviceArgs(buildModelCatalogApiArgs({ directory: input.cwd }))
-          const result = yield* runCliCapture({
-            spawner,
-            backend: OPENCODE_BACKEND,
-            binary,
-            args: catalogArgs,
-            cwd: input.cwd,
-            env: turnEnvironment(input.cwd),
-            timeout,
-          })
+          const env = turnEnvironment(input.cwd)
 
-          const parsed = parseOpencodeModelCatalog(result.stdout)
+          const pollCatalogOnServer = (
+            serverUrl: string,
+            serverEnv: Record<string, string>,
+            deadlineMs: number,
+          ) =>
+            Effect.gen(function* () {
+              const args = withOpenCodeServer(
+                buildModelCatalogApiArgs({ directory: input.cwd }),
+                serverUrl,
+              )
+              for (;;) {
+                const result = yield* runCliCapture({
+                  spawner,
+                  backend: OPENCODE_BACKEND,
+                  binary,
+                  args,
+                  cwd: input.cwd,
+                  env: serverEnv,
+                  timeout,
+                })
+                const parsed = parseOpencodeModelCatalog(result.stdout)
+                if (parsed.kind !== "empty" || Date.now() >= deadlineMs) {
+                  return parsed
+                }
+                yield* Effect.sleep(Duration.millis(CATALOG_SETTLE_POLL_MS))
+              }
+            })
+
+          // Disabled Keymaxxer starts with `--standalone`, which pins the
+          // catalog to this process cwd and returns immediately on OpenCode
+          // 2.0.32. On OpenCode 2.4.x, `GET /api/model` may precede initial
+          // plugin settlement and return `data: []` before the standalone
+          // server exits; in that case, spin up a temporary private `serve`
+          // process and poll until the catalog settles. A harness-owned server
+          // is queried with `--server` and the worktree directory header, and
+          // also polls if a newly-booted location has not settled yet.
+          let parsed =
+            dedicated === undefined
+              ? parseOpencodeModelCatalog(
+                  (yield* runCliCapture({
+                    spawner,
+                    backend: OPENCODE_BACKEND,
+                    binary,
+                    args: ["api", "--standalone", "get", "/api/model"],
+                    cwd: input.cwd,
+                    env,
+                    timeout,
+                  })).stdout,
+                )
+              : yield* pollCatalogOnServer(
+                  dedicated.baseUrl,
+                  env,
+                  Date.now() + settleWindowMs,
+                )
+
+          if (dedicated === undefined && parsed.kind === "empty") {
+            const settled = yield* Effect.scoped(
+              Effect.gen(function* () {
+                const tempServer = yield* Effect.acquireRelease(
+                  Effect.tryPromise(() =>
+                    startTemporaryOpenCodeServer({
+                      binary,
+                      cwd: input.cwd,
+                      env,
+                      readyTimeoutMs: settleWindowMs,
+                    }),
+                  ),
+                  (server) =>
+                    Effect.promise(() => server.dispose()).pipe(Effect.ignore),
+                )
+                return yield* pollCatalogOnServer(
+                  tempServer.baseUrl,
+                  { ...env, OPENCODE_PASSWORD: tempServer.password },
+                  Date.now() + settleWindowMs,
+                )
+              }),
+            ).pipe(Effect.orElseSucceed(() => undefined))
+            if (settled !== undefined) {
+              parsed = settled
+            }
+          }
+
           if (parsed.kind === "malformed") {
             return yield* new AgentBackendConfigError({
               message: OPENCODE_CATALOG_MALFORMED_MESSAGE(parsed.reason),

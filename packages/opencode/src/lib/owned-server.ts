@@ -200,6 +200,106 @@ const readStderrTail = async (
   return tail
 }
 
+export type TemporaryOpenCodeServer = {
+  readonly baseUrl: string
+  readonly password: string
+  readonly headers: Readonly<Record<string, string>>
+  readonly dispose: () => Promise<void>
+}
+
+export type StartTemporaryOpenCodeServerOptions = {
+  readonly binary?: string
+  readonly env: Readonly<Record<string, string>>
+  readonly cwd: string
+  readonly readyTimeoutMs?: number
+}
+
+/**
+ * Start a short-lived private `opencode serve` process without `--service`.
+ * Used by `Opencode.inspect` when `api --standalone get /api/model` returns an
+ * empty catalog before initial plugin settlement (OpenCode 2.4.x).
+ */
+export const startTemporaryOpenCodeServer = async (
+  options: StartTemporaryOpenCodeServerOptions,
+): Promise<TemporaryOpenCodeServer> => {
+  const password = randomBytes(32).toString("base64url")
+  const serverEnv: Record<string, string> = {
+    ...options.env,
+    OPENCODE_SERVER_PASSWORD: password,
+  }
+  const binary = options.binary ?? "opencode"
+  const port = await reserveLoopbackPort()
+  const baseUrl = `http://${LOOPBACK_HOST}:${String(port)}`
+  const args = ownedOpenCodeServeArgs(port)
+  const proc = Bun.spawn({
+    cmd: [binary, ...args],
+    env: serverEnv,
+    cwd: options.cwd,
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "pipe",
+  })
+
+  const stderr =
+    proc.stderr !== undefined && typeof proc.stderr !== "number"
+      ? proc.stderr
+      : null
+  const stderrTail = readStderrTail(stderr)
+  let exitCode: number | null = null
+  let disposePromise: Promise<void> | undefined
+  proc.exited.then((code) => {
+    exitCode = code
+  })
+
+  const dispose = (): Promise<void> => {
+    if (disposePromise !== undefined) return disposePromise
+    disposePromise = stopProcess(proc).finally(() => {
+      void stderrTail.then(() => undefined)
+    })
+    return disposePromise
+  }
+
+  const readyTimeoutMs = options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS
+  const headers = openCodeBasicAuthHeaders(password)
+  const deadline = Date.now() + readyTimeoutMs
+  try {
+    for (;;) {
+      if (exitCode !== null) {
+        throw new Error(
+          `Temporary OpenCode server exited ${String(exitCode)} before it was ready.`,
+        )
+      }
+      try {
+        const response = await fetch(`${baseUrl}/api/config`, {
+          headers,
+          signal: AbortSignal.timeout(1_000),
+        })
+        if (response.ok) {
+          break
+        }
+      } catch {
+        // Not listening yet, or the request timed out.
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Temporary OpenCode server did not accept connections on ${baseUrl} within ${String(readyTimeoutMs)}ms.`,
+        )
+      }
+      await sleep(100)
+    }
+  } catch (error) {
+    await dispose()
+    throw error
+  }
+
+  return {
+    baseUrl,
+    password,
+    headers,
+    dispose,
+  }
+}
+
 export const startOwnedOpenCodeServer = async (
   options: StartOwnedOpenCodeServerOptions,
 ): Promise<OwnedOpenCodeServer> => {
