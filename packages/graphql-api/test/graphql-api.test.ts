@@ -1906,34 +1906,40 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("does not start Linear parent Implement All", async () => {
+  test("forwards a Linear parent native ID to Implement All", async () => {
+    const parentNativeId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    let receivedArgs: readonly [string, string] | undefined
     await runtime.dispose()
-    runtime = makeRuntime({
-      listRepositories: Effect.succeed([
-        makeRepositoryRecord({
-          ...repository,
-          issueTracker: "linear",
-          linearProjectId: "proj-1",
-        }),
-      ]),
-    })
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            ...repository,
+            issueTracker: "linear",
+            linearProjectId: "proj-1",
+          }),
+        ]),
+      },
+      {},
+      {},
+      {
+        implementAllWithAutoMerge: (repositoryId, nativeId) => {
+          receivedArgs = [repositoryId, nativeId]
+          return Effect.succeed([workItem])
+        },
+      },
+    )
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `mutation {
-          implementAllWithAutoMerge(repositoryId: "${repository.id}", nativeId: "1") { id }
+          implementAllWithAutoMerge(repositoryId: "${repository.id}", nativeId: "${parentNativeId}") { id }
         }`,
       }),
     )
-    const payload = (await response.json()) as {
-      errors?: ReadonlyArray<{
-        message?: string
-        extensions?: { code?: string }
-      }>
-    }
-    expect(payload.errors?.[0]?.extensions?.code).toBe(
-      "LINEAR_EXECUTION_NOT_SUPPORTED",
-    )
-    expect(payload.errors?.[0]?.message).toContain("leaf Issues")
+    expect(await response.json()).toEqual({
+      data: { implementAllWithAutoMerge: [{ id: workItem.id }] },
+    })
+    expect(receivedArgs).toEqual([repository.id, parentNativeId])
   })
 
   test("reports Linear credential independently of GitHub", async () => {

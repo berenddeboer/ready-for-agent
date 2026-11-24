@@ -32,8 +32,10 @@ const childIssueCategory = (issue: IssueRecord): number => {
   return issue.blockedBy.length === 0 ? 0 : 1
 }
 
-const issueIdentityKey = (issue: { readonly nativeId: string }): string =>
-  issue.nativeId
+const issueIdentityKey = (
+  tracker: IssueRecord["issueTracker"],
+  nativeId: string,
+): string => `${tracker ?? ""}:${nativeId}`
 
 const issueDisplayKey = (issue: { readonly displayId: string }): string =>
   issue.displayId
@@ -53,9 +55,10 @@ export const workIssueProjection = (
   const childrenByParent = new Map<string, IssueRecord[]>()
   for (const issue of issues) {
     if (issue.parent === null) continue
-    const parentKey = issueIdentityKey({
-      nativeId: issue.parent.nativeId,
-    })
+    const parentKey = issueIdentityKey(
+      issue.issueTracker,
+      issue.parent.nativeId,
+    )
     const children = childrenByParent.get(parentKey) ?? []
     children.push(issue)
     childrenByParent.set(parentKey, children)
@@ -71,7 +74,10 @@ export const workIssueProjection = (
     )
     .flatMap((issue) => {
       if (!issue.hasChildren) return [issue]
-      const children = childrenByParent.get(issueIdentityKey(issue)) ?? []
+      const children =
+        childrenByParent.get(
+          issueIdentityKey(issue.issueTracker, issue.nativeId),
+        ) ?? []
       if (children.length === 0) return []
       return [issue, ...children.sort(compareChildIssues)]
     })
