@@ -322,6 +322,15 @@ export class AbandonCleanupError extends Schema.TaggedError<AbandonCleanupError>
   },
 ) {}
 
+export class AbandonSpecHistoryError extends Schema.TaggedError<AbandonSpecHistoryError>()(
+  "AbandonSpecHistoryError",
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
 export class NeedsHumanHandoffNotEligibleError extends Schema.TaggedError<NeedsHumanHandoffNotEligibleError>()(
   "NeedsHumanHandoffNotEligibleError",
   {

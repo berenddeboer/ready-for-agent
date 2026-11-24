@@ -2396,7 +2396,7 @@ rfa:Commit
 rfa:CloseIssue
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Close Issue"@en ;
-  skos:definition "The Lifecycle Step that publishes a completion summary on the Work Item's Issue and closes that Issue. It runs after a confirmed No-Change Outcome from Assess Changes or Commit, and after a confirmed GitHub merge when the Original Issue Source is Linear. It precedes local cleanup so the remote completion outcome is preserved even when cleanup must be retried. An already-closed or already-completed Issue is accepted; retries reuse the existing summary instead of duplicating it."@en ;
+  skos:definition "The Lifecycle Step that publishes a completion summary on the original Issue Tracker and closes the Issue. For an Issue Work Item it runs before local cleanup, after a confirmed No-Change Outcome or a confirmed GitHub merge when the Original Issue Source is Linear. For a passing Spec Validation Work Item, it checks that the Spec hierarchy is still current before posting the requirement-level verdict and before closing the parent. An already-closed or already-completed Issue is accepted; retries reuse the existing summary instead of duplicating it."@en ;
   skos:hiddenLabel "Complete Work Item"@en, "local cleanup"@en .
 
 [

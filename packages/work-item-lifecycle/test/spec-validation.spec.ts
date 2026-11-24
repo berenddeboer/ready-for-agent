@@ -13,6 +13,7 @@ import type {
   SpecFollowUpPublication,
   SpecObservation,
 } from "@ready-for-agent/forge-contract"
+import { renderSpecBaseline } from "@ready-for-agent/forge-contract"
 import {
   GitHubRequestError,
   GitHubService,
@@ -34,6 +35,7 @@ import {
   stubGitLabServiceLayer,
 } from "../src/index.js"
 import { decodeSpecFindings, validateSpec } from "../src/lib/validate-spec.js"
+import { specCloseOutTracker } from "./spec-close-out-tracker.js"
 import { expect, it } from "bun:test"
 
 const commit = "a".repeat(40)
@@ -172,20 +174,57 @@ it.each([
     initialSource: "publication-comment",
     decision: "changed-baseline",
   },
+  ...(["github", "linear"] as const).flatMap((tracker) =>
+    (
+      [
+        "stale",
+        "retry",
+        "retry-after-reopen",
+        "closed-before-publication",
+        "canceled-after-publication",
+        "manual-reopen",
+        "abandon-then-reopen",
+      ] as const
+    ).map(
+      (closeOut) =>
+        ({
+          tracker,
+          deployedStatus:
+            closeOut === "manual-reopen" || closeOut === "abandon-then-reopen"
+              ? 404
+              : 200,
+          expected:
+            closeOut === "manual-reopen" || closeOut === "abandon-then-reopen"
+              ? "UNMET"
+              : "MET",
+          omit: false,
+          initialSource: "publication-comment",
+          closeOut,
+        }) as const,
+    ),
+  ),
 ] as const)(
-  "$tracker: records $expected for deployed HTTP $deployedStatus (omitted: $omit, baseline: $initialSource, decision: $decision)",
+  "$tracker: records $expected for deployed HTTP $deployedStatus (omitted: $omit, baseline: $initialSource, decision: $decision, close-out: $closeOut)",
   async (scenario) => {
     const { tracker, deployedStatus, expected, omit, initialSource } = scenario
+    const closeOut = "closeOut" in scenario ? scenario.closeOut : undefined
     const decision = "decision" in scenario ? scenario.decision : undefined
     const baselineDecision =
       decision === "baseline" || decision === "changed-baseline"
     const waitForChecklist = omit || decision === "changed-baseline"
     const humanCheck = "humanCheck" in scenario
     const retryPublication =
-      decision === undefined && !omit && deployedStatus === 404
+      closeOut === undefined &&
+      decision === undefined &&
+      !omit &&
+      deployedStatus === 404
     const mixedEvidence = tracker === "github" && retryPublication
     const deployedVerdict = mixedEvidence ? "UNVERIFIED" : expected
-    const expectChild = retryPublication || humanCheck || decision !== undefined
+    const expectChild =
+      retryPublication ||
+      humanCheck ||
+      decision !== undefined ||
+      (closeOut !== undefined && deployedStatus === 404)
     const inconsistentVerdict = deployedStatus === 403 && !humanCheck
     const root = await mkdtemp(join(tmpdir(), "spec-validation-"))
     const sessionId = "spec-validator-own-session"
@@ -199,13 +238,16 @@ it.each([
       port: 0,
       fetch: async (request) => {
         const path = new URL(request.url).pathname
-        if (path === "/deployed/mcp")
+        if (path === "/deployed/mcp" && deployedStatus !== 200)
           return new Response(null, { status: deployedStatus })
         if (path === "/deployed/gateway")
           return new Response(null, { status: 200 })
         if (path === "/deployed/region/mcp" && mixedEvidence)
           return new Response(null, { status: 403 })
-        if (path === "/local/mcp" && request.method === "POST") {
+        if (
+          (path === "/local/mcp" || path === "/deployed/mcp") &&
+          request.method === "POST"
+        ) {
           const body: unknown = await request.json()
           if (
             typeof body === "object" &&
@@ -278,6 +320,47 @@ it.each([
             }
           : approved
     const readBaseline = () => Effect.sync(() => latestBaseline)
+    const native =
+      closeOut === undefined
+        ? undefined
+        : specCloseOutTracker(specUrl, {
+            title: withoutChecklist.title,
+            description: [
+              withoutChecklist.body,
+              `[Approved Spec baseline](<${baselineUrl}>)`,
+              `[Approved requirement checklist](<${checklist.sourceUrl}>)`,
+            ].join("\n\n"),
+            comments: [
+              { url: baselineUrl, body: renderSpecBaseline(withoutChecklist) },
+              {
+                url: checklist.sourceUrl,
+                body: `ready-for-agent:spec-requirement-checklist:v1\n\n\`\`\`json\n${JSON.stringify(checklist)}\n\`\`\``,
+              },
+            ],
+          })
+    const reconcile = (
+      repository: Parameters<
+        (typeof WorkItemLifecycle.Service)["considerSpecValidation"]
+      >[0],
+    ) =>
+      Effect.gen(function* () {
+        if (!native) throw new Error("Expected a tracker at the HTTP boundary")
+        const lifecycle = yield* WorkItemLifecycle
+        const observations =
+          tracker === "linear"
+            ? yield* native.linear.observeSpecs("validation-project")
+            : yield* native.github.observeSpecs({
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "acme/widgets",
+              })
+        for (const observation of observations) {
+          yield* lifecycle.considerSpecValidation(repository, {
+            ...observation,
+            tracker,
+          })
+        }
+      })
     const observed = {
       tracker,
       nativeId: tracker === "linear" ? "linear-native-id" : "7",
@@ -404,10 +487,11 @@ it.each([
       sessionId,
       assistantText: `READY_FOR_AGENT_SPEC_FINDINGS:\n${JSON.stringify(payload)}`,
     })
-    const agent = Layer.succeed(AgentBackend, {
+    let afterValidation = () => {}
+    const validator = {
       // Controlled adapter runs real HTTP probes; a model is not needed to
       // make the lifecycle, persistence, and evidence-boundary checks repeatable.
-      startTurn: (turn) =>
+      startTurn: (turn: Parameters<typeof AgentBackend.Service.startTurn>[0]) =>
         Effect.gen(function* () {
           turns += 1
           expect(turn.cwd).toBe(checkout)
@@ -628,9 +712,12 @@ it.each([
                 ]
               })
             : []
+          afterValidation()
           return report([...findings, ...incomplete])
         }),
-      continueTurn: (turn) =>
+      continueTurn: (
+        turn: Parameters<typeof AgentBackend.Service.continueTurn>[0],
+      ) =>
         turn.prompt.includes("<saved_gap_evidence>")
           ? Effect.sync(() => {
               expect(retryPublication).toBeTrue()
@@ -695,6 +782,11 @@ it.each([
               )
             }),
       inspect: no,
+    }
+    const agent = Layer.succeed(AgentBackend, {
+      ...validator,
+      continueTurn:
+        closeOut === undefined ? validator.continueTurn : validator.startTurn,
     })
     const layers = () =>
       WorkItemLifecycleLive.pipe(
@@ -755,7 +847,7 @@ it.each([
         ),
         Layer.provideMerge(
           stubGitHubServiceLayer({
-            readSpecBaseline: tracker === "github" ? readBaseline : no,
+            ...(tracker === "github" ? native?.github : {}),
             publishSpecFollowUps:
               tracker === "github"
                 ? (repository, publication) =>
@@ -769,8 +861,15 @@ it.each([
                       return followUpResult(publication)
                     })
                 : no,
+            readSpecBaseline:
+              tracker === "github"
+                ? (native?.github.readSpecBaseline ?? readBaseline)
+                : no,
             observeSpecs:
-              tracker === "github" ? () => Effect.sync(() => hierarchy) : no,
+              tracker === "github"
+                ? (native?.github.observeSpecs ??
+                  (() => Effect.sync(() => hierarchy)))
+                : no,
             createDraftPullRequest: no,
             ensureIssueCompletedWithSummary: no,
             ensureIssueComment:
@@ -793,7 +892,7 @@ it.each([
         Layer.provideMerge(
           Layer.succeed(LinearService, {
             ...defaultLinearServiceShape,
-            readSpecBaseline: tracker === "linear" ? readBaseline : no,
+            ...(tracker === "linear" ? native?.linear : {}),
             publishSpecFollowUps:
               tracker === "linear"
                 ? (projectId, publication) =>
@@ -807,9 +906,14 @@ it.each([
                       return followUpResult(publication)
                     })
                 : no,
+            readSpecBaseline:
+              tracker === "linear"
+                ? (native?.linear.readSpecBaseline ?? readBaseline)
+                : no,
             observeSpecs:
               tracker === "linear"
-                ? (projectId) =>
+                ? (native?.linear.observeSpecs ??
+                  ((projectId) =>
                     Effect.suspend(() => {
                       expect(projectId).toBe("validation-project")
                       return failRead
@@ -819,7 +923,7 @@ it.each([
                             }),
                           )
                         : Effect.succeed(readHierarchy())
-                    })
+                    })))
                 : no,
             updateIssueState: no,
             ensureMilestoneComment:
@@ -877,13 +981,30 @@ it.each([
                   linearWorkflowStatuses: [
                     {
                       teamId: "team",
+                      teamKey: "ENG",
+                      teamName: "Engineering",
                       inProgressStateId: "started",
+                      inProgressStateName: "In Progress",
                       doneStateId: "done",
+                      doneStateName: "Done",
                     },
                   ],
                 })
               : yield* db.unpauseRepository(pausedRepository.id)
           const list = lifecycle.listWorkItemsForRepository(repository.id)
+          if (native) {
+            native.tracker.closed = true
+            yield* reconcile(repository)
+            expect(yield* list).toEqual([])
+            expect(native.tracker.comments).toEqual([])
+            native.tracker.closed = false
+            yield* reconcile(repository)
+            yield* reconcile(repository)
+            const [item, extra] = yield* list
+            if (item === undefined || extra !== undefined)
+              throw new Error("Expected one validation Work Item")
+            return { repository, id: item.id }
+          }
           // The tracker produces "waiting" both for empty and open hierarchies.
           yield* lifecycle.considerSpecValidation(repository, {
             ...observed,
@@ -913,6 +1034,284 @@ it.each([
           return { repository, id: item.id }
         }).pipe(Effect.provide(layers())),
       )
+
+      if (native && closeOut) {
+        const { tracker: fake } = native
+        const boot = <A, E>(effect: Effect.Effect<A, E, WorkItemLifecycle>) =>
+          Effect.runPromise(effect.pipe(Effect.provide(layers())))
+        const item = Effect.flatMap(WorkItemLifecycle, (lifecycle) =>
+          lifecycle.getWorkItem(saved.id),
+        )
+        const run = (step: string) => runNext(saved.id, step)
+        const list = Effect.flatMap(WorkItemLifecycle, (lifecycle) =>
+          lifecycle.listWorkItemsForRepository(saved.repository.id),
+        )
+        const retryClose = Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          yield* lifecycle.retry(saved.id)
+          yield* run("close_issue")
+        })
+        if (closeOut === "stale") {
+          // Even if a newly added descendant is already closed, it was not
+          // part of the hierarchy that the validator assessed.
+          afterValidation = () => {
+            fake.childAdded = true
+          }
+        }
+        await boot(run("create_worktree"))
+        if (closeOut === "abandon-then-reopen") {
+          // This reopening precedes the operator's abandonment. It must not
+          // start a replacement validation on the next poll.
+          fake.closed = true
+          fake.reopen(
+            tracker === "github"
+              ? new Date(Math.floor(Date.now() / 1000) * 1000).toISOString()
+              : new Date().toISOString(),
+          )
+          const abandon = Effect.flatMap(WorkItemLifecycle, (lifecycle) =>
+            lifecycle.abandon(saved.id),
+          )
+          if (tracker === "github") {
+            fake.historyUnavailable = true
+            await expect(boot(abandon)).rejects.toThrow(
+              "No abandonment was recorded",
+            )
+            expect((await boot(item)).state).toBe("validate_spec")
+            fake.historyUnavailable = false
+          }
+          await boot(abandon)
+        } else {
+          await boot(run("validate_spec"))
+        }
+        if (
+          closeOut === "manual-reopen" ||
+          closeOut === "abandon-then-reopen"
+        ) {
+          const original = await boot(item)
+          if (closeOut === "abandon-then-reopen") {
+            expect(original.state).toBe("abandoned")
+            expect(turns).toBe(0)
+          } else {
+            expect(original.state).toBe("complete")
+            expect(original.completionSummary).toContain(
+              "UNMET — deployed MCP accepts initialize",
+            )
+          }
+          const refresh = () => boot(reconcile(saved.repository))
+          await refresh()
+          expect(await boot(list)).toHaveLength(1)
+          fake.closedAt = "2026-11-24T02:00:00Z"
+          await refresh()
+          expect(await boot(list)).toHaveLength(1)
+          fake.closed = true
+          await refresh()
+          expect(await boot(list)).toHaveLength(1)
+          expect(fake.comments).toEqual([])
+
+          // The closing and reopening can also happen between polls. Even
+          // with a new native event, an open descendant still prevents work.
+          fake.childOpen = true
+          fake.reopen(
+            new Date(
+              tracker === "github" && closeOut === "abandon-then-reopen"
+                ? Math.floor(original.stateReadyAt.getTime() / 1000) * 1000
+                : original.stateReadyAt.getTime() + 1000,
+            ).toISOString(),
+          )
+          await refresh()
+          expect(await boot(list)).toHaveLength(1)
+          fake.childOpen = false
+          await refresh()
+          const next = (await boot(list)).find(({ id }) => id !== saved.id)
+          if (!next)
+            throw new Error("Reopened parent did not admit a new validation")
+          expect(next.state).toBe("create_worktree")
+          await boot(runNext(next.id, "create_worktree"))
+          await boot(runNext(next.id, "validate_spec"))
+          await refresh()
+          expect(await boot(list)).toHaveLength(2)
+
+          fake.closed = true
+          fake.reopen()
+          await refresh()
+          expect(await boot(list)).toHaveLength(3)
+          expect(fake.closed).toBe(false)
+          expect(fake.comments).toEqual([])
+          return
+        }
+        expect(await boot(item)).toMatchObject({ state: "close_issue" })
+        expect((await boot(item)).completionSummary).toContain(
+          "MET — deployed MCP accepts initialize",
+        )
+        expect(fake.comments).toEqual([])
+        expect(fake.closed).toBe(false)
+
+        if (closeOut === "closed-before-publication") {
+          fake.closed = true
+          await boot(run("close_issue"))
+          expect((await boot(item)).state).toBe("close_issue")
+          expect((await boot(item)).stepRuns.at(-1)?.reasonCode).toBe(
+            "waiting_for_spec_hierarchy",
+          )
+          expect(fake.comments).toEqual([])
+          expect(fake.closed).toBe(true)
+          await boot(reconcile(saved.repository))
+          expect(await boot(list)).toHaveLength(1)
+          fake.reopen()
+          await boot(reconcile(saved.repository))
+          await boot(run("close_issue"))
+          expect((await boot(item)).stepRuns.at(-1)?.reasonMessage).toContain(
+            "The parent Spec was reopened",
+          )
+          expect(fake.comments).toEqual([])
+          expect(fake.closed).toBe(false)
+          await boot(reconcile(saved.repository))
+          expect(await boot(list)).toHaveLength(2)
+          return
+        }
+
+        if (closeOut === "canceled-after-publication") {
+          fake.afterPublication = () => {
+            fake.closed = true
+            fake.canceled = true
+            return undefined
+          }
+          await boot(run("close_issue"))
+          expect((await boot(item)).state).toBe("close_issue")
+          expect((await boot(item)).stepRuns.at(-1)?.reasonCode).toBe(
+            "waiting_for_spec_hierarchy",
+          )
+          expect(fake.comments).toHaveLength(1)
+          expect(fake.canceled).toBe(true)
+          return
+        }
+
+        if (closeOut === "stale") {
+          await boot(run("close_issue"))
+          expect(await boot(item)).toMatchObject({ state: "validate_spec" })
+          expect(fake.comments).toEqual([])
+          expect(fake.closed).toBe(false)
+          await boot(run("validate_spec"))
+
+          // GitHub reports whole seconds: a close/reopen/close in the same
+          // second preserves the time and reason but changes the native event.
+          if (tracker === "github") {
+            fake.childReopenEventId = "child-reopened-in-the-same-second"
+          } else {
+            fake.closedAt = "2026-11-24T01:00:00Z"
+          }
+          await boot(run("close_issue"))
+          expect(await boot(item)).toMatchObject({ state: "validate_spec" })
+          expect(fake.comments).toEqual([])
+          expect(fake.closed).toBe(false)
+          await boot(run("validate_spec"))
+
+          fake.incomplete = true
+          await boot(run("close_issue"))
+          expect((await boot(item)).stepRuns.at(-1)?.reasonCode).toBe(
+            "waiting_for_spec_hierarchy",
+          )
+          expect(fake.comments).toEqual([])
+          expect(fake.closed).toBe(false)
+          fake.incomplete = false
+          await boot(reconcile(saved.repository))
+
+          // A reopen racing publication must prevent the subsequent closure.
+          fake.afterPublication = () => {
+            fake.childOpen = true
+            return undefined
+          }
+          await boot(run("close_issue"))
+          expect(await boot(item)).toMatchObject({ state: "validate_spec" })
+          expect(fake.comments).toHaveLength(1)
+          expect(fake.closed).toBe(false)
+          await boot(run("validate_spec"))
+          expect((await boot(item)).stepRuns.at(-1)?.reasonCode).toBe(
+            "waiting_for_spec_hierarchy",
+          )
+          fake.childOpen = false
+          fake.closedAt = "2026-11-24T02:00:00Z"
+          fake.afterPublication = () => undefined
+          await boot(reconcile(saved.repository))
+          await boot(run("validate_spec"))
+          await boot(run("close_issue"))
+          expect(fake.comments).toHaveLength(2)
+          expect(turns).toBe(4)
+        } else {
+          const lostResponse = () => Response.json({}, { status: 500 })
+          fake.afterPublication = lostResponse
+          await boot(run("close_issue"))
+          expect((await boot(item)).stepRuns.at(-1)?.status).toBe("failed")
+          expect(fake.closed).toBe(false)
+          expect(fake.comments).toHaveLength(1)
+
+          fake.afterPublication = () => undefined
+          fake.beforeClose = lostResponse
+          await boot(retryClose)
+          expect((await boot(item)).stepRuns.at(-1)?.status).toBe("failed")
+          expect(fake.closed).toBe(false)
+          expect(fake.comments).toHaveLength(1)
+
+          fake.beforeClose = () => {
+            fake.closed = true
+            return lostResponse()
+          }
+          await boot(retryClose)
+          expect((await boot(item)).stepRuns.at(-1)?.status).toBe("failed")
+          expect(fake.closed).toBe(true)
+          if (closeOut === "retry-after-reopen") {
+            fake.reopen()
+            fake.beforeClose = () => undefined
+            await boot(retryClose)
+            expect(fake.closed).toBe(false)
+            expect(fake.comments).toHaveLength(1)
+            expect((await boot(item)).stepRuns.at(-1)?.reasonMessage).toContain(
+              "The parent Spec was reopened",
+            )
+            expect(turns).toBe(1)
+
+            await boot(reconcile(saved.repository))
+            await boot(reconcile(saved.repository))
+            const items = await boot(list)
+            expect(items).toHaveLength(2)
+            const next = items.find(({ id }) => id !== saved.id)
+            if (!next)
+              throw new Error("Reopened parent did not admit a new validation")
+            await boot(runNext(next.id, "create_worktree"))
+            await boot(runNext(next.id, "validate_spec"))
+            expect(fake.closed).toBe(false)
+            await boot(runNext(next.id, "close_issue"))
+            expect(turns).toBe(2)
+            expect(fake.closed).toBe(true)
+            expect(fake.comments).toHaveLength(2)
+            return
+          }
+          await boot(retryClose)
+          expect(fake.comments).toHaveLength(1)
+          expect(turns).toBe(1)
+        }
+        expect(fake.closed).toBe(true)
+        expect(await boot(item)).toMatchObject({ state: "complete" })
+        const comment = fake.comments.at(-1)
+        expect(comment).toContain("## Spec validation: passed")
+        expect(comment).toContain("MET — local MCP accepts initialize")
+        expect(comment).toContain("MET — deployed MCP accepts initialize")
+        expect(comment).toContain(baselineUrl)
+        expect(comment).toContain(checklist.sourceUrl)
+
+        fake.childOpen = true
+        await boot(reconcile(saved.repository))
+        expect(fake.closed).toBe(true)
+        expect(await boot(list)).toHaveLength(1)
+        fake.reopen()
+        await boot(reconcile(saved.repository))
+        expect(await boot(list)).toHaveLength(1)
+        fake.childOpen = false
+        await boot(reconcile(saved.repository))
+        await boot(reconcile(saved.repository))
+        expect(await boot(list)).toHaveLength(2)
+        return
+      }
 
       // A new lifecycle/DB connection sees the original frozen baseline, not
       // a more recent tracker response or an implementation session.

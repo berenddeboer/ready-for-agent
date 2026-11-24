@@ -13,10 +13,15 @@ export const readSpecBaselineProgram = (args: ReadonlyArray<string>) =>
     const forgeHost = yield* decodeArgument(args[1], "forge host")
     const projectPath = yield* decodeArgument(args[2], "project path")
     const issueNumber = Number(yield* decodeArgument(args[3], "issue number"))
+    const includeReopening =
+      args[4] === undefined
+        ? false
+        : (yield* decodeArgument(args[4], "include reopening")) === "true"
     const github = yield* GitHubService
     const result = yield* github.readSpecBaseline(
       githubRepository(forge, forgeHost, projectPath),
       issueNumber,
+      { includeReopening },
     )
     yield* writeStandardOutput(JSON.stringify(result))
   })

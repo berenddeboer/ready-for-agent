@@ -451,6 +451,11 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         error.message ?? "Abandon cleanup failed",
         "ABANDON_CLEANUP_FAILED",
       )
+    case "AbandonSpecHistoryError":
+      return gql(
+        error.message ?? "Could not confirm Spec reopening history",
+        "ABANDON_SPEC_HISTORY_UNAVAILABLE",
+      )
     default:
       if (typeof error.message === "string" && error.message.length > 0) {
         return gql(error.message, "INTERNAL_SERVER_ERROR")

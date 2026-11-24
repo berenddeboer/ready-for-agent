@@ -1,7 +1,10 @@
 import { Context, type Effect } from "effect"
 import type {
   PublishedSpecFollowUps,
+  SpecBaselineReadOptions,
   SpecBaselineResult,
+  SpecCloseGuard,
+  SpecCloseResult,
   SpecFollowUpPublication,
 } from "@ready-for-agent/forge-contract"
 import type { LinearRequestError } from "./errors.js"
@@ -44,11 +47,20 @@ export interface LinearServiceShape {
   ) => Effect.Effect<readonly LinearSpecObservation[], LinearServiceError>
   readonly readSpecBaseline: (
     nativeId: string,
+    options?: SpecBaselineReadOptions,
   ) => Effect.Effect<SpecBaselineResult, LinearServiceError>
   readonly publishSpecFollowUps: (
     projectId: string,
     input: SpecFollowUpPublication,
   ) => Effect.Effect<PublishedSpecFollowUps, LinearServiceError>
+  /** Close a marked parent only while its validated hierarchy is still current. */
+  readonly closePassingSpec?: (input: {
+    readonly nativeId: string
+    readonly doneStateId: string
+    readonly verdictId: string
+    readonly summary: string
+    readonly guard: SpecCloseGuard
+  }) => Effect.Effect<SpecCloseResult, LinearServiceError>
   readonly listProjects: () => Effect.Effect<
     readonly LinearProject[],
     LinearServiceError

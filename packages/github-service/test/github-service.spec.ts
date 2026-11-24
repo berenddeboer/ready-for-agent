@@ -315,6 +315,8 @@ describe("GitHub Spec observation", () => {
   const child = (id: string, state = "CLOSED", total = 0) => ({
     id,
     state,
+    closedAt: state === "CLOSED" ? "2026-11-24T00:00:00Z" : null,
+    timelineItems: { nodes: [] },
     subIssuesSummary: { total },
   })
   const page = (

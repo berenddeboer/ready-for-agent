@@ -34,6 +34,10 @@ const SpecValidationSource = Schema.Struct({
 const validationIdentity = {
   spec: SpecValidationSource,
   descendants: ClosedSpecDescendants,
+  parentReopenEventId: Schema.optionalKey(Schema.NullOr(Schema.NonEmptyString)),
+  abandonedWithReopenEventId: Schema.optionalKey(
+    Schema.NullOr(Schema.NonEmptyString),
+  ),
 }
 export const SpecValidationInput = Schema.fromJsonString(
   Schema.Union([
@@ -564,7 +568,7 @@ const recordFindings = Effect.fn("recordSpecFindings")(function* ({
   }
 })
 
-const observeSpecBeforeTurn = Effect.fn("observeSpecBeforeTurn")(
+export const observeSpecBeforeTurn = Effect.fn("observeSpecBeforeTurn")(
   function* (repositoryId: string, spec: SpecValidationInput["spec"]) {
     const db = yield* DbService
     const github = yield* GitHubService
@@ -911,32 +915,28 @@ export const validateSpec = (
         currentReview = { candidates: [], unreadableSnapshots: [] }
       }
     }
-    if (!context.sessionId || priorDecision !== null) {
-      // Descendants can land while the operator is deciding. Keep the same
-      // session and checkout, but re-anchor delivery evidence to integration.
-      startingCommitOid = yield* refreshSpecValidationCheckout(
-        worktreePath,
-      ).pipe(
-        Effect.mapError((cause) =>
-          failed("Could not refresh the Spec Validation checkout.", cause),
-        ),
-      )
-      // Persist the new anchor before a session can be saved mid-turn.
-      if (startingCommitOid !== context.startingCommitOid) {
-        yield* sql
-          .unsafe("UPDATE work_item SET starting_commit_oid = ? WHERE id = ?", [
-            startingCommitOid,
-            context.workItemId,
-          ])
-          .pipe(
-            Effect.mapError((cause) =>
-              failed(
-                "Could not save the integrated revision for Spec Validation.",
-                cause,
-              ),
+    // Descendants can land while the operator is deciding. Keep the same
+    // session and checkout, but re-anchor delivery evidence to integration.
+    startingCommitOid = yield* refreshSpecValidationCheckout(worktreePath).pipe(
+      Effect.mapError((cause) =>
+        failed("Could not refresh the Spec Validation checkout.", cause),
+      ),
+    )
+    // Persist the new anchor before a session can be saved mid-turn.
+    if (startingCommitOid !== context.startingCommitOid) {
+      yield* sql
+        .unsafe("UPDATE work_item SET starting_commit_oid = ? WHERE id = ?", [
+          startingCommitOid,
+          context.workItemId,
+        ])
+        .pipe(
+          Effect.mapError((cause) =>
+            failed(
+              "Could not save the integrated revision for Spec Validation.",
+              cause,
             ),
-          )
-      }
+          ),
+        )
     }
     descendants = yield* observeSpecBeforeTurn(context.repositoryId, input.spec)
     if (descendants === undefined) return { kind: "waiting" as const }
@@ -1117,6 +1117,30 @@ export const validateSpec = (
       "kind" in report ? report.findings : report,
       selectedChecklist,
     )
+    // Passing evidence is guarded again against this exact hierarchy at
+    // close-out. Only an approved checklist with no gaps can take that path.
+    if (
+      findings.length > 0 &&
+      findings.every(
+        (finding) =>
+          finding.status === "met" && gapEvidence(finding).length === 0,
+      )
+    ) {
+      return {
+        kind: "recorded" as const,
+        ...recorded(source, findings),
+        sessionId: result.sessionId,
+        startingCommitOid: evaluatedCommit,
+        passingInput: {
+          spec: input.spec,
+          baseline: source,
+          descendants,
+          ...(input.parentReopenEventId === undefined
+            ? {}
+            : { parentReopenEventId: input.parentReopenEventId }),
+        },
+      }
+    }
     if (!(yield* sameClosure)) return { kind: "waiting" as const }
     return yield* publishReport(source, findings)
   })

@@ -1,5 +1,6 @@
 import type { Effect } from "effect"
 import { runLinearCli } from "../bin/cli.js"
+import { closePassingSpecProgram } from "../bin/close-passing-spec.js"
 import { ensureMilestoneCommentProgram } from "../bin/ensure-milestone-comment.js"
 import { getAuthenticatedUserLoginProgram } from "../bin/get-authenticated-user-login.js"
 import { getIssueProgram } from "../bin/get-issue.js"
@@ -28,6 +29,7 @@ export const LINEAR_HELPER_OPERATIONS = [
   "get-issue",
   "update-issue-state",
   "ensure-milestone-comment",
+  "close-passing-spec",
 ] as const
 
 export type LinearHelperOperation = (typeof LINEAR_HELPER_OPERATIONS)[number]
@@ -124,6 +126,7 @@ const programs: Record<
   "get-issue": getIssueProgram,
   "update-issue-state": updateIssueStateProgram,
   "ensure-milestone-comment": ensureMilestoneCommentProgram,
+  "close-passing-spec": closePassingSpecProgram,
 }
 
 export const runLinearHelperProcess = (

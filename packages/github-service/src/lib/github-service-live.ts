@@ -17,6 +17,7 @@ import {
   type CiGateDefinitionObservation,
   type CiGateObservation,
   type CiGateObservedRun,
+  type ClosedSpecDescendants,
   type GitHubIssueReference,
   type GitHubIssueState,
   type GitHubPullRequestLifecycleState,
@@ -31,8 +32,11 @@ import {
   type PullRequestCheckStatus,
   type ReadyLabeledIssue,
   SPEC_LABEL,
+  type SpecCloseGuard,
+  type SpecCloseResult,
   type SpecFollowUpPublication,
   type TerminalPrStatusCheck,
+  checkSpecHierarchy,
   ciGateRunOrderKey,
   classifyCiGateObservedRun,
   compareCiGateRunOrder,
@@ -49,6 +53,7 @@ import {
 } from "../internal/generated/index.js"
 import { GenqlError } from "../internal/generated/runtime/error.js"
 import type {
+  IssueGenqlSelection,
   Mutation,
   MutationGenqlSelection,
   Query,
@@ -1292,6 +1297,15 @@ const SpecChildCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const SpecChild = Schema.Struct({
   ...SpecIssueIdentity.fields,
   stateReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  closedAt: Schema.NullOr(Schema.String),
+  timelineItems: Schema.Struct({
+    nodes: Schema.Array(
+      Schema.Struct({
+        id: Schema.NonEmptyString,
+        createdAt: Schema.NonEmptyString,
+      }),
+    ),
+  }),
   subIssuesSummary: Schema.Struct({ total: SpecChildCount }),
 })
 const SpecIssuePageFields = {
@@ -1711,15 +1725,14 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
     return links
   })
 
-const makeObserveSpecs = (client: GitHubGraphqlClient) => {
+const makeObserveSpecDescendants = (client: GitHubGraphqlClient) => {
   const observeDescendants = Effect.fn("GitHubService.observeSpecDescendants")(
     function* (root: typeof SpecIssueIdentity.Type) {
       const seen = new Set([root.id])
       const branches: (typeof SpecIssueIdentity.Type & {
         readonly childCount?: number
       })[] = [root]
-      const descendants: { nativeId: string; closureReason: string | null }[] =
-        []
+      const descendants: ClosedSpecDescendants[number][] = []
       let hasOpenDescendant = false
       for (const branch of branches) {
         const describe = `reading sub-issues of GitHub Issue ${branch.id}`
@@ -1747,6 +1760,8 @@ const makeObserveSpecs = (client: GitHubGraphqlClient) => {
                               id: true,
                               state: true,
                               stateReason: true,
+                              closedAt: true,
+                              timelineItems: specReopeningSelection,
                               subIssuesSummary: { total: true },
                             },
                             ...SpecIssuePageFields,
@@ -1790,11 +1805,20 @@ const makeObserveSpecs = (client: GitHubGraphqlClient) => {
           // CLOSED is enough for scheduling, including "not planned". It is
           // not a claim about delivery, nor is GitHub's completed count used.
           if (child.state === "OPEN") hasOpenDescendant = true
-          else
+          else {
+            const reopening = readSpecReopening(child.timelineItems.nodes)
+            if (reopening === undefined) {
+              return yield* new GitHubRequestError({
+                message: `GitHub returned unreadable reopening history for Issue ${child.id}`,
+              })
+            }
             descendants.push({
               nativeId: child.id,
               closureReason: child.stateReason ?? null,
+              closedAt: child.closedAt,
+              reopenEventId: reopening?.id ?? null,
             })
+          }
         }
       }
       const [first, ...rest] = descendants
@@ -1806,7 +1830,11 @@ const makeObserveSpecs = (client: GitHubGraphqlClient) => {
           }
     },
   )
+  return observeDescendants
+}
 
+const makeObserveSpecs = (client: GitHubGraphqlClient) => {
+  const observeDescendants = makeObserveSpecDescendants(client)
   return Effect.fn("GitHubService.observeSpecs")(function* (
     repository: GitHubApiRepository,
   ) {
@@ -1867,6 +1895,60 @@ const issueLabelsSelection = (after: string | null) => ({
   nodes: { name: true },
   pageInfo: { endCursor: true, hasNextPage: true },
 })
+
+const specReopeningSelection = {
+  __args: { last: 1, itemTypes: ["REOPENED_EVENT"] },
+  nodes: { on_ReopenedEvent: { id: true, createdAt: true } },
+} satisfies NonNullable<IssueGenqlSelection["timelineItems"]>
+
+const readSpecReopening = (
+  nodes:
+    | readonly ({ id: string; createdAt: string } | null)[]
+    | null
+    | undefined,
+) => {
+  if (nodes?.length === 0) return null
+  const event = nodes?.[0]
+  return event?.id && Number.isFinite(Date.parse(event.createdAt))
+    ? { id: event.id, createdAt: event.createdAt }
+    : undefined
+}
+
+const makeReadSpecReopenEventId = (client: GitHubGraphqlClient) =>
+  Effect.fn("GitHubService.readSpecReopenEventId")(function* (
+    repository: GitHubApiRepository,
+    issueNumber: number,
+  ) {
+    const issueRef = `${repository.owner}/${repository.name}#${issueNumber}`
+    const result = yield* githubQuery(
+      `Failed to read reopening history for ${issueRef}`,
+      (signal) =>
+        client.query(
+          {
+            repository: {
+              __args: repository,
+              issue: {
+                __args: { number: issueNumber },
+                timelineItems: specReopeningSelection,
+              },
+            },
+          },
+          signal,
+        ),
+    )
+    if (result.repository === null) {
+      return yield* new GitHubApiRepositoryUnavailableError(repository)
+    }
+    const reopening = readSpecReopening(
+      result.repository.issue?.timelineItems?.nodes,
+    )
+    if (reopening === undefined) {
+      return yield* new GitHubRequestError({
+        message: `GitHub returned incomplete reopening history for ${issueRef}`,
+      })
+    }
+    return reopening?.id ?? null
+  })
 
 interface IssueLabelPage {
   readonly nodes: readonly ({ readonly name: string } | null)[] | null
@@ -1933,6 +2015,11 @@ const hasSpecLabel = Effect.fn("GitHubService.hasSpecLabel")(function* (
 type IssueCommentOutcome =
   | { readonly kind: "complete"; readonly workItemId: string }
   | { readonly kind: "comment"; readonly marker: string }
+  | {
+      readonly kind: "close-spec"
+      readonly verdictId: string
+      readonly guard: SpecCloseGuard
+    }
 
 type AdaptedGitHubServiceShape = {
   [K in keyof GitHubServiceShape]: GitHubServiceShape[K] extends (
@@ -1955,14 +2042,17 @@ type AdaptedGitHubServiceShape = {
 
 type GitHubApiServiceShape = Omit<
   AdaptedGitHubServiceShape,
-  "ensureIssueCompletedWithSummary" | "ensureIssueComment"
+  | "ensureIssueCompletedWithSummary"
+  | "ensureIssueComment"
+  | "closePassingSpec"
+  | "readSpecReopenEventId"
 > & {
   readonly ensureIssueCommentOutcome: (
     repository: GitHubApiRepository,
     issueNumber: number,
     outcome: IssueCommentOutcome,
     markdown: string,
-  ) => Effect.Effect<void, GitHubRequestFailure>
+  ) => Effect.Effect<SpecCloseResult, GitHubRequestFailure>
 }
 
 const makeGitHubApiService = (
@@ -3074,12 +3164,15 @@ const makeGitHubApiService = (
         message: `Invalid Issue number for ${repository.owner}/${repository.name}: ${String(issueNumber)}`,
       })
     }
-    const marker =
-      outcome.kind === "complete"
-        ? workItemCompletionMarker(outcome.workItemId)
-        : outcome.marker
     const key =
-      outcome.kind === "complete" ? outcome.workItemId : outcome.marker
+      outcome.kind === "complete"
+        ? outcome.workItemId
+        : outcome.kind === "close-spec"
+          ? outcome.verdictId
+          : outcome.marker
+    const specGuard = outcome.kind === "close-spec" ? outcome.guard : undefined
+    const marker =
+      outcome.kind === "comment" ? key : workItemCompletionMarker(key)
     if (typeof key !== "string" || key.trim() === "") {
       return yield* new GitHubRequestError({
         message: `Invalid comment key for ${repository.owner}/${repository.name}#${issueNumber}`,
@@ -3091,6 +3184,7 @@ const makeGitHubApiService = (
       })
     }
 
+    const body = `${markdown.trimEnd()}\n\n${marker}`
     const issueRef = `${repository.owner}/${repository.name}#${issueNumber}`
 
     const issueResult = yield* githubQuery(
@@ -3129,9 +3223,63 @@ const makeGitHubApiService = (
         message: `GitHub returned an invalid Issue state for ${issueRef}`,
       })
     }
+    const guardSpec = Effect.gen(function* () {
+      if (specGuard === undefined) return "current"
+      const result = yield* githubQuery(
+        `Failed to recheck Spec ${issueRef}`,
+        (signal) =>
+          client.query(
+            {
+              repository: {
+                __args: repository,
+                issue: {
+                  __args: { number: issueNumber },
+                  id: true,
+                  state: true,
+                  stateReason: true,
+                  labels: issueLabelsSelection(null),
+                  timelineItems: specReopeningSelection,
+                },
+              },
+            },
+            signal,
+          ),
+      )
+      const current = result.repository?.issue
+      if (!current || current.id !== issue.id) return "waiting"
+      const reopening = readSpecReopening(current.timelineItems?.nodes)
+      if (reopening === undefined) return "waiting"
+      const sameOpening =
+        (reopening?.id ?? null) === specGuard.parentReopenEventId
+      if (current.state === "CLOSED") {
+        return sameOpening && current.stateReason === "COMPLETED"
+          ? "closed"
+          : "waiting"
+      }
+      if (
+        current.state !== "OPEN" ||
+        !current.labels ||
+        !(yield* hasSpecLabel(client, repository, issueNumber, current.labels))
+      ) {
+        return "waiting"
+      }
+      if (!sameOpening) return "reopened"
+      const hierarchy = yield* makeObserveSpecDescendants(client)({
+        id: current.id,
+        state: current.state,
+      })
+      return checkSpecHierarchy(hierarchy, specGuard.hierarchyFingerprint)
+    }).pipe(
+      Effect.catchIf(
+        (error) =>
+          error._tag === "GitHubRequestError" && error.statusCode !== 401,
+        () => Effect.succeed("waiting" as const),
+      ),
+    )
 
     let hasMarkedComment = false
     let commentsAfter: string | null = null
+    const commentCursors = new Set<string>()
     while (true) {
       const commentsResult = yield* githubQuery(
         `Failed to list comments for Issue ${issueRef}`,
@@ -3170,9 +3318,31 @@ const makeGitHubApiService = (
           message: `No Issue found for ${issueRef}`,
         })
       }
+      if (
+        specGuard !== undefined &&
+        (!Array.isArray(commentsIssue.comments?.nodes) ||
+          !commentsIssue.comments.nodes.every(
+            (comment: { readonly body?: unknown } | null) =>
+              typeof comment?.body === "string",
+          ) ||
+          typeof commentsIssue.comments.pageInfo?.hasNextPage !== "boolean")
+      ) {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned incomplete comments for ${issueRef}`,
+        })
+      }
       for (const comment of commentsIssue.comments.nodes ?? []) {
         if (comment !== null && typeof comment.body === "string") {
-          if (comment.body.includes(marker)) {
+          if (
+            specGuard === undefined
+              ? comment.body.includes(marker)
+              : comment.body.trimEnd().endsWith(`\n\n${marker}`)
+          ) {
+            if (specGuard !== undefined && comment.body.trimEnd() !== body) {
+              return yield* new GitHubRequestError({
+                message: `The pending Spec verdict on ${issueRef} was edited; restore the evidence summary before retrying close-out.`,
+              })
+            }
             hasMarkedComment = true
             break
           }
@@ -3185,22 +3355,30 @@ const makeGitHubApiService = (
         break
       }
       const endCursor = commentsIssue.comments.pageInfo.endCursor
-      if (typeof endCursor !== "string" || endCursor.trim() === "") {
+      if (
+        typeof endCursor !== "string" ||
+        endCursor.trim() === "" ||
+        commentCursors.has(endCursor)
+      ) {
         return yield* new GitHubRequestError({
           message: `GitHub returned an invalid comments page cursor for ${issueRef}`,
         })
       }
+      commentCursors.add(endCursor)
       commentsAfter = endCursor
     }
 
     if (!hasMarkedComment) {
+      const verdict = yield* guardSpec
+      // A closed parent is recoverable only after the matching evidence exists.
+      if (verdict === "closed") return "waiting"
+      if (verdict !== "current") return verdict
       if (client.mutation === undefined) {
         return yield* new GitHubRequestError({
           message: `GitHub GraphQL client does not support mutations for ${issueRef}`,
         })
       }
       const mutate = client.mutation
-      const body = `${markdown.trimEnd()}\n\n${marker}`
       const addResult = yield* githubRequest(
         `Failed to post marked comment on Issue ${issueRef}`,
         (signal) =>
@@ -3224,17 +3402,27 @@ const makeGitHubApiService = (
           ),
       )
       const postedBody = addResult.addComment?.commentEdge?.node?.body
-      if (typeof postedBody !== "string" || !postedBody.includes(marker)) {
+      if (
+        typeof postedBody !== "string" ||
+        (specGuard === undefined
+          ? !postedBody.includes(marker)
+          : postedBody.trimEnd() !== body)
+      ) {
         return yield* new GitHubRequestError({
           message: `GitHub did not return the marked comment for ${issueRef}`,
         })
       }
     }
 
-    if (outcome.kind === "comment" || issue.state === "CLOSED") {
-      return
+    if (
+      outcome.kind === "comment" ||
+      (specGuard === undefined && issue.state === "CLOSED")
+    ) {
+      return "closed"
     }
 
+    const verdict = yield* guardSpec
+    if (verdict !== "current") return verdict
     if (client.mutation === undefined) {
       return yield* new GitHubRequestError({
         message: `GitHub GraphQL client does not support mutations for ${issueRef}`,
@@ -3272,9 +3460,10 @@ const makeGitHubApiService = (
         message: `Issue ${issueRef} is still open after close`,
       })
     }
+    return "closed"
   }),
   readSpecBaseline: Effect.fn("GitHubService.readSpecBaseline")(
-    function* (repository, issueNumber) {
+    function* (repository, issueNumber, options) {
       const issueRef = `${repository.owner}/${repository.name}#${issueNumber}`
       const result = yield* githubQuery(
         `Failed to read Spec ${issueRef}`,
@@ -3289,6 +3478,9 @@ const makeGitHubApiService = (
                   body: true,
                   url: true,
                   labels: issueLabelsSelection(null),
+                  ...(options?.includeReopening
+                    ? { timelineItems: specReopeningSelection }
+                    : {}),
                 },
               },
             },
@@ -3308,6 +3500,14 @@ const makeGitHubApiService = (
         !(yield* hasSpecLabel(client, repository, issueNumber, issue.labels))
       ) {
         return { kind: "not-spec" }
+      }
+      const reopening = options?.includeReopening
+        ? readSpecReopening(issue.timelineItems?.nodes)
+        : undefined
+      if (options?.includeReopening && reopening === undefined) {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned incomplete reopening history for ${issueRef}`,
+        })
       }
 
       const comments: { body: string; url: string; edited: boolean }[] = []
@@ -3353,7 +3553,13 @@ const makeGitHubApiService = (
           })
         }
         if (!connection.pageInfo.hasNextPage) {
-          return resolveSpecBaseline({ ...issue, marked: true }, comments)
+          const approved = resolveSpecBaseline(
+            { ...issue, marked: true },
+            comments,
+          )
+          return approved.kind !== "not-spec" && reopening !== undefined
+            ? { ...approved, reopening }
+            : approved
         }
         after = connection.pageInfo.endCursor
         if (!after || seen.has(after)) {
@@ -3890,12 +4096,14 @@ export const makeGitHubService = (
     observeCiGateImpl,
   )
   const adapt = adaptRepository(service)
+  const commentOutcome = adapt(service.ensureIssueCommentOutcome)
   return {
     getAuthenticatedUserLogin: adapt(service.getAuthenticatedUserLogin),
     listReadyIssues: adapt(service.listReadyIssues),
     observeSpecs: adapt(service.observeSpecs),
     readSpecBaseline: adapt(service.readSpecBaseline),
     publishSpecFollowUps: adapt(service.publishSpecFollowUps),
+    readSpecReopenEventId: adapt(makeReadSpecReopenEventId(client)),
     getPullRequestCheckStatus: adapt(service.getPullRequestCheckStatus),
     getPrStatusCheckDiagnostics: adapt(service.getPrStatusCheckDiagnostics),
     observeAutomatedReviewEvidence: adapt(
@@ -3924,17 +4132,24 @@ export const makeGitHubService = (
       workItemId,
       markdown,
     ) =>
-      adapt(service.ensureIssueCommentOutcome)(
+      commentOutcome(
         repository,
         issueNumber,
         { kind: "complete", workItemId },
         markdown,
-      ),
+      ).pipe(Effect.asVoid),
     ensureIssueComment: (repository, issueNumber, marker, markdown) =>
-      adapt(service.ensureIssueCommentOutcome)(
+      commentOutcome(
         repository,
         issueNumber,
         { kind: "comment", marker },
+        markdown,
+      ).pipe(Effect.asVoid),
+    closePassingSpec: (repository, issueNumber, verdictId, markdown, guard) =>
+      commentOutcome(
+        repository,
+        issueNumber,
+        { kind: "close-spec", verdictId, guard },
         markdown,
       ),
   }

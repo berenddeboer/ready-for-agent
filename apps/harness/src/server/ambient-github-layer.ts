@@ -417,6 +417,27 @@ export const ambientGitHubLayer = (options: {
                 }),
               ),
           ),
+        closePassingSpec: Effect.fn("AmbientGitHub.closePassingSpec")(
+          (repository, issueNumber, verdictId, summary, guard) =>
+            authenticated(
+              "lifecycle",
+              repository,
+              (service) =>
+                service.closePassingSpec?.(
+                  repository,
+                  issueNumber,
+                  verdictId,
+                  summary,
+                  guard,
+                ) ??
+                Effect.fail(
+                  new GitHubRequestError({
+                    message:
+                      "GitHub Spec close-out is unavailable on this connection.",
+                  }),
+                ),
+            ),
+        ),
         listReadyIssues: Effect.fn("AmbientGitHub.listReadyIssues")(
           (repository, operationOptions?: GitHubOperationOptions) =>
             authenticated(
@@ -435,14 +456,27 @@ export const ambientGitHubLayer = (options: {
             ),
         ),
         readSpecBaseline: Effect.fn("AmbientGitHub.readSpecBaseline")(
-          (repository, issueNumber) =>
+          (repository, issueNumber, options) =>
             authenticated("lifecycle", repository, (service) =>
-              service.readSpecBaseline(repository, issueNumber),
+              service.readSpecBaseline(repository, issueNumber, options),
             ),
         ),
         publishSpecFollowUps: (repository, input) =>
           authenticated("lifecycle", repository, (service) =>
             service.publishSpecFollowUps(repository, input),
+          ),
+        readSpecReopenEventId: (repository, issueNumber) =>
+          authenticated(
+            "lifecycle",
+            repository,
+            (service) =>
+              service.readSpecReopenEventId?.(repository, issueNumber) ??
+              Effect.fail(
+                new GitHubRequestError({
+                  message:
+                    "GitHub Spec reopening history is unavailable on this connection.",
+                }),
+              ),
           ),
         listCiGateCatalog: Effect.fn("AmbientGitHub.listCiGateCatalog")(
           (repository, operationOptions?: GitHubOperationOptions) =>

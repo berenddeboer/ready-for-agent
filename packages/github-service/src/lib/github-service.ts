@@ -19,7 +19,10 @@ import type {
   PullRequestCheckStatus,
   PullRequestLifecycleStatus,
   ReadyLabeledIssue,
+  SpecBaselineReadOptions,
   SpecBaselineResult,
+  SpecCloseGuard,
+  SpecCloseResult,
   SpecFollowUpPublication,
   UpdateDraftPullRequestCopyInput,
 } from "@ready-for-agent/forge-contract"
@@ -85,11 +88,17 @@ export interface GitHubServiceShape
   readonly readSpecBaseline: (
     repository: GitHubRepository,
     issueNumber: number,
+    options?: SpecBaselineReadOptions,
   ) => Effect.Effect<SpecBaselineResult, GitHubServiceError>
   readonly publishSpecFollowUps: (
     repository: GitHubRepository,
     input: SpecFollowUpPublication,
   ) => Effect.Effect<PublishedSpecFollowUps, GitHubServiceError>
+  /** Latest native reopening event, independent of approved Spec text. */
+  readonly readSpecReopenEventId?: (
+    repository: GitHubRepository,
+    issueNumber: number,
+  ) => Effect.Effect<string | null, GitHubServiceError>
   /**
    * Live catalog of active GitHub Actions workflows as CI Gate Definitions.
    * Disabled, deleted, and inactive workflows are omitted.
@@ -231,6 +240,14 @@ export interface GitHubServiceShape
     marker: string,
     markdown: string,
   ) => Effect.Effect<void, GitHubServiceError>
+  /** Close a marked parent only while its validated hierarchy is still current. */
+  readonly closePassingSpec?: (
+    repository: GitHubRepository,
+    issueNumber: number,
+    verdictId: string,
+    summaryMarkdown: string,
+    guard: SpecCloseGuard,
+  ) => Effect.Effect<SpecCloseResult, GitHubServiceError>
   /**
    * Close every currently-open pull request for the exact head branch, then
    * remove that remote branch. The operation re-lists open pull requests on

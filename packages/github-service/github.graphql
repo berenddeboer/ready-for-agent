@@ -348,6 +348,11 @@ type Issue implements Node & Labelable {
   createdAt: DateTime!
   state: IssueState!
   stateReason: IssueStateReason
+  closedAt: DateTime
+  timelineItems(
+    last: Int
+    itemTypes: [IssueTimelineItemsItemType!]
+  ): IssueTimelineItemsConnection!
   author: Actor
   labels(first: Int, after: String): LabelConnection
   repository: Repository!
@@ -361,6 +366,21 @@ type Issue implements Node & Labelable {
     after: String
     includeClosedPrs: Boolean
   ): PullRequestConnection!
+}
+
+enum IssueTimelineItemsItemType {
+  REOPENED_EVENT
+}
+
+type IssueTimelineItemsConnection {
+  nodes: [IssueTimelineItems]
+}
+
+union IssueTimelineItems = ReopenedEvent
+
+type ReopenedEvent {
+  id: ID!
+  createdAt: DateTime!
 }
 
 enum IssueStateReason {

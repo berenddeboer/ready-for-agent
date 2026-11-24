@@ -1750,6 +1750,8 @@ describe("IssueReconciler", () => {
     const node = (id: string, type: string, firstChildId?: string) => ({
       id,
       state: { type },
+      completedAt: type === "completed" ? "2026-11-24T00:00:00Z" : null,
+      canceledAt: type === "canceled" ? "2026-11-24T01:00:00Z" : null,
       children: {
         nodes: firstChildId === undefined ? [] : [{ id: firstChildId }],
         pageInfo: { hasNextPage: false },
@@ -1828,8 +1830,16 @@ describe("IssueReconciler", () => {
             url: markedSpec.url,
             readiness: "all-descendants-closed",
             descendants: [
-              { nativeId: "intermediate", closureReason: "completed" },
-              { nativeId: "last-ticket", closureReason: "canceled" },
+              {
+                nativeId: "intermediate",
+                closureReason: "completed",
+                closedAt: "2026-11-24T00:00:00Z",
+              },
+              {
+                nativeId: "last-ticket",
+                closureReason: "canceled",
+                closedAt: "2026-11-24T01:00:00Z",
+              },
             ],
           },
         ])

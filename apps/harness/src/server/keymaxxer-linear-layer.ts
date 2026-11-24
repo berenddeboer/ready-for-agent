@@ -4,6 +4,7 @@ import {
   PublishedSpecFollowUps,
   type ReadyLabeledIssue,
   SpecBaselineResult,
+  SpecCloseResult,
 } from "@ready-for-agent/forge-contract"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
@@ -304,13 +305,18 @@ export const keymaxxerLinearLayer = (options: {
                 describe: `reading Linear Issue ${nativeId}`,
               }),
           ),
-        readSpecBaseline: (nativeId) =>
+        readSpecBaseline: (nativeId, options) =>
           withToken(
-            () => ambient.readSpecBaseline(nativeId),
+            () => ambient.readSpecBaseline(nativeId, options),
             (tokenName) =>
               callHelper({
                 operation: "read-spec-baseline",
-                args: [encodeArgument(nativeId)],
+                args: [
+                  encodeArgument(nativeId),
+                  ...(options?.includeReopening
+                    ? [encodeArgument("true")]
+                    : []),
+                ],
                 tokenName,
                 decode: (stdout) =>
                   Schema.decodeUnknownEffect(
@@ -321,6 +327,39 @@ export const keymaxxerLinearLayer = (options: {
                     ),
                   ),
                 describe: `reading baseline for Linear Spec ${nativeId}`,
+              }),
+          ),
+        closePassingSpec: (input) =>
+          withToken(
+            () =>
+              ambient.closePassingSpec?.(input) ??
+              Effect.fail(
+                requestError(
+                  "Linear Spec close-out is unavailable on this connection.",
+                ),
+              ),
+            (tokenName) =>
+              callHelper({
+                operation: "close-passing-spec",
+                args: [
+                  encodeArgument(input.nativeId),
+                  encodeArgument(input.doneStateId),
+                  encodeArgument(input.verdictId),
+                  encodeArgument(input.summary),
+                  encodeArgument(JSON.stringify(input.guard)),
+                ],
+                tokenName,
+                decode: (stdout) =>
+                  Schema.decodeUnknownEffect(
+                    Schema.fromJsonString(SpecCloseResult),
+                  )(stdout).pipe(
+                    Effect.mapError(() =>
+                      requestError(
+                        "Linear returned an invalid Spec close-out result",
+                      ),
+                    ),
+                  ),
+                describe: `publishing and closing passing Linear Spec ${input.nativeId}`,
               }),
           ),
         updateIssueState: (nativeId, stateId) =>

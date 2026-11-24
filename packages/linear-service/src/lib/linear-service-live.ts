@@ -9,8 +9,12 @@ import {
   Schema,
 } from "effect"
 import {
+  type ClosedSpecDescendants,
   SPEC_LABEL,
+  type SpecBaselineReadOptions,
+  type SpecCloseResult,
   type SpecFollowUpPublication,
+  checkSpecHierarchy,
   extractErrorCode,
   formatSpecFollowUpComment,
   resolveSpecBaseline,
@@ -261,6 +265,8 @@ const SpecChildrenSchema = Schema.Record(
         nodes: Schema.Array(
           Schema.Struct({
             ...HierarchyNodeSchema.fields,
+            completedAt: Schema.NullOr(RequiredString),
+            canceledAt: Schema.NullOr(RequiredString),
             children: Schema.Struct({
               nodes: Schema.Array(Schema.Struct({ id: RequiredString })),
               pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean }),
@@ -394,6 +400,8 @@ const specChildrenSelection = (afterVariable: string) => `{
       nodes {
         id
         state { type }
+        completedAt
+        canceledAt
         children(first: 1, includeArchived: true) {
           nodes { id }
           pageInfo { hasNextPage }
@@ -409,6 +417,23 @@ const SPEC_QUERY = `query Spec($id: String!) {
     description
     url
     ${SPEC_LABELS_SELECTION}
+  }
+}`
+
+const SPEC_CLOSE_QUERY = `query SpecToClose($id: String!) {
+  issue(id: $id) {
+    id
+    state { id type }
+    ${SPEC_LABELS_SELECTION}
+  }
+}`
+
+const SPEC_HISTORY_QUERY = `query SpecHistory($id: String!, $after: String) {
+  issue(id: $id) {
+    history(first: ${PAGE_SIZE}, after: $after, orderBy: createdAt) {
+      nodes { id createdAt fromState { type } toState { type } }
+      pageInfo { hasNextPage endCursor }
+    }
   }
 }`
 
@@ -505,6 +530,32 @@ const SpecSchema = Schema.Struct({
     }),
   ),
 })
+const SpecToCloseSchema = Schema.Struct({
+  issue: Schema.NullOr(
+    Schema.Struct({
+      ...HierarchyNodeSchema.fields,
+      state: Schema.Struct({ id: RequiredString, type: RequiredString }),
+      specLabels: SpecLabelsSchema,
+    }),
+  ),
+})
+const SpecHistorySchema = Schema.Struct({
+  issue: Schema.NullOr(
+    Schema.Struct({
+      history: Schema.Struct({
+        nodes: Schema.Array(
+          Schema.Struct({
+            id: RequiredString,
+            createdAt: RequiredString,
+            fromState: Schema.NullOr(IssueStateSchema),
+            toState: Schema.NullOr(IssueStateSchema),
+          }),
+        ),
+        pageInfo: StrictPageInfoSchema,
+      }),
+    }),
+  ),
+})
 const SpecCommentsSchema = Schema.Struct({
   issue: Schema.NullOr(
     Schema.Struct({
@@ -531,6 +582,12 @@ const IssueUpdateSchema = Schema.Struct({
       Schema.NullOr(
         Schema.Struct({
           id: RequiredString,
+          state: Schema.optional(
+            Schema.Struct({
+              id: RequiredString,
+              type: RequiredString,
+            }),
+          ),
         }),
       ),
     ),
@@ -881,7 +938,7 @@ export const makeLinearService = (options: {
         seenCursors: new Set<string>(),
       })
       const pending = [firstPage(specId)]
-      const descendants: { nativeId: string; closureReason: string }[] = []
+      const descendants: ClosedSpecDescendants[number][] = []
       let hasOpenDescendant = false
       for (let offset = 0; offset < pending.length; ) {
         // Each alias keeps its own cursor; bounding the batch also bounds
@@ -951,6 +1008,10 @@ export const makeLinearService = (options: {
               descendants.push({
                 nativeId: child.id,
                 closureReason: child.state.type,
+                closedAt:
+                  child.state.type === "canceled"
+                    ? child.canceledAt
+                    : child.completedAt,
               })
             }
           }
@@ -966,7 +1027,62 @@ export const makeLinearService = (options: {
     },
   )
 
-  const service: LinearServiceShape = {
+  const readSpecReopening = Effect.fn("LinearService.readSpecReopening")(
+    function* (nativeId: string) {
+      const describe = `reading reopening history for Linear Spec ${nativeId}`
+      const seenCursors = new Set<string>()
+      let after: string | null = null
+      for (;;) {
+        const data: typeof SpecHistorySchema.Type = yield* graphql({
+          query: SPEC_HISTORY_QUERY,
+          variables: { id: nativeId, after },
+          schema: SpecHistorySchema,
+          describe,
+          requireCompleteData: true,
+        })
+        if (!data.issue)
+          return yield* requestError(`Linear Issue ${nativeId} not found`)
+        const page = data.issue.history
+        for (const { id, createdAt, fromState, toState } of page.nodes) {
+          if (
+            fromState &&
+            toState &&
+            !isLinearOpenStateType(fromState.type) &&
+            isLinearOpenStateType(toState.type)
+          ) {
+            if (!Number.isFinite(Date.parse(createdAt))) {
+              return yield* requestError(
+                `Linear returned an invalid reopening date for Spec ${nativeId}`,
+              )
+            }
+            return { id, createdAt }
+          }
+        }
+        after = yield* nextHierarchyCursor({
+          page,
+          after,
+          seenCursors,
+          describe,
+        })
+        if (after === null) return null
+      }
+    },
+  )
+
+  const service: Omit<
+    LinearServiceShape,
+    "closePassingSpec" | "ensureMilestoneComment"
+  > & {
+    readonly ensureMilestoneComment: (
+      nativeId: string,
+      marker: string,
+      body: string,
+      beforeWrite?: Effect.Effect<
+        "current" | SpecCloseResult,
+        LinearRequestError
+      >,
+    ) => Effect.Effect<SpecCloseResult | undefined, LinearServiceError>
+  } = {
     getAuthenticatedUserLogin: Effect.fn(
       "LinearService.getAuthenticatedUserLogin",
     )(function* () {
@@ -1088,57 +1204,64 @@ export const makeLinearService = (options: {
       }
       return observations
     }),
-    readSpecBaseline: Effect.fn("LinearService.readSpecBaseline")(
-      function* (nativeId) {
-        const { issue } = yield* graphql({
-          query: SPEC_QUERY,
-          variables: { id: nativeId },
-          schema: SpecSchema,
-          describe: `reading Linear Spec ${nativeId}`,
+    readSpecBaseline: Effect.fn("LinearService.readSpecBaseline")(function* (
+      nativeId: string,
+      options?: SpecBaselineReadOptions,
+    ) {
+      const { issue } = yield* graphql({
+        query: SPEC_QUERY,
+        variables: { id: nativeId },
+        schema: SpecSchema,
+        describe: `reading Linear Spec ${nativeId}`,
+        requireCompleteData: true,
+      })
+      if (!issue)
+        return yield* requestError(`Linear Issue ${nativeId} not found`)
+      if (!isSpecLabeled(issue.specLabels)) return { kind: "not-spec" as const }
+      const reopening = options?.includeReopening
+        ? yield* readSpecReopening(nativeId)
+        : undefined
+
+      const comments: { body: string; url: string; edited: boolean }[] = []
+      let after: string | null = null
+      const seen = new Set<string>()
+      for (;;) {
+        const page: typeof SpecCommentsSchema.Type = yield* graphql({
+          query: ISSUE_COMMENTS_QUERY,
+          variables: { id: nativeId, after },
+          schema: SpecCommentsSchema,
+          describe: `reading comments for Linear Spec ${nativeId}`,
           requireCompleteData: true,
         })
-        if (!issue)
+        if (!page.issue) {
           return yield* requestError(`Linear Issue ${nativeId} not found`)
-        if (!isSpecLabeled(issue.specLabels)) return { kind: "not-spec" }
-
-        const comments: { body: string; url: string; edited: boolean }[] = []
-        let after: string | null = null
-        const seen = new Set<string>()
-        for (;;) {
-          const page: typeof SpecCommentsSchema.Type = yield* graphql({
-            query: ISSUE_COMMENTS_QUERY,
-            variables: { id: nativeId, after },
-            schema: SpecCommentsSchema,
-            describe: `reading comments for Linear Spec ${nativeId}`,
-            requireCompleteData: true,
-          })
-          if (!page.issue) {
-            return yield* requestError(`Linear Issue ${nativeId} not found`)
-          }
-          const { nodes, pageInfo } = page.issue.comments
-          for (const comment of nodes) {
-            comments.push({
-              body: comment.body,
-              url: comment.url,
-              edited: comment.editedAt !== null,
-            })
-          }
-          if (!pageInfo.hasNextPage) {
-            return resolveSpecBaseline(
-              { ...issue, body: issue.description ?? "", marked: true },
-              comments,
-            )
-          }
-          after = pageInfo.endCursor
-          if (!after || seen.has(after)) {
-            return yield* requestError(
-              `Linear returned an invalid comments page cursor for Spec ${nativeId}`,
-            )
-          }
-          seen.add(after)
         }
-      },
-    ),
+        const { nodes, pageInfo } = page.issue.comments
+        for (const comment of nodes) {
+          comments.push({
+            body: comment.body,
+            url: comment.url,
+            edited: comment.editedAt !== null,
+          })
+        }
+        if (!pageInfo.hasNextPage) {
+          const approved = resolveSpecBaseline(
+            { ...issue, body: issue.description ?? "", marked: true },
+            comments,
+          )
+          return approved.kind !== "not-spec" && reopening !== undefined
+            ? { ...approved, reopening }
+            : approved
+        }
+        after = pageInfo.endCursor
+        if (!after || seen.has(after)) {
+          return yield* requestError(
+            `Linear returned an invalid comments page cursor for Spec ${nativeId}`,
+          )
+        }
+        seen.add(after)
+      }
+    }),
     getIssue: Effect.fn("LinearService.getIssue")(function* (nativeId: string) {
       const data = yield* graphql({
         query: ISSUE_QUERY,
@@ -1379,7 +1502,15 @@ export const makeLinearService = (options: {
       },
     ),
     ensureMilestoneComment: Effect.fn("LinearService.ensureMilestoneComment")(
-      function* (nativeId: string, marker: string, body: string) {
+      function* (
+        nativeId: string,
+        marker: string,
+        body: string,
+        beforeWrite?: Effect.Effect<
+          "current" | SpecCloseResult,
+          LinearRequestError
+        >,
+      ) {
         if (marker.trim() === "" || body.trim() === "") {
           return yield* requestError(
             `Linear milestone comment for Issue ${nativeId} was empty.`,
@@ -1388,21 +1519,38 @@ export const makeLinearService = (options: {
         let existingId: string | null = null
         let existingBody: string | null = null
         let after: string | undefined
+        const seen = new Set<string>()
         for (;;) {
           const data = yield* graphql({
             query: ISSUE_COMMENTS_QUERY,
             variables: { id: nativeId, after: after ?? null },
             schema: IssueCommentsSchema,
             describe: `listing comments for Linear Issue ${nativeId}`,
+            requireCompleteData: beforeWrite !== undefined,
           })
           if (data.issue === null) {
             return yield* requestError(
               `Linear Issue ${nativeId} was not found. Confirm the Issue still exists and the API key can comment on it.`,
             )
           }
+          if (
+            beforeWrite !== undefined &&
+            (typeof data.issue.comments?.pageInfo?.hasNextPage !== "boolean" ||
+              !data.issue.comments.nodes.every(
+                ({ body }) => typeof body === "string",
+              ))
+          ) {
+            return yield* requestError(
+              `Linear returned incomplete comments for Issue ${nativeId}.`,
+            )
+          }
           for (const comment of data.issue.comments?.nodes ?? []) {
             const commentBody = comment.body ?? ""
-            if (commentBody.includes(marker)) {
+            if (
+              beforeWrite === undefined
+                ? commentBody.includes(marker)
+                : commentBody.trimEnd().endsWith(`\n\n${marker}`)
+            ) {
               existingId = comment.id
               existingBody = commentBody
               break
@@ -1412,27 +1560,35 @@ export const makeLinearService = (options: {
             break
           }
           const pageInfo = data.issue.comments?.pageInfo
-          if (
-            pageInfo?.hasNextPage !== true ||
-            pageInfo.endCursor === null ||
-            pageInfo.endCursor === undefined
-          ) {
-            break
+          if (pageInfo?.hasNextPage !== true) break
+          if (!pageInfo.endCursor || seen.has(pageInfo.endCursor)) {
+            return yield* requestError(
+              `Linear returned an invalid comments page cursor for Issue ${nativeId}.`,
+            )
           }
           after = pageInfo.endCursor
+          seen.add(after)
         }
 
+        if (existingBody === body) return
+        if (beforeWrite !== undefined) {
+          const verdict = yield* beforeWrite
+          if (verdict !== "current") return verdict
+        }
         if (existingId !== null) {
-          if (existingBody === body) {
-            return
-          }
           const updated = yield* graphql({
             query: COMMENT_UPDATE_MUTATION,
             variables: { id: existingId, body },
             schema: CommentUpdateSchema,
             describe: `updating a Linear milestone comment on Issue ${nativeId}`,
           })
-          if (updated.commentUpdate.success === false) {
+          if (
+            updated.commentUpdate.success === false ||
+            (beforeWrite !== undefined &&
+              !updated.commentUpdate.comment?.body
+                ?.trimEnd()
+                .endsWith(`\n\n${marker}`))
+          ) {
             return yield* requestError(
               `Linear did not update the existing milestone comment on Issue ${nativeId}.`,
             )
@@ -1452,17 +1608,97 @@ export const makeLinearService = (options: {
           )
         }
         const posted = created.commentCreate.comment?.body ?? ""
-        if (!posted.includes(marker)) {
+        if (
+          beforeWrite === undefined
+            ? !posted.includes(marker)
+            : !posted.trimEnd().endsWith(`\n\n${marker}`)
+        ) {
           return yield* requestError(
             `Linear did not return the marked milestone comment on Issue ${nativeId}.`,
           )
         }
+        return undefined
       },
     ),
     hasCredentials: () => Effect.succeed(configured),
     hasAmbientCredentials: () => Effect.succeed(configured),
   }
-  return service
+
+  const closePassingSpec: NonNullable<LinearServiceShape["closePassingSpec"]> =
+    Effect.fn("LinearService.closePassingSpec")(function* (input) {
+      const {
+        nativeId,
+        doneStateId,
+        verdictId,
+        summary,
+        guard: specGuard,
+      } = input
+      const guard = Effect.gen(function* () {
+        const { issue } = yield* graphql({
+          query: SPEC_CLOSE_QUERY,
+          variables: { id: nativeId },
+          schema: SpecToCloseSchema,
+          describe: `rechecking Linear Spec ${nativeId}`,
+          requireCompleteData: true,
+        })
+        if (issue?.id !== nativeId) return "waiting"
+        const reopening = yield* readSpecReopening(nativeId)
+        const sameOpening =
+          (reopening?.id ?? null) === specGuard.parentReopenEventId
+        if (!isLinearOpenStateType(issue.state.type)) {
+          return sameOpening &&
+            issue.state.id === doneStateId &&
+            issue.state.type === "completed"
+            ? "closed"
+            : "waiting"
+        }
+        if (!isSpecLabeled(issue.specLabels)) return "waiting"
+        if (!sameOpening) return "reopened"
+        return checkSpecHierarchy(
+          yield* observeDescendants(nativeId),
+          specGuard.hierarchyFingerprint,
+        )
+      }).pipe(Effect.catch(() => Effect.succeed("waiting" as const)))
+
+      const marker = `ready-for-agent:spec-passed:${verdictId}`
+      const publication = yield* service.ensureMilestoneComment(
+        nativeId,
+        marker,
+        `${summary.trimEnd()}\n\n${marker}`,
+        // Do not treat closure as recovery while publication is still pending.
+        guard.pipe(
+          Effect.map((result) => (result === "closed" ? "waiting" : result)),
+        ),
+      )
+      if (publication !== undefined) return publication
+      const verdict = yield* guard
+      if (verdict !== "current") return verdict
+      const { issueUpdate } = yield* graphql({
+        query: ISSUE_UPDATE_MUTATION,
+        variables: { id: nativeId, stateId: doneStateId },
+        schema: IssueUpdateSchema,
+        describe: `completing Linear Spec ${nativeId}`,
+        requireCompleteData: true,
+      })
+      if (
+        issueUpdate.success !== true ||
+        issueUpdate.issue?.id !== nativeId ||
+        issueUpdate.issue.state?.id !== doneStateId ||
+        issueUpdate.issue.state.type !== "completed"
+      ) {
+        return yield* requestError(
+          `Linear did not move Spec ${nativeId} to the configured Done status.`,
+        )
+      }
+      return "closed"
+    })
+
+  return {
+    ...service,
+    ensureMilestoneComment: (id, marker, body) =>
+      service.ensureMilestoneComment(id, marker, body).pipe(Effect.asVoid),
+    closePassingSpec,
+  } satisfies LinearServiceShape
 }
 
 export const makeLinearServiceFromToken = (

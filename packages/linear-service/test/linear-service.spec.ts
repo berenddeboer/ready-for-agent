@@ -373,6 +373,8 @@ describe("Linear Spec observation", () => {
   const node = (id: string, type: string, firstChildId?: string) => ({
     id,
     state: { type },
+    completedAt: type === "completed" ? "2026-11-24T00:00:00Z" : null,
+    canceledAt: type === "canceled" ? "2026-11-24T00:00:00Z" : null,
     children: page(firstChildId === undefined ? [] : [{ id: firstChildId }]),
   })
   const spec = (id: string, type = "started") => ({
@@ -498,7 +500,13 @@ describe("Linear Spec observation", () => {
         displayId: archivedSpec.identifier,
         url: archivedSpec.url,
         readiness: "all-descendants-closed",
-        descendants: [{ nativeId: "closed-child", closureReason: "completed" }],
+        descendants: [
+          {
+            nativeId: "closed-child",
+            closureReason: "completed",
+            closedAt: "2026-11-24T00:00:00Z",
+          },
+        ],
       },
     ])
   })
