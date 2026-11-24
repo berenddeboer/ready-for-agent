@@ -41,9 +41,10 @@ tracker-reported closure reason to the validator so it can distinguish completed
 work from a cancellation or “not planned” closure. An unavailable reason is
 unknown, not evidence of completion. A cancelled duplicate may already be
 covered elsewhere; cancelling the only ticket for a requirement does not waive it.
-Repeated observations of the same closure do not start more Work Items. If a
-child is added or reopened during validation, withhold the verdict until all
-children are closed again.
+At most one Spec Validation Work Item may be unfinished for a spec. Repeated
+observations of the same closure do not start another, even after a restart.
+If a child is added or reopened during validation, withhold the verdict until
+all children are closed again.
 
 The validator works from the approved parent spec, the approved revisions of
 design documents it incorporates, and explicit amendments to the spec. Preserve
