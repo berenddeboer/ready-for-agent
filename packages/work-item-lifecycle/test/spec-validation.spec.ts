@@ -1310,6 +1310,9 @@ it.each([
             expect(item.completionSummary).toContain("delivery (deployed)")
             expect(item.completionSummary).toContain("HTTP 200")
             expect(item.completionSummary).not.toContain("defect (deployed)")
+            expect(item.completionSummary).toContain(
+              "The validator reported unmet, but did not record a directly observed defect",
+            )
           }
           if (expectChild) {
             const child = children.get("public-route")

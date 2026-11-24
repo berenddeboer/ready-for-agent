@@ -5,7 +5,10 @@ import { join } from "node:path"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Fiber, Result } from "effect"
 import { TestClock } from "effect/testing"
-import type { SpecFollowUpPublication } from "@ready-for-agent/forge-contract"
+import {
+  type SpecFollowUpPublication,
+  specFollowUpMarker,
+} from "@ready-for-agent/forge-contract"
 import { decodeArgument } from "../src/bin/cli.js"
 import {
   GitHubRepositoryUnavailableError,
@@ -71,7 +74,7 @@ const jsonGraphqlResponse = (body: unknown): Response =>
     headers: { "content-type": "application/json" },
   })
 
-it("reuses a partially written GitHub follow-up and links the open Spec to it", async () => {
+it("reuses a partially written GitHub follow-up without adopting a copied marker", async () => {
   const url = "https://github.com/acme/widgets/issues/8"
   const regionalUrl = "https://github.com/acme/widgets/issues/9"
   const payload: SpecFollowUpPublication = {
@@ -103,6 +106,7 @@ it("reuses a partially written GitHub follow-up and links the open Spec to it", 
     number: number
     url: string
     body: string
+    author: { login: string }
     parent: { id: string } | null
     labels: { nodes: Array<{ id: string }>; pageInfo: { hasNextPage: boolean } }
   } = {
@@ -110,6 +114,7 @@ it("reuses a partially written GitHub follow-up and links the open Spec to it", 
     number: 8,
     url,
     body: "",
+    author: { login: "octocat" },
     parent: null,
     labels: { nodes: [], pageInfo: { hasNextPage: false } },
   }
@@ -193,9 +198,19 @@ it("reuses a partially written GitHub follow-up and links the open Spec to it", 
     if (query.includes("comments("))
       return repo({ issue: { comments: page(comments) } })
     if (query.includes("issues(")) {
-      // A completed, unrelated issue is on the first page; the orphan is
-      // found only on the continuation of the unfiltered repository listing.
-      const other = { id: "other", number: 6, body: "Unrelated" }
+      expect(arg("filterBy")).toEqual({ createdBy: "OctoCat" })
+      // Even if the server returns another author's issue, its copied marker
+      // must not be adopted. The real follow-up is only on the second page.
+      const other = {
+        id: "other",
+        number: 6,
+        body: specFollowUpMarker(
+          payload.parentId,
+          "deployed-mcp",
+          "public-route",
+        ),
+        author: { login: "another-user" },
+      }
       const owned = [child, regional].filter(({ body }) => body !== "")
       return repo({
         issues:
@@ -219,7 +234,12 @@ it("reuses a partially written GitHub follow-up and links the open Spec to it", 
     }
     if (arg("number") === 8) return repo({ issue: child })
     if (arg("number") === 9) return repo({ issue: regional })
-    return repo({ id: "repo", issue: parent })
+    if (arg("number") === 7)
+      return data({
+        viewer: { login: "OctoCat" },
+        repository: { id: "repo", issue: parent },
+      })
+    throw new Error(`Unexpected GitHub query: ${query}`)
   })
   const publish = () =>
     Effect.runPromise(service.publishSpecFollowUps(repository, payload))

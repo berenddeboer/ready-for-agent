@@ -191,6 +191,7 @@ type Repository {
   issues(
     first: Int
     after: String
+    filterBy: IssueFilters
     labels: [String!]
     states: [IssueState!]
   ): IssueConnection!
@@ -202,6 +203,10 @@ type Repository {
     states: [PullRequestState!]
     headRefName: String
   ): PullRequestConnection!
+}
+
+input IssueFilters {
+  createdBy: String
 }
 
 type Ref {

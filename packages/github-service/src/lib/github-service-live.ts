@@ -1398,6 +1398,7 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
       (signal) =>
         client.query(
           {
+            viewer: { login: true },
             repository: {
               __args: repository,
               id: true,
@@ -1416,6 +1417,9 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
     if (repo === null)
       return yield* new GitHubApiRepositoryUnavailableError(repository)
     const parent = repo.issue
+    const login = parentResult.viewer?.login?.trim()
+    if (!login)
+      return yield* invalid("Could not identify the authenticated GitHub user")
     if (
       !parent?.id ||
       parent.state !== "OPEN" ||
@@ -1426,13 +1430,14 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
       )
     }
 
-    // Read the repository, not the eventually indexed issue search or just
-    // sub-issues: a lost response may have left a marked issue unattached.
+    // List only issues created by this credential's user. Searching or listing
+    // sub-issues alone can miss a newly created but still unattached follow-up.
     const existing = yield* readSpecIssuePages(
       Schema.Struct({
         id: Schema.NonEmptyString,
         number: Schema.Int,
         body: Schema.String,
+        author: Schema.NullOr(Schema.Struct({ login: Schema.NonEmptyString })),
       }),
       `finding previously created follow-ups for ${describe}`,
       (after) =>
@@ -1442,8 +1447,17 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
               repository: {
                 __args: repository,
                 issues: {
-                  __args: { first: PAGE_SIZE, after },
-                  nodes: { id: true, number: true, body: true },
+                  __args: {
+                    first: PAGE_SIZE,
+                    after,
+                    filterBy: { createdBy: login },
+                  },
+                  nodes: {
+                    id: true,
+                    number: true,
+                    body: true,
+                    author: { login: true },
+                  },
                   ...SpecIssuePageFields,
                 },
               },
@@ -1453,17 +1467,11 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
         ).pipe(Effect.map((result) => result.repository?.issues)),
     )
     const links: Array<PublishedSpecFollowUps[number]> = []
-    const publishChild = (child: SpecFollowUpPublication["children"][number]) =>
+    const labelIds = new Map<string, string>()
+    const resolveLabelId = (label: string) =>
       Effect.gen(function* () {
-        const { requirementId, gapId, label, title, body } = child
-        const marker = specFollowUpMarker(input.parentId, requirementId, gapId)
-        const matches = existing.filter((issue) =>
-          issue.body.split(/\r?\n/u).includes(marker),
-        )
-        if (matches.length > 1)
-          return yield* invalid(
-            `Multiple GitHub follow-ups already exist for ${requirementId}: ${gapId}`,
-          )
+        const cached = labelIds.get(label)
+        if (cached !== undefined) return cached
         const labelResult = yield* githubQuery(
           `Resolving GitHub label ${label}`,
           (signal) =>
@@ -1477,9 +1485,26 @@ const makePublishSpecFollowUps = (client: GitHubGraphqlClient) =>
               signal,
             ),
         )
-        const labelId = labelResult.repository?.label?.id
-        if (!labelId)
-          return yield* invalid(`Missing GitHub Issue label ${label}`)
+        const id = labelResult.repository?.label?.id
+        if (!id) return yield* invalid(`Missing GitHub Issue label ${label}`)
+        labelIds.set(label, id)
+        return id
+      })
+    const publishChild = (child: SpecFollowUpPublication["children"][number]) =>
+      Effect.gen(function* () {
+        const { requirementId, gapId, label, title, body } = child
+        const marker = specFollowUpMarker(input.parentId, requirementId, gapId)
+        // The hidden marker is not proof of ownership on a public repository.
+        const matches = existing.filter(
+          (issue) =>
+            issue.author?.login.toLowerCase() === login.toLowerCase() &&
+            issue.body.split(/\r?\n/u).includes(marker),
+        )
+        if (matches.length > 1)
+          return yield* invalid(
+            `Multiple GitHub follow-ups already exist for ${requirementId}: ${gapId}`,
+          )
+        const labelId = yield* resolveLabelId(label)
         const found = matches[0]
         let issue: typeof FollowUpIssue.Type
         if (found === undefined) {

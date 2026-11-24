@@ -134,6 +134,7 @@ const SavedFindings = Schema.Array(
     baselineReference: NonBlank,
     status: FindingStatus,
     evidence: Schema.NonEmptyArray(Evidence),
+    evidenceNote: Schema.optionalKey(NonBlank),
     followUps: Schema.optionalKey(Schema.Array(FollowUp)),
     followUpLinks: Schema.optionalKey(
       Schema.Array(Schema.Struct({ gapId: SpecGapId, url: NonBlank })),
@@ -173,6 +174,7 @@ const missingDrafts = (finding: Finding) =>
 const usableDrafts = (finding: Finding, raw: unknown) => {
   const observed = gapEvidence(finding)
   const byGap = new Map<string, typeof FollowUp.Type | null>()
+  // Decode each draft independently so a malformed entry cannot block valid siblings.
   for (const candidate of Array.isArray(raw) ? raw : []) {
     const decoded = Schema.decodeUnknownOption(FollowUp)(candidate)
     if (decoded._tag === "None") continue
@@ -323,6 +325,12 @@ const reconcileFindings = (
       ...entry,
       baselineReference,
       status,
+      ...(finding.status === "unmet" && !hasDefect
+        ? {
+            evidenceNote:
+              "The validator reported unmet, but did not record a directly observed defect in the required environment. No fix follow-up was filed on this evidence.",
+          }
+        : {}),
       evidence: attachGapIds(
         reportedEvidence,
         entry.environment,
@@ -421,6 +429,7 @@ const formatFindings = (
           ({ kind, environment, detail }) =>
             `- ${kind} (${environment}): ${detail}`,
         ),
+        ...(finding.evidenceNote === undefined ? [] : [finding.evidenceNote]),
         ...missingDrafts(finding).map(
           ({ gapId }) => `Follow-up not yet specified: ${gapId}`,
         ),
@@ -809,7 +818,12 @@ export const validateSpec = (
             ),
             // An incomplete or failed drafting turn must not prevent the
             // already valid tasks from being reconciled.
-            Effect.catch(() => Effect.succeed([])),
+            Effect.catch((error) =>
+              Effect.logWarning("Could not recover Spec follow-up drafts", {
+                workItemId: context.workItemId,
+                error,
+              }).pipe(Effect.as([])),
+            ),
           )
         const validRows = drafts.flatMap((raw) => {
           const row = Schema.decodeUnknownOption(DraftRow)(raw)
@@ -1051,6 +1065,8 @@ export const validateSpec = (
           ...(decisionRequest === undefined ? {} : { decisionRequest }),
         }
         if (findings.some((finding) => gapEvidence(finding).length > 0)) {
+          // Only tracker publication or missing drafts need a retry checkpoint.
+          // Other findings are stored by the normal Step Run outcome.
           yield* checkpoint(pending, evaluatedCommit, result.sessionId)
         }
         return yield* publish(pending, evaluatedCommit, result.sessionId)
