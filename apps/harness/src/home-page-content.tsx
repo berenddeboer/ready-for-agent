@@ -4924,13 +4924,21 @@ export function WorkItemLifecycleStatus({
           workItem.providerRecovery,
           workItem.paused,
         ) && (
-          <p className={statusMessageClassName}>
+          <p
+            className={cx(
+              statusMessageClassName,
+              workItem.origin === "SPEC_VALIDATION" &&
+                "line-clamp-4 break-words",
+            )}
+          >
             {isStatusMessageAlarm(status) ? (
               <span className={ui.statusMessageMark} aria-hidden="true">
                 ▲{" "}
               </span>
             ) : null}
-            {workItem.statusMessage}
+            {workItem.origin === "SPEC_VALIDATION"
+              ? workItem.statusMessage.split(/\n\n/)[0]
+              : workItem.statusMessage}
           </p>
         )}
       {workItem.ciRepair.active !== null && (
@@ -4972,7 +4980,7 @@ export function WorkItemLifecycleStatus({
             (workItem.specWaiverDecision ? (
               <form
                 key={workItem.specWaiverDecision.stepRunId}
-                className="basis-full"
+                className="min-w-0 max-w-full basis-full"
                 onSubmit={(event) => {
                   event.preventDefault()
                   const stepRunId = workItem.specWaiverDecision?.stepRunId
@@ -4985,35 +4993,40 @@ export function WorkItemLifecycleStatus({
                   )
                 }}
               >
-                <fieldset disabled={actionsPending || resumeDecision.isPending}>
-                  <legend>
-                    Confirm only the requirements that are no longer required
+                <fieldset
+                  className="m-0 grid min-w-0 max-w-full gap-1.5 border-0 p-0"
+                  disabled={actionsPending || resumeDecision.isPending}
+                >
+                  <legend className="p-0 font-mono text-xs font-semibold break-words whitespace-normal text-ink">
+                    Drop from this Spec (optional):
                   </legend>
-                  <p className={ui.jobTicketRuntimeLine}>
-                    A waiver changes what the Spec requires; it does not mark
-                    the requirement delivered.
-                  </p>
                   {workItem.specWaiverDecision.requirements.map((option) => (
-                    <div key={option.requirementId}>
-                      <label className="inline-flex min-h-11 items-center gap-2">
+                    <div key={option.requirementId} className="min-w-0">
+                      <label className="flex min-h-9 items-start gap-2 text-xs leading-snug text-ink">
                         <input
                           type="checkbox"
                           name="waive"
                           value={option.requirementId}
+                          className="mt-0.5 shrink-0"
                         />
-                        <span>Waive: {option.requirement}</span>
+                        <span className="min-w-0 break-words">
+                          {option.requirement}
+                        </span>
                       </label>
                       {option.trackerQuote && (
-                        <p className={ui.jobTicketRuntimeLine}>
-                          Tracker comment: “{option.trackerQuote}”
+                        <p className="m-0 pl-5 font-mono text-xs leading-relaxed break-words whitespace-normal text-ink-faint">
+                          “{option.trackerQuote}”
                         </p>
                       )}
                     </div>
                   ))}
-                  <button type="submit" className={ui.plateMini}>
+                  <button
+                    type="submit"
+                    className={`${ui.plateMini} justify-self-start`}
+                  >
                     {resumeDecision.isPending
                       ? "Resuming..."
-                      : "Resume with selected decisions"}
+                      : "Resume validation"}
                   </button>
                 </fieldset>
               </form>

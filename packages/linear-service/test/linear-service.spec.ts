@@ -1,8 +1,5 @@
 import { Effect, Result } from "effect"
-import {
-  type SpecFollowUpPublication,
-  renderSpecBaseline,
-} from "@ready-for-agent/forge-contract"
+import type { SpecFollowUpPublication } from "@ready-for-agent/forge-contract"
 import { LinearRequestError } from "../src/lib/errors.js"
 import { makeLinearServiceFromToken } from "../src/lib/linear-service-live.js"
 import {
@@ -142,7 +139,7 @@ test("recovers a partial Linear native follow-up and posts the findings only onc
           throw new Error("Missing stable Linear child ID or description")
         }
         expect(input.id).toMatch(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
         )
         if (isRegional) {
           regional.id = input.id
@@ -248,60 +245,30 @@ describe("Linear Spec baseline", () => {
   const title = "Hosted MCP"
   const approvedBody = `Expose MCP both locally and when deployed.\n\n[Approved design baseline: ADR](<${design}>)`
   const specLabels = { nodes: [{ name: "Spec" }] }
-  const commentUrl = `${url}#comment-1`
 
-  test("recovers published and late-marked approval evidence on the original Issue", async () => {
-    let published = true
+  test("reads a marked Linear Spec directly as written without reading comments", async () => {
     const service = makeLinearServiceFromToken(
       TOKEN,
       makeFetch(({ query, variables }) => {
         expect(variables?.id).toBe(ISSUE_UUID)
-        const issue = query.startsWith("query Spec")
-          ? {
+        expect(query).toStartWith("query Spec")
+        return jsonResponse(200, {
+          data: {
+            issue: {
               title,
-              description: published
-                ? `Expose MCP locally.\n\n[Approved Spec baseline](<${commentUrl}>)`
-                : approvedBody,
+              description: approvedBody,
               url,
               specLabels,
-            }
-          : {
-              comments: {
-                nodes: published
-                  ? [
-                      {
-                        url: commentUrl,
-                        body: renderSpecBaseline({
-                          title,
-                          body: approvedBody,
-                          designRevisions: [design],
-                        }),
-                        editedAt: null,
-                      },
-                    ]
-                  : [],
-                pageInfo: { hasNextPage: false, endCursor: null },
-              },
-            }
-        return jsonResponse(200, { data: { issue } })
+            },
+          },
+        })
       }),
     )
-    const expected = { title, body: approvedBody, designRevisions: [design] }
     await expect(
       Effect.runPromise(service.readSpecBaseline(ISSUE_UUID)),
     ).resolves.toEqual({
       kind: "baseline",
-      baseline: {
-        ...expected,
-        source: { kind: "publication-comment", url: commentUrl },
-      },
-    })
-    published = false
-    await expect(
-      Effect.runPromise(service.readSpecBaseline(ISSUE_UUID)),
-    ).resolves.toEqual({
-      kind: "baseline",
-      baseline: { ...expected, source: { kind: "marked-parent", url } },
+      baseline: { title, body: approvedBody, url },
     })
   })
 

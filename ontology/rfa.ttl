@@ -500,12 +500,6 @@ rfa:WaitingForSpecHierarchyReason
   skos:definition
     "Validate Spec did not start an Agent Turn because the original Issue Tracker did not confirm a complete, nonempty, closed hierarchy. Release the Worker Slot and wait for a new all-closed observation."@en .
 
-rfa:WaitingForApprovedSpecChecklistReason
-  a rfa:StepRunReason ;
-  skos:notation "waiting_for_approved_spec_checklist" ;
-  skos:definition
-    "Validate Spec did not start an Agent Turn because no approved checklist was bound to the Spec baseline. Release the Worker Slot and retain the Work Item for a later all-closed observation with an approved checklist."@en .
-
 rfa:WorkerRestartedReason
   a rfa:StepRunReason ;
   skos:notation "worker_restarted" ;
@@ -555,7 +549,7 @@ rfa:ValidateSpec
   rfa:retryable true ;
   skos:prefLabel "Validate Spec"@en ;
   skos:definition
-    "The independent Agent Turn that tests integrated delivery against a frozen approved Spec baseline and records requirement-level evidence without changing the original Issue Tracker or shipping changes."@en .
+    "The independent Agent Turn that tests integrated delivery against the open Spec as written and records requirement-level evidence without changing the original Issue Tracker or shipping changes."@en .
 
 rfa:AssessChanges
   a owl:Class, owl:NamedIndividual, skos:Concept,

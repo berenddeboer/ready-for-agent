@@ -15,8 +15,6 @@
         "scripts/tool-pins.test.ts",
         "scripts/opencode-contract-ci.test.ts",
         "scripts/opencode-contract-gate.test.ts",
-        "scripts/render-spec-baseline.ts",
-        "scripts/render-spec-requirement-checklist.ts",
         "scripts/run-opencode-cli-contract.ts"
       ],
       "project": ["scripts/**/*.{ts,mjs}"]

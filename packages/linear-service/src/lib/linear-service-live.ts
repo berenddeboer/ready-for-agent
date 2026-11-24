@@ -17,7 +17,6 @@ import {
   checkSpecHierarchy,
   extractErrorCode,
   formatSpecFollowUpComment,
-  resolveSpecBaseline,
   specFindingsMarker,
   specFollowUpMarker,
 } from "@ready-for-agent/forge-contract"
@@ -228,8 +227,8 @@ const FollowUpResult = Schema.Struct({
   issue: FollowUpIssue,
 })
 
-// RFC 9562 name-based UUID in the URL namespace. Linear accepts the ID on
-// creation, so even replay after an ambiguous response cannot allocate twice.
+// Deterministic UUID in v4 format (Linear's IssueCreateInput.id requires
+// version nibble 4). Stable across retries so replay cannot allocate twice.
 const followUpId = (parentId: string, requirementId: string, gapId: string) => {
   const hash = createHash("sha1")
     .update(Buffer.from("6ba7b8119dad11d180b400c04fd430c8", "hex"))
@@ -238,7 +237,7 @@ const followUpId = (parentId: string, requirementId: string, gapId: string) => {
     )
     .digest("hex")
   const variant = ((Number.parseInt(hash[16] ?? "0", 16) & 3) | 8).toString(16)
-  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-${variant}${hash.slice(17, 20)}-${hash.slice(20, 32)}`
 }
 const HierarchyNodeSchema = Schema.Struct({
   id: RequiredString,
@@ -469,14 +468,14 @@ const ISSUE_UPDATE_MUTATION = `mutation IssueUpdate($id: String!, $stateId: Stri
 const COMMENT_CREATE_MUTATION = `mutation CommentCreate($issueId: String!, $body: String!) {
   commentCreate(input: { issueId: $issueId, body: $body }) {
     success
-    comment { id body }
+    comment { id body url }
   }
 }`
 
 const COMMENT_UPDATE_MUTATION = `mutation CommentUpdate($id: String!, $body: String!) {
   commentUpdate(id: $id, input: { body: $body }) {
     success
-    comment { id body }
+    comment { id body url }
   }
 }`
 
@@ -508,6 +507,7 @@ const IssueSnapshotSchema = Schema.Struct({
 const CommentNodeSchema = Schema.Struct({
   id: RequiredString,
   body: Schema.optional(Schema.NullOr(Schema.String)),
+  url: Schema.optional(Schema.NullOr(Schema.String)),
 })
 const IssueCommentsSchema = Schema.Struct({
   issue: Schema.NullOr(
@@ -554,25 +554,6 @@ const SpecHistorySchema = Schema.Struct({
           }),
         ),
         pageInfo: StrictPageInfoSchema,
-      }),
-    }),
-  ),
-})
-const SpecCommentsSchema = Schema.Struct({
-  issue: Schema.NullOr(
-    Schema.Struct({
-      comments: Schema.Struct({
-        nodes: Schema.Array(
-          Schema.Struct({
-            body: Schema.String,
-            url: RequiredString,
-            editedAt: Schema.NullOr(Schema.String),
-          }),
-        ),
-        pageInfo: Schema.Struct({
-          hasNextPage: Schema.Boolean,
-          endCursor: Schema.NullOr(Schema.String),
-        }),
       }),
     }),
   ),
@@ -628,6 +609,7 @@ const CommentCreateSchema = Schema.Struct({
         Schema.Struct({
           id: RequiredString,
           body: Schema.optional(Schema.NullOr(Schema.String)),
+          url: Schema.optional(Schema.NullOr(Schema.String)),
         }),
       ),
     ),
@@ -641,6 +623,7 @@ const CommentUpdateSchema = Schema.Struct({
         Schema.Struct({
           id: RequiredString,
           body: Schema.optional(Schema.NullOr(Schema.String)),
+          url: Schema.optional(Schema.NullOr(Schema.String)),
         }),
       ),
     ),
@@ -1098,6 +1081,143 @@ export const makeLinearService = (options: {
     },
   )
 
+  const ensureMilestoneCommentWithUrl = Effect.fn(
+    "LinearService.ensureMilestoneComment",
+  )(function* (
+    nativeId: string,
+    marker: string,
+    body: string,
+    beforeWrite?: Effect.Effect<
+      "current" | SpecCloseResult,
+      LinearRequestError
+    >,
+  ) {
+    if (marker.trim() === "" || body.trim() === "") {
+      return yield* requestError(
+        `Linear milestone comment for Issue ${nativeId} was empty.`,
+      )
+    }
+    let existingId: string | null = null
+    let existingBody: string | null = null
+    let existingUrl: string | undefined
+    let after: string | undefined
+    const seen = new Set<string>()
+    for (;;) {
+      const data = yield* graphql({
+        query: ISSUE_COMMENTS_QUERY,
+        variables: { id: nativeId, after: after ?? null },
+        schema: IssueCommentsSchema,
+        describe: `listing comments for Linear Issue ${nativeId}`,
+        requireCompleteData: beforeWrite !== undefined,
+      })
+      if (data.issue === null) {
+        return yield* requestError(
+          `Linear Issue ${nativeId} was not found. Confirm the Issue still exists and the API key can comment on it.`,
+        )
+      }
+      if (
+        beforeWrite !== undefined &&
+        (typeof data.issue.comments?.pageInfo?.hasNextPage !== "boolean" ||
+          !data.issue.comments.nodes.every(
+            ({ body }) => typeof body === "string",
+          ))
+      ) {
+        return yield* requestError(
+          `Linear returned incomplete comments for Issue ${nativeId}.`,
+        )
+      }
+      for (const comment of data.issue.comments?.nodes ?? []) {
+        const commentBody = comment.body ?? ""
+        if (
+          beforeWrite === undefined
+            ? commentBody.includes(marker)
+            : commentBody.trimEnd().endsWith(`\n\n${marker}`)
+        ) {
+          existingId = comment.id
+          existingBody = commentBody
+          existingUrl =
+            typeof comment.url === "string" && comment.url.length > 0
+              ? comment.url
+              : undefined
+          break
+        }
+      }
+      if (existingId !== null) {
+        break
+      }
+      const pageInfo = data.issue.comments?.pageInfo
+      if (pageInfo?.hasNextPage !== true) break
+      if (!pageInfo.endCursor || seen.has(pageInfo.endCursor)) {
+        return yield* requestError(
+          `Linear returned an invalid comments page cursor for Issue ${nativeId}.`,
+        )
+      }
+      after = pageInfo.endCursor
+      seen.add(after)
+    }
+
+    if (existingBody === body) return { url: existingUrl }
+    if (beforeWrite !== undefined) {
+      if (existingBody !== null) {
+        if (existingBody.trimEnd() === body) return { url: existingUrl }
+        return yield* requestError(
+          `The pending Spec verdict on Linear Issue ${nativeId} was edited; restore the evidence summary before retrying close-out.`,
+        )
+      }
+      const verdict = yield* beforeWrite
+      if (verdict !== "current") return { result: verdict }
+    }
+    if (existingId !== null) {
+      const updated = yield* graphql({
+        query: COMMENT_UPDATE_MUTATION,
+        variables: { id: existingId, body },
+        schema: CommentUpdateSchema,
+        describe: `updating a Linear milestone comment on Issue ${nativeId}`,
+      })
+      if (updated.commentUpdate.success === false) {
+        return yield* requestError(
+          `Linear did not update the existing milestone comment on Issue ${nativeId}.`,
+        )
+      }
+      const updatedUrl = updated.commentUpdate.comment?.url
+      return {
+        url:
+          typeof updatedUrl === "string" && updatedUrl.length > 0
+            ? updatedUrl
+            : existingUrl,
+      }
+    }
+
+    const created = yield* graphql({
+      query: COMMENT_CREATE_MUTATION,
+      variables: { issueId: nativeId, body },
+      schema: CommentCreateSchema,
+      describe: `posting a Linear milestone comment on Issue ${nativeId}`,
+    })
+    if (created.commentCreate.success === false) {
+      return yield* requestError(
+        `Linear did not create a milestone comment on Issue ${nativeId}.`,
+      )
+    }
+    const posted = created.commentCreate.comment?.body ?? ""
+    if (
+      beforeWrite === undefined
+        ? !posted.includes(marker)
+        : posted.trimEnd() !== body
+    ) {
+      return yield* requestError(
+        `Linear did not return the marked milestone comment on Issue ${nativeId}.`,
+      )
+    }
+    const createdUrl = created.commentCreate.comment?.url
+    return {
+      url:
+        typeof createdUrl === "string" && createdUrl.length > 0
+          ? createdUrl
+          : undefined,
+    }
+  })
+
   const service: Omit<
     LinearServiceShape,
     "closePassingSpec" | "ensureMilestoneComment"
@@ -1291,45 +1411,14 @@ export const makeLinearService = (options: {
       const reopening = options?.includeReopening
         ? yield* readSpecReopening(nativeId)
         : undefined
-
-      const comments: { body: string; url: string; edited: boolean }[] = []
-      let after: string | null = null
-      const seen = new Set<string>()
-      for (;;) {
-        const page: typeof SpecCommentsSchema.Type = yield* graphql({
-          query: ISSUE_COMMENTS_QUERY,
-          variables: { id: nativeId, after },
-          schema: SpecCommentsSchema,
-          describe: `reading comments for Linear Spec ${nativeId}`,
-          requireCompleteData: true,
-        })
-        if (!page.issue) {
-          return yield* requestError(`Linear Issue ${nativeId} not found`)
-        }
-        const { nodes, pageInfo } = page.issue.comments
-        for (const comment of nodes) {
-          comments.push({
-            body: comment.body,
-            url: comment.url,
-            edited: comment.editedAt !== null,
-          })
-        }
-        if (!pageInfo.hasNextPage) {
-          const approved = resolveSpecBaseline(
-            { ...issue, body: issue.description ?? "", marked: true },
-            comments,
-          )
-          return approved.kind !== "not-spec" && reopening !== undefined
-            ? { ...approved, reopening }
-            : approved
-        }
-        after = pageInfo.endCursor
-        if (!after || seen.has(after)) {
-          return yield* requestError(
-            `Linear returned an invalid comments page cursor for Spec ${nativeId}`,
-          )
-        }
-        seen.add(after)
+      return {
+        kind: "baseline" as const,
+        baseline: {
+          title: issue.title,
+          body: issue.description ?? "",
+          url: issue.url,
+        },
+        ...(reopening !== undefined ? { reopening } : {}),
       }
     }),
     getIssue: Effect.fn("LinearService.getIssue")(function* (nativeId: string) {
@@ -1562,134 +1651,32 @@ export const makeLinearService = (options: {
           }
         }
         if (links.length === 0 && failure !== undefined) return yield* failure
-        yield* service.ensureMilestoneComment(
+        const reportComment = yield* ensureMilestoneCommentWithUrl(
           parentId,
           specFindingsMarker(input.workItemId),
           formatSpecFollowUpComment(input, links),
         )
         if (failure !== undefined) return yield* failure
-        return links
+        return reportComment.url === undefined
+          ? links
+          : links.map((link) => ({
+              ...link,
+              reportCommentUrl: reportComment.url,
+            }))
       },
     ),
-    ensureMilestoneComment: Effect.fn("LinearService.ensureMilestoneComment")(
-      function* (
-        nativeId: string,
-        marker: string,
-        body: string,
-        beforeWrite?: Effect.Effect<
-          "current" | SpecCloseResult,
-          LinearRequestError
-        >,
-      ) {
-        if (marker.trim() === "" || body.trim() === "") {
-          return yield* requestError(
-            `Linear milestone comment for Issue ${nativeId} was empty.`,
-          )
-        }
-        let existingId: string | null = null
-        let existingBody: string | null = null
-        let after: string | undefined
-        const seen = new Set<string>()
-        for (;;) {
-          const data = yield* graphql({
-            query: ISSUE_COMMENTS_QUERY,
-            variables: { id: nativeId, after: after ?? null },
-            schema: IssueCommentsSchema,
-            describe: `listing comments for Linear Issue ${nativeId}`,
-            requireCompleteData: beforeWrite !== undefined,
-          })
-          if (data.issue === null) {
-            return yield* requestError(
-              `Linear Issue ${nativeId} was not found. Confirm the Issue still exists and the API key can comment on it.`,
-            )
-          }
-          if (
-            beforeWrite !== undefined &&
-            (typeof data.issue.comments?.pageInfo?.hasNextPage !== "boolean" ||
-              !data.issue.comments.nodes.every(
-                ({ body }) => typeof body === "string",
-              ))
-          ) {
-            return yield* requestError(
-              `Linear returned incomplete comments for Issue ${nativeId}.`,
-            )
-          }
-          for (const comment of data.issue.comments?.nodes ?? []) {
-            const commentBody = comment.body ?? ""
-            if (
-              beforeWrite === undefined
-                ? commentBody.includes(marker)
-                : commentBody.trimEnd().endsWith(`\n\n${marker}`)
-            ) {
-              existingId = comment.id
-              existingBody = commentBody
-              break
-            }
-          }
-          if (existingId !== null) {
-            break
-          }
-          const pageInfo = data.issue.comments?.pageInfo
-          if (pageInfo?.hasNextPage !== true) break
-          if (!pageInfo.endCursor || seen.has(pageInfo.endCursor)) {
-            return yield* requestError(
-              `Linear returned an invalid comments page cursor for Issue ${nativeId}.`,
-            )
-          }
-          after = pageInfo.endCursor
-          seen.add(after)
-        }
-
-        if (existingBody === body) return
-        if (beforeWrite !== undefined) {
-          if (existingBody !== null) {
-            if (existingBody.trimEnd() === body) return
-            return yield* requestError(
-              `The pending Spec verdict on Linear Issue ${nativeId} was edited; restore the evidence summary before retrying close-out.`,
-            )
-          }
-          const verdict = yield* beforeWrite
-          if (verdict !== "current") return verdict
-        }
-        if (existingId !== null) {
-          const updated = yield* graphql({
-            query: COMMENT_UPDATE_MUTATION,
-            variables: { id: existingId, body },
-            schema: CommentUpdateSchema,
-            describe: `updating a Linear milestone comment on Issue ${nativeId}`,
-          })
-          if (updated.commentUpdate.success === false) {
-            return yield* requestError(
-              `Linear did not update the existing milestone comment on Issue ${nativeId}.`,
-            )
-          }
-          return
-        }
-
-        const created = yield* graphql({
-          query: COMMENT_CREATE_MUTATION,
-          variables: { issueId: nativeId, body },
-          schema: CommentCreateSchema,
-          describe: `posting a Linear milestone comment on Issue ${nativeId}`,
-        })
-        if (created.commentCreate.success === false) {
-          return yield* requestError(
-            `Linear did not create a milestone comment on Issue ${nativeId}.`,
-          )
-        }
-        const posted = created.commentCreate.comment?.body ?? ""
-        if (
-          beforeWrite === undefined
-            ? !posted.includes(marker)
-            : posted.trimEnd() !== body
-        ) {
-          return yield* requestError(
-            `Linear did not return the marked milestone comment on Issue ${nativeId}.`,
-          )
-        }
-        return undefined
-      },
-    ),
+    ensureMilestoneComment: (
+      nativeId: string,
+      marker: string,
+      body: string,
+      beforeWrite?: Effect.Effect<
+        "current" | SpecCloseResult,
+        LinearRequestError
+      >,
+    ) =>
+      ensureMilestoneCommentWithUrl(nativeId, marker, body, beforeWrite).pipe(
+        Effect.map(({ result }) => result),
+      ),
     hasCredentials: () => Effect.succeed(configured),
     hasAmbientCredentials: () => Effect.succeed(configured),
   }

@@ -36,7 +36,6 @@ import {
 } from "@ready-for-agent/db-service"
 import {
   type PullRequestLifecycleStatus,
-  type SpecBaselineResult,
   type SpecObservation,
   type StepRunReasonDetail,
   buildReasonDetail,
@@ -3961,7 +3960,7 @@ export const makeWorkItemLifecycleLive = (
           readonly completionSummary?: string | null
           readonly specValidationFindings?: string
           readonly specValidationInput?: string
-          readonly holdForSpec?: "hierarchy" | "checklist"
+          readonly holdForSpec?: "hierarchy"
           readonly publicationTitle?: string | null
           readonly publicationBody?: string | null
           readonly pauseBeforeStep?: OperationalLifecycleStep | null
@@ -4018,7 +4017,7 @@ export const makeWorkItemLifecycleLive = (
                   (cause) =>
                     new LifecycleStepFailedError({
                       message:
-                        "This Work Item does not have a readable approved Spec baseline.",
+                        "This Work Item does not have a readable Spec validation input.",
                       cause,
                     }),
                 ),
@@ -4042,8 +4041,6 @@ export const makeWorkItemLifecycleLive = (
               switch (result.kind) {
                 case "waiting":
                   return { holdForSpec: "hierarchy" as const }
-                case "waiting_for_checklist":
-                  return { holdForSpec: "checklist" as const }
                 case "decision_needed":
                   return {
                     ...result,
@@ -4821,11 +4818,6 @@ export const makeWorkItemLifecycleLive = (
                       }),
                   ),
                 )
-                if (!("baseline" in specInput)) {
-                  return yield* new LifecycleStepFailedError({
-                    message: "Spec close-out requires an approved baseline.",
-                  })
-                }
                 const result = yield* closePassingSpec(context, specInput).pipe(
                   Effect.provideService(DbService, db),
                   Effect.provideService(GitHubService, github),
@@ -7266,16 +7258,11 @@ export const makeWorkItemLifecycleLive = (
                   }
 
                   if (handlerExit.value.holdForSpec !== undefined) {
-                    const awaitingChecklist =
-                      handlerExit.value.holdForSpec === "checklist"
                     yield* completeInterruptedStep({
                       stepRun: afterStart,
-                      reasonCode: awaitingChecklist
-                        ? STEP_RUN_REASON.waitingForApprovedSpecChecklist
-                        : STEP_RUN_REASON.waitingForSpecHierarchy,
-                      reasonMessage: awaitingChecklist
-                        ? "Waiting for an approved requirement checklist linked to the Spec baseline"
-                        : "Waiting for the original Issue Tracker to confirm all Spec descendants are closed",
+                      reasonCode: STEP_RUN_REASON.waitingForSpecHierarchy,
+                      reasonMessage:
+                        "Waiting for the original Issue Tracker to confirm all Spec descendants are closed",
                     })
                     const held = yield* getWorkItem(workItem.id)
                     return { _tag: "processed" as const, workItem: held }
@@ -9991,17 +9978,7 @@ export const makeWorkItemLifecycleLive = (
                     const selected = options.filter(({ requirementId }) =>
                       ids.has(requirementId),
                     )
-                    const baseline =
-                      "baseline" in input ? input.baseline : undefined
-                    if (
-                      !baseline ||
-                      ids.size === 0 ||
-                      selected.length !== ids.size ||
-                      selected.some(
-                        ({ baselineUrl }) =>
-                          baselineUrl !== baseline.source.url,
-                      )
-                    )
+                    if (ids.size === 0 || selected.length !== ids.size)
                       return yield* invalid
                     confirmedSpecInput = yield* Schema.encodeEffect(
                       SpecValidationInput,
@@ -10653,7 +10630,7 @@ export const makeWorkItemLifecycleLive = (
         )
       })
 
-      const wakeSpecValidation = (workItemId: string, approvedInput?: string) =>
+      const wakeSpecValidation = (workItemId: string) =>
         sql.withTransaction(
           Effect.gen(function* () {
             const [parked] = yield* sql.unsafe<{
@@ -10665,20 +10642,9 @@ export const makeWorkItemLifecycleLive = (
                AND (SELECT reason_code FROM step_run
                     WHERE work_item_id = work_item.id
                     ORDER BY queued_at DESC, rowid DESC LIMIT 1) = ?`,
-              [
-                workItemId,
-                approvedInput === undefined
-                  ? STEP_RUN_REASON.waitingForSpecHierarchy
-                  : STEP_RUN_REASON.waitingForApprovedSpecChecklist,
-              ],
+              [workItemId, STEP_RUN_REASON.waitingForSpecHierarchy],
             )
             if (parked === undefined) return false
-            if (approvedInput !== undefined) {
-              yield* sql.unsafe(
-                "UPDATE work_item SET spec_validation_input = ? WHERE id = ?",
-                [approvedInput, workItemId],
-              )
-            }
             const now = yield* Clock.currentTimeMillis
             if (yield* tryAcquireWorkerSlot(workItemId, now)) {
               yield* enqueueStepRunForWorkItem(workItemId, parked.state, now)
@@ -10695,7 +10661,6 @@ export const makeWorkItemLifecycleLive = (
             const [existing] = yield* sql.unsafe<{
               id: string
               state: WorkItemState
-              awaiting_checklist: number
               state_ready_at: number
               close_out_finished: number
               spec_validation_input: string
@@ -10703,20 +10668,12 @@ export const makeWorkItemLifecycleLive = (
               completion_summary: string | null
             }>(
               `SELECT id, state, state_ready_at, spec_validation_input, spec_validation_findings, completion_summary,
-                 (state = 'validate_spec' AND paused = 0
-                   AND holds_worker_slot = 0 AND waiting_since IS NULL
-                   AND (SELECT reason_code FROM step_run WHERE work_item_id = work_item.id
-                         ORDER BY queued_at DESC, rowid DESC LIMIT 1) = ?) AS awaiting_checklist,
                  (state = 'complete' AND
                     (SELECT step = 'close_issue' AND status = 'succeeded'
                        FROM step_run WHERE work_item_id = work_item.id
                         ORDER BY queued_at DESC, rowid DESC LIMIT 1)) AS close_out_finished
                FROM work_item WHERE repository_id = ? AND spec_validation_key = ?`,
-              [
-                STEP_RUN_REASON.waitingForApprovedSpecChecklist,
-                repository.id,
-                key,
-              ],
+              [repository.id, key],
             )
             if (existing !== undefined) {
               yield* publishPendingSpecDecisions(existing.id)
@@ -10726,8 +10683,7 @@ export const makeWorkItemLifecycleLive = (
             if (
               existing !== undefined &&
               existing.state !== "complete" &&
-              existing.state !== "abandoned" &&
-              !existing.awaiting_checklist
+              existing.state !== "abandoned"
             ) {
               if (yield* wakeSpecValidation(existing.id)) {
                 yield* notifyWorkItemsChanged(repository.id)
@@ -10735,10 +10691,8 @@ export const makeWorkItemLifecycleLive = (
               return
             }
 
-            const baselineOptions = {
-              includeReopening: !existing?.awaiting_checklist,
-            }
-            const approved =
+            const baselineOptions = { includeReopening: true }
+            const currentSpec =
               observed.tracker === "linear"
                 ? yield* linear.readSpecBaseline(
                     observed.nativeId,
@@ -10753,105 +10707,7 @@ export const makeWorkItemLifecycleLive = (
                     Number(observed.nativeId),
                     baselineOptions,
                   )
-            if (approved.kind === "not-spec") return
-            if (existing?.awaiting_checklist) {
-              const frozen = yield* Schema.decodeUnknownEffect(
-                SpecValidationInput,
-              )(existing.spec_validation_input)
-              const wakeForApprovalReview = Effect.fnUntraced(function* (
-                baselineReview: Extract<SpecBaselineResult, { kind: "review" }>,
-              ) {
-                const approvedInput = yield* Schema.encodeEffect(
-                  SpecValidationInput,
-                )({
-                  spec: frozen.spec,
-                  descendants: frozen.descendants,
-                  baselineReview,
-                  ...(frozen.parentReopenEventId === undefined
-                    ? {}
-                    : { parentReopenEventId: frozen.parentReopenEventId }),
-                })
-                if (yield* wakeSpecValidation(existing.id, approvedInput)) {
-                  yield* notifyWorkItemsChanged(repository.id)
-                }
-              })
-              if (approved.kind === "review") {
-                yield* wakeForApprovalReview({
-                  ...approved,
-                  candidates:
-                    "baseline" in frozen
-                      ? [
-                          frozen.baseline,
-                          ...approved.candidates.filter(
-                            ({ source }) =>
-                              source.url !== frozen.baseline.source.url,
-                          ),
-                        ]
-                      : approved.candidates,
-                })
-                return
-              }
-              if (!("baseline" in frozen)) return
-              const {
-                requirementChecklist,
-                source,
-                title,
-                body,
-                designRevisions,
-              } = approved.baseline
-              const promiseChanged =
-                frozen.baseline.title !== title ||
-                frozen.baseline.body !== body ||
-                frozen.baseline.designRevisions.length !==
-                  designRevisions.length ||
-                !frozen.baseline.designRevisions.every(
-                  (revision, index) => revision === designRevisions[index],
-                )
-              // The tracker may now cite only a replacement snapshot. Keep
-              // both versions so the validator can establish materiality.
-              if (promiseChanged && source.kind !== "marked-parent") {
-                yield* wakeForApprovalReview({
-                  kind: "review",
-                  candidates: [frozen.baseline, approved.baseline],
-                  unreadableSnapshots: [],
-                })
-                return
-              }
-              if (
-                requirementChecklist === undefined ||
-                source.kind !== "publication-comment" ||
-                requirementChecklist.baselineUrl !== source.url
-              )
-                return
-              // A legacy baseline may gain a publication citation, but the
-              // newly cited snapshot must preserve the entire frozen promise.
-              if (
-                frozen.baseline.source.kind === "publication-comment" &&
-                frozen.baseline.source.url !== source.url
-              ) {
-                yield* Effect.logWarning(
-                  "Spec Validation is waiting: the checklist's baseline does not match the frozen approval",
-                  {
-                    workItemId: existing.id,
-                    spec: observed.url,
-                    frozenBaseline: frozen.baseline.source.url,
-                    checklistBaseline: source.url,
-                    checklist: requirementChecklist.sourceUrl,
-                  },
-                )
-                return
-              }
-              const approvedInput = yield* Schema.encodeEffect(
-                SpecValidationInput,
-              )({
-                ...frozen,
-                baseline: { ...frozen.baseline, source, requirementChecklist },
-              })
-              if (yield* wakeSpecValidation(existing.id, approvedInput)) {
-                yield* notifyWorkItemsChanged(repository.id)
-              }
-              return
-            }
+            if (currentSpec.kind === "not-spec") return
             let followUpPass: SpecValidationInput | undefined
             const published = savedSpecFollowUps(
               existing?.spec_validation_findings ?? null,
@@ -10863,7 +10719,7 @@ export const makeWorkItemLifecycleLive = (
               const prior = yield* Schema.decodeUnknownEffect(
                 SpecValidationInput,
               )(existing.spec_validation_input)
-              const reopening = approved.reopening
+              const reopening = currentSpec.reopening
               const reopeningAnchor =
                 existing.state === "abandoned"
                   ? prior.abandonedWithReopenEventId
@@ -10876,8 +10732,7 @@ export const makeWorkItemLifecycleLive = (
                   Date.parse(reopening.createdAt) <= existing.state_ready_at)
               )
               if (!parentReopened) {
-                if (existing.state !== "complete" || !("baseline" in prior))
-                  return
+                if (existing.state !== "complete") return
                 // Only a newly closed native follow-up can start a new pass
                 // in the same open episode. An arbitrary edit or closure is
                 // not a request to repeat a non-passing verdict.
@@ -10919,26 +10774,23 @@ export const makeWorkItemLifecycleLive = (
               )
             )
               return
-            const frozenInput = yield* Schema.encodeEffect(SpecValidationInput)(
+            const validationInput = yield* Schema.encodeEffect(
+              SpecValidationInput,
+            )(
               followUpPass
                 ? { ...followUpPass, descendants }
                 : {
                     spec: { tracker, nativeId, displayId, url },
                     descendants,
-                    ...(approved.kind === "baseline"
-                      ? { baseline: approved.baseline }
-                      : { baselineReview: approved }),
-                    ...(approved.reopening === undefined
+                    ...(currentSpec.reopening === undefined
                       ? {}
                       : {
-                          parentReopenEventId: approved.reopening?.id ?? null,
+                          parentReopenEventId:
+                            currentSpec.reopening?.id ?? null,
                         }),
                   },
             )
-            const specTitle =
-              approved.kind === "baseline"
-                ? approved.baseline.title
-                : approved.candidates[0]?.title
+            const specTitle = currentSpec.baseline.title
             const title = `Spec Validation — ${formatIssueDisplayId(displayId)}${specTitle ? `: ${specTitle}` : ""}`
             const workItemId = makeWorkItemId()
             const firstStep = "create_worktree"
@@ -10974,7 +10826,7 @@ export const makeWorkItemLifecycleLive = (
                         workItemId,
                         repository.id,
                         key,
-                        frozenInput,
+                        validationInput,
                         title,
                         agentBackendId,
                         firstStep,

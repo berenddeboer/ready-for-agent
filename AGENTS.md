@@ -29,8 +29,8 @@ When adding a repo-local skill, add the matching symlink for Claude Code:
 
 Specs and tickets live in Linear; pull requests live on GitHub. Before creating,
 reading, or updating tickets (including `/to-spec` and `/to-tickets`), follow
-`docs/agents/issue-tracker.md` for Linear routing and relationships.
-When publishing or marking a Spec, follow `docs/agents/spec-publication.md`.
+`docs/agents/issue-tracker.md` for Linear routing and relationships. Apply the
+`spec` label to published Specs (see `docs/agents/triage-labels.md`).
 
 ### Forge token scopes
 

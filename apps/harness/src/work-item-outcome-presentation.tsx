@@ -1,6 +1,52 @@
 import { ui } from "./ui.js"
 import { prBadgeClassName } from "./work-item-progress-chrome.js"
 
+function summarizeSpecValidation(summary: string): {
+  readonly reportUrl: string | null
+  readonly trackerLabel: string
+  readonly counts: readonly string[]
+} | null {
+  const reportUrl =
+    summary.match(/^Report:\s*(https:\/\/\S+)/m)?.[1] ??
+    summary.match(/^Spec:\s*(https:\/\/\S+)/m)?.[1] ??
+    null
+  const met = (summary.match(/^### MET\b/gm) ?? []).length
+  const unmet = (summary.match(/^### UNMET\b/gm) ?? []).length
+  const unverified = (summary.match(/^### UNVERIFIED\b/gm) ?? []).length
+  const waived = (summary.match(/^### WAIVED\b/gm) ?? []).length
+  const followUps = (
+    summary.match(/^- \[.+\]\(<?https?:\/\/[^)\s>]+>?\)$/gm) ?? []
+  ).length
+  const total = met + unmet + unverified + waived
+  if (total === 0 && reportUrl === null) return null
+
+  const counts = [
+    met > 0 ? `${met} met` : null,
+    unmet > 0 ? `${unmet} unmet` : null,
+    unverified > 0 ? `${unverified} unverified` : null,
+    waived > 0 ? `${waived} waived` : null,
+    followUps > 0
+      ? `${followUps} follow-up${followUps === 1 ? "" : "s"}`
+      : null,
+  ].filter((part): part is string => part !== null)
+
+  let trackerLabel = "tracker"
+  if (reportUrl !== null) {
+    try {
+      const host = new URL(reportUrl).hostname.toLowerCase()
+      if (host === "linear.app" || host.endsWith(".linear.app")) {
+        trackerLabel = "Linear"
+      } else if (host === "github.com" || host.endsWith(".github.com")) {
+        trackerLabel = "GitHub"
+      }
+    } catch {
+      // Keep default label.
+    }
+  }
+
+  return { reportUrl, trackerLabel, counts }
+}
+
 /**
  * Presentational outcome chrome for a Work Item: PR links for changed work, or
  * the distinct No-Change Outcome message, Issue link, and completion summary.
@@ -40,6 +86,8 @@ export function WorkItemOutcomePresentation({
   const openPullRequestLabel =
     prNumber === null ? null : `Open pull request #${prNumber}`
   const summary = completionSummary?.trim() ?? ""
+  const specRollup =
+    isSpecValidation && summary !== "" ? summarizeSpecValidation(summary) : null
 
   return (
     <>
@@ -76,10 +124,32 @@ export function WorkItemOutcomePresentation({
       </span>
       {isSpecValidation && summary !== "" && (
         <section
-          className={`w-full ${ui.completionSummary}`}
+          className={`w-full min-w-0 ${ui.completionSummary}`}
           aria-label="Spec validation findings"
         >
-          <p className={ui.completionSummaryP}>{summary}</p>
+          {specRollup !== null ? (
+            <div className="grid gap-1">
+              {specRollup.counts.length > 0 && (
+                <p className="m-0 font-mono text-xs text-ink">
+                  {specRollup.counts.join(" · ")}
+                </p>
+              )}
+              {specRollup.reportUrl !== null && (
+                <a
+                  className="font-mono text-xs font-semibold text-ink-2 underline decoration-signal underline-offset-4 hover:text-ink"
+                  href={specRollup.reportUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View full report on {specRollup.trackerLabel} ↗
+                </a>
+              )}
+            </div>
+          ) : (
+            <p className={`${ui.completionSummaryP} line-clamp-3 break-words`}>
+              {summary}
+            </p>
+          )}
         </section>
       )}
       {isNoChangeComplete && (
