@@ -265,6 +265,7 @@ const SpecChildrenSchema = Schema.Record(
         nodes: Schema.Array(
           Schema.Struct({
             ...HierarchyNodeSchema.fields,
+            url: Schema.optionalKey(RequiredString),
             completedAt: Schema.NullOr(RequiredString),
             canceledAt: Schema.NullOr(RequiredString),
             children: Schema.Struct({
@@ -398,8 +399,9 @@ const specChildrenSelection = (afterVariable: string) => `{
     id
     children(first: ${PAGE_SIZE}, after: $${afterVariable}, includeArchived: true) {
       nodes {
-        id
-        state { type }
+         id
+         url
+         state { type }
         completedAt
         canceledAt
         children(first: 1, includeArchived: true) {
@@ -571,6 +573,31 @@ const SpecCommentsSchema = Schema.Struct({
           hasNextPage: Schema.Boolean,
           endCursor: Schema.NullOr(Schema.String),
         }),
+      }),
+    }),
+  ),
+})
+const SpecConversationPage = Schema.Struct({
+  issue: Schema.NullOr(
+    Schema.Struct({
+      id: RequiredString,
+      comments: Schema.Struct({
+        nodes: Schema.Array(
+          Schema.Struct({
+            id: RequiredString,
+            body: Schema.String,
+            url: RequiredString,
+            user: Schema.NullOr(
+              Schema.Struct({ name: Schema.String, app: Schema.Boolean }),
+            ),
+            botActor: Schema.NullOr(
+              Schema.Struct({ __typename: RequiredString }),
+            ),
+            agentSession: Schema.NullOr(Schema.Struct({ id: RequiredString })),
+            onBehalfOf: Schema.NullOr(Schema.Struct({ id: RequiredString })),
+          }),
+        ),
+        pageInfo: StrictPageInfoSchema,
       }),
     }),
   ),
@@ -1007,6 +1034,7 @@ export const makeLinearService = (options: {
             } else {
               descendants.push({
                 nativeId: child.id,
+                ...(child.url === undefined ? {} : { url: child.url }),
                 closureReason: child.state.type,
                 closedAt:
                   child.state.type === "canceled"
@@ -1205,6 +1233,47 @@ export const makeLinearService = (options: {
       }
       return observations
     }),
+    readSpecConversation: Effect.fn("LinearService.readSpecConversation")(
+      function* (nativeId: string) {
+        const describe = `reading Linear Issue ${nativeId} conversation`
+        const comments = yield* readHierarchyPages(describe, (after) =>
+          graphql({
+            query: `query SpecConversation($id: String!, $after: String) {
+            issue(id: $id) {
+              id
+              comments(first: ${PAGE_SIZE}, after: $after) {
+                nodes { id url body user { name app } botActor { __typename } agentSession { id } onBehalfOf { id } }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }`,
+            variables: { id: nativeId, after },
+            schema: SpecConversationPage,
+            describe,
+            requireCompleteData: true,
+          }).pipe(
+            Effect.flatMap(({ issue }) =>
+              issue?.id === nativeId
+                ? Effect.succeed(issue.comments)
+                : requestError(`Linear Issue ${nativeId} could not be read`),
+            ),
+          ),
+        )
+        return comments.map(
+          ({ url, body, user, botActor, agentSession, onBehalfOf }) => ({
+            url,
+            body,
+            author: user?.name ?? null,
+            authorKind:
+              botActor || agentSession || onBehalfOf || user?.app
+                ? ("automation" as const)
+                : user
+                  ? ("user-account" as const)
+                  : ("unknown" as const),
+          }),
+        )
+      },
+    ),
     readSpecBaseline: Effect.fn("LinearService.readSpecBaseline")(function* (
       nativeId: string,
       options?: SpecBaselineReadOptions,
@@ -1481,7 +1550,7 @@ export const makeLinearService = (options: {
                 )
               }
             }
-            return { requirementId, gapId, url: issue.url }
+            return { requirementId, gapId, nativeId: issue.id, url: issue.url }
           })
         let failure: LinearServiceError | undefined
         for (const child of input.children) {

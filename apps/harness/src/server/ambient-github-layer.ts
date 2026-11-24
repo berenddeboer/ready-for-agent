@@ -465,6 +465,18 @@ export const ambientGitHubLayer = (options: {
           authenticated("lifecycle", repository, (service) =>
             service.publishSpecFollowUps(repository, input),
           ),
+        readSpecConversation: (repository, issue) =>
+          authenticated(
+            "lifecycle",
+            repository,
+            (service) =>
+              service.readSpecConversation?.(repository, issue) ??
+              Effect.fail(
+                new GitHubRequestError({
+                  message: "Issue conversation is unavailable",
+                }),
+              ),
+          ),
         readSpecReopenEventId: (repository, issueNumber) =>
           authenticated(
             "lifecycle",

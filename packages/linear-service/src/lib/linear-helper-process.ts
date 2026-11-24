@@ -10,6 +10,7 @@ import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
 import { observeSpecsProgram } from "../bin/observe-specs.js"
 import { publishSpecFollowUpsProgram } from "../bin/publish-spec-follow-ups.js"
 import { readSpecBaselineProgram } from "../bin/read-spec-baseline.js"
+import { readSpecConversationProgram } from "../bin/read-spec-conversation.js"
 import { updateIssueStateProgram } from "../bin/update-issue-state.js"
 import { linearServiceBinScriptPath } from "../bin-script-path.js"
 import type { LinearService } from "./linear-service.js"
@@ -24,6 +25,7 @@ export const LINEAR_HELPER_OPERATIONS = [
   "observe-specs",
   "publish-spec-follow-ups",
   "read-spec-baseline",
+  "read-spec-conversation",
   "list-projects",
   "list-project-workflow",
   "get-issue",
@@ -121,6 +123,7 @@ const programs: Record<
   "observe-specs": observeSpecsProgram,
   "publish-spec-follow-ups": publishSpecFollowUpsProgram,
   "read-spec-baseline": readSpecBaselineProgram,
+  "read-spec-conversation": readSpecConversationProgram,
   "list-projects": listProjectsProgram,
   "list-project-workflow": listProjectWorkflowProgram,
   "get-issue": getIssueProgram,

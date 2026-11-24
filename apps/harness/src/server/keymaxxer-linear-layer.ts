@@ -5,6 +5,7 @@ import {
   type ReadyLabeledIssue,
   SpecBaselineResult,
   SpecCloseResult,
+  SpecConversation,
 } from "@ready-for-agent/forge-contract"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
@@ -327,6 +328,29 @@ export const keymaxxerLinearLayer = (options: {
                     ),
                   ),
                 describe: `reading baseline for Linear Spec ${nativeId}`,
+              }),
+          ),
+        readSpecConversation: (nativeId) =>
+          withToken(
+            () =>
+              ambient.readSpecConversation?.(nativeId) ??
+              Effect.fail(requestError("Issue conversation is unavailable")),
+            (tokenName) =>
+              callHelper({
+                operation: "read-spec-conversation",
+                args: [encodeArgument(nativeId)],
+                tokenName,
+                describe: `reading Linear Issue ${nativeId} conversation`,
+                decode: (stdout) =>
+                  Schema.decodeUnknownEffect(
+                    Schema.fromJsonString(SpecConversation),
+                  )(stdout).pipe(
+                    Effect.mapError(() =>
+                      requestError(
+                        "Linear returned an invalid Issue conversation",
+                      ),
+                    ),
+                  ),
               }),
           ),
         closePassingSpec: (input) =>

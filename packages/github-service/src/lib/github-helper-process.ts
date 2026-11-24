@@ -22,6 +22,7 @@ import { observeSpecsProgram } from "../bin/observe-specs.js"
 import { publishSpecFollowUpsProgram } from "../bin/publish-spec-follow-ups.js"
 import { readCiRepairRunProgram } from "../bin/read-ci-repair-run.js"
 import { readSpecBaselineProgram } from "../bin/read-spec-baseline.js"
+import { readSpecConversationProgram } from "../bin/read-spec-conversation.js"
 import { readSpecReopenEventIdProgram } from "../bin/read-spec-reopen-event-id.js"
 import { rerunFailedJobsProgram } from "../bin/rerun-failed-jobs.js"
 import { rerunWorkflowRunProgram } from "../bin/rerun-workflow-run.js"
@@ -39,6 +40,7 @@ export const GITHUB_HELPER_OPERATIONS = [
   "observe-specs",
   "publish-spec-follow-ups",
   "read-spec-baseline",
+  "read-spec-conversation",
   "read-spec-reopen-event-id",
   "list-ci-gate-catalog",
   "observe-ci-gate",
@@ -163,6 +165,7 @@ const programs: Record<
   "observe-specs": observeSpecsProgram,
   "publish-spec-follow-ups": publishSpecFollowUpsProgram,
   "read-spec-baseline": readSpecBaselineProgram,
+  "read-spec-conversation": readSpecConversationProgram,
   "read-spec-reopen-event-id": readSpecReopenEventIdProgram,
   "list-ci-gate-catalog": listCiGateCatalogProgram,
   "observe-ci-gate": observeCiGateProgram,

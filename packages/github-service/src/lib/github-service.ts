@@ -23,6 +23,7 @@ import type {
   SpecBaselineResult,
   SpecCloseGuard,
   SpecCloseResult,
+  SpecConversation,
   SpecFollowUpPublication,
   UpdateDraftPullRequestCopyInput,
 } from "@ready-for-agent/forge-contract"
@@ -90,6 +91,10 @@ export interface GitHubServiceShape
     issueNumber: number,
     options?: SpecBaselineReadOptions,
   ) => Effect.Effect<SpecBaselineResult, GitHubServiceError>
+  readonly readSpecConversation?: (
+    repository: GitHubRepository,
+    issue: number | string,
+  ) => Effect.Effect<SpecConversation, GitHubServiceError>
   readonly publishSpecFollowUps: (
     repository: GitHubRepository,
     input: SpecFollowUpPublication,

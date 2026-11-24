@@ -64,6 +64,7 @@ import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
   COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE,
   type ExecutionProfileUpdatePatch,
+  type SpecWaiverConfirmation,
   TIMING_AGENT_BACKEND_MAX_LENGTH,
   TIMING_MODEL_MAX_LENGTH,
   WorkItemLifecycle,
@@ -134,6 +135,7 @@ import { validateAgentModelsAgainstCatalog } from "./validate-agent-models.js"
 import { projectWorkItemCiRepair } from "./work-item-ci-repair-projection.js"
 import {
   lifecycleLabels,
+  projectSpecWaiverDecision,
   workIssueProjection,
   workItemCanResume,
   workItemCanRetry,
@@ -2057,6 +2059,7 @@ export const createGraphqlApi = <R>(
           canRetry: workItemCanRetry,
           canResume: workItemCanResume,
           decisionRequest: workItemDecisionRequest,
+          specWaiverDecision: projectSpecWaiverDecision,
           isTerminal: workItemIsTerminal,
           lifecycleLabels,
           stateReadyAt: (workItem: { stateReadyAt: Date }) =>
@@ -3381,13 +3384,16 @@ export const createGraphqlApi = <R>(
             ),
           resumeWorkItem: async (
             _parent: unknown,
-            args: WorkItemArgs,
+            args: WorkItemArgs & { specWaiver?: SpecWaiverConfirmation | null },
             context: GraphqlRequestContext,
           ) =>
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
-                return yield* lifecycle.resume(args.workItemId)
+                return yield* lifecycle.resume(
+                  args.workItemId,
+                  args.specWaiver ?? undefined,
+                )
               }).pipe(Effect.withSpan("graphql-api.resumeWorkItem")),
               context,
             ),

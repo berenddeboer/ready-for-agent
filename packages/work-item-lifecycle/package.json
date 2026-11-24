@@ -14,6 +14,12 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./test/spec-close-out-tracker": {
+      "@ready-for-agent/source": "./src/lib/spec-close-out-tracker-test.ts",
+      "types": "./dist/lib/spec-close-out-tracker-test.d.ts",
+      "import": "./dist/lib/spec-close-out-tracker-test.js",
+      "default": "./dist/lib/spec-close-out-tracker-test.js"
+    },
     "./jobs-completed-window": {
       "@ready-for-agent/source": "./src/lib/jobs-completed-window.ts",
       "types": "./dist/lib/jobs-completed-window.d.ts",

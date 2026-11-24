@@ -11746,6 +11746,80 @@ describe("GraphQL API", () => {
     expect(receivedWorkItemId).toBe(workItem.id)
   })
 
+  test("Resume exposes and submits requirement-scoped waiver confirmations", async () => {
+    const confirmation = {
+      stepRunId: "srun-decision",
+      requirementIds: ["hosted"],
+    }
+    const decision = {
+      ...workItem,
+      origin: "spec_validation" as const,
+      state: "needs_human" as const,
+      failureCode: "decision_needed",
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          id: confirmation.stepRunId,
+          step: "validate_spec" as const,
+          status: "succeeded" as const,
+          reasonCode: "decision_needed" as const,
+          reasonDetail: JSON.stringify({
+            specWaiverOptions: [
+              {
+                requirementId: "hosted",
+                requirement: "Hosted MCP accepts initialize",
+                baselineUrl: "https://example.test/spec#baseline",
+                trackerComment: {
+                  url: "https://example.test/spec#comment",
+                  quote: "Drop hosted support.",
+                },
+              },
+            ],
+          }),
+        },
+      ],
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        resume: (workItemId, specWaiver) => {
+          expect(workItemId).toBe(workItem.id)
+          expect(specWaiver).toEqual(confirmation)
+          return Effect.succeed(decision)
+        },
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ($id: ID!, $waiver: SpecWaiverConfirmationInput!) {
+          resumeWorkItem(workItemId: $id, specWaiver: $waiver) {
+            specWaiverDecision { stepRunId requirements { requirementId requirement trackerQuote } }
+          }
+        }`,
+        variables: { id: workItem.id, waiver: confirmation },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        resumeWorkItem: {
+          specWaiverDecision: {
+            stepRunId: confirmation.stepRunId,
+            requirements: [
+              {
+                requirementId: "hosted",
+                requirement: "Hosted MCP accepts initialize",
+                trackerQuote: "Drop hosted support.",
+              },
+            ],
+          },
+        },
+      },
+    })
+  })
+
   test("pauseWorkItem and interruptWorkItem call distinct lifecycle requests", async () => {
     const seen: string[] = []
     await runtime.dispose()

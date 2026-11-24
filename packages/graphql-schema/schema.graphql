@@ -1574,6 +1574,22 @@ type IssueSource {
   url: String!
 }
 
+type SpecWaiverDecision {
+  stepRunId: ID!
+  requirements: [SpecWaiverRequirement!]!
+}
+
+type SpecWaiverRequirement {
+  requirementId: ID!
+  requirement: String!
+  trackerQuote: String
+}
+
+input SpecWaiverConfirmationInput {
+  stepRunId: ID!
+  requirementIds: [ID!]!
+}
+
 type WorkItem {
   id: ID!
   repositoryId: ID!
@@ -1693,6 +1709,10 @@ type WorkItem {
   Item is not waiting on that handoff.
   """
   decisionRequest: String
+  """
+  Requirements the operator may explicitly waive when resuming this handoff.
+  """
+  specWaiverDecision: SpecWaiverDecision
   isTerminal: Boolean!
   stateReadyAt: String!
   worktreePath: String
@@ -1943,11 +1963,14 @@ type Mutation {
     repositoryId: ID
   ): WorkItem!
   """
-  Continue a Decision needed handoff in the existing agent session. Does not
-  accept an answer; the operator answers in OpenCode or Jump. Idempotent while
-  a resumed Step Run is already queued, running, or waiting for a Worker Slot.
+  Continue a Decision needed handoff in the existing agent session. Other than
+  confirming explicitly selected Spec waivers, answers belong in the session.
+  Plain Resume is idempotent while a resumed Step Run is in progress.
   """
-  resumeWorkItem(workItemId: ID!): WorkItem!
+  resumeWorkItem(
+    workItemId: ID!
+    specWaiver: SpecWaiverConfirmationInput
+  ): WorkItem!
   pauseWorkItem(workItemId: ID!): WorkItem!
   """
   Stop a running Step Run on a paused Work Item without deleting it.

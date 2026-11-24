@@ -12,6 +12,7 @@ import {
   PublishedSpecFollowUps,
   SpecBaselineResult,
   SpecCloseResult,
+  SpecConversation,
 } from "@ready-for-agent/forge-contract"
 import {
   GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
@@ -989,6 +990,18 @@ export const keymaxxerGitHubLayer = (options: {
               ),
             }),
         ),
+        readSpecConversation: (repository, issue) =>
+          callHelper({
+            operation: "read-spec-conversation",
+            repository,
+            describe: "read GitHub Issue conversation",
+            args: [encodeArgument(JSON.stringify(issue))],
+            decode: decodeJson(
+              SpecConversation,
+              repository,
+              "decode Issue conversation",
+            ),
+          }),
         publishSpecFollowUps: (repository, input) =>
           callHelper({
             operation: "publish-spec-follow-ups",
