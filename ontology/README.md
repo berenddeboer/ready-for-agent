@@ -13,6 +13,9 @@ The ontology is a production interface, not documentation. TypeScript state
 types, the GraphQL `WorkItemState` enum, database state columns, and the
 runtime transition check are all generated from or validated against these
 files. Changing the lifecycle means changing `rfa.ttl` first.
+See [ADR 0044](../docs/adr/0044-ontology-derived-lifecycle-model.md) for the
+architecture and [ADR 0058](../docs/adr/0058-ontology-owns-step-run-reason-codes.md)
+for ownership of Step Run reason codes.
 
 ## Files
 

@@ -24,6 +24,11 @@ Also needed to run or test the harness:
    `scripts/regenerate-e2e-keymaxxer-vault.sh`. It is not required to run the
    operator binary.
 
+When using Claude Code to work on this repository, use version 2.1.277 or
+later for [direct `AGENTS.md` discovery](https://code.claude.com/docs/en/memory#agents-md).
+If a local or ancestor `CLAUDE.md` overrides that default, configure Claude
+Code to read both files.
+
 ## Install with mise
 
 [mise](https://mise.jdx.dev/) 2026.7.0 or later installs the pinned Bun, hk,
