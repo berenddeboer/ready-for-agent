@@ -72,9 +72,9 @@ export const decisionNeededPromptSection = (): string =>
   ].join("\n")
 
 /**
- * Classification-only discoveries route back to Implement so late Commit is
- * not retried against unfinished work. After Implement, the ordinary pipeline
- * runs fresh verification and review.
+ * Spec decisions resume validation in the existing session. Implementation
+ * decisions route back to Implement, so fresh verification and review run
+ * before a late Commit is attempted again.
  */
 export const decisionResumeTarget = (
   originatingStep: OperationalLifecycleStep,

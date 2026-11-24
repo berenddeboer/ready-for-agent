@@ -198,7 +198,7 @@ const prompt = (
         ]
       : []),
     `End your reply with ${findingsMarker} on its own line and then one JSON payload. Do not use code fences or add text after the payload.`,
-    'For Decision Needed use {"kind":"decision_needed","question":"concrete question with options","evidence":["supporting observation or citation"],"findings":[...independent findings if an approved checklist is available]}.',
+    'For Decision Needed use {"kind":"decision_needed","question":"concrete question with options","evidence":["supporting observation or citation"],"findings":[...independent findings]}. Include independent observations even if no approved checklist is available; they are supporting evidence, not an approved verdict.',
     'Use one entry per approved requirement: {"requirementId":"exact approved ID","status":"met|unmet|unverified","evidence":[{"kind":"delivery|unavailable|human-verification|closure|disclaimer|unshipped-experiment","environment":"local|deployed|other","detail":"exact target, method, and observed result, or what is needed to verify it"}]}.',
     promptUserContentSection(
       "approved_spec",

@@ -43,6 +43,7 @@ full loop.
 | Step | GitHub (fine-grained) | GitLab | Azure DevOps |
 | --- | --- | --- | --- |
 | poll Ready Issues | **Issues:** Read-only | `read_api` | **Work Items:** Read |
+| Spec Validation decision comment | **Issues:** Read and write on the parent Spec repository | Not offered | Not offered |
 | push | **Contents:** Read and write. **Workflows:** Read and write if the branch includes `.github/workflows/**` | `write_repository` | **Code:** Read & write |
 | Create PR | **Pull requests:** Read and write | `api` | **Code:** Read & write. **Work Items:** Read & write (Boards ArtifactLink) |
 | Mark PR Ready for Review | **Pull requests:** Read and write | `api` | **Code:** Read & write |
