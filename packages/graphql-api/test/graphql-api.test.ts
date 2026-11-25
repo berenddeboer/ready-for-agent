@@ -7303,6 +7303,83 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("projects a Linear parent with only closed children but offers no intake candidates", async () => {
+    const parent = {
+      ...issue,
+      issueNumber: 1,
+      issueTracker: "linear" as const,
+      nativeId: "parent-id",
+      displayId: "ENG-1",
+      url: "https://linear.app/acme/issue/ENG-1",
+      state: "OPEN" as const,
+      hasChildren: true,
+      parent: null,
+    }
+    const child = {
+      ...parent,
+      id: "issue-2",
+      issueNumber: 2,
+      nativeId: "child-id",
+      displayId: "ENG-2",
+      url: "https://linear.app/acme/issue/ENG-2",
+      state: "CLOSED" as const,
+      hasChildren: false,
+      parent: {
+        issueNumber: parent.issueNumber,
+        issueUrl: parent.url,
+        nativeId: parent.nativeId,
+        displayId: parent.displayId,
+      },
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            ...repository,
+            issueTracker: "linear",
+            linearProjectId: "proj-1",
+          }),
+        ]),
+        listIssues: () => Effect.succeed([child, parent]),
+      },
+      {},
+      {},
+      { listWorkItemsForRepository: () => Effect.succeed([]) },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query($id: ID!) {
+          issues(repositoryId: $id) {
+            displayId state hasChildren parent { displayId }
+          }
+          intakeCandidates(repositoryId: $id) { candidates { nativeId } }
+        }`,
+        variables: { id: repository.id },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        issues: [
+          {
+            displayId: "ENG-1",
+            state: "OPEN",
+            hasChildren: true,
+            parent: null,
+          },
+          {
+            displayId: "ENG-2",
+            state: "CLOSED",
+            hasChildren: false,
+            parent: { displayId: "ENG-1" },
+          },
+        ],
+        intakeCandidates: { candidates: [] },
+      },
+    })
+  })
+
   test("accepts batched issue queries", async () => {
     await runtime.dispose()
     runtime = makeRuntime({ listIssues: () => Effect.succeed([issue]) })

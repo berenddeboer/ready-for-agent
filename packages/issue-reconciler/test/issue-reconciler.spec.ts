@@ -1730,7 +1730,7 @@ describe("IssueReconciler", () => {
     )
   })
 
-  it("observes last-descendant closure and reopening without changing Linear intake", () => {
+  it("keeps closed Linear children for context without changing Spec readiness", () => {
     const linearTracked = makeRepositoryRecord({
       id: "repo-1",
       forge: "github",
@@ -1739,14 +1739,24 @@ describe("IssueReconciler", () => {
       includeAllIssueAuthors: false,
     })
     const db = makeDbFixture({ issues: [] })
+    let specState = "started"
     let lastDescendantState = "started"
     let discoveryUnavailable = false
     const markedSpec = {
       id: "spec-1",
       identifier: "ENG-1",
       url: "https://linear.app/acme/issue/ENG-1",
-      state: { type: "started" },
     }
+    const labeledIssue = (id: string, number: number, type: string) => ({
+      id,
+      number,
+      identifier: `ENG-${number}`,
+      title: `Issue ${number}`,
+      url: `https://linear.app/acme/issue/ENG-${number}`,
+      state: { type },
+      createdAt: "2026-07-01T00:00:00Z",
+      creator: { id: "operator" },
+    })
     const node = (id: string, type: string, firstChildId?: string) => ({
       id,
       state: { type },
@@ -1771,14 +1781,22 @@ describe("IssueReconciler", () => {
                 pageInfo,
                 nodes: [
                   {
-                    id: "ordinary",
-                    identifier: "ENG-9",
-                    number: 9,
-                    title: "Ordinary ticket",
-                    url: "https://linear.app/acme/issue/ENG-9",
-                    createdAt: "2026-07-01T00:00:00Z",
-                    creator: { id: "operator" },
+                    ...labeledIssue(markedSpec.id, 1, specState),
+                    specLabels: { nodes: [{ name: "spec" }] },
+                    children: { nodes: [{ id: "intermediate" }] },
                   },
+                  {
+                    ...labeledIssue("intermediate", 2, "completed"),
+                    parent: {
+                      ...markedSpec,
+                      number: 1,
+                      state: { type: specState },
+                      labels: { nodes: [{ name: "ready-for-agent" }] },
+                    },
+                    children: { nodes: [{ id: "last-ticket" }] },
+                  },
+                  labeledIssue("closed-root", 8, "canceled"),
+                  labeledIssue("ordinary", 9, "unstarted"),
                 ],
               },
             },
@@ -1791,7 +1809,15 @@ describe("IssueReconciler", () => {
             return new Response(null, { status: 503 })
           }
           return Response.json({
-            data: { issues: { nodes: [markedSpec], pageInfo } },
+            data: {
+              issues: {
+                nodes:
+                  specState === "started"
+                    ? [{ ...markedSpec, state: { type: specState } }]
+                    : [],
+                pageInfo,
+              },
+            },
           })
         }
         expect(query).toContain("query SpecChildren")
@@ -1820,7 +1846,20 @@ describe("IssueReconciler", () => {
         const reconciler = yield* IssueReconciler
         const waiting = yield* reconciler.reconcile(linearTracked)
         expect(waiting.linearSpecObservations?.[0]?.readiness).toBe("waiting")
-        expect(waiting.inserted).toBe(1)
+        expect(db.stored.map(({ displayId }) => displayId)).toEqual([
+          "ENG-1",
+          "ENG-2",
+          "ENG-9",
+        ])
+        expect(db.stored[0]).toMatchObject({
+          state: "OPEN",
+          hasChildren: true,
+          parent: null,
+        })
+        expect(db.stored[1]).toMatchObject({
+          state: "CLOSED",
+          parent: { nativeId: markedSpec.id },
+        })
         lastDescendantState = "canceled"
         const ready = yield* reconciler.reconcile(linearTracked)
         expect(ready.linearSpecObservations).toEqual([
@@ -1849,7 +1888,13 @@ describe("IssueReconciler", () => {
         discoveryUnavailable = true
         const unavailable = yield* reconciler.reconcile(linearTracked)
         expect(unavailable.linearSpecObservations).toBeUndefined()
-        expect(unavailable.unchanged).toBe(1)
+        expect(unavailable.unchanged).toBe(3)
+
+        discoveryUnavailable = false
+        specState = "completed"
+        const closed = yield* reconciler.reconcile(linearTracked)
+        expect(closed.deleted).toBe(2)
+        expect(closed.linearSpecObservations).toEqual([])
         expect(db.stored.map((issue) => issue.nativeId)).toEqual(["ordinary"])
       }),
       db.layer,

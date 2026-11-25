@@ -154,6 +154,7 @@ const IssueNodeSchema = Schema.Struct({
   description: Schema.optional(Schema.NullOr(Schema.String)),
   url: RequiredString,
   createdAt: RequiredString,
+  state: Schema.optional(Schema.NullOr(IssueStateSchema)),
   creator: Schema.optional(
     Schema.NullOr(
       Schema.Struct({
@@ -338,7 +339,6 @@ const READY_ISSUES_QUERY = `query ReadyIssues($projectId: ID!, $after: String) {
     filter: {
       project: { id: { eq: $projectId } }
       labels: { name: { eq: "${LINEAR_READY_LABEL}" } }
-      state: { type: { nin: ["completed", "canceled"] } }
     }
   ) {
     nodes {
@@ -349,6 +349,7 @@ const READY_ISSUES_QUERY = `query ReadyIssues($projectId: ID!, $after: String) {
       description
       url
       createdAt
+      state { type }
       creator { id }
       ${SPEC_LABELS_SELECTION}
       parent {
@@ -793,7 +794,7 @@ const toReadyLabeledIssue = (
     body: node.description ?? "",
     url: node.url,
     createdAt: Number.isNaN(createdAt.getTime()) ? new Date(0) : createdAt,
-    state: "OPEN",
+    state: toLinearState(node.state?.type),
     author: node.creator?.id ?? null,
     parent:
       parent === null
