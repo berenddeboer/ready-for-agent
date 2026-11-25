@@ -207,17 +207,20 @@ export const commandBodyExceedsArgvLimit = (input: {
  * the command name and the raw argument string so `$ARGUMENTS` and shell
  * blocks stay server-owned.
  */
-export const buildCommandApiArgs = (input: {
+export const buildCommandApiRequest = (input: {
   readonly sessionId: string
   readonly command: string
   readonly prompt: string
   readonly directory: string
-}): ReadonlyArray<string> =>
-  apiPost({
-    directory: input.directory,
-    path: `/api/session/${input.sessionId}/command`,
-    body: commandApiBody(input),
-  })
+}) => ({
+  directory: input.directory,
+  path: `/api/session/${encodeURIComponent(input.sessionId)}/command`,
+  body: commandApiBody(input),
+})
+
+export const buildCommandApiArgs = (
+  input: Parameters<typeof buildCommandApiRequest>[0],
+): ReadonlyArray<string> => apiPost(buildCommandApiRequest(input))
 
 export const buildSwitchModelApiArgs = (input: {
   readonly sessionId: string

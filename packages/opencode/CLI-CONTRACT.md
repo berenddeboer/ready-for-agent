@@ -3,8 +3,8 @@
 Real-CLI coverage for every production OpenCode subprocess the harness
 launches. The suite is `bunx nx run opencode:cli-contract`. It runs the
 installed OpenCode V2 binary through production launch paths. It also checks
-the owned Implement identity API against that server. It does not copy argv
-templates.
+owned-server identity and command submission over HTTP against that server.
+It does not copy argv templates.
 
 Argv unit tests in `test/build-args.spec.ts` stay useful. They are not
 acceptance coverage: they missed the owned-server `--server` placement bug.
@@ -192,13 +192,14 @@ the parser misses fails the case instead of being treated as compatibility.
 | `run` resume | `AgentBackend.continueTurn` | `--session`, null thinking omits `#variant`; both connection modes | resume turn | same session; variant absent; exact model diagnostic |
 | prompt stdin | `AgentBackend.startTurn` when the prompt has a newline or exceeds the argv limit | stdin, not argv tokens | stdin prompt | stored message equals the prompt, including newlines |
 | PR Status Check Handoff | `AgentBackend.continueTurn` with `replyToPromptOnly` | `run` on stdin with a unique prompt reference, then `session export` in the same connection mode (default discovery, explicit `--server` after `export`, or service disabled) | prompt-scoped continuation | the durably stored user prompt identifies the terminal answer and earlier assistant steps, including an output-limit continuation; earlier turns and subsequent background replies cannot supply the outcome |
-| oversized Agent Command | `AgentBackend.startTurn` with `command` | refusal before spawn | command argv refusal | config error, OpenCode was not started |
+| oversized non-owned Agent Command | `AgentBackend.startTurn` with `command` | refusal before spawn | command argv refusal | config error, OpenCode was not started |
 | create session | `startTurn` command path, no session yet | `POST /api/session` JSON body, directory header, both modes | command turn | session location equals the worktree |
 | switch model | `continueTurn` command path | `POST /api/session/{id}/model` JSON body, both modes | command continuation | session model id, provider, and variant match the pin |
-| configured command | `startTurn` / `continueTurn` with `command` | `POST .../command` `--data`, quoting-sensitive text, both modes | command turn | stored user text is the template plus arguments |
+| configured command, non-owned | `startTurn` / `continueTurn` with `command` | `POST .../command` `--data`, quoting-sensitive text, shared discovery or explicit non-owned server | command turn; api/export placement | stored user text is the template plus arguments |
+| configured command, owned | `startTurn` / `continueTurn` with `command` | authenticated HTTP `POST /api/session/{id}/command`, encoded worktree header, JSON body, no command subprocess | command turn; oversized owned HTTP command; lost acknowledgement | ordinary and >128 KiB quote/newline-sensitive arguments expand in OpenCode and are stored once per turn in the intended session; a dropped acknowledgement after acceptance surfaces uncertainty, without replay |
 | wait | command result collection and Implement stop confirmation | `POST /api/experimental/session/{id}/wait`, both modes | command turn; plain prompt interrupt | command wait exits 0; after an Implement interrupt, the target is no longer active |
 | session export | command result collection | `session export --server` after `export`, both modes | command turn | export JSON contains the session id |
-| interrupt | abort or timeout of a command turn | `POST /api/session/{id}/interrupt`, explicit server | interrupt | CLI JSON `interrupted` boolean; exact success, not a generic nonzero exit |
+| interrupt | abort or timeout of a command turn | `POST /api/session/{id}/interrupt`, explicit server; same CLI path after the switch to HTTP submission on owned servers | owned HTTP command interrupt | CLI JSON `interrupted: true` after cancellation and timeout; only the intended session stops while another remains active |
 | Implement prompt admission | `AgentBackend.startTurn` / `continueTurn` with stop confirmation | `GET /api/session/{id}/message?limit=20&order=desc&type=user`, both modes | plain prompt interrupt | filter to user messages before pagination so later assistant output cannot hide the submitted prompt; previous user messages do not count during resume |
 | Implement prompt interrupt | abort or timeout of an admitted Implement plain prompt | `POST /api/session/{id}/interrupt`, both modes | plain prompt interrupt | `interrupted: true` for the active target, then idle on the server with its history intact. Another session in the same worktree stays active. An acknowledged `false` is the idle no-op, not a substitute for proving prompt admission |
 | Implement server identity, non-owned | tracked Implement start/resume and `verifyImplementStopped` | `api get /api/info` for shared discovery/startup; `api get /api/info` with `--server` for shared or non-owned explicit identity | plain prompt interrupt | discovery still launches the CLI; persist the pinned target before running and verify the same process before accepting an idle read |

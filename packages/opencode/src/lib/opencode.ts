@@ -6,6 +6,7 @@ import {
   AgentBackendConfigError,
   type AgentBackendError,
   AgentBackendMalformedOutputError,
+  AgentBackendTimeoutError,
   type AgentTurnResult,
   type ContinueTurnInput,
   DEFAULT_STARTUP_TIMEOUT,
@@ -20,6 +21,7 @@ import {
 } from "@ready-for-agent/agent-backend"
 import {
   buildCommandApiArgs,
+  buildCommandApiRequest,
   buildCreateSessionApiArgs,
   buildModelCatalogApiArgs,
   buildRunArgs,
@@ -89,6 +91,63 @@ const OPENCODE_BACKEND = {
   id: AGENT_BACKEND_IDS.opencode,
   label: "OpenCode",
 } as const
+
+const submitOwnedOpenCodeCommand = (
+  input: Parameters<typeof buildCommandApiRequest>[0] & {
+    readonly server: NonNullable<OpencodeLayerOptions["dedicatedServer"]>
+    readonly timeout: Duration.Input
+  },
+) => {
+  const { path, body, directory } = buildCommandApiRequest(input)
+  const unconfirmed = `OpenCode did not confirm the Agent Command for session ${input.sessionId}. It may have been accepted; the harness did not resend it.`
+  const uncertain = () => new AgentBackendConfigError({ message: unconfirmed })
+
+  return Effect.tryPromise({
+    try: async (signal) => {
+      const response = await fetch(new URL(path, input.server.baseUrl), {
+        method: "POST",
+        headers: {
+          ...input.server.headers,
+          "content-type": "application/json",
+          "x-opencode-directory": encodeURIComponent(directory),
+        },
+        body,
+        signal,
+        // The known loopback endpoint is the only recipient of this POST.
+        proxy: false,
+        redirect: "error",
+        keepalive: false,
+      })
+      await response.arrayBuffer()
+      return response.status
+    },
+    // Client failures may include the payload or credentials. Do not log them
+    // or retry: OpenCode may already have applied the POST.
+    catch: uncertain,
+  }).pipe(
+    Effect.flatMap((status) =>
+      status === 204
+        ? Effect.void
+        : Effect.fail(
+            status >= 400 && status < 500
+              ? new AgentBackendConfigError({
+                  message: `OpenCode rejected the Agent Command for session ${input.sessionId} (HTTP ${status}).`,
+                })
+              : uncertain(),
+          ),
+    ),
+    Effect.timeoutOrElse({
+      duration: input.timeout,
+      orElse: () =>
+        new AgentBackendTimeoutError({
+          cwd: directory,
+          timeoutMs: Duration.toMillis(input.timeout),
+          sessionId: input.sessionId,
+          message: unconfirmed,
+        }),
+    }),
+  )
+}
 
 export type OpencodeLayerError = OpencodeConfigError
 
@@ -484,6 +543,7 @@ export const Opencode = {
           const timeout = input.timeout ?? defaultTimeout
           if (
             command !== undefined &&
+            dedicated === undefined &&
             commandBodyExceedsArgvLimit({
               command,
               prompt,
@@ -491,7 +551,7 @@ export const Opencode = {
           ) {
             return Effect.fail(
               new AgentBackendConfigError({
-                message: `OpenCode cannot start this Agent Command. OpenCode v2 only accepts the command body as --data, and this prompt exceeds the ${PROMPT_ARGV_BYTE_LIMIT} byte limit. The turn was not started.`,
+                message: `OpenCode cannot start this Agent Command. This connection submits the command body as --data, and this prompt exceeds the ${PROMPT_ARGV_BYTE_LIMIT} byte limit. The turn was not started.`,
               }),
             )
           }
@@ -697,14 +757,6 @@ export const Opencode = {
                     yield* input.onSessionId(turnSessionId).pipe(Effect.ignore)
                   }
                 }
-                turnArgs = serviceArgs(
-                  buildCommandApiArgs({
-                    sessionId: turnSessionId,
-                    command,
-                    prompt,
-                    directory: input.cwd,
-                  }),
-                )
               }
 
               yield* Deferred.await(sessionReady).pipe(
@@ -728,6 +780,31 @@ export const Opencode = {
                 ),
                 Effect.forkScoped,
               )
+
+              if (command !== undefined && turnSessionId !== undefined) {
+                const request = {
+                  sessionId: turnSessionId,
+                  command,
+                  prompt,
+                  directory: input.cwd,
+                }
+                if (dedicated !== undefined) {
+                  yield* stopSessionOnAbort(
+                    turnSessionId,
+                    submitOwnedOpenCodeCommand({
+                      ...request,
+                      server: dedicated,
+                      timeout,
+                    }),
+                  )
+                  const assistantText = yield* collectCommandResult(
+                    turnSessionId,
+                    command,
+                  )
+                  return { sessionId: turnSessionId, assistantText }
+                }
+                turnArgs = serviceArgs(buildCommandApiArgs(request))
+              }
 
               const privateSessionId = turnSessionId
               const turn = runCliTurn({
@@ -908,11 +985,13 @@ export const Opencode = {
           ),
           continueTurn: Effect.fn("Opencode.continueTurn")(
             (input: ContinueTurnInput) =>
-              retrySilentKnownSessionStartup(() => runTurn(input), {
-                sessionId: input.sessionId,
-                model: input.model,
-                observerLabel: "OpenCode",
-              }),
+              dedicated !== undefined && input.command !== undefined
+                ? runTurn(input)
+                : retrySilentKnownSessionStartup(() => runTurn(input), {
+                    sessionId: input.sessionId,
+                    model: input.model,
+                    observerLabel: "OpenCode",
+                  }),
           ),
         })
       }),
