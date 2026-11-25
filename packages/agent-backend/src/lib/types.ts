@@ -119,20 +119,12 @@ export interface StartTurnInput {
   /** Persist a stop obligation before submitting an Implement prompt. */
   readonly trackImplementStop?: TrackImplementStop
   readonly command?: string
-}
-
-export interface ContinueTurnInput {
-  readonly sessionId: string
-  readonly prompt: string
-  readonly cwd: string
-  readonly model: string
-  readonly thinkingLevel: string | null
-  readonly timeout?: Duration.Input
-  readonly onSessionId?: OnSessionId
-  readonly trackImplementStop?: TrackImplementStop
-  readonly command?: string
   /** For a plain prompt, collect its reply rather than session-wide CLI output. */
   readonly replyToPromptOnly?: boolean
+}
+
+export interface ContinueTurnInput extends StartTurnInput {
+  readonly sessionId: string
 }
 
 /** Optional capability declarations for later Work Item-keyed routing. */

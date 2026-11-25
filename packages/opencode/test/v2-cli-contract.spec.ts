@@ -1092,7 +1092,7 @@ describe("installed OpenCode V2 production CLI contract", () => {
   )
 
   test(
-    "prompt-scoped continuation exports only the submitted handoff reply, retaining background history",
+    "prompt-scoped start and continuation export only the submitted reply, retaining background history",
     async () => {
       await exclusive(async () => {
         const current = requireFixture()
@@ -1103,35 +1103,61 @@ describe("installed OpenCode V2 production CLI contract", () => {
             model: REPLY_MODEL,
             thinkingLevel: null,
           }
-          const { started, continued } = await runOwned(
+          const { started, resumed, continued } = await runOwned(
             mode,
             records,
             (backend) =>
               Effect.gen(function* () {
-                const started = yield* backend.startTurn({
+                const pending: PendingImplementStop[] = []
+                const cleared: PendingImplementStop[] = []
+                const trackedInput = {
                   ...options,
                   prompt: PREVIOUS_HANDOFF,
+                  replyToPromptOnly: true,
+                  trackImplementStop: {
+                    started: (target: PendingImplementStop) =>
+                      Effect.sync(() => {
+                        pending.push(target)
+                      }),
+                    stopped: (target: PendingImplementStop) =>
+                      Effect.sync(() => {
+                        cleared.push(target)
+                      }),
+                  },
+                }
+                const started = yield* backend.startTurn(trackedInput)
+                const resumed = yield* backend.continueTurn({
+                  ...trackedInput,
+                  sessionId: started.sessionId,
                 })
+                expect(pending.map((target) => target.sessionId)).toEqual([
+                  started.sessionId,
+                  started.sessionId,
+                ])
+                expect(cleared).toEqual(pending)
                 const continued = yield* backend.continueTurn({
                   ...options,
                   sessionId: started.sessionId,
                   prompt: CURRENT_HANDOFF,
                   replyToPromptOnly: true,
                 })
-                return { started, continued }
+                return { started, resumed, continued }
               }),
           )
           const detail = diagnostic(records, current.secrets)
+          expect(started, detail).toEqual({
+            sessionId: started.sessionId,
+            assistantText: "READY_FOR_AGENT_RESULT: PROCESSED",
+            precedingAssistantText: "",
+          })
+          expect(resumed, detail).toEqual(started)
           expect(continued, detail).toEqual({
             sessionId: started.sessionId,
             assistantText: HANDOFF_REPLY,
             precedingAssistantText: `Investigating.\n${TRUNCATED_REPLY}`,
           })
-          const exported = records.find(
-            (record) => record.args[0] === "session",
-          )
-          expect(exported?.args, detail).toEqual(
-            mode === "explicit"
+          const exportArgs = (explicit: boolean) =>
+            explicit
               ? [
                   "session",
                   "export",
@@ -1139,8 +1165,16 @@ describe("installed OpenCode V2 production CLI contract", () => {
                   current.owned.baseUrl,
                   started.sessionId,
                 ]
-              : ["session", "export", started.sessionId],
+              : ["session", "export", started.sessionId]
+          const trackedArgs = exportArgs(mode !== "standalone")
+          const exports = records.filter(
+            (record) => record.args[0] === "session",
           )
+          expect(
+            exports.map((record) => record.args),
+            detail,
+          ).toEqual([trackedArgs, trackedArgs, exportArgs(mode === "explicit")])
+          const exported = exports.at(-1)
           if (exported === undefined) throw new Error(detail)
           const transcript = parsedExport(exported.stdout)
           expect(transcript.id).toBe(started.sessionId)
