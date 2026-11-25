@@ -8,6 +8,7 @@
  */
 import { createHash } from "node:crypto"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { createServer, request as httpRequest } from "node:http"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
@@ -18,6 +19,7 @@ import {
   AgentBackendConfigError,
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
+  AgentBackendTimeoutError,
   PROMPT_ARGV_BYTE_LIMIT,
   type PendingImplementStop,
 } from "@ready-for-agent/agent-backend"
@@ -544,6 +546,9 @@ const openFixture = async (): Promise<Fixture> => {
           description: "Contract review",
           template: "Review $ARGUMENTS",
         },
+        "owned-review": {
+          template: "Review from !`cat command-location.txt`:\n$ARGUMENTS",
+        },
       },
     }),
   }
@@ -616,6 +621,7 @@ const runOwned = <A>(
   mode:
     | "default"
     | "explicit"
+    | "non-owned-explicit"
     | "standalone"
     | { readonly dedicatedServer: OwnedOpenCodeServer },
   records: LaunchRecord[],
@@ -634,16 +640,23 @@ const runOwned = <A>(
           Opencode.layer({
             keymaxxerMcpUrl: KEYMAXXER_URL,
             environment:
-              mode === "explicit"
+              mode === "explicit" || typeof mode === "object"
                 ? current.explicitEnv
-                : mode === "standalone"
-                  ? current.standaloneEnv
-                  : current.env,
+                : mode === "non-owned-explicit"
+                  ? {
+                      ...current.explicitEnv,
+                      OPENCODE_PASSWORD: current.owned.password,
+                    }
+                  : mode === "standalone"
+                    ? current.standaloneEnv
+                    : current.env,
             ...(mode === "explicit"
               ? { dedicatedServer: current.owned }
-              : typeof mode === "object"
-                ? mode
-                : {}),
+              : mode === "non-owned-explicit"
+                ? { server: { baseUrl: current.owned.baseUrl } }
+                : typeof mode === "object"
+                  ? mode
+                  : {}),
             defaultTimeout: "20 seconds",
             startupTimeout: "8 seconds",
           }).pipe(
@@ -661,6 +674,57 @@ const expectedServerKey = (url: string, pid: number): string =>
   createHash("sha256")
     .update(JSON.stringify([url, pid]))
     .digest("hex")
+
+// Forward to the actual owned server, then interfere only with the command
+// acknowledgement. Session setup, wait, export and interrupt go through.
+const openCommandResponseProxy = async (
+  owned: OwnedOpenCodeServer,
+  fault: "drop" | "hold",
+) => {
+  const commandRequests: string[] = []
+  const commandResponses: number[] = []
+  const proxy = createServer((req, res) => {
+    const path = req.url ?? "/"
+    const command = req.method === "POST" && path.endsWith("/command")
+    if (command) commandRequests.push(path)
+    const upstream = httpRequest(
+      new URL(path, owned.baseUrl),
+      { method: req.method, headers: req.headers },
+      (response) => {
+        if (!command) {
+          res.writeHead(response.statusCode ?? 502, response.headers)
+          response.pipe(res)
+          return
+        }
+        response.resume()
+        response.on("end", () => {
+          commandResponses.push(response.statusCode ?? 0)
+          if (fault === "drop") res.socket?.destroy()
+        })
+      },
+    )
+    upstream.on("error", () => res.destroy())
+    req.pipe(upstream)
+  })
+  await new Promise<void>((resolve, reject) => {
+    proxy.once("error", reject)
+    proxy.listen(0, "127.0.0.1", resolve)
+  })
+  const address = proxy.address()
+  if (address === null || typeof address === "string") {
+    proxy.close()
+    throw new Error("Missing command proxy port")
+  }
+  return {
+    server: { ...owned, baseUrl: `http://127.0.0.1:${address.port}` },
+    commandRequests,
+    commandResponses,
+    close: () => {
+      proxy.close()
+      proxy.closeAllConnections()
+    },
+  }
+}
 
 const sessionBody = async (
   owned: OwnedOpenCodeServer,
@@ -801,7 +865,7 @@ const proveAcceptedCommandPlacement = async (input: {
   const records: LaunchRecord[] = []
   let created: string | undefined
   const error = await runOwned(
-    "explicit",
+    "non-owned-explicit",
     records,
     (backend) =>
       backend
@@ -1294,22 +1358,25 @@ describe("installed OpenCode V2 production CLI contract", () => {
   )
 
   test(
-    "an oversized Agent Command is refused before OpenCode starts",
+    "an oversized non-owned Agent Command is refused before OpenCode starts",
     async () => {
       await exclusive(async () => {
         const current = requireFixture()
         const records: LaunchRecord[] = []
-        const refused = await runOwned("explicit", records, (backend) =>
-          backend
-            .startTurn({
-              cwd: current.cwd,
-              prompt: "x".repeat(PROMPT_ARGV_BYTE_LIMIT + 1),
-              model: UNKNOWN_MODEL,
-              thinkingLevel: null,
-              command: "review",
-              timeout: "20 seconds",
-            })
-            .pipe(Effect.flip),
+        const refused = await runOwned(
+          "non-owned-explicit",
+          records,
+          (backend) =>
+            backend
+              .startTurn({
+                cwd: current.cwd,
+                prompt: "x".repeat(PROMPT_ARGV_BYTE_LIMIT + 1),
+                model: UNKNOWN_MODEL,
+                thinkingLevel: null,
+                command: "review",
+                timeout: "20 seconds",
+              })
+              .pipe(Effect.flip),
         )
         expect(refused).toBeInstanceOf(AgentBackendConfigError)
         if (!(refused instanceof AgentBackendConfigError)) {
@@ -1359,9 +1426,7 @@ describe("installed OpenCode V2 production CLI contract", () => {
             isRecord(session.location) ? session.location.directory : undefined,
           ).toBe(current.cwd)
           const messages = await sessionMessages(current.owned, created)
-          expect(
-            messages.some((message) => message.text === `Review ${prompt}`),
-          ).toBe(true)
+          assertStoredOnce(messages, `Review ${prompt}`)
           const wait = records.find((record) =>
             record.args.some((arg) => arg.includes("/wait")),
           )
@@ -1409,10 +1474,14 @@ describe("installed OpenCode V2 production CLI contract", () => {
             switched?.variant === undefined || switched?.variant === "default",
           ).toBe(true)
           const followUp = await sessionMessages(current.owned, created)
+          assertStoredOnce(followUp, "Review follow up")
+          const allRecords = [...records, ...continuedRecords]
           expect(
-            followUp.some((message) => message.text === "Review follow up"),
-          ).toBe(true)
-          logCase(`${mode} command`, [...records, ...continuedRecords])
+            allRecords
+              .flatMap((record) => record.args)
+              .filter((arg) => arg === `/api/session/${created}/command`),
+          ).toHaveLength(mode === "default" ? 2 : 0)
+          logCase(`${mode} command`, allRecords)
         }
       })
     },
@@ -1420,102 +1489,243 @@ describe("installed OpenCode V2 production CLI contract", () => {
   )
 
   test(
-    "aborting a command turn interrupts through the production API",
+    "owned HTTP command start and continuation preserve arguments over 128 KiB",
+    async () => {
+      await exclusive(async () => {
+        const current = requireFixture()
+        const cwd = current.otherCwd
+        await writeFile(
+          join(cwd, "command-location.txt"),
+          "the target worktree",
+        )
+        const argumentsBlock =
+          "quotes: \"double\", 'single', \\ and café\nline two\n".repeat(4_000)
+        const first = `${argumentsBlock}end of first command`
+        const second = `${argumentsBlock}end of continued command`
+        expect(Buffer.byteLength(first)).toBeGreaterThan(128 * 1024)
+        expect(Buffer.byteLength(second)).toBeGreaterThan(128 * 1024)
+        const records: LaunchRecord[] = []
+        let created: string | undefined
+        const input = {
+          cwd,
+          model: UNKNOWN_MODEL,
+          thinkingLevel: "high",
+          command: "/owned-review",
+        }
+        const started = await runOwned("explicit", records, (backend) =>
+          backend
+            .startTurn({
+              ...input,
+              prompt: first,
+              onSessionId: (sessionId) =>
+                Effect.sync(() => {
+                  created = sessionId
+                }),
+            })
+            .pipe(Effect.flip),
+        )
+        expect(started).toBeInstanceOf(AgentBackendMalformedOutputError)
+        if (created === undefined) throw new Error("Missing command session")
+        const sessionId = created
+        const startedSession = await sessionBody(current.owned, sessionId)
+        expect(
+          isRecord(startedSession.location)
+            ? startedSession.location.directory
+            : undefined,
+        ).toBe(cwd)
+        expect(modelOf(startedSession)).toEqual({
+          providerID: "ready-for-agent-contract",
+          id: "no-such-model",
+          variant: "high",
+        })
+        const continued = await runOwned("explicit", records, (backend) =>
+          backend
+            .continueTurn({
+              ...input,
+              sessionId,
+              prompt: second,
+              thinkingLevel: "low",
+            })
+            .pipe(Effect.flip),
+        )
+        expect(continued).toBeInstanceOf(AgentBackendMalformedOutputError)
+        expect(
+          modelOf(await sessionBody(current.owned, sessionId))?.variant,
+        ).toBe("low")
+        const messages = await sessionMessages(current.owned, sessionId)
+        const user = messages.filter((message) => message.type === "user")
+        expect(user).toHaveLength(2)
+        for (const prompt of [first, second]) {
+          assertStoredOnce(user, `Review from the target worktree:\n${prompt}`)
+        }
+        const args = records.flatMap((record) => record.args)
+        expect(args).not.toContain(`/api/session/${sessionId}/command`)
+        expect(
+          args.every((arg) => Buffer.byteLength(arg) < PROMPT_ARGV_BYTE_LIMIT),
+        ).toBe(true)
+        logCase("oversized owned HTTP command", records)
+      })
+    },
+    CASE_TIMEOUT_MS,
+  )
+
+  test(
+    "a lost acknowledgement after command acceptance is not replayed",
     async () => {
       await exclusive(async () => {
         const current = requireFixture()
         const records: LaunchRecord[] = []
-        let created: string | undefined
-        let commandHeld = false
-        // Hold the command POST so abort runs while the turn is in flight.
-        // The interrupt spawn itself is unmodified production argv.
-        await Effect.runPromise(
-          Effect.scoped(
-            Effect.gen(function* () {
-              const real = yield* ChildProcessSpawner.ChildProcessSpawner
-              const spawner = wrapSpawner(real, records)
-              const delaying = ChildProcessSpawner.make((command) => {
-                if (!ChildProcess.isStandardCommand(command)) {
-                  return spawner.spawn(command)
-                }
-                const binaryAt = opencodeArgIndex(command.args)
-                const cliArgs =
-                  binaryAt < 0 ? [] : command.args.slice(binaryAt + 1)
-                if (cliArgs.some((arg) => arg.endsWith("/command"))) {
-                  commandHeld = true
-                  return Effect.never
-                }
-                return spawner.spawn(command)
-              })
-              yield* Effect.gen(function* () {
-                yield* (yield* AgentBackend)
-                  .startTurn({
-                    cwd: current.cwd,
-                    prompt: "interrupt me",
-                    model: UNKNOWN_MODEL,
-                    thinkingLevel: null,
-                    command: "review",
-                    timeout: "20 seconds",
-                    onSessionId: (sessionId) =>
-                      Effect.sync(() => {
-                        created = sessionId
-                      }),
-                  })
-                  .pipe(Effect.forkScoped)
-                yield* Effect.promise(
-                  () =>
-                    new Promise<void>((resolve, reject) => {
-                      const timer = setTimeout(() => {
-                        reject(
-                          new Error(
-                            "command turn did not reach the command POST",
-                          ),
-                        )
-                      }, 15_000)
-                      const poll = () => {
-                        if (created !== undefined && commandHeld) {
-                          clearTimeout(timer)
-                          resolve()
-                          return
-                        }
-                        setTimeout(poll, 50)
-                      }
-                      poll()
-                    }),
+        const input = {
+          cwd: current.cwd,
+          model: REPLY_MODEL,
+          thinkingLevel: null,
+          command: "review",
+        }
+        const started = await runOwned("explicit", records, (backend) =>
+          backend.startTurn({ ...input, prompt: "before the lost response" }),
+        )
+        expect(started.assistantText).toBe("READY_FOR_AGENT_RESULT: PROCESSED")
+        const { sessionId } = started
+        const proxy = await openCommandResponseProxy(current.owned, "drop")
+        const prompt = 'lost reply for "accepted command"\nsecond line'
+        try {
+          const error = await runOwned(
+            { dedicatedServer: proxy.server },
+            records,
+            (backend) =>
+              backend
+                .continueTurn({ ...input, sessionId, prompt })
+                .pipe(Effect.flip),
+          )
+          expect(error).toBeInstanceOf(AgentBackendConfigError)
+          expect(error.message).toContain(`session ${sessionId}`)
+          expect(error.message).toContain("may have been accepted")
+          expect(error.message).not.toContain(prompt)
+          expect(proxy.commandRequests).toEqual([
+            `/api/session/${sessionId}/command`,
+          ])
+          expect(proxy.commandResponses).toEqual([204])
+          const messages = await sessionMessages(current.owned, sessionId)
+          const user = messages.filter((message) => message.type === "user")
+          expect(user).toHaveLength(2)
+          assertStoredOnce(user, `Review ${prompt}`)
+          expect(records.flatMap((record) => record.args)).not.toContain(
+            `/api/session/${sessionId}/command`,
+          )
+          logCase("lost owned HTTP command acknowledgement", records)
+        } finally {
+          proxy.close()
+        }
+      })
+    },
+    CASE_TIMEOUT_MS,
+  )
+
+  test(
+    "cancelling or timing out an owned command POST interrupts only its session",
+    async () => {
+      await exclusive(async () => {
+        const current = requireFixture()
+        const records: LaunchRecord[] = []
+        const proxy = await openCommandResponseProxy(current.owned, "hold")
+        const readActive = Effect.promise(() => activeSessions(current.owned))
+        const awaitActive = (prompt: string, accepted: number) =>
+          Effect.gen(function* () {
+            while (
+              proxy.commandResponses.length < accepted ||
+              !current.providerRequests.some((body) => body.includes(prompt))
+            ) {
+              yield* Effect.sleep("25 millis")
+            }
+            expect(proxy.commandResponses).toEqual(Array(accepted).fill(204))
+            return yield* readActive
+          }).pipe(Effect.timeout("8 seconds"))
+        const exerciseStops = (backend: OpenCodeBackend) =>
+          Effect.gen(function* () {
+            const input = {
+              cwd: current.cwd,
+              model: BLOCKED_MODEL,
+              thinkingLevel: null,
+              command: "review",
+            }
+            const decoyPrompt = "unrelated active command"
+            const decoy = yield* backend
+              .startTurn({ ...input, prompt: decoyPrompt })
+              .pipe(Effect.forkChild)
+            const [decoyId] = yield* awaitActive(decoyPrompt, 1)
+            if (decoyId === undefined) throw new Error("Missing active decoy")
+
+            const cancelPrompt = "cancel this accepted command"
+            const cancelled = yield* backend
+              .startTurn({ ...input, prompt: cancelPrompt })
+              .pipe(Effect.forkChild)
+            const active = yield* awaitActive(cancelPrompt, 2)
+            const sessionId = active.find((id) => id !== decoyId)
+            if (sessionId === undefined)
+              throw new Error("Missing active command")
+            const assertTargetStopped = (from: number) =>
+              Effect.gen(function* () {
+                expect(yield* readActive).toEqual([decoyId])
+                const interrupts = records
+                  .slice(from)
+                  .filter((record) =>
+                    record.args.some((arg) => arg.endsWith("/interrupt")),
+                  )
+                expect(interrupts).toHaveLength(1)
+                expect(interrupts[0]?.args).toContain(
+                  `/api/session/${sessionId}/interrupt`,
                 )
-              }).pipe(
-                Effect.provide(
-                  Opencode.layer({
-                    keymaxxerMcpUrl: KEYMAXXER_URL,
-                    environment: current.explicitEnv,
-                    dedicatedServer: current.owned,
-                    defaultTimeout: "20 seconds",
-                    startupTimeout: "8 seconds",
-                  }).pipe(
-                    Layer.provide(
-                      Layer.succeed(
-                        ChildProcessSpawner.ChildProcessSpawner,
-                        delaying,
-                      ),
-                    ),
-                  ),
-                ),
-              )
-            }),
-          ).pipe(Effect.provide(BunServices.layer)),
-        )
-        expect(created, diagnostic(records, current.secrets)).toBeDefined()
-        const interrupt = records.find((record) =>
-          record.args.some((arg) => arg.endsWith("/interrupt")),
-        )
-        expect(interrupt, diagnostic(records, current.secrets)).toBeDefined()
-        const body = jsonObject(interrupt?.stdout ?? "")
-        expect(typeof body?.interrupted).toBe("boolean")
-        assertNoArgumentError(
-          `${interrupt?.stdout ?? ""}\n${interrupt?.stderr ?? ""}`,
-          diagnostic(records, current.secrets),
-        )
-        logCase("interrupt", records)
+                expect(
+                  jsonObject(interrupts[0]?.stdout ?? "")?.interrupted,
+                ).toBe(true)
+              })
+
+            const cancelRecord = records.length
+            yield* Fiber.interrupt(cancelled)
+            yield* assertTargetStopped(cancelRecord)
+
+            const timeoutPrompt = "time out this accepted continuation"
+            const timeoutRecord = records.length
+            const timedOut = yield* backend
+              .continueTurn({
+                ...input,
+                sessionId,
+                prompt: timeoutPrompt,
+                timeout: "4 seconds",
+              })
+              .pipe(Effect.flip, Effect.forkChild)
+            expect(yield* awaitActive(timeoutPrompt, 3)).toContain(sessionId)
+            const error = yield* Fiber.join(timedOut)
+            expect(error).toBeInstanceOf(AgentBackendTimeoutError)
+            if (error instanceof AgentBackendTimeoutError) {
+              expect(error.sessionId).toBe(sessionId)
+              expect(error.message).toContain(`session ${sessionId}`)
+              expect(error.message).toContain("may have been accepted")
+              expect(error.message).toContain("did not resend it")
+            }
+            yield* assertTargetStopped(timeoutRecord)
+            expect(
+              proxy.commandRequests.filter(
+                (path) => path === `/api/session/${sessionId}/command`,
+              ),
+            ).toHaveLength(2) // Cancelled start and timed-out continuation.
+            const history = yield* Effect.promise(() =>
+              sessionMessages(current.owned, sessionId),
+            )
+            assertStoredOnce(history, `Review ${cancelPrompt}`)
+            assertStoredOnce(history, `Review ${timeoutPrompt}`)
+            yield* Fiber.interrupt(decoy)
+          })
+        try {
+          await runOwned(
+            { dedicatedServer: proxy.server },
+            records,
+            exerciseStops,
+          )
+          logCase("owned HTTP command interrupt", records)
+        } finally {
+          proxy.close()
+        }
       })
     },
     CASE_TIMEOUT_MS,

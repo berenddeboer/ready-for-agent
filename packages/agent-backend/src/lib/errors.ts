@@ -172,6 +172,8 @@ export class AgentBackendTimeoutError extends Schema.TaggedError<AgentBackendTim
     cwd: Schema.String,
     timeoutMs: Schema.Finite,
     sessionId: Schema.optionalKey(Schema.String),
+    /** Operator-facing detail when the timeout leaves the outcome uncertain. */
+    message: Schema.optionalKey(Schema.String),
   },
 ) {}
 
