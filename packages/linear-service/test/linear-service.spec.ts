@@ -272,7 +272,7 @@ describe("Linear Spec baseline", () => {
     })
   })
 
-  test("does not offer a marked, Ready-labeled Linear Spec before it has children", async () => {
+  test("lists a Ready-labeled Linear Spec with children but excludes a childless Spec", async () => {
     const issue = (number: number, marked: boolean, hasChildren: boolean) => ({
       id: `id-${number}`,
       identifier: `ENG-${number}`,
@@ -280,6 +280,7 @@ describe("Linear Spec baseline", () => {
       title,
       url,
       createdAt: "2026-11-24T00:00:00Z",
+      state: { type: "started" },
       specLabels: marked ? specLabels : { nodes: [] },
       children: { nodes: hasChildren ? [{ id: "child" }] : [] },
     })
@@ -293,7 +294,7 @@ describe("Linear Spec baseline", () => {
             issues: {
               nodes: [
                 issue(1, true, false),
-                issue(2, false, true),
+                issue(2, true, true),
                 issue(3, false, false),
               ],
             },
@@ -366,6 +367,9 @@ describe("Linear Spec observation", () => {
       TOKEN,
       makeFetch(({ query, variables }) => {
         if (query.includes("query OpenSpecs")) {
+          expect(query).toContain(
+            'state: { type: { nin: ["completed", "canceled"] } }',
+          )
           return jsonResponse(200, { data: { issues: page([spec("root")]) } })
         }
         childRequests += 1
@@ -828,6 +832,7 @@ describe("Linear identity and listing", () => {
                   description: "Use native identity.",
                   url: "https://linear.app/acme/issue/ENG-123",
                   createdAt: "2026-09-21T10:00:00.000Z",
+                  state: { type: "started" },
                   creator: { id: "user-linear-1" },
                   parent: null,
                   children: { nodes: [] },
@@ -864,6 +869,54 @@ describe("Linear identity and listing", () => {
     expect(Number.parseInt(issues[0]?.nativeId ?? "", 10)).toBeNaN()
   })
 
+  test("lists Ready-labeled Issues across state and page boundaries", async () => {
+    const issue = (number: number) => ({
+      id: `id-${number}`,
+      identifier: `ENG-${number}`,
+      number,
+      title: `Issue ${number}`,
+      url: `https://linear.app/acme/issue/ENG-${number}`,
+      createdAt: "2026-09-21T10:00:00.000Z",
+    })
+    const cursors: unknown[] = []
+    const service = makeLinearServiceFromToken(
+      TOKEN,
+      makeFetch(({ query, variables }) => {
+        const after = variables?.after
+        cursors.push(after)
+        expect(query).not.toMatch(/\bstate\s*:/)
+        expect(query).toMatch(/^ {6}state \{ type \}$/m)
+        const nodes =
+          after === null
+            ? [{ ...issue(1), state: { type: "completed" } }]
+            : [
+                { ...issue(2), state: { type: "canceled" } },
+                issue(3),
+                { ...issue(4), state: null },
+              ]
+        return jsonResponse(200, {
+          data: {
+            issues: {
+              nodes,
+              pageInfo: {
+                hasNextPage: after === null,
+                endCursor: after === null ? "next-page" : null,
+              },
+            },
+          },
+        })
+      }),
+    )
+    const issues = await Effect.runPromise(service.listReadyIssues(PROJECT_ID))
+    expect(cursors).toEqual([null, "next-page"])
+    expect(issues.map(({ displayId, state }) => [displayId, state])).toEqual([
+      ["ENG-1", "CLOSED"],
+      ["ENG-2", "CLOSED"],
+      ["ENG-3", "CLOSED"],
+      ["ENG-4", "CLOSED"],
+    ])
+  })
+
   test("includes readable blockers outside the mapped project and keeps unreadable blockers", async () => {
     const service = makeLinearServiceFromToken(
       TOKEN,
@@ -880,6 +933,7 @@ describe("Linear identity and listing", () => {
                   description: null,
                   url: "https://linear.app/acme/issue/ENG-10",
                   createdAt: "2026-09-21T10:00:00.000Z",
+                  state: { type: "started" },
                   creator: { id: "user-linear-1" },
                   parent: {
                     id: PARENT_UUID,
@@ -971,6 +1025,7 @@ describe("Linear identity and listing", () => {
                   description: null,
                   url: "https://linear.app/acme/issue/ENG-10",
                   createdAt: "2026-09-21T10:00:00.000Z",
+                  state: { type: "started" },
                   creator: { id: "user-linear-1" },
                   parent: null,
                   children: { nodes: [] },

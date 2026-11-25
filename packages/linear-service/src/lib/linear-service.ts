@@ -26,8 +26,8 @@ export interface LinearServiceShape {
     LinearServiceError
   >
   /**
-   * Open Ready-labeled Issues in one Linear project, including native
-   * identity, display identifier, parent/leaf facts, and blockedBy
+   * Open and closed Ready-labeled Issues in one Linear project, including
+   * native identity, display identifier, parent/leaf facts, and blockedBy
    * relations. Readable blockers outside the project are included.
    * Unreadable blockers remain blocking rather than omitted.
    */
