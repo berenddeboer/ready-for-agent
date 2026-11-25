@@ -507,18 +507,9 @@ export const Opencode = {
             yield* verifyImplementIdle(input.sessionId, capture)
           })
 
-        const runTurn = (input: {
-          readonly prompt: string
-          readonly cwd: string
-          readonly model: string
-          readonly thinkingLevel: string | null
-          readonly sessionId?: string
-          readonly command?: string
-          readonly timeout?: Duration.Input
-          readonly onSessionId?: StartTurnInput["onSessionId"]
-          readonly trackImplementStop?: StartTurnInput["trackImplementStop"]
-          readonly replyToPromptOnly?: ContinueTurnInput["replyToPromptOnly"]
-        }): Effect.Effect<AgentTurnResult, AgentBackendError> => {
+        const runTurn = (
+          input: StartTurnInput & { readonly sessionId?: string },
+        ): Effect.Effect<AgentTurnResult, AgentBackendError> => {
           const unavailable =
             blockedReason !== undefined && blockedReason.length > 0
               ? blockedReason

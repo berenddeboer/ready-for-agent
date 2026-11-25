@@ -310,7 +310,12 @@ const replayOpenCodeHandoff = async (input: {
   readonly toolStepText?: string
 }) =>
   withOpenCodeHandoffReplay(
-    { ...input, sessionId: "ses_implement" },
+    {
+      reply: input.reply,
+      backgroundReplies: [input.backgroundReply],
+      toolStepText: input.toolStepText,
+      sessionId: "ses_implement",
+    },
     async (replay) => {
       const result = await Effect.runPromise(
         Effect.gen(function* () {

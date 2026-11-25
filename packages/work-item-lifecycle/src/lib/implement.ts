@@ -320,32 +320,24 @@ const runImplementTurn = (
         Effect.provideService(DbService, db),
       )
 
-    const stopObserver =
-      context.trackImplementStop === undefined
+    const turnInput = {
+      prompt,
+      cwd: worktreePath,
+      model: context.model,
+      thinkingLevel: context.thinkingLevel,
+      timeout: context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
+      onSessionId,
+      ...(context.origin === "ci_repair" ? { replyToPromptOnly: true } : {}),
+      ...(context.trackImplementStop === undefined
         ? {}
-        : { trackImplementStop: context.trackImplementStop }
+        : { trackImplementStop: context.trackImplementStop }),
+    }
     const run =
       existingSessionId === null
-        ? agentBackend.startTurn({
-            prompt,
-            cwd: worktreePath,
-            model: context.model,
-            thinkingLevel: context.thinkingLevel,
-            timeout:
-              context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
-            onSessionId,
-            ...stopObserver,
-          })
+        ? agentBackend.startTurn(turnInput)
         : agentBackend.continueTurn({
+            ...turnInput,
             sessionId: existingSessionId,
-            prompt,
-            cwd: worktreePath,
-            model: context.model,
-            thinkingLevel: context.thinkingLevel,
-            timeout:
-              context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
-            onSessionId,
-            ...stopObserver,
           })
 
     const result = yield* run.pipe(
@@ -366,7 +358,11 @@ const runImplementTurn = (
       })
     }
 
-    const decision = parseDecisionNeeded(result.assistantText ?? "")
+    const assistantText = result.assistantText ?? ""
+    const precedingAssistantText = result.precedingAssistantText ?? ""
+    const decision = parseDecisionNeeded(
+      `${precedingAssistantText}\n${assistantText}`,
+    )
     if (decision._tag === "invalid") {
       return yield* new ImplementOpenCodeError({
         message: `${agentBackendLabel(context.agentBackend)} reported an invalid decision marker: ${decision.message}`,
@@ -384,7 +380,8 @@ const runImplementTurn = (
     return {
       _tag: "implemented" as const,
       sessionId: result.sessionId,
-      assistantText: result.assistantText ?? "",
+      assistantText,
+      precedingAssistantText,
     }
   })
 
@@ -497,7 +494,10 @@ const implementCiRepairOrigin = (
       failureMessage,
     )
     if (outcome._tag !== "implemented") return outcome
-    const marker = parseCiRepairRetryMarker(outcome.assistantText)
+    const marker = parseCiRepairRetryMarker(
+      outcome.assistantText,
+      outcome.precedingAssistantText,
+    )
     if (marker.kind === "absent") return outcome.sessionId
     if (marker.kind === "invalid") {
       return yield* new ImplementOpenCodeError({

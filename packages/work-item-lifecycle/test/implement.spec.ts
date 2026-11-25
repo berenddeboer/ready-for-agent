@@ -47,6 +47,7 @@ import {
   stubActiveAgentBackendLayer,
   stubLinearServiceLayer,
 } from "../src/index.js"
+import { withOpenCodeHandoffReplay } from "./open-code-handoff-replay.js"
 import { describe, expect, it } from "bun:test"
 
 const PlatformLayer = BunServices.layer
@@ -253,7 +254,173 @@ const seedRepository = (
     })
   })
 
+const ciRepairReplaySessionId = "ses_26125ee9-0a7c-4271-b9bf-88e5e57b2ad3"
+const ciRepairRetryMarker =
+  "READY_FOR_AGENT_RESULT: RETRY_FAILED_JOBS: 45536956453:1"
+const seedCiRepairReplay = (cwd: string) =>
+  Effect.gen(function* () {
+    const repository = yield* seedRepository(cwd)
+    const context = baseContext(cwd, {
+      repositoryId: repository.id,
+      origin: "ci_repair",
+      ciRepairFailingRuns: [
+        { runIdentity: "45536956453:1", displayLabel: "CI", htmlUrl: null },
+        { runIdentity: "20:1", displayLabel: "Other CI", htmlUrl: null },
+      ],
+    })
+    yield* seedWorkItem(context.workItemId, repository.id)
+    return context
+  })
+
 describe("implement", () => {
+  it.each([
+    ["two background summaries", "Full tests passed."],
+    [
+      "a conflicting background marker",
+      "READY_FOR_AGENT_RESULT: RETRY_FAILED_JOBS: 20:1",
+    ],
+  ])(
+    "dispatches one CI retry for the intended reply despite %s",
+    (_, laterReply) =>
+      withOpenCodeHandoffReplay(
+        {
+          sessionId: ciRepairReplaySessionId,
+          reply: [
+            "The observed failing jobs should be retried.",
+            ciRepairRetryMarker,
+          ],
+          backgroundReplies: ["Targeted tests passed.", laterReply],
+          resumeReply: [ciRepairRetryMarker],
+        },
+        async ({ cwd, layer }) => {
+          const retries: number[] = []
+          let attemptNumber = 1
+          await run(
+            Effect.gen(function* () {
+              const context = yield* seedCiRepairReplay(cwd)
+              expect(yield* implement(context)).toMatchObject({
+                _tag: "retry_pending",
+                delayMs: 0,
+                sessionId: ciRepairReplaySessionId,
+              })
+              const resumed = { ...context, sessionId: ciRepairReplaySessionId }
+              expect(yield* implement(resumed)).toMatchObject({
+                _tag: "retry_pending",
+              })
+              expect(yield* implement(resumed)).toMatchObject({
+                _tag: "retry_pending",
+              })
+              attemptNumber = 2
+              const rejected = yield* implement(resumed).pipe(Effect.flip)
+              expect(rejected.message).toContain("No second retry was sent")
+            }),
+            layer,
+            undefined,
+            undefined,
+            {
+              readCiRepairRun: (_repository, run, attempt) =>
+                Effect.sync(() => {
+                  expect([run, attempt]).toEqual([45536956453, 1])
+                  return {
+                    attempt: attemptNumber,
+                    status: "completed",
+                    conclusion: "failure",
+                    failedJobs: [],
+                  }
+                }),
+              rerunFailedJobs: (_repository, run) =>
+                Effect.sync(() => {
+                  retries.push(run)
+                }),
+            },
+          )
+          expect(retries).toEqual([45536956453])
+        },
+      ),
+  )
+
+  it.each([
+    {
+      name: "no marker",
+      reply: ["Implemented a fix."],
+      backgroundReply: "Background tests passed.",
+    },
+    {
+      name: "a marker only in a background reply",
+      reply: ["Implemented a fix."],
+      backgroundReply: ciRepairRetryMarker,
+    },
+    {
+      name: "duplicate markers",
+      reply: [ciRepairRetryMarker, ciRepairRetryMarker],
+      error: "only final result line",
+    },
+    {
+      name: "a malformed marker",
+      reply: [`${ciRepairRetryMarker} 20:1`],
+      error: "only final result line",
+    },
+    {
+      name: "a non-final marker",
+      reply: [ciRepairRetryMarker, "Tests passed."],
+      error: "only final result line",
+    },
+    {
+      name: "a tool-step marker before an empty final answer",
+      toolStepText: ciRepairRetryMarker,
+      reply: [],
+      error: "only final result line",
+    },
+    {
+      name: "a result line in a tool step and a final retry marker",
+      toolStepText: "READY_FOR_AGENT_RESULT: PROCESSED",
+      reply: [ciRepairRetryMarker],
+      error: "only final result line",
+    },
+    {
+      name: "an unlisted run",
+      reply: ["READY_FOR_AGENT_RESULT: RETRY_FAILED_JOBS: 99:1"],
+      error: "only retry a listed failing GitHub run",
+    },
+  ])(
+    "does not request a CI retry with $name",
+    ({ reply, backgroundReply, toolStepText, error }) =>
+      withOpenCodeHandoffReplay(
+        {
+          sessionId: ciRepairReplaySessionId,
+          reply,
+          ...(toolStepText === undefined ? {} : { toolStepText }),
+          backgroundReplies: [backgroundReply ?? "Background tests passed."],
+        },
+        async ({ cwd, layer }) => {
+          const result = await run(
+            Effect.gen(function* () {
+              const context = yield* seedCiRepairReplay(cwd)
+              return yield* Effect.result(implement(context))
+            }),
+            layer,
+            undefined,
+            undefined,
+            {
+              readCiRepairRun: () => Effect.die("unexpected CI retry read"),
+              rerunFailedJobs: () => Effect.die("unexpected CI retry dispatch"),
+            },
+          )
+          if (error === undefined) {
+            expect(result).toMatchObject({
+              _tag: "Success",
+              success: ciRepairReplaySessionId,
+            })
+          } else {
+            expect(result).toMatchObject({
+              _tag: "Failure",
+              failure: { message: expect.stringContaining(error) },
+            })
+          }
+        },
+      ),
+  )
+
   it("does not authorize or perform a GitLab CI retry", () =>
     withTemp(async (root) => {
       const error = await run(

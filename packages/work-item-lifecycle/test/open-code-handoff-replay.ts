@@ -10,8 +10,9 @@ export const withOpenCodeHandoffReplay = async <A>(
   input: {
     readonly sessionId: string
     readonly reply: readonly string[]
-    readonly backgroundReply: string
+    readonly backgroundReplies: readonly string[]
     readonly toolStepText?: string
+    readonly resumeReply?: readonly string[]
   },
   use: (replay: {
     readonly cwd: string
@@ -41,7 +42,7 @@ const user = (id, text) => ({type: "user", id, text, time: {created: 1}})
 const idle = (id) => ({type: "idle", id, outcome: "succeeded", time: {created: 1}})
 const messages = (prompt, index) => {
   const id = String(index)
-  const reply = index === 0 ? scenario.reply : ["READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"]
+  const reply = index === 0 ? scenario.reply : scenario.resumeReply ?? ["READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"]
   return [
     user("prompt-" + id, prompt),
     assistant(
@@ -50,9 +51,11 @@ const messages = (prompt, index) => {
       scenario.toolStepText === undefined ? "stop" : "tool-calls",
     ),
     assistant("reply-" + id, reply.map(textPart)),
-    {type: "synthetic", id: "notice-" + id, metadata: {source: "shell"},
-      text: "Background tests completed.", time: {created: 1}},
-    assistant("background-" + id, [textPart(scenario.backgroundReply)]),
+    ...scenario.backgroundReplies.flatMap((text, job) => [
+      {type: "synthetic", id: "notice-" + id + "-" + job, metadata: {source: "shell"},
+        text: "Background tests completed.", time: {created: 1}},
+      assistant("background-" + id + "-" + job, [textPart(text)]),
+    ]),
     idle("idle-" + id),
   ]
 }

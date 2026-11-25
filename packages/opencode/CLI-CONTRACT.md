@@ -28,9 +28,9 @@ Each case states its boundary in the spec. Operations that can finish
 without inference assert exit status and JSON or server side effects.
 Ordinary inference-triggering cases stop at a validation boundary (`Model
 unavailable` JSON, or command acceptance plus the stored user message).
-The PR Status Check Handoff case completes a real turn with a scripted
-loopback provider and a background shell job. The Implement interruption
-case holds a real turn open with a streaming
+The prompt-scoped reply case completes real tracked Implement turns and a PR
+Status Check Handoff with a scripted loopback provider and a background shell
+job. The Implement interruption case holds a real turn open with a streaming
 loopback provider, checks that the server reports it active before interrupt,
 then checks that only the target becomes inactive and its history remains.
 No case calls a cloud model.
@@ -191,7 +191,8 @@ the parser misses fails the case instead of being treated as compatibility.
 | `run` Implement with service disabled | tracked plain prompts without a shared service | `run --standalone` in the CLI invocation boundary | plain prompt interrupt | persist the exact boundary before inference; only confirm once cleanup is verified and the private provider request is cancelled; no shared service is contacted |
 | `run` resume | `AgentBackend.continueTurn` | `--session`, null thinking omits `#variant`; both connection modes | resume turn | same session; variant absent; exact model diagnostic |
 | prompt stdin | `AgentBackend.startTurn` when the prompt has a newline or exceeds the argv limit | stdin, not argv tokens | stdin prompt | stored message equals the prompt, including newlines |
-| PR Status Check Handoff | `AgentBackend.continueTurn` with `replyToPromptOnly` | `run` on stdin with a unique prompt reference, then `session export` in the same connection mode (default discovery, explicit `--server` after `export`, or service disabled) | prompt-scoped continuation | the durably stored user prompt identifies the terminal answer and earlier assistant steps, including an output-limit continuation; earlier turns and subsequent background replies cannot supply the outcome |
+| PR Status Check Handoff | `AgentBackend.continueTurn` with `replyToPromptOnly` | `run` on stdin with a unique prompt reference, then `session export` in the same connection mode (default discovery, explicit `--server` after `export`, or service disabled) | prompt-scoped reply | the durably stored user prompt identifies the terminal answer and earlier assistant steps, including an output-limit continuation; earlier turns and subsequent background replies cannot supply the outcome |
+| CI Repair Implement start/resume | tracked `AgentBackend.startTurn` / `continueTurn` with `replyToPromptOnly` | `run` on stdin with a unique prompt reference, then `session export` pinned to the Implement server (`--server` after `export`), or local export when the service is disabled | prompt-scoped reply | tracked fresh and resumed turns return the submitted reply, even with identical prompt bodies; both stop obligations clear |
 | oversized non-owned Agent Command | `AgentBackend.startTurn` with `command` | refusal before spawn | command argv refusal | config error, OpenCode was not started |
 | create session | `startTurn` command path, no session yet | `POST /api/session` JSON body, directory header, both modes | command turn | session location equals the worktree |
 | switch model | `continueTurn` command path | `POST /api/session/{id}/model` JSON body, both modes | command continuation | session model id, provider, and variant match the pin |

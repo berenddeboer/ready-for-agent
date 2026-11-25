@@ -6051,7 +6051,7 @@ describe("WorkItemLifecycle", () => {
           reply: [
             "Queued a replacement execution.\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
           ],
-          backgroundReply: "Twenty local scenarios passed.",
+          backgroundReplies: ["Twenty local scenarios passed."],
         },
         async (replay) => {
           const checkId = "psc-checks-triggered"

@@ -70,14 +70,12 @@ export const resolveObservedRetryTarget = (
   return null
 }
 
-export const parseCiRepairRetryMarker = (output: string) => {
-  const lines = output
-    .trim()
+export const parseCiRepairRetryMarker = (output: string, preceding = "") => {
+  // Earlier steps can invalidate the marker's uniqueness, but cannot end the reply.
+  const resultLines = `${preceding}\n${output}`
     .split("\n")
     .map((line) => line.trim())
-  const resultLines = lines.filter((line) =>
-    /^READY_FOR_AGENT_RESULT:/i.test(line),
-  )
+    .filter((line) => /^READY_FOR_AGENT_RESULT:/i.test(line))
   const retryLine = resultLines.find((line) =>
     /^READY_FOR_AGENT_RESULT:\s*(?:RETRY_FAILED_JOBS|RERUN_JOBS)\b/i.test(line),
   )
@@ -88,7 +86,7 @@ export const parseCiRepairRetryMarker = (output: string) => {
     )?.[1]
   if (
     resultLines.length !== 1 ||
-    lines.at(-1) !== retryLine ||
+    output.trim().split("\n").at(-1)?.trim() !== retryLine ||
     identity === undefined
   ) {
     return { kind: "invalid" as const }
