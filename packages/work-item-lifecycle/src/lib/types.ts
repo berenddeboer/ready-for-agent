@@ -220,6 +220,7 @@ export interface IssueWorkItemRecord extends WorkItemRecordBase {
 /** A CI Repair Work Item has no Issue number or Issue source. */
 export interface CiRepairWorkItemRecord extends WorkItemRecordBase {
   readonly origin: "ci_repair"
+  readonly retryWaitingForOriginalRun: boolean
 }
 
 export interface SpecValidationWorkItemRecord extends WorkItemRecordBase {

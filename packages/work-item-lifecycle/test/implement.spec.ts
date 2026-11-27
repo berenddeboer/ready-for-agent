@@ -47,6 +47,7 @@ import {
   stubActiveAgentBackendLayer,
   stubLinearServiceLayer,
 } from "../src/index.js"
+import { loadCiRepairRetryRequest } from "../src/lib/ci-repair-retry.js"
 import { withOpenCodeHandoffReplay } from "./open-code-handoff-replay.js"
 import { describe, expect, it } from "bun:test"
 
@@ -514,12 +515,29 @@ describe("implement", () => {
             sessionId,
           })
           expect(dispatches).toBe(0)
+          const sql = yield* SqlClient.SqlClient
+          const readRetry = () =>
+            loadCiRepairRetryRequest(sql, context.workItemId)
+          expect((yield* readRetry())?.phase).toEqual({ kind: "waiting" })
           // New step invocations reconstruct their context from persisted state.
           const resumed = {
             ...context,
             sessionId: yield* readSessionId(context.workItemId),
           }
           expect(resumed.sessionId).toBe(sessionId)
+          if (scenario === "transient_read_while_waiting") {
+            readFailure = new GitHubRequestError({
+              message: "GitHub temporarily unavailable",
+              statusCode: 503,
+              retryable: true,
+            })
+            expect(yield* implement(resumed)).toMatchObject({
+              _tag: "retry_pending",
+              note: expect.stringContaining("HTTP 503"),
+            })
+            expect((yield* readRetry())?.phase).toEqual({ kind: "waiting" })
+            readFailure = null
+          }
           if (scenario === "permission_read_while_waiting") {
             readFailure = new GitHubRequestError({
               message: "Resource not accessible by integration",
@@ -537,6 +555,10 @@ describe("implement", () => {
             _tag: "retry_pending",
             note: expect.stringContaining("sibling jobs"),
           })
+          expect((yield* readRetry())?.phase).toEqual({
+            kind: "waiting",
+            originalRunFinished: false,
+          })
           if (scenario === "transient_read_while_waiting") {
             readFailure = new GitHubRequestError({
               message: "GitHub temporarily unavailable",
@@ -547,12 +569,15 @@ describe("implement", () => {
               _tag: "retry_pending",
               note: expect.stringContaining("HTTP 503"),
             })
+            expect((yield* readRetry())?.phase).toEqual({
+              kind: "waiting",
+              originalRunFinished: false,
+            })
             readFailure = null
           }
           expect(dispatches).toBe(0)
           expect(prompts).toEqual([])
           snapshot = { ...snapshot, status: "completed", conclusion: "failure" }
-          const sql = yield* SqlClient.SqlClient
           const saveRetry = (
             kind: "waiting" | "submitted",
             requestedAt: number,
@@ -660,6 +685,11 @@ describe("implement", () => {
             expect(yield* implement(resumed)).toMatchObject({
               _tag: "retry_pending",
               note: expect.stringContaining("Adopted replacement attempt 2"),
+            })
+            const retry = yield* readRetry()
+            expect(retry?.phase).toEqual({
+              kind: "waiting",
+              originalRunFinished: true,
             })
             expect(dispatches).toBe(0)
           } else {

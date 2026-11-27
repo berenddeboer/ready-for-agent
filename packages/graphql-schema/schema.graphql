@@ -1381,6 +1381,11 @@ enum WorkItemStatus {
   """
   WAITING_FOR_CI_REPAIR
   """
+  A CI Repair is waiting for the original CI run to finish before retrying
+  failed jobs. This is not a Work Item lifecycle state.
+  """
+  WAITING_FOR_CI_TO_FINISH
+  """
   Derived from the latest Postponed Step Run and its durable wake contract.
   This is not a Work Item lifecycle state.
   """

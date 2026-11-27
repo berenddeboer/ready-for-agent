@@ -316,6 +316,7 @@ type WorkItemStatus =
   | "WAITING_FOR_WORKER_SLOT"
   | "WAITING_FOR_BLOCKERS"
   | "WAITING_FOR_CI_REPAIR"
+  | "WAITING_FOR_CI_TO_FINISH"
   | "WAITING_FOR_GITHUB"
   | "WAITING_FOR_PROVIDER"
 
@@ -4670,7 +4671,9 @@ export function WorkItemLifecycleStatus({
     readonly isFocusLane?: boolean
   }) => {
     const displayDurationMs = liveDurationMs(
-      lifecycleLabel.durationMs,
+      lifecycleLabel.status === "WAITING_FOR_CI_TO_FINISH"
+        ? null
+        : lifecycleLabel.durationMs,
       isLiveDurationStatus(lifecycleLabel.status),
       dataUpdatedAt,
       nowMs,

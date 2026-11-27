@@ -99,6 +99,7 @@ export type WorkItemStatus =
   | "waiting_for_worker_slot"
   | "waiting_for_blockers"
   | "waiting_for_ci_repair"
+  | "waiting_for_ci_to_finish"
   | "waiting_for_github"
   | "waiting_for_provider"
 
@@ -159,6 +160,8 @@ export const statusLabel = (status: WorkItemStatus): string => {
       return "Waiting for provider"
     case "waiting_for_ci_repair":
       return "Waiting for CI Repair"
+    case "waiting_for_ci_to_finish":
+      return "Waiting for CI to finish"
     default:
       return status
         .replaceAll("_", " ")
@@ -168,6 +171,19 @@ export const statusLabel = (status: WorkItemStatus): string => {
 
 const latestStepRun = (workItem: WorkItemRecord): StepRunRecord | undefined =>
   workItem.stepRuns.at(-1)
+
+const isWaitingForCiToFinish = (workItem: WorkItemRecord): boolean => {
+  const latest = latestStepRun(workItem)
+  return (
+    workItem.origin === "ci_repair" &&
+    workItem.state === "implement" &&
+    workItem.retryWaitingForOriginalRun &&
+    latest?.step === "implement" &&
+    (latest.status === "queued" ||
+      latest.status === "running" ||
+      latest.status === "postponed")
+  )
+}
 
 /** Running Step Run blocked on maxConcurrentAgentTurns → operator Queued. */
 const isWaitingForAgentTurn = (stepRun: StepRunRecord): boolean =>
@@ -196,6 +212,14 @@ const higherPriorityWorkItemStatus = (
 ): WorkItemStatus | null => {
   if (workItemIsTerminal(workItem)) return workItem.state
   if (workItem.waitingForBlockers) return "waiting_for_blockers"
+  if (
+    !workItem.paused &&
+    !workItem.waitingForCiRepair &&
+    isWaitingForCiToFinish(workItem)
+  ) {
+    // Readmitting a postponed poll does not end the CI wait.
+    return "waiting_for_ci_to_finish"
+  }
   if (workItem.waitingSince !== null) return "waiting_for_worker_slot"
   if (workItem.paused) return "needs_human_review"
   if (workItem.waitingForCiRepair) return "waiting_for_ci_repair"
@@ -204,8 +228,8 @@ const higherPriorityWorkItemStatus = (
 
 /**
  * The authoritative retry deadline is visible only while the Postponed Step
- * Run forms the current GitHub hold. Higher-precedence holds and impossible
- * active-resource combinations must not leak a stale wake deadline.
+ * Run forms the current GitHub hold. Other visible waits and impossible
+ * active-resource combinations must not expose a wake deadline here.
  */
 export const workItemPostponedUntil = (
   workItem: WorkItemRecord,
@@ -361,6 +385,8 @@ export const workItemStatusLabel = (
   workItem: WorkItemRecord,
   episode?: ProviderRecoverySnapshot | null,
 ): string => {
+  const status = workItemStatus(workItem, episode)
+  if (status === "waiting_for_ci_to_finish") return statusLabel(status)
   if (
     episode?.status === "exhausted" &&
     !workItemIsTerminal(workItem) &&
@@ -375,7 +401,6 @@ export const workItemStatusLabel = (
   ) {
     return "Retrying"
   }
-  const status = workItemStatus(workItem, episode)
   if (status === "needs_human_review" && workItemHasActiveStepRun(workItem)) {
     return "Draining"
   }
@@ -413,6 +438,9 @@ export const workItemStatusMessage = (
   }
   if (workItem.waitingForBlockers) {
     return formatWaitingForBlockersMessage(options?.blockerDisplayIds ?? [])
+  }
+  if (higherPriorityWorkItemStatus(workItem) === "waiting_for_ci_to_finish") {
+    return "Failed jobs will be retried when the remaining jobs finish."
   }
   if (workItem.waitingSince != null) {
     return WAITING_FOR_WORKER_SLOT_MESSAGE
@@ -523,10 +551,15 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
     workItem.state === "needs_human" && finalStepRun !== undefined
       ? lifecyclePhase(finalStepRun.step)
       : null
+  const waitingForCiToFinish = isWaitingForCiToFinish(workItem)
 
   return [...latestRuns].flatMap(([phase, stepRun]) => {
     const status: WorkItemStatus =
-      phase === finalPhase ? "needs_human" : stepRunDisplayStatus(stepRun)
+      phase === finalPhase
+        ? "needs_human"
+        : phase === "implement" && waitingForCiToFinish
+          ? "waiting_for_ci_to_finish"
+          : stepRunDisplayStatus(stepRun)
     const reviewRunningPhase =
       phase === "review" && status === "running"
         ? stepRun.reasonCode === STEP_RUN_REASON.reviewApplyingFindings ||
@@ -563,6 +596,9 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
       status: status.toUpperCase(),
       durationMs: cumulativeExecutionDurationMs(runsByPhase.get(phase) ?? []),
     }
+    // Keep a cooldown from adding a second Build chip when polling resumes.
+    if (status === "waiting_for_ci_to_finish") return [latestLabel]
+
     const priorPostponedCount = (runsByPhase.get(phase) ?? [])
       .slice(0, -1)
       .filter((run) => run.status === "postponed").length

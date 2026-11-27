@@ -9,6 +9,7 @@ import {
   WorkItemLifecycleStatus,
 } from "../src/home-page-content.js"
 import { PipelineTicket } from "../src/kanban-board.js"
+import { ui } from "../src/ui.js"
 import { describe, expect, test } from "bun:test"
 
 const waitingForGitHubWorkItem = {
@@ -133,6 +134,56 @@ describe("WorkItemLifecycleStatus", () => {
     expect(html).not.toContain(">Retry<")
     expect(html).not.toContain("Cause chain")
     expect(html).not.toContain("Explicit Work Item Execution Profile")
+  })
+
+  test("renders the CI retry wait without an active Build fill or poll timer", () => {
+    const waitLabel = "Waiting for CI to finish"
+    const explanation =
+      "Failed jobs will be retried when the remaining jobs finish."
+    const createdAt = new Date().toISOString()
+    const renderWaitingCard = (durationMs: number) =>
+      renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <PipelineTicket
+            workItem={{
+              ...waitingForGitHubWorkItem,
+              origin: "CI_REPAIR",
+              issueNumber: null,
+              issueSource: null,
+              issueTitle: "Repair CI on main",
+              pullRequestNumber: null,
+              state: "IMPLEMENT",
+              stateLabel: "Build",
+              status: "WAITING_FOR_CI_TO_FINISH",
+              statusLabel: waitLabel,
+              statusMessage: explanation,
+              postponedUntil: null,
+              hasActiveStepRun: true,
+              createdAt,
+              lifecycleLabels: [
+                {
+                  phase: "IMPLEMENT",
+                  label: `Build: ${waitLabel}`,
+                  status: "WAITING_FOR_CI_TO_FINISH",
+                  durationMs,
+                },
+              ],
+            }}
+            laneId="build"
+            repository={undefined}
+            issue={undefined}
+            onOpenSession={() => {}}
+          />
+        </QueryClientProvider>,
+      )
+    const html = renderWaitingCard(1_000)
+    expect(html).toContain(`>${waitLabel}<`)
+    expect(html).toContain(explanation)
+    expect(html).toContain(`title="Build: ${waitLabel}"`)
+    expect(html).toContain(ui.statusTagHold)
+    expect(html).not.toContain("Build: Queued")
+    expect(html).not.toContain(ui.legRun)
+    expect(renderWaitingCard(30_000)).toBe(html)
   })
 
   test("renders Addressing status check findings while investigating", () => {

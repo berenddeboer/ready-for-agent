@@ -74,6 +74,7 @@ export function statusBadgeClassNameForStatus(status: string): string {
           : status === "WAITING_FOR_WORKER_SLOT" ||
               status === "WAITING_FOR_BLOCKERS" ||
               status === "WAITING_FOR_CI_REPAIR" ||
+              status === "WAITING_FOR_CI_TO_FINISH" ||
               status === "WAITING_FOR_GITHUB" ||
               status === "WAITING_FOR_PROVIDER"
             ? ui.statusTagHold
@@ -102,6 +103,9 @@ export function lifecycleStepChipClassNameForStatus(status: string): string {
   }
   if (status === "SUCCEEDED" || status === "COMPLETE") {
     return cx(ui.leg, ui.legDone)
+  }
+  if (status === "WAITING_FOR_CI_TO_FINISH") {
+    return cx(ui.leg, "border-dashed")
   }
   // QUEUED / unreached / other holds
   return cx(ui.leg, ui.legNext)
