@@ -1,4 +1,5 @@
 import { Effect, Layer, ManagedRuntime } from "effect"
+import { SqlClient } from "effect/sql"
 import {
   ActiveAgentBackend,
   type AgentBackendId,
@@ -420,6 +421,212 @@ describe("Hold ordinary remote admission during CI failure", () => {
       }
     }`,
     variables: { repositoryId },
+  })
+
+  test("keeps a CI repair visibly waiting through polls, cooldown, and readmission", async () => {
+    const { repository } = await seedRepository(78)
+    await closeGate(repository)
+    const workItemId = await runtime.runPromise(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const repair = yield* lifecycle.startCiRepair(repository.id)
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'implement', ci_repair_retry = ?
+           WHERE id = ?`,
+          [
+            JSON.stringify({
+              runId: 100,
+              attempt: 1,
+              requestedAt: Date.now(),
+              phase: { kind: "waiting" },
+            }),
+            repair.id,
+          ],
+        )
+        yield* sql.unsafe(
+          `UPDATE step_run SET step = 'implement', status = 'succeeded',
+             finished_at = queued_at WHERE work_item_id = ?`,
+          [repair.id],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO step_run (id, work_item_id, step, status, queued_at, created_at, updated_at)
+           VALUES ('srun-ci-repair-poll', ?, 'implement', 'queued', ?, ?, ?)`,
+          [repair.id, Date.now() + 1_000, Date.now(), Date.now()],
+        )
+        return repair.id
+      }),
+    )
+    const api = createGraphqlApi(runtime)
+    const readDashboard = async () => {
+      const response = await api.fetch(
+        graphqlRequest({
+          query: `query ($repositoryId: ID!) {
+            kanbanStatus(repositoryId: $repositoryId) {
+              lanes { id workItems { workItem {
+                status statusLabel statusMessage postponedUntil
+                lifecycleLabels { phase status label }
+              } } }
+            }
+          }`,
+          variables: { repositoryId: repository.id },
+        }),
+      )
+      return response.json()
+    }
+    const waiting = {
+      status: "WAITING_FOR_CI_TO_FINISH",
+      statusLabel: "Waiting for CI to finish",
+      statusMessage:
+        "Failed jobs will be retried when the remaining jobs finish.",
+      postponedUntil: null,
+      lifecycleLabels: [
+        {
+          phase: "IMPLEMENT",
+          status: "WAITING_FOR_CI_TO_FINISH",
+          label: "Build: Waiting for CI to finish",
+        },
+      ],
+    }
+    const inBuildLane = (workItem: object) => ({
+      data: {
+        kanbanStatus: {
+          lanes: expect.arrayContaining([
+            { id: "BUILD", workItems: [{ workItem }] },
+          ]),
+        },
+      },
+    })
+    expect(await readDashboard()).toEqual(
+      inBuildLane({
+        status: "QUEUED",
+        statusLabel: "Queued",
+        statusMessage: null,
+        postponedUntil: null,
+        lifecycleLabels: [
+          { phase: "IMPLEMENT", status: "QUEUED", label: "Build: Queued" },
+        ],
+      }),
+    )
+    // Older retries can have a confirmed wait recorded only in step history.
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          "UPDATE step_run SET reason_message = ? WHERE work_item_id = ? AND status = 'succeeded'",
+          [
+            "GitHub run 100:1 has not finished; waiting for sibling jobs before retrying.",
+            workItemId,
+          ],
+        )
+      }),
+    )
+    expect(await readDashboard()).toEqual(inBuildLane(waiting))
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          "UPDATE step_run SET status = 'running', started_at = queued_at WHERE id = 'srun-ci-repair-poll'",
+        )
+      }),
+    )
+    expect(await readDashboard()).toEqual(inBuildLane(waiting))
+
+    const cooldownUntil = Date.now() + 60_000
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `UPDATE step_run SET status = 'postponed', finished_at = started_at,
+             postponed_until = ? WHERE id = 'srun-ci-repair-poll'`,
+          [cooldownUntil],
+        )
+        yield* sql.unsafe(
+          "UPDATE work_item SET holds_worker_slot = 0 WHERE id = ?",
+          [workItemId],
+        )
+      }),
+    )
+    expect(await readDashboard()).toEqual(inBuildLane(waiting))
+
+    // A due wake without a free Worker Slot leaves the poll postponed.
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          "UPDATE work_item SET waiting_since = ? WHERE id = ?",
+          [cooldownUntil, workItemId],
+        )
+      }),
+    )
+    expect(await readDashboard()).toEqual(inBuildLane(waiting))
+
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          "UPDATE work_item SET holds_worker_slot = 1, waiting_since = NULL WHERE id = ?",
+          [workItemId],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO step_run (id, work_item_id, step, status, queued_at, created_at, updated_at)
+           VALUES ('srun-ci-repair-wake', ?, 'implement', 'queued', ?, ?, ?)`,
+          [workItemId, cooldownUntil, cooldownUntil, cooldownUntil],
+        )
+      }),
+    )
+    expect(await readDashboard()).toEqual(inBuildLane(waiting))
+
+    const running = {
+      status: "RUNNING",
+      statusLabel: "Running",
+      statusMessage: null,
+      postponedUntil: null,
+      lifecycleLabels: [
+        {
+          phase: "IMPLEMENT",
+          label: "Build: Postponed (1 prior attempt)",
+          status: "POSTPONED",
+        },
+        { phase: "IMPLEMENT", status: "RUNNING", label: "Build: Running" },
+      ],
+    }
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        // An older worker recorded a change before dispatch after the sibling wait.
+        const changedAt = cooldownUntil - 1
+        yield* sql.unsafe(
+          `INSERT INTO step_run (id, work_item_id, step, status, queued_at, started_at,
+             finished_at, created_at, updated_at, reason_message)
+           VALUES ('srun-ci-repair-changed', ?, 'implement', 'succeeded', ?, ?, ?, ?, ?, ?)`,
+          [
+            workItemId,
+            changedAt,
+            changedAt,
+            changedAt,
+            changedAt,
+            changedAt,
+            "GitHub changed run 100:1 before retry dispatch; re-observing.",
+          ],
+        )
+        yield* sql.unsafe(
+          "UPDATE step_run SET status = 'running', started_at = queued_at WHERE id = 'srun-ci-repair-wake'",
+        )
+      }),
+    )
+    expect(await readDashboard()).toEqual(inBuildLane(running))
+
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          "UPDATE work_item SET ci_repair_retry = json_set(ci_repair_retry, '$.phase.kind', 'accepted') WHERE id = ?",
+          [workItemId],
+        )
+      }),
+    )
+    expect(await readDashboard()).toEqual(inBuildLane(running))
   })
 
   test("places Implement Now in Queue as Waiting for CI Repair without Failed or Needs Human", async () => {

@@ -7,6 +7,7 @@ import {
   githubHelperCiRepairRejection,
 } from "@ready-for-agent/github-service"
 import type { CiRepairFailingRun } from "./ci-repair-work-item.js"
+import type { StepRunRecord } from "./types.js"
 
 export const CI_REPAIR_RETRY_POLL_MS = 30_000
 const RETRY_WINDOW_MS = 6 * 60 * 60 * 1000
@@ -22,7 +23,11 @@ const Request = Schema.Struct({
   attempt: RunId,
   requestedAt: Schema.Number,
   phase: Schema.Union([
-    Schema.Struct({ kind: Schema.Literal("waiting") }),
+    Schema.Struct({
+      kind: Schema.Literal("waiting"),
+      // Absent before the first observation, and on older stored requests.
+      originalRunFinished: Schema.optionalKey(Schema.Boolean),
+    }),
     // Dispatch was claimed, but a GitHub acknowledgement is not durable yet.
     Schema.Struct({ kind: Schema.Literal("submitted") }),
     Schema.Struct({ kind: Schema.Literal("accepted") }),
@@ -33,9 +38,41 @@ const Request = Schema.Struct({
   ]),
 })
 type Request = typeof Request.Type
+const decodeRequest = Schema.decodeUnknownOption(Schema.fromJsonString(Request))
 
 const encodeRequest = ({ runId, attempt, requestedAt, phase }: Request) =>
   JSON.stringify({ runId, attempt, requestedAt, phase })
+
+export const ciRepairRetryWaitingForOriginalRun = (
+  raw: string | null | undefined,
+  stepRuns: readonly StepRunRecord[],
+): boolean => {
+  if (raw == null) return false
+  const request = decodeRequest(raw)
+  if (Option.isNone(request) || request.value.phase.kind !== "waiting")
+    return false
+  const { originalRunFinished } = request.value.phase
+  if (originalRunFinished !== undefined) return !originalRunFinished
+  // Older requests recorded the observation only in Implement history.
+  const identity = `${request.value.runId}:${request.value.attempt}`
+  const activeNotes = [
+    `GitHub run ${identity} has not finished; waiting for sibling jobs before retrying.`,
+    `GitHub still reports run ${identity} in progress; waiting for eligibility.`,
+  ]
+  for (let index = stepRuns.length - 1; index >= 0; index -= 1) {
+    const run = stepRuns[index]
+    if (run?.step !== "implement" || run.reasonMessage === null) continue
+    if (activeNotes.includes(run.reasonMessage)) return true
+    // The old dispatch-race note could mean a replacement had already started.
+    if (
+      run.reasonMessage.startsWith("Adopted replacement attempt ") ||
+      run.reasonMessage ===
+        `GitHub changed run ${identity} before retry dispatch; re-observing.`
+    )
+      return false
+  }
+  return false
+}
 
 class CiRepairRetryError extends Schema.TaggedError<CiRepairRetryError>()(
   "CiRepairRetryError",
@@ -105,9 +142,7 @@ export const loadCiRepairRetryRequest = (
     )
     const value = row?.ci_repair_retry
     if (value == null) return null
-    const request = Schema.decodeUnknownOption(Schema.fromJsonString(Request))(
-      value,
-    )
+    const request = decodeRequest(value)
     if (Option.isNone(request)) {
       return yield* new CiRepairRetryError({
         message:
@@ -272,8 +307,18 @@ export const observeCiRepairRetry = (
       return pending(`Waiting for GitHub to report run ${identity}.`)
     }
     if (run.status !== "completed" || run.conclusion === null) {
+      const originalRunFinished = run.attempt > attempt
+      if (
+        request.phase.kind === "waiting" &&
+        request.phase.originalRunFinished !== originalRunFinished
+      ) {
+        yield* replaceRequest(workItemId, request, {
+          ...request,
+          phase: { kind: "waiting", originalRunFinished },
+        })
+      }
       return pending(
-        run.attempt > attempt
+        originalRunFinished
           ? `Adopted replacement attempt ${run.attempt} of GitHub run ${runId}; waiting for it to finish.`
           : `GitHub run ${identity} has not finished; waiting for sibling jobs before retrying.`,
       )
@@ -303,6 +348,10 @@ export const observeCiRepairRetry = (
       ...request,
       phase: { kind: "submitted" },
     } satisfies Request
+    const readyToRetry = {
+      ...request,
+      phase: { kind: "waiting", originalRunFinished: true },
+    } satisfies Request
     if (!(yield* replaceRequest(workItemId, request, submitted))) {
       return pending(
         `The GitHub retry of ${identity} has already been claimed; re-observing.`,
@@ -321,11 +370,11 @@ export const observeCiRepairRetry = (
     const error = result.failure
     const status = statusOf(error)
     if (error._tag === "GitHubThrottledError") {
-      yield* replaceRequest(workItemId, submitted, request)
+      yield* replaceRequest(workItemId, submitted, readyToRetry)
       return yield* error
     }
     if (error._tag === "GitHubRequestError" && error.requestNotSent) {
-      yield* replaceRequest(workItemId, submitted, request)
+      yield* replaceRequest(workItemId, submitted, readyToRetry)
       return pending(
         `${error.message} No retry was sent; will recheck eligibility before dispatch.`,
       )
@@ -333,15 +382,22 @@ export const observeCiRepairRetry = (
     if (status !== undefined && status >= 400 && status < 500) {
       // An explicit rejection did not dispatch anything. A human or GitHub
       // may have started the replacement between our GET and POST.
-      yield* replaceRequest(workItemId, submitted, request)
+      yield* replaceRequest(workItemId, submitted, readyToRetry)
       if (status === 403 || status === 409 || status === 422) {
         const after = yield* load.pipe(Effect.option)
+        const markOriginalRunActive = replaceRequest(workItemId, readyToRetry, {
+          ...readyToRetry,
+          phase: { kind: "waiting", originalRunFinished: false },
+        })
         if (
           Option.isSome(after) &&
           (after.value.attempt > attempt ||
             (after.value.attempt === attempt &&
               after.value.status !== "completed"))
         ) {
+          if (after.value.attempt === attempt) {
+            yield* markOriginalRunActive
+          }
           return pending(
             `GitHub changed run ${identity} before retry dispatch; re-observing.`,
           )
@@ -350,6 +406,7 @@ export const observeCiRepairRetry = (
           githubHelperCiRepairRejection(status, error.message).reason ===
           "active"
         ) {
+          yield* markOriginalRunActive
           return pending(
             `GitHub still reports run ${identity} in progress; waiting for eligibility.`,
           )
@@ -363,7 +420,7 @@ export const observeCiRepairRetry = (
         error.retryable === false &&
         status === undefined)
     ) {
-      yield* replaceRequest(workItemId, submitted, request)
+      yield* replaceRequest(workItemId, submitted, readyToRetry)
       return yield* forgeError("retry failed jobs for", error)
     }
     // An ambiguous transport failure is not permission to submit again.

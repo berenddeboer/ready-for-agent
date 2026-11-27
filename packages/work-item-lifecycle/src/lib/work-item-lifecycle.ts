@@ -98,6 +98,7 @@ import {
 } from "./ci-repair-baseline.js"
 import {
   ciRepairRetryDeadline,
+  ciRepairRetryWaitingForOriginalRun,
   loadCiRepairRetryRequest,
 } from "./ci-repair-retry.js"
 import { parseCiRepairFailingRuns } from "./ci-repair-work-item.js"
@@ -574,6 +575,7 @@ type WorkItemRow = {
   readonly ci_repair_default_branch?: string | null
   readonly ci_repair_head_sha?: string | null
   readonly ci_repair_failing_runs?: string | null
+  readonly ci_repair_retry?: string | null
   readonly spec_validation_input?: string | null
   readonly issue_number: number | null
   readonly issue_tracker: string | null
@@ -1108,6 +1110,16 @@ const toWorkItemRecord = (
       stateResidenceMs: Math.max(0, nowMs - row.state_ready_at),
       stepRuns,
     }
+    if (origin === "ci_repair") {
+      return {
+        ...shared,
+        origin,
+        retryWaitingForOriginalRun: ciRepairRetryWaitingForOriginalRun(
+          row.ci_repair_retry,
+          stepRuns,
+        ),
+      }
+    }
     if (origin !== "issue") {
       return { ...shared, origin }
     }
@@ -1121,7 +1133,8 @@ const toWorkItemRecord = (
   })
 
 const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, origin, ci_repair_default_branch,
-                   ci_repair_head_sha, ci_repair_failing_runs, spec_validation_input,
+                   ci_repair_head_sha, ci_repair_failing_runs, ci_repair_retry,
+                   spec_validation_input,
                    issue_number, issue_tracker, issue_native_id,
                    issue_display_id, issue_url, issue_title, agent_backend,
                    execution_profile_present, execution_profile_build_model,
